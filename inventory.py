@@ -24,11 +24,47 @@ def update_inventory():
         elif currentShelf:
                 myDict[currentShelf].append(item)
 
-    print(myDict)
+    return myDict
+    #print(myDict)
         #if currentShelf in shelfCodes and item not in shelfCodes:
          #   myDict[currentShelf].append(item)
-        
 
-update_inventory()
+def find_item(barcode):
+    currentInventory = update_inventory()
+    unsortedInventory = []
+    position = None
+    for item in currentInventory:
+        position = item
+        print("first for")
+        for item in currentInventory[item]:
+            if item == barcode:
+                #print(position)
+                return
+    print("position is")
+
+
+
+    '''if barcode in unsortedInventory:
+        print("barcode is found")
+        position = None
+        for item in currentInventory:
+            position = item
+            for item in currentInventory[item]:
+                if item == barcode:
+                    print(position)
+                    print('voilaaa')
+'''
+
+
+
+
+
+find_item('50505050')
+
+
+
+
+
+
 
 
