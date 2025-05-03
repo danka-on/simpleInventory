@@ -25,43 +25,26 @@ def update_inventory():
                 myDict[currentShelf].append(item)
 
     return myDict
-    #print(myDict)
-        #if currentShelf in shelfCodes and item not in shelfCodes:
-         #   myDict[currentShelf].append(item)
 
 def find_item(barcode):
+
     currentInventory = update_inventory()
-    unsortedInventory = []
-    position = None
+
     for item in currentInventory:
         position = item
-        print("first for")
         for item in currentInventory[item]:
             if item == barcode:
-                #print(position)
-                return
-    print("position is")
+                print(position, 'hello')
+                return position
 
 
 
-    '''if barcode in unsortedInventory:
-        print("barcode is found")
-        position = None
-        for item in currentInventory:
-            position = item
-            for item in currentInventory[item]:
-                if item == barcode:
-                    print(position)
-                    print('voilaaa')
-'''
+find_item('barcode3')
 
+#ebay api
+    #create a dedicated gsheet for ebay orders. 1. barcode 2. name 3. image 4.
 
-
-
-
-find_item('50505050')
-
-
+#
 
 
 
