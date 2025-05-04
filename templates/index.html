@@ -6,9 +6,15 @@
 <body>
     <h1>Search Inventory</h1>
     <form method="POST" action="/search">
-        <label for="query">Barcode:</label>
-        <input type="text" id="query" name="query" required>
-        <button type="submit">Search</button>
+    <input type="text" name="query" placeholder="Enter item name or ID" required>
+    <button type="submit">Search</button>
     </form>
+
+    {% if result %}
+        <h2>Result:</h2>
+        <p>{{ result }}</p>
+    {% endif %}
+
 </body>
 </html>
+

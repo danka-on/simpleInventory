@@ -14,8 +14,6 @@ shelfCodes = ('a','b','c','d')
 myDict = {'a': [] ,'b' : [],'c' : [],'d' : [], }
 currentShelf = None
 
-
-
 def update_inventory():
 
     for item in inventory:
@@ -37,14 +35,6 @@ def find_item(barcode):
                 print(position, 'hello')
                 return position
 
-
-
-find_item('barcode3')
-
-#ebay api
-    #create a dedicated gsheet for ebay orders. 1. barcode 2. name 3. image 4.
-
-#
 
 
 
