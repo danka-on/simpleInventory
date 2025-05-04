@@ -1,4 +1,4 @@
-import gspread
+import gspread , shelfHighlighter
 from oauth2client.service_account import ServiceAccountCredentials
 
 # Define scope and credentials
@@ -34,8 +34,6 @@ def find_item(barcode):
             if item == barcode:
                 print(position, 'hello')
                 return position
-
-
 
 
 

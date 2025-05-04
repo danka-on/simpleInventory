@@ -1,7 +1,21 @@
 <!DOCTYPE html>
 <html>
 <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.5">
     <title>Inventory Search</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            max-width: 600px;
+            margin: auto;
+            padding: 50px;
+        }
+        img {
+            width: 100%;
+            border: 1px solid #ccc;
+            margin-top: 20px;
+        }
+        </style>
 </head>
 <body>
     <h1>Search Inventory</h1>
@@ -10,10 +24,28 @@
     <button type="submit">Search</button>
     </form>
 
-    {% if result %}
+    {% if search_result %}
         <h2>Result:</h2>
-        <p>{{ result }}</p>
+        <p>{{ search_result }}</p>
     {% endif %}
+
+    <h1>Select a Shelf</h1>
+
+    <form method="GET" action="/">
+        <select name="shelf">
+            <option value="shelf 1">Shelf 1</option>
+            <option value="shelf 2">Shelf 2</option>
+            <option value="shelf 3">Shelf 3</option>
+            <option value="shelf 4">Shelf 4</option>
+            <option value="shelf top">Shelf Top</option>
+        </select>
+        <button type="submit">Highlight</button>
+    </form>
+
+    {% if shelf %}
+    <img src="{{ url_for('highLight') }}?shelf={{ shelf }}" alt="Highlighted Shelf">
+    {% endif %}
+
 
 </body>
 </html>
