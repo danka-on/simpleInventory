@@ -1,4 +1,4 @@
-import gspread , shelfHighlighter
+import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
 # Define scope and credentials
