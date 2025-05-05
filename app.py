@@ -6,6 +6,17 @@ from inventory import find_item  # adjust this to match your actual import
 
 app = Flask(__name__)
 
+@app.route("/callback")
+def callback():
+    code = request.args.get("code")
+    if not code:
+        return "Authorization failed or cancelled."
+
+    # Step 5: exchange this code for an access token
+    return f"Authorization code: {code}"
+@app.route("/privacy")
+def privacy():
+    return "<h1>Privacy Policy</h1><p>No user data is stored or shared. This app is for sandbox testing only.</p>"
 @app.route("/")
 def home():
     shelf = request.args.get("shelf")
@@ -87,4 +98,4 @@ def highlight():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5001)
+    app.run(host="0.0.0.0", port=8080)
