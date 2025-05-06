@@ -1,8 +1,32 @@
 from flask import Flask, request, send_file, url_for, render_template
 from PIL import Image, ImageDraw
-import io
-
+import io, time , subprocess, os
+from dotenv import load_dotenv
 from inventory import find_item  # adjust this to match your actual import
+
+CLIENT_ID = os.getenv("EBAY_CLIENT_ID")
+CLIENT_SECRET = os.getenv("EBAY_CLIENT_SECRET")
+RUNAME = os.getenv("EBAY_RUNAME")
+
+#for ebay api calls
+from token_manager import get_access_token
+
+access_token = get_access_token()
+headers = {
+    "Authorization": f"Bearer {access_token}",
+    "Content-Type": "application/json"
+}
+time.sleep(3)  # wait for cloudflared to spin up
+
+def start_cloudflare_tunnel():
+    subprocess.Popen([
+        "cloudflared",
+        "tunnel",
+        "--config",
+        "C:\\Users\\boxatron\\.cloudflared\\config.yml",
+        "run",
+        "mytunnel"
+    ])
 
 app = Flask(__name__)
 
@@ -94,8 +118,15 @@ def highlight():
     return send_file(img_io, mimetype="image/png")
 
 
+def run_stuff():
+    time.sleep(3)
+    start_cloudflare_tunnel()
+    print("cloudflare tunnel started")
 
 
 
 if __name__ == "__main__":
+    run_stuff()
     app.run(host="0.0.0.0", port=8080)
+
+
