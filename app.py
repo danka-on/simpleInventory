@@ -7,14 +7,18 @@ from inventory import find_item  # adjust this to match your actual import
 CLIENT_ID = os.getenv("EBAY_CLIENT_ID")
 CLIENT_SECRET = os.getenv("EBAY_CLIENT_SECRET")
 RUNAME = os.getenv("EBAY_RUNAME")
+
 app = Flask(__name__)
 #for ebay api calls
+
 from token_manager import get_access_token, load_tokens, is_expired
 access_token = get_access_token()
 headers = {
     "Authorization": f"Bearer {access_token}",
     "Content-Type": "application/json"
 }
+
+
 @app.route("/token-status")
 def token_status():
     try:
@@ -32,6 +36,9 @@ def token_status():
 
     except Exception as e:
         return jsonify({"error": str(e)})
+
+
+
 
 def start_cloudflare_tunnel():
     subprocess.Popen([
@@ -144,20 +151,39 @@ def create_policies():
 
         # 1. Fulfillment Policy (Shipping)
         fulfillment_data = {
-            "name": "AutoTestFulfillment",
+            "name": "Sample Fulfillment Policy",
             "marketplaceId": "EBAY_US",
+            "categoryTypes": [
+                {
+                    "name": "ALL_EXCLUDING_MOTORS_VEHICLES",
+                    "default": true
+                }
+            ],
             "shippingOptions": [
                 {
-                    "optionType": "DOMESTIC",
-                    "costType": "FLAT",
+                    "costType": "FLAT_RATE",
                     "shippingServices": [
                         {
-                            "shippingServiceCode": "USPSPriority",
-                            "freeShipping": True
+                            "sortOrder": 1,
+                            "shippingCarrierCode": "USPS",
+                            "shippingServiceCode": "USPSPriorityFlatRateBox",
+                            "additionalShippingCost": {
+                                "value": "0.00",
+                                "currency": "USD"
+                            },
+                            "shippingCost": {
+                                "value": "7.00",
+                                "currency": "USD"
+                            },
+                            "freeShipping": false
                         }
                     ]
                 }
-            ]
+            ],
+            "handlingTime": {
+                "unit": "DAY",
+                "value": 3
+            }
         }
         print(json.dumps(fulfillment_data, indent=2))
 
@@ -167,7 +193,7 @@ def create_policies():
             json=fulfillment_data
         )
         print("Fulfillment response:", r1.status_code, r1.text)
-        fulfillment_id = r1.json()["fulfillmentPolicyId"]
+        #fulfillment_id = r1.json()["fulfillmentPolicyId"]
 
         # 2. Payment Policy
         payment_data = {
@@ -288,8 +314,6 @@ def list_item():
 
     except Exception as e:
         return jsonify({"error": str(e)})
-
-
 
 
 
