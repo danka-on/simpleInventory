@@ -1,6 +1,6 @@
 from flask import Flask, request, send_file, url_for, render_template, jsonify
 from PIL import Image, ImageDraw
-import io, time , subprocess, os, requests
+import io, time , subprocess, os, requests, json
 from dotenv import load_dotenv
 from inventory import find_item  # adjust this to match your actual import
 
@@ -11,7 +11,7 @@ app = Flask(__name__)
 #for ebay api calls
 from token_manager import get_access_token, load_tokens, is_expired
 access_token = get_access_token()
-HEADERS = {
+headers = {
     "Authorization": f"Bearer {access_token}",
     "Content-Type": "application/json"
 }
@@ -146,14 +146,20 @@ def create_policies():
         fulfillment_data = {
             "name": "AutoTestFulfillment",
             "marketplaceId": "EBAY_US",
-            "shippingOptions": [{
-                "shippingServices": [{
-                    "shippingServiceCode": "USPSFirstClass",
-                    "freeShipping": True
-                }],
-                "optionType": "DOMESTIC"
-            }]
+            "shippingOptions": [
+                {
+                    "optionType": "DOMESTIC",
+                    "costType": "FLAT",
+                    "shippingServices": [
+                        {
+                            "shippingServiceCode": "USPSPriority",
+                            "freeShipping": True
+                        }
+                    ]
+                }
+            ]
         }
+        print(json.dumps(fulfillment_data, indent=2))
 
         r1 = requests.post(
             "https://api.sandbox.ebay.com/sell/account/v1/fulfillment_policy",
@@ -205,7 +211,11 @@ def create_policies():
     except Exception as e:
         return jsonify({"error": str(e)})
 
-
+res = requests.get(
+    "https://api.sandbox.ebay.com/sell/account/v1/fulfillment_policy?marketplace_id=EBAY_US",
+    headers=headers
+)
+print(res.status_code, res.text)
 @app.route("/list-item")
 def list_item():
     try:
