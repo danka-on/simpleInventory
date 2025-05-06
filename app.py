@@ -148,6 +148,7 @@ def create_policies():
             "Authorization": f"Bearer {access_token}",
             "Content-Type": "application/json"
         }
+        policy_ids = {}
 
         # 1. Fulfillment Policy (Shipping)
         fulfillment_data = {
@@ -156,11 +157,12 @@ def create_policies():
             "categoryTypes": [
                 {
                     "name": "ALL_EXCLUDING_MOTORS_VEHICLES",
-                    "default": true
+                    "default": True
                 }
             ],
             "shippingOptions": [
                 {
+                    "optionType": "DOMESTIC",
                     "costType": "FLAT_RATE",
                     "shippingServices": [
                         {
@@ -175,7 +177,7 @@ def create_policies():
                                 "value": "7.00",
                                 "currency": "USD"
                             },
-                            "freeShipping": false
+                            "freeShipping": False
                         }
                     ]
                 }
@@ -185,21 +187,48 @@ def create_policies():
                 "value": 3
             }
         }
-        print(json.dumps(fulfillment_data, indent=2))
+        
+        buffer = io.StringIO()
+        json.dump(fulfillment_data, buffer, indent=2)
+        buffer.seek(0)
+        print("Fulfillment Request: ", buffer.read())
 
         r1 = requests.post(
             "https://api.sandbox.ebay.com/sell/account/v1/fulfillment_policy",
             headers=headers,
             json=fulfillment_data
         )
-        print("Fulfillment response:", r1.status_code, r1.text)
-        #fulfillment_id = r1.json()["fulfillmentPolicyId"]
+        
+        print("Fulfillment response:", r1.status_code)
+        if r1.status_code != 201:
+            print("Error creating fulfillment policy:", r1.text)
+            return jsonify({"error": f"Failed to create fulfillment policy: {r1.text}"})
+            
+        fulfillment_id = r1.json()["fulfillmentPolicyId"]
+        policy_ids["fulfillmentPolicyId"] = fulfillment_id
 
         # 2. Payment Policy
         payment_data = {
             "name": "AutoTestPayment",
             "marketplaceId": "EBAY_US",
-            "paymentMethods": ["CREDIT_CARD"]
+            "categoryTypes": [
+                {
+                    "name": "ALL_EXCLUDING_MOTORS_VEHICLES",
+                    "default": True
+                }
+            ],
+            "paymentMethods": [
+                {
+                    "paymentMethodType": "PAYPAL",
+                    "recipientAccountReference": {
+                        "referenceId": "seller@example.com",
+                        "referenceType": "PAYPAL_EMAIL"
+                    }
+                },
+                {
+                    "paymentMethodType": "CREDIT_CARD"
+                }
+            ]
         }
 
         r2 = requests.post(
@@ -207,16 +236,28 @@ def create_policies():
             headers=headers,
             json=payment_data
         )
-        print("Payment response:", r2.status_code, r2.text)
+        
+        print("Payment response:", r2.status_code)
+        if r2.status_code != 201:
+            print("Error creating payment policy:", r2.text)
+            return jsonify({"error": f"Failed to create payment policy: {r2.text}"})
+            
         payment_id = r2.json()["paymentPolicyId"]
+        policy_ids["paymentPolicyId"] = payment_id
 
         # 3. Return Policy
         return_data = {
             "name": "AutoTestReturns",
             "marketplaceId": "EBAY_US",
+            "categoryTypes": [
+                {
+                    "name": "ALL_EXCLUDING_MOTORS_VEHICLES",
+                    "default": True
+                }
+            ],
             "returnsAccepted": True,
-            "returnMethod": "EXCHANGE",
             "returnPeriod": {"value": "30", "unit": "DAY"},
+            "returnShippingCostPayer": "SELLER",
             "refundMethod": "MONEY_BACK"
         }
 
@@ -225,14 +266,23 @@ def create_policies():
             headers=headers,
             json=return_data
         )
-        print("Return response:", r3.status_code, r3.text)
+        
+        print("Return response:", r3.status_code)
+        if r3.status_code != 201:
+            print("Error creating return policy:", r3.text)
+            return jsonify({"error": f"Failed to create return policy: {r3.text}"})
+            
         return_id = r3.json()["returnPolicyId"]
+        policy_ids["returnPolicyId"] = return_id
 
-        return jsonify({
-            "fulfillmentPolicyId": fulfillment_id,
-            "paymentPolicyId": payment_id,
-            "returnPolicyId": return_id
-        })
+        # Save policy IDs to file
+        try:
+            with open("Z:/eBay/policy_ids.json", "w") as f:
+                json.dump(policy_ids, f, indent=2)
+        except Exception as e:
+            print(f"Warning: Could not save policy IDs: {e}")
+
+        return jsonify(policy_ids)
 
     except Exception as e:
         return jsonify({"error": str(e)})
@@ -250,68 +300,149 @@ def list_item():
             "Authorization": f"Bearer {access_token}",
             "Content-Type": "application/json"
         }
-
-        # === Replace with your policy IDs from sandbox ===
-        fulfillment_policy_id = "REPLACE_ME"
-        payment_policy_id = "REPLACE_ME"
-        return_policy_id = "REPLACE_ME"
-
-        sku = "test-sku-001"
-        title = "Sandbox Widget"
-        quantity = 3
-
-        # 1. Upload inventory item
-        inventory_payload = {
-            "product": {
-                "title": title,
-                "description": "A test item in the sandbox environment",
-                "aspects": {"Brand": ["FakeBrand"]}
+        
+        # Load policy IDs
+        try:
+            with open("Z:/eBay/policy_ids.json", "r") as f:
+                policy_ids = json.load(f)
+                fulfillment_id = policy_ids.get("fulfillmentPolicyId")
+                payment_id = policy_ids.get("paymentPolicyId")
+                return_id = policy_ids.get("returnPolicyId")
+        except Exception as e:
+            return jsonify({"error": f"Could not load policy IDs: {e}"})
+            
+        # Create merchant location first
+        location_data = {
+            "location": {
+                "address": {
+                    "addressLine1": "123 Main Street",
+                    "addressLine2": "",
+                    "city": "San Jose",
+                    "stateOrProvince": "CA",
+                    "postalCode": "95131",
+                    "country": "US"
+                }
             },
-            "availability": {
-                "shipToLocationAvailability": {"quantity": quantity}
-            },
-            "condition": "NEW"
+            "locationInstructions": "Ring the doorbell",
+            "name": "Warehouse-1",
+            "merchantLocationStatus": "ENABLED", 
+            "locationTypes": ["WAREHOUSE"]
         }
-
-        requests.put(
-            f"https://api.sandbox.ebay.com/sell/inventory/v1/inventory_item/{sku}",
+        
+        location_res = requests.post(
+            "https://api.sandbox.ebay.com/sell/inventory/v1/location",
             headers=headers,
-            json=inventory_payload
+            json=location_data
         )
-
-        # 2. Create offer
-        offer_payload = {
+        
+        if location_res.status_code not in [201, 200, 409]:
+            print(f"Error creating location: {location_res.status_code}")
+            print(location_res.text)
+            return jsonify({"error": f"Failed to create location: {location_res.text}"})
+        
+        location_name = location_data["name"]
+        print(f"Location created or already exists: {location_name}")
+        
+        # Continue with listing
+        inventory_data = {
+            "availability": {
+                "shipToLocationAvailability": {
+                    "quantity": 10
+                }
+            },
+            "condition": "NEW",
+            "product": {
+                "title": "Sample Product",
+                "description": "This is a sample product.",
+                "aspects": {
+                    "Brand": ["Sample Brand"],
+                    "Type": ["Sample Type"]
+                },
+                "imageUrls": [
+                    "https://i.imgur.com/abc123.jpg"
+                ]
+            }
+        }
+        
+        sku = f"sample-sku-{int(time.time())}"
+        inventory_url = f"https://api.sandbox.ebay.com/sell/inventory/v1/inventory_item/{sku}"
+        
+        inventory_res = requests.put(
+            inventory_url,
+            headers=headers,
+            json=inventory_data
+        )
+        
+        if inventory_res.status_code != 201:
+            print(f"Error creating inventory: {inventory_res.status_code}")
+            print(inventory_res.text)
+            return jsonify({"error": f"Failed to create inventory: {inventory_res.text}"})
+            
+        print(f"Inventory item created: {sku}")
+        
+        # Create offer
+        offer_data = {
             "sku": sku,
             "marketplaceId": "EBAY_US",
             "format": "FIXED_PRICE",
-            "availableQuantity": quantity,
-            "categoryId": "9355",  # Cell Phones category
+            "availableQuantity": 10,
+            "categoryId": "15032",
+            "listingDescription": "Sample listing description",
             "listingPolicies": {
-                "fulfillmentPolicyId": fulfillment_policy_id,
-                "paymentPolicyId": payment_policy_id,
-                "returnPolicyId": return_policy_id
+                "fulfillmentPolicyId": fulfillment_id,
+                "paymentPolicyId": payment_id,
+                "returnPolicyId": return_id
             },
             "pricingSummary": {
-                "price": {"value": "9.99", "currency": "USD"}
-            }
+                "price": {
+                    "value": "10.00",
+                    "currency": "USD"
+                }
+            },
+            "merchantLocationKey": location_name
         }
-
-        res = requests.post(
+        
+        offer_res = requests.post(
             "https://api.sandbox.ebay.com/sell/inventory/v1/offer",
             headers=headers,
-            json=offer_payload
+            json=offer_data
         )
-
-        offer_id = res.json().get("offerId")
-
-        # 3. Publish the offer
-        requests.post(
+        
+        if offer_res.status_code != 201:
+            print(f"Error creating offer: {offer_res.status_code}")
+            print(offer_res.text)
+            return jsonify({"error": f"Failed to create offer: {offer_res.text}"})
+            
+        offer_id = offer_res.json()["offerId"]
+        print(f"Offer created: {offer_id}")
+        
+        # Publish offer
+        publish_res = requests.post(
             f"https://api.sandbox.ebay.com/sell/inventory/v1/offer/{offer_id}/publish",
             headers=headers
         )
-
-        return jsonify({"message": "✅ Item listed successfully!", "sku": sku, "offer_id": offer_id})
-
+        
+        if publish_res.status_code != 200:
+            print(f"Error publishing offer: {publish_res.status_code}")
+            print(publish_res.text)
+            return jsonify({"error": f"Failed to publish offer: {publish_res.text}"})
+            
+        listing_id = publish_res.json()["listingId"]
+        
+        # Log response
+        buffer = io.StringIO()
+        json.dump(publish_res.json(), buffer, indent=2)
+        buffer.seek(0)
+        log_msg = f"Listing published successfully: {buffer.read()}"
+        subprocess.run(["echo", log_msg], check=True)
+        
+        return jsonify({
+            "success": True,
+            "sku": sku,
+            "offerId": offer_id,
+            "listingId": listing_id
+        })
+        
     except Exception as e:
         return jsonify({"error": str(e)})
 
