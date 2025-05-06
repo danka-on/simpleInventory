@@ -8,7 +8,7 @@ load_dotenv()
 
 CLIENT_ID = os.getenv("EBAY_CLIENT_ID")
 CLIENT_SECRET = os.getenv("EBAY_CLIENT_SECRET")
-AUTH_CODE = os.getenv("EBAY_AUTH_CODE")  # set this just for one-time use
+AUTH_CODE = "v^1.1#i^1#f^0#p^3#r^1#I^3#t^Ul41Xzk6Q0E1RUM5OEMyNDFBMEE0REJEMUI1QjgwQzE1MDM2REZfMF8xI0VeMTI4NA=="
 RUNAME = os.getenv("EBAY_RUNAME")
 
 # Base64 encode your credentials
