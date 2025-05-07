@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Create eBay Listing</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input[type="text"], 
+        input[type="number"], 
+        select, 
+        textarea {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        button {
+            background-color: #0066cc;
+            color: white;
+            padding: 10px 15px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #0052a3;
+        }
+        .image-urls {
+            margin-top: 5px;
+        }
+        .add-image-btn {
+            margin-top: 5px;
+            background-color: #4CAF50;
+        }
+        .aspect-container {
+            border: 1px solid #ddd;
+            padding: 15px;
+            margin-bottom: 15px;
+        }
+        .add-aspect-btn {
+            margin-top: 5px;
+            background-color: #ff9800;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            display: none;
+        }
+        .success {
+            background-color: #e8f5e9;
+            color: #2e7d32;
+        }
+        .error {
+            background-color: #ffebee;
+            color: #c62828;
+        }
+    </style>
+</head>
+<body>
+    <h1>Create eBay Listing</h1>
+    <form id="listingForm">
+        <div class="form-group">
+            <label for="title">Title</label>
+            <input type="text" id="title" name="title" required>
+        </div>
+        <div class="form-group">
+            <label for="description">Description</label>
+            <textarea id="description" name="description" rows="5" required></textarea>
+        </div>
+        <div class="form-group">
+            <label for="price">Price (USD)</label>
+            <input type="text" id="price" name="price" required placeholder="9.99">
+        </div>
+        <div class="form-group">
+            <label for="quantity">Quantity</label>
+            <input type="number" id="quantity" name="quantity" min="1" value="1" required>
+        </div>
+        <div class="form-group">
+            <label for="category_id">Category ID</label>
+            <input type="text" id="category_id" name="category_id" value="15032" required>
+            <small>(15032 is for Consumer Electronics)</small>
+        </div>
+        
+        <div class="aspect-container">
+            <h3>Item Aspects/Attributes</h3>
+            <p>These are category-specific attributes for your item (like Brand, Model, etc)</p>
+            <div id="aspects">
+                <div class="form-group aspect-row">
+                    <label>Aspect Name:</label>
+                    <input type="text" name="aspect_name_1" placeholder="e.g. Brand">
+                    <label>Value:</label>
+                    <input type="text" name="aspect_value_1" placeholder="e.g. Sony">
+                </div>
+            </div>
+            <button type="button" class="add-aspect-btn" id="addAspect">Add Another Aspect</button>
+        </div>
+        
+        <div class="form-group">
+            <label>Image URLs</label>
+            <div id="imageUrls">
+                <input type="text" name="imageUrls[]" placeholder="https://example.com/image.jpg">
+            </div>
+            <button type="button" class="add-image-btn" id="addImage">Add Another Image URL</button>
+        </div>
+        
+        <div class="form-group">
+            <button type="submit">Create Listing</button>
+        </div>
+    </form>
+    
+    <div id="result" class="result">
+        <h3 id="resultTitle"></h3>
+        <pre id="resultContent"></pre>
+    </div>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            let aspectCount = 1;
+            
+            document.getElementById('addAspect').addEventListener('click', function() {
+                aspectCount++;
+                const aspectDiv = document.createElement('div');
+                aspectDiv.className = 'form-group aspect-row';
+                aspectDiv.innerHTML = `
+                    <label>Aspect Name:</label>
+                    <input type="text" name="aspect_name_${aspectCount}" placeholder="e.g. Model">
+                    <label>Value:</label>
+                    <input type="text" name="aspect_value_${aspectCount}" placeholder="e.g. XYZ-123">
+                `;
+                document.getElementById('aspects').appendChild(aspectDiv);
+            });
+            
+            document.getElementById('addImage').addEventListener('click', function() {
+                const imageInput = document.createElement('input');
+                imageInput.type = 'text';
+                imageInput.name = 'imageUrls[]';
+                imageInput.placeholder = 'https://example.com/image.jpg';
+                document.getElementById('imageUrls').appendChild(imageInput);
+            });
+            
+            document.getElementById('listingForm').addEventListener('submit', function(e) {
+                e.preventDefault();
+                const form = e.target;
+                const formData = new FormData(form);
+                
+                // Process aspects (convert from name_1, value_1 format to aspect_Name format)
+                const processedData = new FormData();
+                
+                for (const [key, value] of formData.entries()) {
+                    if (key.startsWith('aspect_name_')) {
+                        const index = key.split('_').pop();
+                        const aspectValue = formData.get(`aspect_value_${index}`);
+                        if (value && aspectValue) {
+                            processedData.append(`aspect_${value}`, aspectValue);
+                        }
+                    } else if (!key.startsWith('aspect_value_')) {
+                        // Copy all non-aspect fields as is
+                        processedData.append(key, value);
+                    }
+                }
+                
+                // Show loading state
+                const resultDiv = document.getElementById('result');
+                resultDiv.className = 'result';
+                resultDiv.style.display = 'block';
+                document.getElementById('resultTitle').textContent = 'Creating listing...';
+                document.getElementById('resultContent').textContent = 'Please wait...';
+                
+                fetch('/create-listing', {
+                    method: 'POST',
+                    body: processedData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        resultDiv.className = 'result error';
+                        document.getElementById('resultTitle').textContent = 'Error Creating Listing';
+                        document.getElementById('resultContent').textContent = data.error;
+                    } else {
+                        resultDiv.className = 'result success';
+                        document.getElementById('resultTitle').textContent = 'Listing Created Successfully';
+                        document.getElementById('resultContent').textContent = JSON.stringify(data, null, 2);
+                    }
+                })
+                .catch(error => {
+                    resultDiv.className = 'result error';
+                    document.getElementById('resultTitle').textContent = 'Error';
+                    document.getElementById('resultContent').textContent = 'An error occurred: ' + error.message;
+                });
+            });
+        });
+    </script>
+</body>
+</html> 

@@ -277,8 +277,9 @@ def create_policies():
 
         # Save policy IDs to file
         try:
-            with open("Z:/eBay/policy_ids.json", "w") as f:
+            with open("policy_ids.json", "w") as f:
                 json.dump(policy_ids, f, indent=2)
+            print(f"Saved policy IDs to policy_ids.json: {json.dumps(policy_ids)}")
         except Exception as e:
             print(f"Warning: Could not save policy IDs: {e}")
 
@@ -298,49 +299,54 @@ def list_item():
         access_token = get_access_token()
         headers = {
             "Authorization": f"Bearer {access_token}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "Content-Language": "en-US",
+            "Accept": "application/json"
         }
         
         # Load policy IDs
         try:
-            with open("Z:/eBay/policy_ids.json", "r") as f:
+            with open("policy_ids.json", "r") as f:
                 policy_ids = json.load(f)
                 fulfillment_id = policy_ids.get("fulfillmentPolicyId")
                 payment_id = policy_ids.get("paymentPolicyId")
                 return_id = policy_ids.get("returnPolicyId")
+                print(f"Loaded policy IDs: {json.dumps(policy_ids)}")
         except Exception as e:
             return jsonify({"error": f"Could not load policy IDs: {e}"})
             
-        # Create merchant location first
+        # Create merchant location first - note this is not needed if we've already created it
+        location_name = "store1"  # Use the same location name as in create-location
         location_data = {
+            "locationTypes": ["WAREHOUSE"],
+            "merchantLocationStatus": "ENABLED",
             "location": {
                 "address": {
-                    "addressLine1": "123 Main Street",
-                    "addressLine2": "",
+                    "addressLine1": "123 Main St",
                     "city": "San Jose",
                     "stateOrProvince": "CA",
                     "postalCode": "95131",
                     "country": "US"
                 }
-            },
-            "locationInstructions": "Ring the doorbell",
-            "name": "Warehouse-1",
-            "merchantLocationStatus": "ENABLED", 
-            "locationTypes": ["WAREHOUSE"]
+            }
         }
         
-        location_res = requests.post(
-            "https://api.sandbox.ebay.com/sell/inventory/v1/location",
+        print(f"Using location: {location_name}")
+        
+        location_res = requests.put(
+            f"https://api.sandbox.ebay.com/sell/inventory/v1/inventory_location/{location_name}",
             headers=headers,
             json=location_data
         )
         
-        if location_res.status_code not in [201, 200, 409]:
+        print(f"Location response: {location_res.status_code}")
+        print(location_res.text)
+        
+        if location_res.status_code not in [201, 200, 204, 409]:
             print(f"Error creating location: {location_res.status_code}")
             print(location_res.text)
             return jsonify({"error": f"Failed to create location: {location_res.text}"})
         
-        location_name = location_data["name"]
         print(f"Location created or already exists: {location_name}")
         
         # Continue with listing
@@ -446,19 +452,408 @@ def list_item():
     except Exception as e:
         return jsonify({"error": str(e)})
 
+@app.route("/create-listing", methods=["POST"])
+def create_listing():
+    try:
+        # Get fresh token
+        access_token = get_access_token()
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+            "Content-Language": "en-US",
+            "Accept": "application/json"
+        }
+        
+        # Get form data
+        data = request.json if request.is_json else request.form
+        title = data.get("title", "Sample Item")
+        description = data.get("description", "This is a sample item description")
+        price = data.get("price", "9.99")
+        quantity = int(data.get("quantity", 1))
+        category_id = data.get("category_id", "15032")  # Default category
+        
+        # Try to load policy IDs, or use defaults
+        policy_ids_file = "policy_ids.json"
+        try:
+            if os.path.exists(policy_ids_file):
+                with open(policy_ids_file, "r") as f:
+                    policy_ids = json.load(f)
+                    fulfillment_id = policy_ids.get("fulfillmentPolicyId")
+                    payment_id = policy_ids.get("paymentPolicyId")
+                    return_id = policy_ids.get("returnPolicyId")
+                    print(f"Loaded policy IDs from {policy_ids_file}")
+            else:
+                print(f"{policy_ids_file} does not exist, proceeding without policy IDs")
+                fulfillment_id = data.get("fulfillmentPolicyId")
+                payment_id = data.get("paymentPolicyId")
+                return_id = data.get("returnPolicyId")
+        except Exception as e:
+            print(f"Warning: Could not load policy IDs: {e}")
+            # We'll continue anyway and let eBay tell us if policies are missing
+            fulfillment_id = data.get("fulfillmentPolicyId")
+            payment_id = data.get("paymentPolicyId")
+            return_id = data.get("returnPolicyId")
+        
+        # Create inventory item
+        sku = f"item-{int(time.time())}"
+        aspects = {}
+        
+        # Extract dynamic item aspects from form data
+        for key in data:
+            if key.startswith("aspect_"):
+                aspect_name = key.replace("aspect_", "")
+                aspect_value = data.get(key)
+                if aspect_value:
+                    # Aspects require array values
+                    aspects[aspect_name] = [aspect_value]
+        
+        # If no aspects provided, add some defaults
+        if not aspects:
+            aspects = {
+                "Brand": ["Sample Brand"],
+                "Type": ["Sample Type"]
+            }
+        
+        # Prepare inventory item data
+        inventory_data = {
+            "availability": {
+                "shipToLocationAvailability": {
+                    "quantity": quantity
+                }
+            },
+            "condition": "NEW",
+            "product": {
+                "title": title,
+                "description": description,
+                "aspects": aspects,
+                "imageUrls": []
+            }
+        }
+        
+        # Add image URLs if provided
+        image_urls = data.getlist("imageUrls[]") if hasattr(data, "getlist") else data.get("imageUrls", "").split(",")
+        if image_urls and image_urls[0]:  # Check if we have valid image URLs
+            inventory_data["product"]["imageUrls"] = [url.strip() for url in image_urls if url.strip()]
+        
+        # Create inventory item
+        print(f"Creating inventory item with SKU: {sku}")
+        inventory_res = requests.put(
+            f"https://api.sandbox.ebay.com/sell/inventory/v1/inventory_item/{sku}",
+            headers=headers,
+            json=inventory_data
+        )
+        
+        if inventory_res.status_code != 201 and inventory_res.status_code != 204:
+            error_msg = f"Failed to create inventory: {inventory_res.status_code} - {inventory_res.text}"
+            print(error_msg)
+            return jsonify({"error": error_msg})
+            
+        print(f"Inventory item created: {sku}")
+        
+        # Get or create merchant location
+        location_name = "store1"  # Use the same location name as in create-location
+        try:
+            # First check if we have any inventory locations
+            print("Checking for existing merchant locations...")
+            location_list_res = requests.get(
+                "https://api.sandbox.ebay.com/sell/inventory/v1/inventory_location",
+                headers=headers
+            )
+            if location_list_res.status_code == 200:
+                locations = location_list_res.json().get("locations", [])
+                if locations:
+                    print(f"Found existing locations: {json.dumps(locations)}")
+                    location_name = locations[0].get("locationName")
+                else:
+                    print("No existing locations found, using default location name")
+            else:
+                print(f"Error checking locations: {location_list_res.status_code}")
+        except Exception as e:
+            error_msg = f"Warning: Could not check merchant locations: {str(e)}"
+            print(error_msg)
+            return jsonify({"error": error_msg})
+        
+        # Create offer data
+        offer_data = {
+            "sku": sku,
+            "marketplaceId": "EBAY_US",
+            "format": "FIXED_PRICE",
+            "availableQuantity": quantity,
+            "categoryId": category_id,
+            "listingDescription": description,
+            "merchantLocationKey": location_name,
+            "pricingSummary": {
+                "price": {
+                    "currency": "USD",
+                    "value": price
+                }
+            }
+        }
+        
+        # Add listing policies if available
+        if all([fulfillment_id, payment_id, return_id]):
+            offer_data["listingPolicies"] = {
+                "fulfillmentPolicyId": fulfillment_id,
+                "paymentPolicyId": payment_id,
+                "returnPolicyId": return_id
+            }
+            print(f"Using policy IDs: fulfillment={fulfillment_id}, payment={payment_id}, return={return_id}")
+        else:
+            print("No policy IDs provided, eBay will use account defaults if available")
+        
+        # Create offer
+        print("Creating offer...")
+        print("Offer data:", json.dumps(offer_data, indent=2))
+        
+        offer_res = requests.post(
+            "https://api.sandbox.ebay.com/sell/inventory/v1/offer",
+            headers=headers,
+            json=offer_data
+        )
+        
+        if offer_res.status_code != 201 and offer_res.status_code != 204:
+            error_msg = f"Failed to create offer: {offer_res.status_code} - {offer_res.text}"
+            print(error_msg)
+            return jsonify({"error": error_msg})
+            
+        offer_id = offer_res.json().get("offerId")
+        if not offer_id:
+            return jsonify({"error": "Offer created but could not get offer ID"})
+            
+        print(f"Offer created: {offer_id}")
+        
+        # Publish the offer
+        print("Publishing offer...")
+        publish_res = requests.post(
+            f"https://api.sandbox.ebay.com/sell/inventory/v1/offer/{offer_id}/publish",
+            headers=headers
+        )
+        
+        if publish_res.status_code != 200:
+            error_msg = f"Failed to publish offer: {publish_res.status_code} - {publish_res.text}"
+            print(error_msg)
+            return jsonify({"error": error_msg})
+            
+        listing_id = publish_res.json().get("listingId")
+        if not listing_id:
+            return jsonify({"error": "Offer published but could not get listing ID"})
+            
+        print(f"Listing published: {listing_id}")
+        
+        return jsonify({
+            "success": True,
+            "message": "Listing created successfully",
+            "sku": sku,
+            "offerId": offer_id,
+            "listingId": listing_id
+        })
+        
+    except Exception as e:
+        error_msg = f"Error creating listing: {str(e)}"
+        print(error_msg)
+        return jsonify({"error": error_msg})
 
-
-
-
-
-
+@app.route("/new-listing")
+def new_listing_form():
+    return render_template("create_listing.html")
 
 def run_stuff():
     time.sleep(3)
     start_cloudflare_tunnel()
     print("cloudflare tunnel started")
 
+@app.route("/create-location")
+def create_location():
+    try:
+        # Ensure we have a fresh token
+        access_token = get_access_token()
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+            "Content-Language": "en-US",
+            "Accept": "application/json"
+        }
+        
+        # Remove any sensitive data from debug output
+        safe_headers = headers.copy()
+        if "Authorization" in safe_headers:
+            safe_headers["Authorization"] = "Bearer ****"
+        print("Headers:", safe_headers)
+        
+        # Use a very simple name - this goes in the URL, not the payload
+        location_name = "store1"  
+        
+        # Create a minimalist location payload - note merchantLocationKey is NOT included
+        location_data = {
+            "locationTypes": ["WAREHOUSE"],
+            "merchantLocationStatus": "ENABLED",
+            "location": {
+                "address": {
+                    "addressLine1": "123 Main St",
+                    "city": "San Jose",
+                    "stateOrProvince": "CA",
+                    "postalCode": "95131",
+                    "country": "US"
+                }
+            }
+        }
+        
+        # Print the request payload for debugging
+        print("Location payload:", json.dumps(location_data, indent=2))
+        print("URL:", f"https://api.sandbox.ebay.com/sell/inventory/v1/inventory_location/{location_name}")
+        
+        # Make the create request - using PUT not POST as per eBay docs
+        response = requests.put(
+            f"https://api.sandbox.ebay.com/sell/inventory/v1/inventory_location/{location_name}",
+            headers=headers,
+            json=location_data
+        )
+        
+        # Print the full response
+        print(f"Response status: {response.status_code}")
+        print(f"Response headers: {dict(response.headers)}")
+        print(f"Response body: {response.text}")
+        
+        if response.status_code in [200, 201, 204]:
+            result = {
+                "success": True,
+                "status_code": response.status_code,
+                "location": location_name,
+                "message": "Location created successfully"
+            }
+        else:
+            result = {
+                "success": False,
+                "status_code": response.status_code,
+                "error": response.text
+            }
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        print(f"Exception in create_location: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        })
 
+@app.route("/check-locations")
+def check_locations():
+    try:
+        # Get fresh token
+        access_token = get_access_token()
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+            "Content-Language": "en-US",
+            "Accept": "application/json"
+        }
+        
+        # Try to get locations list
+        print("Making request to check locations...")
+        response = requests.get(
+            "https://api.sandbox.ebay.com/sell/inventory/v1/inventory_location",
+            headers=headers
+        )
+        
+        print(f"Response status: {response.status_code}")
+        print(f"Response headers: {response.headers}")
+        print(f"Response body: {response.text}")
+        
+        if response.status_code == 200:
+            try:
+                data = response.json()
+                locations = data.get("locations", [])
+                return jsonify({
+                    "success": True,
+                    "status_code": 200,
+                    "count": len(locations),
+                    "locations": locations
+                })
+            except Exception as e:
+                print(f"Error parsing locations response: {e}")
+                return jsonify({
+                    "success": False,
+                    "error": f"Error parsing response: {str(e)}",
+                    "raw_response": response.text
+                })
+        else:
+            return jsonify({
+                "success": False,
+                "status_code": response.status_code,
+                "error": response.text
+            })
+            
+    except Exception as e:
+        print(f"Exception in check_locations: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        })
+
+@app.route("/check-auth")
+def check_auth():
+    try:
+        access_token = get_access_token()
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+        }
+        
+        # Get user information to verify token
+        user_response = requests.get(
+            "https://api.sandbox.ebay.com/ws/api.dll",
+            headers={
+                "X-EBAY-API-SITEID": "0",
+                "X-EBAY-API-COMPATIBILITY-LEVEL": "967",
+                "X-EBAY-API-CALL-NAME": "GetUser",
+                "X-EBAY-API-IAF-TOKEN": access_token,
+                "Content-Type": "text/xml"
+            },
+            data="""<?xml version="1.0" encoding="utf-8"?>
+            <GetUserRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+                <RequesterCredentials>
+                    <eBayAuthToken>{}</eBayAuthToken>
+                </RequesterCredentials>
+                <DetailLevel>ReturnAll</DetailLevel>
+            </GetUserRequest>""".format(access_token)
+        )
+        
+        # Make a simpler request to the inventory API - just get locations count
+        inventory_response = requests.get(
+            "https://api.sandbox.ebay.com/sell/inventory/v1/location?limit=1",
+            headers=headers
+        )
+        
+        # Check if we have a scope issue
+        scope_issue = False
+        if inventory_response.status_code == 401 or inventory_response.status_code == 403:
+            scope_issue = True
+            
+        # Get current token info
+        tokens = load_tokens()
+        
+        return jsonify({
+            "token_valid": True,
+            "token_expires_at": tokens.get("expires_at"),
+            "current_time": int(time.time()),
+            "seconds_until_expiry": int(tokens.get("expires_at", 0) - time.time()),
+            "inventory_api_response": {
+                "status_code": inventory_response.status_code,
+                "body": inventory_response.text
+            },
+            "user_api_response": {
+                "status_code": user_response.status_code,
+                "body": user_response.text[:500] + "..." if len(user_response.text) > 500 else user_response.text
+            },
+            "possible_scope_issue": scope_issue,
+            "recommendation": "If you see authorization errors, please ensure your token includes the scopes: sell.inventory, sell.account"
+        })
+    except Exception as e:
+        return jsonify({
+            "error": str(e)
+        })
 
 if __name__ == "__main__":
     run_stuff()
