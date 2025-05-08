@@ -138,47 +138,43 @@ def highlight():
     return send_file(img_io, mimetype="image/png")
 
 ####################################
-
-@app.route("/listnames")
-def get_inventory_listing_names():
+@app.route("/identity", methods=["GET"])
+def get_ebay_identity():
     headers = {
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json"
     }
-    endpoint = "https://api.ebay.com/sell/inventory/v1/inventory_item"
-    names = []
-    limit = 100
-    offset = 0
 
-    while True:
-        params = {
-            "limit": limit,
-            "offset": offset
-        }
-        response = requests.get(endpoint, headers=headers, params=params)
-        if response.status_code != 200:
-            print("Failed to fetch inventory:", response.status_code, response.text)
-            break
+    response = requests.get("https://api.ebay.com/identity/v1/user", headers=headers)
+    if response.status_code == 200:
+        print("eBay User Info:")
+        print(response.json())
+    else:
+        print("Failed:", response.status_code, response.text)
 
+@app.route("/listnames")
+def get_inventory_listing_names():
+    response = requests.get("https://api.ebay.com/sell/inventory/v1/offer", headers=headers)
+
+    if response.status_code == 200:
         data = response.json()
-        for item in data.get("inventoryItems", []):
-            product = item.get("product", {})
-            title = product.get("title")
-            if title:
-                names.append(title)
+        offers = data.get("offers", [])
+        result = [f"{offer.get('sku')} - {offer.get('title')}" for offer in offers]
+        return "<br>".join(result) if result else "No active offers found."
+    else:
+        return f"Request failed with status {response.status_code}: {response.text}"
+@app.route ("/ID", methods=["GET"])
+def userID():
 
-        if "href" in data and "next" in data["href"]:
-            offset += limit
-        else:
-            break
+    response = requests.get("https://api.ebay.com/identity/v1/user", headers=headers)
 
-    print("Inventory Listing Names:")
-    for name in names:
-        print(name)
+    print("Status:", response.status_code)
+    print("Raw:", response.text)
 
-    return names
-
-
+    if response.status_code == 200:
+        print("User Info:", response.json())
+    else:
+        print("Failed. Check token or scope.")
 
 
 
