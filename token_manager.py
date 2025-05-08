@@ -7,7 +7,7 @@ TOKEN_FILE = "tokens.json"
 CLIENT_ID = os.getenv("EBAY_CLIENT_ID", "your_id")
 CLIENT_SECRET = os.getenv("EBAY_CLIENT_SECRET", "your_secret")
 SCOPE = os.getenv("EBAY_SCOPE", "https://api.ebay.com/oauth/api_scope")
-TOKEN_URL = "https://api.sandbox.ebay.com/identity/v1/oauth2/token"
+TOKEN_URL = "https://api.ebay.com/identity/v1/oauth2/token"
 
 def load_tokens():
     with open(TOKEN_FILE) as f:

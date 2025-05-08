@@ -18,6 +18,8 @@ headers = {
     "Content-Type": "application/json"
 }
 
+app = Flask(__name__)
+
 @app.route("/token-status")
 def token_status():
     try:
@@ -137,372 +139,44 @@ def highlight():
 
 ####################################
 
-
-def create_inventory_item(access_token, sku):
-    url = f"https://api.sandbox.ebay.com/sell/inventory/v1/inventory_item/{sku}"
+@app.route("/listnames")
+def get_inventory_listing_names():
     headers = {
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json"
     }
-    payload = {
-        "availability": {
-            "shipToLocationAvailability": {
-                "quantity": 1
-            }
-        },
-        "condition": "NEW",
-        "product": {
-            "title": "Test Listing via API",
-            "description": "Description of the item created via API in sandbox.",
-            "aspects": {
-                "Brand": ["Unbranded"]
-            }
+    endpoint = "https://api.ebay.com/sell/inventory/v1/inventory_item"
+    names = []
+    limit = 100
+    offset = 0
+
+    while True:
+        params = {
+            "limit": limit,
+            "offset": offset
         }
-    }
+        response = requests.get(endpoint, headers=headers, params=params)
+        if response.status_code != 200:
+            print("Failed to fetch inventory:", response.status_code, response.text)
+            break
 
-    return requests.put(url, headers=headers, json=payload)
+        data = response.json()
+        for item in data.get("inventoryItems", []):
+            product = item.get("product", {})
+            title = product.get("title")
+            if title:
+                names.append(title)
 
-def create_offer(access_token, sku, fulfillment_policy_id, payment_policy_id, return_policy_id):
-    url = "https://api.sandbox.ebay.com/sell/inventory/v1/offer"
-    headers = {
-        "Authorization": f"Bearer {access_token}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "sku": sku,
-        "marketplaceId": "EBAY_US",
-        "format": "FIXED_PRICE",
-        "listingDescription": "Test API listing via eBay sandbox.",
-        "availableQuantity": 1,
-        "categoryId": "9355",  # Example: Cell Phones & Smartphones
-        "listingPolicies": {
-            "fulfillmentPolicyId": fulfillment_policy_id,
-            "paymentPolicyId": payment_policy_id,
-            "returnPolicyId": return_policy_id
-        },
-        "pricingSummary": {
-            "price": {
-                "value": "19.99",
-                "currency": "USD"
-            }
-        }
-    }
+        if "href" in data and "next" in data["href"]:
+            offset += limit
+        else:
+            break
 
-    return requests.post(url, headers=headers, json=payload)
+    print("Inventory Listing Names:")
+    for name in names:
+        print(name)
 
-def publish_offer(access_token, offer_id):
-    url = f"https://api.sandbox.ebay.com/sell/inventory/v1/offer/{offer_id}/publish/"
-    headers = {
-        "Authorization": f"Bearer {access_token}",
-        "Content-Type": "application/json"
-    }
-
-    return requests.post(url, headers=headers)
-
-
-@app.route("/create-listing", methods=["GET"])
-def create_listing():
-    try:
-        access_token = get_access_token()
-        sku = "test-sku-001"
-
-        fulfillment_policy_id = "REPLACE_WITH_ID"
-        payment_policy_id = "REPLACE_WITH_ID"
-        return_policy_id = "REPLACE_WITH_ID"
-
-        step1 = create_inventory_item(access_token, sku)
-        print("Inventory Item:", step1.status_code, step1.text)
-
-        step2 = create_offer(access_token, sku, fulfillment_policy_id, payment_policy_id, return_policy_id)
-        print("Create Offer:", step2.status_code, step2.text)
-        offer_id = step2.json().get("offerId")
-
-        step3 = publish_offer(access_token, offer_id)
-        print("Publish Offer:", step3.status_code, step3.text)
-
-        return jsonify({
-            "inventory_item": step1.status_code,
-            "offer_created": step2.status_code,
-            "offer_id": offer_id,
-            "published": step3.status_code
-        })
-
-    except Exception as e:
-        return jsonify({"error": str(e)})
-
-@app.route("/ids", methods=["GET"])
-def get_policy_ids():
-    access_token = get_access_token()
-    headers = {
-        "Authorization": f"Bearer {access_token}",
-        "Content-Type": "application/json"
-    }
-
-    fulfillment = requests.get(
-        "https://api.sandbox.ebay.com/sell/account/v1/fulfillment_policy?marketplace_id=EBAY_US",
-        headers=headers
-    ).json()
-
-    payment = requests.get(
-        "https://api.sandbox.ebay.com/sell/account/v1/payment_policy?marketplace_id=EBAY_US",
-        headers=headers
-    ).json()
-
-    returns = requests.get(
-        "https://api.sandbox.ebay.com/sell/account/v1/return_policy?marketplace_id=EBAY_US",
-        headers=headers
-    ).json()
-
-    try:
-        return jsonify({
-            "fulfillment_policy_id": fulfillment['fulfillmentPolicies'][0]['fulfillmentPolicyId'],
-            "payment_policy_id": payment['paymentPolicies'][0]['paymentPolicyId'],
-            "return_policy_id": returns['returnPolicies'][0]['returnPolicyId']
-        })
-    except KeyError as e:
-        return jsonify({
-            "error": "Missing expected key in response",
-            "missing_key": str(e),
-            "fulfillment_response": fulfillment,
-            "payment_response": payment,
-            "return_response": returns
-        })
-
-
-
-@app.route("/list_policies")
-def list_all_policies():
-    headers = {
-        "Authorization": f"Bearer {access_token}",
-        "Content-Type": "application/json"
-    }
-
-    # Fulfillment (Shipping) Policies
-    r1 = requests.get(
-        "https://api.sandbox.ebay.com/sell/account/v1/fulfillment_policy?marketplace_id=EBAY_US",
-        headers=headers
-    )
-    print("Fulfillment Policies:", r1.status_code)
-    print(r1.json())
-
-    # Payment Policies
-    r2 = requests.get(
-        "https://api.sandbox.ebay.com/sell/account/v1/payment_policy?marketplace_id=EBAY_US",
-        headers=headers
-    )
-    print("Payment Policies:", r2.status_code)
-    print(r2.json())
-
-    # Return Policies
-    r3 = requests.get(
-        "https://api.sandbox.ebay.com/sell/account/v1/return_policy?marketplace_id=EBAY_US",
-        headers=headers
-    )
-    print("Return Policies:", r3.status_code)
-    print(r3.json())
-@app.route("/create-policy-fulfillment")
-def create_policy_fulfillment():
-
-    try:
-        access_token = get_access_token()
-        headers = {
-            "Authorization": f"Bearer {access_token}",
-            "Content-Type": "application/json"
-        }
-
-        # 1. Fulfillment Policy (Shipping)
-        fulfillment_data = {
-            "name": "Sample Fulfillment Policy",
-            "marketplaceId": "EBAY_US",
-            "categoryTypes": [
-                {
-                    "name": "ALL_EXCLUDING_MOTORS_VEHICLES",
-                    "default": True
-                }
-            ],
-            "handlingTime": {
-                "value": 1,
-                "unit": "DAY"
-            },
-            "shippingOptions": [
-                {
-                    "costType": "FLAT_RATE",
-                    "optionType": "DOMESTIC",
-                    "shippingServices": [
-                        {
-                            "sortOrder": 1,
-                            "shippingCarrierCode": "USPS",
-                            "shippingServiceCode": "USPSFirstClass",
-                            "shippingCost": {
-                                "value": "5.00",
-                                "currency": "USD"
-                            }
-                        }
-                    ]
-                }
-            ]
-        }
-
-        r1 = requests.post(
-            "https://api.sandbox.ebay.com/sell/account/v1/fulfillment_policy",
-            headers=headers,
-            json=fulfillment_data
-        )
-        print("Fulfillment response:", r1.status_code, r1.text)
-        fulfillment_id = r1.json()["fulfillmentPolicyId"]
-
-        # 2. Payment Policy
-        payment_data = {
-
-            "name": "Sample Payment Policy",
-            "marketplaceId": "EBAY_US",
-            "categoryTypes": [
-                {
-                    "name": "ALL_EXCLUDING_MOTORS_VEHICLES",
-                    "default": True
-                }
-            ],
-            "paymentMethods": [
-                {
-                    "paymentMethodType": "PAYPAL",
-                    "recipientAccountReference": {
-                        "referenceId": "paypal@example.com",
-                        "referenceType": "PAYPAL_EMAIL"
-                    }
-                }
-            ],
-            "immediatePayRequired": False
-        }
-
-        r2 = requests.post(
-            "https://api.sandbox.ebay.com/sell/account/v1/payment_policy",
-            headers=headers,
-            json=payment_data
-        )
-        print("Payment response:", r2.status_code, r2.text)
-        payment_id = r2.json()["paymentPolicyId"]
-
-        # 3. Return Policy
-        return_data = {
-
-  "name": "Sample Return Policy",
-  "marketplaceId": "EBAY_US",
-  "categoryTypes": [
-    {
-      "name": "ALL_EXCLUDING_MOTORS_VEHICLES",
-      "default": True
-    }
-  ],
-  "returnsAccepted": True,
-  "returnPeriod": {
-    "value": 30,
-    "unit": "DAY"
-  },
-  "refundMethod": "MONEY_BACK",
-  "returnShippingCostPayer": "BUYER"
-}
-
-        r3 = requests.post(
-            "https://api.sandbox.ebay.com/sell/account/v1/return_policy",
-            headers=headers,
-            json=return_data
-        )
-        print("Return response:", r3.status_code, r3.text)
-        return_id = r3.json()["returnPolicyId"]
-
-        return jsonify({
-            "fulfillmentPolicyId": fulfillment_id,
-            "paymentPolicyId": payment_id,
-            "returnPolicyId": return_id
-        })
-
-    except Exception as e:
-        return jsonify({"error": str(e)})
-
-res = requests.get(
-    "https://api.sandbox.ebay.com/sell/account/v1/fulfillment_policy?marketplace_id=EBAY_US",
-    headers=headers
-)
-print(res.status_code, res.text)
-
-
-@app.route("/list-item")
-def list_item():
-    try:
-        access_token = get_access_token()
-        headers = {
-            "Authorization": f"Bearer {access_token}",
-            "Content-Type": "application/json"
-        }
-
-        # === Replace with your policy IDs from sandbox ===
-        fulfillment_policy_id = "REPLACE_ME"
-        payment_policy_id = "REPLACE_ME"
-        return_policy_id = "REPLACE_ME"
-
-        sku = "test-sku-001"
-        title = "Sandbox Widget"
-        quantity = 3
-
-        # 1. Upload inventory item
-        inventory_payload = {
-            "product": {
-                "title": title,
-                "description": "A test item in the sandbox environment",
-                "aspects": {"Brand": ["FakeBrand"]}
-            },
-            "availability": {
-                "shipToLocationAvailability": {"quantity": quantity}
-            },
-            "condition": "NEW"
-        }
-
-        requests.put(
-            f"https://api.sandbox.ebay.com/sell/inventory/v1/inventory_item/{sku}",
-            headers=headers,
-            json=inventory_payload
-        )
-
-        # 2. Create offer
-        offer_payload = {
-            "sku": sku,
-            "marketplaceId": "EBAY_US",
-            "format": "FIXED_PRICE",
-            "availableQuantity": quantity,
-            "categoryId": "9355",  # Cell Phones category
-            "listingPolicies": {
-                "fulfillmentPolicyId": fulfillment_policy_id,
-                "paymentPolicyId": payment_policy_id,
-                "returnPolicyId": return_policy_id
-            },
-            "pricingSummary": {
-                "price": {"value": "9.99", "currency": "USD"}
-            }
-        }
-
-        res = requests.post(
-            "https://api.sandbox.ebay.com/sell/inventory/v1/offer",
-            headers=headers,
-            json=offer_payload
-        )
-
-        offer_id = res.json().get("offerId")
-
-        # 3. Publish the offer
-        requests.post(
-            f"https://api.sandbox.ebay.com/sell/inventory/v1/offer/{offer_id}/publish",
-            headers=headers
-        )
-
-        return jsonify({"message": "✅ Item listed successfully!", "sku": sku, "offer_id": offer_id})
-
-    except Exception as e:
-        return jsonify({"error": str(e)})
-
-
-
-
-
+    return names
 
 
 

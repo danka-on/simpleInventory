@@ -8,7 +8,7 @@ load_dotenv()
 
 CLIENT_ID = os.getenv("EBAY_CLIENT_ID")
 CLIENT_SECRET = os.getenv("EBAY_CLIENT_SECRET")
-AUTH_CODE = "v^1.1#i^1#f^0#r^1#p^3#I^3#t^Ul41XzQ6NTNERkRFQkIwQjAwODQ5RThEOTMyODBDRkQwRjI4OEFfMl8xI0VeMTI4NA=="
+AUTH_CODE = "v^1.1#i^1#I^3#f^0#r^1#p^3#t^Ul41XzI6NkE3MDlDMkI1MDM0OTc0RkZCNkVDMkU2ODkyRkQ3RTFfMF8xI0VeMjYw"
 RUNAME = os.getenv("EBAY_RUNAME")
 
 # Base64 encode your credentials
@@ -29,7 +29,7 @@ data = {
 
 # Make the request
 response = requests.post(
-    "https://api.sandbox.ebay.com/identity/v1/oauth2/token",
+    "https://api.ebay.com/identity/v1/oauth2/token",
     headers=headers,
     data=data
 )
