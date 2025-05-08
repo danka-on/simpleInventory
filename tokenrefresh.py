@@ -9,6 +9,10 @@ load_dotenv()
 
 CLIENT_ID = os.getenv("EBAY_CLIENT_ID")
 CLIENT_SECRET = os.getenv("EBAY_CLIENT_SECRET")
+<<<<<<< Updated upstream
+=======
+AUTH_CODE = "v^1.1#i^1#p^3#f^0#I^3#r^1#t^Ul41XzY6OTczQjc0QUQ0MUMyMkFGQThGRUQ3QjE1NzVFQUYyNEVfMF8xI0VeMjYw"
+>>>>>>> Stashed changes
 RUNAME = os.getenv("EBAY_RUNAME")
 
 # Check if environment variables are missing
@@ -43,6 +47,7 @@ def get_authorization_url():
     full_url = f"{auth_url}?{'&'.join(url_parts)}"
     return full_url
 
+<<<<<<< Updated upstream
 # Step 2: Exchange the authorization code for tokens
 def exchange_code_for_tokens(auth_code):
     encoded_credentials = base64.b64encode(f"{CLIENT_ID}:{CLIENT_SECRET}".encode()).decode()
@@ -79,6 +84,14 @@ def exchange_code_for_tokens(auth_code):
         print(f"❌ Failed to exchange token: {response.status_code}")
         print(response.text)
         return False
+=======
+# Make the request
+response = requests.post(
+    "https://api.ebay.com/identity/v1/oauth2/token",
+    headers=headers,
+    data=data
+)
+>>>>>>> Stashed changes
 
 # Main flow
 def main():

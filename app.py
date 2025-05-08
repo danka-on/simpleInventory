@@ -8,7 +8,11 @@ CLIENT_ID = os.getenv("EBAY_CLIENT_ID")
 CLIENT_SECRET = os.getenv("EBAY_CLIENT_SECRET")
 RUNAME = os.getenv("EBAY_RUNAME")
 
+<<<<<<< Updated upstream
 app = Flask(__name__)
+=======
+
+>>>>>>> Stashed changes
 #for ebay api calls
 
 from token_manager import get_access_token, load_tokens, is_expired
@@ -18,6 +22,10 @@ headers = {
     "Content-Type": "application/json"
 }
 
+<<<<<<< Updated upstream
+=======
+app = Flask(__name__)
+>>>>>>> Stashed changes
 
 @app.route("/token-status")
 def token_status():
@@ -140,6 +148,7 @@ def highlight():
     return send_file(img_io, mimetype="image/png")
 
 ####################################
+<<<<<<< Updated upstream
 @app.route("/create-policies")
 def create_policies():
     try:
@@ -652,6 +661,47 @@ def create_listing():
         error_msg = f"Error creating listing: {str(e)}"
         print(error_msg)
         return jsonify({"error": error_msg})
+=======
+@app.route("/listnames")
+def get_inventory_listing_names():
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json"
+    }
+    endpoint = "https://api.ebay.com/sell/inventory/v1/inventory_item"
+    names = []
+    limit = 100
+    offset = 0
+
+    while True:
+        params = {
+            "limit": limit,
+            "offset": offset
+        }
+        response = requests.get(endpoint, headers=headers, params=params)
+        if response.status_code != 200:
+            print("Failed to fetch inventory:", response.status_code, response.text)
+            break
+
+        data = response.json()
+        for item in data.get("inventoryItems", []):
+            product = item.get("product", {})
+            title = product.get("title")
+            if title:
+                names.append(title)
+
+        if "href" in data and "next" in data["href"]:
+            offset += limit
+        else:
+            break
+
+    print("Inventory Listing Names:")
+    for name in names:
+        print(name)
+
+    return names
+
+>>>>>>> Stashed changes
 
 @app.route("/new-listing")
 def new_listing_form():

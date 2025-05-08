@@ -6,9 +6,14 @@ load_dotenv()
 TOKEN_FILE = "tokens.json"
 CLIENT_ID = os.getenv("EBAY_CLIENT_ID", "your_id")
 CLIENT_SECRET = os.getenv("EBAY_CLIENT_SECRET", "your_secret")
+<<<<<<< Updated upstream
 # Update with required scopes for account and inventory
 SCOPE = os.getenv("EBAY_SCOPE", "https://api.ebay.com/oauth/api_scope https://api.ebay.com/oauth/api_scope/sell.account https://api.ebay.com/oauth/api_scope/sell.inventory")
 TOKEN_URL = "https://api.sandbox.ebay.com/identity/v1/oauth2/token"
+=======
+SCOPE = os.getenv("EBAY_SCOPE", "https://api.ebay.com/oauth/api_scope")
+TOKEN_URL = "https://api.ebay.com/identity/v1/oauth2/token"
+>>>>>>> Stashed changes
 
 def load_tokens():
     try:
