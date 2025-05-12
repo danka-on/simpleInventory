@@ -1,0 +1,146 @@
+Unique XML tags:
+Ack
+AutoPay
+BestOfferCount
+BestOfferDetails
+BestOfferEnabled
+BidCount
+BidIncrement
+Build
+BuyItNowAvailable
+BuyerGuaranteePrice
+BuyerProtection
+BuyerRequirementDetails
+BuyerResponsibleForShipping
+CategoryID
+CategoryName
+ConditionDescription
+ConditionDisplayName
+ConditionID
+ConvertedCurrentPrice
+                                            Count
+Country
+Currency
+CurrentPrice
+Email
+EndTime
+EndingReason
+GetSellerListResponse
+HasMoreItems
+HasPublicMessages
+HasUnansweredQuestions
+HideFromSearch
+HighBidder
+HoursToDeposit
+InternationalShippingDiscountProfileID
+IsItemEMSEligible
+IsSecureDescription
+                                            Item
+                                            ItemArray
+                                            ItemID
+ItemRevised
+                                            ItemsPerPage
+ListingDetails
+ListingDuration
+                                                ListingStatus
+                                                Location
+LocationDefaulted
+MaximumItemCount
+MaximumItemRequirements
+MaximumUnpaidItemStrikesInfo
+MinimumFeedbackScore
+MinimumToBid
+NewBestOffer
+                                                        PageNumber
+                                                PaginationResult
+PaymentDetails
+PaymentProfileID
+PaymentProfileName
+Period
+PictureDetails
+                                                            PictureURL
+PostCheckoutExperienceEnabled
+PostalCode
+PrimaryCategory
+ProxyItem
+                                                            Quantity
+                                                            QuantitySold
+Refund
+RefundOption
+RelistParentID
+ReturnPolicy
+ReturnProfileID
+ReturnProfileName
+ReturnedItemCountActual
+ReturnsAccepted
+ReturnsAcceptedOption
+ReturnsWithin
+ReturnsWithinOption
+ReviseStatus
+                                                                            SKU
+SecondChanceEligible
+SellerPaymentProfile
+SellerProfiles
+SellerReturnProfile
+SellerShippingProfile
+                                                                        SellingStatus
+ShipToLocations
+ShipToRegistrationCountry
+ShippingCostPaidBy
+ShippingCostPaidByOption
+ShippingDetails
+ShippingDiscountProfileID
+ShippingProfileID
+ShippingProfileName
+Site
+StartTime
+StoreCategory2ID
+StoreCategoryID
+StoreURL
+Storefront
+TimeLeft
+Timestamp
+                                                                                Title
+TotalNumberOfEntries
+TotalNumberOfPages
+UserID
+Version
+                                                                                    ViewItemURL
+ViewItemURLForNaturalSearch
+WatchCount
+eBayPlus
+eBayPlusEligible
+
+##
+
+
+Item
+ItemArray
+ItemID
+ViewItemURL
+Title
+SellingStatus
+SKU
+Quantity
+QuantitySold
+PictureURL
+PageNumber
+PaginationResult
+ListingStatus
+Location
+ItemsPerPage
+Count
+Item
+ViewItemURL
+Title
+SellingStatus
+SKU
+Quantity
+QuantitySold
+PictureURL
+PageNumber
+PaginationResult
+ListingStatus
+Location
+ItemsPerPage
+Count
