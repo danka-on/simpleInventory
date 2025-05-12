@@ -184,7 +184,11 @@ def orders():
               <PageNumber>{page_number}</PageNumber>
             </Pagination>
           </ActiveList>
+        <UnsoldList>
+                <Include>true</Include>
+            </UnsoldList>
         </GetMyeBaySellingRequest>'''
+
         ns = {'ebay': 'urn:ebay:apis:eBLBaseComponents'}
         response = requests.post("https://api.ebay.com/ws/api.dll", headers=headers, data=xml_payload, timeout=20)
         root = ET.fromstring(response.text)
@@ -194,8 +198,13 @@ def orders():
             print(f"❌ API Error on page {page_number}: {ack.text if ack is not None else 'No Ack'}")
             break
 
+        #SoldList = root.findall('.//ebay:SoldList', ns)
+
+        #print("soldlist stats",SoldList.tags, SoldList.attributes)
+
         items = root.findall('.//ebay:Item', ns)
         for item in items:
+
             title = item.find('ebay:Title', ns)
             item_id = item.find('ebay:ItemID', ns)
             sku = item.find('ebay:SKU', ns)
@@ -228,6 +237,7 @@ def orders():
                 break  # no pagination info, likely no results
 
         page_number += 1
+
 
 
 
