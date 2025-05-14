@@ -48,32 +48,15 @@
     <img src="{{ url_for('highlight') }}?shelf={{ shelf }}" alt="shelfHighlighter">
     {% endif %}
 
-<h2>Scan Barcode</h2>
-<div id="reader" style="width:100%"></div>
+<h2></h2>
+<div></div>
 
 
-<script src="https://unpkg.com/html5-qrcode"></script>
-<script>
-    function onScanSuccess(decodedText, decodedResult) {
-        console.log(`Code scanned: ${decodedText}`);
-        // Auto-fill and submit the search form
-        document.querySelector("input[name='query']").value = decodedText;
-        document.querySelector("form[method='POST']").submit();
-    }
+    <form method="GET" action="/position">
+    <button style="font-size: 20px; padding: 15px 200px;">Add Item</button>
+    </form>
 
-    const html5QrCode = new Html5Qrcode("reader");
-    Html5Qrcode.getCameras().then(devices => {
-        if (devices && devices.length) {
-            html5QrCode.start(
-                devices[0].id,
-                { fps: 10, qrbox: { width: 250, height: 100 } },
-                onScanSuccess
-            );
-        }
-    }).catch(err => {
-        console.error("Camera error:", err);
-    });
-</script>
+
 
 </body>
 </html>

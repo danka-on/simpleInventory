@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Set Position of Item</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            max-width: 600px;
+            margin: auto;
+            padding: 10px;
+        }
+
+        #reader {
+            width: 100%;
+            margin-top: 20px;
+        }
+
+        input[type="text"] {
+            width: 100%;
+            font-size: 1.2em;
+            padding: 10px;
+            margin-top: 20px;
+        }
+
+        button {
+            font-size: 18px;
+            padding: 10px 20px;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Set Position of Item</h1>
+
+    <div id="reader"></div>
+
+    <input type="text" id="scanned-result" placeholder="Scanned code will appear here">
+
+    <button onclick="restartScanner()">Restart Scanner</button>
+
+    <script src="https://unpkg.com/html5-qrcode"></script>
+<script>
+    let html5QrCode;
+
+    function startScanner() {
+        html5QrCode = new Html5Qrcode("reader");
+
+        Html5Qrcode.getCameras().then(devices => {
+            if (devices && devices.length) {
+                const backCamera = devices.find(device =>
+                    device.label.toLowerCase().includes('back') ||
+                    device.label.toLowerCase().includes('environment')
+                );
+
+                const cameraId = backCamera ? backCamera.id : devices[0].id;
+
+                html5QrCode.start(
+                    cameraId,
+                    { fps: 10, qrbox: 250 },
+                    (decodedText, decodedResult) => {
+                        console.log("Scanned:", decodedText);
+                        document.getElementById("scanned-result").value = decodedText;
+
+                        // Send to Python backend
+                        fetch("/process-code", {
+                            method: "POST",
+                            headers: {
+                                "Content-Type": "application/json"
+                            },
+                            body: JSON.stringify({ code: decodedText })
+                        })
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.redirect) {
+                                window.location.href = data.redirect; // 👈 Redirect to barcode page
+                            }
+                        });
+
+                        html5QrCode.stop();
+                    },
+                    errorMessage => {
+                        // Handle scan errors if needed
+                    }
+                );
+            }
+        }).catch(err => {
+            console.error("Camera error:", err);
+        });
+    }
+
+    window.addEventListener('load', startScanner);
+</script>
+
+</body>
+</html>

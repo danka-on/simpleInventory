@@ -2,10 +2,12 @@ from contextlib import nullcontext
 
 from flask import Flask, request, send_file, url_for, render_template, jsonify
 from PIL import Image, ImageDraw
-import io, time , subprocess, os, requests, json, threading
+import io, time , subprocess, os, requests, json, threading, sqlite3
 import xml.etree.ElementTree as ET
 from dotenv import load_dotenv
+import xml.dom.minidom as minidom
 from inventory import find_item  # adjust this to match your actual import
+from speakToDb import myDataBase
 
 oldAuth_token = 'v^1.1#i^1#I^3#f^0#p^3#r^1#t^Ul4xMF82OkYwRjY2Q0VFOUY1QUM0MkEyMjkyMDY5Q0E5NjY0NjIxXzFfMSNFXjI2MA=='
 
@@ -145,6 +147,47 @@ def highlight():
 
 ####################################
 
+@app.route("/database")
+def show_inventory():
+    conn = sqlite3.connect("database.db")
+    conn.row_factory = sqlite3.Row  # to access columns by name
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM items ORDER BY DateListed DESC")
+    items = cursor.fetchall()
+    conn.close()
+    return render_template("inventory.html", items=items)
+
+@app.route("/position", methods=["GET"])
+def position_page():
+
+    return render_template("position.html")
+
+@app.route('/process-code', methods=['POST'])
+def process_code():
+    data = request.get_json()
+    code = data.get('code')
+    print("Received scanned code:", code)
+    return jsonify({"redirect": "/barcode"})
+    # Process the code here (e.g., database lookup, logging, etc.)
+    #return f"Code '{code}' received successfully", 200
+
+@app.route('/barcode')
+def process_barcode():
+
+    return render_template("pictures.html")
+
+
+
+
+
+
+
+
+
+
+
+
+
 import requests
 
 def get_high_res_image_url(url):
@@ -152,7 +195,7 @@ def get_high_res_image_url(url):
         return url.replace("s-l140.jpg", "s-l1600.jpg").replace("s-l500.jpg", "s-l1600.jpg")
     return url
 
-#@app.route("/orders" , methods=["POST"])
+
 def orders():
     print("✅ Now running orders()...")
     headers = {
@@ -166,56 +209,182 @@ def orders():
     }
     entries = 100
     page_number = 1
-    total_pages = 1
-    count = 1
+    total_pages = 20
+    count = 0
     while page_number <= total_pages:
 
-        xml_payload = f'''<?xml version="1.0" encoding="utf-8"?>
-        <GetMyeBaySellingRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-          <RequesterCredentials>
-            <eBayAuthToken>{os.getenv("EBAY_OLDAUTH_TOKEN")}</eBayAuthToken>
-          </RequesterCredentials>
-          <ErrorLanguage>en_US</ErrorLanguage>
-          <WarningLevel>High</WarningLevel>
-          <ActiveList>
-            <Sort>TimeLeft</Sort>
-            <Pagination>
-              <EntriesPerPage>{entries}</EntriesPerPage>
-              <PageNumber>{page_number}</PageNumber>
-            </Pagination>
-          </ActiveList>
-        <UnsoldList>
+        xml_payload = f'''
+        <?xml version="1.0" encoding="utf-8"?>
+            <GetMyeBaySellingRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+              <RequesterCredentials>
+                <eBayAuthToken>{os.getenv("EBAY_OLDAUTH_TOKEN")}</eBayAuthToken>
+              </RequesterCredentials>
+              <ErrorLanguage>en_US</ErrorLanguage>
+              <WarningLevel>High</WarningLevel>
+              <ActiveList>
+                <Sort>TimeLeft</Sort>
+                <Pagination>
+                  <EntriesPerPage>{entries}</EntriesPerPage>
+                  <PageNumber>{page_number}</PageNumber>
+                </Pagination>
+              </ActiveList>
+            <SoldList>
                 <Include>true</Include>
-            </UnsoldList>
-        </GetMyeBaySellingRequest>'''
+                <DurationInDays>60</DurationInDays>
+                    <Pagination>
+                  <EntriesPerPage>{entries}</EntriesPerPage>
+                  <PageNumber>{page_number}</PageNumber>
+                </Pagination>
+            </SoldList>
+            <UnsoldList>
+                <Include>true</Include>
+                <Pagination>
+                      <EntriesPerPage>{entries}</EntriesPerPage>
+                      <PageNumber>{page_number}</PageNumber>
+                    </Pagination>
+                    
+                </UnsoldList>
+            
+            </GetMyeBaySellingRequest>'''
 
         ns = {'ebay': 'urn:ebay:apis:eBLBaseComponents'}
         response = requests.post("https://api.ebay.com/ws/api.dll", headers=headers, data=xml_payload, timeout=20)
         root = ET.fromstring(response.text)
 
+        '''
+        rough_string = ET.tostring(root, encoding="utf-8")
+        # Parse that into a minidom object
+        dom = minidom.parseString(rough_string)
+        # Pretty print
+        pretty_xml = dom.toprettyxml(indent="  ")
+        print(pretty_xml)
+        '''
+
+
+
         ack = root.find('ebay:Ack', ns)
         if ack is None or ack.text != "Success":
             print(f"❌ API Error on page {page_number}: {ack.text if ack is not None else 'No Ack'}")
-            break
+            #break
 
-        #SoldList = root.findall('.//ebay:SoldList', ns)
 
-        #print("soldlist stats",SoldList.tags, SoldList.attributes)
 
-        items = root.findall('.//ebay:Item', ns)
-        for item in items:
+
+
+
+        #ACTIVE LIST ITEMS
+        ActiveItems = root.findall('.//ebay:ActiveList/ebay:ItemArray/ebay:Item', ns)
+        for item in ActiveItems:
 
             title = item.find('ebay:Title', ns)
             item_id = item.find('ebay:ItemID', ns)
             sku = item.find('ebay:SKU', ns)
             price = item.find('.//ebay:CurrentPrice', ns)
             quantity = item.find('ebay:Quantity', ns)
+            list_date = item.find('ebay:ListingDetails/ebay:StartTime', ns)
+            sold_date = item.find('ebay:ListingDetails/ebay:EndTime', ns)
+            list_state = "Active"
+            URL = f"https://www.ebay.com/itm/{item_id.text}"
 
             picture_url = item.find('.//ebay:PictureDetails/ebay:GalleryURL', ns)
             high_res_url = get_high_res_image_url(picture_url.text) if picture_url is not None else "No image"
 
 
 
+            # add to database
+            myDataBase(title = title.text if title is not None else "N/A",
+                       item_id = item_id.text if item_id is not None else "N/A",
+                       sku = sku.text if sku is not None else "None",
+                       price = price.text if price is not None else "N/A",
+                       quantity = quantity.text if quantity is not None else "N/A",
+                       image = high_res_url,
+                       List_State = list_state,
+                       Sold_Date=sold_date.text if sold_date is not None else "None",
+                       List_Date=list_date.text if list_date is not None else "None",
+                       URL = URL if URL is not None else "None"
+            )
+
+
+
+
+            print("Item", count)
+            print("📦 Title:", title.text if title is not None else "N/A")
+            print("🆔 ItemID:", item_id.text if item_id is not None else "N/A")
+            print("🔖 SKU:", sku.text if sku is not None else "None")
+            print("💲 Price:", price.text if price is not None else "N/A")
+            print("🔢 Quantity:", quantity.text if quantity is not None else "N/A")
+            print("🖼️ Image:", high_res_url)
+            print("🛣️ URL:", f"https://www.ebay.com/itm/{item_id.text}")
+            print("—" * 40)
+            count += 1
+
+        # finding unsold item list
+        UnsoldItems = root.findall('.//ebay:UnsoldList/ebay:ItemArray/ebay:Item', ns)
+        for item in UnsoldItems:
+            title = item.find('ebay:Title', ns)
+            item_id = item.find('ebay:ItemID', ns)
+            sku = item.find('ebay:SKU', ns)
+            price = item.find('.//ebay:CurrentPrice', ns)
+            quantity = item.find('ebay:Quantity', ns)
+            list_date = item.find('ebay:ListingDetails/ebay:StartTime', ns)
+            sold_date = item.find('ebay:ListingDetails/ebay:EndTime', ns)
+            list_state = "Unsold"
+            URL = f"https://www.ebay.com/itm/{item_id.text}"
+
+            picture_url = item.find('.//ebay:PictureDetails/ebay:GalleryURL', ns)
+            high_res_url = get_high_res_image_url(picture_url.text) if picture_url is not None else "No image"
+
+            # add to database
+            myDataBase(title=title.text if title is not None else "N/A",
+                       item_id=item_id.text if item_id is not None else "N/A",
+                       sku=sku.text if sku is not None else "None",
+                       price=price.text if price is not None else "N/A",
+                       quantity=quantity.text if quantity is not None else "N/A", image=high_res_url,
+                       List_State=list_state,
+                       Sold_Date=sold_date.text if sold_date is not None else "None",
+                       List_Date=list_date.text if list_date is not None else "None",
+                       URL=URL if URL is not None else "None"
+                       )
+
+            print("Item", count)
+            print("📦 Title:", title.text if title is not None else "N/A")
+            print("🆔 ItemID:", item_id.text if item_id is not None else "N/A")
+            print("🔖 SKU:", sku.text if sku is not None else "None")
+            print("💲 Price:", price.text if price is not None else "N/A")
+            print("🔢 Quantity:", quantity.text if quantity is not None else "N/A")
+            print("🖼️ Image:", high_res_url)
+            print("🛣️ URL:", f"https://www.ebay.com/itm/{item_id.text}")
+            print("—" * 40)
+            count += 1
+
+        # finding sold list items
+
+        SoldItems = root.findall('.//ebay:SoldList/ebay:OrderTransactionArray/ebay:OrderTransaction/ebay:Transaction/ebay:Item', ns)
+
+        for item in SoldItems:
+            title = item.find('ebay:Title', ns)
+            item_id = item.find('ebay:ItemID', ns)
+            sku = item.find('ebay:SKU', ns)
+            price = item.find('.//ebay:CurrentPrice', ns)
+            quantity = item.find('ebay:Quantity', ns)
+            sold_date = item.find('ebay:ListingDetails/ebay:EndTime', ns)
+            list_date = item.find('ebay:ListingDetails/ebay:StartTime', ns)
+            list_state = "Sold"
+            URL = f"https://www.ebay.com/itm/{item_id.text}"
+            picture_url = item.find('.//ebay:PictureDetails/ebay:GalleryURL', ns)
+            high_res_url = get_high_res_image_url(picture_url.text) if picture_url is not None else "No image"
+
+            # add to database
+            myDataBase(title=title.text if title is not None else "N/A",
+                       item_id=item_id.text if item_id is not None else "N/A",
+                       sku=sku.text if sku is not None else "None",
+                       price=price.text if price is not None else "N/A",
+                       quantity=quantity.text if quantity is not None else "N/A", image=high_res_url,
+                       List_State=list_state,
+                       Sold_Date=sold_date.text if sold_date is not None else "None",
+                       List_Date=list_date.text if list_date is not None else "None",
+                       URL = URL if URL is not None else "None"
+                       )
 
             print("Item", count)
             print("📦 Title:", title.text if title is not None else "N/A")
@@ -234,89 +403,12 @@ def orders():
             if page_info is not None:
                 total_pages = int(page_info.find('ebay:TotalNumberOfPages', ns).text)
             else:
-                break  # no pagination info, likely no results
+                return
+                #break  # no pagination info, likely no results
 
         page_number += 1
 
 
-
-
-    #items = root.findall('.//ebay:Item', ns)
-
-'''
-    <ActiveList>
-    <SoldList>
-    <UnsoldList>
-
-    < SoldList > ItemListCustomizationType
-    < DurationInDays > int < / DurationInDays >
-    < Include > boolean < / Include >
-    < IncludeNotes > boolean < / IncludeNotes >
-    < OrderStatusFilter > OrderStatusFilterCodeType < / OrderStatusFilter >
-    < Pagination > PaginationType
-    < EntriesPerPage > int < / EntriesPerPage >
-    < PageNumber > int < / PageNumber >
-
-< / Pagination >
-< Sort > ItemSortTypeCodeType < / Sort >
-< / SoldList >
-< UnsoldList > ItemListCustomizationType
-< DurationInDays > int < / DurationInDays >
-< Include > true < / Include >
-< IncludeNotes > false < / IncludeNotes >
-< Pagination > PaginationType
-< EntriesPerPage > int < / EntriesPerPage >
-< PageNumber > int < / PageNumber >
-< / Pagination >
-< Sort > ItemSortTypeCodeType < / Sort >
-< / UnsoldList >
-< / GetMyeBaySellingRequest >
-
-
-    
-    # Print all elements and their text
-    def strip_ns(tag):
-        return tag.split('}', 1)[-1] if '}' in tag else tag
-
-    unique_tags = set()
-
-    for elem in root.iter():
-        unique_tags.add(strip_ns(elem.tag))
-
-    print("Unique XML tags:")
-    for tag in sorted(unique_tags):
-        print(tag)
-
-
-
-
-        
-    for item in items:
-        item_id = item.find('ebay:ItemID', ns).text
-        title = item.find('ebay:Title', ns).text
-        print(f"{item_id} - {title}")
-        
-    return response.status_code #response.text
-
-
-
-
-
-def run_stuff():
-
-
-    time.sleep(3)
-    start_cloudflare_tunnel()
-
-
-
-
-if __name__ == "__main__":
-    run_stuff()
-    print("running host")
-    app.run(host="0.0.0.0", port=8080)
-
-'''
 
 
 
@@ -365,63 +457,3 @@ if __name__ == "__main__":
     while True:
         time.sleep(1)
 
-
-'''
-
-    headers = {
-        "X-EBAY-API-SITEID": "0",
-        "X-EBAY-API-COMPATIBILITY-LEVEL": "967",
-        "X-EBAY-API-CALL-NAME": "GetSellerList",
-        "X-EBAY-API-DEV-NAME": os.getenv("EBAY_PROD_DEV_ID"),
-        "X-EBAY-API-APP-NAME": os.getenv("EBAY_PROD_APP_ID"),
-        "X-EBAY-API-CERT-NAME": os.getenv("EBAY_PROD_CERT_ID"),
-        "Content-Type": "text/xml"
-               }
-
-
-    #payload variables
-
-    search_detail = "Coarse"
-    start_date = "2025-01-10T06:38:48.420Z"
-    end_date = "2025-05-10T06:38:48.420Z"
-    entries = '200'
-    #83 items in 5-1 , 5-10
-    page_number = 1
-
-    xml_payload = f
-    <?xml version="1.0" encoding="utf-8"?>
-    <GetSellerListRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-    <RequesterCredentials>
-    <eBayAuthToken>{os.getenv("EBAY_OLDAUTH_TOKEN")}</eBayAuthToken>
-    </RequesterCredentials>
-	<ErrorLanguage>en_US</ErrorLanguage>
-	<WarningLevel>High</WarningLevel>
-     <!--You can use DetailLevel or GranularityLevel in a request, but not both-->
-    <GranularityLevel>{search_detail}</GranularityLevel>
-     <!-- Enter a valid Time range to get the Items listed using this format
-          2013-03-21T06:38:48.420Z -->
-    <StartTimeFrom>{start_date}</StartTimeFrom>
-    <StartTimeTo>{end_date}</StartTimeTo>
-    <IncludeWatchCount>true</IncludeWatchCount>
-    <Pagination>
-        <PageNumber>{page_number}</PageNumber>
-        <EntriesPerPage>{entries}</EntriesPerPage>
-    </Pagination>
-    </GetSellerListRequest>
-    
-    response = requests.post("https://api.ebay.com/ws/api.dll", headers=headers, data=xml_payload)
-    root = ET.fromstring(response.text)
-
-    ns = {'ebay': 'urn:ebay:apis:eBLBaseComponents'}
-
-    items = root.findall('.//ebay:Item', ns)
-
-    count = 0
-    for item in items:
-        title = item.find('ebay:Title', ns)
-        if title is not None:
-         count += 1
-         print(count," ", title.text)
-    print("what is happening?")
-    
-    '''

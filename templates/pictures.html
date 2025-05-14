@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Take Pictures</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            margin: 0;
+            padding: 20px;
+            max-width: 600px;
+            margin: auto;
+        }
+
+        video {
+            width: 100%;
+            height: auto; /* or set a fixed height like 300px */
+            aspect-ratio: 4 / 3; /* Helps maintain proper shape on mobile */
+            background: black; /* optional: shows area even if stream fails */
+            border: 2px solid #ccc;
+            border-radius: 8px;
+}
+
+        #photo-slots {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        .photo-slot {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border: 1px solid #aaa;
+            padding: 8px;
+            border-radius: 5px;
+            background: #f0f0f0;
+        }
+
+        .photo-slot span {
+            cursor: pointer;
+            color: blue;
+            text-decoration: underline;
+        }
+
+        .photo-slot button {
+            background: red;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            padding: 5px 10px;
+        }
+
+        #complete-btn {
+            margin-top: 30px;
+            width: 100%;
+            padding: 15px;
+            font-size: 20px;
+            background-color: green;
+            color: white;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+        }
+
+        #full-view {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.9);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            z-index: 9999;
+            display: none;
+        }
+
+        #full-view img {
+            max-width: 90%;
+            max-height: 80%;
+        }
+
+        #exit-full {
+            margin-top: 20px;
+            font-size: 18px;
+            padding: 10px 20px;
+            background: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+
+        #take-btn {
+            margin-top: 15px;
+            width: 100%;
+            padding: 12px;
+            font-size: 18px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+
+    <h2>Take Pictures</h2>
+    <video id="video" autoplay></video>
+    <button id="take-btn">📷 Take Picture</button>
+
+    <div id="photo-slots"></div>
+
+    <button id="complete-btn">✅ Complete</button>
+
+    <div id="full-view">
+        <img id="full-image" src="">
+        <button id="exit-full">Exit</button>
+    </div>
+
+    <script>
+        const video = document.getElementById('video');
+        const takeBtn = document.getElementById('take-btn');
+        const photoSlots = document.getElementById('photo-slots');
+        const fullView = document.getElementById('full-view');
+        const fullImage = document.getElementById('full-image');
+        const exitFull = document.getElementById('exit-full');
+
+        let photos = [];
+
+        // Open camera on load
+        navigator.mediaDevices.getUserMedia({video: {facingMode: 'environment'}})
+            .then(stream => {
+                video.srcObject = stream;
+                video.play(); // ✅ make sure to explicitly play
+            })
+            .catch(err => {
+                alert('Error accessing camera: ' + err.message);
+            });
+
+        // Take photo
+        takeBtn.addEventListener('click', () => {
+            if (photos.length >= 5) {
+                alert('Maximum 5 pictures allowed.');
+                return;
+            }
+
+            const canvas = document.createElement('canvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            canvas.getContext('2d').drawImage(video, 0, 0);
+
+            const dataUrl = canvas.toDataURL();
+            photos.push(dataUrl);
+            updatePhotoSlots();
+        });
+
+        // Update photo display
+        function updatePhotoSlots() {
+            photoSlots.innerHTML = '';
+            photos.forEach((photo, index) => {
+                const div = document.createElement('div');
+                div.className = 'photo-slot';
+
+                const label = document.createElement('span');
+                label.textContent = `${index + 1}. Picture taken`;
+                label.onclick = () => openFull(photo);
+
+                const del = document.createElement('button');
+                del.textContent = '✕';
+                del.onclick = () => {
+                    photos.splice(index, 1);
+                    updatePhotoSlots();
+                };
+
+                div.appendChild(label);
+                div.appendChild(del);
+                photoSlots.appendChild(div);
+            });
+        }
+
+        // Full view
+        function openFull(photo) {
+            fullImage.src = photo;
+            fullView.style.display = 'flex';
+        }
+
+        exitFull.onclick = () => {
+            fullView.style.display = 'none';
+            fullImage.src = '';
+        };
+    </script>
+
+</body>
+</html>
