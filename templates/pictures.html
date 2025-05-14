@@ -13,14 +13,12 @@
             margin: auto;
         }
 
-        video {
+      video {
             width: 100%;
-            height: auto; /* or set a fixed height like 300px */
-            aspect-ratio: 4 / 3; /* Helps maintain proper shape on mobile */
-            background: black; /* optional: shows area even if stream fails */
-            border: 2px solid #ccc;
-            border-radius: 8px;
-}
+            height: 300px; /* fallback for older mobile browsers */
+            object-fit: contain; /* or cover, depending on your preference */
+            
+        }
 
         #photo-slots {
             display: flex;
@@ -112,7 +110,7 @@
 <body>
 
     <h2>Take Pictures</h2>
-    <video id="video" autoplay></video>
+    <video id="video" autoplay playsinline muted></video>
     <button id="take-btn">📷 Take Picture</button>
 
     <div id="photo-slots"></div>
@@ -135,14 +133,16 @@
         let photos = [];
 
         // Open camera on load
-        navigator.mediaDevices.getUserMedia({video: {facingMode: 'environment'}})
-            .then(stream => {
-                video.srcObject = stream;
-                video.play(); // ✅ make sure to explicitly play
-            })
-            .catch(err => {
-                alert('Error accessing camera: ' + err.message);
-            });
+        window.addEventListener('load', () => {
+            navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+                .then(stream => {
+                    video.srcObject = stream;
+                    video.play();
+                })
+                .catch(err => {
+                    alert('Error accessing camera: ' + err.message);
+                });
+        });
 
         // Take photo
         takeBtn.addEventListener('click', () => {
