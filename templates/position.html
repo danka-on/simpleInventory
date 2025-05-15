@@ -73,12 +73,16 @@
 
 
     <button onclick="restartScanner()">Restart Scanner</button>
+    <button id="flashBtn" type="button">Toggle Flashlight</button>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
 <script>
     let scannerActive = false;
     let scanBuffer = [];
-    const REQUIRED_MATCHES = 3;
+    const REQUIRED_MATCHES = 1;
+    let track = null;
+    let imageCapture = null;
+    let torchOn = false;
 
     // --- Web Audio API beep logic ---
     let audioUnlocked = false;
@@ -124,7 +128,9 @@
                 type: "LiveStream",
                 target: document.querySelector('#reader'),
                 constraints: {
-                    facingMode: "environment"
+                    facingMode: "environment",
+                    width: { ideal: 640 },
+                    height: { ideal: 480 }
                 },
             },
             decoder: {
@@ -133,7 +139,7 @@
                             "ean_reader",
                             "ean_8_reader" ]
             },
-            locate: false
+            locate: true
         }, function (err) {
             if (err) {
                 console.error(err);
@@ -147,6 +153,9 @@
             let code = result.codeResult.code;
             if (!code) return;
             code = code.trim().replace(/^0+/, '');
+            if (scanBuffer.length > 0 && scanBuffer[scanBuffer.length - 1] !== code) {
+                scanBuffer = [];
+            }
             scanBuffer.push(code);
             if (scanBuffer.length > REQUIRED_MATCHES) scanBuffer.shift();
             if (scanBuffer.length === REQUIRED_MATCHES && scanBuffer.every(c => c === code)) {
@@ -158,12 +167,8 @@
             }
         });
         Quagga.onProcessed(function (result) {
-            if (result && result.codeResult && result.codeResult.code) {
-            console.log("Scanned (raw):", result.codeResult.code);
-    }
-});
-
-
+            // Removed console.log for speed
+        });
     }
     function restartScanner() {
         if (scannerActive) {

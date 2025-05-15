@@ -71,12 +71,16 @@
     </form>
 
     <button onclick="restartScanner()">Restart Scanner</button>
+    <button id="flashBtn" type="button">Toggle Flashlight</button>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
 <script>
     let scannerActive = false;
     let scanBuffer = [];
-    const REQUIRED_MATCHES = 3;
+    const REQUIRED_MATCHES = 2;
+    let track = null;
+    let imageCapture = null;
+    let torchOn = false;
 
     // --- Web Audio API beep logic ---
     let audioUnlocked = false;
@@ -113,6 +117,33 @@
     window.addEventListener('touchstart', unlockAudio, { once: true });
     window.addEventListener('mousedown', unlockAudio, { once: true });
 
+    // Flashlight and focus logic
+    document.getElementById('flashBtn').addEventListener('click', async function() {
+        if (!track || !imageCapture) return;
+        try {
+            torchOn = !torchOn;
+            await track.applyConstraints({
+                advanced: [{ torch: torchOn }]
+            });
+        } catch (e) {
+            alert('Flashlight not supported on this device/browser.');
+        }
+    });
+
+    function setupTapToFocus() {
+        const reader = document.getElementById('reader');
+        reader.addEventListener('click', async function() {
+            if (!track || !imageCapture) return;
+            try {
+                await track.applyConstraints({
+                    advanced: [{ focusMode: 'continuous' }] // or 'manual' if supported
+                });
+            } catch (e) {
+                // Not supported, do nothing
+            }
+        });
+    }
+
     function startScanner() {
         if (scannerActive) return;
         scannerActive = true;
@@ -122,7 +153,9 @@
                 type: "LiveStream",
                 target: document.querySelector('#reader'),
                 constraints: {
-                    facingMode: "environment"
+                    facingMode: "environment",
+                    width: { ideal: 640 },
+                    height: { ideal: 480 }
                 },
             },
             decoder: {
@@ -131,7 +164,7 @@
                             "ean_reader",
                             "ean_8_reader" ]
             },
-            locate: false
+            locate: true
         }, function (err) {
             if (err) {
                 console.error(err);
@@ -139,12 +172,28 @@
                 return;
             }
             Quagga.start();
+            // Get the video track for torch/focus
+            setTimeout(() => {
+                let stream = Quagga.cameraAccess && Quagga.cameraAccess.getActiveStream && Quagga.cameraAccess.getActiveStream();
+                if (stream && stream.getVideoTracks) {
+                    track = stream.getVideoTracks()[0];
+                    try {
+                        imageCapture = new window.ImageCapture(track);
+                    } catch (e) {
+                        imageCapture = null;
+                    }
+                }
+            }, 500);
+            setupTapToFocus();
         });
 
         Quagga.onDetected(function (result) {
             let code = result.codeResult.code;
             if (!code) return;
             code = code.trim().replace(/^0+/, '');
+            if (scanBuffer.length > 0 && scanBuffer[scanBuffer.length - 1] !== code) {
+                scanBuffer = [];
+            }
             scanBuffer.push(code);
             if (scanBuffer.length > REQUIRED_MATCHES) scanBuffer.shift();
             if (scanBuffer.length === REQUIRED_MATCHES && scanBuffer.every(c => c === code)) {
@@ -156,12 +205,8 @@
             }
         });
         Quagga.onProcessed(function (result) {
-            if (result && result.codeResult && result.codeResult.code) {
-            console.log("Scanned (raw):", result.codeResult.code);
-    }
-});
-
-
+            // Removed console.log for speed
+        });
     }
     function restartScanner() {
         if (scannerActive) {
