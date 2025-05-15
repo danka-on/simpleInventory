@@ -56,7 +56,7 @@ def start_cloudflare_tunnel():
         "mytunnel"
     ])
 
-@app.route("/")
+@app.route("/", methods=["GET", "POST"])
 def home():
     shelf = request.args.get("shelf")
     return render_template("index.html", shelf=shelf)
@@ -157,26 +157,40 @@ def show_inventory():
     conn.close()
     return render_template("inventory.html", items=items)
 
-@app.route("/position", methods=["GET"])
+
+
+
+
+#adding inventory flow #1/3
+@app.route("/position")
 def position_page():
 
     return render_template("position.html")
 
-@app.route('/process-code', methods=['POST'])
-def process_code():
-    data = request.get_json()
-    code = data.get('code')
-    print("Received scanned code:", code)
-    return jsonify({"redirect": "/barcode"})
-    # Process the code here (e.g., database lookup, logging, etc.)
-    #return f"Code '{code}' received successfully", 200
+#inventory flow #2
+@app.route('/submitposition', methods=['POST'])
+def process_position():
+    position_code = request.form.get('scanned_result')
+    print("Received scanned code:", position_code)
+    #restart if code: None
 
-@app.route('/barcode')
+    return render_template("barcode.html")
+
+
+#inventory flow #3
+@app.route('/submitbarcode', methods=['POST'])
 def process_barcode():
+    barcode = request.form.get('scanned_result')
+    print("Received scanned code:", barcode)
 
     return render_template("pictures.html")
 
 
+
+@app.route('/additem', methods=['POST'])
+def additem_page():
+    #return pictures
+    return render_template("additem.html")
 
 
 
