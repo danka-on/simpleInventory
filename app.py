@@ -83,6 +83,14 @@ def search():
     return render_template("index.html", search_result=result)
 
 SHELF_COORDS = {
+        "shelf top": (220, 163, 753, 407),
+        "shelf 1":   (90, 825, 930, 990),
+        "shelf 2":   (90, 465, 930, 630),
+        "shelf 3":   (90, 645, 930, 810),
+        "shelf 4":   (90, 825, 930, 990),
+        "shelf 5":   (90, 825, 930, 990)
+}
+'''
     "Hammer_Rack": {
         "shelf0": (220, 163, 753, 407),
         "shelf1":   (90, 825, 930, 990),
@@ -124,7 +132,7 @@ SHELF_COORDS = {
         "shelf5":   (90, 825, 930, 990)
     }
 }
-
+'''
 @app.route("/highlight")
 def highlight():
     shelf_name = request.args.get("shelf", "").lower()
@@ -177,14 +185,21 @@ def show_inventory():
     return render_template("inventory.html", items=items)
 
 
+@app.route("/barcode")
+def barcode_page():
 
-
+    return render_template("barcode.html")
+@app.route("/pictures")
+def pictures_page():
+    return render_template("pictures.html")
 
 #adding inventory flow #1/3
 @app.route("/position")
 def position_page():
 
     return render_template("position.html")
+
+
 
 #inventory flow #2
 @app.route('/submitposition', methods=['POST'])

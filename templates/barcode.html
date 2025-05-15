@@ -71,7 +71,11 @@
     </form>
 
     <button onclick="restartScanner()">Restart Scanner</button>
-    <button id="flashBtn" type="button">Toggle Flashlight</button>
+    <a href="/pictures">
+  <button type="button">Skip</button>
+    </a>
+    <button id="flashBtn" type="button" style="display:none">Turn On Flashlight</button>
+    <span id="flashMsg" style="color:red; display:none; font-size:0.9em;"></span>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
 <script>
@@ -118,15 +122,28 @@
     window.addEventListener('mousedown', unlockAudio, { once: true });
 
     // Flashlight and focus logic
+    function checkTorchSupport() {
+        if (!track) return;
+        const capabilities = track.getCapabilities ? track.getCapabilities() : {};
+        if (capabilities.torch) {
+            document.getElementById('flashBtn').style.display = '';
+        } else {
+            document.getElementById('flashBtn').style.display = 'none';
+            document.getElementById('flashMsg').textContent = 'Flashlight not supported on this device/browser.';
+            document.getElementById('flashMsg').style.display = '';
+        }
+    }
     document.getElementById('flashBtn').addEventListener('click', async function() {
-        if (!track || !imageCapture) return;
+        if (!track) return;
         try {
             torchOn = !torchOn;
             await track.applyConstraints({
                 advanced: [{ torch: torchOn }]
             });
+            this.textContent = torchOn ? 'Turn Off Flashlight' : 'Turn On Flashlight';
         } catch (e) {
-            alert('Flashlight not supported on this device/browser.');
+            document.getElementById('flashMsg').textContent = 'Failed to toggle flashlight.';
+            document.getElementById('flashMsg').style.display = '';
         }
     });
 
@@ -182,6 +199,7 @@
                     } catch (e) {
                         imageCapture = null;
                     }
+                    checkTorchSupport();
                 }
             }, 500);
             setupTapToFocus();
