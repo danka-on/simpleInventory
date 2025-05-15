@@ -211,9 +211,6 @@ def additem_page():
     #return pictures
     return render_template("additem.html")
 
-@app.route('/inventory', methods=['GET'])
-def inventory_page():
-    return render_template("inventory.html")
 
 
 
