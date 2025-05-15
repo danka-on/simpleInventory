@@ -149,10 +149,29 @@ def highlight():
 
 @app.route("/database")
 def show_inventory():
+    q = request.args.get('q', '').strip()
+    status = request.args.get('status', '').strip()
+    sort = request.args.get('sort', 'ID')
+    dir = request.args.get('dir', 'asc')
+    allowed_sorts = ['ID','Title','ItemID','SKU','Price','Quantity','List_State','Sold_Date','List_Date']
+    if sort not in allowed_sorts:
+        sort = 'ID'
+    if dir not in ['asc','desc']:
+        dir = 'asc'
     conn = sqlite3.connect("database.db")
-    conn.row_factory = sqlite3.Row  # to access columns by name
+    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM items ORDER BY DateListed DESC")
+    sql = "SELECT * FROM INVENTORY WHERE 1=1"
+    params = []
+    if q:
+        sql += " AND (Title LIKE ? OR ItemID LIKE ? OR SKU LIKE ? OR Price LIKE ? OR Quantity LIKE ? OR List_State LIKE ? OR Sold_Date LIKE ? OR List_Date LIKE ?)"
+        for _ in range(8):
+            params.append(f"%{q}%")
+    if status:
+        sql += " AND List_State = ?"
+        params.append(status)
+    sql += f" ORDER BY {sort} {dir.upper()}"
+    cursor.execute(sql, params)
     items = cursor.fetchall()
     conn.close()
     return render_template("inventory.html", items=items)
@@ -192,7 +211,9 @@ def additem_page():
     #return pictures
     return render_template("additem.html")
 
-
+@app.route('/inventory', methods=['GET'])
+def inventory_page():
+    return render_template("inventory.html")
 
 
 
