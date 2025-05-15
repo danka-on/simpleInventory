@@ -74,9 +74,13 @@
 
     <button onclick="restartScanner()">Restart Scanner</button>
 
+    <audio id="beep" src="https://actions.google.com/sounds/v1/cartoon/clang_and_wobble.ogg" preload="auto"></audio>
+
     <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
 <script>
     let scannerActive = false;
+    let scanBuffer = [];
+    const REQUIRED_MATCHES = 3;
 
     function startScanner() {
         if (scannerActive) return;
@@ -106,25 +110,19 @@
             Quagga.start();
         });
 
-        let lastResult = null;
-        let confirmed = false;
-
         Quagga.onDetected(function (result) {
-            const code = result.codeResult.code;
-
-            // Ignore duplicates or unstable reads
-            if (confirmed || !code || code === lastResult) return;
-            lastResult = code;
-
-            // Optional: add simple length/sanity check
-            // if (code.length < 8 || code.length > 14) return;
-
-            // Confirmed result
-            confirmed = true;
-            document.getElementById("scanned_result").value = code;
-            Quagga.stop();
-            scannerActive = false;
-            document.getElementById("scan_form").submit();  // ← submit form to Flask
+            let code = result.codeResult.code;
+            if (!code) return;
+            code = code.trim().replace(/^0+/, '');
+            scanBuffer.push(code);
+            if (scanBuffer.length > REQUIRED_MATCHES) scanBuffer.shift();
+            if (scanBuffer.length === REQUIRED_MATCHES && scanBuffer.every(c => c === code)) {
+                document.getElementById("scanned_result").value = code;
+                Quagga.stop();
+                scannerActive = false;
+                document.getElementById("beep").play();
+                document.getElementById("scan_form").submit();
+            }
         });
         Quagga.onProcessed(function (result) {
             if (result && result.codeResult && result.codeResult.code) {
