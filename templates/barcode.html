@@ -72,13 +72,46 @@
 
     <button onclick="restartScanner()">Restart Scanner</button>
 
-    <audio id="beep" src="https://actions.google.com/sounds/v1/cartoon/clang_and_wobble.ogg" preload="auto"></audio>
-
     <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
 <script>
     let scannerActive = false;
     let scanBuffer = [];
     const REQUIRED_MATCHES = 3;
+
+    // --- Web Audio API beep logic ---
+    let audioUnlocked = false;
+    let audioCtx = null;
+    function unlockAudio() {
+        if (!audioUnlocked) {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            // Play a silent sound to unlock
+            let buffer = audioCtx.createBuffer(1, 1, 22050);
+            let source = audioCtx.createBufferSource();
+            source.buffer = buffer;
+            source.connect(audioCtx.destination);
+            source.start(0);
+            audioUnlocked = true;
+        }
+    }
+    function playBeep() {
+        if (!audioCtx) return;
+        let duration = 0.1;
+        let oscillator = audioCtx.createOscillator();
+        let gain = audioCtx.createGain();
+        oscillator.type = 'sine';
+        oscillator.frequency.value = 880;
+        gain.gain.value = 0.2;
+        oscillator.connect(gain);
+        gain.connect(audioCtx.destination);
+        oscillator.start();
+        oscillator.stop(audioCtx.currentTime + duration);
+        oscillator.onended = () => {
+            oscillator.disconnect();
+            gain.disconnect();
+        };
+    }
+    window.addEventListener('touchstart', unlockAudio, { once: true });
+    window.addEventListener('mousedown', unlockAudio, { once: true });
 
     function startScanner() {
         if (scannerActive) return;
@@ -118,7 +151,7 @@
                 document.getElementById("scanned_result").value = code;
                 Quagga.stop();
                 scannerActive = false;
-                document.getElementById("beep").play();
+                playBeep();
                 document.getElementById("scan_form").submit();
             }
         });
