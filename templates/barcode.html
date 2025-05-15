@@ -92,9 +92,12 @@
                 },
             },
             decoder: {
-                readers: ["code_128_reader", "ean_reader", "ean_8_reader", "code_39_reader", "code_39_vin_reader", "codabar_reader", "upc_reader", "upc_e_reader", "i2of5_reader", "2of5_reader", "code_93_reader"]
+                readers: [  "upc_reader",
+                            "upc_e_reader",
+                            "ean_reader",
+                            "ean_8_reader" ]
             },
-            locate: true
+            locate: false
         }, function (err) {
             if (err) {
                 console.error(err);
@@ -104,18 +107,37 @@
             Quagga.start();
         });
 
+        let lastResult = null;
+        let confirmed = false;
+
         Quagga.onDetected(function (result) {
-            if (result && result.codeResult && result.codeResult.code) {
-                const code = result.codeResult.code;
-                document.getElementById("scanned_result").value = code;
+            const code = result.codeResult.code;
 
+            // Ignore duplicates or unstable reads
+            if (confirmed || !code || code === lastResult) return;
+            lastResult = code;
 
-                Quagga.stop();
-                scannerActive = false;
+            // Optional: add simple length/sanity check
+            // if (code.length < 8 || code.length > 14) return;
 
-                document.getElementById("scan_form").submit();  // ← submit form to Flask
-            }
+            // Confirmed result
+            confirmed = true;
+            document.getElementById("scanned_result").value = code;
+            
+            if (result && result.codeResult) {
+                console.log("Format:", result.codeResult.format);
+                console.log("Code:", result.codeResult.code);
+                }
+            Quagga.stop();
+            scannerActive = false;
+            document.getElementById("scan_form").submit();  // ← submit form to Flask
         });
+        Quagga.onProcessed(function (result) {
+            if (result && result.codeResult && result.codeResult.code) {
+            console.log("Scanned (raw):", result.codeResult.code);
+    }
+});
+
 
     }
     function restartScanner() {
