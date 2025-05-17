@@ -187,8 +187,8 @@ def show_inventory():
 
 @app.route("/barcode")
 def barcode_page():
-
     return render_template("barcode.html")
+
 @app.route("/pictures")
 def pictures_page():
     return render_template("pictures.html")
@@ -198,7 +198,6 @@ def pictures_page():
 def position_page():
 
     return render_template("position.html")
-
 
 
 #inventory flow #2

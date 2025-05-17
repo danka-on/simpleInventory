@@ -82,7 +82,8 @@
     <button id="flashBtn" type="button" style="display:none">Turn On Flashlight</button>
     <span id="flashMsg" style="color:red; display:none; font-size:0.9em;"></span>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
+    <!-- Replaced Quagga with html5-qrcode -->
+    <script src="https://unpkg.com/html5-qrcode@2.3.8/dist/html5-qrcode.min.js"></script>
 <script>
     let scannerActive = false;
     let scanBuffer = [];
@@ -126,38 +127,19 @@
     window.addEventListener('touchstart', unlockAudio, { once: true });
     window.addEventListener('mousedown', unlockAudio, { once: true });
 
+    let html5QrcodeScanner = null;
+
     function startScanner() {
         if (scannerActive) return;
         scannerActive = true;
-        Quagga.init({
-            inputStream: {
-                name: "Live",
-                type: "LiveStream",
-                target: document.querySelector('#reader'),
-                constraints: {
-                    facingMode: "environment",
-                    width: { ideal: 640 },
-                    height: { ideal: 480 }
-                },
-            },
-            decoder: {
-                readers: [  "upc_reader",
-                            "upc_e_reader",
-                            "ean_reader",
-                            "ean_8_reader" ]
-            },
-            locate: true
-        }, function (err) {
-            if (err) {
-                console.error(err);
-                scannerActive = false;
-                return;
-            }
-            Quagga.start();
-        });
 
-        Quagga.onDetected(function (result) {
-            let code = result.codeResult.code;
+        html5QrcodeScanner = new Html5QrcodeScanner(
+            "reader", { fps: 10, qrbox: { width: 250, height: 250 } });
+
+        html5QrcodeScanner.render(onScanSuccess, onScanFailure);
+
+        function onScanSuccess(decodedText, decodedResult) {
+            let code = decodedText;
             if (!code) return;
             code = code.trim().replace(/^0+/, '');
             if (scanBuffer.length > 0 && scanBuffer[scanBuffer.length - 1] !== code) {
@@ -167,30 +149,30 @@
             if (scanBuffer.length > REQUIRED_MATCHES) scanBuffer.shift();
             if (scanBuffer.length === REQUIRED_MATCHES && scanBuffer.every(c => c === code)) {
                 document.getElementById("scanned_result").value = code;
-                Quagga.stop();
+                html5QrcodeScanner.clear(); // Stop the scanner
                 scannerActive = false;
                 playBeep();
                 document.getElementById("scan_form").submit();
             }
-        });
-        Quagga.onProcessed(function (result) {
-            // Removed console.log for speed
-        });
+        }
+
+       
     }
     function restartScanner() {
-        if (scannerActive) {
-            Quagga.stop();
-            scannerActive = false;
+        if (!scannerActive && html5QrcodeScanner) {
+             html5QrcodeScanner.clear();
         }
+        // Removed Quagga.stop and scannerActive = false; as they are handled by clear()
         startScanner();
     }
 
     // Flashlight and focus logic
-    function checkTorchSupport() {
-        if (!track) return;
-        const capabilities = track.getCapabilities ? track.getCapabilities() : {};
-        if (capabilities.torch) {
-            document.getElementById('flashBtn').style.display = '';
+    async function checkTorchSupport() {
+        if (!html5QrcodeScanner) return;
+        // html5-qrcode provides its own API for torch control
+        const capabilities = await html5QrcodeScanner.gettorchCapabilities();
+        if (capabilities && capabilities.torch) {
+             document.getElementById('flashBtn').style.display = '';
         } else {
             document.getElementById('flashBtn').style.display = 'none';
             document.getElementById('flashMsg').textContent = 'Flashlight not supported on this device/browser.';
@@ -198,12 +180,10 @@
         }
     }
     document.getElementById('flashBtn').addEventListener('click', async function() {
-        if (!track) return;
+        if (!html5QrcodeScanner) return;
         try {
             torchOn = !torchOn;
-            await track.applyConstraints({
-                advanced: [{ torch: torchOn }]
-            });
+            await html5QrcodeScanner.toggleTorch(torchOn);
             this.textContent = torchOn ? 'Turn Off Flashlight' : 'Turn On Flashlight';
         } catch (e) {
             document.getElementById('flashMsg').textContent = 'Failed to toggle flashlight.';
@@ -212,18 +192,20 @@
     });
 
     window.addEventListener('load', startScanner);
-    setTimeout(() => {
-        let stream = Quagga.cameraAccess && Quagga.cameraAccess.getActiveStream && Quagga.cameraAccess.getActiveStream();
-        if (stream && stream.getVideoTracks) {
-            track = stream.getVideoTracks()[0];
-            try {
-                imageCapture = new window.ImageCapture(track);
-            } catch (e) {
-                imageCapture = null;
-            }
-            checkTorchSupport();
-        }
-    }, 500);
+    // Removed the timeout logic as html5-qrcode manages camera access internally
+    // setTimeout(() => {
+    //     let stream = Quagga.cameraAccess && Quagga.cameraAccess.getActiveStream && Quagga.cameraAccess.getActiveStream();
+    //     if (stream && stream.getVideoTracks) {
+    //         track = stream.getVideoTracks()[0];
+    //         try {
+    //             imageCapture = new window.ImageCapture(track);
+    //         } catch (e) {
+    //             imageCapture = null;
+    //         }
+    //         checkTorchSupport();
+    //     }
+    // }, 500);
+    setTimeout(checkTorchSupport, 1000); // Check torch support after a short delay to allow scanner to initialize
 </script>
 
 </body>
