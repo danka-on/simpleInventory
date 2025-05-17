@@ -9,233 +9,267 @@
             max-width: 600px;
             margin: auto;
             padding: 10px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
         }
-
         #reader {
             width: 100%;
+            max-width: 300px;
             margin-top: 20px;
-            height: 300px;
+            aspect-ratio: 1/1;
             background: #222;
             border-radius: 8px;
             position: relative;
             overflow: hidden;
         }
-
         input[type="text"] {
             width: 100%;
             font-size: 1.2em;
             padding: 10px;
             margin-top: 20px;
         }
-
         button {
             font-size: 18px;
             padding: 10px 20px;
             margin-top: 10px;
         }
-
         #scanner-overlay {
             position: absolute;
             top: 0; left: 0; right: 0; bottom: 0;
             pointer-events: none;
             z-index: 2;
         }
-
         .scanner-line {
             position: absolute;
-            left: 0;
-            width: 100%;
+            left: 10%; /* Matches scan-box left */
+            width: 80%; /* Matches scan-box width */
             height: 3px;
             background: red;
+            top: 40%; /* Start at top of scan-box */
             animation: scan-move 2s linear infinite;
             opacity: 0.8;
         }
-
+        .scan-box {
+            width: 80%;
+            height: 20%;
+            border: 2px solid white;
+            background: transparent;
+            position: absolute;
+            top: 40%; /* Center vertically */
+            left: 10%; /* Center horizontally */
+        }
+        .dark-overlay-top {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 40%; /* Above scan-box */
+            background: rgba(0, 0, 0, 0.5);
+        }
+        .dark-overlay-bottom {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 40%; /* Below scan-box */
+            background: rgba(0, 0, 0, 0.5);
+        }
+        .dark-overlay-left {
+            position: absolute;
+            top: 40%; /* Align with scan-box */
+            left: 0;
+            width: 10%; /* Left of scan-box */
+            height: 20%; /* Matches scan-box height */
+            background: rgba(0, 0, 0, 0.5);
+        }
+        .dark-overlay-right {
+            position: absolute;
+            top: 40%; /* Align with scan-box */
+            right: 0;
+            width: 10%; /* Right of scan-box */
+            height: 20%; /* Matches scan-box height */
+            background: rgba(0, 0, 0, 0.5);
+        }
         @keyframes scan-move {
-            0% { top: 0; }
-            100% { top: 100%; }
+            0% { top: 40%; } /* Top of scan-box */
+            100% { top: 60%; } /* Bottom of scan-box */
         }
     </style>
 </head>
 <body>
-    <h1>Set BARCODE </h1>
-
-    <div id="reader" style="position: relative; width: 100%; height: 300px; background: #222; border-radius: 8px; overflow: hidden;">
+    <h1>Set BARCODE</h1>
+    <div id="reader">
         <div id="scanner-overlay">
+            <div class="dark-overlay-top"></div>
+            <div class="dark-overlay-bottom"></div>
+            <div class="dark-overlay-left"></div>
+            <div class="dark-overlay-right"></div>
             <div class="scanner-line"></div>
+            <div class="scan-box"></div>
         </div>
     </div>
-
-    <form type="text" id="scan_form" action="/submitbarcode" method="POST">
+    <form id="scan_form" action="/submitbarcode" method="POST">
         <input name="scanned_result" type="text" id="scanned_result" placeholder="Scanned code will appear here">
     </form>
-
     <button onclick="restartScanner()">Restart Scanner</button>
-    <a href="/pictures">
-  <button type="button">Skip</button>
-    </a>
+    <a href="/pictures"><button type="button">Skip</button></a>
     <button id="flashBtn" type="button" style="display:none">Turn On Flashlight</button>
     <span id="flashMsg" style="color:red; display:none; font-size:0.9em;"></span>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
-<script>
-    let scannerActive = false;
-    let scanBuffer = [];
-    const REQUIRED_MATCHES = 2;
-    let track = null;
-    let imageCapture = null;
-    let torchOn = false;
+    <script>
+        let scannerActive = false;
+        let scanBuffer = [];
+        const REQUIRED_MATCHES = 2;
+        let track = null;
+        let imageCapture = null;
+        let torchOn = false;
 
-    // --- Web Audio API beep logic ---
-    let audioUnlocked = false;
-    let audioCtx = null;
-    function unlockAudio() {
-        if (!audioUnlocked) {
-            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            // Play a silent sound to unlock
-            let buffer = audioCtx.createBuffer(1, 1, 22050);
-            let source = audioCtx.createBufferSource();
-            source.buffer = buffer;
-            source.connect(audioCtx.destination);
-            source.start(0);
-            audioUnlocked = true;
+        // Web Audio API beep logic
+        let audioUnlocked = false;
+        let audioCtx = null;
+        function unlockAudio() {
+            if (!audioUnlocked) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                let buffer = audioCtx.createBuffer(1, 1, 22050);
+                let source = audioCtx.createBufferSource();
+                source.buffer = buffer;
+                source.connect(audioCtx.destination);
+                source.start(0);
+                audioUnlocked = true;
+            }
         }
-    }
-    function playBeep() {
-        if (!audioCtx) return;
-        let duration = 0.1;
-        let oscillator = audioCtx.createOscillator();
-        let gain = audioCtx.createGain();
-        oscillator.type = 'sine';
-        oscillator.frequency.value = 880;
-        gain.gain.value = 0.2;
-        oscillator.connect(gain);
-        gain.connect(audioCtx.destination);
-        oscillator.start();
-        oscillator.stop(audioCtx.currentTime + duration);
-        oscillator.onended = () => {
-            oscillator.disconnect();
-            gain.disconnect();
-        };
-    }
-    window.addEventListener('touchstart', unlockAudio, { once: true });
-    window.addEventListener('mousedown', unlockAudio, { once: true });
+        function playBeep() {
+            if (!audioCtx) return;
+            let duration = 0.1;
+            let oscillator = audioCtx.createOscillator();
+            let gain = audioCtx.createGain();
+            oscillator.type = 'sine';
+            oscillator.frequency.value = 880;
+            gain.gain.value = 0.2;
+            oscillator.connect(gain);
+            gain.connect(audioCtx.destination);
+            oscillator.start();
+            oscillator.stop(audioCtx.currentTime + duration);
+            oscillator.onended = () => {
+                oscillator.disconnect();
+                gain.disconnect();
+            };
+        }
+        window.addEventListener('touchstart', unlockAudio, { once: true });
+        window.addEventListener('mousedown', unlockAudio, { once: true });
 
-    // Flashlight and focus logic
-    function checkTorchSupport() {
-        if (!track) return;
-        const capabilities = track.getCapabilities ? track.getCapabilities() : {};
-        if (capabilities.torch) {
-            document.getElementById('flashBtn').style.display = '';
-        } else {
-            document.getElementById('flashBtn').style.display = 'none';
-            document.getElementById('flashMsg').textContent = 'Flashlight not supported on this device/browser.';
-            document.getElementById('flashMsg').style.display = '';
+        // Flashlight and focus logic
+        function checkTorchSupport() {
+            if (!track) return;
+            const capabilities = track.getCapabilities ? track.getCapabilities() : {};
+            if (capabilities.torch) {
+                document.getElementById('flashBtn').style.display = '';
+            } else {
+                document.getElementById('flashBtn').style.display = 'none';
+                document.getElementById('flashMsg').textContent = 'Flashlight not supported on this device/browser.';
+                document.getElementById('flashMsg').style.display = '';
+            }
         }
-    }
-    document.getElementById('flashBtn').addEventListener('click', async function() {
-        if (!track) return;
-        try {
-            torchOn = !torchOn;
-            await track.applyConstraints({
-                advanced: [{ torch: torchOn }]
-            });
-            this.textContent = torchOn ? 'Turn Off Flashlight' : 'Turn On Flashlight';
-        } catch (e) {
-            document.getElementById('flashMsg').textContent = 'Failed to toggle flashlight.';
-            document.getElementById('flashMsg').style.display = '';
-        }
-    });
-
-    function setupTapToFocus() {
-        const reader = document.getElementById('reader');
-        reader.addEventListener('click', async function() {
-            if (!track || !imageCapture) return;
+        document.getElementById('flashBtn').addEventListener('click', async function() {
+            if (!track) return;
             try {
+                torchOn = !torchOn;
                 await track.applyConstraints({
-                    advanced: [{ focusMode: 'continuous' }] // or 'manual' if supported
+                    advanced: [{ torch: torchOn }]
                 });
+                this.textContent = torchOn ? 'Turn Off Flashlight' : 'Turn On Flashlight';
             } catch (e) {
-                // Not supported, do nothing
+                document.getElementById('flashMsg').textContent = 'Failed to toggle flashlight.';
+                document.getElementById('flashMsg').style.display = '';
             }
         });
-    }
 
-    function startScanner() {
-        if (scannerActive) return;
-        scannerActive = true;
-        Quagga.init({
-            inputStream: {
-                name: "Live",
-                type: "LiveStream",
-                target: document.querySelector('#reader'),
-                constraints: {
-                    facingMode: "environment",
-                    width: { ideal: 640 },
-                    height: { ideal: 480 }
-                },
-            },
-            decoder: {
-                readers: [  "upc_reader",
-                            "upc_e_reader",
-                            "ean_reader",
-                            "ean_8_reader" ]
-            },
-            locate: true
-        }, function (err) {
-            if (err) {
-                console.error(err);
-                scannerActive = false;
-                return;
-            }
-            Quagga.start();
-            // Get the video track for torch/focus
-            setTimeout(() => {
-                let stream = Quagga.cameraAccess && Quagga.cameraAccess.getActiveStream && Quagga.cameraAccess.getActiveStream();
-                if (stream && stream.getVideoTracks) {
-                    track = stream.getVideoTracks()[0];
-                    try {
-                        imageCapture = new window.ImageCapture(track);
-                    } catch (e) {
-                        imageCapture = null;
-                    }
-                    checkTorchSupport();
+        function setupTapToFocus() {
+            const reader = document.getElementById('reader');
+            reader.addEventListener('click', async function() {
+                if (!track || !imageCapture) return;
+                try {
+                    await track.applyConstraints({
+                        advanced: [{ focusMode: 'continuous' }]
+                    });
+                } catch (e) {
+                    // Not supported, do nothing
                 }
-            }, 500);
-            setupTapToFocus();
-        });
+            });
+        }
 
-        Quagga.onDetected(function (result) {
-            let code = result.codeResult.code;
-            if (!code) return;
-            code = code.trim().replace(/^0+/, '');
-            if (scanBuffer.length > 0 && scanBuffer[scanBuffer.length - 1] !== code) {
-                scanBuffer = [];
-            }
-            scanBuffer.push(code);
-            if (scanBuffer.length > REQUIRED_MATCHES) scanBuffer.shift();
-            if (scanBuffer.length === REQUIRED_MATCHES && scanBuffer.every(c => c === code)) {
-                document.getElementById("scanned_result").value = code;
+        function startScanner() {
+            if (scannerActive) return;
+            scannerActive = true;
+            Quagga.init({
+                inputStream: {
+                    name: "Live",
+                    type: "LiveStream",
+                    target: document.querySelector('#reader'),
+                    constraints: {
+                        facingMode: "environment",
+                        width: { ideal: 640 },
+                        height: { ideal: 480 }
+                    },
+                },
+                decoder: {
+                    readers: ["upc_reader", "upc_e_reader", "ean_reader", "ean_8_reader"]
+                },
+                locate: true
+            }, function (err) {
+                if (err) {
+                    console.error(err);
+                    scannerActive = false;
+                    return;
+                }
+                Quagga.start();
+                setTimeout(() => {
+                    let stream = Quagga.cameraAccess && Quagga.cameraAccess.getActiveStream && Quagga.cameraAccess.getActiveStream();
+                    if (stream && stream.getVideoTracks) {
+                        track = stream.getVideoTracks()[0];
+                        try {
+                            imageCapture = new window.ImageCapture(track);
+                        } catch (e) {
+                            imageCapture = null;
+                        }
+                        checkTorchSupport();
+                    }
+                }, 500);
+                setupTapToFocus();
+            });
+
+            Quagga.onDetected(function (result) {
+                let code = result.codeResult.code;
+                if (!code) return;
+                code = code.trim().replace(/^0+/, '');
+                if (scanBuffer.length > 0 && scanBuffer[scanBuffer.length - 1] !== code) {
+                    scanBuffer = [];
+                }
+                scanBuffer.push(code);
+                if (scanBuffer.length > REQUIRED_MATCHES) scanBuffer.shift();
+                if (scanBuffer.length === REQUIRED_MATCHES && scanBuffer.every(c => c === code)) {
+                    document.getElementById("scanned_result").value = code;
+                    Quagga.stop();
+                    scannerActive = false;
+                    playBeep();
+                    document.getElementById("scan_form").submit();
+                }
+            });
+            Quagga.onProcessed(function (result) {});
+        }
+
+        function restartScanner() {
+            if (scannerActive) {
                 Quagga.stop();
                 scannerActive = false;
-                playBeep();
-                document.getElementById("scan_form").submit();
             }
-        });
-        Quagga.onProcessed(function (result) {
-            // Removed console.log for speed
-        });
-    }
-    function restartScanner() {
-        if (scannerActive) {
-            Quagga.stop();
-            scannerActive = false;
+            startScanner();
         }
-        startScanner();
-    }
 
-    window.addEventListener('load', startScanner);
-</script>
-
+        window.addEventListener('load', startScanner);
+    </script>
 </body>
 </html>
