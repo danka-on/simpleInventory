@@ -6,6 +6,9 @@ import io, time , subprocess, os, requests, json, threading, sqlite3
 import xml.etree.ElementTree as ET
 from dotenv import load_dotenv
 import xml.dom.minidom as minidom
+
+from pyasn1_modules.rfc5990 import NullParms
+
 from inventory import find_item  # adjust this to match your actual import
 from speakToDb import myDataBase
 
@@ -185,6 +188,41 @@ def show_inventory():
     return render_template("inventory.html", items=items)
 
 
+# inventory flow variables for database injection
+
+from speakToDb import addToRack
+
+same_position = None
+position_code = None
+barcode = None
+
+
+
+
+@app.route('/additemtrue', methods=['POST'])
+def additemtrue():
+    #telling database its go time to upload our SHIT
+
+    global same_position
+    global position_code
+    global barcode
+    try:
+        print("Flow Complete, adding to Rack....")
+        addToRack(position_code, barcode)
+        position_code = None
+        barcode = None
+    except Exception as e:
+        print("something went wrong with adding to RACK", e)
+
+
+    if same_position:
+        return render_template("barcode.html")
+    else:
+        return render_template("position.html")
+
+
+
+
 @app.route("/barcode")
 def barcode_page():
     return render_template("barcode.html")
@@ -203,28 +241,41 @@ def position_page():
 #inventory flow #2
 @app.route('/submitposition', methods=['POST'])
 def process_position():
+    global position_code
     position_code = request.form.get('scanned_result')
     print("Received scanned code:", position_code)
-    #restart if code: None
-
     return render_template("barcode.html")
 
 
 #inventory flow #3
 @app.route('/submitbarcode', methods=['POST'])
 def process_barcode():
+    global barcode
     barcode = request.form.get('scanned_result')
     print("Received scanned code:", barcode)
 
-    return render_template("pictures.html")
+    return render_template("additem.html")
 
 
 
 @app.route('/additem', methods=['POST'])
 def additem_page():
     #return pictures
+
     return render_template("additem.html")
 
+
+@app.route('/toggle', methods=['POST'])
+def toggle():
+    global same_position
+    data = request.get_json()
+    is_checked = data.get('checked', False)
+    same_position = is_checked
+    print("Checkbox state:", is_checked)  # True or False
+
+    # Respond with JSON so the page doesn't change
+    return jsonify({'success': True, 'message': f'Checkbox is {"ON" if is_checked else "OFF"}'})
+# order placement flow variables for database injection
 
 
 

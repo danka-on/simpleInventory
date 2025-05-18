@@ -90,6 +90,11 @@
     <form id="scan_form" action="/submitposition" method="POST">
         <input name="scanned_result" type="text" id="scanned_result" placeholder="Scanned code will appear here">
     </form>
+    <form action="/toggle" method="POST">
+    <label>
+    <input type="checkbox" id="featureToggle">  KEEP SAME POSITION?
+    </label>
+    </form>
     <button onclick="restartScanner()">Restart Scanner</button>
     <a href="/barcode"><button type="button">Skip</button></a>
     <button id="flashBtn" type="button" style="display:none">Turn On Flashlight</button>
@@ -97,6 +102,22 @@
 
     <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
     <script>
+
+  document.getElementById('featureToggle').addEventListener('change', function () {
+    fetch('/toggle', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ checked: this.checked })
+    })
+    .then(response => response.json())
+    .then(data => {
+      console.log("Server says:", data.message);  // Optional feedback
+    })
+    .catch(error => console.error('Error:', error));
+  });
+
     let scannerActive = false;
     let html5QrCode = null;
     let track = null;

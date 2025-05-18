@@ -1,5 +1,29 @@
 import sqlite3
 
+
+def createRack():
+    conn = sqlite3.connect('rack.db')
+    cursor = conn.cursor()
+    print("Rack starting creation")
+    try:
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS INVENTORY (
+                ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                ITEM_POSITION TEXT,
+                BARCODE TEXT,
+                IMAGES TEXT
+            )
+        ''')
+        print("Rack created successfully")
+        conn.commit()
+        print("Rack committed")
+        conn.close()
+        print("Rack closed successfully")
+    except sqlite3.Error as e:
+        print("something went wrong with my Rack ",e)
+        conn.close()
+
+
 def createMyDataBase():
     conn = sqlite3.connect('database.db')
     cursor = conn.cursor()
@@ -33,7 +57,22 @@ def createMyDataBase():
         print("something went wrong with table ",e)
         conn.close()
 createMyDataBase()
+createRack()
 
+def addToRack(ITEM_POSITION = None, BARCODE = None, IMAGES = None):
+    conn = sqlite3.connect('rack.db')
+    cursor = conn.cursor()
+    try:
+        cursor.execute("INSERT INTO INVENTORY (ITEM_POSITION, BARCODE, IMAGES ) VALUES (?,?,?)", (ITEM_POSITION, BARCODE, IMAGES))
+        conn.commit()
+        print(f"added",{ITEM_POSITION},{BARCODE})
+    except sqlite3.Error as e:
+        print("something went wrong", e)
+        try:
+            conn.close()
+            print("Closed successfully from myDataBase")
+        except sqlite3.Error as e:
+            print("Failed to close connection:", e)
 
 
 def myDataBase(title, item_id, sku = None, price = None, quantity = None, image = None, List_State = None, Sold_Date = None, List_Date = None, URL = None):

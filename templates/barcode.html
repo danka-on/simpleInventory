@@ -92,14 +92,64 @@
             height: 20%; /* Matches scan-box height */
             background: rgba(0, 0, 0, 0.5);
         }
+        .barcode-icon {
+            margin: 10px 0 20px 0;
+            text-align: center;
+        }
+        .barcode-icon svg {
+            width: 180px;
+            height: 60px;
+        }
         @keyframes scan-move {
             0% { top: 40%; } /* Top of scan-box */
             100% { top: 60%; } /* Bottom of scan-box */
+        }
+        h1 {
+            margin-bottom: 0;
         }
     </style>
 </head>
 <body>
     <h1>Set BARCODE</h1>
+    <div class="barcode-icon">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 170">
+            <rect x="10" y="10" width="8" height="150" fill="#000"/>
+            <rect x="24" y="10" width="2" height="150" fill="#000"/>
+            <rect x="32" y="10" width="8" height="150" fill="#000"/>
+            <rect x="46" y="10" width="16" height="150" fill="#000"/>
+            <rect x="68" y="10" width="4" height="150" fill="#000"/>
+            <rect x="78" y="10" width="12" height="150" fill="#000"/>
+            <rect x="96" y="10" width="8" height="150" fill="#000"/>
+            <rect x="110" y="10" width="16" height="150" fill="#000"/>
+            <rect x="132" y="10" width="4" height="150" fill="#000"/>
+            <rect x="142" y="10" width="2" height="150" fill="#000"/>
+            <rect x="150" y="10" width="8" height="150" fill="#000"/>
+            <rect x="164" y="10" width="6" height="150" fill="#000"/>
+            <rect x="176" y="10" width="12" height="150" fill="#000"/>
+            <rect x="194" y="10" width="4" height="150" fill="#000"/>
+            <rect x="204" y="10" width="16" height="150" fill="#000"/>
+            <rect x="226" y="10" width="8" height="150" fill="#000"/>
+            <rect x="240" y="10" width="2" height="150" fill="#000"/>
+            <rect x="248" y="10" width="6" height="150" fill="#000"/>
+            <rect x="260" y="10" width="14" height="150" fill="#000"/>
+            <rect x="280" y="10" width="4" height="150" fill="#000"/>
+            <rect x="290" y="10" width="12" height="150" fill="#000"/>
+            <rect x="308" y="10" width="6" height="150" fill="#000"/>
+            <rect x="320" y="10" width="8" height="150" fill="#000"/>
+            <rect x="334" y="10" width="14" height="150" fill="#000"/>
+            <rect x="354" y="10" width="6" height="150" fill="#000"/>
+            <rect x="366" y="10" width="2" height="150" fill="#000"/>
+            <rect x="374" y="10" width="8" height="150" fill="#000"/>
+            <rect x="388" y="10" width="12" height="150" fill="#000"/>
+            <rect x="406" y="10" width="4" height="150" fill="#000"/>
+            <rect x="416" y="10" width="4" height="150" fill="#000"/>
+            <rect x="426" y="10" width="16" height="150" fill="#000"/>
+            <rect x="448" y="10" width="8" height="150" fill="#000"/>
+            <rect x="462" y="10" width="4" height="150" fill="#000"/>
+            <rect x="472" y="10" width="6" height="150" fill="#000"/>
+            <rect x="484" y="10" width="12" height="150" fill="#000"/>
+        </svg>
+    </div>
     <div id="reader">
         <div id="scanner-overlay">
             <div class="dark-overlay-top"></div>
