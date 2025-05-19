@@ -53,11 +53,12 @@
             z-index: 1;
         }
     </style>
+    <link href="https://fonts.googleapis.com/css2?family=Libre+Barcode+39&display=swap" rel="stylesheet">
 </head>
 <body>
     <h1>Set BARCODE</h1>
-    <div class="barcode-icon">
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 170">
+    <div class="barcode-icon" style="display: flex; justify-content: center; align-items: center; width: 100%; margin-bottom: 10px;">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 170" width="90%" height="60">
             <rect x="10" y="10" width="8" height="150" fill="#000"/>
             <rect x="24" y="10" width="2" height="150" fill="#000"/>
             <rect x="32" y="10" width="8" height="150" fill="#000"/>
@@ -262,13 +263,32 @@
             }
         }
         
+        // Stop the scanner and release resources
+        async function stopScanner() {
+            if (codeReader) {
+                try { await codeReader.reset(); } catch (e) { console.warn('Error resetting codeReader:', e); }
+                codeReader = null;
+            }
+            if (stream) {
+                try { stream.getTracks().forEach(track => track.stop()); } catch (e) { console.warn('Error stopping stream:', e); }
+                stream = null;
+            }
+            video.srcObject = null;
+        }
+
         // Restart scanner function
         async function restartScanner() {
-            if (codeReader) {
-                await codeReader.reset();
-            }
+            await stopScanner();
             scannedResultInput.value = '';
-            initScanner();
+            scannedResultInput.readOnly = false;
+            window.__barcodeSubmitted = false;
+            const restartBtn = document.querySelector('button[onclick="restartScanner()"]');
+            if (restartBtn) restartBtn.disabled = false;
+            loadingMessage.style.display = '';
+            loadingMessage.textContent = 'Restarting camera...';
+            setTimeout(() => {
+                initializeCamera();
+            }, 300);
         }
         
         // Check if the browser supports mediaDevices
