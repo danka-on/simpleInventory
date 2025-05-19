@@ -24,6 +24,11 @@
             position: relative;
             overflow: hidden;
         }
+        #reader video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
         input[type="text"] {
             width: 100%;
             font-size: 1.2em;
@@ -34,6 +39,7 @@
             font-size: 18px;
             padding: 10px 20px;
             margin-top: 10px;
+            cursor: pointer;
         }
         #scanner-overlay {
             position: absolute;
@@ -43,13 +49,13 @@
         }
         .scanner-line {
             position: absolute;
-            left: 10%; /* Matches scan-box left */
-            width: 80%; /* Matches scan-box width */
+            left: 10%;
+            width: 80%;
             height: 3px;
-            background: red;
-            top: 40%; /* Start at top of scan-box */
+            background: rgba(255, 0, 0, 0.8);
+            top: 40%;
             animation: scan-move 2s linear infinite;
-            opacity: 0.8;
+            z-index: 3;
         }
         .scan-box {
             width: 80%;
@@ -57,40 +63,10 @@
             border: 2px solid white;
             background: transparent;
             position: absolute;
-            top: 40%; /* Center vertically */
-            left: 10%; /* Center horizontally */
-        }
-        .dark-overlay-top {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 40%; /* Above scan-box */
-            background: rgba(0, 0, 0, 0.5);
-        }
-        .dark-overlay-bottom {
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            width: 100%;
-            height: 40%; /* Below scan-box */
-            background: rgba(0, 0, 0, 0.5);
-        }
-        .dark-overlay-left {
-            position: absolute;
-            top: 40%; /* Align with scan-box */
-            left: 0;
-            width: 10%; /* Left of scan-box */
-            height: 20%; /* Matches scan-box height */
-            background: rgba(0, 0, 0, 0.5);
-        }
-        .dark-overlay-right {
-            position: absolute;
-            top: 40%; /* Align with scan-box */
-            right: 0;
-            width: 10%; /* Right of scan-box */
-            height: 20%; /* Matches scan-box height */
-            background: rgba(0, 0, 0, 0.5);
+            top: 40%;
+            left: 10%;
+            z-index: 2;
+            box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.5);
         }
         .barcode-icon {
             margin: 10px 0 20px 0;
@@ -101,11 +77,22 @@
             height: 60px;
         }
         @keyframes scan-move {
-            0% { top: 40%; } /* Top of scan-box */
-            100% { top: 60%; } /* Bottom of scan-box */
+            0% { top: 40%; }
+            100% { top: 60%; }
         }
         h1 {
             margin-bottom: 0;
+        }
+        #loadingMessage {
+            color: white;
+            text-align: center;
+            padding: 20px;
+            position: absolute;
+            top: 50%;
+            left: 0;
+            right: 0;
+            transform: translateY(-50%);
+            z-index: 1;
         }
     </style>
 </head>
@@ -151,35 +138,41 @@
         </svg>
     </div>
     <div id="reader">
+        <video id="video" playsinline style="width: 100%; height: 100%;"></video>
         <div id="scanner-overlay">
-            <div class="dark-overlay-top"></div>
-            <div class="dark-overlay-bottom"></div>
-            <div class="dark-overlay-left"></div>
-            <div class="dark-overlay-right"></div>
             <div class="scanner-line"></div>
             <div class="scan-box"></div>
         </div>
+        <div id="loadingMessage">🎥 Unable to access video stream (please make sure you have a webcam enabled)</div>
     </div>
     <form id="scan_form" action="/submitbarcode" method="POST">
-        <input name="scanned_result" type="text" id="scanned_result" placeholder="Scanned code will appear here">
+        <input name="scanned_result" type="text" id="scanned_result" placeholder="Scanned code will appear here" readonly>
     </form>
     <button onclick="restartScanner()">Restart Scanner</button>
     <a href="/pictures"><button type="button">Skip</button></a>
     <button id="flashBtn" type="button" style="display:none">Turn On Flashlight</button>
     <span id="flashMsg" style="color:red; display:none; font-size:0.9em;"></span>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
+    <!-- ZXing Library -->
+    <script src="https://unpkg.com/@zxing/library@0.19.1/umd/index.min.js"></script>
+    
     <script>
-        let scannerActive = false;
-        let scanBuffer = [];
-        const REQUIRED_MATCHES = 2;
-        let track = null;
-        let imageCapture = null;
+        // DOM Elements
+        const video = document.getElementById('video');
+        const loadingMessage = document.getElementById('loadingMessage');
+        const scannedResultInput = document.getElementById('scanned_result');
+        const flashBtn = document.getElementById('flashBtn');
+        const flashMsg = document.getElementById('flashMsg');
+        
+        // ZXing variables
+        let codeReader = null;
+        let isScanning = false;
+        let stream = null;
         let torchOn = false;
+        let audioCtx = null;
+        let audioUnlocked = false;
 
         // Web Audio API beep logic
-        let audioUnlocked = false;
-        let audioCtx = null;
         function unlockAudio() {
             if (!audioUnlocked) {
                 audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -191,11 +184,12 @@
                 audioUnlocked = true;
             }
         }
+
         function playBeep() {
             if (!audioCtx) return;
-            let duration = 0.1;
-            let oscillator = audioCtx.createOscillator();
-            let gain = audioCtx.createGain();
+            const duration = 0.1;
+            const oscillator = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
             oscillator.type = 'sine';
             oscillator.frequency.value = 880;
             gain.gain.value = 0.2;
@@ -208,118 +202,361 @@
                 gain.disconnect();
             };
         }
-        window.addEventListener('touchstart', unlockAudio, { once: true });
-        window.addEventListener('mousedown', unlockAudio, { once: true });
-
-        // Flashlight and focus logic
-        function checkTorchSupport() {
-            if (!track) return;
-            const capabilities = track.getCapabilities ? track.getCapabilities() : {};
-            if (capabilities.torch) {
-                document.getElementById('flashBtn').style.display = '';
-            } else {
-                document.getElementById('flashBtn').style.display = 'none';
-                document.getElementById('flashMsg').textContent = 'Flashlight not supported on this device/browser.';
-                document.getElementById('flashMsg').style.display = '';
-            }
-        }
-        document.getElementById('flashBtn').addEventListener('click', async function() {
-            if (!track) return;
+        
+        // Initialize the barcode scanner
+        async function initScanner() {
             try {
-                torchOn = !torchOn;
-                await track.applyConstraints({
-                    advanced: [{ torch: torchOn }]
-                });
-                this.textContent = torchOn ? 'Turn Off Flashlight' : 'Turn On Flashlight';
-            } catch (e) {
-                document.getElementById('flashMsg').textContent = 'Failed to toggle flashlight.';
-                document.getElementById('flashMsg').style.display = '';
-            }
-        });
-
-        function setupTapToFocus() {
-            const reader = document.getElementById('reader');
-            reader.addEventListener('click', async function() {
-                if (!track || !imageCapture) return;
-                try {
-                    await track.applyConstraints({
-                        advanced: [{ focusMode: 'continuous' }]
-                    });
-                } catch (e) {
-                    // Not supported, do nothing
+                console.log('Initializing ZXing barcode scanner...');
+                
+                // Create code reader with optimized settings
+                codeReader = new ZXing.BrowserMultiFormatReader();
+                
+                // Set optimized hints for better performance
+                const hints = new Map();
+                hints.set(ZXing.DecodeHintType.TRY_HARDER, false);  // Disable for faster scanning
+                hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+                    ZXing.BarcodeFormat.EAN_13,
+                    //ZXing.BarcodeFormat.CODE_128,
+                    ZXing.BarcodeFormat.UPC_A,
+                    ZXing.BarcodeFormat.UPC_A,
+                    ZXing.BarcodeFormat.UPC_E
+                ]);
+                codeReader.hints = hints;
+                
+                console.log('ZXing code reader created');
+                
+                // Skip device listing as it's causing issues
+                console.log('Skipping device listing for better performance');
+                
+                // Start decoding with default camera
+                console.log('Starting barcode scanner with default camera...');
+                
+                // Reset the video element
+                if (video.srcObject) {
+                    video.srcObject.getTracks().forEach(track => track.stop());
                 }
-            });
+                video.srcObject = null;
+                
+                // Start decoding from default video device
+                await codeReader.decodeFromVideoDevice(
+                    undefined, // Let the browser choose the default camera
+                    'video',
+                    (result, error) => {
+                        if (result) {
+                            // Successful scan
+                            const code = result.getText().trim();
+                            console.log('Barcode detected:', code);
+                            
+                            // Update the input field
+                            scannedResultInput.value = code;
+                            
+                            // Play beep sound
+                            playBeep();
+                            
+                            // Visual feedback
+                            const scanBox = document.querySelector('.scan-box');
+                            if (scanBox) {
+                                scanBox.style.borderColor = '#4CAF50';
+                                scanBox.style.boxShadow = '0 0 20px #4CAF50';
+                                
+                                // Reset the border color after animation
+                                setTimeout(() => {
+                                    scanBox.style.borderColor = 'white';
+                                    scanBox.style.boxShadow = '0 0 0 100vmax rgba(0, 0, 0, 0.5)';
+                                }, 1000);
+                            }
+                            
+                            // Submit the form after a short delay
+                            console.log('Submitting form with barcode:', code);
+                            setTimeout(() => {
+                                const form = document.getElementById('scan_form');
+                                if (form) {
+                                    form.submit();
+                                } else {
+                                    console.error('Form element not found');
+                                }
+                            }, 100); // Reduced delay for faster submission
+                        }
+                        
+                        if (error && !(error instanceof ZXing.NotFoundException)) {
+                            console.error('Scan error:', error);
+                        }
+                    },
+                    {
+                        delayBetweenScanAttempts: 100,  // Faster scanning
+                        delayBetweenScanSuccess: 100,    // Shorter delay between scans
+                        tryPlayVideoTimeout: 2000       // Shorter timeout
+                    }
+                );
+                
+                console.log('Barcode scanner started successfully');
+                loadingMessage.style.display = 'none';
+                
+                // Check for torch support
+                checkTorchSupport();
+                
+            } catch (error) {
+                console.error('Error initializing scanner:', error);
+                showCameraError('Error initializing barcode scanner: ' + (error.message || 'Unknown error'));
+                
+                // Try to restart the scanner after an error
+                setTimeout(() => {
+                    console.log('Attempting to restart scanner...');
+                    initScanner();
+                }, 2000);
+            }
+        }
+        
+        // Flashlight control
+        async function toggleTorch() {
+            if (!stream) return;
+            
+            const track = stream.getVideoTracks()[0];
+            if (!track || !track.getCapabilities) {
+                flashMsg.textContent = 'Flashlight not supported on this device';
+                flashMsg.style.display = 'block';
+                return;
+            }
+            
+            try {
+                await track.applyConstraints({
+                    advanced: [{ torch: !torchOn }]
+                });
+                torchOn = !torchOn;
+                flashBtn.textContent = torchOn ? 'Turn Off Flashlight' : 'Turn On Flashlight';
+                flashMsg.style.display = 'none';
+            } catch (error) {
+                console.error('Error toggling torch:', error);
+                flashMsg.textContent = 'Failed to toggle flashlight';
+                flashMsg.style.display = 'block';
+            }
+        }
+        
+        // Check if device supports torch
+        function checkTorchSupport() {
+            if (!stream) return;
+            
+            const track = stream.getVideoTracks()[0];
+            if (!track || !track.getCapabilities) return;
+            
+            const capabilities = track.getCapabilities();
+            if (capabilities.torch) {
+                flashBtn.style.display = 'inline-block';
+                flashBtn.addEventListener('click', toggleTorch);
+            } else {
+                flashBtn.style.display = 'none';
+                flashMsg.textContent = 'Flashlight not supported on this device';
+                flashMsg.style.display = 'block';
+            }
+        }
+        
+        // Restart scanner function
+        async function restartScanner() {
+            if (codeReader) {
+                await codeReader.reset();
+            }
+            scannedResultInput.value = '';
+            initScanner();
+        }
+        
+        // Check if the browser supports mediaDevices
+        function hasGetUserMedia() {
+            return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
         }
 
-        function startScanner() {
-            if (scannerActive) return;
-            scannerActive = true;
-            Quagga.init({
-                inputStream: {
-                    name: "Live",
-                    type: "LiveStream",
-                    target: document.querySelector('#reader'),
-                    constraints: {
-                        facingMode: "environment",
-                        width: { ideal: 640 },
-                        height: { ideal: 480 }
+        // Check if the browser supports the permissions API
+        async function checkCameraPermission() {
+            if (!navigator.permissions) return null;
+            try {
+                const permissionStatus = await navigator.permissions.query({ name: 'camera' });
+                return permissionStatus.state;
+            } catch (e) {
+                console.warn('Permissions API not supported:', e);
+                return null;
+            }
+        }
+
+        // Show a user-friendly error message
+        function showCameraError(message) {
+            console.error('Camera Error:', message);
+            loadingMessage.textContent = message;
+            loadingMessage.style.color = '#ff4444';
+            
+            // Add a retry button
+            const retryButton = document.createElement('button');
+            retryButton.textContent = 'Retry';
+            retryButton.style.marginTop = '10px';
+            retryButton.style.padding = '8px 16px';
+            retryButton.onclick = initializeCamera;
+            
+            // Clear previous content and add new message with retry button
+            loadingMessage.innerHTML = '';
+            loadingMessage.appendChild(document.createTextNode(message));
+            loadingMessage.appendChild(document.createElement('br'));
+            loadingMessage.appendChild(retryButton);
+        }
+
+        // Debug function to log camera capabilities
+        async function logCameraCapabilities(track) {
+            if (!track || !track.getCapabilities) return;
+            
+            try {
+                const capabilities = track.getCapabilities();
+                const settings = track.getSettings();
+                console.log('Camera Capabilities:', capabilities);
+                console.log('Camera Settings:', settings);
+                
+                // Log supported constraints
+                const supportedConstraints = navigator.mediaDevices.getSupportedConstraints();
+                console.log('Supported Constraints:', supportedConstraints);
+                
+            } catch (e) {
+                console.warn('Could not get camera capabilities:', e);
+            }
+        }
+
+        // Initialize camera with appropriate constraints
+        async function initializeCamera() {
+            console.log('Starting camera initialization...');
+            loadingMessage.textContent = 'Initializing camera...';
+            loadingMessage.style.color = 'white';
+            
+            if (!hasGetUserMedia()) {
+                const errorMsg = 'Your browser does not support camera access. Please try a modern browser like Chrome or Firefox.';
+                console.error(errorMsg);
+                showCameraError(errorMsg);
+                return;
+            }
+
+            // Reset any existing stream
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                stream = null;
+            }
+
+            try {
+                console.log('Requesting camera access...');
+                
+                // First try with basic constraints
+                const constraints = {
+                    video: {
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 },
+                        facingMode: 'environment'
                     },
-                },
-                decoder: {
-                    readers: ["upc_reader", "upc_e_reader", "ean_reader", "ean_8_reader"]
-                },
-                locate: true
-            }, function (err) {
-                if (err) {
-                    console.error(err);
-                    scannerActive = false;
-                    return;
+                    audio: false
+                };
+
+                console.log('Trying with constraints:', JSON.stringify(constraints));
+                
+                // Request camera access
+                const mediaStream = await navigator.mediaDevices.getUserMedia(constraints)
+                    .catch(async (err) => {
+                        console.warn('Error with ideal constraints, trying more permissive...', err);
+                        // Try with minimal constraints
+                        return navigator.mediaDevices.getUserMedia({
+                            video: true,
+                            audio: false
+                        });
+                    });
+
+                console.log('Got media stream:', mediaStream);
+                
+                // Check if we got a video track
+                const videoTracks = mediaStream.getVideoTracks();
+                if (videoTracks.length === 0) {
+                    throw new Error('No video track found in the stream');
                 }
-                Quagga.start();
-                setTimeout(() => {
-                    let stream = Quagga.cameraAccess && Quagga.cameraAccess.getActiveStream && Quagga.cameraAccess.getActiveStream();
-                    if (stream && stream.getVideoTracks) {
-                        track = stream.getVideoTracks()[0];
-                        try {
-                            imageCapture = new window.ImageCapture(track);
-                        } catch (e) {
-                            imageCapture = null;
-                        }
-                        checkTorchSupport();
+
+                // Log camera capabilities
+                logCameraCapabilities(videoTracks[0]);
+                
+                // Set up the video element
+                stream = mediaStream;
+                video.srcObject = stream;
+                
+                // Handle video play promise
+                console.log('Attempting to play video...');
+                try {
+                    await video.play();
+                    console.log('Video is playing');
+                } catch (playError) {
+                    console.error('Error playing video:', playError);
+                    // Try again with autoplay attribute
+                    video.setAttribute('autoplay', '');
+                    video.setAttribute('muted', '');
+                    video.setAttribute('playsinline', '');
+                    try {
+                        await video.play();
+                        console.log('Video is playing after retry');
+                    } catch (retryError) {
+                        console.error('Still could not play video:', retryError);
+                        throw new Error('Could not start the camera feed: ' + (retryError.message || 'Unknown error'));
+                    }
+                }
+
+                // Show that camera is ready
+                console.log('Camera is ready, initializing scanner...');
+                loadingMessage.textContent = 'Ready to scan...';
+                
+                // Small delay before initializing scanner to ensure video is displayed
+                setTimeout(async () => {
+                    try {
+                        await initScanner();
+                        loadingMessage.style.display = 'none';
+                    } catch (scannerError) {
+                        console.error('Scanner initialization failed:', scannerError);
+                        showCameraError('Scanner error: ' + (scannerError.message || 'Unknown error'));
                     }
                 }, 500);
-                setupTapToFocus();
-            });
-
-            Quagga.onDetected(function (result) {
-                let code = result.codeResult.code;
-                if (!code) return;
-                code = code.trim().replace(/^0+/, '');
-                if (scanBuffer.length > 0 && scanBuffer[scanBuffer.length - 1] !== code) {
-                    scanBuffer = [];
+                
+            } catch (err) {
+                console.error('Camera initialization failed:', err);
+                let errorMessage = 'Failed to access the camera. ';
+                
+                if (err.name === 'NotAllowedError') {
+                    errorMessage = 'Camera access was denied. Please allow camera access in your browser settings and refresh the page.';
+                } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+                    errorMessage = 'No camera found on this device.';
+                } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
+                    errorMessage = 'The camera is already in use by another application.';
+                } else if (err.name === 'OverconstrainedError' || err.name === 'ConstraintNotSatisfiedError') {
+                    errorMessage = 'The requested camera configuration is not supported. ' + (err.message || '');
+                } else if (err.name === 'NotSupportedError') {
+                    errorMessage = 'Camera access is not supported in this browser. Try Chrome or Firefox on Android, or Safari on iOS.';
+                } else {
+                    errorMessage += 'Error: ' + (err.message || 'Please try again or check your browser settings.');
                 }
-                scanBuffer.push(code);
-                if (scanBuffer.length > REQUIRED_MATCHES) scanBuffer.shift();
-                if (scanBuffer.length === REQUIRED_MATCHES && scanBuffer.every(c => c === code)) {
-                    document.getElementById("scanned_result").value = code;
-                    Quagga.stop();
-                    scannerActive = false;
-                    playBeep();
-                    document.getElementById("scan_form").submit();
+                
+                showCameraError(errorMessage);
+                
+                // Clean up if there was an error after getting the stream
+                if (stream) {
+                    stream.getTracks().forEach(track => track.stop());
+                    stream = null;
                 }
-            });
-            Quagga.onProcessed(function (result) {});
-        }
-
-        function restartScanner() {
-            if (scannerActive) {
-                Quagga.stop();
-                scannerActive = false;
             }
-            startScanner();
         }
 
-        window.addEventListener('load', startScanner);
+        // Initialize everything when the page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            // Unlock audio on user interaction
+            window.addEventListener('touchstart', unlockAudio, { once: true });
+            window.addEventListener('mousedown', unlockAudio, { once: true });
+            
+            // Add a small delay to ensure the DOM is fully loaded
+            setTimeout(initializeCamera, 100);
+        });
+        
+        // Clean up on page unload
+        window.addEventListener('unload', () => {
+            if (codeReader) {
+                codeReader.reset();
+            }
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+            }
+        });
     </script>
 </body>
 </html>
