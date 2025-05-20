@@ -10,8 +10,8 @@ import xml.dom.minidom as minidom
 from pyasn1_modules.rfc5990 import NullParms
 
 from inventory import find_item  # adjust this to match your actual import
-from DBmanager import myDataBase, addToRack
-from BOLextractor import process_bol_excel  # Add this import for the processing function
+from DBmanager import ebayStoreDB, addToRack
+from BOLextractor import process_bol_excel
 
 oldAuth_token = 'v^1.1#i^1#I^3#f^0#p^3#r^1#t^Ul4xMF82OkYwRjY2Q0VFOUY1QUM0MkEyMjkyMDY5Q0E5NjY0NjIxXzFfMSNFXjI2MA=='
 
@@ -197,8 +197,6 @@ def show_inventory():
 
 
 # inventory flow variables for database injection
-
-from speakToDb import addToRack
 
 same_position = None
 position_code = None
@@ -397,7 +395,7 @@ def orders():
 
 
             # add to database
-            myDataBase(title = title.text if title is not None else "N/A",
+            ebayStoreDB(title = title.text if title is not None else "N/A",
                        item_id = item_id.text if item_id is not None else "N/A",
                        sku = sku.text if sku is not None else "None",
                        price = price.text if price is not None else "N/A",
@@ -440,7 +438,7 @@ def orders():
             high_res_url = get_high_res_image_url(picture_url.text) if picture_url is not None else "No image"
 
             # add to database
-            myDataBase(title=title.text if title is not None else "N/A",
+            ebayStoreDB(title=title.text if title is not None else "N/A",
                        item_id=item_id.text if item_id is not None else "N/A",
                        sku=sku.text if sku is not None else "None",
                        price=price.text if price is not None else "N/A",
@@ -480,7 +478,7 @@ def orders():
             high_res_url = get_high_res_image_url(picture_url.text) if picture_url is not None else "No image"
 
             # add to database
-            myDataBase(title=title.text if title is not None else "N/A",
+            ebayStoreDB(title=title.text if title is not None else "N/A",
                        item_id=item_id.text if item_id is not None else "N/A",
                        sku=sku.text if sku is not None else "None",
                        price=price.text if price is not None else "N/A",

@@ -1,11 +1,11 @@
 import pandas as pd
+from DBmanager import insert_bol_items
 import io
 import os
-from DBmanager import process_bol_excel_db  # Move DB logic to DBmanager
 
 def process_bol_excel(file, import_date):
     """
-    Process the uploaded Excel file and import date, extract required columns, check for duplicates by UPC, and insert into SQLite DB (ebayStoreDB).
+    Process the uploaded Excel file and import date, extract required columns, check for duplicates by UPC, and insert into SQLite DB (bol.db).
     Returns: {'success': True} or {'success': False, 'error': '...'}
     """
     try:
@@ -17,19 +17,17 @@ def process_bol_excel(file, import_date):
         filename = getattr(file, 'filename', None) or getattr(file, 'name', None) or ''
         ext = os.path.splitext(filename)[-1].lower()
         try:
-            if ext == '.xls':
-                return {'success': False, 'error': 'Legacy .xls files are not supported. Please convert your file to .xlsx and try again.'}
-            elif ext == '.xlsx':
+            if ext == '.xlsx':
                 df = pd.read_excel(in_memory_file, engine='openpyxl')
             else:
-                return {'success': False, 'error': 'Unsupported file extension: ' + ext}
+                return {'success': False, 'error': 'Only .xlsx files are supported.'}
         except Exception as e:
-            return {'success': False, 'error': f'Failed to read Excel file: {str(e)}. First bytes: {file_bytes[:32]}'}
+            return {'success': False, 'error': f'Failed to read Excel file: {str(e)}'}
         required_columns = ['UPC', 'ITEM DESCRIPTION', 'CLIENT COST', 'TOTAL CLIENT COST', 'IMAGE', 'LOT #', 'BOL #']
         for col in required_columns:
             if col not in df.columns:
                 return {'success': False, 'error': f'Missing required column: {col}'}
-        # Move DB logic to DBmanager
-        return process_bol_excel_db(df, import_date)
+        # Use DBmanager's insert_bol_items
+        return insert_bol_items(df, import_date)
     except Exception as e:
         return {'success': False, 'error': str(e)}
