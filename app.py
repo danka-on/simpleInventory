@@ -11,6 +11,7 @@ from pyasn1_modules.rfc5990 import NullParms
 
 from inventory import find_item  # adjust this to match your actual import
 from speakToDb import myDataBase
+from BOLextractor import process_bol_excel  # Add this import for the processing function
 
 oldAuth_token = 'v^1.1#i^1#I^3#f^0#p^3#r^1#t^Ul4xMF82OkYwRjY2Q0VFOUY1QUM0MkEyMjkyMDY5Q0E5NjY0NjIxXzFfMSNFXjI2MA=='
 
@@ -30,6 +31,12 @@ headers = {
 }
 
 app = Flask(__name__)
+
+
+
+@app.route('/extractor')
+def extractor():
+    return render_template('extractor.html')
 
 @app.route("/token-status")
 def token_status():
@@ -535,6 +542,22 @@ def start_tunnel():
                 break
     except Exception as e:
         print("❌ Tunnel metrics not found:", e)
+
+
+@app.route('/extractor/upload', methods=['POST'])
+def extractor_upload():
+    if 'excel_file' not in request.files or 'import_date' not in request.form:
+        return jsonify({'success': False, 'error': 'Missing file or date.'})
+    file = request.files['excel_file']
+    import_date = request.form['import_date']
+    try:
+        result = process_bol_excel(file, import_date)
+        if result.get('success'):
+            return jsonify({'success': True})
+        else:
+            return jsonify({'success': False, 'error': result.get('error', 'Unknown error')})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
 
 
 if __name__ == "__main__":

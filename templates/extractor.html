@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+</head>
+<body>
+    <h2>BOL Excel Extractor</h2>
+    <form id="extractor-form" enctype="multipart/form-data" method="post" action="/extractor/upload">
+        <label for="excel-file">Upload Excel File:</label>
+        <input type="file" id="excel-file" name="excel_file" accept=".xlsx,.xls" required><br><br>
+        <label for="import-date">Date:</label>
+        <input type="date" id="import-date" name="import_date" required><br><br>
+        <button type="submit">Upload</button>
+    </form>
+    <div id="message"></div>
+    <script>
+        // Drag and drop support
+        const form = document.getElementById('extractor-form');
+        const fileInput = document.getElementById('excel-file');
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            const formData = new FormData(form);
+            fetch('/extractor/upload', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('message').innerText = data.success ? 'Upload successful!' : ('Error: ' + data.error);
+            })
+            .catch(err => {
+                document.getElementById('message').innerText = 'Error: ' + err;
+            });
+        });
+        // Optional: drag-and-drop
+        form.addEventListener('dragover', function(e) {
+            e.preventDefault();
+            form.style.background = '#e0e0e0';
+        });
+        form.addEventListener('dragleave', function(e) {
+            e.preventDefault();
+            form.style.background = '';
+        });
+        form.addEventListener('drop', function(e) {
+            e.preventDefault();
+            form.style.background = '';
+            if (e.dataTransfer.files.length) {
+                fileInput.files = e.dataTransfer.files;
+            }
+        });
+    </script>
+</body>
+</html>
