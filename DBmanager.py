@@ -40,7 +40,8 @@ def createEbayStoreDB():
                 URL TEXT,
                 List_State TEXT,
                 Sold_Date TEXT,
-                List_Date TEXT
+                List_Date TEXT,
+                isFound TEXT
             )
         ''')
         print("Table created successfully")
@@ -82,7 +83,8 @@ def ebayStoreDB(title, item_id, sku = None, price = None, quantity = None, image
         URL TEXT,
         List_State TEXT,
         Sold_Date TEXT,
-        List_Date TEXT
+        List_Date TEXT,
+        isFound TEXT 
     )''')
     conn.commit()
     cursor.execute("SELECT 1 FROM INVENTORY WHERE ItemID = ?", (item_id,))
