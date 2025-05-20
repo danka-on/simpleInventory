@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Manual Matcher</title>
+    <style>
+        body { font-family: sans-serif; margin: 0; padding: 0; background: #f7f7f7; }
+        .container { display: flex; justify-content: space-between; padding: 20px; }
+        .column { width: 40%; background: #fff; border-radius: 8px; box-shadow: 0 2px 8px #0001; padding: 10px; min-height: 500px; }
+        .header { font-size: 1.2em; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between; }
+        .gallery { display: flex; flex-wrap: wrap; gap: 10px; min-height: 120px; }
+        .card { width: 110px; border: 2px solid #ccc; border-radius: 6px; background: #fafafa; cursor: pointer; padding: 5px; text-align: center; transition: border 0.2s, box-shadow 0.2s, background 0.2s; }
+        .card.selected-ebay { border: 2px solid #28a745; background: #eaffea; }
+        .card.selected-bol { border: 2px solid #dc3545; background: #ffeaea; }
+        .card img { width: 90px; height: 90px; object-fit: contain; border-radius: 4px; background: #eee; }
+        .card .title { font-size: 0.9em; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .search-box { width: 100%; margin-bottom: 10px; padding: 6px; border-radius: 4px; border: 1px solid #ccc; }
+        .pagination { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+        .arrow-btn { background: #007bff; color: #fff; border: none; border-radius: 4px; padding: 4px 10px; font-size: 1.1em; cursor: pointer; }
+        .arrow-btn:disabled { background: #aaa; cursor: not-allowed; }
+        .show-x { margin-left: 10px; }
+        .progress { margin: 10px 0; font-size: 1em; text-align: center; }
+        .center-controls { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 10%; min-width: 120px; }
+        #match-btn, #undo-btn { width: 100px; margin: 10px 0; padding: 10px 0; font-size: 1.1em; border: none; border-radius: 6px; cursor: pointer; opacity: 0.95; }
+        #match-btn { background: #28a745; color: #fff; }
+        #match-btn:disabled { background: #b7e6c2; color: #fff; cursor: not-allowed; }
+        #undo-btn { background: #dc3545; color: #fff; }
+        #undo-btn:disabled { background: #f5b7b7; color: #fff; cursor: not-allowed; }
+        .matched-count { color: #28a745; font-weight: bold; }
+        .modal-bg { display: none; position: fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.6); z-index: 1000; align-items: center; justify-content: center; }
+        .modal { background: #fff; border-radius: 8px; padding: 20px; max-width: 400px; box-shadow: 0 2px 16px #0003; }
+        .modal img { width: 100%; max-height: 250px; object-fit: contain; }
+        .modal .desc { margin-top: 10px; font-size: 1em; }
+        .close-modal { margin-top: 10px; background: #007bff; color: #fff; border: none; border-radius: 4px; padding: 6px 18px; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- eBay column LEFT -->
+        <div class="column" id="ebay-col">
+            <div class="header">
+                eBay Items
+                <span class="show-x">Show <input type="number" id="ebay-show-x" value="10" min="1" max="100" style="width:40px;"> items</span>
+            </div>
+            <input class="search-box" id="ebay-search" placeholder="Search eBay...">
+            <div class="gallery" id="ebay-gallery"></div>
+            <div class="pagination">
+                <button class="arrow-btn" id="ebay-prev">&#8592;</button>
+                <span id="ebay-page-info"></span>
+                <button class="arrow-btn" id="ebay-next">&#8594;</button>
+            </div>
+        </div>
+        <!-- Center controls -->
+        <div class="center-controls">
+            <button id="match-btn" disabled>Match</button>
+            <button id="undo-btn" disabled>Undo</button>
+            <div class="progress">
+                Matched: <span class="matched-count" id="matched-count">0</span>
+            </div>
+        </div>
+        <!-- BOL column RIGHT -->
+        <div class="column" id="bol-col">
+            <div class="header">
+                BOL Items
+                <span class="show-x">Show <input type="number" id="bol-show-x" value="10" min="1" max="100" style="width:40px;"> items</span>
+            </div>
+            <input class="search-box" id="bol-search" placeholder="Search BOL...">
+            <div class="gallery" id="bol-gallery"></div>
+            <div class="pagination">
+                <button class="arrow-btn" id="bol-prev">&#8592;</button>
+                <span id="bol-page-info"></span>
+                <button class="arrow-btn" id="bol-next">&#8594;</button>
+            </div>
+        </div>
+    </div>
+    <!-- Modal for details -->
+    <div class="modal-bg" id="modal-bg">
+        <div class="modal" id="modal">
+            <img id="modal-img" src="" alt="">
+            <div class="desc" id="modal-desc"></div>
+            <button class="close-modal" onclick="closeModal()">Close</button>
+        </div>
+    </div>
+    <script>
+    // Data from Flask
+    const ebayItems = {{ ebay_items|tojson | safe }};
+    const bolItems = {{ bol_items|tojson | safe }};
+    let matchedCount = 0;
+    // Pagination state
+    let ebayPage = 1, bolPage = 1;
+    let ebayShowX = 10, bolShowX = 10;
+    let ebayFilter = '', bolFilter = '';
+    let selected = {ebay: null, bol: null};
+    let matchHistory = [];
+
+    function renderGallery(items, page, showX, filter, galleryId, type) {
+        const gallery = document.getElementById(galleryId);
+        let filtered = items.filter(item => item.title.toLowerCase().includes(filter));
+        const totalPages = Math.ceil(filtered.length / showX) || 1;
+        if (page > totalPages) page = totalPages;
+        const start = (page - 1) * showX;
+        const end = start + showX;
+        gallery.innerHTML = '';
+        filtered.slice(start, end).forEach(item => {
+            const card = document.createElement('div');
+            card.className = 'card';
+            card.dataset.id = item.id;
+            card.dataset.title = item.title;
+            card.dataset.image = item.image;
+            card.dataset.desc = item.title;
+            card.onclick = () => selectCard(card, type);
+            card.ondblclick = e => { e.stopPropagation(); showModal(item.image, item.title); };
+            if (selected[type] && selected[type].dataset.id == item.id) {
+                card.classList.add(type === 'ebay' ? 'selected-ebay' : 'selected-bol');
+            }
+            const img = document.createElement('img');
+            img.src = item.image;
+            img.onerror = () => { img.src = 'https://via.placeholder.com/90x90?text=No+Image'; };
+            card.appendChild(img);
+            const titleDiv = document.createElement('div');
+            titleDiv.className = 'title';
+            titleDiv.textContent = item.title;
+            card.appendChild(titleDiv);
+            gallery.appendChild(card);
+        });
+        document.getElementById(galleryId.replace('gallery', 'page-info')).textContent = `Page ${page} of ${totalPages}`;
+        document.getElementById(galleryId.replace('gallery', 'prev')).disabled = (page <= 1);
+        document.getElementById(galleryId.replace('gallery', 'next')).disabled = (page >= totalPages);
+    }
+
+    function updateGalleries() {
+        renderGallery(ebayItems, ebayPage, ebayShowX, ebayFilter, 'ebay-gallery', 'ebay');
+        renderGallery(bolItems, bolPage, bolShowX, bolFilter, 'bol-gallery', 'bol');
+    }
+
+    // Pagination controls
+    document.getElementById('ebay-prev').onclick = () => { if (ebayPage > 1) { ebayPage--; updateGalleries(); } };
+    document.getElementById('ebay-next').onclick = () => { ebayPage++; updateGalleries(); };
+    document.getElementById('bol-prev').onclick = () => { if (bolPage > 1) { bolPage--; updateGalleries(); } };
+    document.getElementById('bol-next').onclick = () => { bolPage++; updateGalleries(); };
+    document.getElementById('ebay-show-x').onchange = e => { ebayShowX = parseInt(e.target.value)||10; ebayPage = 1; updateGalleries(); };
+    document.getElementById('bol-show-x').onchange = e => { bolShowX = parseInt(e.target.value)||10; bolPage = 1; updateGalleries(); };
+    document.getElementById('ebay-search').oninput = e => { ebayFilter = e.target.value.toLowerCase(); ebayPage = 1; updateGalleries(); };
+    document.getElementById('bol-search').oninput = e => { bolFilter = e.target.value.toLowerCase(); bolPage = 1; updateGalleries(); };
+
+    // Card selection logic
+    function selectCard(card, type) {
+        // Deselect previous in this window
+        if (selected[type]) selected[type].classList.remove(type === 'ebay' ? 'selected-ebay' : 'selected-bol');
+        if (selected[type] && selected[type].dataset.id == card.dataset.id) {
+            selected[type] = null;
+        } else {
+            selected[type] = card;
+            card.classList.add(type === 'ebay' ? 'selected-ebay' : 'selected-bol');
+        }
+        updateMatchButton();
+    }
+
+    function updateMatchButton() {
+        const matchBtn = document.getElementById('match-btn');
+        matchBtn.disabled = !(selected.ebay && selected.bol);
+    }
+
+    // Modal for details
+    function showModal(img, desc) {
+        document.getElementById('modal-img').src = img;
+        document.getElementById('modal-desc').textContent = desc;
+        document.getElementById('modal-bg').style.display = 'flex';
+    }
+    function closeModal() {
+        document.getElementById('modal-bg').style.display = 'none';
+    }
+
+    // Match button
+    document.getElementById('match-btn').onclick = function() {
+        if (!(selected.ebay && selected.bol)) return;
+        const ebay_id = selected.ebay.dataset.id;
+        const bol_id = selected.bol.dataset.id;
+        fetch('/match', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({bol_id, ebay_id})
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                matchedCount++;
+                document.getElementById('matched-count').textContent = matchedCount;
+                matchHistory.push({ebay: selected.ebay, bol: selected.bol});
+                // Remove matched from UI
+                selected.ebay.style.display = 'none';
+                selected.bol.style.display = 'none';
+                selected = {ebay: null, bol: null};
+                updateMatchButton();
+            } else {
+                alert('Failed to match.');
+            }
+        });
+    };
+
+    // Undo button
+    document.getElementById('undo-btn').onclick = function() {
+        if (matchHistory.length === 0) return;
+        const last = matchHistory.pop();
+        if (last.ebay) last.ebay.style.display = '';
+        if (last.bol) last.bol.style.display = '';
+        matchedCount = Math.max(0, matchedCount - 1);
+        document.getElementById('matched-count').textContent = matchedCount;
+        selected = {ebay: null, bol: null};
+        updateMatchButton();
+    };
+
+    // Modal close on background click
+    document.getElementById('modal-bg').onclick = function(e) {
+        if (e.target === this) closeModal();
+    };
+
+    // Initial render
+    updateGalleries();
+    </script>
+</body>
+</html>
