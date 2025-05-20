@@ -10,7 +10,7 @@ import xml.dom.minidom as minidom
 from pyasn1_modules.rfc5990 import NullParms
 
 from inventory import find_item  # adjust this to match your actual import
-from speakToDb import myDataBase
+from DBmanager import myDataBase, addToRack
 from BOLextractor import process_bol_excel  # Add this import for the processing function
 
 oldAuth_token = 'v^1.1#i^1#I^3#f^0#p^3#r^1#t^Ul4xMF82OkYwRjY2Q0VFOUY1QUM0MkEyMjkyMDY5Q0E5NjY0NjIxXzFfMSNFXjI2MA=='
@@ -20,6 +20,7 @@ CLIENT_ID = os.getenv("EBAY_CLIENT_ID")
 CLIENT_SECRET = os.getenv("EBAY_CLIENT_SECRET")
 RUNAME = os.getenv("EBAY_RUNAME")
 app = Flask(__name__)
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16 MB limit for uploads
 #for ebay api calls
 
 from token_manager import get_access_token, load_tokens, is_expired
@@ -547,17 +548,16 @@ def start_tunnel():
 @app.route('/extractor/upload', methods=['POST'])
 def extractor_upload():
     if 'excel_file' not in request.files or 'import_date' not in request.form:
-        return jsonify({'success': False, 'error': 'Missing file or date.'})
+        return jsonify({'success': False, 'error': 'Missing file or import date.'})
     file = request.files['excel_file']
     import_date = request.form['import_date']
-    try:
+    if file.filename == '':
+        return jsonify({'success': False, 'error': 'No file selected.'})
+    if file:
+        print('DEBUG: Received file:', file.filename, 'Content-Type:', file.content_type, 'Size:', file.content_length)
         result = process_bol_excel(file, import_date)
-        if result.get('success'):
-            return jsonify({'success': True})
-        else:
-            return jsonify({'success': False, 'error': result.get('error', 'Unknown error')})
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
+        return jsonify(result)
+    return jsonify({'success': False, 'error': 'Unknown error during file upload.'})
 
 
 if __name__ == "__main__":
