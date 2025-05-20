@@ -177,7 +177,7 @@ def show_inventory():
         sort = 'ID'
     if dir not in ['asc','desc']:
         dir = 'asc'
-    conn = sqlite3.connect("database.db")
+    conn = sqlite3.connect("ebayStore.db.db")
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     sql = "SELECT * FROM INVENTORY WHERE 1=1"
