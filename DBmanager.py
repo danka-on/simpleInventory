@@ -155,4 +155,52 @@ def insert_bol_items(df, import_date):
     except Exception as e:
         return {'success': False, 'error': str(e)}
 
+def store_ebay_order(order):
+    print("hello this is store_ebay_order we received", order)
+    try:
+        conn = sqlite3.connect('sold.db')
+        cur = conn.cursor()
+    except sqlite3.Error as e:
+        print("Failed to connect to sold.db:", e)
+    try:
+        cur.execute('''CREATE TABLE IF NOT EXISTS orders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_id TEXT,
+            item_id TEXT,
+            title TEXT,
+            quantity INTEGER,
+            price REAL,
+            checkout_status TEXT,
+            shipping_name TEXT,
+            shipping_street1 TEXT,
+            shipping_street2 TEXT,
+            shipping_city TEXT,
+            shipping_state TEXT,
+            shipping_postal_code TEXT,
+            shipping_country TEXT,
+            paid_time TEXT,
+            shipped_time TEXT,
+            seller_fee REAL,
+            taxes REAL,
+            fees REAL,
+            isHandled TEXT,
+            isHandledDate TEXT
+        )''')
+        cur.execute('''INSERT INTO orders (
+            order_id, item_id, title, quantity, price, checkout_status,
+            shipping_name, shipping_street1, shipping_street2, shipping_city, shipping_state, shipping_postal_code, shipping_country,
+            paid_time, shipped_time, seller_fee, taxes, fees, isHandled, isHandledDate
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+            (
+                order.get('order_id'), order.get('item_id'), order.get('title'), order.get('quantity'), order.get('price'), order.get('checkout_status'),
+                order.get('shipping_name'), order.get('shipping_street1'), order.get('shipping_street2'), order.get('shipping_city'), order.get('shipping_state'), order.get('shipping_postal_code'), order.get('shipping_country'),
+                order.get('paid_time'), order.get('shipped_time'), order.get('seller_fee'), order.get('taxes'), order.get('fees'),
+                order.get('isHandled'), order.get('isHandledDate')
+            )
+        )
+        conn.commit()
+        conn.close()
+    except sqlite3.Error as e:
+        print("something went wrong", e)
+
 # No top-level code or __main__ block

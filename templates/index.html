@@ -69,6 +69,28 @@
     <button type="submit">Manual Matcher</button>
 </form>
 
+<label for="sold-days">Days to fetch:</label>
+<input type="number" id="sold-days" value="90" min="1" max="120" style="width:60px;">
+<button id="get-sold-orders-btn">Get Sold Orders</button>
+<script>
+document.getElementById('get-sold-orders-btn').onclick = function() {
+    const days = parseInt(document.getElementById('sold-days').value) || 90;
+    fetch('/get-sold-orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ days })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            alert('Sold orders fetched and stored!');
+        } else {
+            alert('Failed to fetch sold orders: ' + (data.error || 'Unknown error'));
+        }
+    });
+};
+</script>
+
 </body>
 </html>
 

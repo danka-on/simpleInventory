@@ -10,7 +10,7 @@ import xml.dom.minidom as minidom
 
 
 from inventory import find_item  # adjust this to match your actual import
-from DBmanager import ebayStoreDB, addToRack
+from DBmanager import ebayStoreDB, addToRack, store_ebay_order
 from BOLextractor import process_bol_excel
 from manualMatcher import get_bol_items, get_ebay_items, fuse_and_store_match
 
@@ -292,7 +292,7 @@ def toggle():
 
 
 
-import requests
+
 
 def get_high_res_image_url(url):
     if url and "s-l" in url:
@@ -514,10 +514,122 @@ def orders():
 
 
 
+def get_ebay_orders(days=90):
+    print(f"Getting eBay orders for the last {days} days...")
+    # Trading API endpoint
+    url = "https://api.ebay.com/ws/api.dll"
+    headers = {
+        "X-EBAY-API-SITEID": "0",
+        "X-EBAY-API-COMPATIBILITY-LEVEL": "967",
+        "X-EBAY-API-CALL-NAME": "GetOrders",
+        "X-EBAY-API-DEV-NAME": os.getenv("EBAY_PROD_DEV_ID"),
+        "X-EBAY-API-APP-NAME": os.getenv("EBAY_PROD_APP_ID"),
+        "X-EBAY-API-CERT-NAME": os.getenv("EBAY_PROD_CERT_ID"),
+        "Content-Type": "text/xml"
+    }
+    xml_payload = f'''
+    <?xml version="1.0" encoding="utf-8"?>
+    <GetOrdersRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+      <RequesterCredentials>
+        <eBayAuthToken>{os.getenv("EBAY_OLDAUTH_TOKEN")}</eBayAuthToken>
+      </RequesterCredentials>
+      <OrderRole>Seller</OrderRole>
+      <OrderStatus>All</OrderStatus>
+      <NumberOfDays>{days}</NumberOfDays>
+      <Pagination>
+        <EntriesPerPage>100</EntriesPerPage>
+        <PageNumber>1</PageNumber>
+      </Pagination>
+    </GetOrdersRequest>
+    '''
 
 
+    response = requests.post(url, headers=headers, data=xml_payload, timeout=30)
+    root = ET.fromstring(response.text)
+    print(root)
+    '''
+    rough_string = ET.tostring(root, encoding="utf-8")
+    # Parse that into a minidom object
+    dom = minidom.parseString(rough_string)
+    # Pretty print
+    pretty_xml = dom.toprettyxml(indent="  ")
+    print(pretty_xml)
+    '''
 
-
+    ns = {'ebay': 'urn:ebay:apis:eBLBaseComponents'}
+    print("right before for loop")
+    for order in root.findall('.//ebay:Order', ns):
+        print("inside first for loop")
+        order_id = order.find('ebay:OrderID', ns)
+        paid_time = order.find('ebay:PaidTime', ns)
+        shipped_time = order.find('ebay:ShippedTime', ns)
+        checkout_status = order.find('.//ebay:CheckoutStatus/ebay:Status', ns)
+        shipping = order.find('.//ebay:ShippingAddress', ns)
+        shipping_name = shipping.find('ebay:Name', ns) if shipping is not None else None
+        shipping_street1 = shipping.find('ebay:Street1', ns) if shipping is not None else None
+        shipping_street2 = shipping.find('ebay:Street2', ns) if shipping is not None else None
+        shipping_city = shipping.find('ebay:CityName', ns) if shipping is not None else None
+        shipping_state = shipping.find('ebay:StateOrProvince', ns) if shipping is not None else None
+        shipping_postal_code = shipping.find('ebay:PostalCode', ns) if shipping is not None else None
+        shipping_country = shipping.find('ebay:Country', ns) if shipping is not None else None
+        print("inside first for loop end")
+        try:
+            for transaction in order.findall('.//ebay:Transaction', ns):
+                print("Storing eBay order transaction...")
+                item = transaction.find('ebay:Item', ns)
+                item_id = item.find('ebay:ItemID', ns) if item is not None else None
+                title = item.find('ebay:Title', ns) if item is not None else None
+                quantity = transaction.find('ebay:QuantityPurchased', ns)
+                price = transaction.find('.//ebay:TransactionPrice', ns)
+                seller_fee = transaction.find('.//ebay:FinalValueFee', ns)
+                taxes = transaction.find('.//ebay:Taxes/ebay:TotalTaxAmount', ns)
+                fees = transaction.find('.//ebay:TransactionSiteID', ns)  # Placeholder, adjust as needed
+                store_ebay_order({
+                    'order_id': order_id.text if order_id is not None else None,
+                    'item_id': item_id.text if item_id is not None else None,
+                    'title': title.text if title is not None else None,
+                    'quantity': int(quantity.text) if quantity is not None and quantity.text.isdigit() else None,
+                    'price': float(price.text) if price is not None and price.text.replace('.', '', 1).isdigit() else None,
+                    'checkout_status': checkout_status.text if checkout_status is not None else None,
+                    'shipping_name': shipping_name.text if shipping_name is not None else None,
+                    'shipping_street1': shipping_street1.text if shipping_street1 is not None else None,
+                    'shipping_street2': shipping_street2.text if shipping_street2 is not None else None,
+                    'shipping_city': shipping_city.text if shipping_city is not None else None,
+                    'shipping_state': shipping_state.text if shipping_state is not None else None,
+                    'shipping_postal_code': shipping_postal_code.text if shipping_postal_code is not None else None,
+                    'shipping_country': shipping_country.text if shipping_country is not None else None,
+                    'paid_time': paid_time.text if paid_time is not None else None,
+                    'shipped_time': shipped_time.text if shipped_time is not None else None,
+                    'seller_fee': float(seller_fee.text) if seller_fee is not None and seller_fee.text.replace('.', '', 1).isdigit() else None,
+                    'taxes': float(taxes.text) if taxes is not None and taxes.text.replace('.', '', 1).isdigit() else None,
+                    'fees': fees.text if fees is not None else None,
+                    'isHandled': '',
+                    'isHandledDate': ''
+                })
+                print("Transaction stored:", {
+                    'order_id': order_id.text if order_id is not None else None,
+                    'item_id': item_id.text if item_id is not None else None,
+                    'title': title.text if title is not None else None,
+                    'quantity': int(quantity.text) if quantity is not None and quantity.text.isdigit() else None,
+                    'price': float(price.text) if price is not None and price.text.replace('.', '', 1).isdigit() else None,
+                    'checkout_status': checkout_status.text if checkout_status is not None else None,
+                    'shipping_name': shipping_name.text if shipping_name is not None else None,
+                    'shipping_street1': shipping_street1.text if shipping_street1 is not None else None,
+                    'shipping_street2': shipping_street2.text if shipping_street2 is not None else None,
+                    'shipping_city': shipping_city.text if shipping_city is not None else None,
+                    'shipping_state': shipping_state.text if shipping_state is not None else None,
+                    'shipping_postal_code': shipping_postal_code.text if shipping_postal_code is not None else None,
+                    'shipping_country': shipping_country.text if shipping_country is not None else None,
+                    'paid_time': paid_time.text if paid_time is not None else None,
+                    'shipped_time': shipped_time.text if shipped_time is not None else None,
+                    'seller_fee': float(seller_fee.text) if seller_fee is not None and seller_fee.text.replace('.', '', 1).isdigit() else None,
+                    'taxes': float(taxes.text) if taxes is not None and taxes.text.replace('.', '', 1).isdigit() else None,
+                    'fees': fees.text if fees is not None else None,
+                    'isHandled': '',
+                    'isHandledDate': ''
+                })
+        except Exception as e:
+            print("Failed to connect to sold.db:", e)
 
 def start_flask():
     app.run(host="0.0.0.0", port=8080)
@@ -577,6 +689,17 @@ def match_items():
         except Exception as e:
             return jsonify({'success': False, 'error': str(e)})
     return jsonify({'success': False, 'error': 'Missing IDs'})
+
+
+@app.route('/get-sold-orders', methods=['POST'])
+def get_sold_orders_route():
+    print("we're getting sold orders")
+    try:
+        days = request.json.get('days', 90) if request.is_json else 90
+        get_ebay_orders(days=days)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
 
 
 if __name__ == "__main__":
