@@ -584,6 +584,9 @@ def get_ebay_orders(days=90):
                 seller_fee = transaction.find('.//ebay:FinalValueFee', ns)
                 taxes = transaction.find('.//ebay:Taxes/ebay:TotalTaxAmount', ns)
                 fees = transaction.find('.//ebay:TransactionSiteID', ns)  # Placeholder, adjust as needed
+                # Extract image URL from item
+                picture_url = item.find('.//ebay:PictureDetails/ebay:GalleryURL', ns) if item is not None else None
+                high_res_url = get_high_res_image_url(picture_url.text) if picture_url is not None else None
                 store_ebay_order({
                     'order_id': order_id.text if order_id is not None else None,
                     'item_id': item_id.text if item_id is not None else None,
@@ -603,6 +606,7 @@ def get_ebay_orders(days=90):
                     'seller_fee': float(seller_fee.text) if seller_fee is not None and seller_fee.text.replace('.', '', 1).isdigit() else None,
                     'taxes': float(taxes.text) if taxes is not None and taxes.text.replace('.', '', 1).isdigit() else None,
                     'fees': fees.text if fees is not None else None,
+                    'image': high_res_url,
                     'isHandled': '',
                     'isHandledDate': ''
                 })
@@ -625,6 +629,7 @@ def get_ebay_orders(days=90):
                     'seller_fee': float(seller_fee.text) if seller_fee is not None and seller_fee.text.replace('.', '', 1).isdigit() else None,
                     'taxes': float(taxes.text) if taxes is not None and taxes.text.replace('.', '', 1).isdigit() else None,
                     'fees': fees.text if fees is not None else None,
+                    'image': high_res_url,
                     'isHandled': '',
                     'isHandledDate': ''
                 })
