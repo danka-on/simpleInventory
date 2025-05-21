@@ -91,6 +91,77 @@ document.getElementById('get-sold-orders-btn').onclick = function() {
 };
 </script>
 
+<h2>Recent Sold Orders</h2>
+<label for="sold-orders-days">Days to show:</label>
+<input type="number" id="sold-orders-days" value="1" min="1" max="120" style="width:60px;">
+<table id="sold-orders-table" style="width:100%;border-collapse:collapse;margin-bottom:20px;">
+    <thead>
+        <tr style="background:#f0f0f0;">
+            <th>Title</th>
+            <th>Quantity</th>
+            <th>Image</th>
+            <th>Buyer Name</th>
+            <th>Address</th>
+            <th>Checkout Status</th>
+            <th>Handled</th>
+        </tr>
+    </thead>
+    <tbody></tbody>
+</table>
+<script>
+function renderSoldOrders(orders) {
+    const tbody = document.querySelector('#sold-orders-table tbody');
+    tbody.innerHTML = '';
+    orders.forEach(order => {
+        const tr = document.createElement('tr');
+        if (order.isHandled === '1') {
+            tr.style.textDecoration = 'line-through';
+            tr.style.background = '#e0e0e0';
+            tr.style.opacity = 0.6;
+        }
+        tr.innerHTML = `
+            <td>${order.title || ''}</td>
+            <td>${order.quantity || ''}</td>
+            <td><img src="${order.image_url || ''}" alt="item" style="max-width:60px;max-height:60px;"></td>
+            <td>${order.shipping_name || ''}</td>
+            <td>${[order.shipping_street1, order.shipping_street2, order.shipping_city, order.shipping_state, order.shipping_postal_code, order.shipping_country].filter(Boolean).join('<br>')}</td>
+            <td>${order.checkout_status || ''}</td>
+            <td><button class="handle-btn" data-id="${order.id}" style="background:#4caf50;color:white;border:none;padding:6px 10px;border-radius:4px;font-size:18px;cursor:pointer;">&#10003;</button></td>
+        `;
+        tbody.appendChild(tr);
+    });
+    // Add event listeners for handle buttons
+    document.querySelectorAll('.handle-btn').forEach(btn => {
+        btn.onclick = function() {
+            const id = this.getAttribute('data-id');
+            fetch('/mark-order-handled', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    this.closest('tr').style.textDecoration = 'line-through';
+                    this.closest('tr').style.background = '#e0e0e0';
+                    this.closest('tr').style.opacity = 0.6;
+                } else {
+                    alert('Failed to mark as handled: ' + (data.error || 'Unknown error'));
+                }
+            });
+        };
+    });
+}
+function loadSoldOrders() {
+    const days = parseInt(document.getElementById('sold-orders-days').value) || 1;
+    fetch(`/sold-orders?days=${days}`)
+        .then(r => r.json())
+        .then(renderSoldOrders);
+}
+document.getElementById('sold-orders-days').onchange = loadSoldOrders;
+window.addEventListener('DOMContentLoaded', loadSoldOrders);
+</script>
+
 </body>
 </html>
 

@@ -702,6 +702,36 @@ def get_sold_orders_route():
         return jsonify({'success': False, 'error': str(e)})
 
 
+@app.route('/sold-orders', methods=['GET'])
+def sold_orders():
+    days = int(request.args.get('days', 1))
+    conn = sqlite3.connect('sold.db')
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    # Only show orders from the last N days
+    cur.execute('''SELECT * FROM orders WHERE paid_time >= date('now', '-' || ? || ' days') ORDER BY paid_time DESC''', (days,))
+    orders = cur.fetchall()
+    conn.close()
+    return jsonify([dict(order) for order in orders])
+
+
+@app.route('/mark-order-handled', methods=['POST'])
+def mark_order_handled():
+    data = request.get_json()
+    order_id = data.get('id')
+    if not order_id:
+        return jsonify({'success': False, 'error': 'Missing order id'})
+    try:
+        conn = sqlite3.connect('sold.db')
+        cur = conn.cursor()
+        cur.execute("UPDATE orders SET isHandled = '1', isHandledDate = datetime('now') WHERE id = ?", (order_id,))
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
 if __name__ == "__main__":
     # Start Flask in a thread
     flask_thread = threading.Thread(target=start_flask, daemon=True)
