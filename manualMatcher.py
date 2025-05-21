@@ -1,8 +1,7 @@
-from flask import Flask, render_template, request, jsonify
 import sqlite3
-import os
 
-app = Flask(__name__)
+
+
 
 # Helper to get items from bol.db and ebayStore.db
 def get_bol_items():
@@ -33,6 +32,8 @@ def fuse_and_store_match(bol_id, ebay_id):
     bol_cur = bol_conn.cursor()
     bol_cur.execute("SELECT upc, date_added FROM bol_items WHERE rowid=?", (bol_id,))
     bol_row = bol_cur.fetchone()
+    if not bol_row:
+        raise Exception(f"No BOL item found for rowid={bol_id}")
     # Mark as found
     bol_cur.execute("UPDATE bol_items SET isFound='True' WHERE rowid=?", (bol_id,))
     bol_conn.commit()
@@ -42,11 +43,14 @@ def fuse_and_store_match(bol_id, ebay_id):
     ebay_cur = ebay_conn.cursor()
     ebay_cur.execute("SELECT title, image FROM INVENTORY WHERE rowid=?", (ebay_id,))
     ebay_row = ebay_cur.fetchone()
+    if not ebay_row:
+        raise Exception(f"No eBay item found for rowid={ebay_id}")
     # Mark as found
     ebay_cur.execute("UPDATE INVENTORY SET isFound='True' WHERE rowid=?", (ebay_id,))
     ebay_conn.commit()
     ebay_conn.close()
     # Insert into found.db
+    print(f"DEBUG: bol_row={bol_row}, ebay_row={ebay_row}, bol_id={bol_id}, ebay_id={ebay_id}")
     found_conn = sqlite3.connect('found.db')
     found_cur = found_conn.cursor()
     found_cur.execute('''CREATE TABLE IF NOT EXISTS matches (
@@ -61,26 +65,5 @@ def fuse_and_store_match(bol_id, ebay_id):
     found_conn.commit()
     found_conn.close()
 
-@app.route('/')
-def index():
-    bol_items = get_bol_items()
-    ebay_items = get_ebay_items()
-    return render_template('manualmatcher.html', bol_items=bol_items, ebay_items=ebay_items)
 
-# API endpoint for matching (to be implemented)
-@app.route('/match', methods=['POST'])
-def match_items():
-    data = request.json
-    bol_id = data.get('bol_id')
-    ebay_id = data.get('ebay_id')
-    if bol_id is not None and ebay_id is not None:
-        try:
-            fuse_and_store_match(bol_id, ebay_id)
-            return jsonify({'success': True})
-        except Exception as e:
-            print('Failed to match:', e)
-            return jsonify({'success': False, 'error': str(e)})
-    return jsonify({'success': False, 'error': 'Missing IDs'})
 
-if __name__ == '__main__':
-    app.run(debug=True)

@@ -2,12 +2,12 @@ from contextlib import nullcontext
 
 from flask import Flask, request, send_file, url_for, render_template, jsonify
 from PIL import Image, ImageDraw
-import io, time , subprocess, os, requests, json, threading, sqlite3
+import io, time, subprocess, os, requests, json, threading, sqlite3
 import xml.etree.ElementTree as ET
 from dotenv import load_dotenv
 import xml.dom.minidom as minidom
 
-from pyasn1_modules.rfc5990 import NullParms
+
 
 from inventory import find_item  # adjust this to match your actual import
 from DBmanager import ebayStoreDB, addToRack
@@ -32,7 +32,7 @@ headers = {
     "Content-Type": "application/json"
 }
 
-app = Flask(__name__)
+
 
 
 
@@ -178,7 +178,7 @@ def show_inventory():
         sort = 'ID'
     if dir not in ['asc','desc']:
         dir = 'asc'
-    conn = sqlite3.connect("ebayStore.db.db")
+    conn = sqlite3.connect("ebayStore.db")  # fixed typo here
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     sql = "SELECT * FROM INVENTORY WHERE 1=1"
