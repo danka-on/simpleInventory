@@ -78,6 +78,7 @@ def match_items():
             fuse_and_store_match(bol_id, ebay_id)
             return jsonify({'success': True})
         except Exception as e:
+            print('Failed to match:', e)
             return jsonify({'success': False, 'error': str(e)})
     return jsonify({'success': False, 'error': 'Missing IDs'})
 
