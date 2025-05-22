@@ -247,8 +247,8 @@ def createSearchRackDB():
     rack_cur.execute('SELECT BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION FROM INVENTORY')
     rack_items = rack_cur.fetchall()
     for barcode, item_position, images, pictureposition in rack_items:
-        # Get title from bol.db by barcode
-        bol_cur.execute('SELECT title FROM inventory WHERE barcode=? COLLATE NOCASE', (barcode,))
+        # Get item_description from bol.db by upc (barcode)
+        bol_cur.execute('SELECT item_description FROM bol_items WHERE upc=? COLLATE NOCASE', (barcode,))
         bol_row = bol_cur.fetchone()
         title = bol_row[0] if bol_row else None
         search_cur.execute('INSERT INTO SEARCHRACK (TITLE, BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION) VALUES (?,?,?,?,?)',
@@ -271,8 +271,8 @@ def updateSearchRackDB():
     rack_cur.execute('SELECT BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION FROM INVENTORY')
     rack_items = rack_cur.fetchall()
     for barcode, item_position, images, pictureposition in rack_items:
-        # Get title from bol.db by barcode
-        bol_cur.execute('SELECT title FROM inventory WHERE barcode=? COLLATE NOCASE', (barcode,))
+        # Get item_description from bol.db by upc (barcode)
+        bol_cur.execute('SELECT item_description FROM bol_items WHERE upc=? COLLATE NOCASE', (barcode,))
         bol_row = bol_cur.fetchone()
         title = bol_row[0] if bol_row else None
         search_cur.execute('INSERT INTO SEARCHRACK (TITLE, BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION) VALUES (?,?,?,?,?)',

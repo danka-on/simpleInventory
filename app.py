@@ -856,8 +856,9 @@ def searchrack_api():
         conn.close()
     return jsonify({'results': results})
 
-@app.route('/admin/refresh_searchrack')
+@app.route('/refresh_searchrack')
 def refresh_searchrack():
+    createSearchRackDB()
     updateSearchRackDB()
     return 'SearchRack database updated! <a href="/searchrack">Back to Search</a>'
 
