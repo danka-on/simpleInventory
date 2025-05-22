@@ -573,16 +573,19 @@
             // Unlock audio on user interaction
             window.addEventListener('touchstart', unlockAudio, { once: true });
             window.addEventListener('mousedown', unlockAudio, { once: true });
-            
             // Add a small delay to ensure the DOM is fully loaded
             setTimeout(initializeCamera, 100);
-
             // Fetch allowed UPCs
             fetchAllowedUPCs();
-
             // On load, check upload status only if redirected from pictureposition
             if (window.location.search.includes('pictureposition=1')) {
                 checkPictureUploadStatus();
+            }
+            // PERSIST BARCODE: If barcode exists in sessionStorage, pre-fill input
+            const storedBarcode = sessionStorage.getItem('barcode');
+            if (storedBarcode) {
+                scannedResultInput.value = storedBarcode;
+                scannedResultInput.style.background = '#e0ffe0';
             }
         });
         
@@ -593,6 +596,15 @@
             }
             if (stream) {
                 stream.getTracks().forEach(track => track.stop());
+            }
+        });
+
+        // On skip, if barcode exists in sessionStorage, keep it. If not, do nothing (let backend handle empty).
+        document.getElementById('skipForm').addEventListener('submit', function(e) {
+            const storedBarcode = sessionStorage.getItem('barcode');
+            if (storedBarcode) {
+                // If barcode exists, submit it instead of empty
+                this.querySelector('input[name="scanned_result"]').value = storedBarcode;
             }
         });
     </script>
