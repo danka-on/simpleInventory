@@ -16,6 +16,7 @@
             border: 1px solid #ccc;
             margin-top: 20px;
         }
+        #checklist .checkitem { transition: background 0.2s, color 0.2s; }
         </style>
 </head>
 <body>
@@ -35,6 +36,64 @@
         </div>
     </form>
 
+    <div id="checklist" style="margin: 30px 0;">
+        <div id="position-check" class="checkitem" style="padding:12px 18px; border-radius:8px; margin-bottom:12px; cursor:pointer; font-size:1.1em; font-weight:bold; display:flex; align-items:center;">
+            <span id="position-status">Loading...</span>
+        </div>
+        <div id="barcode-check" class="checkitem" style="padding:12px 18px; border-radius:8px; margin-bottom:12px; cursor:pointer; font-size:1.1em; font-weight:bold; display:flex; align-items:center;">
+            <span id="barcode-status">Loading...</span>
+        </div>
+    </div>
+    <script>
+    function updateChecklist() {
+        // Try to get from sessionStorage, fallback to global JS vars if needed
+        const itemPosition = sessionStorage.getItem('item_position');
+        const picturePosition = sessionStorage.getItem('pictureposition_path');
+        const barcode = sessionStorage.getItem('barcode');
+        // Position logic
+        let posText = '', posColor = '', posGoto = '';
+        if (itemPosition) {
+            posText = `Position set - ${itemPosition}`;
+            posColor = '#43a047';
+            posGoto = '/position';
+        } else if (picturePosition) {
+            posText = `Position set - picture`;
+            posColor = '#43a047';
+            posGoto = '/pictureposition';
+        } else {
+            posText = 'Position NOT set';
+            posColor = '#d32f2f';
+            posGoto = '/position?error=noposition';
+        }
+        // Barcode logic
+        let barText = '', barColor = '', barGoto = '';
+        if (barcode) {
+            barText = `Barcode set - ${barcode}`;
+            barColor = '#43a047';
+            barGoto = '/barcode';
+        } else {
+            barText = 'Barcode NOT set';
+            barColor = '#d32f2f';
+            barGoto = '/barcode';
+        }
+        // Update DOM
+        const posDiv = document.getElementById('position-check');
+        if (posDiv) {
+            posDiv.style.background = posColor;
+            posDiv.style.color = '#fff';
+            document.getElementById('position-status').textContent = posText;
+            posDiv.onclick = () => { window.location.href = posGoto; };
+        }
+        const barDiv = document.getElementById('barcode-check');
+        if (barDiv) {
+            barDiv.style.background = barColor;
+            barDiv.style.color = '#fff';
+            document.getElementById('barcode-status').textContent = barText;
+            barDiv.onclick = () => { window.location.href = barGoto; };
+        }
+    }
+    document.addEventListener('DOMContentLoaded', updateChecklist);
+    </script>
 </body>
 </html>
 <script>

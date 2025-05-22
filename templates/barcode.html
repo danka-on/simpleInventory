@@ -112,9 +112,12 @@
     <form id="scan_form" action="/submitbarcode" method="POST">
         <input name="scanned_result" type="text" id="scanned_result" placeholder="Scanned code will appear here" readonly>
     </form>
-    <button onclick="restartScanner()">Restart Scanner</button>
-    <a href="/pictures"><button type="button">Skip</button></a>
 
+    <button onclick="restartScanner()">Restart Scanner</button>
+    <form id="skipForm" action="/submitbarcode" method="POST" style="display:inline;">
+        <input type="hidden" name="scanned_result" value="" />
+        <button type="submit">Skip</button>
+    </form>
     <!-- ZXing Library -->
     <script src="https://unpkg.com/@zxing/library@0.19.1/umd/index.min.js"></script>
     
