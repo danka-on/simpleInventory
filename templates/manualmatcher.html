@@ -192,6 +192,7 @@
                 selected.bol.style.display = 'none';
                 selected = {ebay: null, bol: null};
                 updateMatchButton();
+                updateUndoButton();
             } else {
                 alert('Failed to match.');
             }
@@ -201,14 +202,38 @@
     // Undo button
     document.getElementById('undo-btn').onclick = function() {
         if (matchHistory.length === 0) return;
-        const last = matchHistory.pop();
-        if (last.ebay) last.ebay.style.display = '';
-        if (last.bol) last.bol.style.display = '';
-        matchedCount = Math.max(0, matchedCount - 1);
-        document.getElementById('matched-count').textContent = matchedCount;
-        selected = {ebay: null, bol: null};
-        updateMatchButton();
+        const last = matchHistory[matchHistory.length - 1];
+        if (!last || !last.ebay || !last.bol) return;
+        const ebay_id = last.ebay.dataset.id;
+        const bol_id = last.bol.dataset.id;
+        fetch('/undo_match', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({bol_id, ebay_id})
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                last.ebay.style.display = '';
+                last.bol.style.display = '';
+                matchedCount = Math.max(0, matchedCount - 1);
+                document.getElementById('matched-count').textContent = matchedCount;
+                // Unselect all cards on both sides
+                document.querySelectorAll('.card.selected-ebay').forEach(card => card.classList.remove('selected-ebay'));
+                document.querySelectorAll('.card.selected-bol').forEach(card => card.classList.remove('selected-bol'));
+                selected = {ebay: null, bol: null};
+                matchHistory.pop();
+                updateMatchButton();
+                updateUndoButton();
+            } else {
+                alert('Failed to undo match.');
+            }
+        });
     };
+
+    function updateUndoButton() {
+        document.getElementById('undo-btn').disabled = (matchHistory.length === 0);
+    }
 
     // Modal close on background click
     document.getElementById('modal-bg').onclick = function(e) {
@@ -217,6 +242,7 @@
 
     // Initial render
     updateGalleries();
+    updateUndoButton();
     </script>
 </body>
 </html>

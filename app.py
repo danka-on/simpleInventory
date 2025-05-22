@@ -737,6 +737,46 @@ def mark_order_handled():
         return jsonify({'success': False, 'error': str(e)})
 
 
+@app.route('/undo_match', methods=['POST'])
+def undo_match():
+    data = request.json
+    bol_id = data.get('bol_id')
+    ebay_id = data.get('ebay_id')
+    if bol_id is None or ebay_id is None:
+        return jsonify({'success': False, 'error': 'Missing IDs'})
+    try:
+        # Look up the upc for this bol_id
+        bol_conn = sqlite3.connect('bol.db')
+        bol_cur = bol_conn.cursor()
+        bol_cur.execute('SELECT upc FROM bol_items WHERE rowid=?', (bol_id,))
+        bol_row = bol_cur.fetchone()
+        bol_conn.close()
+        if not bol_row or not bol_row[0]:
+            return jsonify({'success': False, 'error': 'No UPC found for BOL item'})
+        upc = bol_row[0]
+        # Remove from found.db using upc and ebay_id
+        found_conn = sqlite3.connect('found.db')
+        found_cur = found_conn.cursor()
+        found_cur.execute('DELETE FROM matches WHERE ebay_id=? AND upc=?', (ebay_id, upc))
+        found_conn.commit()
+        found_conn.close()
+        # Unmark bol item
+        bol_conn = sqlite3.connect('bol.db')
+        bol_cur = bol_conn.cursor()
+        bol_cur.execute("UPDATE bol_items SET isFound='' WHERE rowid=?", (bol_id,))
+        bol_conn.commit()
+        bol_conn.close()
+        # Unmark ebay item
+        ebay_conn = sqlite3.connect('ebayStore.db')
+        ebay_cur = ebay_conn.cursor()
+        ebay_cur.execute("UPDATE INVENTORY SET isFound='' WHERE rowid=?", (ebay_id,))
+        ebay_conn.commit()
+        ebay_conn.close()
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
 if __name__ == "__main__":
     # Start Flask in a thread
     flask_thread = threading.Thread(target=start_flask, daemon=True)
