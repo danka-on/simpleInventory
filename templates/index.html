@@ -173,7 +173,7 @@
                 </thead>
                 <tbody></tbody>
             </table>
-            <div id="sold-popup" class="sold-popup"><span class="sold-popup-close" onclick="this.parentNode.style.display='none'">&times;</span><span id="sold-popup-content"></span></div>
+            <div id="sold-popup" class="sold-popup" onclick="hideSoldPopup(event)"><span class="sold-popup-close" onclick="this.parentNode.style.display='none'">&times;</span><span id="sold-popup-content"></span></div>
         </div>
 
         <div class="tools-section">
@@ -193,6 +193,14 @@
     </div>
 
 <script>
+function hideSoldPopup(event) {
+    // Only close if clicking the background or an image inside the popup
+    var popup = document.getElementById('sold-popup');
+    var content = document.getElementById('sold-popup-content');
+    if (event.target === popup || event.target.tagName === 'IMG') {
+        popup.style.display = 'none';
+    }
+}
 function showSoldPopup(contentHtml) {
     var popup = document.getElementById('sold-popup');
     var content = document.getElementById('sold-popup-content');
