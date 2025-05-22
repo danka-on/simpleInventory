@@ -234,10 +234,16 @@ def additemtrue():
         pictureposition_path = None
     except Exception as e:
         print("something went wrong with adding to RACK", e)
+    # Add script to clear sessionStorage after successful add
+    clear_script = '''<script>
+        sessionStorage.removeItem('barcode');
+        sessionStorage.removeItem('item_position');
+        sessionStorage.removeItem('pictureposition_path');
+    </script>'''
     if same_position:
-        return render_template("barcode.html")
+        return render_template("barcode.html") + clear_script
     else:
-        return render_template("position.html")
+        return render_template("position.html") + clear_script
 
 
 
