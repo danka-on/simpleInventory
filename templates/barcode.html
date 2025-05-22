@@ -224,6 +224,8 @@
                             // If not, still proceed (no alert, no block)
                             // (Optional: you could add a console.log or visual indicator for unknown barcodes)
                             scannedResultInput.value = code;
+                            // Set sessionStorage for additem checklist
+                            sessionStorage.setItem('barcode', code);
                             playBeep();
                             const scanBox = document.querySelector('.scan-box');
                             if (scanBox) {

@@ -216,6 +216,8 @@
                 const code = decodedText.trim();
                 if (!code.match(/^(gr[1-5]|or[1-3])s[2-6]$/)) return;
                 document.getElementById("scanned_result").value = code;
+                // Set sessionStorage for additem checklist
+                sessionStorage.setItem('item_position', code);
                 stopScanner();
                 playBeep();
                 document.getElementById("scan_form").submit();
