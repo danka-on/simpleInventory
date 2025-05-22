@@ -231,7 +231,10 @@ function tdLocation(order) {
     if (!order.location) return '<td></td>';
     
     var imgUrl = 'https://nexuscentralhq.org/static/gr1new.png';  // Use the known working URL
-    return `<td class='sold-td-small'><a href="#" onclick=\"showSoldPopup('<img src=\\'${imgUrl}\\' style=\\'display:block;margin:0 auto;max-width:90vw;max-height:70vh;\\'>');return false;\">${esc(order.location)}</a></td>`;
+    var locationText = esc(order.location);
+    var popupContent = `<div style='text-align:center;margin-bottom:10px;font-size:1.2em;font-weight:bold;'>Location: ${locationText}</div>`;
+    popupContent += `<img src='${imgUrl}' style='display:block;margin:0 auto;max-width:90vw;max-height:65vh;'>`;
+    return `<td class='sold-td-small'><a href="#" onclick="showSoldPopup('${popupContent.replace(/'/g, '\\' + "'")}');return false;">${locationText}</a></td>`;
 }
 function tdInfo(order) {
     var buyer = esc(order.shipping_name || '');
