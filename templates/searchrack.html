@@ -94,26 +94,10 @@
         <div id="rack-results"></div>
     </div>
 
-    <div class="search-container">
-        <div class="section-title">Search Macy BOL</div>
-        <div class="search-box">
-            <input id="search-bol" type="text" placeholder="Search BOL items by description or UPC...">
-            <button onclick="window.location.href='/view_all/bol'">Show All</button>
-        </div>
-        <div id="bol-results"></div>
-    </div>
-
     <script>
     // Function to fetch rack inventory results
     async function fetchRackResults(query) {
         const resp = await fetch(`/searchrack_api?q=${encodeURIComponent(query)}`);
-        const data = await resp.json();
-        return data.results;
-    }
-
-    // Function to fetch BOL results
-    async function fetchBOLResults(query) {
-        const resp = await fetch(`/searchbol_api?q=${encodeURIComponent(query)}`);
         const data = await resp.json();
         return data.results;
     }
@@ -140,29 +124,6 @@
         container.innerHTML = html;
     }
 
-    // Render BOL table
-    function renderBOLTable(items) {
-        const container = document.getElementById('bol-results');
-        if (!items || items.length === 0) {
-            container.innerHTML = '<div class="no-results">No BOL items found.</div>';
-            return;
-        }
-        let html = '<table><tr><th>Description</th><th>UPC</th><th>Client Cost</th><th>Total Cost</th><th>Lot #</th><th>BOL #</th></tr>';
-        for (const item of items) {
-            html += `
-                <tr>
-                    <td>${item.description||'N/A'}</td>
-                    <td>${item.upc||'N/A'}</td>
-                    <td>${item.client_cost||'N/A'}</td>
-                    <td>${item.total_cost||'N/A'}</td>
-                    <td>${item.lot_number||'N/A'}</td>
-                    <td>${item.bol_number||'N/A'}</td>
-                </tr>`;
-        }
-        html += '</table>';
-        container.innerHTML = html;
-    }
-
     // Add event listeners for search inputs
     document.getElementById('search-rack').addEventListener('input', debounce(async function() {
         const q = this.value.trim();
@@ -172,16 +133,6 @@
         }
         const items = await fetchRackResults(q);
         renderRackTable(items);
-    }, 300));
-
-    document.getElementById('search-bol').addEventListener('input', debounce(async function() {
-        const q = this.value.trim();
-        if (!q) { 
-            document.getElementById('bol-results').innerHTML = ''; 
-            return; 
-        }
-        const items = await fetchBOLResults(q);
-        renderBOLTable(items);
     }, 300));
 
     // Debounce function to limit API calls
