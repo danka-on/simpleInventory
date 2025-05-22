@@ -205,14 +205,16 @@ function esc(s) {
 function tdTitle(order) {
     if (order.image || order.image_url) {
         var imgSrc = esc(order.image || order.image_url);
-        return `<td class='sold-td-small'><a href="#" onclick="showSoldPopup('<img src=\'${imgSrc}\' style=\'max-width:90vw;max-height:60vh;\'>');return false;">${esc(order.title || '')}</a></td>`;
+        var fullTitle = esc(order.title || '');
+        // Popup will show full title above the image
+        return `<td class='sold-td-small'><a href="#" onclick=\"showSoldPopup('<div style=\\'font-weight:bold;font-size:1.1em;margin-bottom:8px;text-align:center;\\'>${fullTitle}</div><img src=\\'${imgSrc}\\' style=\\'display:block;margin:0 auto;max-width:90vw;max-height:60vh;\\'>');return false;\">${esc(order.title || '')}</a></td>`;
     } else {
         return `<td class='sold-td-small'>${esc(order.title || '')}</td>`;
     }
 }
 function tdQuantity(order) {
     var qty = order.quantity || '';
-    var highlight = parseInt(qty) > 1 ? ' style="color:#c0392b;font-weight:bold;"' : '';
+    var highlight = parseInt(qty) > 1 ? ' style="color:#e53935;font-weight:bold;background:#ffeaea;"' : '';
     return `<td${highlight}>${qty}</td>`;
 }
 function tdInfo(order) {
