@@ -202,26 +202,36 @@ def show_inventory():
 same_position = None
 position_code = None
 barcode = None
+pictureposition_path = None
 
 
 
 
 @app.route('/additemtrue', methods=['POST'])
 def additemtrue():
-    #telling database its go time to upload our SHIT
-
     global same_position
     global position_code
     global barcode
+    global pictureposition_path
     try:
+        # If a picture position was used, compress and convert to B&W
+        if pictureposition_path:
+            abs_path = os.path.join(os.getcwd(), pictureposition_path)
+            try:
+                img = Image.open(abs_path)
+                img = img.convert('L')  # Convert to grayscale
+                img.thumbnail((400, 400))  # Resize to max 400x400
+                img.save(abs_path, optimize=True, quality=40)
+            except Exception as e:
+                print(f"Image processing failed: {e}")
         print("Flow Complete, adding to Rack....")
-        addToRack(position_code, barcode)
+        addToRack(position_code, barcode, None, pictureposition_path)
+        print(f"Added to rack: position={position_code}, barcode={barcode}, pictureposition={pictureposition_path}")
         position_code = None
         barcode = None
+        pictureposition_path = None
     except Exception as e:
         print("something went wrong with adding to RACK", e)
-
-
     if same_position:
         return render_template("barcode.html")
     else:
@@ -249,8 +259,11 @@ def position_page():
 @app.route('/submitposition', methods=['POST'])
 def process_position():
     global position_code
+    global pictureposition_path
     position_code = request.form.get('scanned_result')
+    pictureposition_path = request.form.get('pictureposition')
     print("Received scanned code:", position_code)
+    print("Received picture position path:", pictureposition_path)
     return render_template("barcode.html")
 
 
@@ -789,6 +802,27 @@ def get_bol_upcs():
         return jsonify({'upcs': upcs})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/upload_position_picture', methods=['POST'])
+def upload_position_picture():
+    import os
+    from werkzeug.utils import secure_filename
+    # Ensure folder exists
+    save_dir = os.path.join(os.getcwd(), 'pictureposition')
+    os.makedirs(save_dir, exist_ok=True)
+    file = request.files.get('picture')
+    if not file:
+        return jsonify({'success': False, 'error': 'No file uploaded'})
+    filename = secure_filename(file.filename)
+    # Make filename unique
+    import time
+    unique_name = f"{int(time.time())}_{filename}"
+    save_path = os.path.join(save_dir, unique_name)
+    file.save(save_path)
+    # Return relative path for DB
+    rel_path = os.path.relpath(save_path, os.getcwd())
+    return jsonify({'success': True, 'path': rel_path})
 
 
 if __name__ == "__main__":

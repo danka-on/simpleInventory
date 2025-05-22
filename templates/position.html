@@ -120,6 +120,15 @@
     <a href="/barcode"><button type="button">Skip</button></a>
     <button id="flashBtn" type="button" style="display:none">Turn On Flashlight</button>
     <span id="flashMsg" style="color:red; display:none; font-size:0.9em;"></span>
+    <button id="picturePositionBtn" type="button">Picture Position</button>
+    <input type="file" id="pictureInput" accept="image/*" capture="environment" style="display:none">
+    <div id="picturePreviewContainer" style="display:none; flex-direction:column; align-items:center; margin-top:10px;">
+        <img id="picturePreview" src="" alt="Preview" style="max-width:250px; max-height:250px; border:2px solid #888; margin-bottom:10px;" />
+        <div>
+            <button id="confirmPictureBtn" type="button">Confirm</button>
+            <button id="retakePictureBtn" type="button">Retake</button>
+        </div>
+    </div>
 
     <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
     <script>
@@ -313,6 +322,68 @@
             document.getElementById('flashMsg').style.display = '';
         }
     });
+
+    // --- Picture Position logic ---
+    const pictureBtn = document.getElementById('picturePositionBtn');
+    const pictureInput = document.getElementById('pictureInput');
+    const previewContainer = document.getElementById('picturePreviewContainer');
+    const previewImg = document.getElementById('picturePreview');
+    const confirmBtn = document.getElementById('confirmPictureBtn');
+    const retakeBtn = document.getElementById('retakePictureBtn');
+    let pictureFile = null;
+
+    pictureBtn.addEventListener('click', () => {
+        pictureInput.value = '';
+        pictureInput.click();
+    });
+
+    pictureInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (file) {
+            pictureFile = file;
+            const reader = new FileReader();
+            reader.onload = function(ev) {
+                previewImg.src = ev.target.result;
+                previewContainer.style.display = 'flex';
+            };
+            reader.readAsDataURL(file);
+        }
+    });
+
+    retakeBtn.addEventListener('click', () => {
+        previewContainer.style.display = 'none';
+        previewImg.src = '';
+        pictureFile = null;
+        pictureInput.value = '';
+    });
+
+    confirmBtn.addEventListener('click', async () => {
+        if (!pictureFile) return;
+        // Upload image to server
+        const formData = new FormData();
+        formData.append('picture', pictureFile);
+        const resp = await fetch('/upload_position_picture', { method: 'POST', body: formData });
+        const data = await resp.json();
+        if (data.success && data.path) {
+            // Submit position as 'picture' and pass the image path
+            const form = document.getElementById('scan_form');
+            form.scanned_result.value = 'picture';
+            // Add a hidden input for the image path
+            let imgInput = document.getElementById('picturePositionPath');
+            if (!imgInput) {
+                imgInput = document.createElement('input');
+                imgInput.type = 'hidden';
+                imgInput.name = 'pictureposition';
+                imgInput.id = 'picturePositionPath';
+                form.appendChild(imgInput);
+            }
+            imgInput.value = data.path;
+            form.submit();
+        } else {
+            alert('Failed to upload picture.');
+        }
+    });
+    // --- End Picture Position logic ---
 
     // Start scanner on page load
     window.addEventListener('load', () => {

@@ -53,20 +53,26 @@ def createEbayStoreDB():
         print("something went wrong with table ",e)
         conn.close()
 
-def addToRack(ITEM_POSITION = None, BARCODE = None, IMAGES = None):
+def addToRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITION=None):
     conn = sqlite3.connect('rack.db')
     cursor = conn.cursor()
     try:
-        cursor.execute("INSERT INTO INVENTORY (ITEM_POSITION, BARCODE, IMAGES ) VALUES (?,?,?)", (ITEM_POSITION, BARCODE, IMAGES))
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS INVENTORY (
+                ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                ITEM_POSITION TEXT,
+                BARCODE TEXT,
+                IMAGES TEXT,
+                PICTUREPOSITION TEXT
+            )
+        ''')
+        cursor.execute("INSERT INTO INVENTORY (ITEM_POSITION, BARCODE, IMAGES, PICTUREPOSITION) VALUES (?,?,?,?)", (ITEM_POSITION, BARCODE, IMAGES, PICTUREPOSITION))
         conn.commit()
-        print(f"added",{ITEM_POSITION},{BARCODE})
+        print(f"added position: {ITEM_POSITION}, barcode: {BARCODE}, images: {IMAGES}, pictureposition: {PICTUREPOSITION}")
     except sqlite3.Error as e:
         print("something went wrong", e)
-        try:
-            conn.close()
-            print("Closed successfully from ebayStoreDB")
-        except sqlite3.Error as e:
-            print("Failed to close connection:", e)
+    finally:
+        conn.close()
 
 def ebayStoreDB(title, item_id, sku = None, price = None, quantity = None, image = None, List_State = None, Sold_Date = None, List_Date = None, URL = None):
     conn = sqlite3.connect('ebayStore.db')
