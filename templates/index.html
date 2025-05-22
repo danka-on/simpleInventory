@@ -1,175 +1,206 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.ico') }}">
     <link rel="apple-touch-icon" href="{{ url_for('static', filename='apple-touch-icon.png') }}">
     <title>Sweet Shelves</title>
     <style>
-        body {
-            font-family: sans-serif;
-            max-width: 600px;
-            margin: auto;
-            padding: 10px;
+        :root {
+            --primary: #0984e3;
+            --accent: #00b894;
+            --bg: #f9f9f9;
+            --card: #fff;
+            --border: #e0e0e0;
+            --radius: 14px;
         }
-        img {
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background: var(--bg);
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 480px;
+            margin: 0 auto;
+            padding: 16px 8px 80px 8px;
+        }
+        h1, h2 {
+            margin: 0 0 18px 0;
+            font-weight: 600;
+        }
+        .main-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+            margin-bottom: 32px;
+        }
+        .main-actions button, .main-actions a > button {
             width: 100%;
-            border: 1px solid #ccc;
-            margin-top: 20px;
+            font-size: 1.2rem;
+            padding: 18px 0;
+            background: var(--primary);
+            color: #fff;
+            border: none;
+            border-radius: var(--radius);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .main-actions button:hover, .main-actions a > button:hover {
+            background: var(--accent);
+        }
+        .section-card {
+            background: var(--card);
+            border-radius: var(--radius);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+            padding: 18px 12px 12px 12px;
+            margin-bottom: 24px;
+            border: 1px solid var(--border);
         }
         #sold-orders-table {
-    border-collapse: collapse;
-    width: 100%;
-    margin-bottom: 20px;
-}
-#sold-orders-table, #sold-orders-table th, #sold-orders-table td {
-    border: 1px solid #bbb;
-}
-#sold-orders-table th, #sold-orders-table td {
-    padding: 6px 8px;
-    background: #fff;
-}
-#sold-orders-table th {
-    background: #f0f0f0;
-}
-#sold-orders-table tr.handled {
-    text-decoration: line-through;
-    background: #e0e0e0;
-    opacity: 0.6;
-}
-.sold-td-small {
-    font-size: 12px;
-    max-width: 120px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    cursor: pointer;
-}
-.sold-popup {
-    display: none;
-    position: fixed;
-    z-index: 9999;
-    left: 50%;
-    top: 50%;
-    transform: translate(-50%, -50%);
-    background: #fff;
-    border: 2px solid #333;
-    border-radius: 8px;
-    padding: 20px;
-    box-shadow: 0 2px 16px rgba(0,0,0,0.3);
-    max-width: 90vw;
-    max-height: 70vh;
-    overflow: auto;
-    font-size: 16px;
-}
-.sold-popup-close {
-    float: right;
-    font-size: 22px;
-    font-weight: bold;
-    color: #333;
-    cursor: pointer;
-    margin-left: 10px;
-}
+            border-collapse: collapse;
+            width: 100%;
+            margin-bottom: 10px;
+        }
+        #sold-orders-table, #sold-orders-table th, #sold-orders-table td {
+            border: 1px solid #bbb;
+        }
+        #sold-orders-table th, #sold-orders-table td {
+            padding: 6px 8px;
+            background: #fff;
+        }
+        #sold-orders-table th {
+            background: #f0f0f0;
+        }
+        #sold-orders-table tr.handled {
+            text-decoration: line-through;
+            background: #e0e0e0;
+            opacity: 0.6;
+        }
+        .sold-td-small {
+            font-size: 12px;
+            max-width: 120px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            cursor: pointer;
+        }
+        .sold-popup {
+            display: none;
+            position: fixed;
+            z-index: 9999;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            background: #fff;
+            border: 2px solid #333;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 16px rgba(0,0,0,0.3);
+            max-width: 90vw;
+            max-height: 70vh;
+            overflow: auto;
+            font-size: 16px;
+        }
+        .sold-popup-close {
+            float: right;
+            font-size: 22px;
+            font-weight: bold;
+            color: #333;
+            cursor: pointer;
+            margin-left: 10px;
+        }
+        .tools-section {
+            background: var(--card);
+            border-radius: var(--radius);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+            padding: 14px 12px 10px 12px;
+            border: 1px solid var(--border);
+            margin-bottom: 18px;
+        }
+        .tools-section h3 {
+            margin: 0 0 10px 0;
+            font-size: 1.1rem;
+            color: #555;
+            font-weight: 500;
+        }
+        .tools-row {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .tools-row label {
+            font-size: 0.98rem;
+            color: #444;
+        }
+        @media (max-width: 600px) {
+            .container {
+                padding: 8px 2vw 80px 2vw;
+            }
+            .main-actions button, .main-actions a > button {
+                font-size: 1.05rem;
+                padding: 14px 0;
+            }
+            .section-card, .tools-section {
+                padding: 10px 4px 8px 4px;
+            }
+        }
     </style>
 </head>
 <body>
+    <div class="container">
+        <div class="main-actions">
+            <form method="GET" action="/position" style="margin:0;">
+                <button type="submit">Add Item</button>
+            </form>
+            <a href="/searchrack" style="text-decoration:none;"><button type="button">Search My Rack</button></a>
+        </div>
 
+        <div class="section-card">
+            <h2 style="font-size:1.2rem; margin-bottom:10px;">Recent Sold Orders</h2>
+            <label for="sold-orders-days" style="font-size:0.98rem;">Days to show:</label>
+            <input type="number" id="sold-orders-days" value="1" min="1" max="120" style="width:60px; margin-bottom:10px;">
+            <table id="sold-orders-table">
+                <thead>
+                    <tr style="background:#f0f0f0;">
+                        <th>Title</th>
+                        <th>Quantity</th>
+                        <th>Image</th>
+                        <th>Buyer Name</th>
+                        <th>Address</th>
+                        <th>Checkout Status</th>
+                        <th>Handled</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+            <div id="sold-popup" class="sold-popup"><span class="sold-popup-close" onclick="this.parentNode.style.display='none'">&times;</span><span id="sold-popup-content"></span></div>
+        </div>
 
+        <div class="tools-section">
+            <h3>Tools</h3>
+            <div class="tools-row">
+                <a href="/extractor"><button type="button" style="background:#636e72;">BOL Extract</button></a>
+                <form method="GET" action="/manualmatcher" style="margin:0;">
+                    <button type="submit" style="background:#636e72;">Manual Matcher</button>
+                </form>
+                <div style="margin-top:8px;">
+                    <label for="sold-days">Days to fetch sold orders:</label>
+                    <input type="number" id="sold-days" value="90" min="1" max="120" style="width:60px;">
+                    <button id="get-sold-orders-btn" style="background:#636e72; color:white; border:none; border-radius:4px; padding:6px 12px; font-size:1rem;">Get Sold Orders</button>
+                </div>
+            </div>
+        </div>
+    </div>
 
-    <h1>Search Inventory</h1>
-    <form method="POST" action="/search">
-    <input type="text" name="query" placeholder="Enter item name or ID" required>
-    <button type="submit">Search</button>
-    </form>
-    <h1></h1>
-
-    <form method="GET" action="/database">
-    <button type="submit">Go to Inventory page</button>
-    </form>
-
-    {% if search_result %}
-        <h2>Result:</h2>
-        <p>{{ search_result }}</p>
-    {% endif %}
-
-    <h1>Select a Shelf</h1>
-
-    <form method="GET" action="/">
-        <select name="shelf">
-            <option value="shelf 1">Shelf 1</option>
-            <option value="shelf 2">Shelf 2</option>
-            <option value="shelf 3">Shelf 3</option>
-            <option value="shelf 4">Shelf 4</option>
-            <option value="shelf top">Shelf Top</option>
-        </select>
-        <button type="submit">Highlight</button>
-    </form>
-
-    {% if shelf %}
-    <img src="{{ url_for('highlight') }}?shelf={{ shelf }}" alt="shelfHighlighter">
-    {% endif %}
-
-<h2></h2>
-<div></div>
-
-
-    <form method="GET" action="/position">
-    <button style="font-size: 20px; padding: 15px 200px;">Add Item</button>
-    </form>
-
-    <a href="/extractor"><button type="button">BOL Extract</button></a>
-    <form method="GET" action="/manualmatcher">
-    <button type="submit">Manual Matcher</button>
-</form>
-
-<label for="sold-days">Days to fetch:</label>
-<input type="number" id="sold-days" value="90" min="1" max="120" style="width:60px;">
-<button id="get-sold-orders-btn">Get Sold Orders</button>
-<script>
-document.getElementById('get-sold-orders-btn').onclick = function() {
-    const days = parseInt(document.getElementById('sold-days').value) || 90;
-    fetch('/get-sold-orders', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ days })
-    })
-    .then(r => r.json())
-    .then(data => {
-        if (data.success) {
-            alert('Sold orders fetched and stored!');
-        } else {
-            alert('Failed to fetch sold orders: ' + (data.error || 'Unknown error'));
-        }
-    });
-};
-</script>
-
-<h2>Recent Sold Orders</h2>
-<label for="sold-orders-days">Days to show:</label>
-<input type="number" id="sold-orders-days" value="1" min="1" max="120" style="width:60px;">
-<table id="sold-orders-table">
-    <thead>
-        <tr style="background:#f0f0f0;">
-            <th>Title</th>
-            <th>Quantity</th>
-            <th>Image</th>
-            <th>Buyer Name</th>
-            <th>Address</th>
-            <th>Checkout Status</th>
-            <th>Handled</th>
-        </tr>
-    </thead>
-    <tbody></tbody>
-</table>
-<div id="sold-popup" class="sold-popup"><span class="sold-popup-close" onclick="this.parentNode.style.display='none'">&times;</span><span id="sold-popup-content"></span></div>
 <script>
 function showSoldPopup(text) {
     document.getElementById('sold-popup-content').innerHTML = text;
     document.getElementById('sold-popup').style.display = 'block';
 }
-// Move tdSmall to top-level so it can be used in renderSoldOrders
 function tdSmall(content, full) {
-    // Escape HTML for attribute and popup
     const esc = s => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     return `<td class='sold-td-small' title='${esc(full)}' onclick='showSoldPopup("${esc(full)}")'>${esc(content)}</td>`;
 }
@@ -193,7 +224,6 @@ function renderSoldOrders(orders) {
         `;
         tbody.appendChild(tr);
     });
-    // Add event listeners for handle buttons
     document.querySelectorAll('.handle-btn').forEach(btn => {
         btn.onclick = function() {
             const tr = this.closest('tr');
@@ -223,12 +253,25 @@ function loadSoldOrders() {
 }
 document.getElementById('sold-orders-days').onchange = loadSoldOrders;
 window.addEventListener('DOMContentLoaded', loadSoldOrders);
+
+document.getElementById('get-sold-orders-btn').onclick = function(e) {
+    e.preventDefault();
+    const days = parseInt(document.getElementById('sold-days').value) || 90;
+    fetch('/get-sold-orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ days })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            alert('Sold orders fetched and stored!');
+        } else {
+            alert('Failed to fetch sold orders: ' + (data.error || 'Unknown error'));
+        }
+    });
+};
 </script>
-
-<div style="margin: 20px 0; text-align: center;">
-    <a href="/searchrack"><button style="background:#0984e3;color:white;font-size:20px;padding:12px 32px;border:none;border-radius:8px;cursor:pointer;">Search My Rack</button></a>
-</div>
-
 </body>
 </html>
 
