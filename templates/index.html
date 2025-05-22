@@ -165,22 +165,28 @@
             </a>
         </div>
 
-        <div class="section-card">
-            <h2 style="font-size:1.2rem; margin-bottom:10px;">Ready to Ship</h2>
-            <label for="sold-orders-days" style="font-size:0.98rem;">Days to show:</label>
-            <input type="number" id="sold-orders-days" value="2" min="1" max="120" style="width:60px; margin-bottom:10px;">
-            <table id="sold-orders-table">
-                <thead>
-                    <tr style="background:#f0f0f0;">
-                        <th>Title</th>
-                        <th>Info</th>
-                        <th>Location</th>
-                        <th>#</th>
-                        <th>Handled</th>
-                    </tr>
-                </thead>
-                <tbody></tbody>
-            </table>
+        <div class="section-card" style="overflow-x: auto;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <h2 style="font-size:1.2rem; margin: 0;">Ready to Ship</h2>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <label for="sold-orders-days" style="font-size:0.9rem; white-space: nowrap;">Days:</label>
+                    <input type="number" id="sold-orders-days" value="2" min="1" max="120" style="width: 50px; padding: 4px; border: 1px solid #ddd; border-radius: 4px;">
+                </div>
+            </div>
+            <div style="max-height: 400px; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 6px;">
+                <table id="sold-orders-table" style="width: 100%; border-collapse: collapse;">
+                    <thead>
+                        <tr style="background:#f5f5f5; position: sticky; top: 0; z-index: 10;">
+                            <th style="padding: 8px; text-align: left; border-bottom: 2px solid #e0e0e0; font-size: 0.85rem;">Title</th>
+                            <th style="padding: 8px; text-align: left; border-bottom: 2px solid #e0e0e0; font-size: 0.85rem;">Buyer</th>
+                            <th style="padding: 8px; text-align: center; border-bottom: 2px solid #e0e0e0; font-size: 0.85rem; width: 60px;">Loc</th>
+                            <th style="padding: 8px; text-align: center; border-bottom: 2px solid #e0e0e0; font-size: 0.85rem; width: 40px;">#</th>
+                            <th style="padding: 8px; text-align: center; border-bottom: 2px solid #e0e0e0; font-size: 0.85rem; width: 60px;">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody style="font-size: 0.85rem;"></tbody>
+                </table>
+            </div>
             <div id="sold-popup" class="sold-popup" onclick="hideSoldPopup(event)"><span class="sold-popup-close" onclick="this.parentNode.style.display='none'">&times;</span><span id="sold-popup-content"></span></div>
         </div>
 

@@ -3,7 +3,8 @@
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta charset="UTF-8">
-    <title>Title</title>
+    <title>Add Item to Inventory</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <style>
         body {
             font-family: sans-serif;
@@ -35,7 +36,7 @@
 </head>
 <body>
 <div style="text-align: center;">
-    <h1>THIS IS ADD ITEM PAGE</h1>
+    <h1 style="margin-bottom: 30px;">Add Item to Inventory</h1>
 
 
     <div id="checklist" style="margin: 30px 0;">
@@ -46,13 +47,10 @@
             <span id="barcode-status">Loading...</span>
         </div>
     </div>
-    <form action="/" method="POST" style="margin-bottom: 16px;">
-        <button >PRESS ME </button>
-    </form>
     <form action="/additemtrue" method="POST">
         <div style="display:flex; justify-content:center; align-items:center;">
         <button style="background-color:#00b894; color:white; font-size:24px; padding:15px 40px; border:none; border-radius:8px; cursor:pointer;">
-            Add item
+            <i class="fas fa-check-circle"></i> Add Item
         </button>
         </div>
     </form>
