@@ -777,6 +777,20 @@ def undo_match():
         return jsonify({'success': False, 'error': str(e)})
 
 
+@app.route('/get_bol_upcs', methods=['GET'])
+def get_bol_upcs():
+    """Return a JSON list of all UPCs from bol.db bol_items table (UPC column)."""
+    try:
+        conn = sqlite3.connect('bol.db')
+        cur = conn.cursor()
+        cur.execute('SELECT upc FROM bol_items WHERE upc IS NOT NULL AND upc != ""')
+        upcs = [row[0] for row in cur.fetchall()]
+        conn.close()
+        return jsonify({'upcs': upcs})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 if __name__ == "__main__":
     # Start Flask in a thread
     flask_thread = threading.Thread(target=start_flask, daemon=True)
