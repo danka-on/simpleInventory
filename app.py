@@ -94,69 +94,45 @@ def search():
     result = find_item(query)
     return render_template("index.html", search_result=result)
 
-SHELF_COORDS = {
-        "shelf top": (220, 163, 753, 407),
-        "shelf 1":   (90, 825, 930, 990),
-        "shelf 2":   (90, 465, 930, 630),
-        "shelf 3":   (90, 645, 930, 810),
-        "shelf 4":   (90, 825, 930, 990),
-        "shelf 5":   (90, 825, 930, 990)
-}
-'''
-    "Hammer_Rack": {
-        "shelf0": (220, 163, 753, 407),
-        "shelf1":   (90, 825, 930, 990),
-        "shelf2":   (90, 465, 930, 630),
-        "shelf3":   (90, 645, 930, 810),
-        "shelf4":   (90, 825, 930, 990),
-        "shelf5":   (90, 825, 930, 990)
+SHELF_COORDS = [
+    {"gr1":
+         {
+        "s6":(220, 163, 753, 407),
+        "s5": (90, 825, 930, 990),
+        "s4":(90, 465, 930, 630),
+        "s3":(90, 645, 930, 810),
+        "s2":(90, 825, 930, 990),
+        "s1":(90, 825, 930, 990)
+         }
     },
-    "Wheel_Rack": {
-        "shelf0": (220, 163, 753, 407),
-        "shelf1":   (90, 825, 930, 990),
-        "shelf2":   (90, 465, 930, 630),
-        "shelf3":   (90, 645, 930, 810),
-        "shelf4":   (90, 825, 930, 990),
-        "shelf5":   (90, 825, 930, 990)
-    },
-    "Sun_Rack": {
-        "shelf0": (220, 163, 753, 407),
-        "shelf1":   (90, 825, 930, 990),
-        "shelf2":   (90, 465, 930, 630),
-        "shelf3":   (90, 645, 930, 810),
-        "shelf4":   (90, 825, 930, 990),
-        "shelf5":   (90, 825, 930, 990)
-    },
-    "Plane_Rack": {
-        "shelf0": (220, 163, 753, 407),
-        "shelf1":   (90, 825, 930, 990),
-        "shelf2":   (90, 465, 930, 630),
-        "shelf3":   (90, 645, 930, 810),
-        "shelf4":   (90, 825, 930, 990),
-        "shelf5":   (90, 825, 930, 990)
-    },
-    "Bike_Rack": {
-        "shelf0": (220, 163, 753, 407),
-        "shelf1":   (90, 825, 930, 990),
-        "shelf2":   (90, 465, 930, 630),
-        "shelf3":   (90, 645, 930, 810),
-        "shelf4":   (90, 825, 930, 990),
-        "shelf5":   (90, 825, 930, 990)
+    {"gr2":
+    {
+        "s6":(220, 163, 753, 407),
+        "s5": (90, 825, 930, 990),
+        "s4":(90, 465, 930, 630),
+        "s3":(90, 645, 930, 810),
+        "s2":(90, 825, 930, 990),
+        "s1":(90, 825, 930, 990)
     }
-}
-'''
+    }
+]
+
 @app.route("/highlight")
 def highlight():
     shelf_name = request.args.get("shelf", "").lower()
+    print(f"[DEBUG] highlight() called with shelf_name: {shelf_name}")  # printdebug
 
     # Load original image
-    image_path = "static/shelf1.png"  # move your base image here
+    image_path = "static/gr1.png"  # move your base image here
     img = Image.open(image_path).convert("RGB")
     draw = ImageDraw.Draw(img)
 
     # Draw the selected shelf in green
     if shelf_name in SHELF_COORDS:
         draw.rectangle(SHELF_COORDS[shelf_name], outline="green", width=30)
+
+    # Substantially decrease image size for faster loading
+    img.thumbnail((180, 80))  # width x height, adjust as needed
 
     # Output to memory, not file
     img_io = io.BytesIO()

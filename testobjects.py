@@ -10,18 +10,19 @@ cursor.execute('''
     INSERT INTO orders (
         title, quantity, image, shipping_name, shipping_street1, 
         shipping_city, shipping_state, shipping_postal_code, shipping_country, 
-        checkout_status, isHandled, paid_time
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        checkout_status, isHandled, paid_time, location
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ''', (
-    'item test',
+    'godinger silver plate (test)',
     2,
     'https://i.ebayimg.com/images/g/vJgAAOSwNFNmT1Xx/s-l1600.jpg',
-    'test',
-    'test address',
+    'John Smith ',
+    'Fort myers florida 13742 ',
     '', '', '', '',
     'Complete',
     '0',
-    datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+    'gr1s6'
 ))
 
 conn.commit()

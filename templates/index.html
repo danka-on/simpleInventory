@@ -167,6 +167,7 @@
                     <tr style="background:#f0f0f0;">
                         <th>Title</th>
                         <th>Info</th>
+                        <th>Location</th>
                         <th>#</th>
                         <th>Handled</th>
                     </tr>
@@ -225,11 +226,18 @@ function tdQuantity(order) {
     var highlight = parseInt(qty) > 1 ? ' style="color:#e53935;font-weight:bold;background:#ffeaea;"' : '';
     return `<td${highlight}>${qty}</td>`;
 }
+function tdLocation(order) {
+    var location = order.location ? esc(order.location) : '';
+    if (!location) return '<td></td>';
+    // Clickable: show highlight image in popup
+    var imgHtml = `<img src='/highlight?shelf=${encodeURIComponent(location)}' alt='Location Highlight' style='display:block;margin:8px auto 0 auto;max-width:180px;max-height:80px;border:2px solid #b26500;border-radius:8px;'>`;
+    return `<td class='sold-td-small'><a href='#' onclick=\"showSoldPopup('<div style=\\'margin:10px 0 6px 0;padding:4px 8px;background:#ffe082;color:#b26500;font-weight:bold;border-radius:6px;display:inline-block;\\'>Location: ${location}</div>${imgHtml}');return false;\">${location}</a></td>`;
+}
 function tdInfo(order) {
     var buyer = esc(order.shipping_name || '');
     var address = [order.shipping_street1, order.shipping_street2, order.shipping_city, order.shipping_state, order.shipping_postal_code, order.shipping_country].filter(Boolean).map(esc).join(' ');
-    // Use double quotes for onclick and single quotes inside HTML for popup
-    return `<td class='sold-td-small'><a href="#" onclick=\"showSoldPopup('<b>${buyer}</b><br><span style=\\'font-size:0.98em;\\'>${address}</span>');return false;\">${buyer}</a></td>`;
+    // No location logic here anymore
+    return `<td class='sold-td-small'><a href='#' onclick=\"showSoldPopup('<b>${buyer}</b><br><span style=\\'font-size:0.98em;\\'>${address}</span>');return false;\">${buyer}</a></td>`;
 }
 function renderSoldOrders(orders) {
     var tbody = document.querySelector('#sold-orders-table tbody');
@@ -242,6 +250,7 @@ function renderSoldOrders(orders) {
         tr.innerHTML =
             tdTitle(order) +
             tdInfo(order) +
+            tdLocation(order) +
             tdQuantity(order) +
             `<td><button class="handle-btn" data-id="${order.id}" style="background:#4caf50;color:white;border:none;padding:6px 10px;border-radius:4px;font-size:18px;cursor:pointer;">&#10003;</button></td>`;
         tbody.appendChild(tr);
