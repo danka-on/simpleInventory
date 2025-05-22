@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }}</title>
+    <script src="https://unpkg.com/gridjs/dist/gridjs.umd.js"></script>
+    <link href="https://unpkg.com/gridjs/dist/theme/mermaid.min.css" rel="stylesheet" />
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f7fa;
+            color: #333;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            color: #2c3e50;
+            margin-top: 0;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #eee;
+        }
+        .back-link {
+            display: inline-block;
+            margin-bottom: 20px;
+            color: #3498db;
+            text-decoration: none;
+            font-weight: 500;
+        }
+        .back-link:hover {
+            text-decoration: underline;
+        }
+        .gridjs-container {
+            box-shadow: none !important;
+            border: 1px solid #e0e0e0 !important;
+            border-radius: 6px !important;
+            overflow: hidden;
+        }
+        .gridjs-th {
+            background-color: #f8f9fa !important;
+            font-weight: 600 !important;
+        }
+        .gridjs-td {
+            padding: 12px 16px !important;
+        }
+        .gridjs-td[data-column-id="actions"] {
+            text-align: center;
+        }
+        .edit-btn {
+            background: none;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 4px 8px;
+            cursor: pointer;
+            color: #3498db;
+            font-size: 14px;
+        }
+        .edit-btn:hover {
+            background: #f0f7ff;
+        }
+        .save-btn {
+            background: #28a745;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 4px 12px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-right: 5px;
+        }
+        .cancel-btn {
+            background: #dc3545;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 4px 12px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .edit-input {
+            width: 100%;
+            padding: 6px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .gridjs-pagination {
+            padding: 10px 16px !important;
+            border-top: 1px solid #e0e0e0 !important;
+        }
+        .gridjs-search {
+            margin-bottom: 15px;
+        }
+        .gridjs-search input {
+            border: 1px solid #ddd !important;
+            border-radius: 4px !important;
+            padding: 8px 12px !important;
+            font-size: 14px !important;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <a href="/searchrack" class="back-link">← Back to Search</a>
+        <h1>{{ title }}</h1>
+        <div id="wrapper"></div>
+    </div>
+
+    <script>
+        // Convert Python data to JavaScript
+        const items = {{ items | tojson | safe }};
+        const dbType = '{{ db_type }}';
+        
+        // Get column names from the first item
+        const columns = items.length > 0 ? Object.keys(items[0]) : [];
+        
+        // Create columns configuration for Grid.js
+        const gridColumns = columns.map(col => ({
+            name: col.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+            id: col,
+            sort: true,
+            formatter: (cell, row) => {
+                return gridjs.html(`<div class="cell-content">${cell !== null ? cell : ''}</div>`);
+            }
+        }));
+
+        // Add actions column
+        gridColumns.push({
+            name: 'Actions',
+            id: 'actions',
+            sort: false,
+            width: '120px',
+            formatter: (_, row) => {
+                return gridjs.h('button', {
+                    className: 'edit-btn',
+                    onClick: () => editRow(row)
+                }, 'Edit');
+            }
+        });
+
+        // Initialize the grid
+        const grid = new gridjs.Grid({
+            columns: gridColumns,
+            data: items.map(item => {
+                const row = [];
+                columns.forEach(col => {
+                    row.push(item[col] !== null ? item[col] : '');
+                });
+                row.push(''); // Empty cell for actions
+                return row;
+            }),
+            search: true,
+            pagination: {
+                limit: 20,
+                summary: true
+            },
+            sort: true,
+            fixedHeader: true,
+            height: '600px',
+            style: {
+                table: {
+                    'white-space': 'nowrap'
+                },
+                th: {
+                    'background-color': '#f8f9fa',
+                    'font-weight': '600',
+                    'border-bottom': '1px solid #e0e0e0',
+                    'padding': '12px 16px'
+                },
+                td: {
+                    'border-bottom': '1px solid #f0f0f0',
+                    'padding': '12px 16px',
+                    'vertical-align': 'middle'
+                },
+                '.gridjs-tbody': {
+                    'font-size': '14px'
+                },
+                '.gridjs-td:last-child': {
+                    'text-align': 'center'
+                }
+            }
+        }).render(document.getElementById('wrapper'));
+
+        // Function to handle row editing
+        function editRow(row) {
+            const rowIndex = row._cells[0].data;
+            const rowId = items[rowIndex].id || rowIndex;
+            const rowData = items[rowIndex];
+            
+            // Create form elements for editing
+            const form = document.createElement('div');
+            form.style.padding = '10px';
+            
+            const fields = [];
+            
+            // Create input fields for each column (except id and actions)
+            Object.entries(rowData).forEach(([key, value]) => {
+                if (key === 'id') return;
+                
+                const fieldDiv = document.createElement('div');
+                fieldDiv.style.marginBottom = '10px';
+                
+                const label = document.createElement('label');
+                label.textContent = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()) + ': ';
+                label.style.display = 'block';
+                label.style.marginBottom = '5px';
+                label.style.fontWeight = '500';
+                
+                const input = document.createElement('input');
+                input.type = 'text';
+                input.className = 'edit-input';
+                input.value = value !== null ? value : '';
+                input.dataset.field = key;
+                
+                fieldDiv.appendChild(label);
+                fieldDiv.appendChild(input);
+                fields.push({ key, input });
+                form.appendChild(fieldDiv);
+            });
+            
+            // Create buttons
+            const buttonDiv = document.createElement('div');
+            buttonDiv.style.marginTop = '15px';
+            buttonDiv.style.textAlign = 'right';
+            
+            const saveBtn = document.createElement('button');
+            saveBtn.className = 'save-btn';
+            saveBtn.textContent = 'Save';
+            saveBtn.onclick = () => saveChanges(dbType, rowId, fields, rowIndex);
+            
+            const cancelBtn = document.createElement('button');
+            cancelBtn.className = 'cancel-btn';
+            cancelBtn.textContent = 'Cancel';
+            cancelBtn.onclick = () => gridjs.Grid.get(document.querySelector('.gridjs-wrapper')).forceRender();
+            
+            buttonDiv.appendChild(saveBtn);
+            buttonDiv.appendChild(cancelBtn);
+            form.appendChild(buttonDiv);
+            
+            // Show the form in a dialog
+            const dialog = document.createElement('div');
+            dialog.style.position = 'fixed';
+            dialog.style.top = '50%';
+            dialog.style.left = '50%';
+            dialog.style.transform = 'translate(-50%, -50%)';
+            dialog.style.background = 'white';
+            dialog.style.padding = '20px';
+            dialog.style.borderRadius = '8px';
+            dialog.style.boxShadow = '0 4px 20px rgba(0,0,0,0.15)';
+            dialog.style.zIndex = '1000';
+            dialog.style.minWidth = '400px';
+            dialog.style.maxWidth = '80%';
+            dialog.style.maxHeight = '90vh';
+            dialog.style.overflowY = 'auto';
+            
+            const title = document.createElement('h3');
+            title.textContent = 'Edit Item';
+            title.style.marginTop = '0';
+            title.style.color = '#2c3e50';
+            dialog.appendChild(title);
+            dialog.appendChild(form);
+            
+            // Add overlay
+            const overlay = document.createElement('div');
+            overlay.style.position = 'fixed';
+            overlay.style.top = '0';
+            overlay.style.left = '0';
+            overlay.style.right = '0';
+            overlay.style.bottom = '0';
+            overlay.style.background = 'rgba(0,0,0,0.5)';
+            overlay.style.zIndex = '999';
+            
+            // Close on overlay click
+            overlay.onclick = () => {
+                document.body.removeChild(overlay);
+                document.body.removeChild(dialog);
+            };
+            
+            document.body.appendChild(overlay);
+            document.body.appendChild(dialog);
+        }
+        
+        // Function to save changes
+        async function saveChanges(dbType, itemId, fields, rowIndex) {
+            const data = {};
+            fields.forEach(({ key, input }) => {
+                data[key] = input.value || null;
+            });
+            
+            try {
+                const response = await fetch(`/update_item/${dbType}/${itemId}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(data)
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    // Update the local data
+                    Object.assign(items[rowIndex], data);
+                    // Refresh the grid
+                    grid.forceRender();
+                    // Close the dialog
+                    const overlay = document.querySelector('.gridjs-overlay');
+                    const dialog = document.querySelector('.gridjs-dialog');
+                    if (overlay) document.body.removeChild(overlay);
+                    if (dialog) document.body.removeChild(dialog);
+                    
+                    alert('Changes saved successfully!');
+                } else {
+                    alert('Error saving changes: ' + (result.error || 'Unknown error'));
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('An error occurred while saving changes.');
+            }
+        }
+    </script>
+</body>
+</html>

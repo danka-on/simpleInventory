@@ -3,49 +3,196 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Search My Rack</title>
+    <title>Search Inventory</title>
     <style>
-        body { font-family: sans-serif; max-width: 700px; margin: auto; padding: 20px; }
+        body { font-family: sans-serif; max-width: 900px; margin: auto; padding: 20px; }
         h1 { text-align: center; }
-        #search-bar { width: 100%; font-size: 1.2em; padding: 10px; margin-bottom: 20px; }
-        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-        th, td { border: 1px solid #bbb; padding: 8px 12px; text-align: left; }
-        th { background: #0984e3; color: #fff; }
-        tr:nth-child(even) { background: #f4f4f4; }
-        .no-results { color: #d32f2f; text-align: center; margin-top: 20px; }
+        .search-container { margin-bottom: 30px; }
+        .search-box { 
+            display: flex; 
+            margin-bottom: 15px;
+            gap: 10px;
+        }
+        .search-box input { 
+            flex: 1; 
+            font-size: 1.1em; 
+            padding: 10px; 
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .search-box button {
+            padding: 0 20px;
+            background: #3498db;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .search-box button:hover {
+            background: #2980b9;
+        }
+        table { 
+            width: 100%; 
+            border-collapse: collapse; 
+            margin-top: 20px; 
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        th, td { 
+            border: 1px solid #ddd; 
+            padding: 12px; 
+            text-align: left; 
+        }
+        th { 
+            background: #2c3e50; 
+            color: #fff; 
+            position: sticky;
+            top: 0;
+        }
+        tr:nth-child(even) { background: #f9f9f9; }
+        tr:hover { background: #f1f1f1; }
+        .no-results { 
+            color: #d32f2f; 
+            text-align: center; 
+            margin: 20px 0;
+            padding: 20px;
+            background: #ffebee;
+            border-radius: 4px;
+        }
+        .section-title {
+            font-size: 1.2em;
+            margin: 25px 0 10px 0;
+            color: #2c3e50;
+            font-weight: bold;
+        }
+        .refresh-btn {
+            background: #00b894;
+            color: white;
+            font-size: 16px;
+            padding: 8px 24px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            margin-bottom: 20px;
+        }
+        .refresh-btn:hover {
+            background: #00a884;
+        }
     </style>
 </head>
 <body>
-    <h1>Search My Rack</h1>
-    <div style="text-align:center;margin-bottom:18px;">
-        <a href="/refresh_searchrack"><button style="background:#00b894;color:white;font-size:16px;padding:8px 24px;border:none;border-radius:6px;cursor:pointer;">Refresh Search DB</button></a>
+    <h1>Inventory Search</h1>
+    <div style="text-align:center;margin-bottom:25px;">
+        <a href="/refresh_searchrack"><button class="refresh-btn">Refresh Search DB</button></a>
     </div>
-    <input id="search-bar" type="text" placeholder="Search by title or barcode..." autofocus>
-    <div id="results"></div>
+    
+    <div class="search-container">
+        <div class="section-title">Search Inventory</div>
+        <div class="search-box">
+            <input id="search-rack" type="text" placeholder="Search by title or barcode..." autofocus>
+            <button onclick="window.location.href='/view_all/rack'">Show All</button>
+        </div>
+        <div id="rack-results"></div>
+    </div>
+
+    <div class="search-container">
+        <div class="section-title">Search Macy BOL</div>
+        <div class="search-box">
+            <input id="search-bol" type="text" placeholder="Search BOL items by description or UPC...">
+            <button onclick="window.location.href='/view_all/bol'">Show All</button>
+        </div>
+        <div id="bol-results"></div>
+    </div>
+
     <script>
-    async function fetchResults(query) {
+    // Function to fetch rack inventory results
+    async function fetchRackResults(query) {
         const resp = await fetch(`/searchrack_api?q=${encodeURIComponent(query)}`);
         const data = await resp.json();
         return data.results;
     }
-    function renderTable(items) {
-        if (!items.length) {
-            document.getElementById('results').innerHTML = '<div class="no-results">No items found.</div>';
+
+    // Function to fetch BOL results
+    async function fetchBOLResults(query) {
+        const resp = await fetch(`/searchbol_api?q=${encodeURIComponent(query)}`);
+        const data = await resp.json();
+        return data.results;
+    }
+
+    // Render rack inventory table
+    function renderRackTable(items) {
+        const container = document.getElementById('rack-results');
+        if (!items || items.length === 0) {
+            container.innerHTML = '<div class="no-results">No inventory items found.</div>';
             return;
         }
         let html = '<table><tr><th>Title</th><th>Barcode</th><th>Position</th><th>Images</th><th>Picture Position</th></tr>';
         for (const item of items) {
-            html += `<tr><td>${item.title||''}</td><td>${item.barcode||''}</td><td>${item.item_position||''}</td><td>${item.images||''}</td><td>${item.pictureposition||''}</td></tr>`;
+            html += `
+                <tr>
+                    <td>${item.title||'N/A'}</td>
+                    <td>${item.barcode||'N/A'}</td>
+                    <td>${item.item_position||'N/A'}</td>
+                    <td>${item.images||'N/A'}</td>
+                    <td>${item.pictureposition||'N/A'}</td>
+                </tr>`;
         }
         html += '</table>';
-        document.getElementById('results').innerHTML = html;
+        container.innerHTML = html;
     }
-    document.getElementById('search-bar').addEventListener('input', async function() {
+
+    // Render BOL table
+    function renderBOLTable(items) {
+        const container = document.getElementById('bol-results');
+        if (!items || items.length === 0) {
+            container.innerHTML = '<div class="no-results">No BOL items found.</div>';
+            return;
+        }
+        let html = '<table><tr><th>Description</th><th>UPC</th><th>Client Cost</th><th>Total Cost</th><th>Lot #</th><th>BOL #</th></tr>';
+        for (const item of items) {
+            html += `
+                <tr>
+                    <td>${item.description||'N/A'}</td>
+                    <td>${item.upc||'N/A'}</td>
+                    <td>${item.client_cost||'N/A'}</td>
+                    <td>${item.total_cost||'N/A'}</td>
+                    <td>${item.lot_number||'N/A'}</td>
+                    <td>${item.bol_number||'N/A'}</td>
+                </tr>`;
+        }
+        html += '</table>';
+        container.innerHTML = html;
+    }
+
+    // Add event listeners for search inputs
+    document.getElementById('search-rack').addEventListener('input', debounce(async function() {
         const q = this.value.trim();
-        if (!q) { document.getElementById('results').innerHTML = ''; return; }
-        const items = await fetchResults(q);
-        renderTable(items);
-    });
+        if (!q) { 
+            document.getElementById('rack-results').innerHTML = ''; 
+            return; 
+        }
+        const items = await fetchRackResults(q);
+        renderRackTable(items);
+    }, 300));
+
+    document.getElementById('search-bol').addEventListener('input', debounce(async function() {
+        const q = this.value.trim();
+        if (!q) { 
+            document.getElementById('bol-results').innerHTML = ''; 
+            return; 
+        }
+        const items = await fetchBOLResults(q);
+        renderBOLTable(items);
+    }, 300));
+
+    // Debounce function to limit API calls
+    function debounce(func, wait) {
+        let timeout;
+        return function() {
+            const context = this, args = arguments;
+            clearTimeout(timeout);
+            timeout = setTimeout(() => func.apply(context, args), wait);
+        };
+    }
     </script>
 </body>
 </html>

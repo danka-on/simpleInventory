@@ -856,6 +856,86 @@ def searchrack_api():
         conn.close()
     return jsonify({'results': results})
 
+@app.route('/searchbol_api')
+def searchbol_api():
+    q = request.args.get('q', '').strip()
+    results = []
+    if q:
+        conn = sqlite3.connect('bol.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute('''
+            SELECT item_description as description, upc, client_cost, 
+                   total_client_cost as total_cost, lot_number, bol_number 
+            FROM bol_items 
+            WHERE item_description LIKE ? OR upc LIKE ?
+        ''', (f'%{q}%', f'%{q}%'))
+        results = [dict(row) for row in cur.fetchall()]
+        conn.close()
+    return jsonify({'results': results})
+
+@app.route('/view_all/<db_type>')
+def view_all(db_type):
+    if db_type == 'rack':
+        conn = sqlite3.connect('searchRack.db')
+        cur = conn.cursor()
+        cur.execute('SELECT * FROM SEARCHRACK')
+        columns = [desc[0] for desc in cur.description]
+        items = [dict(zip(columns, row)) for row in cur.fetchall()]
+        title = 'All Inventory Items'
+        conn.close()
+    elif db_type == 'bol':
+        conn = sqlite3.connect('bol.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute('SELECT * FROM bol_items')
+        items = [dict(row) for row in cur.fetchall()]
+        title = 'All BOL Items'
+        conn.close()
+    else:
+        return 'Invalid database type', 400
+    
+    return render_template('view_all.html', items=items, title=title, db_type=db_type)
+
+@app.route('/update_item/<db_type>/<int:item_id>', methods=['POST'])
+def update_item(db_type, item_id):
+    if db_type not in ['rack', 'bol']:
+        return jsonify({'success': False, 'error': 'Invalid database type'}), 400
+    
+    data = request.get_json()
+    if not data:
+        return jsonify({'success': False, 'error': 'No data provided'}), 400
+    
+    try:
+        if db_type == 'rack':
+            conn = sqlite3.connect('searchRack.db')
+        else:  # bol
+            conn = sqlite3.connect('bol.db')
+        
+        cur = conn.cursor()
+        
+        # Get column names to validate fields
+        cur.execute(f'PRAGMA table_info({"SEARCHRACK" if db_type == "rack" else "bol_items"})')
+        columns = [col[1] for col in cur.fetchall()]
+        
+        # Build update query
+        set_clause = ', '.join([f'"{k}"=?' for k in data.keys() if k in columns])
+        values = [v for k, v in data.items() if k in columns]
+        values.append(item_id)
+        
+        if not set_clause:
+            return jsonify({'success': False, 'error': 'No valid fields to update'}), 400
+        
+        query = f'UPDATE {"SEARCHRACK" if db_type == "rack" else "bol_items"} SET {set_clause} WHERE id=?'
+        cur.execute(query, values)
+        conn.commit()
+        
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+    finally:
+        conn.close()
+
 @app.route('/refresh_searchrack')
 def refresh_searchrack():
     createSearchRackDB()
