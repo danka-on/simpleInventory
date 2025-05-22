@@ -37,3 +37,45 @@
 
 </body>
 </html>
+<script>
+    // Show spinner/status if upload is in progress, or redirect if error
+    function checkPictureUploadStatus() {
+        const status = sessionStorage.getItem('pictureposition_upload_status');
+        if (status === 'uploading') {
+            showUploadSpinner();
+            // Poll until done or error
+            const interval = setInterval(() => {
+                const s = sessionStorage.getItem('pictureposition_upload_status');
+                if (s === 'done') {
+                    hideUploadSpinner();
+                    clearInterval(interval);
+                } else if (s === 'error') {
+                    clearInterval(interval);
+                    window.location.href = '/pictureposition?error=1';
+                }
+            }, 500);
+        } else if (status === 'error') {
+            window.location.href = '/pictureposition?error=1';
+        }
+    }
+
+    function showUploadSpinner() {
+        let spinner = document.getElementById('upload-spinner');
+        if (!spinner) {
+            spinner = document.createElement('div');
+            spinner.id = 'upload-spinner';
+            spinner.innerHTML = '<div style="margin:30px auto;text-align:center;"><span style="font-size:1.2em;">Uploading picture...</span><br><svg width="40" height="40" viewBox="0 0 40 40"><circle cx="20" cy="20" r="18" stroke="#1976d2" stroke-width="4" fill="none" stroke-dasharray="90" stroke-dashoffset="60"><animateTransform attributeName="transform" type="rotate" from="0 20 20" to="360 20 20" dur="1s" repeatCount="indefinite"/></circle></svg></div>';
+            document.body.appendChild(spinner);
+        } else {
+            spinner.style.display = '';
+        }
+    }
+    function hideUploadSpinner() {
+        let spinner = document.getElementById('upload-spinner');
+        if (spinner) spinner.style.display = 'none';
+    }
+    // On load, check upload status if redirected from pictureposition
+    if (window.location.search.includes('pictureposition=1')) {
+        checkPictureUploadStatus();
+    }
+</script>

@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Picture Position</title>
+    <style>
+        body { font-family: sans-serif; max-width: 600px; margin: auto; padding: 10px; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
+        #camera-container { width: 100%; max-width: 350px; margin-top: 20px; position: relative; }
+        #video, #preview-img { width: 100%; border-radius: 8px; background: #222; }
+        #controls { margin-top: 15px; display: flex; gap: 10px; }
+        button { font-size: 18px; padding: 10px 20px; cursor: pointer; }
+        #confirm-btn { background: #1976d2; color: white; }
+        #retake-btn { background: #aaa; color: white; }
+        #skip-btn { background: #eee; color: #222; }
+        #status { margin-top: 10px; color: #1976d2; }
+    </style>
+</head>
+<body>
+    <h1>Take Picture of Location</h1>
+    <div id="camera-container">
+        <video id="video" autoplay playsinline></video>
+        <img id="preview-img" style="display:none;" />
+    </div>
+    <div id="controls">
+        <button id="capture-btn">Capture</button>
+        <button id="confirm-btn" style="display:none;">Confirm</button>
+        <button id="retake-btn" style="display:none;">Retake</button>
+        <a href="/barcode"><button id="skip-btn" type="button">Skip</button></a>
+    </div>
+    <div id="status"></div>
+    <script>
+    let video = document.getElementById('video');
+    let previewImg = document.getElementById('preview-img');
+    let captureBtn = document.getElementById('capture-btn');
+    let confirmBtn = document.getElementById('confirm-btn');
+    let retakeBtn = document.getElementById('retake-btn');
+    let statusDiv = document.getElementById('status');
+    let stream = null;
+    let capturedBlob = null;
+
+    async function startCamera() {
+        try {
+            stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+            video.srcObject = stream;
+            video.style.display = '';
+            previewImg.style.display = 'none';
+            captureBtn.style.display = '';
+            confirmBtn.style.display = 'none';
+            retakeBtn.style.display = 'none';
+            statusDiv.textContent = '';
+        } catch (e) {
+            statusDiv.textContent = 'Camera error: ' + (e.message || e);
+            captureBtn.disabled = true;
+        }
+    }
+
+    function stopCamera() {
+        if (stream) {
+            stream.getTracks().forEach(track => track.stop());
+            stream = null;
+        }
+    }
+
+    captureBtn.onclick = function() {
+        let canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        let ctx = canvas.getContext('2d');
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob(blob => {
+            capturedBlob = blob;
+            previewImg.src = URL.createObjectURL(blob);
+            previewImg.style.display = '';
+            video.style.display = 'none';
+            captureBtn.style.display = 'none';
+            confirmBtn.style.display = '';
+            retakeBtn.style.display = '';
+        }, 'image/jpeg', 0.7);
+    };
+
+    retakeBtn.onclick = function() {
+        capturedBlob = null;
+        previewImg.style.display = 'none';
+        video.style.display = '';
+        captureBtn.style.display = '';
+        confirmBtn.style.display = 'none';
+        retakeBtn.style.display = 'none';
+        statusDiv.textContent = '';
+    };
+
+    confirmBtn.onclick = function() {
+        if (!capturedBlob) return;
+        sessionStorage.setItem('pictureposition_upload_status', 'uploading');
+        console.log('Set pictureposition_upload_status to uploading');
+        statusDiv.textContent = 'Uploading in background...';
+        backgroundUploadPicture(capturedBlob);
+        // Add a short delay before redirecting to barcode.html
+        setTimeout(() => {
+            window.location.href = '/barcode?pictureposition=1';
+        }, 700); // 700ms delay for user feedback
+    };
+
+    // Background upload logic
+    async function backgroundUploadPicture(blob) {
+        sessionStorage.setItem('pictureposition_upload_status', 'uploading');
+        console.log('Set pictureposition_upload_status to uploading (backgroundUploadPicture)');
+        let formData = new FormData();
+        formData.append('picture', blob, 'image.jpg');
+        try {
+            let resp = await fetch('/upload_position_picture', { method: 'POST', body: formData });
+            let data = await resp.json();
+            if (data.success && data.path) {
+                sessionStorage.setItem('pictureposition_path', data.path);
+                sessionStorage.setItem('pictureposition_upload_status', 'done');
+                console.log('Set pictureposition_upload_status to done');
+            } else {
+                sessionStorage.setItem('pictureposition_upload_status', 'error');
+                console.log('Set pictureposition_upload_status to error (upload failed)');
+            }
+        } catch (e) {
+            sessionStorage.setItem('pictureposition_upload_status', 'error');
+            console.log('Set pictureposition_upload_status to error (exception)');
+        }
+    }
+
+    // Show error if redirected with error param
+    function showErrorIfNeeded() {
+        const params = new URLSearchParams(window.location.search);
+        if (params.get('error') === '1') {
+            let statusDiv = document.getElementById('status');
+            if (statusDiv) {
+                statusDiv.textContent = 'Error uploading picture. Please try again.';
+                statusDiv.style.color = '#d32f2f';
+            } else {
+                alert('Error uploading picture. Please try again.');
+            }
+            // Reset upload status
+            sessionStorage.setItem('pictureposition_upload_status', '');
+        }
+    }
+    window.addEventListener('DOMContentLoaded', showErrorIfNeeded);
+    window.addEventListener('DOMContentLoaded', startCamera);
+    window.addEventListener('beforeunload', stopCamera);
+    </script>
+</body>
+</html>

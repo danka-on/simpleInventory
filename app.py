@@ -242,6 +242,12 @@ def additemtrue():
 
 @app.route("/barcode")
 def barcode_page():
+    # If redirected from pictureposition, set global pictureposition_path from sessionStorage (via query param)
+    from flask import request
+    global pictureposition_path
+    if request.args.get("pictureposition") == "1":
+        # Try to get the path from sessionStorage via a hidden form or AJAX (handled in JS below)
+        pass  # Will be handled by JS below
     return render_template("barcode.html")
 
 @app.route("/pictures")
@@ -824,6 +830,18 @@ def upload_position_picture():
     rel_path = os.path.relpath(save_path, os.getcwd())
     return jsonify({'success': True, 'path': rel_path})
 
+
+@app.route("/pictureposition")
+def pictureposition_page():
+    return render_template("pictureposition.html")
+
+@app.route('/set_pictureposition_path', methods=['POST'])
+def set_pictureposition_path():
+    global pictureposition_path
+    data = request.get_json()
+    pictureposition_path = data.get('path')
+    print(f"Set pictureposition_path from barcode.html: {pictureposition_path}")
+    return jsonify({'success': True})
 
 if __name__ == "__main__":
     # Start Flask in a thread

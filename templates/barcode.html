@@ -52,6 +52,15 @@
             transform: translateY(-50%);
             z-index: 1;
         }
+        #upload-spinner {
+            display: none;
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 1000;
+            text-align: center;
+        }
     </style>
     <link href="https://fonts.googleapis.com/css2?family=Libre+Barcode+39&display=swap" rel="stylesheet">
 </head>
@@ -494,6 +503,66 @@
             }
         }
 
+        // Show spinner/status if upload is in progress, or redirect if error
+        function checkPictureUploadStatus() {
+            const status = sessionStorage.getItem('pictureposition_upload_status');
+            // Only check if we actually just came from pictureposition
+            if (!window.location.search.includes('pictureposition=1')) return;
+            if (status === 'uploading') {
+                showUploadSpinner();
+                // Poll until done or error
+                const interval = setInterval(() => {
+                    const s = sessionStorage.getItem('pictureposition_upload_status');
+                    if (s === 'done') {
+                        hideUploadSpinner();
+                        clearInterval(interval);
+                    } else if (s === 'error' || s === null) {
+                        clearInterval(interval);
+                        window.location.href = '/pictureposition?error=1';
+                    }
+                }, 500);
+            } else if (status === 'error' || status === null) {
+                window.location.href = '/pictureposition?error=1';
+            } else {
+                // If status is not uploading or error, do nothing (let user proceed)
+                hideUploadSpinner();
+            }
+        }
+
+        function showUploadSpinner() {
+            let spinner = document.getElementById('upload-spinner');
+            if (!spinner) {
+                spinner = document.createElement('div');
+                spinner.id = 'upload-spinner';
+                spinner.innerHTML = '<div style="margin:30px auto;text-align:center;"><span style="font-size:1.2em;">Uploading picture...</span><br><svg width="40" height="40" viewBox="0 0 40 40"><circle cx="20" cy="20" r="18" stroke="#1976d2" stroke-width="4" fill="none" stroke-dasharray="90" stroke-dashoffset="60"><animateTransform attributeName="transform" type="rotate" from="0 20 20" to="360 20 20" dur="1s" repeatCount="indefinite"/></circle></svg></div>';
+                document.body.appendChild(spinner);
+            } else {
+                spinner.style.display = '';
+            }
+        }
+        function hideUploadSpinner() {
+            let spinner = document.getElementById('upload-spinner');
+            if (spinner) spinner.style.display = 'none';
+        }
+        
+        // On load, check if redirected from pictureposition and send the image path to backend
+        if (window.location.search.includes('pictureposition=1')) {
+            const path = sessionStorage.getItem('pictureposition_path');
+            if (path) {
+                // Send to backend to set global variable
+                fetch('/set_pictureposition_path', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ path })
+                }).then(() => {
+                    // Optionally clear from sessionStorage
+                    // sessionStorage.removeItem('pictureposition_path');
+                });
+            }
+            // Check upload status
+            checkPictureUploadStatus();
+        }
+
         // Initialize everything when the page loads
         document.addEventListener('DOMContentLoaded', () => {
             // Unlock audio on user interaction
@@ -505,6 +574,11 @@
 
             // Fetch allowed UPCs
             fetchAllowedUPCs();
+
+            // On load, check upload status only if redirected from pictureposition
+            if (window.location.search.includes('pictureposition=1')) {
+                checkPictureUploadStatus();
+            }
         });
         
         // Clean up on page unload
