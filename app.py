@@ -36,6 +36,10 @@ headers = {
 
 
 
+@app.route('/tools')
+def tools():
+    return render_template('tools.html')
+
 @app.route('/extractor')
 def extractor():
     return render_template('extractor.html')

@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.ico') }}">
+    <title>Tools - Sweet Shelves</title>
+    <style>
+        :root {
+            --primary: #0984e3;
+            --accent: #00b894;
+            --bg: #f9f9f9;
+            --card: #fff;
+            --border: #e0e0e0;
+            --radius: 14px;
+        }
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background: var(--bg);
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 480px;
+            margin: 0 auto;
+            padding: 20px 16px 80px 16px;
+        }
+        h1 {
+            margin: 0 0 18px 0;
+            font-weight: 600;
+            color: #2c3e50;
+            text-align: center;
+        }
+        .tools-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-top: 20px;
+        }
+        .tool-card {
+            background: var(--card);
+            border-radius: var(--radius);
+            padding: 20px;
+            text-align: center;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+            border: 1px solid var(--border);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .tool-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        .tool-card i {
+            font-size: 2.5rem;
+            margin-bottom: 12px;
+            color: var(--primary);
+        }
+        .tool-card h3 {
+            margin: 0 0 8px 0;
+            color: #2c3e50;
+        }
+        .tool-card p {
+            margin: 0;
+            color: #666;
+            font-size: 0.9rem;
+        }
+        .back-btn {
+            display: inline-block;
+            margin-top: 25px;
+            padding: 12px 20px;
+            background: var(--primary);
+            color: white;
+            text-decoration: none;
+            border-radius: var(--radius);
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+        .back-btn:hover {
+            background: var(--accent);
+        }
+        .sold-orders-section {
+            margin-top: 30px;
+            background: var(--card);
+            border-radius: var(--radius);
+            padding: 16px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+            border: 1px solid var(--border);
+        }
+        .sold-orders-section h2 {
+            margin-top: 0;
+            font-size: 1.2rem;
+            color: #2c3e50;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 6px;
+            color: #555;
+        }
+        .form-group input[type="number"] {
+            width: 80px;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 1rem;
+        }
+        .btn {
+            background: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 10px 16px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .btn:hover {
+            background: var(--accent);
+        }
+        @media (max-width: 400px) {
+            .tools-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Tools</h1>
+        
+        <div class="tools-grid">
+            <a href="/extractor" class="tool-card">
+                <i class="fas fa-file-import"></i>
+                <h3>BOL Extract</h3>
+                <p>Extract BOL data from Excel files</p>
+            </a>
+            
+            <a href="/manualmatcher" class="tool-card">
+                <i class="fas fa-handshake"></i>
+                <h3>Manual Matcher</h3>
+                <p>Match BOL items with eBay listings</p>
+            </a>
+            
+            <a href="/searchrack" class="tool-card">
+                <i class="fas fa-search"></i>
+                <h3>Search Rack</h3>
+                <p>Search your inventory</p>
+            </a>
+            
+            <a href="/position" class="tool-card">
+                <i class="fas fa-plus-circle"></i>
+                <h3>Add Item</h3>
+                <p>Add new item to inventory</p>
+            </a>
+        </div>
+
+        <div class="sold-orders-section">
+            <h2>Sold Orders</h2>
+            <div class="form-group">
+                <label for="sold-days">Days to fetch:</label>
+                <input type="number" id="sold-days" value="90" min="1" max="120">
+            </div>
+            <button id="get-sold-orders-btn" class="btn">
+                <i class="fas fa-download"></i> Get Sold Orders
+            </button>
+        </div>
+
+        <a href="/" class="back-btn">
+            <i class="fas fa-arrow-left"></i> Back to Home
+        </a>
+    </div>
+
+    <script>
+    document.getElementById('get-sold-orders-btn').onclick = function(e) {
+        e.preventDefault();
+        const days = parseInt(document.getElementById('sold-days').value) || 90;
+        fetch('/get-sold-orders', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ days })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                alert('Sold orders fetched and stored successfully!');
+            } else {
+                alert('Failed to fetch sold orders: ' + (data.error || 'Unknown error'));
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('An error occurred while fetching sold orders');
+        });
+    };
+    </script>
+</body>
+</html>
