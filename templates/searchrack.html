@@ -77,10 +77,49 @@
         .refresh-btn:hover {
             background: #00a884;
         }
+        /* Modal styles */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.8);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+        .modal-content {
+            max-width: 90%;
+            max-height: 90%;
+        }
+        .modal-content img {
+            max-width: 100%;
+            max-height: 90vh;
+            border: 3px solid white;
+            border-radius: 4px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+        }
+        .location-link {
+            color: #3498db;
+            text-decoration: underline;
+            cursor: pointer;
+        }
+        .location-link:hover {
+            color: #2980b9;
+        }
     </style>
 </head>
 <body>
     <h1>Inventory Search</h1>
+    <!-- Modal for displaying the location image -->
+    <div id="locationModal" class="modal">
+        <div class="modal-content">
+            <img id="locationImage" src="{{ url_for('static', filename='gr1new.png') }}" alt="Location Image">
+        </div>
+    </div>
+
     <div style="text-align:center;margin-bottom:25px;">
         <a href="/refresh_searchrack"><button class="refresh-btn">Refresh Search DB</button></a>
     </div>
@@ -115,7 +154,11 @@
                 <tr>
                     <td>${item.title||'N/A'}</td>
                     <td>${item.barcode||'N/A'}</td>
-                    <td>${item.item_position||'N/A'}</td>
+                    <td>
+                        ${item.item_position ? 
+                            `<span class="location-link" onclick="showLocationImage('${item.item_position}')">${item.item_position}</span>` : 
+                            'N/A'}
+                    </td>
                     <td>${item.images||'N/A'}</td>
                     <td>${item.pictureposition||'N/A'}</td>
                 </tr>`;
@@ -134,6 +177,25 @@
         const items = await fetchRackResults(q);
         renderRackTable(items);
     }, 300));
+
+    // Show location image in modal
+    function showLocationImage(position) {
+        const modal = document.getElementById('locationModal');
+        modal.style.display = 'flex';
+        
+        // Close modal when clicking anywhere
+        modal.onclick = function() {
+            modal.style.display = 'none';
+        };
+    }
+
+    // Close modal when pressing Escape key
+    document.addEventListener('keydown', function(event) {
+        const modal = document.getElementById('locationModal');
+        if (event.key === 'Escape' && modal.style.display === 'flex') {
+            modal.style.display = 'none';
+        }
+    });
 
     // Debounce function to limit API calls
     function debounce(func, wait) {
