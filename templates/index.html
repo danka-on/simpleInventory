@@ -153,13 +153,13 @@
     <div class="container">
         <div class="main-actions">
             <form method="GET" action="/position" style="margin:0;">
-                <button type="submit">Add Item</button>
+                <button type="submit" style="background:#27ae60;">Add Item to Shelf</button>
             </form>
             <a href="/searchrack" style="text-decoration:none;"><button type="button">Search My Rack</button></a>
         </div>
 
         <div class="section-card">
-            <h2 style="font-size:1.2rem; margin-bottom:10px;">Recent Sold Orders</h2>
+            <h2 style="font-size:1.2rem; margin-bottom:10px;">Ready to Ship</h2>
             <label for="sold-orders-days" style="font-size:0.98rem;">Days to show:</label>
             <input type="number" id="sold-orders-days" value="1" min="1" max="120" style="width:60px; margin-bottom:10px;">
             <table id="sold-orders-table">
@@ -182,9 +182,9 @@
         <div class="tools-section">
             <h3>Tools</h3>
             <div class="tools-row">
-                <a href="/extractor"><button type="button" style="background:#636e72;">BOL Extract</button></a>
+                <a href="/extractor"><button type="button" style="background:#ffb366;">BOL Extract</button></a>
                 <form method="GET" action="/manualmatcher" style="margin:0;">
-                    <button type="submit" style="background:#636e72;">Manual Matcher</button>
+                    <button type="submit" style="background:#ffb366;">Manual Matcher</button>
                 </form>
                 <div style="margin-top:8px;">
                     <label for="sold-days">Days to fetch sold orders:</label>
