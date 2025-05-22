@@ -119,27 +119,33 @@ SHELF_COORDS = [
 
 @app.route("/highlight")
 def highlight():
-    shelf_name = request.args.get("shelf", "").lower()
-    print(f"[DEBUG] highlight() called with shelf_name: {shelf_name}")  # printdebug
-
-    # Load original image
-    image_path = "static/gr1.png"  # move your base image here
-    img = Image.open(image_path).convert("RGB")
+    shelf_name = request.args.get("shelf", "").lower().strip()
+    print(f"[DEBUG] highlight() called with shelf_name: {shelf_name}")
+    if not shelf_name or len(shelf_name) < 4 or not shelf_name.startswith("gr"):
+        return "Invalid shelf parameter", 400
+    rack = shelf_name[:3]  # e.g., 'gr1'
+    shelf = shelf_name[3:]  # e.g., 's6'
+    image_path = f"static/{rack}.png"
+    # SHELF_COORDS is a list of dicts, find the dict for this rack
+    coords = None
+    for rack_dict in SHELF_COORDS:
+        if rack in rack_dict:
+            coords = rack_dict[rack].get(shelf)
+            break
+    if coords is None:
+        return f"No coordinates found for {rack} {shelf}", 404
+    try:
+        img = Image.open(image_path).convert("RGB")
+    except Exception as e:
+        return f"Image not found: {image_path}", 404
     draw = ImageDraw.Draw(img)
-
-    # Draw the selected shelf in green
-    if shelf_name in SHELF_COORDS:
-        draw.rectangle(SHELF_COORDS[shelf_name], outline="green", width=30)
-
-    # Substantially decrease image size for faster loading
-    img.thumbnail((180, 80))  # width x height, adjust as needed
-
-    # Output to memory, not file
+    draw.rectangle(coords, outline="green", width=30)
+    img.thumbnail((180, 80))  # Substantially decrease image size
     img_io = io.BytesIO()
     img.save(img_io, "PNG")
     img_io.seek(0)
-
     return send_file(img_io, mimetype="image/png")
+
 
 ####################################
 
