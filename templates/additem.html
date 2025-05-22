@@ -16,7 +16,21 @@
             border: 1px solid #ccc;
             margin-top: 20px;
         }
-        #checklist .checkitem { transition: background 0.2s, color 0.2s; }
+        #checklist { display: block !important; }
+        #checklist .checkitem {
+            padding:12px 18px;
+            border-radius:8px;
+            margin-bottom:12px;
+            cursor:pointer;
+            font-size:1.1em;
+            font-weight:bold;
+            display:flex;
+            align-items:center;
+            background:#eee;
+            color:#222;
+            border: 1px solid #bbb;
+            min-height: 40px;
+        }
         </style>
 </head>
 <body>
@@ -24,29 +38,26 @@
     <h1>THIS IS ADD ITEM PAGE</h1>
 
 
-    <form action="/" method="POST">
+    <div id="checklist" style="margin: 30px 0;">
+        <div id="position-check" class="checkitem">
+            <span id="position-status">Loading...</span>
+        </div>
+        <div id="barcode-check" class="checkitem">
+            <span id="barcode-status">Loading...</span>
+        </div>
+    </div>
+    <form action="/" method="POST" style="margin-bottom: 16px;">
         <button >PRESS ME </button>
     </form>
     <form action="/additemtrue" method="POST">
-        <div
-            style="display:flex; justify-content:center; align-items:center; height:100vh;">
-        <button style="background-color:red; color:white; font-size:24px; padding:15px 40px; border:none; border-radius:8px; cursor:pointer;">
+        <div style="display:flex; justify-content:center; align-items:center;">
+        <button style="background-color:#00b894; color:white; font-size:24px; padding:15px 40px; border:none; border-radius:8px; cursor:pointer;">
             Add item
         </button>
         </div>
     </form>
-
-    <div id="checklist" style="margin: 30px 0;">
-        <div id="position-check" class="checkitem" style="padding:12px 18px; border-radius:8px; margin-bottom:12px; cursor:pointer; font-size:1.1em; font-weight:bold; display:flex; align-items:center;">
-            <span id="position-status">Loading...</span>
-        </div>
-        <div id="barcode-check" class="checkitem" style="padding:12px 18px; border-radius:8px; margin-bottom:12px; cursor:pointer; font-size:1.1em; font-weight:bold; display:flex; align-items:center;">
-            <span id="barcode-status">Loading...</span>
-        </div>
-    </div>
     <script>
     function updateChecklist() {
-        // Try to get from sessionStorage, fallback to global JS vars if needed
         const itemPosition = sessionStorage.getItem('item_position');
         const picturePosition = sessionStorage.getItem('pictureposition_path');
         const barcode = sessionStorage.getItem('barcode');
@@ -79,19 +90,20 @@
         // Update DOM
         const posDiv = document.getElementById('position-check');
         if (posDiv) {
-            posDiv.style.background = posColor;
+            posDiv.style.backgroundColor = posColor;
             posDiv.style.color = '#fff';
             document.getElementById('position-status').textContent = posText;
             posDiv.onclick = () => { window.location.href = posGoto; };
         }
         const barDiv = document.getElementById('barcode-check');
         if (barDiv) {
-            barDiv.style.background = barColor;
+            barDiv.style.backgroundColor = barColor;
             barDiv.style.color = '#fff';
             document.getElementById('barcode-status').textContent = barText;
             barDiv.onclick = () => { window.location.href = barGoto; };
         }
     }
+    // Always show checklist on load
     document.addEventListener('DOMContentLoaded', updateChecklist);
     </script>
 </body>
