@@ -225,8 +225,10 @@ def additemtrue():
             except Exception as e:
                 print(f"Image processing failed: {e}")
         print("Flow Complete, adding to Rack....")
-        addToRack(position_code, barcode, None, pictureposition_path)
-        print(f"Added to rack: position={position_code}, barcode={barcode}, pictureposition={pictureposition_path}")
+        # If picture position is set, store 'picture' in ITEM_POSITION
+        item_position_to_store = 'picture' if pictureposition_path else position_code
+        addToRack(item_position_to_store, barcode, None, pictureposition_path)
+        print(f"Added to rack: position={item_position_to_store}, barcode={barcode}, pictureposition={pictureposition_path}")
         position_code = None
         barcode = None
         pictureposition_path = None

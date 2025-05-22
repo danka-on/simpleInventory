@@ -58,19 +58,22 @@
     </form>
     <script>
     function updateChecklist() {
+        // If both are set, prefer picturePosition (picture takes precedence)
         const itemPosition = sessionStorage.getItem('item_position');
         const picturePosition = sessionStorage.getItem('pictureposition_path');
         const barcode = sessionStorage.getItem('barcode');
         // Position logic
         let posText = '', posColor = '', posGoto = '';
-        if (itemPosition) {
-            posText = `Position set - ${itemPosition}`;
-            posColor = '#43a047';
-            posGoto = '/position';
-        } else if (picturePosition) {
+        if (picturePosition) {
             posText = `Position set - picture`;
             posColor = '#43a047';
             posGoto = '/pictureposition';
+            // If a picture position is set, clear any previous item_position to avoid confusion
+            sessionStorage.removeItem('item_position');
+        } else if (itemPosition) {
+            posText = `Position set - ${itemPosition}`;
+            posColor = '#43a047';
+            posGoto = '/position';
         } else {
             posText = 'Position NOT set';
             posColor = '#d32f2f';
