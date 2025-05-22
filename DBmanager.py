@@ -224,4 +224,62 @@ def store_ebay_order(order):
     conn.commit()
     conn.close()
 
+def createSearchRackDB():
+    # Connect to all databases
+    rack_conn = sqlite3.connect('rack.db')
+    bol_conn = sqlite3.connect('bol.db')
+    search_conn = sqlite3.connect('searchRack.db')
+    rack_cur = rack_conn.cursor()
+    bol_cur = bol_conn.cursor()
+    search_cur = search_conn.cursor()
+    # Create table
+    search_cur.execute('''
+        CREATE TABLE IF NOT EXISTS SEARCHRACK (
+            ID INTEGER PRIMARY KEY AUTOINCREMENT,
+            TITLE TEXT,
+            BARCODE TEXT,
+            ITEM_POSITION TEXT,
+            IMAGES TEXT,
+            PICTUREPOSITION TEXT
+        )
+    ''')
+    # Get all rack items
+    rack_cur.execute('SELECT BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION FROM INVENTORY')
+    rack_items = rack_cur.fetchall()
+    for barcode, item_position, images, pictureposition in rack_items:
+        # Get title from bol.db by barcode
+        bol_cur.execute('SELECT title FROM inventory WHERE barcode=? COLLATE NOCASE', (barcode,))
+        bol_row = bol_cur.fetchone()
+        title = bol_row[0] if bol_row else None
+        search_cur.execute('INSERT INTO SEARCHRACK (TITLE, BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION) VALUES (?,?,?,?,?)',
+            (title, barcode, item_position, images, pictureposition))
+    search_conn.commit()
+    rack_conn.close()
+    bol_conn.close()
+    search_conn.close()
+
+def updateSearchRackDB():
+    rack_conn = sqlite3.connect('rack.db')
+    bol_conn = sqlite3.connect('bol.db')
+    search_conn = sqlite3.connect('searchRack.db')
+    rack_cur = rack_conn.cursor()
+    bol_cur = bol_conn.cursor()
+    search_cur = search_conn.cursor()
+    # Clear existing data
+    search_cur.execute('DELETE FROM SEARCHRACK')
+    # Get all rack items
+    rack_cur.execute('SELECT BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION FROM INVENTORY')
+    rack_items = rack_cur.fetchall()
+    for barcode, item_position, images, pictureposition in rack_items:
+        # Get title from bol.db by barcode
+        bol_cur.execute('SELECT title FROM inventory WHERE barcode=? COLLATE NOCASE', (barcode,))
+        bol_row = bol_cur.fetchone()
+        title = bol_row[0] if bol_row else None
+        search_cur.execute('INSERT INTO SEARCHRACK (TITLE, BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION) VALUES (?,?,?,?,?)',
+            (title, barcode, item_position, images, pictureposition))
+    search_conn.commit()
+    rack_conn.close()
+    bol_conn.close()
+    search_conn.close()
+
 # No top-level code or __main__ block

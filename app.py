@@ -10,7 +10,7 @@ import xml.dom.minidom as minidom
 
 
 from inventory import find_item  # adjust this to match your actual import
-from DBmanager import ebayStoreDB, addToRack, store_ebay_order
+from DBmanager import ebayStoreDB, addToRack, store_ebay_order, createSearchRackDB, updateSearchRackDB
 from BOLextractor import process_bol_excel
 from manualMatcher import get_bol_items, get_ebay_items, fuse_and_store_match
 
@@ -850,6 +850,34 @@ def set_pictureposition_path():
     pictureposition_path = data.get('path')
     print(f"Set pictureposition_path from barcode.html: {pictureposition_path}")
     return jsonify({'success': True})
+
+@app.route('/searchrack')
+def searchrack_page():
+    return render_template('searchrack.html')
+
+@app.route('/searchrack_api')
+def searchrack_api():
+    q = request.args.get('q', '').strip()
+    results = []
+    if q:
+        conn = sqlite3.connect('searchRack.db')
+        cur = conn.cursor()
+        cur.execute('''SELECT TITLE, BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION FROM SEARCHRACK WHERE TITLE LIKE ? OR BARCODE LIKE ?''', (f'%{q}%', f'%{q}%'))
+        for row in cur.fetchall():
+            results.append({
+                'title': row[0],
+                'barcode': row[1],
+                'item_position': row[2],
+                'images': row[3],
+                'pictureposition': row[4],
+            })
+        conn.close()
+    return jsonify({'results': results})
+
+@app.route('/admin/refresh_searchrack')
+def refresh_searchrack():
+    updateSearchRackDB()
+    return 'SearchRack database updated! <a href="/searchrack">Back to Search</a>'
 
 if __name__ == "__main__":
     # Start Flask in a thread

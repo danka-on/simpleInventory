@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Search My Rack</title>
+    <style>
+        body { font-family: sans-serif; max-width: 700px; margin: auto; padding: 20px; }
+        h1 { text-align: center; }
+        #search-bar { width: 100%; font-size: 1.2em; padding: 10px; margin-bottom: 20px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #bbb; padding: 8px 12px; text-align: left; }
+        th { background: #0984e3; color: #fff; }
+        tr:nth-child(even) { background: #f4f4f4; }
+        .no-results { color: #d32f2f; text-align: center; margin-top: 20px; }
+    </style>
+</head>
+<body>
+    <h1>Search My Rack</h1>
+    <div style="text-align:center;margin-bottom:18px;">
+        <a href="/refresh_searchrack"><button style="background:#00b894;color:white;font-size:16px;padding:8px 24px;border:none;border-radius:6px;cursor:pointer;">Refresh Search DB</button></a>
+    </div>
+    <input id="search-bar" type="text" placeholder="Search by title or barcode..." autofocus>
+    <div id="results"></div>
+    <script>
+    async function fetchResults(query) {
+        const resp = await fetch(`/searchrack_api?q=${encodeURIComponent(query)}`);
+        const data = await resp.json();
+        return data.results;
+    }
+    function renderTable(items) {
+        if (!items.length) {
+            document.getElementById('results').innerHTML = '<div class="no-results">No items found.</div>';
+            return;
+        }
+        let html = '<table><tr><th>Title</th><th>Barcode</th><th>Position</th><th>Images</th><th>Picture Position</th></tr>';
+        for (const item of items) {
+            html += `<tr><td>${item.title||''}</td><td>${item.barcode||''}</td><td>${item.item_position||''}</td><td>${item.images||''}</td><td>${item.pictureposition||''}</td></tr>`;
+        }
+        html += '</table>';
+        document.getElementById('results').innerHTML = html;
+    }
+    document.getElementById('search-bar').addEventListener('input', async function() {
+        const q = this.value.trim();
+        if (!q) { document.getElementById('results').innerHTML = ''; return; }
+        const items = await fetchResults(q);
+        renderTable(items);
+    });
+    </script>
+</body>
+</html>
