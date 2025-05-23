@@ -178,7 +178,7 @@
                     <thead>
                         <tr style="background:#f5f5f5; position: sticky; top: 0; z-index: 10;">
                             <th style="padding: 8px; text-align: left; border-bottom: 2px solid #e0e0e0; font-size: 0.85rem;">Title</th>
-                            <th style="padding: 8px; text-align: left; border-bottom: 2px solid #e0e0e0; font-size: 0.85rem;">Buyer</th>
+                            <th style="padding: 8px; text-align: left; border-bottom: 2px solid #e0e0e0; font-size: 0.85rem;">Info</th>
                             <th style="padding: 8px; text-align: center; border-bottom: 2px solid #e0e0e0; font-size: 0.85rem; width: 60px;">Loc</th>
                             <th style="padding: 8px; text-align: center; border-bottom: 2px solid #e0e0e0; font-size: 0.85rem; width: 40px;">#</th>
                             <th style="padding: 8px; text-align: center; border-bottom: 2px solid #e0e0e0; font-size: 0.85rem; width: 60px;">Status</th>
@@ -219,13 +219,15 @@ function esc(s) {
     return String(s||'').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 function tdTitle(order) {
+    var fullTitle = esc(order.title || '');
+    var titleHtml = `<div style='font-weight:bold;font-size:1.1em;margin-bottom:8px;text-align:center;'>${fullTitle}</div>`;
+    
     if (order.image || order.image_url) {
         var imgSrc = esc(order.image || order.image_url);
-        var fullTitle = esc(order.title || '');
-        // Popup will show full title above the image
-        return `<td class='sold-td-small'><a href="#" onclick=\"showSoldPopup('<div style=\\'font-weight:bold;font-size:1.1em;margin-bottom:8px;text-align:center;\\'>${fullTitle}</div><img src=\\'${imgSrc}\\' style=\\'display:block;margin:0 auto;max-width:90vw;max-height:60vh;\\'>');return false;\">${esc(order.title || '')}</a></td>`;
+        var popupContent = titleHtml + `<img src='${imgSrc}' style='display:block;margin:0 auto;max-width:90vw;max-height:60vh;'>`;
+        return `<td class='sold-td-small'><a href="#" onclick="event.preventDefault(); showSoldPopup('${popupContent.replace(/'/g, "\\'")}');">${esc(order.title || '')}</a></td>`;
     } else {
-        return `<td class='sold-td-small'>${esc(order.title || '')}</td>`;
+        return `<td class='sold-td-small'><a href="#" onclick="event.preventDefault(); showSoldPopup('${titleHtml.replace(/'/g, "\\'")}');">${esc(order.title || '')}</a></td>`;
     }
 }
 function tdQuantity(order) {
@@ -245,8 +247,35 @@ function tdLocation(order) {
 function tdInfo(order) {
     var buyer = esc(order.shipping_name || '');
     var address = [order.shipping_street1, order.shipping_street2, order.shipping_city, order.shipping_state, order.shipping_postal_code, order.shipping_country].filter(Boolean).map(esc).join(' ');
-    // No location logic here anymore
-    return `<td class='sold-td-small'><a href='#' onclick=\"showSoldPopup('<b>${buyer}</b><br><span style=\\'font-size:0.98em;\\'>${address}</span>');return false;\">${buyer}</a></td>`;
+    
+    // Format price, tax, and fees
+    var price = order.price ? `$${parseFloat(order.price).toFixed(2)}` : 'N/A';
+    var paidTime = order.paid_time ? new Date(order.paid_time).toLocaleString() : 'N/A';
+    var tax = order.tax ? `$${parseFloat(order.tax).toFixed(2)}` : 'N/A';
+    var fees = order.fees ? `$${parseFloat(order.fees).toFixed(2)}` : 'N/A';
+    var sellerFees = order.seller_fees ? `$${parseFloat(order.seller_fees).toFixed(2)}` : 'N/A';
+    
+    // Build the popup content - using single quotes for HTML attributes to avoid escaping issues
+    var popupContent = [
+        "<div style='max-width:300px;'>",
+        "<div style='margin-bottom:10px;'>",
+        "<b>", buyer, "</b><br>",
+        "<span style='font-size:0.98em;'>", address, "</span>",
+        "</div>",
+        "<hr style='border:none;border-top:1px solid #ddd;margin:10px 0;'>",
+        "<div style='margin-bottom:5px;'><b>Price:</b> ", price, "</div>",
+        "<div style='margin-bottom:5px;'><b>Paid:</b> ", paidTime, "</div>",
+        "<hr style='border:none;border-top:1px solid #ddd;margin:10px 0;'>",
+        "<div style='font-size:0.9em;color:#666;'>",
+        "<div style='margin-bottom:3px;'><b>Tax:</b> ", tax, "</div>",
+        "<div style='margin-bottom:3px;'><b>Fees:</b> ", fees, "</div>",
+        "<div><b>Seller Fees:</b> ", sellerFees, "</div>",
+        "</div></div>"
+    ].join('');
+    
+    // Escape single quotes for the onclick handler
+    var escapedContent = popupContent.replace(/'/g, "\\'");
+    return `<td class='sold-td-small'><a href="#" onclick="event.preventDefault(); showSoldPopup('${escapedContent}');">${buyer}</a></td>`;
 }
 function renderSoldOrders(orders) {
     var tbody = document.querySelector('#sold-orders-table tbody');

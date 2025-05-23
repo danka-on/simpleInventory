@@ -2,9 +2,37 @@
 <html lang="en">
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Set Item Position</title>
+    <title>Location</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <style>
+    /* Green screen overlay */
+    #green-screen {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background-color: #00ff00;
+        z-index: 99999;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 200ms ease-in-out;
+    }
+    
+    #green-screen.visible {
+        opacity: 1;
+    }
+    
+    #green-screen .checkmark {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        color: white;
+        font-size: 120px;
+        text-shadow: 0 0 20px rgba(255, 255, 255, 0.5);
+    }
+
     body {
         font-family: sans-serif;
         max-width: 600px;
@@ -79,7 +107,7 @@
 </head>
 <body>
     <div style="display: flex; justify-content: center; align-items: center; margin-bottom: 20px; gap: 15px;">
-        <h1 style="margin: 0;">Set Item Position</h1>
+        <h1 style="margin: 0;">Location</h1>
         <img src="/static/qrcode.jpg" alt="QR Code" style="width:50px; height:50px; object-fit:contain; border:2px solid #000; background:#fff;" />
     </div>
     <div id="reader"></div>
@@ -108,7 +136,10 @@
         </label>
     </form>
     <button id="flashBtn" type="button" style="display:none">Turn On Flashlight</button>
-    <span id="flashMsg" style="color:red; display:none; font-size:0.9em;"></span>
+    <div id="flashMsg" style="color:red; display:none; font-size:0.9em;"></div>
+    <div id="green-screen">
+        <i class="fas fa-check-circle checkmark"></i>
+    </div>
 
     <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
     <script>
@@ -208,7 +239,12 @@
                 sessionStorage.setItem('item_position', code);
                 stopScanner();
                 playBeep();
-                document.getElementById("scan_form").submit();
+                // Show green screen and submit after delay
+                const greenScreen = document.getElementById('green-screen');
+                greenScreen.classList.add('visible');
+                setTimeout(() => {
+                    document.getElementById("scan_form").submit();
+                }, 1000);
             },
             (error) => {}
         ).then(() => {
