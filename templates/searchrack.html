@@ -117,7 +117,11 @@
     <div id="locationModal" class="modal">
         <div class="modal-content">
             <div id="locationTitle" style='text-align:center;margin-bottom:10px;font-size:1.2em;font-weight:bold;'></div>
-            <img id="locationImage" src="" alt="Location Image" style='display:block;margin:0 auto;max-width:90vw;max-height:65vh;' onerror="this.onerror=null; this.src='{{ url_for(\'static\', filename=\'gr1new.png\') }}';">
+            <img id="locationImage" 
+                 src="" 
+                 alt="Location Image" 
+                 data-fallback="{{ url_for('static', filename='gr1new.png') }}"
+                 style="display:block;margin:0 auto;max-width:90vw;max-height:65vh;">
         </div>
     </div>
 
@@ -185,16 +189,30 @@
         const locationImage = document.getElementById('locationImage');
         const locationTitle = document.getElementById('locationTitle');
         
-        // Set the title and image source
+        // Set the title
         locationTitle.textContent = `Location: ${position}`;
+        
+        // Reset the image and set up error handling
+        locationImage.onerror = null;
+        locationImage.onload = null;
+        
+        // Set up error handler first
+        locationImage.onerror = function() {
+            this.onerror = null; // Prevent infinite loop if fallback also fails
+            this.src = this.dataset.fallback;
+        };
+        
+        // Set the image source
         locationImage.src = `/static/shelves/${position.toLowerCase()}.png`;
         
         // Show the modal
         modal.style.display = 'flex';
         
         // Close modal when clicking anywhere
-        modal.onclick = function() {
-            modal.style.display = 'none';
+        modal.onclick = function(event) {
+            if (event.target === modal) {
+                modal.style.display = 'none';
+            }
         };
     }
 
