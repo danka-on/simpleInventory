@@ -153,19 +153,28 @@
             container.innerHTML = '<div class="no-results">No inventory items found.</div>';
             return;
         }
-        let html = '<table><tr><th>Title</th><th>Barcode</th><th>Position</th><th>Images</th><th>Picture Position</th></tr>';
+        let html = '<table><tr><th>Title</th><th>Barcode</th><th>Position</th><th>Images</th></tr>';
         for (const item of items) {
+            // Determine which position to show and which function to call
+            const position = item.item_position || '';
+            const isPicturePosition = position.toLowerCase() === 'picture';
+            
+            // Create the position cell with appropriate click handler
+            let positionCell = 'N/A';
+            if (isPicturePosition && item.pictureposition) {
+                // For picture positions, show "Picture" as text and make it clickable
+                positionCell = `Picture <span class="location-link" onclick="showPicturePosition('${item.pictureposition}')">(view)</span>`;
+            } else if (position) {
+                // For regular shelf positions
+                positionCell = `<span class="location-link" onclick="showLocationImage('${position}')">${position}</span>`;
+            }
+                
             html += `
                 <tr>
                     <td>${item.title||'N/A'}</td>
                     <td>${item.barcode||'N/A'}</td>
-                    <td>
-                        ${item.item_position ? 
-                            `<span class="location-link" onclick="showLocationImage('${item.item_position}')">${item.item_position}</span>` : 
-                            'N/A'}
-                    </td>
+                    <td>${positionCell}</td>
                     <td>${item.images||'N/A'}</td>
-                    <td>${item.pictureposition||'N/A'}</td>
                 </tr>`;
         }
         html += '</table>';
@@ -204,6 +213,41 @@
         
         // Set the image source
         locationImage.src = `/static/shelves/${position.toLowerCase()}.png`;
+        
+        // Show the modal
+        modal.style.display = 'flex';
+        
+        // Close modal when clicking anywhere
+        modal.onclick = function(event) {
+            if (event.target === modal) {
+                modal.style.display = 'none';
+            }
+        };
+    }
+    
+    // Show picture position image in modal
+    function showPicturePosition(picturePosition) {
+        const modal = document.getElementById('locationModal');
+        const locationImage = document.getElementById('locationImage');
+        const locationTitle = document.getElementById('locationTitle');
+        
+        // Set the title
+        locationTitle.textContent = `Picture Position: ${picturePosition}`;
+        
+        // Reset the image and set up error handling
+        locationImage.onerror = null;
+        locationImage.onload = null;
+        
+        // Set up error handler first
+        locationImage.onerror = function() {
+            this.onerror = null; // Prevent infinite loop if fallback also fails
+            this.src = this.dataset.fallback;
+            console.error(`Failed to load image: /static/pictureposition/${picturePosition}`);
+        };
+        
+        // Set the image source - use the exact filename from picturePosition
+        // The picturePosition is already the full filename (e.g., '1234567890.jpg')
+        locationImage.src = `/static/pictureposition/${picturePosition}`;
         
         // Show the modal
         modal.style.display = 'flex';

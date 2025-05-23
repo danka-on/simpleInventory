@@ -66,11 +66,33 @@ def addToRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITION=Non
                 PICTUREPOSITION TEXT
             )
         ''')
-        cursor.execute("INSERT INTO INVENTORY (ITEM_POSITION, BARCODE, IMAGES, PICTUREPOSITION) VALUES (?,?,?,?)", (ITEM_POSITION, BARCODE, IMAGES, PICTUREPOSITION))
+        
+        # Check if barcode already exists
+        cursor.execute("SELECT ID FROM INVENTORY WHERE BARCODE = ?", (BARCODE,))
+        existing = cursor.fetchone()
+        
+        if existing:
+            # Update existing record
+            cursor.execute("""
+                UPDATE INVENTORY 
+                SET ITEM_POSITION = COALESCE(?, ITEM_POSITION),
+                    IMAGES = COALESCE(?, IMAGES),
+                    PICTUREPOSITION = COALESCE(?, PICTUREPOSITION)
+                WHERE BARCODE = ?
+            """, (ITEM_POSITION, IMAGES, PICTUREPOSITION, BARCODE))
+            action = "updated"
+        else:
+            # Insert new record
+            cursor.execute("""
+                INSERT INTO INVENTORY (ITEM_POSITION, BARCODE, IMAGES, PICTUREPOSITION) 
+                VALUES (?, ?, ?, ?)
+            """, (ITEM_POSITION, BARCODE, IMAGES, PICTUREPOSITION))
+            action = "added"
+            
         conn.commit()
-        print(f"added position: {ITEM_POSITION}, barcode: {BARCODE}, images: {IMAGES}, pictureposition: {PICTUREPOSITION}")
+        print(f"{action} position: {ITEM_POSITION}, barcode: {BARCODE}, images: {IMAGES}, pictureposition: {PICTUREPOSITION}")
     except sqlite3.Error as e:
-        print("something went wrong", e)
+        print("Error in addToRack:", e)
     finally:
         conn.close()
 

@@ -640,28 +640,75 @@ document.addEventListener('visibilitychange', function() {
         loadSoldOrders(null, true);
     }
 });
+// Tab switching functionality
+function setupTabs() {
+    const tabButtons = document.querySelectorAll('.tab-button');
+    const tabContents = document.querySelectorAll('.tab-content');
+    
+    tabButtons.forEach(button => {
+        button.addEventListener('click', () => {
+            // Remove active class from all buttons and contents
+            tabButtons.forEach(btn => btn.classList.remove('active'));
+            tabContents.forEach(content => content.classList.remove('active'));
+            
+            // Add active class to clicked button and corresponding content
+            button.classList.add('active');
+            const tabId = button.getAttribute('data-tab') + '-orders';
+            document.getElementById(tabId).classList.add('active');
+            
+            // If switching to pending tab, refresh the data
+            if (button.getAttribute('data-tab') === 'pending') {
+                loadSoldOrders();
+            }
+        });
+    });
+}
+
 window.addEventListener('DOMContentLoaded', function() {
+    // Set up tab functionality
+    setupTabs();
+    
     // On load, fetch and show last 48 hours (2 days)
     fetchAndShowSoldOrders(2);
-});
-document.getElementById('get-sold-orders-btn').onclick = function(e) {
-    e.preventDefault();
-    const days = parseInt(document.getElementById('sold-days').value) || 90;
-    fetch('/get-sold-orders', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ days })
-    })
-    .then(r => r.json())
-    .then(data => {
-        if (data.success) {
-            alert('Sold orders fetched and stored!');
-        } else {
-            alert('Failed to fetch sold orders: ' + (data.error || 'Unknown error'));
-        }
-    });
-};
+    
+    // Set up the sold orders button click handler
+    const soldOrdersBtn = document.getElementById('get-sold-orders-btn');
+    if (soldOrdersBtn) {
+        soldOrdersBtn.onclick = function(e) {
+            e.preventDefault();
+            const days = parseInt(document.getElementById('sold-days').value) || 90;
+            fetch('/get-sold-orders', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ days })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    alert('Sold orders fetched and stored!');
+                    // Refresh the orders after fetching
+                    loadSoldOrders();
+                } else {
+                    alert('Error: ' + (data.error || 'Unknown error'));
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error fetching sold orders');
+            });
+        };
+    }
+    
+    // Add event listener for days dropdown change
+    const soldOrdersDays = document.getElementById('sold-orders-days');
+    if (soldOrdersDays) {
+        soldOrdersDays.addEventListener('change', function() {
+            const days = parseInt(this.value) || 2;
+            fetchAndShowSoldOrders(days);
+        });
+    }
+}); // End of DOMContentLoaded
+
 </script>
 </body>
 </html>
-

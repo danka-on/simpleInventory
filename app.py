@@ -850,21 +850,27 @@ def get_bol_upcs():
 def upload_position_picture():
     import os
     from werkzeug.utils import secure_filename
-    # Ensure folder exists
-    save_dir = os.path.join(os.getcwd(), 'pictureposition')
+    # Ensure static/pictureposition folder exists
+    save_dir = os.path.join(os.getcwd(), 'static', 'pictureposition')
     os.makedirs(save_dir, exist_ok=True)
+    
     file = request.files.get('picture')
     if not file:
         return jsonify({'success': False, 'error': 'No file uploaded'})
-    filename = secure_filename(file.filename)
-    # Make filename unique
+    
+    # Generate a unique filename with timestamp
     import time
-    unique_name = f"{int(time.time())}_{filename}"
+    timestamp = int(time.time())
+    filename = secure_filename(file.filename)
+    name, ext = os.path.splitext(filename)
+    unique_name = f"{timestamp}{ext}"
+    
+    # Save the file
     save_path = os.path.join(save_dir, unique_name)
     file.save(save_path)
-    # Return relative path for DB
-    rel_path = os.path.relpath(save_path, os.getcwd())
-    return jsonify({'success': True, 'path': rel_path})
+    
+    # Return just the filename (not full path) since it's in the static folder
+    return jsonify({'success': True, 'path': unique_name})
 
 
 @app.route("/pictureposition")
