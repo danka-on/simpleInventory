@@ -291,11 +291,32 @@ function hideSoldPopup(event) {
     }
 }
 function showSoldPopup(contentHtml) {
-    console.log('showSoldPopup called with:', contentHtml); // Debug log
-    var popup = document.getElementById('sold-popup');
-    var content = document.getElementById('sold-popup-content');
-    content.innerHTML = contentHtml;
-    popup.style.display = 'block';
+    try {
+        console.log('showSoldPopup called with:', contentHtml); // Debug log
+        var popup = document.getElementById('sold-popup');
+        var content = document.getElementById('sold-popup-content');
+        
+        // First, clear the content
+        while (content.firstChild) {
+            content.removeChild(content.firstChild);
+        }
+        
+        // Create a temporary div to parse the HTML
+        var temp = document.createElement('div');
+        temp.innerHTML = contentHtml;
+        
+        // Move all nodes to the content div
+        while (temp.firstChild) {
+            content.appendChild(temp.firstChild);
+        }
+        
+        popup.style.display = 'block';
+    } catch (e) {
+        console.error('Error in showSoldPopup:', e);
+        // Fallback to simple text display if there's an error
+        content.textContent = 'Error loading content';
+        popup.style.display = 'block';
+    }
 }
 function esc(s) {
     return String(s||'').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -323,11 +344,49 @@ function tdQuantity(order) {
 function tdLocation(order) {
     if (!order.location) return '<td></td>';
     
-    var imgUrl = 'https://nexuscentralhq.org/static/gr1new.png';
+    // Convert location to lowercase for the image filename
+    var locationLower = order.location.toLowerCase();
+    var imgUrl = '/static/shelves/' + locationLower + '.png';
     var locationText = esc(order.location);
-    var popupContent = `<div style='text-align:center;margin-bottom:10px;font-size:1.2em;font-weight:bold;'>Location: ${locationText}</div>`;
-    popupContent += `<img src='${imgUrl}' style='display:block;margin:0 auto;max-width:90vw;max-height:65vh;'>`;
-    return `<td class='sold-td-small'><a href="#" onclick="event.preventDefault(); showSoldPopup('${popupContent.replace(/'/g, "\\'")}');">${locationText}</a></td>`;
+    
+    // Create a unique ID for the popup content
+    var popupId = 'popup-' + Math.random().toString(36).substr(2, 9);
+    
+    // Create the popup content HTML as a string
+    var popupContent = [
+        '<div style="text-align:center;margin-bottom:10px;font-size:1.2em;font-weight:bold;">',
+        'Location: ' + esc(locationText),
+        '</div>',
+        '<img src="' + esc(imgUrl) + '" ',
+        'onerror="this.onerror=null;this.src=\'/static/gr1new.png\'" ',
+        'style="display:block;margin:0 auto;max-width:90vw;max-height:65vh;">'
+    ].join('');
+    
+    // Create a unique ID for this link
+    var linkId = 'loc-link-' + Math.random().toString(36).substr(2, 9);
+    
+    // Create the table cell with the link
+    var cell = document.createElement('td');
+    cell.className = 'sold-td-small';
+    
+    var link = document.createElement('a');
+    link.href = '#';
+    link.textContent = locationText;
+    link.id = linkId;
+    
+    // Add click handler after the element is added to the DOM
+    setTimeout(function() {
+        var linkEl = document.getElementById(linkId);
+        if (linkEl) {
+            linkEl.addEventListener('click', function(e) {
+                e.preventDefault();
+                showSoldPopup(popupContent);
+            });
+        }
+    }, 0);
+    
+    cell.appendChild(link);
+    return cell.outerHTML;
 }
 
 function tdInfo(order) {
