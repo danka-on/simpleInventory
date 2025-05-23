@@ -759,7 +759,6 @@ def get_order():
 def mark_order_handled():
     data = request.get_json()
     order_id = data.get('id')
-    is_handled = data.get('isHandled', True)
     
     if not order_id:
         return jsonify({'success': False, 'error': 'Missing order id'})
@@ -767,12 +766,25 @@ def mark_order_handled():
     try:
         conn = sqlite3.connect('sold.db')
         cur = conn.cursor()
+        cur.execute("UPDATE orders SET isHandled = '1', isHandledDate = datetime('now') WHERE id = ?", (order_id,))
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/mark-order-unhandled', methods=['POST'])
+def mark_order_unhandled():
+    data = request.get_json()
+    order_id = data.get('id')
+    
+    if not order_id:
+        return jsonify({'success': False, 'error': 'Missing order id'})
         
-        if is_handled:
-            cur.execute("UPDATE orders SET isHandled = '1', isHandledDate = datetime('now') WHERE id = ?", (order_id,))
-        else:
-            cur.execute("UPDATE orders SET isHandled = '0', isHandledDate = NULL WHERE id = ?", (order_id,))
-            
+    try:
+        conn = sqlite3.connect('sold.db')
+        cur = conn.cursor()
+        cur.execute("UPDATE orders SET isHandled = '', isHandledDate = NULL WHERE id = ?", (order_id,))
         conn.commit()
         conn.close()
         return jsonify({'success': True})

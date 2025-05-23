@@ -437,14 +437,13 @@ function renderSoldOrders(orders) {
                 const orderId = tr.querySelector('.handle-btn').getAttribute('data-id');
                 
                 // First, mark the order as unhandled on the server
-                fetch('/mark-order-handled', {
+                fetch('/mark-order-unhandled', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
-                        id: orderId,
-                        isHandled: false
+                        id: orderId
                     })
                 })
                 .then(response => response.json())
@@ -534,11 +533,12 @@ function renderSoldOrders(orders) {
                 tr.remove();
             }
             
-            // Update the server
-            fetch('/mark-order-handled', {
+            // Update the server - using the appropriate endpoint based on action
+            const endpoint = isUndo ? '/mark-order-unhandled' : '/mark-order-handled';
+            fetch(endpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id: orderId, isHandled: !isUndo })
+                body: JSON.stringify({ id: orderId })
             })
             .catch(error => console.error('Error updating order status:', error));
         }, 400);
@@ -557,7 +557,9 @@ function fetchAndShowSoldOrders(days) {
         loadSoldOrders(days);
     });
 }
-function loadSoldOrders(days) {
+function loadSoldOrders(days, force = false) {
+    if (!isSoldOrdersTabActive && !force) return;
+    
     days = days || parseInt(document.getElementById('sold-orders-days').value) || 2;
     fetch(`/sold-orders?days=${days}`)
         .then(r => r.json())
@@ -567,6 +569,18 @@ document.getElementById('sold-orders-days').onchange = function() {
     const days = parseInt(this.value) || 2;
     fetchAndShowSoldOrders(days);
 };
+
+// Track tab visibility
+let isSoldOrdersTabActive = true;
+
+// Listen for tab changes
+document.addEventListener('visibilitychange', function() {
+    isSoldOrdersTabActive = !document.hidden;
+    if (isSoldOrdersTabActive) {
+        // Refresh data when tab becomes active
+        loadSoldOrders(null, true);
+    }
+});
 window.addEventListener('DOMContentLoaded', function() {
     // On load, fetch and show last 48 hours (2 days)
     fetchAndShowSoldOrders(2);
