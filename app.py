@@ -733,16 +733,46 @@ def sold_orders():
     return jsonify([dict(order) for order in orders])
 
 
+@app.route('/get-order', methods=['GET'])
+def get_order():
+    order_id = request.args.get('id')
+    if not order_id:
+        return jsonify({'error': 'Missing order id'}), 400
+    try:
+        conn = sqlite3.connect('sold.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM orders WHERE id = ?", (order_id,))
+        order = cur.fetchone()
+        conn.close()
+        
+        if not order:
+            return jsonify({'error': 'Order not found'}), 404
+            
+        # Convert sqlite3.Row to dict
+        order_dict = dict(order)
+        return jsonify(order_dict)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/mark-order-handled', methods=['POST'])
 def mark_order_handled():
     data = request.get_json()
     order_id = data.get('id')
+    is_handled = data.get('isHandled', True)
+    
     if not order_id:
         return jsonify({'success': False, 'error': 'Missing order id'})
+        
     try:
         conn = sqlite3.connect('sold.db')
         cur = conn.cursor()
-        cur.execute("UPDATE orders SET isHandled = '1', isHandledDate = datetime('now') WHERE id = ?", (order_id,))
+        
+        if is_handled:
+            cur.execute("UPDATE orders SET isHandled = '1', isHandledDate = datetime('now') WHERE id = ?", (order_id,))
+        else:
+            cur.execute("UPDATE orders SET isHandled = '0', isHandledDate = NULL WHERE id = ?", (order_id,))
+            
         conn.commit()
         conn.close()
         return jsonify({'success': True})

@@ -434,25 +434,77 @@ function renderSoldOrders(orders) {
         setTimeout(() => {
             if (isUndo) {
                 // Move from completed back to pending
-                const pendingTable = document.querySelector('#sold-orders-table tbody');
-                const pendingRow = tr.cloneNode(true);
+                const orderId = tr.querySelector('.handle-btn').getAttribute('data-id');
                 
-                // Update the status button
-                const pendingBtn = pendingRow.querySelector('.handle-btn');
-                if (pendingBtn) {
-                    pendingBtn.innerHTML = '<span style="font-size:16px;">✓</span>';
-                    pendingBtn.style.backgroundColor = '#4caf50';
-                    pendingBtn.classList.remove('undo-btn');
-                    pendingBtn.style.pointerEvents = 'auto';
-                }
-                
-                // Add to pending table with fade-in effect
-                pendingRow.style.opacity = '0';
-                pendingTable.prepend(pendingRow);
-                setTimeout(() => pendingRow.style.opacity = '1', 10);
-                
-                // Remove from completed table
-                tr.remove();
+                // First, mark the order as unhandled on the server
+                fetch('/mark-order-handled', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        id: orderId,
+                        isHandled: false
+                    })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (!data.success) {
+                        console.error('Failed to update order status:', data.error);
+                        return;
+                    }
+                    
+                    // Then fetch the updated order details
+                    return fetch(`/get-order?id=${orderId}`);
+                })
+                .then(response => response.json())
+                .then(order => {
+                    if (!order) return;
+                    
+                    const pendingTable = document.querySelector('#sold-orders-table tbody');
+                    const pendingRow = document.createElement('tr');
+                    
+                    // Rebuild the row with all order data
+                    pendingRow.innerHTML = `
+                        ${tdTitle(order)}
+                        ${tdInfo(order)}
+                        ${tdLocation(order)}
+                        ${tdQuantity(order)}
+                        <td style="text-align: center;">
+                            <button class="handle-btn" 
+                                    data-id="${order.id}" 
+                                    style="background:#4caf50;color:white;border:none;padding:8px 12px;border-radius:20px;font-size:14px;cursor:pointer;transition:all 0.3s ease;width:60px;display:inline-flex;align-items:center;justify-content:center;gap:4px;">
+                                <span style="font-size:16px;">✓</span>
+                            </button>
+                        </td>
+                    `;
+                    
+                    // Add to pending table with fade-in effect
+                    pendingRow.style.opacity = '0';
+                    pendingTable.prepend(pendingRow);
+                    setTimeout(() => pendingRow.style.opacity = '1', 10);
+                    
+                    // Remove from completed table
+                    tr.remove();
+                })
+                    .catch(error => {
+                        console.error('Error fetching order:', error);
+                        // Fallback to simple row move if fetch fails
+                        const pendingTable = document.querySelector('#sold-orders-table tbody');
+                        const pendingRow = tr.cloneNode(true);
+                        
+                        // Update the status button
+                        const pendingBtn = pendingRow.querySelector('.handle-btn');
+                        if (pendingBtn) {
+                            pendingBtn.innerHTML = '<span style="font-size:16px;">✓</span>';
+                            pendingBtn.style.backgroundColor = '#4caf50';
+                            pendingBtn.classList.remove('undo-btn');
+                            pendingBtn.style.pointerEvents = 'auto';
+                        }
+                        
+                        pendingTable.prepend(pendingRow);
+                        tr.remove();
+                    });
             } else {
                 // Move from pending to completed
                 const completedTable = document.querySelector('#completed-orders-table tbody');
