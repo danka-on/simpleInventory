@@ -1,0 +1,24 @@
+Flask
+zxing
+requests
+Pillow
+python-dotenv
+sqlite3
+
+# Additional likely dependencies for your project:
+Werkzeug
+itsdangerous
+Jinja2
+MarkupSafe
+# If you use pandas for data manipulation:
+pandas
+# If you use openpyxl for Excel import/export:
+openpyxl
+# If you use gunicorn for production server:
+gunicorn
+# If you use python-barcode for barcode generation:
+python-barcode
+# If you use pyzbar for barcode/QR decoding:
+pyzbar
+# If you use opencv for image processing:
+opencv-python
