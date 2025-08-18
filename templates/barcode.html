@@ -130,6 +130,8 @@
         <div id="loadingMessage" style="color: white;">⌛ Loading video...</div>
         <div id="scanningLine" class="scanning-line" style="display: none;"></div>
     </div>
+    <!-- Barcode Text Input (hidden by default, shown for tablet) -->
+    <input type="text" id="barcodeTextInput" name="barcodeTextInput" placeholder="Scan or enter barcode" style="width:100%;font-size:1.2em;padding:10px;margin-top:20px;display:none;" autocomplete="off" />
     <form id="scan_form" action="/submitbarcode" method="POST">
         <input name="scanned_result" type="text" id="scanned_result" placeholder="BARCODE will appear here" style="font-weight: bold;" readonly>
     </form>
@@ -594,6 +596,54 @@
             }
             // Check upload status
             checkPictureUploadStatus();
+        }
+
+        function getDeviceType() {
+            const ua = navigator.userAgent;
+            if (/iPad|Macintosh/.test(ua) && 'ontouchend' in document) return 'iPad';
+            if (/Android/.test(ua) && !/Mobile/.test(ua)) return 'Android Tablet';
+            if (/iPhone|Android.*Mobile|Windows Phone|webOS|BlackBerry|Opera Mini|IEMobile|Mobile/.test(ua)) return 'Mobile';
+            return 'Desktop';
+        }
+
+        function setupDeviceMode() {
+            var deviceType = getDeviceType();
+            var barcodeInput = document.getElementById('barcodeTextInput');
+            var readerDiv = document.getElementById('reader');
+            if (deviceType === 'iPad' || deviceType === 'Android Tablet') {
+                // Hide camera/QR scanner, show barcode input
+                if (readerDiv) readerDiv.style.display = 'none';
+                if (barcodeInput) {
+                    barcodeInput.style.display = '';
+                    barcodeInput.value = '';
+                    requestAnimationFrame(function() {
+                        barcodeInput.focus();
+                    });
+                }
+                // Prevent scanner from starting
+                window.initializeCamera = function(){};
+            } else {
+                // Mobile or desktop: keep camera, hide barcode input
+                if (readerDiv) readerDiv.style.display = '';
+                if (barcodeInput) barcodeInput.style.display = 'none';
+            }
+        }
+
+        window.addEventListener('DOMContentLoaded', setupDeviceMode);
+
+        // Handle barcode input for tablet mode
+        var barcodeInput = document.getElementById('barcodeTextInput');
+        if (barcodeInput) {
+            barcodeInput.addEventListener('input', function() {
+                var code = this.value.trim();
+                if (code.length >= 8) { // Accept barcode with reasonable length
+                    document.getElementById('scanned_result').value = code;
+                    sessionStorage.setItem('barcode', code);
+                    setTimeout(function() {
+                        document.getElementById('scan_form').submit();
+                    }, 300);
+                }
+            });
         }
 
         // Initialize everything when the page loads
