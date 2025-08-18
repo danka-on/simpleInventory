@@ -47,11 +47,29 @@
             <span id="barcode-status">Loading...</span>
         </div>
     </div>
-    <form action="/additemtrue" method="POST">
-        <div style="display:flex; justify-content:center; align-items:center;">
-        <button style="background-color:#00b894; color:white; font-size:24px; padding:15px 40px; border:none; border-radius:8px; cursor:pointer;">
-            <i class="fas fa-check-circle"></i> Add Item
-        </button>
+    <form id="addItemForm" action="/additemtrue" method="POST">
+        <div style="display: flex; flex-direction: column; align-items: center; width: 100%; max-width: 350px; margin: 0 auto; gap: 0;">
+            <!-- Add Item button -->
+            <button id="addItemBtn" type="submit" form="addItemForm" style="background-color: #4CAF50; color: white; border: none; padding: 14px; border-radius: 6px; cursor: pointer; font-size: 1.1em; width: 100%; margin-bottom: 10px; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                <i class="fas fa-plus"></i> Add Item
+            </button>
+            <!-- Clear button below Add Item -->
+            <button id="clearBtn" type="button" style="background-color: #ff4444; color: white; border: none; padding: 14px; border-radius: 6px; cursor: pointer; font-size: 1.1em; width: 100%; margin-bottom: 18px; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                <i class="fas fa-trash"></i> Clear
+            </button>
+            <!-- Divider -->
+            <div style="width: 100%; height: 1px; background: #eee; margin: 10px 0 18px 0;"></div>
+            <!-- Navigation buttons: Back, Exit (Skip removed) -->
+            <div style="width: 100%; display: flex; justify-content: center; gap: 15px;">
+                <a href="/barcode" style="text-decoration: none; flex: 1; max-width: 120px;">
+                    <button style="background-color: #2196F3; color: white; border: none; padding: 10px 0; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 1em; width: 100%;">
+                        <i class="fas fa-arrow-left"></i> Back
+                    </button>
+                </a>
+                <button id="exitBtn" type="button" style="background-color: #ff4444; color: white; border: none; padding: 10px 0; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 1em; width: 100%; max-width: 120px;">
+                    <i class="fas fa-times"></i> Exit
+                </button>
+            </div>
         </div>
     </form>
     <script>
@@ -150,4 +168,23 @@
     if (window.location.search.includes('pictureposition=1')) {
         checkPictureUploadStatus();
     }
+
+    document.getElementById('clearBtn').addEventListener('click', function(e) {
+        e.preventDefault();
+        sessionStorage.removeItem('item_position');
+        sessionStorage.removeItem('barcode');
+        sessionStorage.removeItem('pictureposition_path');
+        // Optionally clear any other related sessionStorage keys
+        // Do NOT submit any form or reload to a new page
+        // Instead, update checklist and visually reset
+        updateChecklist();
+    });
+
+    document.getElementById('exitBtn').addEventListener('click', function(e) {
+        e.preventDefault();
+        sessionStorage.removeItem('item_position');
+        sessionStorage.removeItem('barcode');
+        sessionStorage.removeItem('pictureposition_path');
+        window.location.href = '/index.html';
+    });
 </script>

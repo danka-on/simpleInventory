@@ -246,34 +246,7 @@
                             // If code is in allowedUPCs, proceed as normal
                             // If not, still proceed (no alert, no block)
                             // (Optional: you could add a console.log or visual indicator for unknown barcodes)
-                            scannedResultInput.value = code;
-                            // Set sessionStorage for additem checklist
-                            sessionStorage.setItem('barcode', code);
-                            playBeep();
-                            const scanBox = document.querySelector('.scan-box');
-                            if (scanBox) {
-                                scanBox.style.borderColor = '#4CAF50';
-                                scanBox.style.boxShadow = '0 0 20px #4CAF50';
-                                setTimeout(() => {
-                                    scanBox.style.borderColor = 'white';
-                                    scanBox.style.boxShadow = '0 0 0 100vmax rgba(0, 0, 0, 0.5)';
-                                }, 1000);
-                            }
-                            if (!window.__barcodeSubmitted) {
-                                window.__barcodeSubmitted = true;
-                                scannedResultInput.readOnly = true;
-                                const restartBtn = document.querySelector('button[onclick="restartScanner()"]');
-                                if (restartBtn) restartBtn.disabled = true;
-                                if (codeReader) codeReader.reset();
-                                setTimeout(() => {
-                                    const form = document.getElementById('scan_form');
-                                    if (form) {
-                                        form.submit();
-                                    } else {
-                                        console.error('Form element not found');
-                                    }
-                                }, 200);
-                            }
+                            handleBarcodeScan(code);
                         }
                         if (error && !(error instanceof ZXing.NotFoundException)) {
                             console.error('Scan error:', error);
@@ -706,6 +679,38 @@
                 this.querySelector('input[name="scanned_result"]').value = storedBarcode;
             }
         });
+
+        // Ensure barcode is set in sessionStorage on successful scan or input
+        // For camera scan (ZXing)
+        function handleBarcodeScan(code) {
+            document.getElementById('scanned_result').value = code;
+            sessionStorage.setItem('barcode', code);
+            playBeep();
+            const scanBox = document.querySelector('.scan-box');
+            if (scanBox) {
+                scanBox.style.borderColor = '#4CAF50';
+                scanBox.style.boxShadow = '0 0 20px #4CAF50';
+                setTimeout(() => {
+                    scanBox.style.borderColor = 'white';
+                    scanBox.style.boxShadow = '0 0 0 100vmax rgba(0, 0, 0, 0.5)';
+                }, 1000);
+            }
+            if (!window.__barcodeSubmitted) {
+                window.__barcodeSubmitted = true;
+                scannedResultInput.readOnly = true;
+                const restartBtn = document.querySelector('button[onclick="restartScanner()"]');
+                if (restartBtn) restartBtn.disabled = true;
+                if (codeReader) codeReader.reset();
+                setTimeout(() => {
+                    const form = document.getElementById('scan_form');
+                    if (form) {
+                        form.submit();
+                    } else {
+                        console.error('Form element not found');
+                    }
+                }, 200);
+            }
+        }
     </script>
     
     <!-- Navigation Buttons at Bottom -->

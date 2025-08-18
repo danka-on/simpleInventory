@@ -124,11 +124,11 @@
     <input type="text" id="qrTextInput" name="qrTextInput" placeholder="Scan or enter QR code" style="width:100%;font-size:1.2em;padding:10px;margin-top:20px;display:none;" autocomplete="off" />
 
     <div style="margin: 20px 0; display: flex; flex-direction: column; gap: 15px; width: 100%; max-width: 300px;">
-        <button onclick="restartScanner()" style="background-color: #2196F3; color: white; border: none; padding: 12px; border-radius: 6px; cursor: pointer; font-size: 1.1em; display: flex; align-items: center; justify-content: center; gap: 8px;">
+        <button id="restartScannerBtn" onclick="restartScanner()" style="background-color: #2196F3; color: white; border: none; padding: 12px; border-radius: 6px; cursor: pointer; font-size: 1.1em; display: flex; align-items: center; justify-content: center; gap: 8px;">
             <i class="fas fa-sync-alt"></i> Restart Scanner
         </button>
-        <button id="picturePositionBtn" type="button" style="background-color: #ff4444; color: white; border: none; padding: 12px; border-radius: 6px; cursor: pointer; font-size: 1.1em; display: flex; align-items: center; justify-content: center; gap: 8px;">
-            <i class="fas fa-camera"></i> NO SHELF (take a picture)
+        <button id="picturePositionBtn" type="button" style="background-color: #2196F3; color: white; border: none; padding: 12px; border-radius: 6px; cursor: pointer; font-size: 1.1em; display: flex; align-items: center; justify-content: center; gap: 8px;">
+            <i class="fas fa-camera"></i> Picture Position (no shelf)
         </button>
     </div>
     <form id="scan_form" action="/submitposition" method="POST" style="display: none;">
@@ -360,14 +360,14 @@
         var deviceType = getDeviceType();
         var qrInput = document.getElementById('qrTextInput');
         var readerDiv = document.getElementById('reader');
+        var restartBtn = document.getElementById('restartScannerBtn');
+        var pictureBtn = document.getElementById('picturePositionBtn');
         if (deviceType === 'iPad' || deviceType === 'Android Tablet') {
             // Hide camera/QR scanner, show QR input
             if (readerDiv) readerDiv.style.display = 'none';
             if (qrInput) {
                 qrInput.style.display = '';
-                // Remove any value so cursor appears at start
                 qrInput.value = '';
-                // Use requestAnimationFrame for reliable cursor focus
                 requestAnimationFrame(function() {
                     qrInput.focus();
                 });
@@ -379,10 +379,30 @@
             document.getElementById('flashMsg').style.display = 'none';
             // Prevent scanner from starting
             window.startScanner = function(){};
+            // Hide Restart Scanner button in tablet mode
+            if (restartBtn) restartBtn.style.display = 'none';
+            // Change Picture Position button color and text for tablet mode
+            if (pictureBtn) {
+                pictureBtn.style.backgroundColor = '#2196F3';
+                pictureBtn.textContent = '';
+                var icon = document.createElement('i');
+                icon.className = 'fas fa-camera';
+                pictureBtn.appendChild(icon);
+                pictureBtn.appendChild(document.createTextNode(' Picture Position (no shelf)'));
+            }
         } else {
             // Mobile or desktop: keep camera, hide QR input
             if (readerDiv) readerDiv.style.display = '';
             if (qrInput) qrInput.style.display = 'none';
+            if (restartBtn) restartBtn.style.display = '';
+            if (pictureBtn) {
+                pictureBtn.style.backgroundColor = '#ff4444';
+                pictureBtn.textContent = '';
+                var icon = document.createElement('i');
+                icon.className = 'fas fa-camera';
+                pictureBtn.appendChild(icon);
+                pictureBtn.appendChild(document.createTextNode(' NO SHELF (take a picture)'));
+            }
         }
     }
 
