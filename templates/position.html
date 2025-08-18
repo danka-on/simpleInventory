@@ -119,7 +119,8 @@
         </div>
     </div>
 
-    <!-- QR Code Text Input (hidden by default, shown for iPad/tablet) -->
+    <!-- Notification for invalid QR code (hidden by default) -->
+    <div id="flashMsg" style="color:#d32f2f; background:#ffdddd; display:none; font-size:0.9em; font-weight:bold; text-align:center; margin-bottom:8px; border-radius:6px; padding:8px;"></div>
     <input type="text" id="qrTextInput" name="qrTextInput" placeholder="Scan or enter QR code" style="width:100%;font-size:1.2em;padding:10px;margin-top:20px;display:none;" autocomplete="off" />
 
     <div style="margin: 20px 0; display: flex; flex-direction: column; gap: 15px; width: 100%; max-width: 300px;">
@@ -392,14 +393,68 @@
     if (qrInput) {
         qrInput.addEventListener('input', function() {
             var code = this.value.trim();
+            var flashMsg = document.getElementById('flashMsg');
             if (code.match(/^(gr[1-5]|or[1-3])s[2-6]$/i)) {
                 document.getElementById('scanned_result').value = code;
                 sessionStorage.setItem('item_position', code);
-                // Show green screen and submit after delay
                 var greenScreen = document.getElementById('green-screen');
                 greenScreen.classList.add('visible');
+                // Play positive beep
+                try {
+                    var ctx = window.audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+                    window.audioCtx = ctx;
+                    var osc = ctx.createOscillator();
+                    var gain = ctx.createGain();
+                    osc.type = 'sine';
+                    osc.frequency.value = 880;
+                    gain.gain.value = 0.2;
+                    osc.connect(gain);
+                    gain.connect(ctx.destination);
+                    osc.start();
+                    osc.stop(ctx.currentTime + 0.15);
+                    osc.onended = function() {
+                        osc.disconnect();
+                        gain.disconnect();
+                    };
+                } catch(e) {}
                 setTimeout(function() {
                     document.getElementById('scan_form').submit();
+                }, 1000);
+                if (flashMsg) {
+                    flashMsg.style.display = 'none';
+                }
+            } else if (code.length > 5) {
+                if (flashMsg) {
+                    flashMsg.textContent = 'Not a QR code';
+                    flashMsg.style.display = '';
+                    flashMsg.style.background = '#ffdddd';
+                    flashMsg.style.color = '#d32f2f';
+                    flashMsg.style.fontWeight = 'bold';
+                    flashMsg.style.padding = '8px';
+                    flashMsg.style.borderRadius = '6px';
+                    flashMsg.style.transition = 'background 0.2s';
+                }
+                // Play error beep
+                try {
+                    var ctx = window.audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+                    window.audioCtx = ctx;
+                    var osc = ctx.createOscillator();
+                    var gain = ctx.createGain();
+                    osc.type = 'square';
+                    osc.frequency.value = 220;
+                    gain.gain.value = 0.3;
+                    osc.connect(gain);
+                    gain.connect(ctx.destination);
+                    osc.start();
+                    osc.stop(ctx.currentTime + 0.25);
+                    osc.onended = function() {
+                        osc.disconnect();
+                        gain.disconnect();
+                    };
+                } catch(e) {}
+                setTimeout(function() {
+                    qrInput.value = '';
+                    if (flashMsg) flashMsg.style.display = 'none';
                 }, 1000);
             }
         });
