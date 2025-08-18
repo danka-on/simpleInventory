@@ -419,7 +419,7 @@
                 } catch(e) {}
                 setTimeout(function() {
                     document.getElementById('scan_form').submit();
-                }, 1000);
+                }, 500); // Reduced from 1000ms to 500ms
                 if (flashMsg) {
                     flashMsg.style.display = 'none';
                 }
