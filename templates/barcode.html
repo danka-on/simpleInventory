@@ -634,25 +634,46 @@
         // Handle barcode input for tablet mode
         var barcodeInput = document.getElementById('barcodeTextInput');
         if (barcodeInput) {
-            barcodeInput.addEventListener('input', function() {
+            barcodeInput.addEventListener('change', function() {
                 var code = this.value.trim();
-                if (code.length >= 8) { // Accept barcode with reasonable length
-                    document.getElementById('scanned_result').value = code;
-                    sessionStorage.setItem('barcode', code);
-                    setTimeout(function() {
-                        document.getElementById('scan_form').submit();
-                    }, 300);
-                }
+                document.getElementById('scanned_result').value = code;
+                sessionStorage.setItem('barcode', code);
+                var greenScreen = document.getElementById('green-screen');
+                if (greenScreen) greenScreen.classList.add('visible');
+                // Play positive beep
+                try {
+                    var ctx = window.audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+                    window.audioCtx = ctx;
+                    var osc = ctx.createOscillator();
+                    var gain = ctx.createGain();
+                    osc.type = 'sine';
+                    osc.frequency.value = 880;
+                    gain.gain.value = 0.2;
+                    osc.connect(gain);
+                    gain.connect(ctx.destination);
+                    osc.start();
+                    osc.stop(ctx.currentTime + 0.15);
+                    osc.onended = function() {
+                        osc.disconnect();
+                        gain.disconnect();
+                    };
+                } catch(e) {}
+                setTimeout(function() {
+                    document.getElementById('scan_form').submit();
+                }, 500);
             });
         }
 
         // Initialize everything when the page loads
-        document.addEventListener('DOMContentLoaded', () => {
+        window.addEventListener('DOMContentLoaded', () => {
             // Unlock audio on user interaction
             window.addEventListener('touchstart', unlockAudio, { once: true });
             window.addEventListener('mousedown', unlockAudio, { once: true });
             // Add a small delay to ensure the DOM is fully loaded
-            setTimeout(initializeCamera, 100);
+            var deviceType = getDeviceType();
+            if (deviceType !== 'iPad' && deviceType !== 'Android Tablet') {
+                setTimeout(initializeCamera, 100);
+            }
             // Fetch allowed UPCs
             fetchAllowedUPCs();
             // On load, check upload status only if redirected from pictureposition
