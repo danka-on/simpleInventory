@@ -24,6 +24,7 @@ def update_inventory():
 
     return myDict
 
+
 def find_item(barcode):
 
     currentInventory = update_inventory()

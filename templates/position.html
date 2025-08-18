@@ -119,6 +119,9 @@
         </div>
     </div>
 
+    <!-- QR Code Text Input (hidden by default, shown for iPad/tablet) -->
+    <input type="text" id="qrTextInput" name="qrTextInput" placeholder="Scan or enter QR code" style="width:100%;font-size:1.2em;padding:10px;margin-top:20px;display:none;" autocomplete="off" />
+
     <div style="margin: 20px 0; display: flex; flex-direction: column; gap: 15px; width: 100%; max-width: 300px;">
         <button onclick="restartScanner()" style="background-color: #2196F3; color: white; border: none; padding: 12px; border-radius: 6px; cursor: pointer; font-size: 1.1em; display: flex; align-items: center; justify-content: center; gap: 8px;">
             <i class="fas fa-sync-alt"></i> Restart Scanner
@@ -343,6 +346,64 @@
     document.getElementById('picturePositionBtn').addEventListener('click', function() {
         window.location.href = '/pictureposition';
     });
+
+    function getDeviceType() {
+        const ua = navigator.userAgent;
+        if (/iPad|Macintosh/.test(ua) && 'ontouchend' in document) return 'iPad';
+        if (/Android/.test(ua) && !/Mobile/.test(ua)) return 'Android Tablet';
+        if (/iPhone|Android.*Mobile|Windows Phone|webOS|BlackBerry|Opera Mini|IEMobile|Mobile/.test(ua)) return 'Mobile';
+        return 'Desktop';
+    }
+
+    function setupDeviceMode() {
+        var deviceType = getDeviceType();
+        var qrInput = document.getElementById('qrTextInput');
+        var readerDiv = document.getElementById('reader');
+        if (deviceType === 'iPad' || deviceType === 'Android Tablet') {
+            // Hide camera/QR scanner, show QR input
+            if (readerDiv) readerDiv.style.display = 'none';
+            if (qrInput) {
+                qrInput.style.display = '';
+                // Remove any value so cursor appears at start
+                qrInput.value = '';
+                // Use requestAnimationFrame for reliable cursor focus
+                requestAnimationFrame(function() {
+                    qrInput.focus();
+                });
+            }
+            // Hide overlay and camera controls
+            var overlay = document.getElementById('qrOverlay');
+            if (overlay) overlay.style.display = 'none';
+            document.getElementById('flashBtn').style.display = 'none';
+            document.getElementById('flashMsg').style.display = 'none';
+            // Prevent scanner from starting
+            window.startScanner = function(){};
+        } else {
+            // Mobile or desktop: keep camera, hide QR input
+            if (readerDiv) readerDiv.style.display = '';
+            if (qrInput) qrInput.style.display = 'none';
+        }
+    }
+
+    window.addEventListener('DOMContentLoaded', setupDeviceMode);
+
+    // Optionally, handle QR code input for iPad/tablet
+    var qrInput = document.getElementById('qrTextInput');
+    if (qrInput) {
+        qrInput.addEventListener('input', function() {
+            var code = this.value.trim();
+            if (code.match(/^(gr[1-5]|or[1-3])s[2-6]$/i)) {
+                document.getElementById('scanned_result').value = code;
+                sessionStorage.setItem('item_position', code);
+                // Show green screen and submit after delay
+                var greenScreen = document.getElementById('green-screen');
+                greenScreen.classList.add('visible');
+                setTimeout(function() {
+                    document.getElementById('scan_form').submit();
+                }, 1000);
+            }
+        });
+    }
 
     // Start scanner on page load
     window.addEventListener('load', () => {
