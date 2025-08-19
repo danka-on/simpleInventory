@@ -739,6 +739,41 @@ def get_ebay_orders(days=90):
         except Exception as e:
             print("Failed to connect to sold.db:", e)
 
+def finalize_barcodes():
+    print("🔎 Finalizing barcodes in ebayStore.db...")
+    try:
+        conn = sqlite3.connect('ebayStore.db')
+        cur = conn.cursor()
+        # Ensure barcodes_finalized column exists
+        cur.execute("PRAGMA table_info(INVENTORY)")
+        columns = [row[1] for row in cur.fetchall()]
+        if "barcodes_finalized" not in columns:
+            cur.execute("ALTER TABLE INVENTORY ADD COLUMN barcodes_finalized INTEGER DEFAULT 0")
+            conn.commit()
+        # Select items not finalized
+        cur.execute("SELECT ItemID, SKU, UPC, barcodes_finalized FROM INVENTORY WHERE barcodes_finalized IS NULL OR barcodes_finalized = 0")
+        rows = cur.fetchall()
+        for item_id, sku, upc, finalized in rows:
+            if not sku:
+                continue
+            # If SKU and UPC are the same, delete SKU
+            if sku == upc:
+                cur.execute("UPDATE INVENTORY SET SKU = NULL, barcodes_finalized = 1 WHERE ItemID = ?", (item_id,))
+                print(f"ItemID {item_id}: SKU and UPC are the same, SKU deleted.")
+                continue
+            # If SKU is all digits, >9 chars, and UPC is null/empty
+            if sku.isdigit() and len(sku) > 9 and (upc is None or upc == '' or upc == 'null'):
+                cur.execute("UPDATE INVENTORY SET UPC = ?, SKU = NULL, barcodes_finalized = 1 WHERE ItemID = ?", (sku, item_id))
+                print(f"ItemID {item_id}: Numeric SKU transferred to UPC and SKU deleted.")
+                continue
+            # Otherwise, just mark as finalized
+            cur.execute("UPDATE INVENTORY SET barcodes_finalized = 1 WHERE ItemID = ?", (item_id,))
+        conn.commit()
+        conn.close()
+        print("✅ Barcode finalization complete.")
+    except Exception as e:
+        print(f"❌ Error finalizing barcodes: {e}")
+
 def start_flask():
     app.run(host="0.0.0.0", port=8080)
 
@@ -1096,6 +1131,7 @@ if __name__ == "__main__":
     # Wait until both are likely up
     time.sleep(2)
     orders()
+    finalize_barcodes()
 
     # Keep main thread alive
     while True:
