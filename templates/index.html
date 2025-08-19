@@ -714,24 +714,5 @@ window.addEventListener('DOMContentLoaded', function() {
 }); // End of DOMContentLoaded
 
 </script>
-<div id="orders-list"></div>
-<script>
-function loadOrders() {
-    document.getElementById('orders-list').innerHTML = '';
-    fetch('/sold-orders?days=' + (new URLSearchParams(window.location.search).get('days') || 1))
-        .then(response => response.json())
-        .then(data => {
-            let html = '<ul>';
-            for (const order of data) {
-                html += `<li>Order ID: ${order.order_id || order.id} | Paid: ${order.paid_time || ''}</li>`;
-            }
-            html += '</ul>';
-            document.getElementById('orders-list').innerHTML = html;
-        });
-}
-document.addEventListener('DOMContentLoaded', function() {
-    loadOrders();
-});
-</script>
 </body>
 </html>
