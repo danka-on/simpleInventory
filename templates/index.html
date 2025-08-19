@@ -413,6 +413,10 @@ function tdInfo(order) {
     return `<td class='sold-td-small'><a href="#" onclick="event.preventDefault(); showSoldPopup('${popupContent.replace(/'/g, "\\'")}');">${buyer}</a></td>`;
 }
 function renderSoldOrders(orders) {
+    // Clear the orders list before rendering new data
+    document.querySelector('#sold-orders-table tbody').innerHTML = '';
+    document.querySelector('#completed-orders-table tbody').innerHTML = '';
+    
     // Create table rows for each order
     orders.forEach(function(order) {
         var tr = document.createElement('tr');
@@ -709,6 +713,25 @@ window.addEventListener('DOMContentLoaded', function() {
     }
 }); // End of DOMContentLoaded
 
+</script>
+<div id="orders-list"></div>
+<script>
+function loadOrders() {
+    document.getElementById('orders-list').innerHTML = '';
+    fetch('/sold-orders?days=' + (new URLSearchParams(window.location.search).get('days') || 1))
+        .then(response => response.json())
+        .then(data => {
+            let html = '<ul>';
+            for (const order of data) {
+                html += `<li>Order ID: ${order.order_id || order.id} | Paid: ${order.paid_time || ''}</li>`;
+            }
+            html += '</ul>';
+            document.getElementById('orders-list').innerHTML = html;
+        });
+}
+document.addEventListener('DOMContentLoaded', function() {
+    loadOrders();
+});
 </script>
 </body>
 </html>

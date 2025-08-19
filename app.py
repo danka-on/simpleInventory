@@ -1119,6 +1119,20 @@ def refresh_searchrack():
     updateSearchRackDB()
     return 'SearchRack database updated! <a href="/searchrack">Back to Search</a>'
 
+@app.route('/test_sold_item', methods=['POST'])
+def test_sold_item():
+    import datetime
+    try:
+        today = datetime.date.today().isoformat()
+        conn = sqlite3.connect('sold.db')
+        cur = conn.cursor()
+        cur.execute("UPDATE orders SET isHandled = 0, paid_time = ?, shipped_time = ? WHERE id = 99", (today, today))
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
 if __name__ == "__main__":
     # Start Flask in a thread
     flask_thread = threading.Thread(target=start_flask, daemon=True)

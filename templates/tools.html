@@ -166,6 +166,9 @@
             <button id="get-sold-orders-btn" class="btn">
                 <i class="fas fa-download"></i> Get Sold Orders
             </button>
+            <button id="test-sold-item-btn" class="btn" style="margin-top:18px;background:#2196F3;">
+                <i class="fas fa-vial"></i> Test Sold Item
+            </button>
         </div>
 
         <a href="/" class="back-btn">
@@ -194,6 +197,14 @@
             console.error('Error:', error);
             alert('An error occurred while fetching sold orders');
         });
+    };
+
+    document.getElementById('test-sold-item-btn').onclick = function() {
+        fetch('/test_sold_item', {method: 'POST'})
+            .then(res => res.json())
+            .then(data => {
+                alert(data.success ? "Item 99 isHandled set to 0!" : "Error: " + data.error);
+            });
     };
     </script>
 </body>
