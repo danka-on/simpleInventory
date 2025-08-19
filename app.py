@@ -328,6 +328,31 @@ def orders():
     page_number = 1
     total_pages = 20
     count = 0
+    # Ensure UPC and UPC_Processed columns exist
+    try:
+        conn = sqlite3.connect('ebayStore.db')
+        cur = conn.cursor()
+        cur.execute("PRAGMA table_info(INVENTORY)")
+        columns = [row[1] for row in cur.fetchall()]
+        if "UPC" not in columns:
+            cur.execute("ALTER TABLE INVENTORY ADD COLUMN UPC TEXT")
+        if "UPC_Processed" not in columns:
+            cur.execute("ALTER TABLE INVENTORY ADD COLUMN UPC_Processed INTEGER DEFAULT 0")
+        conn.commit()
+        conn.close()
+    except Exception as alter_e:
+        print(f"Failed to ensure UPC/UPC_Processed columns exist: {alter_e}")
+    # Query for missing UPCs and not processed
+    try:
+        conn = sqlite3.connect('ebayStore.db')
+        cur = conn.cursor()
+        cur.execute("SELECT ItemID FROM INVENTORY WHERE (UPC IS NULL OR UPC = '' OR UPC = 'null') AND (UPC_Processed IS NULL OR UPC_Processed = 0)")
+        item_ids_missing_upc = set(row[0] for row in cur.fetchall() if row[0])
+        conn.close()
+    except Exception as e:
+        print(f"Failed to get ItemIDs missing UPC: {e}")
+        item_ids_missing_upc = set()
+    processed_upc_ids = set()
     while page_number <= total_pages:
 
         xml_payload = f'''
@@ -542,8 +567,10 @@ def orders():
         except Exception as alter_e:
             print(f"Failed to ensure UPC column exists: {alter_e}")
 
-        # For each item ID, fetch UPC using GetItem API and update ebayStore.db
-        for eid in all_item_ids:
+        # Only fetch UPCs for items that do not already have a UPC and not processed
+        # Filter only those in both all_item_ids and item_ids_missing_upc, and not already processed
+        to_lookup = [eid for eid in all_item_ids if eid in item_ids_missing_upc and eid not in processed_upc_ids]
+        for eid in to_lookup:
             getitem_xml = f'''<?xml version="1.0" encoding="utf-8"?>
 <GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <RequesterCredentials>
@@ -563,14 +590,15 @@ def orders():
                     upc_elem = product_details.find('{urn:ebay:apis:eBLBaseComponents}UPC')
                     upc = upc_elem.text if upc_elem is not None else None
                 print(f"Fetched UPC for ItemID {eid}: {upc}")
-                # Update ebayStore.db with UPC
+                # Update ebayStore.db with UPC and mark as processed
                 try:
                     conn = sqlite3.connect('ebayStore.db')
                     cur = conn.cursor()
-                    cur.execute("UPDATE INVENTORY SET UPC = ? WHERE ItemID = ?", (upc, eid))
+                    cur.execute("UPDATE INVENTORY SET UPC = ?, UPC_Processed = 1 WHERE ItemID = ?", (upc, eid))
                     conn.commit()
                     conn.close()
-                    print(f"Updated UPC for ItemID {eid} in ebayStore.db")
+                    print(f"Updated UPC for ItemID {eid} in ebayStore.db and marked as processed")
+                    processed_upc_ids.add(eid)
                 except Exception as db_e:
                     print(f"Failed to update UPC for ItemID {eid} in ebayStore.db: {db_e}")
             except Exception as e:
