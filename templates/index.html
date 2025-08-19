@@ -269,7 +269,6 @@
                     </table>
                 </div>
             </div>
-            <div id="sold-popup" class="sold-popup" onclick="hideSoldPopup(event)"><span class="sold-popup-close" onclick="this.parentNode.style.display='none'">&times;</span><span id="sold-popup-content"></span></div>
         </div>
 
         <div class="main-actions" style="margin-top: 20px;">
@@ -282,57 +281,25 @@
     </div>
 
 <script>
-function hideSoldPopup(event) {
-    // Only close if clicking the background or an image inside the popup
-    var popup = document.getElementById('sold-popup');
-    var content = document.getElementById('sold-popup-content');
-    if (event.target === popup || event.target.tagName === 'IMG') {
-        popup.style.display = 'none';
-    }
-}
-function showSoldPopup(contentHtml) {
-    try {
-        console.log('showSoldPopup called with:', contentHtml); // Debug log
-        var popup = document.getElementById('sold-popup');
-        var content = document.getElementById('sold-popup-content');
-        
-        // First, clear the content
-        while (content.firstChild) {
-            content.removeChild(content.firstChild);
-        }
-        
-        // Create a temporary div to parse the HTML
-        var temp = document.createElement('div');
-        temp.innerHTML = contentHtml;
-        
-        // Move all nodes to the content div
-        while (temp.firstChild) {
-            content.appendChild(temp.firstChild);
-        }
-        
-        popup.style.display = 'block';
-    } catch (e) {
-        console.error('Error in showSoldPopup:', e);
-        // Fallback to simple text display if there's an error
-        content.textContent = 'Error loading content';
-        popup.style.display = 'block';
-    }
-}
 function esc(s) {
     return String(s||'').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 function tdTitle(order) {
     var fullTitle = esc(order.title || '');
-    var titleHtml = `<div style='font-weight:bold;font-size:1.1em;margin-bottom:8px;text-align:center;'>${fullTitle}</div>`;
-    var titleContent = order.isHandled || order.isHandled === '1' ? fullTitle : esc(order.title || '');
-    
-    if (order.image || order.image_url) {
-        var imgSrc = esc(order.image || order.image_url);
-        var popupContent = titleHtml + `<img src='${imgSrc}' style='display:block;margin:0 auto;max-width:90vw;max-height:60vh;'>`;
-        return `<td class='sold-td-small'><a href="#" onclick="event.preventDefault(); showSoldPopup('${popupContent.replace(/'/g, "\\'")}');">${titleContent}</a></td>`;
-    } else {
-        return `<td class='sold-td-small'><a href="#" onclick="event.preventDefault(); showSoldPopup('${titleHtml.replace(/'/g, "\\'")}');">${titleContent}</a></td>`;
-    }
+    var imgSrc = esc(order.image || order.image_url || '');
+    return `<td class='sold-td-small'><a href="#" class="order-title-link" data-title="${fullTitle}" data-image="${imgSrc}">${fullTitle}</a></td>`;
+}
+
+function tdInfo(order) {
+    var buyer = esc(order.shipping_name || '');
+    var address = [order.shipping_street1, order.shipping_street2, order.shipping_city, order.shipping_state, order.shipping_postal_code, order.shipping_country].filter(Boolean).map(esc).join(' ');
+    var info = `${buyer}${address ? ' - ' + address : ''}`;
+    return `<td class='sold-td-small'><a href="#" class="order-info-link" data-info="${info}">${buyer}</a></td>`;
+}
+
+function tdLocation(order) {
+    var locationText = esc(order.location || '');
+    return `<td class='sold-td-small'><a href="#" class="order-loc-link" data-loc="${locationText}">${locationText}</a></td>`;
 }
 
 function tdQuantity(order) {
@@ -341,77 +308,6 @@ function tdQuantity(order) {
     return `<td${highlight}>${qty}</td>`;
 }
 
-function tdLocation(order) {
-    if (!order.location) return '<td></td>';
-    
-    // Convert location to lowercase for the image filename
-    var locationLower = order.location.toLowerCase();
-    var imgUrl = '/static/shelves/' + locationLower + '.png';
-    var locationText = esc(order.location);
-    
-    // Create a unique ID for the popup content
-    var popupId = 'popup-' + Math.random().toString(36).substr(2, 9);
-    
-    // Create the popup content HTML as a string
-    var popupContent = [
-        '<div style="text-align:center;margin-bottom:10px;font-size:1.2em;font-weight:bold;">',
-        'Location: ' + esc(locationText),
-        '</div>',
-        '<img src="' + esc(imgUrl) + '" ',
-        'onerror="this.onerror=null;this.src=\'/static/gr1new.png\'" ',
-        'style="display:block;margin:0 auto;max-width:90vw;max-height:65vh;">'
-    ].join('');
-    
-    // Create a unique ID for this link
-    var linkId = 'loc-link-' + Math.random().toString(36).substr(2, 9);
-    
-    // Create the table cell with the link
-    var cell = document.createElement('td');
-    cell.className = 'sold-td-small';
-    
-    var link = document.createElement('a');
-    link.href = '#';
-    link.textContent = locationText;
-    link.id = linkId;
-    
-    // Add click handler after the element is added to the DOM
-    setTimeout(function() {
-        var linkEl = document.getElementById(linkId);
-        if (linkEl) {
-            linkEl.addEventListener('click', function(e) {
-                e.preventDefault();
-                showSoldPopup(popupContent);
-            });
-        }
-    }, 0);
-    
-    cell.appendChild(link);
-    return cell.outerHTML;
-}
-
-function tdInfo(order) {
-    var buyer = esc(order.shipping_name || '');
-    var address = [order.shipping_street1, order.shipping_street2, order.shipping_city, order.shipping_state, order.shipping_postal_code, order.shipping_country].filter(Boolean).map(esc).join(' ');
-    
-    // Format price and paid time
-    var price = order.price ? `$${parseFloat(order.price).toFixed(2)}` : 'N/A';
-    var paidTime = order.paid_time ? new Date(order.paid_time).toLocaleString() : 'N/A';
-    
-    // Build the popup content
-    var popupContent = [
-        "<div style='max-width:300px;'>",
-        "<div style='margin-bottom:10px;'>",
-        "<b>", buyer, "</b><br>",
-        "<span style='font-size:0.98em;'>", address, "</span>",
-        "</div>",
-        "<hr style='border:none;border-top:1px solid #ddd;margin:10px 0;'>",
-        "<div style='margin-bottom:5px;'><b>Price:</b> ", price, "</div>",
-        "<div><b>Paid:</b> ", paidTime, "</div>",
-        "</div>"
-    ].join('');
-    
-    return `<td class='sold-td-small'><a href="#" onclick="event.preventDefault(); showSoldPopup('${popupContent.replace(/'/g, "\\'")}');">${buyer}</a></td>`;
-}
 function renderSoldOrders(orders) {
     // Clear the orders list before rendering new data
     document.querySelector('#sold-orders-table tbody').innerHTML = '';
@@ -420,6 +316,7 @@ function renderSoldOrders(orders) {
     // Create table rows for each order
     orders.forEach(function(order) {
         var tr = document.createElement('tr');
+        tr.orderData = order; // Attach order data for info popup
         if (order.isHandled) {
             // Add to completed table
             tr.innerHTML =
@@ -606,6 +503,7 @@ function renderSoldOrders(orders) {
             .catch(error => console.error('Error updating order status:', error));
         }, 400);
     });
+    attachPopups();
 }
 function fetchAndShowSoldOrders(days) {
     // First, fetch new sold orders for the given days
@@ -713,6 +611,137 @@ window.addEventListener('DOMContentLoaded', function() {
     }
 }); // End of DOMContentLoaded
 
+function showOrderPopup(title, imageUrl, info, loc, price, paidTime) {
+    // Remove any existing popup
+    const oldPopup = document.getElementById('order-popup');
+    if (oldPopup) oldPopup.remove();
+    // Create overlay
+    const overlay = document.createElement('div');
+    overlay.id = 'order-popup';
+    overlay.style.position = 'fixed';
+    overlay.style.top = 0;
+    overlay.style.left = 0;
+    overlay.style.width = '100vw';
+    overlay.style.height = '100vh';
+    overlay.style.background = 'rgba(0,0,0,0.35)';
+    overlay.style.display = 'flex';
+    overlay.style.alignItems = 'center';
+    overlay.style.justifyContent = 'center';
+    overlay.style.zIndex = 9999;
+    overlay.onclick = function(e) {
+        if (e.target === overlay) overlay.remove();
+    };
+    // Create popup content
+    const popup = document.createElement('div');
+    popup.style.background = '#fff';
+    popup.style.borderRadius = '14px';
+    popup.style.boxShadow = '0 2px 16px rgba(0,0,0,0.18)';
+    popup.style.padding = '28px 24px';
+    popup.style.maxWidth = '340px';
+    popup.style.textAlign = 'center';
+    popup.style.position = 'relative';
+    popup.onclick = function(e) { e.stopPropagation(); };
+    // Info tab formatting (old system)
+    if (info) {
+        // info = buyer + address
+        let infoParts = info.split(' - ');
+        let buyer = infoParts[0] || '';
+        let address = infoParts[1] || '';
+        const infoHtml = `
+            <div style='max-width:300px;'>
+                <div style='margin-bottom:10px;'>
+                    <b>${buyer}</b><br>
+                    <span style='font-size:0.98em;'>${address}</span>
+                </div>
+                <hr style='border:none;border-top:1px solid #ddd;margin:10px 0;'>
+                <div style='margin-bottom:5px;'><b>Price:</b> ${price || 'N/A'}</div>
+                <div><b>Paid:</b> ${paidTime || 'N/A'}</div>
+            </div>
+        `;
+        popup.innerHTML += infoHtml;
+    }
+    // Location tab formatting (show shelf image)
+    if (loc) {
+        const locEl = document.createElement('div');
+        locEl.textContent = 'Location: ' + loc;
+        locEl.style.fontSize = '0.98rem';
+        locEl.style.marginBottom = '8px';
+        popup.appendChild(locEl);
+        // Shelf image
+        if (loc) {
+            const img = document.createElement('img');
+            const locationLower = loc.toLowerCase();
+            img.src = '/static/shelves/' + locationLower + '.png';
+            img.alt = loc;
+            img.style.maxWidth = '220px';
+            img.style.borderRadius = '10px';
+            img.style.marginBottom = '18px';
+            img.onerror = function() { img.src = '/static/gr1new.png'; };
+            popup.appendChild(img);
+        }
+    }
+    // Title and image (for title tab)
+    if (title) {
+        const nameEl = document.createElement('div');
+        nameEl.textContent = title;
+        nameEl.style.fontWeight = 'bold';
+        nameEl.style.fontSize = '1.1rem';
+        nameEl.style.marginBottom = '8px';
+        popup.appendChild(nameEl);
+    }
+    if (imageUrl) {
+        const img = document.createElement('img');
+        img.src = imageUrl;
+        img.alt = title;
+        img.style.maxWidth = '220px';
+        img.style.borderRadius = '10px';
+        img.style.marginBottom = '18px';
+        popup.appendChild(img);
+    }
+    // Add close button
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = 'Close';
+    closeBtn.style.marginTop = '12px';
+    closeBtn.style.background = '#0984e3';
+    closeBtn.style.color = '#fff';
+    closeBtn.style.border = 'none';
+    closeBtn.style.borderRadius = '6px';
+    closeBtn.style.padding = '8px 18px';
+    closeBtn.style.cursor = 'pointer';
+    closeBtn.onclick = function() { overlay.remove(); };
+    popup.appendChild(closeBtn);
+    overlay.appendChild(popup);
+    document.body.appendChild(overlay);
+}
+// Attach to all title, info, and loc clickable elements
+function attachPopups() {
+    document.querySelectorAll('.order-title-link').forEach(el => {
+        el.onclick = function(e) {
+            e.preventDefault();
+            showOrderPopup(el.dataset.title, el.dataset.image, null, null);
+        };
+    });
+    document.querySelectorAll('.order-info-link').forEach(el => {
+        el.onclick = function(e) {
+            e.preventDefault();
+            // Get price and paidTime from parent row
+            const tr = el.closest('tr');
+            let price = 'N/A', paidTime = 'N/A';
+            if (tr && tr.orderData) {
+                price = tr.orderData.price ? `$${parseFloat(tr.orderData.price).toFixed(2)}` : 'N/A';
+                paidTime = tr.orderData.paid_time ? new Date(tr.orderData.paid_time).toLocaleString() : 'N/A';
+            }
+            showOrderPopup(null, null, el.dataset.info, null, price, paidTime);
+        };
+    });
+    document.querySelectorAll('.order-loc-link').forEach(el => {
+        el.onclick = function(e) {
+            e.preventDefault();
+            showOrderPopup(null, null, null, el.dataset.loc);
+        };
+    });
+}
+document.addEventListener('DOMContentLoaded', attachPopups);
 </script>
 </body>
 </html>
