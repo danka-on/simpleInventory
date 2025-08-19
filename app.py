@@ -514,6 +514,68 @@ def orders():
             print("—" * 40)
             count += 1
 
+        # Collect all item IDs from Active, Unsold, and Sold lists
+        all_item_ids = set()
+        for item in ActiveItems:
+            item_id = item.find('ebay:ItemID', ns)
+            if item_id is not None and item_id.text not in [None, "N/A", "None", ""]:
+                all_item_ids.add(item_id.text)
+        for item in UnsoldItems:
+            item_id = item.find('ebay:ItemID', ns)
+            if item_id is not None and item_id.text not in [None, "N/A", "None", ""]:
+                all_item_ids.add(item_id.text)
+        for item in SoldItems:
+            item_id = item.find('ebay:ItemID', ns)
+            if item_id is not None and item_id.text not in [None, "N/A", "None", ""]:
+                all_item_ids.add(item_id.text)
+
+        # Ensure UPC column exists in ebayStore.db
+        try:
+            conn = sqlite3.connect('ebayStore.db')
+            cur = conn.cursor()
+            cur.execute("PRAGMA table_info(INVENTORY)")
+            columns = [row[1] for row in cur.fetchall()]
+            if "UPC" not in columns:
+                cur.execute("ALTER TABLE INVENTORY ADD COLUMN UPC TEXT")
+                conn.commit()
+            conn.close()
+        except Exception as alter_e:
+            print(f"Failed to ensure UPC column exists: {alter_e}")
+
+        # For each item ID, fetch UPC using GetItem API and update ebayStore.db
+        for eid in all_item_ids:
+            getitem_xml = f'''<?xml version="1.0" encoding="utf-8"?>
+<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <RequesterCredentials>
+    <eBayAuthToken>{os.getenv("EBAY_OLDAUTH_TOKEN")}</eBayAuthToken>
+  </RequesterCredentials>
+  <ItemID>{eid}</ItemID>
+  <DetailLevel>ReturnAll</DetailLevel>
+</GetItemRequest>'''
+            getitem_headers = headers.copy()
+            getitem_headers["X-EBAY-API-CALL-NAME"] = "GetItem"
+            try:
+                getitem_resp = requests.post("https://api.ebay.com/ws/api.dll", headers=getitem_headers, data=getitem_xml, timeout=20)
+                getitem_root = ET.fromstring(getitem_resp.text)
+                product_details = getitem_root.find('.//{urn:ebay:apis:eBLBaseComponents}ProductListingDetails')
+                upc = None
+                if product_details is not None:
+                    upc_elem = product_details.find('{urn:ebay:apis:eBLBaseComponents}UPC')
+                    upc = upc_elem.text if upc_elem is not None else None
+                print(f"Fetched UPC for ItemID {eid}: {upc}")
+                # Update ebayStore.db with UPC
+                try:
+                    conn = sqlite3.connect('ebayStore.db')
+                    cur = conn.cursor()
+                    cur.execute("UPDATE INVENTORY SET UPC = ? WHERE ItemID = ?", (upc, eid))
+                    conn.commit()
+                    conn.close()
+                    print(f"Updated UPC for ItemID {eid} in ebayStore.db")
+                except Exception as db_e:
+                    print(f"Failed to update UPC for ItemID {eid} in ebayStore.db: {db_e}")
+            except Exception as e:
+                print(f"Failed to fetch UPC for ItemID {eid}: {e}")
+
         # Get total pages if first time
         if page_number == 1:
             page_info = root.find('.//ebay:PaginationResult', ns)
