@@ -2,3 +2,5 @@ credentials.json
 license\ type\ file
 tokens.json
 .env
+venv/
+ebayStore.db
