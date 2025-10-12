@@ -67,7 +67,7 @@ def start_cloudflare_tunnel():
         "cloudflared",
         "tunnel",
         "--config",
-        "/home/boxraspberry/simpleInventory/.cloudflared/config.yml",
+        "C:\\Users\\boxatron\\.cloudflared\\config.yml",
         "run",
         "mytunnel"
     ])
@@ -775,14 +775,14 @@ def finalize_barcodes():
         print(f"❌ Error finalizing barcodes: {e}")
 
 def start_flask():
-    app.run(host="0.0.0.0", port=8081)
+    app.run(host="0.0.0.0", port=8080)
 
 def start_tunnel():
     subprocess.Popen([
         "cloudflared",
         "tunnel",
         "--config",
-        "/home/boxraspberry/simpleInventory/.cloudflared/config.yml",
+        "C:\\Users\\boxatron\\.cloudflared\\config.yml",
         "run",
         "mytunnel"
     ])

@@ -1,7 +1,0 @@
-tunnel: 7489df01-760a-45b2-a973-b9ecb5467de3
-credentials-file: /home/boxraspberry/.cloudflared/7489df01-760a-45b2-a973-b9ecb5467de3.json
-
-ingress:
-  - hostname: nexuscentralhq.org
-    service: http://localhost:8081
-  - service: http_status:404
