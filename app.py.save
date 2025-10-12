@@ -1,0 +1,1154 @@
+from contextlib import nullcontext
+
+from flask import Flask, request, send_file, url_for, render_template, jsonify
+from PIL import Image, ImageDraw
+import io, time, subprocess, os, requests, json, threading, sqlite3
+import xml.etree.ElementTree as ET
+from dotenv import load_dotenv
+import xml.dom.minidom as minidom
+
+
+
+from inventory import find_item  # adjust this to match your actual import
+from DBmanager import ebayStoreDB, addToRack, store_ebay_order, createSearchRackDB, updateSearchRackDB
+from BOLextractor import process_bol_excel
+from manualMatcher import get_bol_items, get_ebay_items, fuse_and_store_match
+
+oldAuth_token = 'v^1.1#i^1#I^3#f^0#p^3#r^1#t^Ul4xMF82OkYwRjY2Q0VFOUY1QUM0MkEyMjkyMDY5Q0E5NjY0NjIxXzFfMSNFXjI2MA=='
+
+
+CLIENT_ID = os.getenv("EBAY_CLIENT_ID")
+CLIENT_SECRET = os.getenv("EBAY_CLIENT_SECRET")
+RUNAME = os.getenv("EBAY_RUNAME")
+app = Flask(__name__)
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16 MB limit for uploads
+#for ebay api calls
+
+from token_manager import get_access_token, load_tokens, is_expired
+
+access_token = get_access_token()
+headers = {
+    "Authorization": f"Bearer {access_token}",
+    "Content-Type": "application/json"
+}
+
+
+
+
+
+@app.route('/tools')
+def tools():
+    return render_template('tools.html')
+
+@app.route('/extractor')
+def extractor():
+    return render_template('extractor.html')
+
+@app.route("/token-status")
+def token_status():
+    try:
+        tokens = load_tokens()
+        expired = is_expired(tokens)
+        access_token = get_access_token()  # this will refresh if expired
+
+        return jsonify({
+            "token_expired": expired,
+            "access_token": access_token[:40] + "...",  # for safety
+            "expires_at": tokens.get("expires_at"),
+            "current_time": int(time.time()),
+            "seconds_until_expiry": int(tokens.get("expires_at") - time.time())
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+def start_cloudflare_tunnel():
+    subprocess.Popen([
+        "cloudflared",
+        "tunnel",
+        "--config",
+        "~/simpleInventory/.cloudflared/config.yml",
+        "run",
+        "mytunnel"
+    ])
+
+@app.route("/", methods=["GET", "POST"])
+def home():
+    shelf = request.args.get("shelf")
+    return render_template("index.html", shelf=shelf)
+
+
+@app.route("/callback")
+def callback():
+    code = request.args.get("code")
+    if not code:
+        return "Authorization failed or cancelled."
+
+    # Step 5: exchange this code for an access token
+    return f"Authorization code: {code}"
+@app.route("/privacy")
+def privacy():
+    return "<h1>Privacy Policy</h1><p>No user data is stored or shared. This app is for sandbox testing only.</p>"
+
+
+
+@app.route("/search", methods=["POST"])
+def search():
+    query = request.form["query"]
+    result = find_item(query)
+    return render_template("index.html", search_result=result)
+
+SHELF_COORDS = [
+    {"gr1":
+         {
+        "s6":(220, 163, 753, 407),
+        "s5": (90, 825, 930, 990),
+        "s4":(90, 465, 930, 630),
+        "s3":(90, 645, 930, 810),
+        "s2":(90, 825, 930, 990),
+        "s1":(90, 825, 930, 990)
+         }
+    },
+    {"gr2":
+    {
+        "s6":(220, 163, 753, 407),
+        "s5": (90, 825, 930, 990),
+        "s4":(90, 465, 930, 630),
+        "s3":(90, 645, 930, 810),
+        "s2":(90, 825, 930, 990),
+        "s1":(90, 825, 930, 990)
+    }
+    }
+]
+
+@app.route("/highlight")
+def highlight():
+    shelf_name = request.args.get("shelf", "").lower().strip()
+    print(f"[DEBUG] highlight() called with shelf_name: {shelf_name}")
+    if not shelf_name or len(shelf_name) < 4 or not shelf_name.startswith("gr"):
+        return "Invalid shelf parameter", 400
+    rack = shelf_name[:3]  # e.g., 'gr1'
+    shelf = shelf_name[3:]  # e.g., 's6'
+    image_path = f"static/{rack}.png"
+    # SHELF_COORDS is a list of dicts, find the dict for this rack
+    coords = None
+    for rack_dict in SHELF_COORDS:
+        if rack in rack_dict:
+            coords = rack_dict[rack].get(shelf)
+            break
+    if coords is None:
+        return f"No coordinates found for {rack} {shelf}", 404
+    try:
+
+        img = Image.open(image_path).convert("RGB")
+    except Exception as e:
+        return f"Image not found: {image_path}", 404
+    draw = ImageDraw.Draw(img)
+    draw.rectangle(coords, outline="green", width=30)
+    img.thumbnail((180, 80))  # Substantially decrease image size
+    img_io = io.BytesIO()
+    img.save(img_io, "PNG")
+    img_io.seek(0)
+    return send_file(img_io, mimetype="image/png")
+
+
+####################################
+
+@app.route("/database")
+def show_inventory():
+    q = request.args.get('q', '').strip()
+    status = request.args.get('status', '').strip()
+    sort = request.args.get('sort', 'ID')
+    dir = request.args.get('dir', 'asc')
+    allowed_sorts = ['ID','Title','ItemID','SKU','Price','Quantity','List_State','Sold_Date','List_Date']
+    if sort not in allowed_sorts:
+        sort = 'ID'
+    if dir not in ['asc','desc']:
+        dir = 'asc'
+    conn = sqlite3.connect("ebayStore.db")  # fixed typo here
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    sql = "SELECT * FROM INVENTORY WHERE 1=1"
+    params = []
+    if q:
+        sql += " AND (Title LIKE ? OR ItemID LIKE ? OR SKU LIKE ? OR Price LIKE ? OR Quantity LIKE ? OR List_State LIKE ? OR Sold_Date LIKE ? OR List_Date LIKE ?)"
+        for _ in range(8):
+            params.append(f"%{q}%")
+    if status:
+        sql += " AND List_State = ?"
+        params.append(status)
+    sql += f" ORDER BY {sort} {dir.upper()}"
+    cursor.execute(sql, params)
+    items = cursor.fetchall()
+    conn.close()
+    return render_template("inventory.html", items=items)
+
+
+# inventory flow variables for database injection
+
+same_position = None
+position_code = None
+barcode = None
+pictureposition_path = None
+
+
+
+
+@app.route('/additemtrue', methods=['POST'])
+def additemtrue():
+    global same_position
+    global position_code
+    global barcode
+    global pictureposition_path
+    try:
+        # If a picture position was used, compress and convert to B&W
+        if pictureposition_path:
+            abs_path = os.path.join(os.getcwd(), pictureposition_path)
+            try:
+                img = Image.open(abs_path)
+                img = img.convert('L')  # Convert to grayscale
+                img.thumbnail((400, 400))  # Resize to max 400x400
+                img.save(abs_path, optimize=True, quality=40)
+            except Exception as e:
+                print(f"Image processing failed: {e}")
+        print("Flow Complete, adding to Rack....")
+        # If picture position is set, store 'picture' in ITEM_POSITION
+        item_position_to_store = 'picture' if pictureposition_path else position_code
+        addToRack(item_position_to_store, barcode, None, pictureposition_path)
+        print(f"Added to rack: position={item_position_to_store}, barcode={barcode}, pictureposition={pictureposition_path}")
+        position_code = None
+        barcode = None
+        pictureposition_path = None
+    except Exception as e:
+        print("something went wrong with adding to RACK", e)
+    # Add script to clear sessionStorage after successful add
+    clear_script = '''<script>
+        sessionStorage.removeItem('barcode');
+        sessionStorage.removeItem('item_position');
+        sessionStorage.removeItem('pictureposition_path');
+    </script>'''
+    if same_position:
+        return render_template("barcode.html") + clear_script
+    else:
+        return render_template("position.html") + clear_script
+
+
+
+
+@app.route("/barcode")
+def barcode_page():
+    # If redirected from pictureposition, set global pictureposition_path from sessionStorage (via query param)
+    from flask import request
+    global pictureposition_path
+    if request.args.get("pictureposition") == "1":
+        # Try to get the path from sessionStorage via a hidden form or AJAX (handled in JS below)
+        pass  # Will be handled by JS below
+    return render_template("barcode.html")
+
+@app.route("/pictures")
+def pictures_page():
+    return render_template("pictures.html")
+
+#adding inventory flow #1/3
+@app.route("/position")
+def position_page():
+
+    return render_template("position.html")
+
+
+#inventory flow #2
+@app.route('/submitposition', methods=['POST'])
+def process_position():
+    global position_code
+    global pictureposition_path
+    position_code = request.form.get('scanned_result')
+    pictureposition_path = request.form.get('pictureposition')
+    print("Received scanned code:", position_code)
+    print("Received picture position path:", pictureposition_path)
+    return render_template("barcode.html")
+
+
+#inventory flow #3
+@app.route('/submitbarcode', methods=['POST'])
+def process_barcode():
+    global barcode
+    barcode = request.form.get('scanned_result')
+    print("Received scanned code:", barcode)
+
+    return render_template("additem.html")
+
+
+
+@app.route('/additem', methods=['POST'])
+def additem_page():
+    #return pictures
+
+    return render_template("additem.html")
+
+
+@app.route('/toggle', methods=['POST'])
+def toggle():
+    global same_position
+    data = request.get_json()
+    is_checked = data.get('checked', False)
+    same_position = is_checked
+    print("Checkbox state:", is_checked)  # True or False
+
+    # Respond with JSON so the page doesn't change
+    return jsonify({'success': True, 'message': f'Checkbox is {"ON" if is_checked else "OFF"}'})
+# order placement flow variables for database injection
+
+
+
+
+
+
+
+
+
+
+
+def get_high_res_image_url(url):
+    if url and "s-l" in url:
+        return url.replace("s-l140.jpg", "s-l1600.jpg").replace("s-l500.jpg", "s-l1600.jpg")
+    return url
+
+
+def orders():
+    print("✅ Now running orders()...")
+    headers = {
+        "X-EBAY-API-SITEID": "0",
+        "X-EBAY-API-COMPATIBILITY-LEVEL": "967",
+        "X-EBAY-API-CALL-NAME": "GetMyeBaySelling",
+        "X-EBAY-API-DEV-NAME": os.getenv("EBAY_PROD_DEV_ID"),
+        "X-EBAY-API-APP-NAME": os.getenv("EBAY_PROD_APP_ID"),
+        "X-EBAY-API-CERT-NAME": os.getenv("EBAY_PROD_CERT_ID"),
+        "Content-Type": "text/xml"
+    }
+    entries = 100
+    page_number = 1
+    total_pages = 20
+    count = 0
+    # Ensure UPC and UPC_Processed columns exist
+    try:
+        conn = sqlite3.connect('ebayStore.db')
+        cur = conn.cursor()
+        cur.execute("PRAGMA table_info(INVENTORY)")
+        columns = [row[1] for row in cur.fetchall()]
+        if "UPC" not in columns:
+            cur.execute("ALTER TABLE INVENTORY ADD COLUMN UPC TEXT")
+        if "UPC_Processed" not in columns:
+            cur.execute("ALTER TABLE INVENTORY ADD COLUMN UPC_Processed INTEGER DEFAULT 0")
+        conn.commit()
+        conn.close()
+    except Exception as alter_e:
+        print(f"Failed to ensure UPC/UPC_Processed columns exist: {alter_e}")
+    # Query for missing UPCs and not processed
+    try:
+        conn = sqlite3.connect('ebayStore.db')
+        cur = conn.cursor()
+        cur.execute("SELECT ItemID FROM INVENTORY WHERE (UPC IS NULL OR UPC = '' OR UPC = 'null') AND (UPC_Processed IS NULL OR UPC_Processed = 0)")
+        item_ids_missing_upc = set(row[0] for row in cur.fetchall() if row[0])
+        conn.close()
+    except Exception as e:
+        print(f"Failed to get ItemIDs missing UPC: {e}")
+        item_ids_missing_upc = set()
+    processed_upc_ids = set()
+    while page_number <= total_pages:
+
+        xml_payload = f'''
+        <?xml version="1.0" encoding="utf-8"?>
+            <GetMyeBaySellingRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+              <RequesterCredentials>
+                <eBayAuthToken>{os.getenv("EBAY_OLDAUTH_TOKEN")}</eBayAuthToken>
+              </RequesterCredentials>
+              <ErrorLanguage>en_US</ErrorLanguage>
+              <WarningLevel>High</WarningLevel>
+              <ActiveList>
+                <Sort>TimeLeft</Sort>
+                <Pagination>
+                  <EntriesPerPage>{entries}</EntriesPerPage>
+                  <PageNumber>{page_number}</PageNumber>
+                </Pagination>
+              </ActiveList>
+            <SoldList>
+                <Include>true</Include>
+                <DurationInDays>60</DurationInDays>
+                    <Pagination>
+                  <EntriesPerPage>{entries}</EntriesPerPage>
+                  <PageNumber>{page_number}</PageNumber>
+                </Pagination>
+            </SoldList>
+            <UnsoldList>
+                <Include>true</Include>
+                <Pagination>
+                      <EntriesPerPage>{entries}</EntriesPerPage>
+                      <PageNumber>{page_number}</PageNumber>
+                    </Pagination>
+                    
+                </UnsoldList>
+            
+            </GetMyeBaySellingRequest>'''
+
+        ns = {'ebay': 'urn:ebay:apis:eBLBaseComponents'}
+        response = requests.post("https://api.ebay.com/ws/api.dll", headers=headers, data=xml_payload, timeout=20)
+        root = ET.fromstring(response.text)
+
+        '''
+        rough_string = ET.tostring(root, encoding="utf-8")
+        # Parse that into a minidom object
+        dom = minidom.parseString(rough_string)
+        # Pretty print
+        pretty_xml = dom.toprettyxml(indent="  ")
+        print(pretty_xml)
+        '''
+
+
+
+        ack = root.find('ebay:Ack', ns)
+        if ack is None or ack.text != "Success":
+            print(f"❌ API Error on page {page_number}: {ack.text if ack is not None else 'No Ack'}")
+            #break
+
+
+
+
+
+
+        #ACTIVE LIST ITEMS
+        ActiveItems = root.findall('.//ebay:ActiveList/ebay:ItemArray/ebay:Item', ns)
+        for item in ActiveItems:
+
+            title = item.find('ebay:Title', ns)
+            item_id = item.find('ebay:ItemID', ns)
+            sku = item.find('ebay:SKU', ns)
+            price = item.find('.//ebay:CurrentPrice', ns)
+            quantity = item.find('ebay:Quantity', ns)
+            list_date = item.find('ebay:ListingDetails/ebay:StartTime', ns)
+            sold_date = item.find('ebay:ListingDetails/ebay:EndTime', ns)
+            list_state = "Active"
+            URL = f"https://www.ebay.com/itm/{item_id.text}"
+
+            picture_url = item.find('.//ebay:PictureDetails/ebay:GalleryURL', ns)
+            high_res_url = get_high_res_image_url(picture_url.text) if picture_url is not None else "No image"
+
+
+
+            # add to database
+            ebayStoreDB(title = title.text if title is not None else "N/A",
+                       item_id = item_id.text if item_id is not None else "N/A",
+                       sku = sku.text if sku is not None else "None",
+                       price = price.text if price is not None else "N/A",
+                       quantity = quantity.text if quantity is not None else "N/A",
+                       image = high_res_url,
+                       List_State = list_state,
+                       Sold_Date=sold_date.text if sold_date is not None else "None",
+                       List_Date=list_date.text if list_date is not None else "None",
+                       URL = URL if URL is not None else "None"
+            )
+
+
+
+
+            print("Item", count)
+            print("📦 Title:", title.text if title is not None else "N/A")
+            print("🆔 ItemID:", item_id.text if item_id is not None else "N/A")
+            print("🔖 SKU:", sku.text if sku is not None else "None")
+            print("💲 Price:", price.text if price is not None else "N/A")
+            print("🔢 Quantity:", quantity.text if quantity is not None else "N/A")
+            print("🖼️ Image:", high_res_url)
+            print("🛣️ URL:", f"https://www.ebay.com/itm/{item_id.text}")
+            print("—" * 40)
+            count += 1
+
+        # finding unsold item list
+        UnsoldItems = root.findall('.//ebay:UnsoldList/ebay:ItemArray/ebay:Item', ns)
+        for item in UnsoldItems:
+            title = item.find('ebay:Title', ns)
+            item_id = item.find('ebay:ItemID', ns)
+            sku = item.find('ebay:SKU', ns)
+            price = item.find('.//ebay:CurrentPrice', ns)
+            quantity = item.find('ebay:Quantity', ns)
+            list_date = item.find('ebay:ListingDetails/ebay:StartTime', ns)
+            sold_date = item.find('ebay:ListingDetails/ebay:EndTime', ns)
+            list_state = "Unsold"
+            URL = f"https://www.ebay.com/itm/{item_id.text}"
+
+            picture_url = item.find('.//ebay:PictureDetails/ebay:GalleryURL', ns)
+            high_res_url = get_high_res_image_url(picture_url.text) if picture_url is not None else "No image"
+
+            # add to database
+            ebayStoreDB(title=title.text if title is not None else "N/A",
+                       item_id=item_id.text if item_id is not None else "N/A",
+                       sku=sku.text if sku is not None else "None",
+                       price=price.text if price is not None else "N/A",
+                       quantity=quantity.text if quantity is not None else "N/A", image=high_res_url,
+                       List_State=list_state,
+                       Sold_Date=sold_date.text if sold_date is not None else "None",
+                       List_Date=list_date.text if list_date is not None else "None",
+                       URL=URL if URL is not None else "None"
+                       )
+
+            print("Item", count)
+            print("📦 Title:", title.text if title is not None else "N/A")
+            print("🆔 ItemID:", item_id.text if item_id is not None else "N/A")
+            print("🔖 SKU:", sku.text if sku is not None else "None")
+            print("💲 Price:", price.text if price is not None else "N/A")
+            print("🔢 Quantity:", quantity.text if quantity is not None else "N/A")
+            print("🖼️ Image:", high_res_url)
+            print("🛣️ URL:", f"https://www.ebay.com/itm/{item_id.text}")
+            print("—" * 40)
+            count += 1
+
+        # finding sold list items
+
+        SoldItems = root.findall('.//ebay:SoldList/ebay:OrderTransactionArray/ebay:OrderTransaction/ebay:Transaction/ebay:Item', ns)
+
+        for item in SoldItems:
+            title = item.find('ebay:Title', ns)
+            item_id = item.find('ebay:ItemID', ns)
+            sku = item.find('ebay:SKU', ns)
+            price = item.find('.//ebay:CurrentPrice', ns)
+            quantity = item.find('ebay:Quantity', ns)
+            sold_date = item.find('ebay:ListingDetails/ebay:EndTime', ns)
+            list_date = item.find('ebay:ListingDetails/ebay:StartTime', ns)
+            list_state = "Sold"
+            URL = f"https://www.ebay.com/itm/{item_id.text}"
+            picture_url = item.find('.//ebay:PictureDetails/ebay:GalleryURL', ns)
+            high_res_url = get_high_res_image_url(picture_url.text) if picture_url is not None else "No image"
+
+            # add to database
+            ebayStoreDB(title=title.text if title is not None else "N/A",
+                       item_id=item_id.text if item_id is not None else "N/A",
+                       sku=sku.text if sku is not None else "None",
+                       price=price.text if price is not None else "N/A",
+                       quantity=quantity.text if quantity is not None else "N/A", image=high_res_url,
+                       List_State=list_state,
+                       Sold_Date=sold_date.text if sold_date is not None else "None",
+                       List_Date=list_date.text if list_date is not None else "None",
+                       URL = URL if URL is not None else "None"
+                       )
+
+            print("Item", count)
+            print("📦 Title:", title.text if title is not None else "N/A")
+            print("🆔 ItemID:", item_id.text if item_id is not None else "N/A")
+            print("🔖 SKU:", sku.text if sku is not None else "None")
+            print("💲 Price:", price.text if price is not None else "N/A")
+            print("🔢 Quantity:", quantity.text if quantity is not None else "N/A")
+            print("🖼️ Image:", high_res_url)
+            print("🛣️ URL:", f"https://www.ebay.com/itm/{item_id.text}")
+            print("—" * 40)
+            count += 1
+
+        # Collect all item IDs from Active, Unsold, and Sold lists
+        all_item_ids = set()
+        for item in ActiveItems:
+            item_id = item.find('ebay:ItemID', ns)
+            if item_id is not None and item_id.text not in [None, "N/A", "None", ""]:
+                all_item_ids.add(item_id.text)
+        for item in UnsoldItems:
+            item_id = item.find('ebay:ItemID', ns)
+            if item_id is not None and item_id.text not in [None, "N/A", "None", ""]:
+                all_item_ids.add(item_id.text)
+        for item in SoldItems:
+            item_id = item.find('ebay:ItemID', ns)
+            if item_id is not None and item_id.text not in [None, "N/A", "None", ""]:
+                all_item_ids.add(item_id.text)
+
+        # Ensure UPC column exists in ebayStore.db
+        try:
+            conn = sqlite3.connect('ebayStore.db')
+            cur = conn.cursor()
+            cur.execute("PRAGMA table_info(INVENTORY)")
+            columns = [row[1] for row in cur.fetchall()]
+            if "UPC" not in columns:
+                cur.execute("ALTER TABLE INVENTORY ADD COLUMN UPC TEXT")
+                conn.commit()
+            conn.close()
+        except Exception as alter_e:
+            print(f"Failed to ensure UPC column exists: {alter_e}")
+
+        # Only fetch UPCs for items that do not already have a UPC and not processed
+        # Filter only those in both all_item_ids and item_ids_missing_upc, and not already processed
+        to_lookup = [eid for eid in all_item_ids if eid in item_ids_missing_upc and eid not in processed_upc_ids]
+        for eid in to_lookup:
+            getitem_xml = f'''<?xml version="1.0" encoding="utf-8"?>
+<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <RequesterCredentials>
+    <eBayAuthToken>{os.getenv("EBAY_OLDAUTH_TOKEN")}</eBayAuthToken>
+  </RequesterCredentials>
+  <ItemID>{eid}</ItemID>
+  <DetailLevel>ReturnAll</DetailLevel>
+</GetItemRequest>'''
+            getitem_headers = headers.copy()
+            getitem_headers["X-EBAY-API-CALL-NAME"] = "GetItem"
+            try:
+                getitem_resp = requests.post("https://api.ebay.com/ws/api.dll", headers=getitem_headers, data=getitem_xml, timeout=20)
+                getitem_root = ET.fromstring(getitem_resp.text)
+                product_details = getitem_root.find('.//{urn:ebay:apis:eBLBaseComponents}ProductListingDetails')
+                upc = None
+                if product_details is not None:
+                    upc_elem = product_details.find('{urn:ebay:apis:eBLBaseComponents}UPC')
+                    upc = upc_elem.text if upc_elem is not None else None
+                print(f"Fetched UPC for ItemID {eid}: {upc}")
+                # Update ebayStore.db with UPC and mark as processed
+                try:
+                    conn = sqlite3.connect('ebayStore.db')
+                    cur = conn.cursor()
+                    cur.execute("UPDATE INVENTORY SET UPC = ?, UPC_Processed = 1 WHERE ItemID = ?", (upc, eid))
+                    conn.commit()
+                    conn.close()
+                    print(f"Updated UPC for ItemID {eid} in ebayStore.db and marked as processed")
+                    processed_upc_ids.add(eid)
+                except Exception as db_e:
+                    print(f"Failed to update UPC for ItemID {eid} in ebayStore.db: {db_e}")
+            except Exception as e:
+                print(f"Failed to fetch UPC for ItemID {eid}: {e}")
+
+        # Get total pages if first time
+        if page_number == 1:
+            page_info = root.find('.//ebay:PaginationResult', ns)
+            if page_info is not None:
+                total_pages = int(page_info.find('ebay:TotalNumberOfPages', ns).text)
+            else:
+                return
+                #break  # no pagination info, likely no results
+
+        page_number += 1
+
+
+
+def get_ebay_orders(days=90):
+    print(f"Getting eBay orders for the last {days} days...")
+    # Trading API endpoint
+    url = "https://api.ebay.com/ws/api.dll"
+    headers = {
+        "X-EBAY-API-SITEID": "0",
+        "X-EBAY-API-COMPATIBILITY-LEVEL": "967",
+        "X-EBAY-API-CALL-NAME": "GetOrders",
+        "X-EBAY-API-DEV-NAME": os.getenv("EBAY_PROD_DEV_ID"),
+        "X-EBAY-API-APP-NAME": os.getenv("EBAY_PROD_APP_ID"),
+        "X-EBAY-API-CERT-NAME": os.getenv("EBAY_PROD_CERT_ID"),
+        "Content-Type": "text/xml"
+    }
+    xml_payload = f'''
+    <?xml version="1.0" encoding="utf-8"?>
+    <GetOrdersRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+      <RequesterCredentials>
+        <eBayAuthToken>{os.getenv("EBAY_OLDAUTH_TOKEN")}</eBayAuthToken>
+      </RequesterCredentials>
+      <OrderRole>Seller</OrderRole>
+      <OrderStatus>All</OrderStatus>
+      <NumberOfDays>{days}</NumberOfDays>
+      <Pagination>
+        <EntriesPerPage>100</EntriesPerPage>
+        <PageNumber>1</PageNumber>
+      </Pagination>
+    </GetOrdersRequest>
+    '''
+
+
+    response = requests.post(url, headers=headers, data=xml_payload, timeout=30)
+    root = ET.fromstring(response.text)
+    print(root)
+    '''
+    rough_string = ET.tostring(root, encoding="utf-8")
+    # Parse that into a minidom object
+    dom = minidom.parseString(rough_string)
+    # Pretty print
+    pretty_xml = dom.toprettyxml(indent="  ")
+    print(pretty_xml)
+    '''
+
+    ns = {'ebay': 'urn:ebay:apis:eBLBaseComponents'}
+    print("right before for loop")
+    for order in root.findall('.//ebay:Order', ns):
+        print("inside first for loop")
+        order_id = order.find('ebay:OrderID', ns)
+        paid_time = order.find('ebay:PaidTime', ns)
+        shipped_time = order.find('ebay:ShippedTime', ns)
+        checkout_status = order.find('.//ebay:CheckoutStatus/ebay:Status', ns)
+        shipping = order.find('.//ebay:ShippingAddress', ns)
+        shipping_name = shipping.find('ebay:Name', ns) if shipping is not None else None
+        shipping_street1 = shipping.find('ebay:Street1', ns) if shipping is not None else None
+        shipping_street2 = shipping.find('ebay:Street2', ns) if shipping is not None else None
+        shipping_city = shipping.find('ebay:CityName', ns) if shipping is not None else None
+        shipping_state = shipping.find('ebay:StateOrProvince', ns) if shipping is not None else None
+        shipping_postal_code = shipping.find('ebay:PostalCode', ns) if shipping is not None else None
+        shipping_country = shipping.find('ebay:Country', ns) if shipping is not None else None
+        print("inside first for loop end")
+        try:
+            for transaction in order.findall('.//ebay:Transaction', ns):
+                print("Storing eBay order transaction...")
+                item = transaction.find('ebay:Item', ns)
+                item_id = item.find('ebay:ItemID', ns) if item is not None else None
+                title = item.find('ebay:Title', ns) if item is not None else None
+                quantity = transaction.find('ebay:QuantityPurchased', ns)
+                price = transaction.find('.//ebay:TransactionPrice', ns)
+                seller_fee = transaction.find('.//ebay:FinalValueFee', ns)
+                taxes = transaction.find('.//ebay:Taxes/ebay:TotalTaxAmount', ns)
+                fees = transaction.find('.//ebay:TransactionSiteID', ns)  # Placeholder, adjust as needed
+                # Extract image URL from item
+                picture_url = item.find('.//ebay:PictureDetails/ebay:GalleryURL', ns) if item is not None else None
+                #high_res_url = get_high_res_image_url(picture_url.text) if picture_url is not None else None
+                store_ebay_order({
+                    'order_id': order_id.text if order_id is not None else None,
+                    'item_id': item_id.text if item_id is not None else None,
+                    'title': title.text if title is not None else None,
+                    'quantity': int(quantity.text) if quantity is not None and quantity.text.isdigit() else None,
+                    'price': float(price.text) if price is not None and price.text.replace('.', '', 1).isdigit() else None,
+                    'checkout_status': checkout_status.text if checkout_status is not None else None,
+                    'shipping_name': shipping_name.text if shipping_name is not None else None,
+                    'shipping_street1': shipping_street1.text if shipping_street1 is not None else None,
+                    'shipping_street2': shipping_street2.text if shipping_street2 is not None else None,
+                    'shipping_city': shipping_city.text if shipping_city is not None else None,
+                    'shipping_state': shipping_state.text if shipping_state is not None else None,
+                    'shipping_postal_code': shipping_postal_code.text if shipping_postal_code is not None else None,
+                    'shipping_country': shipping_country.text if shipping_country is not None else None,
+                    'paid_time': paid_time.text if paid_time is not None else None,
+                    'shipped_time': shipped_time.text if shipped_time is not None else None,
+                    'seller_fee': float(seller_fee.text) if seller_fee is not None and seller_fee.text.replace('.', '', 1).isdigit() else None,
+                    'taxes': float(taxes.text) if taxes is not None and taxes.text.replace('.', '', 1).isdigit() else None,
+                    'fees': fees.text if fees is not None else None,
+                    'image': picture_url,
+                    'isHandled': '',
+                    'isHandledDate': ''
+                })
+                print("Transaction stored:", {
+                    'order_id': order_id.text if order_id is not None else None,
+                    'item_id': item_id.text if item_id is not None else None,
+                    'title': title.text if title is not None else None,
+                    'quantity': int(quantity.text) if quantity is not None and quantity.text.isdigit() else None,
+                    'price': float(price.text) if price is not None and price.text.replace('.', '', 1).isdigit() else None,
+                    'checkout_status': checkout_status.text if checkout_status is not None else None,
+                    'shipping_name': shipping_name.text if shipping_name is not None else None,
+                    'shipping_street1': shipping_street1.text if shipping_street1 is not None else None,
+                    'shipping_street2': shipping_street2.text if shipping_street2 is not None else None,
+                    'shipping_city': shipping_city.text if shipping_city is not None else None,
+                    'shipping_state': shipping_state.text if shipping_state is not None else None,
+                    'shipping_postal_code': shipping_postal_code.text if shipping_postal_code is not None else None,
+                    'shipping_country': shipping_country.text if shipping_country is not None else None,
+                    'paid_time': paid_time.text if paid_time is not None else None,
+                    'shipped_time': shipped_time.text if shipped_time is not None else None,
+                    'seller_fee': float(seller_fee.text) if seller_fee is not None and seller_fee.text.replace('.', '', 1).isdigit() else None,
+                    'taxes': float(taxes.text) if taxes is not None and taxes.text.replace('.', '', 1).isdigit() else None,
+                    'fees': fees.text if fees is not None else None,
+                    'image': picture_url,
+                    'isHandled': '',
+                    'isHandledDate': ''
+                })
+        except Exception as e:
+            print("Failed to connect to sold.db:", e)
+
+def finalize_barcodes():
+    print("🔎 Finalizing barcodes in ebayStore.db...")
+    try:
+        conn = sqlite3.connect('ebayStore.db')
+        cur = conn.cursor()
+        # Ensure barcodes_finalized column exists
+        cur.execute("PRAGMA table_info(INVENTORY)")
+        columns = [row[1] for row in cur.fetchall()]
+        if "barcodes_finalized" not in columns:
+            cur.execute("ALTER TABLE INVENTORY ADD COLUMN barcodes_finalized INTEGER DEFAULT 0")
+            conn.commit()
+        # Select items not finalized
+        cur.execute("SELECT ItemID, SKU, UPC, barcodes_finalized FROM INVENTORY WHERE barcodes_finalized IS NULL OR barcodes_finalized = 0")
+        rows = cur.fetchall()
+        for item_id, sku, upc, finalized in rows:
+            if not sku:
+                continue
+            # If SKU and UPC are the same, delete SKU
+            if sku == upc:
+                cur.execute("UPDATE INVENTORY SET SKU = NULL, barcodes_finalized = 1 WHERE ItemID = ?", (item_id,))
+                print(f"ItemID {item_id}: SKU and UPC are the same, SKU deleted.")
+                continue
+            # If SKU is all digits, >9 chars, and UPC is null/empty
+            if sku.isdigit() and len(sku) > 9 and (upc is None or upc == '' or upc == 'null'):
+                cur.execute("UPDATE INVENTORY SET UPC = ?, SKU = NULL, barcodes_finalized = 1 WHERE ItemID = ?", (sku, item_id))
+                print(f"ItemID {item_id}: Numeric SKU transferred to UPC and SKU deleted.")
+                continue
+            # Otherwise, just mark as finalized
+            cur.execute("UPDATE INVENTORY SET barcodes_finalized = 1 WHERE ItemID = ?", (item_id,))
+        conn.commit()
+        conn.close()
+        print("✅ Barcode finalization complete.")
+    except Exception as e:
+        print(f"❌ Error finalizing barcodes: {e}")
+
+def start_flask():
+    app.run(host="0.0.0.0", port=8080)
+
+def start_tunnel():
+    subprocess.Popen([
+        "cloudflared",
+        "tunnel",
+        "--config",
+        "C:\\Users\\boxatron\\.cloudflared\\config.yml",
+        "run",
+        "mytunnel"
+    ])
+    print("⏳ Cloudflare tunnel starting...")
+    time.sleep(3)
+    try:
+        res = requests.get("http://localhost:5555/metrics")
+        for line in res.text.splitlines():
+            if "userURL" in line:
+                public_url = line.split(" ")[-1]
+                print(f"✅ Public URL: {public_url}")
+                break
+    except Exception as e:
+        print("❌ Tunnel metrics not found:", e)
+
+
+@app.route('/extractor/upload', methods=['POST'])
+def extractor_upload():
+    if 'excel_file' not in request.files or 'import_date' not in request.form:
+        return jsonify({'success': False, 'error': 'Missing file or import date.'})
+    file = request.files['excel_file']
+    import_date = request.form['import_date']
+    if file.filename == '':
+        return jsonify({'success': False, 'error': 'No file selected.'})
+    if file:
+        print('DEBUG: Received file:', file.filename, 'Content-Type:', file.content_type, 'Size:', file.content_length)
+        result = process_bol_excel(file, import_date)
+        return jsonify(result)
+    return jsonify({'success': False, 'error': 'Unknown error during file upload.'})
+
+
+@app.route('/manualmatcher')
+def manualmatcher():
+    bol_items = get_bol_items()
+    ebay_items = get_ebay_items()
+    return render_template('manualmatcher.html', bol_items=bol_items, ebay_items=ebay_items)
+
+@app.route('/match', methods=['POST'])
+def match_items():
+    data = request.json
+    bol_id = data.get('bol_id')
+    ebay_id = data.get('ebay_id')
+    if bol_id is not None and ebay_id is not None:
+        try:
+            fuse_and_store_match(bol_id, ebay_id)
+            return jsonify({'success': True})
+        except Exception as e:
+            return jsonify({'success': False, 'error': str(e)})
+    return jsonify({'success': False, 'error': 'Missing IDs'})
+
+
+@app.route('/get-sold-orders', methods=['POST'])
+def get_sold_orders_route():
+    print("we're getting sold orders")
+    try:
+        days = request.json.get('days', 90) if request.is_json else 90
+        get_ebay_orders(days=days)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/sold-orders', methods=['GET'])
+def sold_orders():
+    days = int(request.args.get('days', 1))
+    conn = sqlite3.connect('sold.db')
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    # Only show orders from the last N days
+    cur.execute('''SELECT * FROM orders WHERE paid_time >= date('now', '-' || ? || ' days') ORDER BY paid_time DESC''', (days,))
+    orders = cur.fetchall()
+    conn.close()
+    return jsonify([dict(order) for order in orders])
+
+
+@app.route('/get-order', methods=['GET'])
+def get_order():
+    order_id = request.args.get('id')
+    if not order_id:
+        return jsonify({'error': 'Missing order id'}), 400
+    try:
+        conn = sqlite3.connect('sold.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM orders WHERE id = ?", (order_id,))
+        order = cur.fetchone()
+        conn.close()
+        
+        if not order:
+            return jsonify({'error': 'Order not found'}), 404
+            
+        # Convert sqlite3.Row to dict
+        order_dict = dict(order)
+        return jsonify(order_dict)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/mark-order-handled', methods=['POST'])
+def mark_order_handled():
+    data = request.get_json()
+    order_id = data.get('id')
+    
+    if not order_id:
+        return jsonify({'success': False, 'error': 'Missing order id'})
+        
+    try:
+        conn = sqlite3.connect('sold.db')
+        cur = conn.cursor()
+        cur.execute("UPDATE orders SET isHandled = '1', isHandledDate = datetime('now') WHERE id = ?", (order_id,))
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/mark-order-unhandled', methods=['POST'])
+def mark_order_unhandled():
+    data = request.get_json()
+    order_id = data.get('id')
+    
+    if not order_id:
+        return jsonify({'success': False, 'error': 'Missing order id'})
+        
+    try:
+        conn = sqlite3.connect('sold.db')
+        cur = conn.cursor()
+        cur.execute("UPDATE orders SET isHandled = '', isHandledDate = NULL WHERE id = ?", (order_id,))
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/undo_match', methods=['POST'])
+def undo_match():
+    data = request.json
+    bol_id = data.get('bol_id')
+    ebay_id = data.get('ebay_id')
+    if bol_id is None or ebay_id is None:
+        return jsonify({'success': False, 'error': 'Missing IDs'})
+    try:
+        # Look up the upc for this bol_id
+        bol_conn = sqlite3.connect('bol.db')
+        bol_cur = bol_conn.cursor()
+        bol_cur.execute('SELECT upc FROM bol_items WHERE rowid=?', (bol_id,))
+        bol_row = bol_cur.fetchone()
+        bol_conn.close()
+        if not bol_row or not bol_row[0]:
+            return jsonify({'success': False, 'error': 'No UPC found for BOL item'})
+        upc = bol_row[0]
+        # Remove from found.db using upc and ebay_id
+        found_conn = sqlite3.connect('found.db')
+        found_cur = found_conn.cursor()
+        found_cur.execute('DELETE FROM matches WHERE ebay_id=? AND upc=?', (ebay_id, upc))
+        found_conn.commit()
+        found_conn.close()
+        # Unmark bol item
+        bol_conn = sqlite3.connect('bol.db')
+        bol_cur = bol_conn.cursor()
+        bol_cur.execute("UPDATE bol_items SET isFound='' WHERE rowid=?", (bol_id,))
+        bol_conn.commit()
+        bol_conn.close()
+        # Unmark ebay item
+        ebay_conn = sqlite3.connect('ebayStore.db')
+        ebay_cur = ebay_conn.cursor()
+        ebay_cur.execute("UPDATE INVENTORY SET isFound='' WHERE rowid=?", (ebay_id,))
+        ebay_conn.commit()
+        ebay_conn.close()
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/get_bol_upcs', methods=['GET'])
+def get_bol_upcs():
+    """Return a JSON list of all UPCs from bol.db bol_items table (UPC column)."""
+    try:
+        conn = sqlite3.connect('bol.db')
+        cur = conn.cursor()
+        cur.execute('SELECT upc FROM bol_items WHERE upc IS NOT NULL AND upc != ""')
+        upcs = [row[0] for row in cur.fetchall()]
+        conn.close()
+        return jsonify({'upcs': upcs})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/upload_position_picture', methods=['POST'])
+def upload_position_picture():
+    import os
+    from werkzeug.utils import secure_filename
+    # Ensure static/pictureposition folder exists
+    save_dir = os.path.join(os.getcwd(), 'static', 'pictureposition')
+    os.makedirs(save_dir, exist_ok=True)
+    
+    file = request.files.get('picture')
+    if not file:
+        return jsonify({'success': False, 'error': 'No file uploaded'})
+    
+    # Generate a unique filename with timestamp
+    import time
+    timestamp = int(time.time())
+    filename = secure_filename(file.filename)
+    name, ext = os.path.splitext(filename)
+    unique_name = f"{timestamp}{ext}"
+    
+    # Save the file
+    save_path = os.path.join(save_dir, unique_name)
+    file.save(save_path)
+    
+    # Return just the filename (not full path) since it's in the static folder
+    return jsonify({'success': True, 'path': unique_name})
+
+
+@app.route("/pictureposition")
+def pictureposition_page():
+    return render_template("pictureposition.html")
+
+@app.route('/set_pictureposition_path', methods=['POST'])
+def set_pictureposition_path():
+    global pictureposition_path
+    data = request.get_json()
+    pictureposition_path = data.get('path')
+    print(f"Set pictureposition_path from barcode.html: {pictureposition_path}")
+    return jsonify({'success': True})
+
+@app.route('/searchrack')
+def searchrack_page():
+    return render_template('searchrack.html')
+
+@app.route('/searchrack_api')
+def searchrack_api():
+    q = request.args.get('q', '').strip()
+    results = []
+    if q:
+        conn = sqlite3.connect('searchRack.db')
+        cur = conn.cursor()
+        cur.execute('''SELECT TITLE, BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION FROM SEARCHRACK WHERE TITLE LIKE ? OR BARCODE LIKE ?''', (f'%{q}%', f'%{q}%'))
+        for row in cur.fetchall():
+            results.append({
+                'title': row[0],
+                'barcode': row[1],
+                'item_position': row[2],
+                'images': row[3],
+                'pictureposition': row[4],
+            })
+        conn.close()
+    return jsonify({'results': results})
+
+@app.route('/searchbol_api')
+def searchbol_api():
+    q = request.args.get('q', '').strip()
+    results = []
+    if q:
+        conn = sqlite3.connect('bol.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute('''
+            SELECT item_description as description, upc, client_cost, 
+                   total_client_cost as total_cost, lot_number, bol_number 
+            FROM bol_items 
+            WHERE item_description LIKE ? OR upc LIKE ?
+        ''', (f'%{q}%', f'%{q}%'))
+        results = [dict(row) for row in cur.fetchall()]
+        conn.close()
+    return jsonify({'results': results})
+
+@app.route('/view_all/<db_type>')
+def view_all(db_type):
+    if db_type == 'rack':
+        conn = sqlite3.connect('searchRack.db')
+        cur = conn.cursor()
+        cur.execute('SELECT * FROM SEARCHRACK')
+        columns = [desc[0] for desc in cur.description]
+        items = [dict(zip(columns, row)) for row in cur.fetchall()]
+        title = 'All Inventory Items'
+        conn.close()
+    elif db_type == 'bol':
+        conn = sqlite3.connect('bol.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute('SELECT * FROM bol_items')
+        items = [dict(row) for row in cur.fetchall()]
+        title = 'All BOL Items'
+        conn.close()
+    else:
+        return 'Invalid database type', 400
+    
+    return render_template('view_all.html', items=items, title=title, db_type=db_type)
+
+@app.route('/update_item/<db_type>/<int:item_id>', methods=['POST'])
+def update_item(db_type, item_id):
+    if db_type not in ['rack', 'bol']:
+        return jsonify({'success': False, 'error': 'Invalid database type'}), 400
+    
+    data = request.get_json()
+    if not data:
+        return jsonify({'success': False, 'error': 'No data provided'}), 400
+    
+    try:
+        if db_type == 'rack':
+            conn = sqlite3.connect('searchRack.db')
+        else:  # bol
+            conn = sqlite3.connect('bol.db')
+        
+        cur = conn.cursor()
+        
+        # Get column names to validate fields
+        cur.execute(f'PRAGMA table_info({"SEARCHRACK" if db_type == "rack" else "bol_items"})')
+        columns = [col[1] for col in cur.fetchall()]
+        
+        # Build update query
+        set_clause = ', '.join([f'"{k}"=?' for k in data.keys() if k in columns])
+        values = [v for k, v in data.items() if k in columns]
+        values.append(item_id)
+        
+        if not set_clause:
+            return jsonify({'success': False, 'error': 'No valid fields to update'}), 400
+        
+        query = f'UPDATE {"SEARCHRACK" if db_type == "rack" else "bol_items"} SET {set_clause} WHERE id=?'
+        cur.execute(query, values)
+        conn.commit()
+        
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+    finally:
+        conn.close()
+
+@app.route('/refresh_searchrack')
+def refresh_searchrack():
+    createSearchRackDB()
+    updateSearchRackDB()
+    return 'SearchRack database updated! <a href="/searchrack">Back to Search</a>'
+
+@app.route('/test_sold_item', methods=['POST'])
+def test_sold_item():
+    import datetime
+    try:
+        today = datetime.date.today().isoformat()
+        conn = sqlite3.connect('sold.db')
+        cur = conn.cursor()
+        cur.execute("UPDATE orders SET isHandled = 0, paid_time = ?, shipped_time = ? WHERE id = 99", (today, today))
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+if __name__ == "__main__":
+    # Start Flask in a thread
+    flask_thread = threading.Thread(target=start_flask, daemon=True)
+    flask_thread.start()
+
+    # Wait a bit, then start tunnel
+    time.sleep(1)
+    start_tunnel()
+
+    # Wait until both are likely up
+    time.sleep(2)
+    orders()
+    finalize_barcodes()
+
+    # Keep main thread alive
+    while True:
+        time.sleep(1)
+
