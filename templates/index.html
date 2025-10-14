@@ -287,7 +287,15 @@ function esc(s) {
 function tdTitle(order) {
     var fullTitle = esc(order.title || '');
     var imgSrc = esc(order.image || order.image_url || '');
-    return `<td class='sold-td-small'><a href="#" class="order-title-link" data-title="${fullTitle}" data-image="${imgSrc}">${fullTitle}</a></td>`;
+    // small thumbnail to the left of the title (48x48)
+    const missingDataUrlThumb = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48"><rect width="100%" height="100%" fill="#f8f8f8"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#b0b0b0" font-size="8">No Img</text></svg>');
+    var thumbHtml = '';
+    if (imgSrc) {
+        thumbHtml = `<img src="${imgSrc}" style="width:48px;height:48px;object-fit:cover;border-radius:6px;margin-right:8px;vertical-align:middle;" onerror="this.src='${missingDataUrlThumb}'">`;
+    } else {
+        thumbHtml = `<img src='${missingDataUrlThumb}' style="width:48px;height:48px;object-fit:cover;border-radius:6px;margin-right:8px;vertical-align:middle;">`;
+    }
+    return `<td class='sold-td-small'><a href="#" class="order-title-link" data-title="${fullTitle}" data-image="${imgSrc}" style="display:flex;align-items:center;">${thumbHtml}<span style="display:inline-block;max-width:220px;vertical-align:middle;">${fullTitle}</span></a></td>`;
 }
 
 function tdInfo(order) {

@@ -26,19 +26,29 @@
         <button id="capture-btn">Capture</button>
         <button id="confirm-btn" style="display:none;">Confirm</button>
         <button id="retake-btn" style="display:none;">Retake</button>
+        <button id="abort-btn" style="display:none;background:#d32f2f;color:#fff;">Abort</button>
         <a href="/barcode"><button id="skip-btn" type="button">Skip</button></a>
         <a href="/position"><button id="back-btn" type="button" style="background:#eee;color:#222;">Back</button></a>
     </div>
     <div id="status"></div>
+    <div id="progress-container" style="width:100%;max-width:350px;margin-top:12px;display:none;">
+        <div style="background:#ddd;border-radius:6px;overflow:hidden;height:14px;">
+            <div id="progress-bar" style="height:100%;width:0%;background:#1976d2"></div>
+        </div>
+        <div id="progress-text" style="text-align:center;margin-top:6px;font-size:14px;color:#1976d2">Uploading: 0%</div>
+    </div>
     <script>
     let video = document.getElementById('video');
     let previewImg = document.getElementById('preview-img');
     let captureBtn = document.getElementById('capture-btn');
     let confirmBtn = document.getElementById('confirm-btn');
     let retakeBtn = document.getElementById('retake-btn');
+    let abortBtn = document.getElementById('abort-btn');
     let statusDiv = document.getElementById('status');
     let stream = null;
     let capturedBlob = null;
+    let currentObjectUrl = null;
+    let xhrUpload = null;
 
     async function startCamera() {
         try {
@@ -49,7 +59,12 @@
             captureBtn.style.display = '';
             confirmBtn.style.display = 'none';
             retakeBtn.style.display = 'none';
+            abortBtn.style.display = 'none';
             statusDiv.textContent = '';
+            // ensure video metadata is loaded for proper dimensions
+            video.addEventListener('loadedmetadata', () => {
+                console.log('video metadata loaded', video.videoWidth, video.videoHeight);
+            }, { once: true });
         } catch (e) {
             statusDiv.textContent = 'Camera error: ' + (e.message || e);
             captureBtn.disabled = true;
@@ -65,18 +80,24 @@
 
     captureBtn.onclick = function() {
         let canvas = document.createElement('canvas');
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
+        // Guard: ensure we have valid video dimensions
+        const w = video.videoWidth || 640;
+        const h = video.videoHeight || 480;
+        canvas.width = w;
+        canvas.height = h;
         let ctx = canvas.getContext('2d');
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
         canvas.toBlob(blob => {
             capturedBlob = blob;
-            previewImg.src = URL.createObjectURL(blob);
+            if (currentObjectUrl) URL.revokeObjectURL(currentObjectUrl);
+            currentObjectUrl = URL.createObjectURL(blob);
+            previewImg.src = currentObjectUrl;
             previewImg.style.display = '';
             video.style.display = 'none';
             captureBtn.style.display = 'none';
             confirmBtn.style.display = '';
             retakeBtn.style.display = '';
+            abortBtn.style.display = 'none';
         }, 'image/jpeg', 0.7);
     };
 
@@ -87,42 +108,97 @@
         captureBtn.style.display = '';
         confirmBtn.style.display = 'none';
         retakeBtn.style.display = 'none';
+        abortBtn.style.display = 'none';
         statusDiv.textContent = '';
+        // revoke object URL
+        if (currentObjectUrl) { URL.revokeObjectURL(currentObjectUrl); currentObjectUrl = null; }
     };
 
     confirmBtn.onclick = function() {
         if (!capturedBlob) return;
-        sessionStorage.setItem('pictureposition_upload_status', 'uploading');
-        console.log('Set pictureposition_upload_status to uploading');
-        statusDiv.textContent = 'Uploading in background...';
-        backgroundUploadPicture(capturedBlob);
-        // Add a short delay before redirecting to barcode.html
-        setTimeout(() => {
-            window.location.href = '/barcode?pictureposition=1';
-        }, 700); // 700ms delay for user feedback
+        // Disable buttons to prevent multiple clicks
+        confirmBtn.disabled = true;
+        retakeBtn.disabled = true;
+        abortBtn.style.display = '';
+        statusDiv.textContent = 'Uploading...';
+        document.getElementById('progress-container').style.display = '';
+        // Start upload with progress
+        uploadWithProgress(capturedBlob).then(result => {
+            confirmBtn.disabled = false;
+            retakeBtn.disabled = false;
+            abortBtn.style.display = 'none';
+            if (result && result.success) {
+                sessionStorage.setItem('pictureposition_path', result.path);
+                sessionStorage.setItem('pictureposition_upload_status', 'done');
+                statusDiv.textContent = 'Upload complete.';
+                // Let user confirm final or retake
+                // change confirm button text to Continue
+                confirmBtn.textContent = 'Continue';
+                // Confirm now navigates to barcode
+                confirmBtn.onclick = function() { window.location.href = '/barcode?pictureposition=1'; };
+            } else {
+                sessionStorage.setItem('pictureposition_upload_status', 'error');
+                statusDiv.textContent = 'Upload failed. Please retry or retake.';
+            }
+        }).catch(e => {
+            confirmBtn.disabled = false;
+            retakeBtn.disabled = false;
+            abortBtn.style.display = 'none';
+            sessionStorage.setItem('pictureposition_upload_status', 'error');
+            statusDiv.textContent = 'Upload error. Please retry or retake.';
+            console.error('upload error', e);
+        });
+    };
+
+    // Abort upload and allow retake
+    abortBtn.onclick = function() {
+        if (xhrUpload) {
+            try { xhrUpload.abort(); } catch (e) {}
+            xhrUpload = null;
+        }
+        statusDiv.textContent = 'Upload aborted. You can retake.';
+        document.getElementById('progress-container').style.display = 'none';
+        sessionStorage.setItem('pictureposition_upload_status', '');
+        // revert UI to allow retake
+        retakeBtn.click();
     };
 
     // Background upload logic
-    async function backgroundUploadPicture(blob) {
-        sessionStorage.setItem('pictureposition_upload_status', 'uploading');
-        console.log('Set pictureposition_upload_status to uploading (backgroundUploadPicture)');
-        let formData = new FormData();
-        formData.append('picture', blob, 'image.jpg');
-        try {
-            let resp = await fetch('/upload_position_picture', { method: 'POST', body: formData });
-            let data = await resp.json();
-            if (data.success && data.path) {
-                sessionStorage.setItem('pictureposition_path', data.path);
-                sessionStorage.setItem('pictureposition_upload_status', 'done');
-                console.log('Set pictureposition_upload_status to done');
-            } else {
-                sessionStorage.setItem('pictureposition_upload_status', 'error');
-                console.log('Set pictureposition_upload_status to error (upload failed)');
-            }
-        } catch (e) {
-            sessionStorage.setItem('pictureposition_upload_status', 'error');
-            console.log('Set pictureposition_upload_status to error (exception)');
-        }
+    function uploadWithProgress(blob) {
+        return new Promise((resolve, reject) => {
+            const url = '/upload_position_picture';
+            const formData = new FormData();
+            formData.append('picture', blob, 'image.jpg');
+            xhrUpload = new XMLHttpRequest();
+            xhrUpload.open('POST', url, true);
+            xhrUpload.upload.onprogress = function(e) {
+                if (e.lengthComputable) {
+                    const pct = Math.round((e.loaded / e.total) * 100);
+                    document.getElementById('progress-bar').style.width = pct + '%';
+                    document.getElementById('progress-text').textContent = 'Uploading: ' + pct + '%';
+                }
+            };
+            xhrUpload.onload = function() {
+                xhrUpload = null;
+                if (xhrUpload === null) {
+                    // proceed
+                }
+                if (xhrUpload !== null) { /* noop */ }
+                if (this.status >= 200 && this.status < 300) {
+                    try {
+                        const data = JSON.parse(this.responseText);
+                        resolve(data);
+                    } catch (e) {
+                        resolve({ success: false });
+                    }
+                } else {
+                    resolve({ success: false });
+                }
+            };
+            xhrUpload.onerror = function() { xhrUpload = null; resolve({ success: false }); };
+            xhrUpload.onabort = function() { xhrUpload = null; resolve({ success: false }); };
+            xhrUpload.send(formData);
+        });
     }
 
     // Show error if redirected with error param
