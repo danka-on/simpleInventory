@@ -64,6 +64,7 @@
             color: #2c3e50;
             font-weight: bold;
         }
+        .top-actions { display:flex; gap:10px; justify-content:center; align-items:center; margin-bottom:20px; }
         .refresh-btn {
             background: #00b894;
             color: white;
@@ -72,11 +73,11 @@
             border: none;
             border-radius: 6px;
             cursor: pointer;
-            margin-bottom: 20px;
+            display:inline-flex; align-items:center; height:40px;
         }
-        .refresh-btn:hover {
-            background: #00a884;
-        }
+        .refresh-btn:hover { background: #00a884; }
+        .back-btn { background:#e74c3c;color:white;font-size:16px;padding:8px 24px;border:none;border-radius:6px;cursor:pointer;display:inline-flex;align-items:center;height:40px; }
+        .back-btn:hover { background:#c43b2f; }
         /* Modal styles */
         .modal {
             display: none;
@@ -124,8 +125,9 @@
         </div>
     </div>
 
-    <div style="text-align:center;margin-bottom:25px;">
-        <a href="/refresh_searchrack"><button class="refresh-btn">Refresh Search DB</button></a>
+    <div class="top-actions">
+        <a href="/" style="text-decoration:none;"><button class="back-btn">Back</button></a>
+        <a href="/refresh_searchrack"><button class="refresh-btn">Refresh</button></a>
     </div>
     
     <div class="search-container">
@@ -152,28 +154,34 @@
             container.innerHTML = '<div class="no-results">No inventory items found.</div>';
             return;
         }
-        let html = '<table><tr><th>Title</th><th>Barcode</th><th>Position</th><th>Images</th></tr>';
+    let html = '<table><tr><th>Title</th><th>Barcode</th><th>Position</th><th>Images</th></tr>';
         for (const item of items) {
             // Determine which position to show and which function to call
             const position = item.item_position || '';
             const isPicturePosition = position.toLowerCase() === 'picture';
             
-            // Create the position cell with appropriate click handler
+            // Create the position cell; position text opens the modal when clicked (no preview)
             let positionCell = 'N/A';
             if (isPicturePosition && item.pictureposition) {
-                // For picture positions, show "Picture" as text and make it clickable
-                positionCell = `Picture <span class="location-link" onclick="showPicturePosition('${item.pictureposition}')">(view)</span>`;
+                positionCell = `<a href="#" class="location-link" onclick="showPicturePosition('${item.pictureposition}');return false;">Picture</a>`;
             } else if (position) {
-                // For regular shelf positions
-                positionCell = `<span class="location-link" onclick="showLocationImage('${position}')">${position}</span>`;
+                positionCell = `<a href="#" class="location-link" onclick="showLocationImage('${position}');return false;">${position}</a>`;
             }
-                
+
+            // Images column: show filename(s) or N/A (no preview before clicking)
+            let imagesCell = 'N/A';
+            if (item.pictureposition) {
+                imagesCell = item.pictureposition;
+            } else if (item.images) {
+                imagesCell = item.images;
+            }
+
             html += `
                 <tr>
                     <td>${item.title||'N/A'}</td>
                     <td>${item.barcode||'N/A'}</td>
                     <td>${positionCell}</td>
-                    <td>${item.images||'N/A'}</td>
+                    <td style="text-align:center;">${imagesCell}</td>
                 </tr>`;
         }
         html += '</table>';
@@ -205,9 +213,10 @@
         locationImage.onload = null;
         
         // Set up error handler first
+        const missingModal = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="720" height="480"><rect width="100%" height="100%" fill="#f8f8f8"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#b0b0b0" font-size="24">Image missing</text></svg>');
         locationImage.onerror = function() {
             this.onerror = null; // Prevent infinite loop if fallback also fails
-            this.src = this.dataset.fallback;
+            this.src = missingModal;
         };
         
         // Set the image source
@@ -238,12 +247,13 @@
         locationImage.onload = null;
         
         // Set up error handler first
+        const missingModal = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="720" height="480"><rect width="100%" height="100%" fill="#f8f8f8"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#b0b0b0" font-size="24">Image missing</text></svg>');
         locationImage.onerror = function() {
             this.onerror = null; // Prevent infinite loop if fallback also fails
-            this.src = this.dataset.fallback;
+            this.src = missingModal;
             console.error(`Failed to load image: /static/pictureposition/${picturePosition}`);
         };
-        
+
         // Set the image source - use the exact filename from picturePosition
         // The picturePosition is already the full filename (e.g., '1234567890.jpg')
         locationImage.src = `/static/pictureposition/${picturePosition}`;
@@ -257,6 +267,19 @@
                 modal.style.display = 'none';
             }
         };
+    }
+
+    // Open an external image (URL) in the same modal
+    function openExternalImage(url) {
+        const modal = document.getElementById('locationModal');
+        const locationImage = document.getElementById('locationImage');
+        const locationTitle = document.getElementById('locationTitle');
+        locationTitle.textContent = `Image`;
+        const missingModal = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="720" height="480"><rect width="100%" height="100%" fill="#f8f8f8"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#b0b0b0" font-size="24">Image missing</text></svg>');
+        locationImage.onerror = function() { this.onerror = null; this.src = missingModal; };
+        locationImage.src = url;
+        modal.style.display = 'flex';
+        modal.onclick = function(event) { if (event.target === modal) modal.style.display = 'none'; };
     }
 
     // Close modal when pressing Escape key
