@@ -4,3 +4,5 @@ tokens.json
 .env
 venv/
 ebayStore.db
+__pycache__/
+*.pyc

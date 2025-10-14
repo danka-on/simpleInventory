@@ -69,7 +69,7 @@ def start_cloudflare_tunnel():
         "--config",
         "C:\\Users\\boxatron\\.cloudflared\\config.yml",
         "run",
-        "mytunnel"
+        "pitunnel"
     ])
 
 @app.route("/", methods=["GET", "POST"])
@@ -784,7 +784,7 @@ def start_tunnel():
         "--config",
         "C:\\Users\\boxatron\\.cloudflared\\config.yml",
         "run",
-        "mytunnel"
+        "pitunnel"
     ])
     print("⏳ Cloudflare tunnel starting...")
     time.sleep(3)
