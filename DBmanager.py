@@ -209,7 +209,8 @@ def store_ebay_order(order):
         fees TEXT,
         image TEXT,
         isHandled TEXT,
-        isHandledDate TEXT
+        isHandledDate TEXT,
+        location TEXT
     )''')
     # Prepare image: if order doesn't include an image URL, try to fetch from ebayStore.db by item_id
     image_val = order.get('image')
@@ -231,9 +232,27 @@ def store_ebay_order(order):
     if cur.fetchone():
         conn.close()
         return
+    # Prepare location: if order doesn't include location, try to fetch from rack.db by barcode==item_id
+    location_val = order.get('location')
+    if not location_val and order.get('item_id'):
+        try:
+            rack_conn = sqlite3.connect('rack.db')
+            rack_cur = rack_conn.cursor()
+            rack_cur.execute('SELECT ITEM_POSITION, PICTUREPOSITION FROM INVENTORY WHERE BARCODE = ?', (order.get('item_id'),))
+            r = rack_cur.fetchone()
+            if r:
+                item_pos = r[0]
+                picpos = r[1]
+                if item_pos and str(item_pos).lower() == 'picture' and picpos:
+                    location_val = picpos
+                elif item_pos:
+                    location_val = item_pos
+            rack_conn.close()
+        except Exception:
+            pass
     cur.execute('''INSERT INTO orders (
-        order_id, item_id, title, quantity, price, checkout_status, shipping_name, shipping_street1, shipping_street2, shipping_city, shipping_state, shipping_postal_code, shipping_country, paid_time, shipped_time, seller_fee, taxes, fees, image, isHandled, isHandledDate
-    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+        order_id, item_id, title, quantity, price, checkout_status, shipping_name, shipping_street1, shipping_street2, shipping_city, shipping_state, shipping_postal_code, shipping_country, paid_time, shipped_time, seller_fee, taxes, fees, image, isHandled, isHandledDate, location
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
         (
             order.get('order_id'),
             order.get('item_id'),
@@ -255,7 +274,8 @@ def store_ebay_order(order):
             order.get('fees'),
             image_val,
             order.get('isHandled'),
-            order.get('isHandledDate')
+            order.get('isHandledDate'),
+            location_val
         )
     )
     conn.commit()
