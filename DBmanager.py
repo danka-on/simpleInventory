@@ -211,6 +211,21 @@ def store_ebay_order(order):
         isHandled TEXT,
         isHandledDate TEXT
     )''')
+    # Prepare image: if order doesn't include an image URL, try to fetch from ebayStore.db by item_id
+    image_val = order.get('image')
+    if not image_val and order.get('item_id'):
+        try:
+            ebay_conn = sqlite3.connect('ebayStore.db')
+            ebay_cur = ebay_conn.cursor()
+            ebay_cur.execute('SELECT Image FROM INVENTORY WHERE ItemID = ?', (order.get('item_id'),))
+            row = ebay_cur.fetchone()
+            if row and row[0]:
+                image_val = row[0]
+            ebay_conn.close()
+        except Exception:
+            # If lookup fails, just leave image_val as-is (None)
+            pass
+
     # Check for duplicate (order_id + item_id)
     cur.execute('SELECT 1 FROM orders WHERE order_id = ? AND item_id = ?', (order.get('order_id'), order.get('item_id')))
     if cur.fetchone():
@@ -238,7 +253,7 @@ def store_ebay_order(order):
             order.get('seller_fee'),
             order.get('taxes'),
             order.get('fees'),
-            order.get('image'),
+            image_val,
             order.get('isHandled'),
             order.get('isHandledDate')
         )
