@@ -36,7 +36,6 @@
             <div class="filters" id="db-filters">
                 <!-- checkboxes inserted here -->
             </div>
-            <button class="btn btn-primary" id="refresh-btn">Refresh</button>
         </div>
     </div>
 
@@ -56,9 +55,9 @@
     <div id="editModal" class="modal"><div class="card"><div style="text-align:right"><button id="closeEdit">Close</button></div><h3>Edit Item</h3><div id="editContent"></div><div style="text-align:right;margin-top:8px"><button id="saveEdit" class="btn btn-primary">Save</button></div></div></div>
 
 <script>
-const DBS = ['rack','searchRack','ebayStore','sold','found','bol'];
-const DB_LABELS = {rack:'rack.db', searchRack:'searchRack.db', ebayStore:'ebayStore.db', sold:'sold.db', found:'found.db', bol:'bol.db'};
-const defaultChecked = {'rack':true};
+const DBS = ['searchRack','ebayStore','bol','sold'];
+const DB_LABELS = {searchRack:'Inventory', ebayStore:'Ebay live', bol:'Macy BOL', sold:'Sold'};
+const defaultChecked = {'searchRack':true};
 
 function createFilters(){
     const container = document.getElementById('db-filters');
@@ -78,7 +77,6 @@ function getActiveDBs(){
 
 document.getElementById('search-btn').addEventListener('click', doSearch);
 document.getElementById('search-input').addEventListener('keyup', (e)=>{ if(e.key==='Enter') doSearch(); });
-document.getElementById('refresh-btn').addEventListener('click', ()=>{ location.href='/refresh_searchrack' });
 
 async function doSearch(){
     const q = document.getElementById('search-input').value.trim();
