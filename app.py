@@ -69,7 +69,7 @@ def start_cloudflare_tunnel():
         "--config",
         "C:\\Users\\boxatron\\.cloudflared\\config.yml",
         "run",
-        "pitunnel"
+        "mytunnel"
     ])
 
 @app.route("/", methods=["GET", "POST"])
@@ -687,9 +687,9 @@ def get_ebay_orders(days=90):
                 seller_fee = transaction.find('.//ebay:FinalValueFee', ns)
                 taxes = transaction.find('.//ebay:Taxes/ebay:TotalTaxAmount', ns)
                 fees = transaction.find('.//ebay:TransactionSiteID', ns)  # Placeholder, adjust as needed
-                # Extract image URL from item
+                # Extract image URL from item and convert to high-res string
                 picture_url = item.find('.//ebay:PictureDetails/ebay:GalleryURL', ns) if item is not None else None
-                #high_res_url = get_high_res_image_url(picture_url.text) if picture_url is not None else None
+                high_res_url = get_high_res_image_url(picture_url.text) if (picture_url is not None and picture_url.text) else None
                 store_ebay_order({
                     'order_id': order_id.text if order_id is not None else None,
                     'item_id': item_id.text if item_id is not None else None,
@@ -709,7 +709,7 @@ def get_ebay_orders(days=90):
                     'seller_fee': float(seller_fee.text) if seller_fee is not None and seller_fee.text.replace('.', '', 1).isdigit() else None,
                     'taxes': float(taxes.text) if taxes is not None and taxes.text.replace('.', '', 1).isdigit() else None,
                     'fees': fees.text if fees is not None else None,
-                    'image': picture_url,
+                    'image': high_res_url,
                     'isHandled': '',
                     'isHandledDate': ''
                 })
@@ -784,7 +784,7 @@ def start_tunnel():
         "--config",
         "C:\\Users\\boxatron\\.cloudflared\\config.yml",
         "run",
-        "pitunnel"
+        "mytunnel"
     ])
     print("⏳ Cloudflare tunnel starting...")
     time.sleep(3)
@@ -1112,6 +1112,274 @@ def update_item(db_type, item_id):
         return jsonify({'success': False, 'error': str(e)}), 500
     finally:
         conn.close()
+
+@app.route('/api/search/<db_key>', methods=['POST'])
+def api_search_db(db_key):
+    data = request.get_json() or {}
+    q = (data.get('q') or '').strip()
+    limit = int(data.get('limit') or 50)
+    try:
+        mapping = {
+            'rack': 'rack.db',
+            'ebayStore': 'ebayStore.db',
+            'sold': 'sold.db',
+            'searchRack': 'searchRack.db',
+            'found': 'found.db',
+            'bol': 'bol.db'
+        }
+        if db_key not in mapping:
+            return jsonify({'error': 'Unknown db_key'}), 400
+        db_path = mapping[db_key]
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+        tables = [r[0] for r in cur.fetchall()]
+        if not tables:
+            conn.close()
+            return jsonify({'results': []})
+        prefer = None
+        for t in ['orders','INVENTORY','SEARCHRACK','searchrack','rack','items','bol_items']:
+            if t in tables:
+                prefer = t
+                break
+        table = prefer or tables[0]
+        cur.execute(f"PRAGMA table_info('{table}')")
+        cols = [r[1] for r in cur.fetchall()]
+        where_clause = ''
+        params = []
+        if q:
+            likes = []
+            for c in cols:
+                likes.append(f"LOWER(COALESCE({c},'')) LIKE ?")
+                params.append(f"%{q.lower()}%")
+            where_clause = ' WHERE ' + ' OR '.join(likes)
+        sql = f"SELECT * FROM {table} {where_clause} LIMIT ?"
+        params.append(limit)
+        cur.execute(sql, params)
+        rows = [dict(r) for r in cur.fetchall()]
+        results = []
+        for r in rows:
+            item = dict(r)
+            item_out = {
+                'source_db': db_key,
+                'source_table': table,
+                'id': item.get('id') or item.get('ID') or item.get('rowid'),
+                'title': item.get('Title') or item.get('title') or item.get('name') or item.get('Name') or '',
+                'image': item.get('Image') or item.get('image') or item.get('image_url') or item.get('images') or '',
+                'barcode': item.get('BARCODE') or item.get('barcode') or item.get('Barcode') or '',
+                'item_id': item.get('ItemID') or item.get('item_id') or item.get('ItemId') or '',
+                'pictureposition': item.get('PICTUREPOSITION') or item.get('pictureposition') or item.get('picture_position') or '',
+                'item_position': item.get('ITEM_POSITION') or item.get('item_position') or item.get('position') or '',
+                'quantity': item.get('Quantity') or item.get('quantity') or item.get('qty') or '',
+                'raw': item
+            }
+            results.append(item_out)
+        conn.close()
+        return jsonify({'results': results})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/lookup_location', methods=['POST'])
+def api_lookup_location():
+    data = request.get_json() or {}
+    barcode = data.get('barcode')
+    item_id = data.get('item_id')
+    try:
+        conn = sqlite3.connect('rack.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        row = None
+        if barcode:
+            cur.execute("SELECT * FROM INVENTORY WHERE BARCODE = ? COLLATE NOCASE LIMIT 1", (barcode,))
+            row = cur.fetchone()
+        if not row and item_id:
+            cur.execute("SELECT * FROM INVENTORY WHERE BARCODE = ? COLLATE NOCASE LIMIT 1", (item_id,))
+            row = cur.fetchone()
+        if not row:
+            conn.close()
+            return jsonify({'found': False})
+        r = dict(row)
+        conn.close()
+        return jsonify({'found': True, 'item_position': r.get('ITEM_POSITION') or r.get('item_position'), 'pictureposition': r.get('PICTUREPOSITION') or r.get('pictureposition') or r.get('image')})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+def _get_table_and_pk(db_path, table_hint=None):
+    conn = sqlite3.connect(db_path)
+    cur = conn.cursor()
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+    tables = [r[0] for r in cur.fetchall()]
+    if not tables:
+        conn.close()
+        return None, None
+    table = table_hint if table_hint in tables else (tables[0] if tables else None)
+    cur.execute(f"PRAGMA table_info('{table}')")
+    cols = cur.fetchall()
+    pk = None
+    colnames = [c[1] for c in cols]
+    for c in cols:
+        if c[5] == 1:
+            pk = c[1]
+            break
+    if not pk:
+        if 'id' in colnames:
+            pk = 'id'
+        elif 'ID' in colnames:
+            pk = 'ID'
+        else:
+            pk = colnames[0]
+    conn.close()
+    return table, pk
+
+
+@app.route('/api/update/<db_key>/<int:item_id>', methods=['POST'])
+def api_update_row(db_key, item_id):
+    data = request.get_json() or {}
+    mapping = {
+        'rack': 'rack.db',
+        'ebayStore': 'ebayStore.db',
+        'sold': 'sold.db',
+        'searchRack': 'searchRack.db',
+        'found': 'found.db',
+        'bol': 'bol.db'
+    }
+    if db_key not in mapping:
+        return jsonify({'error': 'Unknown db_key'}), 400
+    db_path = mapping[db_key]
+    try:
+        table, pk = _get_table_and_pk(db_path)
+        if not table:
+            return jsonify({'error': 'No table found in DB'}), 400
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        cur.execute(f"PRAGMA table_info('{table}')")
+        cols = [r[1] for r in cur.fetchall()]
+        set_parts = []
+        params = []
+        for k, v in data.items():
+            if k in cols:
+                set_parts.append(f"{k} = ?")
+                params.append(v)
+        if not set_parts:
+            return jsonify({'error': 'No updatable fields provided'}), 400
+        params.append(item_id)
+        sql = f"UPDATE {table} SET {', '.join(set_parts)} WHERE {pk} = ?"
+        cur.execute(sql, params)
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/delete/<db_key>/<int:item_id>', methods=['POST'])
+def api_delete_row(db_key, item_id):
+    mapping = {
+        'rack': 'rack.db',
+        'ebayStore': 'ebayStore.db',
+        'sold': 'sold.db',
+        'searchRack': 'searchRack.db',
+        'found': 'found.db',
+        'bol': 'bol.db'
+    }
+    if db_key not in mapping:
+        return jsonify({'error': 'Unknown db_key'}), 400
+    src_db = mapping[db_key]
+    try:
+        table, pk = _get_table_and_pk(src_db)
+        if not table:
+            return jsonify({'error': 'No table in source DB'}), 400
+        conn = sqlite3.connect(src_db)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute(f"SELECT * FROM {table} WHERE {pk} = ?", (item_id,))
+        row = cur.fetchone()
+        if not row:
+            conn.close()
+            return jsonify({'error': 'Row not found'}), 404
+        rowdict = dict(row)
+        conn.close()
+        dconn = sqlite3.connect('deleted.db')
+        dcur = dconn.cursor()
+        dcur.execute('''CREATE TABLE IF NOT EXISTS deleted_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_db TEXT,
+            source_table TEXT,
+            source_pk TEXT,
+            source_id TEXT,
+            deleted_at TEXT,
+            data_json TEXT
+        )''')
+        import datetime, json
+        deleted_at = datetime.datetime.utcnow().isoformat()
+        dcur.execute('INSERT INTO deleted_items (source_db, source_table, source_pk, source_id, deleted_at, data_json) VALUES (?,?,?,?,?,?)',
+                     (db_key, table, pk, str(item_id), deleted_at, json.dumps(rowdict)))
+        dconn.commit()
+        archive_id = dcur.lastrowid
+        dconn.close()
+        conn2 = sqlite3.connect(src_db)
+        cur2 = conn2.cursor()
+        cur2.execute(f"DELETE FROM {table} WHERE {pk} = ?", (item_id,))
+        conn2.commit()
+        conn2.close()
+        return jsonify({'success': True, 'archived_id': archive_id})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/undelete/<int:archive_id>', methods=['POST'])
+def api_undelete(archive_id):
+    try:
+        dconn = sqlite3.connect('deleted.db')
+        dconn.row_factory = sqlite3.Row
+        dcur = dconn.cursor()
+        dcur.execute('SELECT * FROM deleted_items WHERE id = ?', (archive_id,))
+        row = dcur.fetchone()
+        if not row:
+            dconn.close()
+            return jsonify({'error': 'Archive not found'}), 404
+        rec = dict(row)
+        import json
+        data = json.loads(rec['data_json'])
+        src_db_key = rec['source_db']
+        mapping = {
+            'rack': 'rack.db',
+            'ebayStore': 'ebayStore.db',
+            'sold': 'sold.db',
+            'searchRack': 'searchRack.db',
+            'found': 'found.db',
+            'bol': 'bol.db'
+        }
+        if src_db_key not in mapping:
+            dconn.close()
+            return jsonify({'error': 'Unknown source db'}), 400
+        src_db = mapping[src_db_key]
+        table = rec['source_table']
+        conn = sqlite3.connect(src_db)
+        cur = conn.cursor()
+        cur.execute(f"PRAGMA table_info('{table}')")
+        cols = [r[1] for r in cur.fetchall()]
+        insert_cols = [c for c in cols if c in data and c != rec['source_pk']]
+        vals = [data[c] for c in insert_cols]
+        placeholders = ','.join(['?'] * len(vals))
+        if insert_cols:
+            sql = f"INSERT INTO {table} ({','.join(insert_cols)}) VALUES ({placeholders})"
+            cur.execute(sql, vals)
+            conn.commit()
+            conn.close()
+            dcur.execute('DELETE FROM deleted_items WHERE id = ?', (archive_id,))
+            dconn.commit()
+            dconn.close()
+            return jsonify({'success': True})
+        else:
+            conn.close()
+            dconn.close()
+            return jsonify({'error': 'No insertable columns found'}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/refresh_searchrack')
 def refresh_searchrack():

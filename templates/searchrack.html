@@ -1,304 +1,217 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Search Inventory</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Multi-DB Search</title>
     <style>
-        body { font-family: sans-serif; max-width: 900px; margin: auto; padding: 20px; }
-        h1 { text-align: center; }
-        .search-container { margin-bottom: 30px; }
-        .search-box { 
-            display: flex; 
-            margin-bottom: 15px;
-            gap: 10px;
-        }
-        .search-box input { 
-            flex: 1; 
-            font-size: 1.1em; 
-            padding: 10px; 
-            border: 1px solid #ddd;
-            border-radius: 4px;
-        }
-        .search-box button {
-            padding: 0 20px;
-            background: #3498db;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-        }
-        .search-box button:hover {
-            background: #2980b9;
-        }
-        table { 
-            width: 100%; 
-            border-collapse: collapse; 
-            margin-top: 20px; 
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-        }
-        th, td { 
-            border: 1px solid #ddd; 
-            padding: 12px; 
-            text-align: left; 
-        }
-        th { 
-            background: #2c3e50; 
-            color: #fff; 
-            position: sticky;
-            top: 0;
-        }
-        tr:nth-child(even) { background: #f9f9f9; }
-        tr:hover { background: #f1f1f1; }
-        .no-results { 
-            color: #d32f2f; 
-            text-align: center; 
-            margin: 20px 0;
-            padding: 20px;
-            background: #ffebee;
-            border-radius: 4px;
-        }
-        .section-title {
-            font-size: 1.2em;
-            margin: 25px 0 10px 0;
-            color: #2c3e50;
-            font-weight: bold;
-        }
-        .top-actions { display:flex; gap:10px; justify-content:center; align-items:center; margin-bottom:20px; }
-        .refresh-btn {
-            background: #00b894;
-            color: white;
-            font-size: 16px;
-            padding: 8px 24px;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-            display:inline-flex; align-items:center; height:40px;
-        }
-        .refresh-btn:hover { background: #00a884; }
-        .back-btn { background:#e74c3c;color:white;font-size:16px;padding:8px 24px;border:none;border-radius:6px;cursor:pointer;display:inline-flex;align-items:center;height:40px; }
-        .back-btn:hover { background:#c43b2f; }
-        /* Modal styles */
-        .modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.8);
-            z-index: 1000;
-            justify-content: center;
-            align-items: center;
-        }
-        .modal-content {
-            max-width: 90%;
-            max-height: 90%;
-        }
-        .modal-content img {
-            max-width: 100%;
-            max-height: 90vh;
-            border: 3px solid white;
-            border-radius: 4px;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
-        }
-        .location-link {
-            color: #3498db;
-            text-decoration: underline;
-            cursor: pointer;
-        }
-        .location-link:hover {
-            color: #2980b9;
-        }
+        body{font-family:Segoe UI,Arial,sans-serif;background:#f7f7f8;margin:0;padding:18px}
+        .top {display:flex;gap:10px;align-items:center;justify-content:space-between}
+        .actions {display:flex;gap:8px;align-items:center}
+        .btn {padding:8px 14px;border-radius:6px;border:none;cursor:pointer}
+        .btn-primary{background:#00b894;color:#fff}
+        .btn-danger{background:#e74c3c;color:#fff}
+        .filters {display:flex;gap:8px;align-items:center}
+        .search-row{display:flex;gap:8px;margin-top:12px}
+        input[type=text]{flex:1;padding:10px;border:1px solid #ddd;border-radius:6px}
+        table{width:100%;border-collapse:collapse;margin-top:12px}
+        th,td{padding:8px;border:1px solid #e6e6e6;text-align:left}
+        th{background:#f0f0f0}
+        .thumb{width:48px;height:48px;object-fit:cover;border-radius:6px;margin-right:8px}
+        .title-cell{display:flex;align-items:center}
+        .location-link{color:#3498db;text-decoration:underline;cursor:pointer}
+        .small-muted{color:#777;font-size:0.9rem}
+        .modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;align-items:center;justify-content:center}
+        .modal .card{background:#fff;padding:18px;border-radius:8px;max-width:720px;max-height:80vh;overflow:auto}
+        .form-row{display:flex;gap:8px;margin-bottom:8px}
+        .form-row input, .form-row textarea{flex:1;padding:8px;border:1px solid #ddd;border-radius:6px}
     </style>
 </head>
 <body>
-    <h1>Inventory Search</h1>
-    <!-- Modal for displaying the location image -->
-    <div id="locationModal" class="modal">
-        <div class="modal-content">
-            <div id="locationTitle" style='text-align:center;margin-bottom:10px;font-size:1.2em;font-weight:bold;'></div>
-          <img id="locationImage" 
-              src="" 
-              alt="Location Image" 
-              style="display:block;margin:0 auto;max-width:90vw;max-height:65vh;">
+    <div class="top">
+        <div>
+            <a href="/" style="text-decoration:none"><button class="btn btn-danger">Back</button></a>
+        </div>
+        <div class="actions">
+            <div class="filters" id="db-filters">
+                <!-- checkboxes inserted here -->
+            </div>
+            <button class="btn btn-primary" id="refresh-btn">Refresh</button>
         </div>
     </div>
 
-    <div class="top-actions">
-        <a href="/" style="text-decoration:none;"><button class="back-btn">Back</button></a>
-        <a href="/refresh_searchrack"><button class="refresh-btn">Refresh</button></a>
-    </div>
-    
-    <div class="search-container">
-        <div class="section-title">Search Inventory</div>
-        <div class="search-box">
-            <input id="search-rack" type="text" placeholder="Search by title or barcode..." autofocus>
-            <button onclick="window.location.href='/view_all/rack'">Show All</button>
-        </div>
-        <div id="rack-results"></div>
+    <div class="search-row">
+        <input type="text" id="search-input" placeholder="Search by title, barcode, item id, ...">
+        <button class="btn btn-primary" id="search-btn">Search</button>
     </div>
 
-    <script>
-    // Function to fetch rack inventory results
-    async function fetchRackResults(query) {
-        const resp = await fetch(`/searchrack_api?q=${encodeURIComponent(query)}`);
-        const data = await resp.json();
-        return data.results;
-    }
+    <div style="margin-top:10px; font-size:0.95rem; color:#444">Showing: <span id="active-dbs">rack.db</span></div>
 
-    // Render rack inventory table
-    function renderRackTable(items) {
-        const container = document.getElementById('rack-results');
-        if (!items || items.length === 0) {
-            container.innerHTML = '<div class="no-results">No inventory items found.</div>';
-            return;
-        }
-    let html = '<table><tr><th>Title</th><th>Barcode</th><th>Position</th><th>Images</th></tr>';
-        for (const item of items) {
-            // Determine which position to show and which function to call
-            const position = item.item_position || '';
-            const isPicturePosition = position.toLowerCase() === 'picture';
-            
-            // Create the position cell; position text opens the modal when clicked (no preview)
-            let positionCell = 'N/A';
-            if (isPicturePosition && item.pictureposition) {
-                positionCell = `<a href="#" class="location-link" onclick="showPicturePosition('${item.pictureposition}');return false;">Picture</a>`;
-            } else if (position) {
-                positionCell = `<a href="#" class="location-link" onclick="showLocationImage('${position}');return false;">${position}</a>`;
+    <div id="results"></div>
+
+    <!-- Image / Info Modal -->
+    <div id="viewModal" class="modal"><div class="card"><div style="text-align:right"><button id="closeView">Close</button></div><div id="viewContent"></div></div></div>
+
+    <!-- Edit Modal -->
+    <div id="editModal" class="modal"><div class="card"><div style="text-align:right"><button id="closeEdit">Close</button></div><h3>Edit Item</h3><div id="editContent"></div><div style="text-align:right;margin-top:8px"><button id="saveEdit" class="btn btn-primary">Save</button></div></div></div>
+
+<script>
+const DBS = ['rack','searchRack','ebayStore','sold','found','bol'];
+const DB_LABELS = {rack:'rack.db', searchRack:'searchRack.db', ebayStore:'ebayStore.db', sold:'sold.db', found:'found.db', bol:'bol.db'};
+const defaultChecked = {'rack':true};
+
+function createFilters(){
+    const container = document.getElementById('db-filters');
+    DBS.forEach(k=>{
+        const id = 'chk-'+k;
+        const cb = document.createElement('input'); cb.type='checkbox'; cb.id=id; cb.value=k; cb.checked=!!defaultChecked[k];
+        const lbl = document.createElement('label'); lbl.htmlFor=id; lbl.style.marginRight='8px'; lbl.appendChild(cb); lbl.appendChild(document.createTextNode(' '+DB_LABELS[k]));
+        container.appendChild(lbl);
+    })
+}
+
+createFilters();
+
+function getActiveDBs(){
+    return DBS.filter(k=>document.getElementById('chk-'+k).checked);
+}
+
+document.getElementById('search-btn').addEventListener('click', doSearch);
+document.getElementById('search-input').addEventListener('keyup', (e)=>{ if(e.key==='Enter') doSearch(); });
+document.getElementById('refresh-btn').addEventListener('click', ()=>{ location.href='/refresh_searchrack' });
+
+async function doSearch(){
+    const q = document.getElementById('search-input').value.trim();
+    const dbs = getActiveDBs();
+    document.getElementById('active-dbs').textContent = dbs.map(d=>DB_LABELS[d]).join(', ');
+    const allResults = [];
+    for(const db of dbs){
+        try{
+            const resp = await fetch('/api/search/'+db, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({q:q, limit:50})});
+            const j = await resp.json();
+            if(j.results) {
+                j.results.forEach(r=> allResults.push(r));
             }
+        }catch(err){console.error('search err',err)}
+    }
+    renderResults(allResults);
+}
 
-            // Images column: show filename(s) or N/A (no preview before clicking)
-            let imagesCell = 'N/A';
-            if (item.pictureposition) {
-                imagesCell = item.pictureposition;
-            } else if (item.images) {
-                imagesCell = item.images;
+function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function missingThumb(width=48,height=48,text='No Img'){ return 'data:image/svg+xml;utf8,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="'+width+'" height="'+height+'"><rect width="100%" height="100%" fill="#f8f8f8"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#b0b0b0" font-size="10">'+text+'</text></svg>'); }
+
+function renderResults(results){
+    const container = document.getElementById('results');
+    if(!results || results.length===0){ container.innerHTML = '<div class="small-muted">No results</div>'; return; }
+    let html = '<table><thead><tr><th>Title</th><th>Barcode</th><th>Item ID</th><th>Location</th><th>Qty</th><th>DB</th><th>Actions</th></tr></thead><tbody>';
+    results.forEach(r=>{
+        const title = esc(r.title||r.raw && (r.raw.Title||r.raw.title) || '')
+        const img = esc(r.image||'')
+        const thumb = img ? img : (r.pictureposition?('/static/pictureposition/'+r.pictureposition):missingThumb())
+        const barcode = esc(r.barcode||'')
+        const itemid = esc(r.item_id||'')
+        const qty = esc(r.quantity||'')
+        const db = esc(r.source_db||'')
+        let locDisplay = '';
+        if(r.pictureposition) locDisplay = r.pictureposition;
+        else if(r.item_position) locDisplay = r.item_position;
+        html += `<tr data-src="${db}" data-id="${r.id}">`+
+                `<td><div class="title-cell"><img class="thumb" src="${thumb}" onerror="this.src='${missingThumb(48,48,'No Img')}'"><a href="#" class="title-link" data-src="${db}" data-id="${r.id}" data-image="${img}" data-title="${esc(r.title)}">${title}</a></div></td>`+
+                `<td>${barcode}</td>`+
+                `<td>${itemid}</td>`+
+                `<td>${ locDisplay ? `<a href="#" class=\"location-link\" data-src=\"${db}\" data-id=\"${r.id}\" data-barcode=\"${barcode}\" data-picture=\"${esc(r.pictureposition||'')}\">${esc(locDisplay)}</a>` : '' }</td>`+
+                `<td>${qty}</td>`+
+                `<td>${db}</td>`+
+                `<td><button class="btn" onclick="onEdit('${db}',${r.id})">Edit</button> <button class="btn" onclick="onDelete('${db}',${r.id})">Delete</button></td>`+
+                `</tr>`;
+    })
+    html += '</tbody></table>';
+    container.innerHTML = html;
+    document.querySelectorAll('.title-link').forEach(el=> el.addEventListener('click', onViewTitle));
+    document.querySelectorAll('.location-link').forEach(el=> el.addEventListener('click', onViewLocation));
+}
+
+async function onViewTitle(e){
+    e.preventDefault();
+    const el = e.currentTarget;
+    const src = el.dataset.src;
+    const id = el.dataset.id;
+    const tr = el.closest('tr');
+    const image = el.dataset.image;
+    const title = el.dataset.title;
+    let html = `<div><h3>${esc(title)}</h3>`;
+    if(image) html += `<img src="${image}" style="max-width:320px;border-radius:8px;display:block;margin:8px 0;" onerror="this.src='${missingThumb(320,180,'Image missing')}'">`;
+    html += `<div class=\"small-muted\">DB: ${esc(src)}</div></div>`;
+    showViewModal(html);
+}
+
+async function onViewLocation(e){
+    e.preventDefault();
+    const el = e.currentTarget;
+    const db = el.dataset.src;
+    const picture = el.dataset.picture;
+    const barcode = el.dataset.barcode;
+    if(picture){
+        showViewModal(`<div><h4>Picture Position</h4><img src="/static/pictureposition/${picture}" style="max-width:640px;max-height:60vh;" onerror="this.src='${missingThumb(720,480,'Image missing')}'"></div>`);
+        return;
+    }
+    try{
+        const resp = await fetch('/api/lookup_location',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({barcode:barcode})});
+        const j = await resp.json();
+        if(j.found){
+            if(j.pictureposition){
+                showViewModal(`<div><h4>Picture Position</h4><img src="/static/pictureposition/${j.pictureposition}" style="max-width:640px;max-height:60vh;" onerror="this.src='${missingThumb(720,480,'Image missing')}'"></div>`);
+            } else if(j.item_position){
+                showViewModal(`<div><h4>Shelf Position</h4><img src="/static/shelves/${j.item_position.toLowerCase()}.png" style="max-width:640px;max-height:60vh;" onerror="this.src='${missingThumb(720,480,'Image missing')}'"></div>`);
+            } else {
+                showViewModal('<div class="small-muted">No location info available</div>');
             }
-
-            html += `
-                <tr>
-                    <td>${item.title||'N/A'}</td>
-                    <td>${item.barcode||'N/A'}</td>
-                    <td>${positionCell}</td>
-                    <td style="text-align:center;">${imagesCell}</td>
-                </tr>`;
+        } else {
+            showViewModal('<div class="small-muted">No rack record found</div>');
         }
-        html += '</table>';
-        container.innerHTML = html;
+    }catch(err){ console.error(err); showViewModal('<div class="small-muted">Lookup failed</div>') }
+}
+
+function showViewModal(html){ document.getElementById('viewContent').innerHTML = html; const m=document.getElementById('viewModal'); m.style.display='flex'; }
+document.getElementById('closeView').addEventListener('click', ()=>document.getElementById('viewModal').style.display='none');
+
+function onEdit(db, id){
+    const tr = document.querySelector(`tr[data-src="${db}"][data-id="${id}"]`);
+    if(!tr) return alert('Row not in DOM');
+    const title = tr.querySelector('.title-cell a')?.textContent || '';
+    const barcode = tr.children[1].textContent;
+    const itemid = tr.children[2].textContent;
+    const qty = tr.children[4].textContent;
+    const content = `<div class=\"form-row\"><label>Title</label><input id=\"edit_title\" value=\"${esc(title)}\"></div>`+
+                  `<div class=\"form-row\"><label>Barcode</label><input id=\"edit_barcode\" value=\"${esc(barcode)}\"></div>`+
+                  `<div class=\"form-row\"><label>Item ID</label><input id=\"edit_itemid\" value=\"${esc(itemid)}\"></div>`+
+                  `<div class=\"form-row\"><label>Qty</label><input id=\"edit_qty\" value=\"${esc(qty)}\"></div>`+
+                  `<div class=\"form-row\"><label>Notes</label><textarea id=\"edit_notes\"></textarea></div>`;
+    document.getElementById('editContent').innerHTML = content;
+    document.getElementById('editModal').style.display='flex';
+    document.getElementById('saveEdit').onclick = async ()=>{
+        const payload = { Title: document.getElementById('edit_title').value, BARCODE: document.getElementById('edit_barcode').value, ItemID: document.getElementById('edit_itemid').value, Quantity: document.getElementById('edit_qty').value };
+        const resp = await fetch(`/api/update/${db}/${id}`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+        const j = await resp.json();
+        if(j.success || j.ok){ alert('Saved'); document.getElementById('editModal').style.display='none'; doSearch(); } else alert('Save failed: '+(j.error||JSON.stringify(j)));
     }
+}
 
-    // Add event listeners for search inputs
-    document.getElementById('search-rack').addEventListener('input', debounce(async function() {
-        const q = this.value.trim();
-        if (!q) { 
-            document.getElementById('rack-results').innerHTML = ''; 
-            return; 
-        }
-        const items = await fetchRackResults(q);
-        renderRackTable(items);
-    }, 300));
+async function onDelete(db,id){
+    if(!confirm('Delete this item (will be archived)?')) return;
+    try{
+        const resp = await fetch(`/api/delete/${db}/${id}`, {method:'POST'});
+        const j = await resp.json();
+        if(j.success) { alert('Deleted and archived'); doSearch(); } else alert('Delete failed: '+(j.error||JSON.stringify(j)));
+    }catch(err){console.error(err); alert('Delete failed')}
+}
 
-    // Show location image in modal
-    function showLocationImage(position) {
-        const modal = document.getElementById('locationModal');
-        const locationImage = document.getElementById('locationImage');
-        const locationTitle = document.getElementById('locationTitle');
-        
-        // Set the title
-        locationTitle.textContent = `Location: ${position}`;
-        
-        // Reset the image and set up error handling
-        locationImage.onerror = null;
-        locationImage.onload = null;
-        
-        // Set up error handler first
-        const missingModal = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="720" height="480"><rect width="100%" height="100%" fill="#f8f8f8"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#b0b0b0" font-size="24">Image missing</text></svg>');
-        locationImage.onerror = function() {
-            this.onerror = null; // Prevent infinite loop if fallback also fails
-            this.src = missingModal;
-        };
-        
-        // Set the image source
-        locationImage.src = `/static/shelves/${position.toLowerCase()}.png`;
-        
-        // Show the modal
-        modal.style.display = 'flex';
-        
-        // Close modal when clicking anywhere
-        modal.onclick = function(event) {
-            if (event.target === modal) {
-                modal.style.display = 'none';
-            }
-        };
-    }
-    
-    // Show picture position image in modal
-    function showPicturePosition(picturePosition) {
-        const modal = document.getElementById('locationModal');
-        const locationImage = document.getElementById('locationImage');
-        const locationTitle = document.getElementById('locationTitle');
-        
-        // Set the title
-        locationTitle.textContent = `Picture Position: ${picturePosition}`;
-        
-        // Reset the image and set up error handling
-        locationImage.onerror = null;
-        locationImage.onload = null;
-        
-        // Set up error handler first
-        const missingModal = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="720" height="480"><rect width="100%" height="100%" fill="#f8f8f8"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#b0b0b0" font-size="24">Image missing</text></svg>');
-        locationImage.onerror = function() {
-            this.onerror = null; // Prevent infinite loop if fallback also fails
-            this.src = missingModal;
-            console.error(`Failed to load image: /static/pictureposition/${picturePosition}`);
-        };
+// close edit modal
+document.getElementById('closeEdit').addEventListener('click', ()=>document.getElementById('editModal').style.display='none');
 
-        // Set the image source - use the exact filename from picturePosition
-        // The picturePosition is already the full filename (e.g., '1234567890.jpg')
-        locationImage.src = `/static/pictureposition/${picturePosition}`;
-        
-        // Show the modal
-        modal.style.display = 'flex';
-        
-        // Close modal when clicking anywhere
-        modal.onclick = function(event) {
-            if (event.target === modal) {
-                modal.style.display = 'none';
-            }
-        };
-    }
-
-    // Open an external image (URL) in the same modal
-    function openExternalImage(url) {
-        const modal = document.getElementById('locationModal');
-        const locationImage = document.getElementById('locationImage');
-        const locationTitle = document.getElementById('locationTitle');
-        locationTitle.textContent = `Image`;
-        const missingModal = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="720" height="480"><rect width="100%" height="100%" fill="#f8f8f8"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#b0b0b0" font-size="24">Image missing</text></svg>');
-        locationImage.onerror = function() { this.onerror = null; this.src = missingModal; };
-        locationImage.src = url;
-        modal.style.display = 'flex';
-        modal.onclick = function(event) { if (event.target === modal) modal.style.display = 'none'; };
-    }
-
-    // Close modal when pressing Escape key
-    document.addEventListener('keydown', function(event) {
-        const modal = document.getElementById('locationModal');
-        if (event.key === 'Escape' && modal.style.display === 'flex') {
-            modal.style.display = 'none';
-        }
-    });
-
-    // Debounce function to limit API calls
-    function debounce(func, wait) {
-        let timeout;
-        return function() {
-            const context = this, args = arguments;
-            clearTimeout(timeout);
-            timeout = setTimeout(() => func.apply(context, args), wait);
-        };
-    }
-    </script>
+// initial load: search default DBs
+window.addEventListener('load', ()=>{ document.getElementById('search-input').focus(); doSearch(); });
+</script>
 </body>
 </html>
