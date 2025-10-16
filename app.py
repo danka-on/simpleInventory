@@ -1084,6 +1084,27 @@ def searchrack_api():
                 'pictureposition': row[4],
             })
         conn.close()
+        # Merge results that share same barcode + item_position by summing quantities
+        merged = {}
+        for r in results:
+            bc = (r.get('barcode') or '').strip()
+            pos = (r.get('item_position') or '').strip()
+            # only merge when barcode present
+            if not bc:
+                # use a unique key to preserve as-is
+                key = f"__{id(r)}"
+            else:
+                key = f"{bc.lower()}||{pos.lower()}"
+            if key not in merged:
+                # initialize quantity: default 1 (assume single item if qty missing)
+                merged[key] = r.copy()
+                merged[key]['quantity'] = int(r.get('quantity')) if str(r.get('quantity') or '').isdigit() else 1
+            else:
+                # sum quantities (assume 1 if missing/invalid)
+                add_q = int(r.get('quantity')) if str(r.get('quantity') or '').isdigit() else 1
+                merged[key]['quantity'] = merged[key].get('quantity', 0) + add_q
+        # convert merged back to list
+        results = list(merged.values())
     return jsonify({'results': results})
 
 @app.route('/searchbol_api')
@@ -1308,6 +1329,27 @@ def api_search_db(db_key):
                 pass
             results.append(item_out)
         conn.close()
+        # If searching the searchRack snapshot, merge rows with same barcode+item_position and sum quantities
+        if db_key == 'searchRack' and results:
+            merged = {}
+            for r in results:
+                bc = (r.get('barcode') or '').strip()
+                pos = (r.get('item_position') or '').strip()
+                if not bc:
+                    key = f"__{id(r)}_{len(merged)}"
+                else:
+                    key = f"{bc.lower()}||{pos.lower()}"
+                if key not in merged:
+                    merged[key] = r.copy()
+                    # normalize quantity
+                    merged[key]['quantity'] = int(r.get('quantity')) if str(r.get('quantity') or '').isdigit() else 1
+                else:
+                    add_q = int(r.get('quantity')) if str(r.get('quantity') or '').isdigit() else 1
+                    merged[key]['quantity'] = merged[key].get('quantity', 0) + add_q
+            results = list(merged.values())
+            # adjust total_count to reflect merged items count
+            total_count = len(results)
+
         return jsonify({'results': results, 'total': total_count})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
