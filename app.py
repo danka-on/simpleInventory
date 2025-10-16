@@ -1381,6 +1381,62 @@ def api_undelete(archive_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+
+@app.route('/api/archived', methods=['GET', 'POST'])
+def api_archived_list():
+    """Return list of archived (deleted) items from deleted.db as normalized results."""
+    try:
+        conn = sqlite3.connect('deleted.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute('SELECT * FROM deleted_items ORDER BY deleted_at DESC')
+        rows = [dict(r) for r in cur.fetchall()]
+        results = []
+        import json
+        for r in rows:
+            data = {}
+            try:
+                data = json.loads(r.get('data_json') or '{}')
+            except Exception:
+                data = {}
+            item_out = {
+                'archived': True,
+                'archived_id': r.get('id'),
+                'deleted_at': r.get('deleted_at'),
+                'source_db': 'archived',
+                'orig_source_db': r.get('source_db'),
+                'orig_table': r.get('source_table'),
+                'orig_pk': r.get('source_pk'),
+                'orig_id': r.get('source_id'),
+                'id': r.get('id'),
+                'title': data.get('Title') or data.get('title') or data.get('item_description') or '',
+                'image': data.get('Image') or data.get('image') or data.get('image_url') or '',
+                'barcode': data.get('BARCODE') or data.get('barcode') or data.get('upc') or data.get('ItemID') or '',
+                'item_id': data.get('ItemID') or data.get('item_id') or data.get('ItemId') or data.get('upc') or '',
+                'pictureposition': data.get('PICTUREPOSITION') or data.get('pictureposition') or data.get('picture_position') or '',
+                'item_position': data.get('ITEM_POSITION') or data.get('item_position') or data.get('position') or '',
+                'quantity': data.get('Quantity') or data.get('quantity') or data.get('qty') or '',
+                'raw': data
+            }
+            results.append(item_out)
+        conn.close()
+        return jsonify({'results': results})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/delete_archive/<int:archive_id>', methods=['POST'])
+def api_delete_archive(archive_id):
+    try:
+        conn = sqlite3.connect('deleted.db')
+        cur = conn.cursor()
+        cur.execute('DELETE FROM deleted_items WHERE id = ?', (archive_id,))
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/refresh_searchrack')
 def refresh_searchrack():
     createSearchRackDB()

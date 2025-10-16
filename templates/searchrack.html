@@ -55,7 +55,7 @@
         <div id="pagination-controls" style="margin-left:auto"></div>
     </div>
 
-    <div style="margin-top:10px; font-size:0.95rem; color:#444">Showing: <span id="active-dbs">rack.db</span></div>
+    <div style="margin-top:10px; font-size:0.95rem; color:#444">Showing: <span id="active-dbs">Inventory</span></div>
 
     <div id="results"></div>
 
@@ -66,8 +66,8 @@
     <div id="editModal" class="modal"><div class="card"><div style="text-align:right"><button id="closeEdit">Close</button></div><h3>Edit Item</h3><div id="editContent"></div><div style="text-align:right;margin-top:8px"><button id="saveEdit" class="btn btn-primary">Save</button></div></div></div>
 
 <script>
-const DBS = ['searchRack','ebayStore','bol','sold'];
-const DB_LABELS = {searchRack:'Inventory', ebayStore:'Ebay live', bol:'Macy BOL', sold:'Sold'};
+const DBS = ['searchRack','ebayStore','bol','sold','archived'];
+const DB_LABELS = {searchRack:'Inventory', ebayStore:'Ebay live', bol:'Macy BOL', sold:'Sold', archived:'Archived'};
 const defaultChecked = {'searchRack':true};
 let _allResults = [];
 let _currentPage = 1;
@@ -99,9 +99,15 @@ async function doSearch(){
     _allResults = [];
     for(const db of dbs){
         try{
-            const resp = await fetch('/api/search/'+db, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({q:q, limit:50})});
-            const j = await resp.json();
-            if(j.results) {
+            let j = null;
+            if(db === 'archived'){
+                const resp = await fetch('/api/archived');
+                j = await resp.json();
+            } else {
+                const resp = await fetch('/api/search/'+db, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({q:q, limit:50})});
+                j = await resp.json();
+            }
+            if(j && j.results) {
                 j.results.forEach(r=> _allResults.push(r));
             }
         }catch(err){console.error('search err',err)}
@@ -163,6 +169,13 @@ function renderResults(results){
         let locDisplay = '';
         if(r.pictureposition) locDisplay = r.pictureposition;
         else if(r.item_position) locDisplay = r.item_position;
+        let actionHtml = '';
+        if(r.archived || db === 'archived'){
+            // Archived row: show Restore and Delete Forever
+            actionHtml = `<button class="btn btn-primary" onclick="onRestore(${r.id})">Restore</button> <button class="btn btn-danger" onclick="onDeleteArchive(${r.id})">Delete Forever</button>`;
+        } else {
+            actionHtml = `<button class="btn" onclick="onEdit('${db}',${r.id})">Edit</button> <button class="btn" onclick="onDelete('${db}',${r.id})">Delete</button>`;
+        }
         html += `<tr data-src="${db}" data-id="${r.id}">`+
                 `<td><div class="title-cell"><img class="thumb" src="${thumb}" onerror="this.src='${missingThumb(48,48,'No Img')}'"><a href="#" class="title-link" data-src="${db}" data-id="${r.id}" data-image="${img}" data-title="${esc(r.title)}">${title}</a></div></td>`+
                 `<td>${barcode}</td>`+
@@ -170,13 +183,43 @@ function renderResults(results){
                 `<td>${ locDisplay ? `<a href="#" class=\"location-link\" data-src=\"${db}\" data-id=\"${r.id}\" data-barcode=\"${barcode}\" data-picture=\"${esc(r.pictureposition||'')}\">${esc(locDisplay)}</a>` : '' }</td>`+
                 `<td>${qty}</td>`+
                 `<td>${db}</td>`+
-                `<td><button class="btn" onclick="onEdit('${db}',${r.id})">Edit</button> <button class="btn" onclick="onDelete('${db}',${r.id})">Delete</button></td>`+
+                `<td>${actionHtml}</td>`+
                 `</tr>`;
     })
     html += '</tbody></table>';
     container.innerHTML = html;
     document.querySelectorAll('.title-link').forEach(el=> el.addEventListener('click', onViewTitle));
     document.querySelectorAll('.location-link').forEach(el=> el.addEventListener('click', onViewLocation));
+    // double-click to open archive action when in archived list
+    document.querySelectorAll('tbody tr').forEach(tr=>{
+        tr.addEventListener('dblclick', async (e)=>{
+            const src = tr.dataset.src;
+            if(src === 'archived'){
+                const aid = tr.dataset.id;
+                // show modal with restore/delete
+                const rec = _allResults.find(r=> String(r.id) === String(aid));
+                let html = `<div><h3>Archived item</h3><div class=\"small-muted\">Deleted at: ${esc(rec.deleted_at||'')}</div>`+
+                           `<div style=\"margin-top:8px;\">Title: ${esc(rec.title||'')}</div>`+
+                           `<div style=\"margin-top:8px;\">Source: ${esc(rec.orig_source_db||'')}</div>`+
+                           `<div style=\"margin-top:12px;display:flex;gap:8px;justify-content:flex-end\">`+
+                           `<button class=\"btn btn-primary\" id=\"arch-restore\">Restore</button>`+
+                           `<button class=\"btn btn-danger\" id=\"arch-delete\">Delete Forever</button>`+
+                           `</div></div>`;
+                showViewModal(html);
+                document.getElementById('arch-restore').addEventListener('click', async ()=>{
+                    const resp = await fetch('/api/undelete/'+aid, {method:'POST'});
+                    const j = await resp.json();
+                    if(j.success){ alert('Restored'); document.getElementById('viewModal').style.display='none'; doSearch(); } else alert('Restore failed: '+JSON.stringify(j));
+                });
+                document.getElementById('arch-delete').addEventListener('click', async ()=>{
+                    if(!confirm('Permanently delete this archived row?')) return;
+                    const resp = await fetch('/api/delete_archive/'+aid, {method:'POST'});
+                    const j = await resp.json();
+                    if(j.success){ alert('Permanently deleted'); document.getElementById('viewModal').style.display='none'; doSearch(); } else alert('Delete failed: '+JSON.stringify(j));
+                });
+            }
+        });
+    });
 }
 
 async function onViewTitle(e){
@@ -251,6 +294,24 @@ async function onDelete(db,id){
         const resp = await fetch(`/api/delete/${db}/${id}`, {method:'POST'});
         const j = await resp.json();
         if(j.success) { alert('Deleted and archived'); doSearch(); } else alert('Delete failed: '+(j.error||JSON.stringify(j)));
+    }catch(err){console.error(err); alert('Delete failed')}
+}
+
+async function onRestore(archive_id){
+    if(!confirm('Restore this archived item to its original DB?')) return;
+    try{
+        const resp = await fetch('/api/undelete/'+archive_id, {method:'POST'});
+        const j = await resp.json();
+        if(j.success) { alert('Restored'); doSearch(); } else alert('Restore failed: '+(j.error||JSON.stringify(j)));
+    }catch(err){console.error(err); alert('Restore failed')}
+}
+
+async function onDeleteArchive(archive_id){
+    if(!confirm('Permanently delete this archived item? This cannot be undone.')) return;
+    try{
+        const resp = await fetch('/api/delete_archive/'+archive_id, {method:'POST'});
+        const j = await resp.json();
+        if(j.success) { alert('Permanently deleted'); doSearch(); } else alert('Delete failed: '+(j.error||JSON.stringify(j)));
     }catch(err){console.error(err); alert('Delete failed')}
 }
 
