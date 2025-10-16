@@ -44,6 +44,17 @@
         <button class="btn btn-primary" id="search-btn">Search</button>
     </div>
 
+    <div style="margin-top:10px; display:flex; gap:12px; align-items:center;">
+        <label style="font-size:0.95rem; color:#444">Page size:
+            <select id="page-size" style="margin-left:6px;padding:6px;border-radius:6px;border:1px solid #ddd">
+                <option value="10">10</option>
+                <option value="25">25</option>
+                <option value="50">50</option>
+            </select>
+        </label>
+        <div id="pagination-controls" style="margin-left:auto"></div>
+    </div>
+
     <div style="margin-top:10px; font-size:0.95rem; color:#444">Showing: <span id="active-dbs">rack.db</span></div>
 
     <div id="results"></div>
@@ -58,6 +69,9 @@
 const DBS = ['searchRack','ebayStore','bol','sold'];
 const DB_LABELS = {searchRack:'Inventory', ebayStore:'Ebay live', bol:'Macy BOL', sold:'Sold'};
 const defaultChecked = {'searchRack':true};
+let _allResults = [];
+let _currentPage = 1;
+let _pageSize = 10;
 
 function createFilters(){
     const container = document.getElementById('db-filters');
@@ -82,18 +96,53 @@ async function doSearch(){
     const q = document.getElementById('search-input').value.trim();
     const dbs = getActiveDBs();
     document.getElementById('active-dbs').textContent = dbs.map(d=>DB_LABELS[d]).join(', ');
-    const allResults = [];
+    _allResults = [];
     for(const db of dbs){
         try{
             const resp = await fetch('/api/search/'+db, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({q:q, limit:50})});
             const j = await resp.json();
             if(j.results) {
-                j.results.forEach(r=> allResults.push(r));
+                j.results.forEach(r=> _allResults.push(r));
             }
         }catch(err){console.error('search err',err)}
     }
-    renderResults(allResults);
+    _currentPage = 1;
+    _pageSize = parseInt(document.getElementById('page-size').value || '10', 10);
+    renderPagedResults();
 }
+
+function renderPagedResults(){
+    const total = _allResults.length;
+    const pages = Math.max(1, Math.ceil(total / _pageSize));
+    if(_currentPage > pages) _currentPage = pages;
+    const start = (_currentPage - 1) * _pageSize;
+    const end = start + _pageSize;
+    const slice = _allResults.slice(start, end);
+    renderResults(slice);
+    renderPagination(total, pages);
+}
+
+function renderPagination(total, pages){
+    const container = document.getElementById('pagination-controls');
+    if(pages <= 1){ container.innerHTML = `<span class="small-muted">${total} results</span>`; return; }
+    let html = '';
+    html += `<button class=\"btn\" id=\"pg-prev\">Prev</button>`;
+    // show up to 7 page buttons centered around current
+    const win = 7;
+    let start = Math.max(1, _currentPage - Math.floor(win/2));
+    let finish = Math.min(pages, start + win - 1);
+    if(finish - start < win - 1) start = Math.max(1, finish - win + 1);
+    for(let p=start;p<=finish;p++){
+        html += `<button class=\"btn\" data-page=\"${p}\" style=\"${p===_currentPage? 'font-weight:bold; background:#ddd':''}\">${p}</button>`;
+    }
+    html += `<button class=\"btn\" id=\"pg-next\">Next</button>`;
+    container.innerHTML = html;
+    document.getElementById('pg-prev').addEventListener('click', ()=>{ if(_currentPage>1){ _currentPage--; renderPagedResults(); } });
+    document.getElementById('pg-next').addEventListener('click', ()=>{ if(_currentPage<pages){ _currentPage++; renderPagedResults(); } });
+    container.querySelectorAll('button[data-page]').forEach(b=> b.addEventListener('click', (e)=>{ _currentPage = parseInt(e.currentTarget.dataset.page,10); renderPagedResults(); }));
+}
+
+document.getElementById('page-size').addEventListener('change', ()=>{ _pageSize = parseInt(document.getElementById('page-size').value,10); _currentPage = 1; renderPagedResults(); });
 
 function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
