@@ -363,7 +363,14 @@
     });
 
     document.getElementById('picturePositionBtn').addEventListener('click', function() {
-        window.location.href = '/pictureposition';
+        const params = new URLSearchParams(window.location.search);
+        const editId = params.get('edit_rack_id');
+        if(editId){
+            // forward the edit id so pictureposition.html knows to persist PICTUREPOSITION for this searchRack row
+            window.location.href = '/pictureposition?edit_rack_id=' + encodeURIComponent(editId);
+        } else {
+            window.location.href = '/pictureposition';
+        }
     });
 
     function getDeviceType() {

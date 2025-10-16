@@ -1345,8 +1345,10 @@ def api_set_rack_location():
     data = request.get_json() or {}
     item_id = data.get('id')
     pos = (data.get('item_position') or '').strip()
-    if not item_id or not pos:
-        return jsonify({'success': False, 'error': 'Missing id or item_position'}), 400
+    pictureposition = (data.get('pictureposition') or '').strip()
+    # Require id and at least one of pos or pictureposition
+    if not item_id or (not pos and not pictureposition):
+        return jsonify({'success': False, 'error': 'Missing id or item_position/pictureposition'}), 400
     try:
         conn = sqlite3.connect('searchRack.db')
         cur = conn.cursor()
@@ -1360,10 +1362,23 @@ def api_set_rack_location():
             pk = 'ID'
         else:
             pk = None
-        if pk:
-            cur.execute(f"UPDATE SEARCHRACK SET ITEM_POSITION = ? WHERE {pk} = ?", (pos, item_id))
-        else:
-            cur.execute("UPDATE SEARCHRACK SET ITEM_POSITION = ? WHERE rowid = ?", (pos, item_id))
+        # If a pictureposition is provided, update PICTUREPOSITION and mark ITEM_POSITION as 'picture'
+        if pictureposition:
+            if 'PICTUREPOSITION' in cols or 'pictureposition' in [c.lower() for c in cols]:
+                # Use the exact column name if available
+                pic_col = 'PICTUREPOSITION' if 'PICTUREPOSITION' in cols else next((c for c in cols if c.lower() == 'pictureposition'), 'PICTUREPOSITION')
+            else:
+                pic_col = 'PICTUREPOSITION'
+            if pk:
+                cur.execute(f"UPDATE SEARCHRACK SET {pic_col} = ?, ITEM_POSITION = ? WHERE {pk} = ?", (pictureposition, 'picture', item_id))
+            else:
+                cur.execute(f"UPDATE SEARCHRACK SET {pic_col} = ?, ITEM_POSITION = ? WHERE rowid = ?", (pictureposition, 'picture', item_id))
+        # Otherwise update only ITEM_POSITION
+        elif pos:
+            if pk:
+                cur.execute(f"UPDATE SEARCHRACK SET ITEM_POSITION = ? WHERE {pk} = ?", (pos, item_id))
+            else:
+                cur.execute("UPDATE SEARCHRACK SET ITEM_POSITION = ? WHERE rowid = ?", (pos, item_id))
         conn.commit()
         updated = cur.rowcount
         conn.close()

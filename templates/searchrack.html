@@ -182,17 +182,19 @@ function renderResults(results){
         let locDisplay = '';
         if(r.pictureposition) locDisplay = r.pictureposition;
         else if(r.item_position) locDisplay = r.item_position;
-        let actionHtml = '';
+            let actionHtml = '';
         if(r.archived || db === 'archived'){
             // Archived row: show Restore and Delete Forever
             actionHtml = `<button class="btn btn-primary" onclick="onRestore(${r.id})">Restore</button> <button class="btn btn-danger" onclick="onDeleteArchive(${r.id})">Delete Forever</button>`;
         } else {
-            // Add Edit Location button only for searchRack rows
+            // Add Edit Location and Picture Position buttons only for searchRack rows
             let editBtn = '';
+            let picBtn = '';
             if(db === 'searchRack'){
                 editBtn = `<button class="btn" onclick="onEditLocation(${r.id}, '${esc(r.barcode||'')}')">Edit Location</button> `;
+                picBtn = '';
             }
-            actionHtml = editBtn + `<button class="btn" onclick="onEdit('${db}',${r.id})">Edit</button> <button class="btn" onclick="onDelete('${db}',${r.id})">Delete</button>`;
+            actionHtml = picBtn + editBtn + `<button class="btn" onclick="onEdit('${db}',${r.id})">Edit</button> <button class="btn" onclick="onDelete('${db}',${r.id})">Delete</button>`;
         }
         html += `<tr data-src="${db}" data-id="${r.id}">`+
                 `<td><div class="title-cell"><img class="thumb" src="${thumb}" onerror="this.src='${missingThumb(48,48,'No Img')}'"><a href="#" class="title-link" data-src="${db}" data-id="${r.id}" data-image="${img}" data-title="${esc(r.title)}">${title}</a></div></td>`+
@@ -256,6 +258,8 @@ function onEditLocation(rackId, barcode){
     // include a query param so position page knows this is an edit flow
     window.location.href = '/position?edit_rack_id=' + encodeURIComponent(rackId);
 }
+
+// (Picture position uses the Position flow now.)
 
 async function onViewTitle(e){
     e.preventDefault();
