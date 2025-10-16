@@ -1404,23 +1404,38 @@ def api_set_rack_location():
             pk = 'ID'
         else:
             pk = None
-        # If a pictureposition is provided, update PICTUREPOSITION and mark ITEM_POSITION as 'picture'
+        # If a pictureposition is provided, update PICTUREPOSITION and clear ITEM_POSITION
         if pictureposition:
             if 'PICTUREPOSITION' in cols or 'pictureposition' in [c.lower() for c in cols]:
-                # Use the exact column name if available
                 pic_col = 'PICTUREPOSITION' if 'PICTUREPOSITION' in cols else next((c for c in cols if c.lower() == 'pictureposition'), 'PICTUREPOSITION')
             else:
                 pic_col = 'PICTUREPOSITION'
+            # enforce single-location rule: set pictureposition and clear item_position
             if pk:
-                cur.execute(f"UPDATE SEARCHRACK SET {pic_col} = ?, ITEM_POSITION = ? WHERE {pk} = ?", (pictureposition, 'picture', item_id))
+                cur.execute(f"UPDATE SEARCHRACK SET {pic_col} = ?, ITEM_POSITION = ? WHERE {pk} = ?", (pictureposition, '', item_id))
             else:
-                cur.execute(f"UPDATE SEARCHRACK SET {pic_col} = ?, ITEM_POSITION = ? WHERE rowid = ?", (pictureposition, 'picture', item_id))
-        # Otherwise update only ITEM_POSITION
+                cur.execute(f"UPDATE SEARCHRACK SET {pic_col} = ?, ITEM_POSITION = ? WHERE rowid = ?", (pictureposition, '', item_id))
+        # Otherwise update only ITEM_POSITION and clear PICTUREPOSITION
         elif pos:
-            if pk:
-                cur.execute(f"UPDATE SEARCHRACK SET ITEM_POSITION = ? WHERE {pk} = ?", (pos, item_id))
+            # find picture column name if exists
+            pic_col = None
+            if 'PICTUREPOSITION' in cols:
+                pic_col = 'PICTUREPOSITION'
             else:
-                cur.execute("UPDATE SEARCHRACK SET ITEM_POSITION = ? WHERE rowid = ?", (pos, item_id))
+                for c in cols:
+                    if c.lower() == 'pictureposition':
+                        pic_col = c
+                        break
+            if pk:
+                if pic_col:
+                    cur.execute(f"UPDATE SEARCHRACK SET ITEM_POSITION = ?, {pic_col} = ? WHERE {pk} = ?", (pos, '', item_id))
+                else:
+                    cur.execute(f"UPDATE SEARCHRACK SET ITEM_POSITION = ? WHERE {pk} = ?", (pos, item_id))
+            else:
+                if pic_col:
+                    cur.execute(f"UPDATE SEARCHRACK SET ITEM_POSITION = ?, {pic_col} = ? WHERE rowid = ?", (pos, '', item_id))
+                else:
+                    cur.execute("UPDATE SEARCHRACK SET ITEM_POSITION = ? WHERE rowid = ?", (pos, item_id))
         conn.commit()
         updated = cur.rowcount
         conn.close()
