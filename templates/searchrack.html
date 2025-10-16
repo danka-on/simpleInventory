@@ -70,6 +70,18 @@
     <!-- Edit Modal -->
     <div id="editModal" class="modal"><div class="card"><div style="text-align:right"><button id="closeEdit">Close</button></div><h3>Edit Item</h3><div id="editContent"></div><div style="text-align:right;margin-top:8px"><button id="saveEdit" class="btn btn-primary">Save</button></div></div></div>
 
+    <!-- Move Quantity Modal -->
+    <div id="qtyModal" class="modal"><div class="card"><div style="text-align:right"><button id="closeQty">Close</button></div><h3>How many to move?</h3><div id="qtyContent" style="display:flex;align-items:center;gap:10px;justify-content:center;margin:12px 0;">
+        <button id="qty-decr" class="btn">-</button>
+        <div style="min-width:60px;text-align:center;font-size:1.2rem" id="qty-value">1</div>
+        <button id="qty-incr" class="btn">+</button>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:center;margin-top:6px">
+        <button id="qty-all" class="btn">All</button>
+        <button id="qty-confirm" class="btn btn-primary">Move</button>
+        <button id="qty-cancel" class="btn btn-danger">Cancel</button>
+    </div></div></div>
+
 <script>
 const DBS = ['searchRack','ebayStore','bol','sold','archived'];
 const DB_LABELS = {searchRack:'Inventory', ebayStore:'Ebay live', bol:'Macy BOL', sold:'Sold', archived:'Archived'};
@@ -254,9 +266,55 @@ function onEditLocation(rackId, barcode){
     sessionStorage.setItem('searchrack_return_state', JSON.stringify(state));
     // also store the rack id to edit
     sessionStorage.setItem('searchrack_edit_id', String(rackId));
-    // navigate to position page in edit mode
-    // include a query param so position page knows this is an edit flow
-    window.location.href = '/position?edit_rack_id=' + encodeURIComponent(rackId);
+
+    // Determine quantity for this row; if >1 ask how many to move
+    const tr = document.querySelector(`tr[data-id="${rackId}"]`);
+    let qty = 1;
+    try{
+        if(tr){ qty = parseInt(tr.children[4].textContent||'1', 10) || 1; }
+    }catch(e){ qty = 1; }
+    // If qty > 1 show qty modal, otherwise proceed immediately
+    if(qty > 1){
+        showQtyModal(rackId, qty);
+    } else {
+        // navigate to position page in edit mode with move_qty=1
+        window.location.href = '/position?edit_rack_id=' + encodeURIComponent(rackId) + '&move_qty=1';
+    }
+}
+
+function showQtyModal(rackId, maxQty){
+    const modal = document.getElementById('qtyModal');
+    const valEl = document.getElementById('qty-value');
+    let v = 1;
+    valEl.textContent = String(v);
+    modal.style.display = 'flex';
+
+    const incr = document.getElementById('qty-incr');
+    const decr = document.getElementById('qty-decr');
+    const allBtn = document.getElementById('qty-all');
+    const confirm = document.getElementById('qty-confirm');
+    const cancel = document.getElementById('qty-cancel');
+    const close = document.getElementById('closeQty');
+
+    function setVal(n){ v = Math.max(1, Math.min(maxQty, n)); valEl.textContent = String(v); }
+    function cleanup(){ modal.style.display='none'; incr.removeEventListener('click', onIncr); decr.removeEventListener('click', onDecr); allBtn.removeEventListener('click', onAll); confirm.removeEventListener('click', onConfirm); cancel.removeEventListener('click', onCancel); close.removeEventListener('click', onCancel); }
+
+    function onIncr(){ setVal(v+1); }
+    function onDecr(){ setVal(v-1); }
+    function onAll(){ setVal(maxQty); }
+    function onConfirm(){
+        cleanup();
+        // navigate including move_qty param
+        window.location.href = '/position?edit_rack_id=' + encodeURIComponent(rackId) + '&move_qty=' + encodeURIComponent(String(v));
+    }
+    function onCancel(){ cleanup(); }
+
+    incr.addEventListener('click', onIncr);
+    decr.addEventListener('click', onDecr);
+    allBtn.addEventListener('click', onAll);
+    confirm.addEventListener('click', onConfirm);
+    cancel.addEventListener('click', onCancel);
+    close.addEventListener('click', onCancel);
 }
 
 // (Picture position uses the Position flow now.)

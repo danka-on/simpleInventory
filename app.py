@@ -1388,6 +1388,11 @@ def api_set_rack_location():
     item_id = data.get('id')
     pos = (data.get('item_position') or '').strip()
     pictureposition = (data.get('pictureposition') or '').strip()
+    # Optional move quantity: how many items to move from this row's Quantity
+    try:
+        move_qty = int(data.get('move_qty')) if data.get('move_qty') is not None else None
+    except Exception:
+        move_qty = None
     # Require id and at least one of pos or pictureposition
     if not item_id or (not pos and not pictureposition):
         return jsonify({'success': False, 'error': 'Missing id or item_position/pictureposition'}), 400
@@ -1404,6 +1409,36 @@ def api_set_rack_location():
             pk = 'ID'
         else:
             pk = None
+        # Load current row to inspect Quantity and other columns (we may need to split)
+        # Determine how to address the row (by pk or rowid)
+        id_col = pk
+        id_val = item_id
+        if not id_col:
+            id_col = 'rowid'
+            id_val = item_id
+
+        cur.execute(f"SELECT * FROM SEARCHRACK WHERE {id_col} = ?", (id_val,))
+        existing = cur.fetchone()
+        # If we couldn't find a matching row, return error
+        if not existing:
+            conn.close()
+            return jsonify({'success': False, 'error': 'Row not found'}), 404
+
+        # Extract current quantity (try common column names)
+        existing_dict = {d[0]: existing[idx] for idx, d in enumerate(cur.description)} if cur.description else dict(zip([c[0] for c in cur.description], existing))
+        qty_cols = ['Quantity','quantity','Qty','QTY']
+        current_qty = None
+        for qc in qty_cols:
+            if qc in existing_dict and existing_dict.get(qc) is not None:
+                try:
+                    current_qty = int(existing_dict.get(qc))
+                    break
+                except Exception:
+                    current_qty = None
+        # default to 1 when quantity is not known
+        if current_qty is None:
+            current_qty = 1
+
         # If a pictureposition is provided, update PICTUREPOSITION and clear ITEM_POSITION
         if pictureposition:
             if 'PICTUREPOSITION' in cols or 'pictureposition' in [c.lower() for c in cols]:
@@ -1411,10 +1446,54 @@ def api_set_rack_location():
             else:
                 pic_col = 'PICTUREPOSITION'
             # enforce single-location rule: set pictureposition and clear item_position
-            if pk:
-                cur.execute(f"UPDATE SEARCHRACK SET {pic_col} = ?, ITEM_POSITION = ? WHERE {pk} = ?", (pictureposition, '', item_id))
+            # Handle splitting when move_qty provided and less than current_qty
+            target_move = move_qty or current_qty
+            if target_move < 1 or target_move > current_qty:
+                conn.close()
+                return jsonify({'success': False, 'error': 'move_qty out of range'}), 400
+
+            if target_move < current_qty:
+                # decrement existing row's Quantity and insert a new row for moved qty
+                # find quantity column name to update (if any)
+                qty_col_name = None
+                for qc in qty_cols:
+                    if qc in cols:
+                        qty_col_name = qc
+                        break
+                if qty_col_name:
+                    # update original row quantity
+                    if pk:
+                        cur.execute(f"UPDATE SEARCHRACK SET {qty_col_name} = {qty_col_name} - ? WHERE {pk} = ?", (target_move, item_id))
+                    else:
+                        cur.execute(f"UPDATE SEARCHRACK SET {qty_col_name} = {qty_col_name} - ? WHERE rowid = ?", (target_move, item_id))
+                else:
+                    # no quantity column; treat as items of qty 1, so we will just insert new row and delete original
+                    pass
+
+                # prepare new row columns/values copied from existing, but with moved qty and new pictureposition/item_position
+                col_names = [c for c in cols]
+                placeholders = ','.join('?' for _ in col_names)
+                # build values copying existing row values, replacing quantity and picture/item position
+                cur_vals = []
+                for c in col_names:
+                    val = existing[col_names.index(c)] if c in col_names else None
+                    # replace quantity if applicable
+                    if c == qty_col_name:
+                        val = target_move
+                    if c.lower() == 'pictureposition':
+                        val = pictureposition
+                    if c.lower() == 'item_position' or c == 'ITEM_POSITION' or c.lower() == 'itemposition':
+                        # clear item position when pictureposition is set
+                        val = ''
+                    cur_vals.append(val)
+                # Insert new row (without specifying rowid)
+                cur.execute(f"INSERT INTO SEARCHRACK ({', '.join(col_names)}) VALUES ({placeholders})", tuple(cur_vals))
             else:
-                cur.execute(f"UPDATE SEARCHRACK SET {pic_col} = ?, ITEM_POSITION = ? WHERE rowid = ?", (pictureposition, '', item_id))
+                # moving all items: update in-place
+                if pk:
+                    cur.execute(f"UPDATE SEARCHRACK SET {pic_col} = ?, ITEM_POSITION = ? WHERE {pk} = ?", (pictureposition, '', item_id))
+                else:
+                    cur.execute(f"UPDATE SEARCHRACK SET {pic_col} = ?, ITEM_POSITION = ? WHERE rowid = ?", (pictureposition, '', item_id))
         # Otherwise update only ITEM_POSITION and clear PICTUREPOSITION
         elif pos:
             # find picture column name if exists
@@ -1426,16 +1505,51 @@ def api_set_rack_location():
                     if c.lower() == 'pictureposition':
                         pic_col = c
                         break
-            if pk:
-                if pic_col:
-                    cur.execute(f"UPDATE SEARCHRACK SET ITEM_POSITION = ?, {pic_col} = ? WHERE {pk} = ?", (pos, '', item_id))
-                else:
-                    cur.execute(f"UPDATE SEARCHRACK SET ITEM_POSITION = ? WHERE {pk} = ?", (pos, item_id))
+            # Handle splitting similar to pictureposition case
+            target_move = move_qty or current_qty
+            if target_move < 1 or target_move > current_qty:
+                conn.close()
+                return jsonify({'success': False, 'error': 'move_qty out of range'}), 400
+
+            if target_move < current_qty:
+                # decrement existing row's Quantity
+                qty_col_name = None
+                for qc in qty_cols:
+                    if qc in cols:
+                        qty_col_name = qc
+                        break
+                if qty_col_name:
+                    if pk:
+                        cur.execute(f"UPDATE SEARCHRACK SET {qty_col_name} = {qty_col_name} - ? WHERE {pk} = ?", (target_move, item_id))
+                    else:
+                        cur.execute(f"UPDATE SEARCHRACK SET {qty_col_name} = {qty_col_name} - ? WHERE rowid = ?", (target_move, item_id))
+
+                # insert new row for moved qty
+                col_names = [c for c in cols]
+                placeholders = ','.join('?' for _ in col_names)
+                cur_vals = []
+                for c in col_names:
+                    val = existing[col_names.index(c)] if c in col_names else None
+                    if c == qty_col_name:
+                        val = target_move
+                    if c.lower() == 'pictureposition':
+                        val = ''
+                    if c.lower() == 'item_position' or c == 'ITEM_POSITION' or c.lower() == 'itemposition':
+                        val = pos
+                    cur_vals.append(val)
+                cur.execute(f"INSERT INTO SEARCHRACK ({', '.join(col_names)}) VALUES ({placeholders})", tuple(cur_vals))
             else:
-                if pic_col:
-                    cur.execute(f"UPDATE SEARCHRACK SET ITEM_POSITION = ?, {pic_col} = ? WHERE rowid = ?", (pos, '', item_id))
+                # update in-place
+                if pk:
+                    if pic_col:
+                        cur.execute(f"UPDATE SEARCHRACK SET ITEM_POSITION = ?, {pic_col} = ? WHERE {pk} = ?", (pos, '', item_id))
+                    else:
+                        cur.execute(f"UPDATE SEARCHRACK SET ITEM_POSITION = ? WHERE {pk} = ?", (pos, item_id))
                 else:
-                    cur.execute("UPDATE SEARCHRACK SET ITEM_POSITION = ? WHERE rowid = ?", (pos, item_id))
+                    if pic_col:
+                        cur.execute(f"UPDATE SEARCHRACK SET ITEM_POSITION = ?, {pic_col} = ? WHERE rowid = ?", (pos, '', item_id))
+                    else:
+                        cur.execute("UPDATE SEARCHRACK SET ITEM_POSITION = ? WHERE rowid = ?", (pos, item_id))
         conn.commit()
         updated = cur.rowcount
         conn.close()
