@@ -9,7 +9,11 @@
         .top {display:flex;gap:10px;align-items:center;justify-content:space-between}
         .actions {display:flex;gap:8px;align-items:center}
         .btn {padding:8px 14px;border-radius:6px;border:none;cursor:pointer}
-        .btn-primary{background:#00b894;color:#fff}
+    .btn-primary{background:#00b894;color:#fff}
+    .btn-blue{background:#3498db;color:#fff}
+    /* Sync button: distinct color and inline icon */
+    .btn-sync{background:#2d9cdb;color:#fff;display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:6px;border:none}
+    .btn-sync svg{width:16px;height:16px;flex:0 0 16px;fill:currentColor}
         .btn-danger{background:#e74c3c;color:#fff}
         .filters {display:flex;gap:8px;align-items:center}
         .search-row{display:flex;gap:8px;margin-top:12px}
@@ -29,17 +33,19 @@
 </head>
 <body>
     <div class="top">
-        <div>
+        <div style="display:flex;gap:8px;align-items:center">
             <a href="/" style="text-decoration:none"><button class="btn btn-danger">Back</button></a>
+            <button id="refresh-btn" class="btn btn-sync" title="Sync DB" aria-label="Sync DB">
+                <!-- Inline sync icon -->
+                <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false"><path d="M21 12.79A9 9 0 1 0 11.21 3" stroke="none"/></svg>
+                Sync DB
+            </button>
+            <span id="refresh-status" class="small-muted" style="margin-left:8px"></span>
         </div>
         <div class="actions">
                 <div class="filters" id="db-filters">
                 <!-- checkboxes inserted here -->
             </div>
-                <div style="margin-left:12px">
-                    <button id="refresh-btn" class="btn">Refresh</button>
-                    <span id="refresh-status" class="small-muted" style="margin-left:8px"></span>
-                </div>
         </div>
     </div>
 
@@ -56,7 +62,6 @@
                 <option value="50">50</option>
             </select>
         </label>
-        <label style="font-size:0.95rem; color:#444"> <input type="checkbox" id="fetch-all" style="margin-left:8px"> Fetch all results (may be slow)</label>
         <div id="pagination-controls" style="margin-left:auto"></div>
     </div>
 
@@ -114,7 +119,8 @@ async function doSearch(){
     const dbs = getActiveDBs();
     _allResults = [];
     // If user requested fetch-all, send limit=0 to tell server to return all matches
-    const wantAll = document.getElementById('fetch-all').checked;
+    // default: fetch all results from server for each selected DB
+    const wantAll = true;
     for(const db of dbs){
         try{
             let j = null;
@@ -170,10 +176,7 @@ function renderPagination(total, pages){
 }
 
 document.getElementById('page-size').addEventListener('change', ()=>{ _pageSize = parseInt(document.getElementById('page-size').value,10); _currentPage = 1; renderPagedResults(); });
-document.getElementById('fetch-all').addEventListener('change', (e)=>{
-    const disabled = e.currentTarget.checked;
-    document.getElementById('page-size').disabled = disabled;
-});
+    // page-size control hidden when fetching all by default
 
 function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
@@ -203,10 +206,10 @@ function renderResults(results){
             let editBtn = '';
             let picBtn = '';
             if(db === 'searchRack'){
-                editBtn = `<button class="btn" onclick="onEditLocation(${r.id}, '${esc(r.barcode||'')}')">Edit Location</button> `;
+                editBtn = `<button class="btn btn-blue" onclick="onEditLocation(${r.id}, '${esc(r.barcode||'')}')">Edit Location</button> `;
                 picBtn = '';
             }
-            actionHtml = picBtn + editBtn + `<button class="btn" onclick="onEdit('${db}',${r.id})">Edit</button> <button class="btn" onclick="onDelete('${db}',${r.id})">Delete</button>`;
+            actionHtml = picBtn + editBtn + `<button class="btn btn-primary" onclick="onEdit('${db}',${r.id})">Edit</button> <button class="btn btn-danger" onclick="onDelete('${db}',${r.id})">Delete</button>`;
         }
         html += `<tr data-src="${db}" data-id="${r.id}">`+
                 `<td><div class="title-cell"><img class="thumb" src="${thumb}" onerror="this.src='${missingThumb(48,48,'No Img')}'"><a href="#" class="title-link" data-src="${db}" data-id="${r.id}" data-image="${img}" data-title="${esc(r.title)}">${title}</a></div></td>`+
