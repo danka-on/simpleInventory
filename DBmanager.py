@@ -534,18 +534,24 @@ def enrich_searchrack_db(batch_size=500, do_backup=True):
                         # Update TITLE if empty, set ITEMID/QUANTITY/IMAGE when available
                         try:
                             # Prefer existing TITLE if present
-                            s_cur.execute('SELECT TITLE, IMAGES, IMAGE, ITEMID, QUANTITY FROM SEARCHRACK WHERE ID = ?', (rid,))
+                            s_cur.execute('SELECT TITLE, IMAGES, IMAGE, ITEMID, QUANTITY, BARCODE FROM SEARCHRACK WHERE ID = ?', (rid,))
                             currow = s_cur.fetchone()
                             curtitle = currow[0] if currow else None
                             curimages = currow[1] if currow else None
                             curimage = currow[2] if currow else None
                             curitemid = currow[3] if currow else None
                             curqty = currow[4] if currow else None
+                            curbarcode = currow[5] if currow else None
                             new_title = curtitle or data.get('title')
                             new_image = curimage or curimages or data.get('image')
                             new_itemid = curitemid or data.get('itemid')
                             new_qty = curqty or data.get('quantity')
-                            s_cur.execute('UPDATE SEARCHRACK SET TITLE = ?, IMAGE = ?, ITEMID = ?, QUANTITY = ? WHERE ID = ?', (new_title, new_image, new_itemid, new_qty, rid))
+                            # If barcode is missing in SEARCHRACK and enrichment provides one, populate it
+                            new_barcode = curbarcode or None
+                            if (not new_barcode) and data.get('itemid'):
+                                # for bol, itemid is the upc; for ebayStore it may be ItemID or UPC
+                                new_barcode = data.get('itemid')
+                            s_cur.execute('UPDATE SEARCHRACK SET TITLE = ?, IMAGE = ?, ITEMID = ?, QUANTITY = ?, BARCODE = ? WHERE ID = ?', (new_title, new_image, new_itemid, new_qty, new_barcode, rid))
                             total_updates += 1
                         except Exception:
                             continue

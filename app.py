@@ -1230,9 +1230,12 @@ def api_search_db(db_key):
         results = []
         for r in rows:
             item = dict(r)
-            # Prefer UPC for ebayStore entries
+            # Prefer UPC for ebayStore entries; for bol use upc
             if db_key == 'ebayStore':
                 barcode_val = item.get('UPC') or item.get('upc') or item.get('BARCODE') or item.get('barcode') or item.get('Barcode') or ''
+            elif db_key == 'bol':
+                # bol_items schema: upc, item_description
+                barcode_val = item.get('upc') or item.get('UPC') or item.get('BARCODE') or item.get('barcode') or ''
             else:
                 barcode_val = item.get('BARCODE') or item.get('barcode') or item.get('Barcode') or ''
             item_out = {
@@ -1286,6 +1289,14 @@ def api_search_db(db_key):
                             bol_conn.close()
                         except Exception:
                             pass
+            except Exception:
+                pass
+            # For bol rows, prefer bol-specific fields
+            try:
+                if db_key == 'bol':
+                    # Use bol_items.item_description as title and upc as barcode
+                    item_out['title'] = item.get('item_description') or item.get('ITEM_DESCRIPTION') or item_out.get('title')
+                    item_out['barcode'] = item.get('upc') or item.get('UPC') or item_out.get('barcode')
             except Exception:
                 pass
             results.append(item_out)
