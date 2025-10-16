@@ -1339,6 +1339,39 @@ def api_lookup_location():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/set_rack_location', methods=['POST'])
+def api_set_rack_location():
+    """Set ITEM_POSITION for a SEARCHRACK row. Expects JSON: { id: <id>, item_position: <pos> }"""
+    data = request.get_json() or {}
+    item_id = data.get('id')
+    pos = (data.get('item_position') or '').strip()
+    if not item_id or not pos:
+        return jsonify({'success': False, 'error': 'Missing id or item_position'}), 400
+    try:
+        conn = sqlite3.connect('searchRack.db')
+        cur = conn.cursor()
+        # Try updating by id column; fall back to rowid if id column not present
+        cur.execute("PRAGMA table_info('SEARCHRACK')")
+        cols = [r[1] for r in cur.fetchall()]
+        pk = None
+        if 'id' in cols:
+            pk = 'id'
+        elif 'ID' in cols:
+            pk = 'ID'
+        else:
+            pk = None
+        if pk:
+            cur.execute(f"UPDATE SEARCHRACK SET ITEM_POSITION = ? WHERE {pk} = ?", (pos, item_id))
+        else:
+            cur.execute("UPDATE SEARCHRACK SET ITEM_POSITION = ? WHERE rowid = ?", (pos, item_id))
+        conn.commit()
+        updated = cur.rowcount
+        conn.close()
+        return jsonify({'success': True, 'updated': updated})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 def _get_table_and_pk(db_path, table_hint=None):
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()

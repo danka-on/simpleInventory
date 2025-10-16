@@ -237,18 +237,36 @@
             },
             (decodedText) => {
                 const code = decodedText.trim();
-                if (!code.match(/^(gr[1-5]|or[1-3])s[2-6]$/)) return;
-                document.getElementById("scanned_result").value = code;
-                // Set sessionStorage for additem checklist
-                sessionStorage.setItem('item_position', code);
-                stopScanner();
-                playBeep();
-                // Show green screen and submit after delay
-                const greenScreen = document.getElementById('green-screen');
-                greenScreen.classList.add('visible');
-                setTimeout(() => {
-                    document.getElementById("scan_form").submit();
-                }, 1000);
+                    if (!code.match(/^(gr[1-5]|or[1-3])s[2-6]$/)) return;
+                    const posCode = code;
+                    document.getElementById("scanned_result").value = posCode;
+                    // Set sessionStorage for additem checklist
+                    sessionStorage.setItem('item_position', posCode);
+                    stopScanner();
+                    playBeep();
+                    // Show green screen
+                    const greenScreen = document.getElementById('green-screen');
+                    greenScreen.classList.add('visible');
+                    // If this page was opened for editing a SEARCHRACK row, call API to set it and then return
+                    const urlParams = new URLSearchParams(window.location.search);
+                    const editId = urlParams.get('edit_rack_id');
+                    if(editId){
+                        // call API
+                        fetch('/api/set_rack_location', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id: editId, item_position: posCode})})
+                        .then(r=>r.json())
+                        .then(j=>{
+                            // restore search state if any
+                            const st = sessionStorage.getItem('searchrack_return_state');
+                            if(st){
+                                sessionStorage.removeItem('searchrack_return_state');
+                            }
+                            // briefly show green then redirect back
+                            setTimeout(()=>{ window.location.href = '/searchrack'; }, 600);
+                        }).catch(err=>{ console.error('Failed to set rack location', err); setTimeout(()=>{ window.location.href = '/searchrack'; }, 600); });
+                    } else {
+                        // normal flow: submit form to /submitposition
+                        setTimeout(() => { document.getElementById("scan_form").submit(); }, 500);
+                    }
             },
             (error) => {}
         ).then(() => {
@@ -415,8 +433,9 @@
             var code = this.value.trim();
             var flashMsg = document.getElementById('flashMsg');
             if (code.match(/^(gr[1-5]|or[1-3])s[2-6]$/i)) {
-                document.getElementById('scanned_result').value = code;
-                sessionStorage.setItem('item_position', code);
+                const posCode = code;
+                document.getElementById('scanned_result').value = posCode;
+                sessionStorage.setItem('item_position', posCode);
                 var greenScreen = document.getElementById('green-screen');
                 greenScreen.classList.add('visible');
                 // Play positive beep
@@ -437,9 +456,18 @@
                         gain.disconnect();
                     };
                 } catch(e) {}
-                setTimeout(function() {
-                    document.getElementById('scan_form').submit();
-                }, 500); // Reduced from 1000ms to 500ms
+                // If in edit mode, call API and redirect back
+                const urlParams = new URLSearchParams(window.location.search);
+                const editId = urlParams.get('edit_rack_id');
+                if(editId){
+                    fetch('/api/set_rack_location', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id: editId, item_position: posCode})})
+                    .then(r=>r.json()).then(j=>{
+                        // redirect back to searchrack
+                        setTimeout(()=>{ window.location.href = '/searchrack'; }, 600);
+                    }).catch(err=>{ console.error('set location failed',err); setTimeout(()=>{ window.location.href = '/searchrack'; }, 600); });
+                } else {
+                    setTimeout(function() { document.getElementById('scan_form').submit(); }, 400);
+                }
                 if (flashMsg) {
                     flashMsg.style.display = 'none';
                 }

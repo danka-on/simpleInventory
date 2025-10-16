@@ -187,7 +187,12 @@ function renderResults(results){
             // Archived row: show Restore and Delete Forever
             actionHtml = `<button class="btn btn-primary" onclick="onRestore(${r.id})">Restore</button> <button class="btn btn-danger" onclick="onDeleteArchive(${r.id})">Delete Forever</button>`;
         } else {
-            actionHtml = `<button class="btn" onclick="onEdit('${db}',${r.id})">Edit</button> <button class="btn" onclick="onDelete('${db}',${r.id})">Delete</button>`;
+            // Add Edit Location button only for searchRack rows
+            let editBtn = '';
+            if(db === 'searchRack'){
+                editBtn = `<button class="btn" onclick="onEditLocation(${r.id}, '${esc(r.barcode||'')}')">Edit Location</button> `;
+            }
+            actionHtml = editBtn + `<button class="btn" onclick="onEdit('${db}',${r.id})">Edit</button> <button class="btn" onclick="onDelete('${db}',${r.id})">Delete</button>`;
         }
         html += `<tr data-src="${db}" data-id="${r.id}">`+
                 `<td><div class="title-cell"><img class="thumb" src="${thumb}" onerror="this.src='${missingThumb(48,48,'No Img')}'"><a href="#" class="title-link" data-src="${db}" data-id="${r.id}" data-image="${img}" data-title="${esc(r.title)}">${title}</a></div></td>`+
@@ -233,6 +238,23 @@ function renderResults(results){
             }
         });
     });
+}
+
+// When editing location: save search state, then redirect to position page in edit mode
+function onEditLocation(rackId, barcode){
+    // save current search UI state so we can restore after returning
+    const state = {
+        q: document.getElementById('search-input').value || '',
+        pageSize: document.getElementById('page-size').value || '10',
+        page: _currentPage || 1,
+        checkedDBs: getActiveDBs()
+    };
+    sessionStorage.setItem('searchrack_return_state', JSON.stringify(state));
+    // also store the rack id to edit
+    sessionStorage.setItem('searchrack_edit_id', String(rackId));
+    // navigate to position page in edit mode
+    // include a query param so position page knows this is an edit flow
+    window.location.href = '/position?edit_rack_id=' + encodeURIComponent(rackId);
 }
 
 async function onViewTitle(e){
@@ -333,6 +355,26 @@ document.getElementById('closeEdit').addEventListener('click', ()=>document.getE
 
 // initial load: search default DBs
 window.addEventListener('load', ()=>{ document.getElementById('search-input').focus(); doSearch(); });
+
+// If returning from an edit flow, restore previous search state
+window.addEventListener('load', ()=>{
+    try{
+        const st = sessionStorage.getItem('searchrack_return_state');
+        if(st){
+            const s = JSON.parse(st);
+            document.getElementById('search-input').value = s.q || '';
+            if(s.pageSize) document.getElementById('page-size').value = s.pageSize;
+            // restore checked DBs
+            if(Array.isArray(s.checkedDBs)){
+                // uncheck all first
+                DBS.forEach(k=> document.getElementById('chk-'+k).checked = s.checkedDBs.indexOf(k) !== -1 );
+            }
+            // clear saved state then run search
+            sessionStorage.removeItem('searchrack_return_state');
+            doSearch();
+        }
+    }catch(e){ console.error('restore state failed', e); }
+});
 
 // Refresh handler: call refresh API and poll status
 document.getElementById('refresh-btn').addEventListener('click', async ()=>{
