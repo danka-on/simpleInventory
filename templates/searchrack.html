@@ -33,9 +33,13 @@
             <a href="/" style="text-decoration:none"><button class="btn btn-danger">Back</button></a>
         </div>
         <div class="actions">
-            <div class="filters" id="db-filters">
+                <div class="filters" id="db-filters">
                 <!-- checkboxes inserted here -->
             </div>
+                <div style="margin-left:12px">
+                    <button id="refresh-btn" class="btn">Refresh</button>
+                    <span id="refresh-status" class="small-muted" style="margin-left:8px"></span>
+                </div>
         </div>
     </div>
 
@@ -52,6 +56,7 @@
                 <option value="50">50</option>
             </select>
         </label>
+        <label style="font-size:0.95rem; color:#444"> <input type="checkbox" id="fetch-all" style="margin-left:8px"> Fetch all results (may be slow)</label>
         <div id="pagination-controls" style="margin-left:auto"></div>
     </div>
 
@@ -95,8 +100,9 @@ document.getElementById('search-input').addEventListener('keyup', (e)=>{ if(e.ke
 async function doSearch(){
     const q = document.getElementById('search-input').value.trim();
     const dbs = getActiveDBs();
-    document.getElementById('active-dbs').textContent = dbs.map(d=>DB_LABELS[d]).join(', ');
     _allResults = [];
+    // If user requested fetch-all, send limit=0 to tell server to return all matches
+    const wantAll = document.getElementById('fetch-all').checked;
     for(const db of dbs){
         try{
             let j = null;
@@ -104,7 +110,7 @@ async function doSearch(){
                 const resp = await fetch('/api/archived');
                 j = await resp.json();
             } else {
-                const resp = await fetch('/api/search/'+db, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({q:q, limit:50})});
+                const resp = await fetch('/api/search/'+db, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({q:q, limit: wantAll ? 0 : 50})});
                 j = await resp.json();
             }
             if(j && j.results) {
@@ -114,6 +120,9 @@ async function doSearch(){
     }
     _currentPage = 1;
     _pageSize = parseInt(document.getElementById('page-size').value || '10', 10);
+    // Update the 'Showing' label to include total result count
+    const activeLabel = dbs.map(d=>DB_LABELS[d]).join(', ');
+    document.getElementById('active-dbs').textContent = `${activeLabel} — ${_allResults.length} results`;
     renderPagedResults();
 }
 
@@ -149,6 +158,10 @@ function renderPagination(total, pages){
 }
 
 document.getElementById('page-size').addEventListener('change', ()=>{ _pageSize = parseInt(document.getElementById('page-size').value,10); _currentPage = 1; renderPagedResults(); });
+document.getElementById('fetch-all').addEventListener('change', (e)=>{
+    const disabled = e.currentTarget.checked;
+    document.getElementById('page-size').disabled = disabled;
+});
 
 function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
@@ -320,6 +333,42 @@ document.getElementById('closeEdit').addEventListener('click', ()=>document.getE
 
 // initial load: search default DBs
 window.addEventListener('load', ()=>{ document.getElementById('search-input').focus(); doSearch(); });
+
+// Refresh handler: call refresh API and poll status
+document.getElementById('refresh-btn').addEventListener('click', async ()=>{
+    if(!confirm('Run real-time refresh of searchRack? This will update searchRack.db by looking up UPCs in ebayStore.db and bol.db.')) return;
+    document.getElementById('refresh-status').textContent = 'starting...';
+    try{
+        const resp = await fetch('/api/refresh_searchrack', {method:'POST'});
+        const j = await resp.json();
+        if(!j.success){
+            alert('Failed to start refresh: '+(j.message||JSON.stringify(j)));
+            document.getElementById('refresh-status').textContent='failed to start';
+            return;
+        }
+        document.getElementById('refresh-status').textContent = 'running...';
+        // poll status
+        const poll = setInterval(async ()=>{
+            try{
+                const s = await (await fetch('/api/enrich_status')).json();
+                if(s.running){
+                    document.getElementById('refresh-status').textContent = 'running...';
+                } else {
+                    document.getElementById('refresh-status').textContent = s.message || 'idle';
+                    clearInterval(poll);
+                    alert('Refresh complete: '+(s.message||'done'));
+                    doSearch();
+                }
+            }catch(innerErr){
+                console.error('Status poll failed', innerErr);
+            }
+        }, 1500);
+    }catch(err){
+        console.error(err);
+        alert('Refresh failed');
+        document.getElementById('refresh-status').textContent='error';
+    }
+});
 </script>
 </body>
 </html>

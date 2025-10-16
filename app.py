@@ -11,6 +11,7 @@ import xml.dom.minidom as minidom
 
 from inventory import find_item  # adjust this to match your actual import
 from DBmanager import ebayStoreDB, addToRack, store_ebay_order, createSearchRackDB, updateSearchRackDB
+from DBmanager import enrich_searchrack_db
 from BOLextractor import process_bol_excel
 from manualMatcher import get_bol_items, get_ebay_items, fuse_and_store_match
 
@@ -31,6 +32,30 @@ headers = {
     "Authorization": f"Bearer {access_token}",
     "Content-Type": "application/json"
 }
+
+# Simple lock and status for background enrichment
+_enrich_lock = threading.Lock()
+_enrich_status = {'running': False, 'last_run': None, 'message': ''}
+
+def _run_enrich_in_background():
+    global _enrich_status
+    if _enrich_lock.locked():
+        return False
+    def _worker():
+        global _enrich_status
+        with _enrich_lock:
+            _enrich_status['running'] = True
+            _enrich_status['message'] = 'running'
+            try:
+                enrich_searchrack_db()
+                _enrich_status['message'] = 'completed'
+            except Exception as e:
+                _enrich_status['message'] = f'error: {e}'
+            _enrich_status['last_run'] = int(time.time())
+            _enrich_status['running'] = False
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+    return True
 
 
 
@@ -97,6 +122,34 @@ def search():
     query = request.form["query"]
     result = find_item(query)
     return render_template("index.html", search_result=result)
+
+
+# Populate searchRack on startup (best-effort). Guard against Flask reloader by checking if in main thread.
+def maybe_run_startup_enrich():
+    # only run once in main process
+    try:
+        if os.environ.get('WERKZEUG_RUN_MAIN') == 'true' or os.environ.get('FLASK_ENV') == 'production' or not os.getenv('FLASK_DEBUG'):
+            print('Starting searchRack enrichment on startup...')
+            # run in background so startup isn't blocked heavily
+            _run_enrich_in_background()
+    except Exception as e:
+        print('Failed to start startup enrich:', e)
+
+
+@app.route('/api/refresh_searchrack', methods=['POST'])
+def api_refresh_searchrack():
+    # no auth as requested
+    if _enrich_lock.locked():
+        return jsonify({'success': False, 'message': 'Enrichment already running'})
+    started = _run_enrich_in_background()
+    if not started:
+        return jsonify({'success': False, 'message': 'Failed to start enrichment'})
+    return jsonify({'success': True, 'message': 'Enrichment started'})
+
+
+@app.route('/api/enrich_status', methods=['GET'])
+def api_enrich_status():
+    return jsonify(_enrich_status)
 
 SHELF_COORDS = [
     {"gr1":
@@ -1117,7 +1170,12 @@ def update_item(db_type, item_id):
 def api_search_db(db_key):
     data = request.get_json() or {}
     q = (data.get('q') or '').strip()
-    limit = int(data.get('limit') or 50)
+    # Accept limit from client. If limit is 0 or None, we will NOT apply a SQL LIMIT (i.e., return all rows).
+    limit_raw = data.get('limit')
+    try:
+        limit = int(limit_raw) if limit_raw is not None else 50
+    except Exception:
+        limit = 50
     try:
         mapping = {
             'rack': 'rack.db',
@@ -1154,29 +1212,85 @@ def api_search_db(db_key):
                 likes.append(f"LOWER(COALESCE({c},'')) LIKE ?")
                 params.append(f"%{q.lower()}%")
             where_clause = ' WHERE ' + ' OR '.join(likes)
-        sql = f"SELECT * FROM {table} {where_clause} LIMIT ?"
-        params.append(limit)
-        cur.execute(sql, params)
+        # compute total matching count for pagination
+        count_sql = f"SELECT COUNT(*) FROM {table} {where_clause}"
+        cur.execute(count_sql, params)
+        total_count = cur.fetchone()[0]
+
+        # If limit <= 0, return all rows; otherwise apply LIMIT/OFFSET
+        offset = int(data.get('offset') or 0)
+        if limit and int(limit) > 0:
+            sql = f"SELECT * FROM {table} {where_clause} LIMIT ? OFFSET ?"
+            exec_params = params + [limit, offset]
+            cur.execute(sql, exec_params)
+        else:
+            sql = f"SELECT * FROM {table} {where_clause}"
+            cur.execute(sql, params)
         rows = [dict(r) for r in cur.fetchall()]
         results = []
         for r in rows:
             item = dict(r)
+            # Prefer UPC for ebayStore entries
+            if db_key == 'ebayStore':
+                barcode_val = item.get('UPC') or item.get('upc') or item.get('BARCODE') or item.get('barcode') or item.get('Barcode') or ''
+            else:
+                barcode_val = item.get('BARCODE') or item.get('barcode') or item.get('Barcode') or ''
             item_out = {
                 'source_db': db_key,
                 'source_table': table,
                 'id': item.get('id') or item.get('ID') or item.get('rowid'),
                 'title': item.get('Title') or item.get('title') or item.get('name') or item.get('Name') or '',
                 'image': item.get('Image') or item.get('image') or item.get('image_url') or item.get('images') or '',
-                'barcode': item.get('BARCODE') or item.get('barcode') or item.get('Barcode') or '',
+                'barcode': barcode_val,
                 'item_id': item.get('ItemID') or item.get('item_id') or item.get('ItemId') or '',
                 'pictureposition': item.get('PICTUREPOSITION') or item.get('pictureposition') or item.get('picture_position') or '',
                 'item_position': item.get('ITEM_POSITION') or item.get('item_position') or item.get('position') or '',
                 'quantity': item.get('Quantity') or item.get('quantity') or item.get('qty') or '',
                 'raw': item
             }
+            # If this row comes from searchRack (the inventory snapshot), try to enrich it
+            # by looking up the barcode (UPC) in ebayStore.db first, then bol.db as fallback.
+            try:
+                if db_key == 'searchRack' and item_out.get('barcode'):
+                    lookup_barcode = item_out.get('barcode')
+                    # lookup in ebayStore.db
+                    try:
+                        es_conn = sqlite3.connect('ebayStore.db')
+                        es_conn.row_factory = sqlite3.Row
+                        es_cur = es_conn.cursor()
+                        es_cur.execute("SELECT Title, Image, ItemID, Quantity, UPC FROM INVENTORY WHERE UPC = ? COLLATE NOCASE LIMIT 1", (lookup_barcode,))
+                        row_es = es_cur.fetchone()
+                        if row_es:
+                            # prefer values from ebayStore if present
+                            item_out['title'] = item_out.get('title') or row_es['Title']
+                            item_out['image'] = item_out.get('image') or row_es['Image']
+                            item_out['item_id'] = item_out.get('item_id') or row_es['ItemID']
+                            item_out['quantity'] = item_out.get('quantity') or row_es['Quantity']
+                        es_conn.close()
+                    except Exception:
+                        # ignore lookup errors
+                        pass
+                    # if still missing title/image, try bol.db
+                    if not item_out.get('title') or not item_out.get('image'):
+                        try:
+                            bol_conn = sqlite3.connect('bol.db')
+                            bol_conn.row_factory = sqlite3.Row
+                            bol_cur = bol_conn.cursor()
+                            bol_cur.execute('SELECT item_description, image_url, upc FROM bol_items WHERE upc = ? COLLATE NOCASE LIMIT 1', (lookup_barcode,))
+                            row_bol = bol_cur.fetchone()
+                            if row_bol:
+                                item_out['title'] = item_out.get('title') or row_bol['item_description']
+                                item_out['image'] = item_out.get('image') or row_bol['image_url']
+                                # If item_id missing, use upc as fallback
+                                item_out['item_id'] = item_out.get('item_id') or row_bol['upc']
+                            bol_conn.close()
+                        except Exception:
+                            pass
+            except Exception:
+                pass
             results.append(item_out)
         conn.close()
-        return jsonify({'results': results})
+        return jsonify({'results': results, 'total': total_count})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
