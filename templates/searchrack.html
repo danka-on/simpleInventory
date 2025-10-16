@@ -182,7 +182,7 @@ function renderResults(results){
                 `<td>${itemid}</td>`+
                 `<td>${ locDisplay ? `<a href="#" class=\"location-link\" data-src=\"${db}\" data-id=\"${r.id}\" data-barcode=\"${barcode}\" data-picture=\"${esc(r.pictureposition||'')}\">${esc(locDisplay)}</a>` : '' }</td>`+
                 `<td>${qty}</td>`+
-                `<td>${db}</td>`+
+                `<td>${ (r.archived||db==='archived') ? ('Archive ('+esc(DB_LABELS[r.orig_source_db]||r.orig_source_db||'Unknown')+')') : esc(DB_LABELS[db] || db) }</td>`+
                 `<td>${actionHtml}</td>`+
                 `</tr>`;
     })
