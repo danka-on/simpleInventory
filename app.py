@@ -1206,12 +1206,30 @@ def api_search_db(db_key):
         cols = [r[1] for r in cur.fetchall()]
         where_clause = ''
         params = []
+        # Accept optional location filter (from client UI) to search Item_Position specifically
+        location = (data.get('location') or '').strip()
         if q:
             likes = []
             for c in cols:
                 likes.append(f"LOWER(COALESCE({c},'')) LIKE ?")
                 params.append(f"%{q.lower()}%")
             where_clause = ' WHERE ' + ' OR '.join(likes)
+        # If a specific location was provided, add an AND clause to filter by item position columns
+        if location:
+            # try common column names for location
+            loc_cols = [c for c in cols if c.lower() in ('item_position','itemposition','position','item_position')]
+            if not loc_cols:
+                # fallback to any column that looks like position
+                loc_cols = [c for c in cols if 'position' in c.lower()]
+            if loc_cols:
+                loc_likes = []
+                for lc in loc_cols:
+                    loc_likes.append(f"LOWER(COALESCE({lc},'')) LIKE ?")
+                    params.append(f"%{location.lower()}%")
+                if where_clause:
+                    where_clause += ' AND (' + ' OR '.join(loc_likes) + ')'
+                else:
+                    where_clause = ' WHERE ' + ' OR '.join(loc_likes)
         # compute total matching count for pagination
         count_sql = f"SELECT COUNT(*) FROM {table} {where_clause}"
         cur.execute(count_sql, params)
@@ -1230,12 +1248,9 @@ def api_search_db(db_key):
         results = []
         for r in rows:
             item = dict(r)
-            # Prefer UPC for ebayStore entries; for bol use upc
+            # Prefer UPC for ebayStore entries
             if db_key == 'ebayStore':
                 barcode_val = item.get('UPC') or item.get('upc') or item.get('BARCODE') or item.get('barcode') or item.get('Barcode') or ''
-            elif db_key == 'bol':
-                # bol_items schema: upc, item_description
-                barcode_val = item.get('upc') or item.get('UPC') or item.get('BARCODE') or item.get('barcode') or ''
             else:
                 barcode_val = item.get('BARCODE') or item.get('barcode') or item.get('Barcode') or ''
             item_out = {
@@ -1289,14 +1304,6 @@ def api_search_db(db_key):
                             bol_conn.close()
                         except Exception:
                             pass
-            except Exception:
-                pass
-            # For bol rows, prefer bol-specific fields
-            try:
-                if db_key == 'bol':
-                    # Use bol_items.item_description as title and upc as barcode
-                    item_out['title'] = item.get('item_description') or item.get('ITEM_DESCRIPTION') or item_out.get('title')
-                    item_out['barcode'] = item.get('upc') or item.get('UPC') or item_out.get('barcode')
             except Exception:
                 pass
             results.append(item_out)
