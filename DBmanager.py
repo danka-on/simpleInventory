@@ -1,5 +1,8 @@
 import sqlite3
-import pandas as pd
+try:
+    import pandas as pd
+except Exception:
+    pd = None
 import os
 
 def createRack():
@@ -417,6 +420,15 @@ def enrich_searchrack_db(batch_size=500, do_backup=True):
             if b:
                 barcodes_set.add(b)
 
+    # Additionally, include any SEARCHRACK rows that currently lack a TITLE so we can fill missing titles
+    try:
+        s_cur.execute("SELECT DISTINCT BARCODE FROM SEARCHRACK WHERE TITLE IS NULL OR TRIM(TITLE) = ''")
+        for (b,) in s_cur.fetchall():
+            if b:
+                barcodes_set.add(str(b).strip())
+    except Exception:
+        pass
+
     # 2) new UPCs added to ebayStore since last run
     try:
         es_conn = sqlite3.connect('ebayStore.db')
@@ -476,19 +488,26 @@ def enrich_searchrack_db(batch_size=500, do_backup=True):
             params = batch + batch
             es_cur.execute(sql, params)
             for r in es_cur.fetchall():
-                key = (r['UPC'] or r['ItemID'] or '').strip()
-                if not key:
-                    # fallback: try ItemID
-                    key = (r['ItemID'] or '').strip()
-                if not key:
-                    continue
-                enrichment[key] = {'title': r['Title'], 'itemid': r['ItemID'], 'quantity': r['Quantity'], 'image': r['Image'], 'source': 'ebayStore'}
+                upc = (r['UPC'] or '')
+                itemid = (r['ItemID'] or '')
+                # normalize keys for matching
+                keys = set()
+                if upc:
+                    keys.add(str(upc).strip())
+                    keys.add(str(upc).strip().lower())
+                if itemid:
+                    keys.add(str(itemid).strip())
+                    keys.add(str(itemid).strip().lower())
+                for key in keys:
+                    enrichment[key] = {'title': r['Title'], 'itemid': r['ItemID'], 'quantity': r['Quantity'], 'image': r['Image'], 'source': 'ebayStore'}
         es_conn.close()
     except Exception as e:
         print('Warning: ebayStore lookup failed:', e)
 
     # For barcodes not found, query bol.db
-    remaining = [b for b in barcodes if b not in enrichment]
+    # normalize barcodes list for matching
+    norm_barcodes = [str(b).strip() for b in barcodes]
+    remaining = [b for b in norm_barcodes if b not in enrichment and b.lower() not in enrichment]
     try:
         if remaining:
             bol_conn = sqlite3.connect('bol.db')
@@ -498,10 +517,12 @@ def enrich_searchrack_db(batch_size=500, do_backup=True):
                 placeholders = ','.join(['?'] * len(batch))
                 bol_cur.execute(f"SELECT upc, item_description, image_url FROM bol_items WHERE upc IN ({placeholders})", batch)
                 for r in bol_cur.fetchall():
-                    key = (r['upc'] or '').strip()
-                    if not key:
+                    upc = (r['upc'] or '')
+                    if not upc:
                         continue
-                    enrichment[key] = {'title': r['item_description'], 'itemid': key, 'quantity': None, 'image': r['image_url'], 'source': 'bol'}
+                    keys = {str(upc).strip(), str(upc).strip().lower()}
+                    for key in keys:
+                        enrichment[key] = {'title': r['item_description'], 'itemid': upc, 'quantity': None, 'image': r['image_url'], 'source': 'bol'}
             bol_conn.close()
     except Exception as e:
         print('Warning: bol lookup failed:', e)
@@ -531,28 +552,32 @@ def enrich_searchrack_db(batch_size=500, do_backup=True):
                     if not data:
                         continue
                     for rid in ids_list:
-                        # Update TITLE if empty, set ITEMID/QUANTITY/IMAGE when available
+                        # Update TITLE if empty or different; set ITEMID/QUANTITY/IMAGE when available
                         try:
-                            # Prefer existing TITLE if present
-                            s_cur.execute('SELECT TITLE, IMAGES, IMAGE, ITEMID, QUANTITY, BARCODE FROM SEARCHRACK WHERE ID = ?', (rid,))
+                            s_cur.execute('SELECT TITLE, IMAGES, IMAGE, ITEMID, QUANTITY FROM SEARCHRACK WHERE ID = ?', (rid,))
                             currow = s_cur.fetchone()
                             curtitle = currow[0] if currow else None
                             curimages = currow[1] if currow else None
                             curimage = currow[2] if currow else None
                             curitemid = currow[3] if currow else None
                             curqty = currow[4] if currow else None
-                            curbarcode = currow[5] if currow else None
-                            new_title = curtitle or data.get('title')
+                            src_title = data.get('title')
+                            # decide if we should write title: if current title is empty or different
+                            write_title = False
+                            if src_title:
+                                if not curtitle or str(curtitle).strip() == '':
+                                    write_title = True
+                                else:
+                                    # compare normalized
+                                    if str(curtitle).strip().lower() != str(src_title).strip().lower():
+                                        write_title = True
+                            new_title = src_title if write_title else curtitle
                             new_image = curimage or curimages or data.get('image')
                             new_itemid = curitemid or data.get('itemid')
                             new_qty = curqty or data.get('quantity')
-                            # If barcode is missing in SEARCHRACK and enrichment provides one, populate it
-                            new_barcode = curbarcode or None
-                            if (not new_barcode) and data.get('itemid'):
-                                # for bol, itemid is the upc; for ebayStore it may be ItemID or UPC
-                                new_barcode = data.get('itemid')
-                            s_cur.execute('UPDATE SEARCHRACK SET TITLE = ?, IMAGE = ?, ITEMID = ?, QUANTITY = ?, BARCODE = ? WHERE ID = ?', (new_title, new_image, new_itemid, new_qty, new_barcode, rid))
-                            total_updates += 1
+                            if write_title or new_image or new_itemid or new_qty:
+                                s_cur.execute('UPDATE SEARCHRACK SET TITLE = ?, IMAGE = ?, ITEMID = ?, QUANTITY = ? WHERE ID = ?', (new_title, new_image, new_itemid, new_qty, rid))
+                                total_updates += 1
                         except Exception:
                             continue
         s_conn.commit()
