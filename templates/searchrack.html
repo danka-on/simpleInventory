@@ -99,16 +99,32 @@ function createFilters(){
     const container = document.getElementById('db-filters');
     DBS.forEach(k=>{
         const id = 'chk-'+k;
-        const cb = document.createElement('input'); cb.type='checkbox'; cb.id=id; cb.value=k; cb.checked=!!defaultChecked[k];
-        const lbl = document.createElement('label'); lbl.htmlFor=id; lbl.style.marginRight='8px'; lbl.appendChild(cb); lbl.appendChild(document.createTextNode(' '+DB_LABELS[k]));
+        // use radio buttons so only one DB can be selected at a time
+        const rb = document.createElement('input'); rb.type='radio'; rb.name='db_select'; rb.id=id; rb.value=k; rb.checked=!!defaultChecked[k];
+        const lbl = document.createElement('label'); lbl.htmlFor=id; lbl.style.marginRight='8px'; lbl.appendChild(rb); lbl.appendChild(document.createTextNode(' '+DB_LABELS[k]));
         container.appendChild(lbl);
     })
 }
 
 createFilters();
 
+// attach change listeners so switching DBs auto-refreshes the results
+function attachDBChangeHandlers(){
+    // use event delegation in case inputs are recreated
+    document.getElementById('db-filters').addEventListener('change', (e)=>{
+        const tgt = e.target;
+        if(tgt && tgt.name === 'db_select'){
+            // run search when user explicitly changes selection
+            doSearch();
+        }
+    });
+}
+attachDBChangeHandlers();
+
 function getActiveDBs(){
-    return DBS.filter(k=>document.getElementById('chk-'+k).checked);
+    // radios ensure at most one DB is selected; return as an array for compatibility
+    const sel = document.querySelector('input[name="db_select"]:checked');
+    return sel ? [sel.value] : [];
 }
 
 document.getElementById('search-btn').addEventListener('click', doSearch);
@@ -429,10 +445,10 @@ window.addEventListener('load', ()=>{
             const s = JSON.parse(st);
             document.getElementById('search-input').value = s.q || '';
             if(s.pageSize) document.getElementById('page-size').value = s.pageSize;
-            // restore checked DBs
-            if(Array.isArray(s.checkedDBs)){
-                // uncheck all first
-                DBS.forEach(k=> document.getElementById('chk-'+k).checked = s.checkedDBs.indexOf(k) !== -1 );
+            // restore selected DB (radio). s.checkedDBs was previously an array; take first entry if present
+            if(Array.isArray(s.checkedDBs) && s.checkedDBs.length){
+                const first = s.checkedDBs[0];
+                DBS.forEach(k=>{ const el = document.getElementById('chk-'+k); if(el) el.checked = (k === first); });
             }
             // clear saved state then run search
             sessionStorage.removeItem('searchrack_return_state');
