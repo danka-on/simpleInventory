@@ -203,11 +203,11 @@ function renderResults(results){
     if(!results || results.length===0){ container.innerHTML = '<div class="small-muted">No results</div>'; return; }
     let html = '<table><thead><tr><th>Title</th><th>Barcode</th><th>Item ID</th><th>Location</th><th>Qty</th><th>DB</th><th>Actions</th></tr></thead><tbody>';
     results.forEach(r=>{
-        const title = esc(r.title||r.raw && (r.raw.Title||r.raw.title) || '')
-        const img = esc(r.image||'')
+    const title = esc(r.title || (r.raw && (r.raw.Title || r.raw.title || r.raw.item_description || r.raw.description)) || '')
+    const img = esc(r.image|| (r.raw && (r.raw.image || r.raw.image_url)) || '')
         const thumb = img ? img : (r.pictureposition?('/static/pictureposition/'+r.pictureposition):missingThumb())
-        const barcode = esc(r.barcode||'')
-        const itemid = esc(r.item_id||'')
+    const barcode = esc(r.barcode || (r.raw && (r.raw.upc || r.raw.UPC || r.raw.Barcode || r.raw.barcode)) || '')
+    const itemid = esc(r.item_id || (r.raw && (r.raw.ItemID || r.raw.item_id || r.raw.id || r.raw.upc)) || '')
         const qty = esc(r.quantity||'')
         const db = esc(r.source_db||'')
         let locDisplay = '';
@@ -228,7 +228,7 @@ function renderResults(results){
             actionHtml = picBtn + editBtn + `<button class="btn btn-primary" onclick="onEdit('${db}',${r.id})">Edit</button> <button class="btn btn-danger" onclick="onDelete('${db}',${r.id})">Delete</button>`;
         }
         html += `<tr data-src="${db}" data-id="${r.id}">`+
-                `<td><div class="title-cell"><img class="thumb" src="${thumb}" onerror="this.src='${missingThumb(48,48,'No Img')}'"><a href="#" class="title-link" data-src="${db}" data-id="${r.id}" data-image="${img}" data-title="${esc(r.title)}">${title}</a></div></td>`+
+                `<td><div class="title-cell"><img class="thumb" src="${thumb}" onerror="this.src='${missingThumb(48,48,'No Img')}'"><a href="#" class="title-link" data-src="${db}" data-id="${r.id}" data-image="${img}" data-title="${title}">${title}</a></div></td>`+
                 `<td>${barcode}</td>`+
                 `<td>${itemid}</td>`+
                 `<td>${ locDisplay ? `<a href="#" class=\"location-link\" data-src=\"${db}\" data-id=\"${r.id}\" data-barcode=\"${barcode}\" data-picture=\"${esc(r.pictureposition||'')}\">${esc(locDisplay)}</a>` : '' }</td>`+
