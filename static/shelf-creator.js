@@ -8,6 +8,8 @@
 // ============================================================================
 const state = {
     shelves: [],
+    selectedShelves: new Set(),
+    selectMode: false,
     currentShelfCode: '',
     currentImage: null,
     cameraStream: null,
@@ -46,6 +48,8 @@ function init() {
 function setupEventListeners() {
     // List view
     document.getElementById('add-btn').addEventListener('click', showAddView);
+    document.getElementById('select-mode-btn').addEventListener('click', toggleSelectMode);
+    document.getElementById('print-qr-btn').addEventListener('click', printQRCodes);
     
     // Add/Edit view
     document.getElementById('cancel-btn').addEventListener('click', cancelAdd);
@@ -105,14 +109,89 @@ function renderShelves() {
         return;
     }
     
-    container.innerHTML = state.shelves.map(shelf => `
-        <div class="shelf-item" onclick="enlargeShelf('${shelf.code}')">
+    container.innerHTML = state.shelves.map(shelf => {
+        const isSelected = state.selectedShelves.has(shelf.code);
+        const classes = ['shelf-item'];
+        if (isSelected) classes.push('selected');
+        if (state.selectMode) classes.push('selecting');
+        
+        return `
+        <div class="${classes.join(' ')}" 
+             data-code="${shelf.code}"
+             onclick="handleShelfClick('${shelf.code}')">
             <img src="${shelf.url}" alt="${shelf.code}" loading="lazy">
             <div class="shelf-code">${shelf.code}</div>
         </div>
-    `).join('');
+    `}).join('');
     
-    console.log(`Rendered ${state.shelves.length} shelves`);
+    updatePrintButton();
+    console.log(`Rendered ${state.shelves.length} shelves, selected: ${state.selectedShelves.size}`);
+}
+
+/**
+ * Handle shelf item click (enlarge or select based on mode)
+ */
+function handleShelfClick(code) {
+    if (state.selectMode) {
+        console.log('Selecting shelf:', code);
+        toggleShelfSelection(code);
+        console.log('Selected shelves:', Array.from(state.selectedShelves));
+    } else {
+        enlargeShelf(code);
+    }
+}
+
+/**
+ * Toggle select mode on/off
+ */
+function toggleSelectMode() {
+    state.selectMode = !state.selectMode;
+    const btn = document.getElementById('select-mode-btn');
+    
+    if (state.selectMode) {
+        btn.innerHTML = '<i class="fas fa-times"></i> Cancel';
+        btn.classList.add('btn-warning');
+        btn.classList.remove('btn-secondary');
+    } else {
+        btn.innerHTML = '<i class="fas fa-check-square"></i> Select';
+        btn.classList.remove('btn-warning');
+        btn.classList.add('btn-secondary');
+        // Clear selections when exiting select mode
+        state.selectedShelves.clear();
+        updatePrintButton();
+    }
+    
+    renderShelves();
+}
+
+/**
+ * Toggle shelf selection
+ */
+function toggleShelfSelection(code) {
+    if (state.selectedShelves.has(code)) {
+        state.selectedShelves.delete(code);
+    } else {
+        state.selectedShelves.add(code);
+    }
+    
+    // Re-render to update visual state
+    renderShelves();
+    updatePrintButton();
+}
+
+/**
+ * Update print button visibility and count
+ */
+function updatePrintButton() {
+    const printBtn = document.getElementById('print-qr-btn');
+    const count = state.selectedShelves.size;
+    
+    if (count > 0) {
+        printBtn.style.display = 'inline-block';
+        document.getElementById('selected-count').textContent = count;
+    } else {
+        printBtn.style.display = 'none';
+    }
 }
 
 /**
@@ -602,6 +681,144 @@ function deleteShelf() {
         console.error('Delete error:', err);
         showError('Error: ' + err.message);
     });
+}
+
+// ============================================================================
+// QR CODE PRINTING
+// ============================================================================
+
+/**
+ * Print QR codes for selected shelves
+ */
+function printQRCodes() {
+    if (state.selectedShelves.size === 0) {
+        showError('No shelves selected');
+        return;
+    }
+    
+    console.log('Generating QR codes for:', Array.from(state.selectedShelves));
+    
+    // Create print window
+    const printWindow = window.open('', '_blank');
+    
+    // Build HTML for print page
+    const html = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Shelf QR Codes</title>
+            <style>
+                @page {
+                    size: letter;
+                    margin: 0.5in;
+                }
+                
+                * {
+                    margin: 0;
+                    padding: 0;
+                    box-sizing: border-box;
+                }
+                
+                body {
+                    font-family: Arial, sans-serif;
+                    background: white;
+                }
+                
+                .qr-grid {
+                    display: grid;
+                    grid-template-columns: repeat(4, 2in);
+                    gap: 0.25in;
+                    padding: 0;
+                }
+                
+                .qr-item {
+                    width: 2in;
+                    height: 2.5in;
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    justify-content: center;
+                    page-break-inside: avoid;
+                    border: 1px dashed #ccc;
+                    padding: 0.1in;
+                }
+                
+                .qr-code {
+                    width: 2in;
+                    height: 2in;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                }
+                
+                .qr-code canvas {
+                    max-width: 100%;
+                    max-height: 100%;
+                }
+                
+                .qr-label {
+                    margin-top: 0.1in;
+                    font-size: 14pt;
+                    font-weight: bold;
+                    text-align: center;
+                    color: #000;
+                }
+                
+                @media print {
+                    .qr-item {
+                        border: none;
+                    }
+                }
+            </style>
+            <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+        </head>
+        <body>
+            <div class="qr-grid" id="qr-grid"></div>
+            <script>
+                const codes = ${JSON.stringify(Array.from(state.selectedShelves))};
+                const grid = document.getElementById('qr-grid');
+                
+                codes.forEach(code => {
+                    // Create item container
+                    const item = document.createElement('div');
+                    item.className = 'qr-item';
+                    
+                    // Create QR code container
+                    const qrDiv = document.createElement('div');
+                    qrDiv.className = 'qr-code';
+                    qrDiv.id = 'qr-' + code;
+                    
+                    // Create label
+                    const label = document.createElement('div');
+                    label.className = 'qr-label';
+                    label.textContent = code;
+                    
+                    item.appendChild(qrDiv);
+                    item.appendChild(label);
+                    grid.appendChild(item);
+                    
+                    // Generate QR code
+                    new QRCode(qrDiv, {
+                        text: code,
+                        width: 192,  // 2 inches at 96 DPI
+                        height: 192,
+                        colorDark: '#000000',
+                        colorLight: '#ffffff',
+                        correctLevel: QRCode.CorrectLevel.H
+                    });
+                });
+                
+                // Auto-print after QR codes are generated
+                setTimeout(() => {
+                    window.print();
+                }, 500);
+            </script>
+        </body>
+        </html>
+    `;
+    
+    printWindow.document.write(html);
+    printWindow.document.close();
 }
 
 // ============================================================================

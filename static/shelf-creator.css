@@ -54,6 +54,12 @@ h2 {
     display: block;
 }
 
+/* Action Bar */
+.action-bar {
+    margin: 20px 0;
+    text-align: center;
+}
+
 /* Shelf Grid */
 .shelf-grid {
     display: grid;
@@ -70,11 +76,36 @@ h2 {
     border: 2px solid var(--border);
     cursor: pointer;
     transition: transform 0.2s, box-shadow 0.2s;
+    position: relative;
 }
 
 .shelf-item:hover {
     transform: translateY(-4px);
     box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+.shelf-item.selecting {
+    cursor: pointer;
+}
+
+.shelf-item.selecting:hover {
+    border-color: var(--accent);
+}
+
+.shelf-item.selected {
+    border-color: var(--accent) !important;
+    background-color: rgba(0, 184, 148, 0.15) !important;
+    box-shadow: 0 0 0 4px rgba(0, 184, 148, 0.4) !important;
+}
+
+.shelf-item.selected:hover {
+    border-color: var(--accent) !important;
+    box-shadow: 0 0 0 4px rgba(0, 184, 148, 0.5) !important;
+    transform: translateY(-2px);
+}
+
+.shelf-checkbox {
+    display: none; /* Hide checkboxes, using click selection instead */
 }
 
 .shelf-item img {
@@ -198,6 +229,11 @@ h2 {
 .btn-secondary {
     background: #95a5a6;
     color: white;
+}
+
+.btn-warning {
+    background: var(--warning);
+    color: #333;
 }
 
 .btn:disabled {
