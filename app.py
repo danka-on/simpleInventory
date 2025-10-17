@@ -65,6 +65,10 @@ def _run_enrich_in_background():
 def tools():
     return render_template('tools.html')
 
+@app.route('/shelfcreator')
+def shelfcreator():
+    return render_template('shelfcreator.html')
+
 @app.route('/extractor')
 def extractor():
     return render_template('extractor.html')
@@ -1631,6 +1635,202 @@ def api_update_row(db_key, item_id):
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/create_shelf', methods=['POST'])
+def api_create_shelf():
+    """Create a new shelf entry. Expects JSON: { shelf_name, location, notes }"""
+    data = request.get_json() or {}
+    shelf_name = (data.get('shelf_name') or '').strip()
+    location = (data.get('location') or '').strip()
+    notes = (data.get('notes') or '').strip()
+    
+    if not shelf_name:
+        return jsonify({'success': False, 'error': 'Shelf name is required'}), 400
+    
+    try:
+        # Store shelves in a simple table in searchRack.db
+        conn = sqlite3.connect('searchRack.db')
+        cur = conn.cursor()
+        
+        # Create shelves table if it doesn't exist
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS shelves (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                shelf_name TEXT NOT NULL,
+                location TEXT,
+                notes TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # Insert the new shelf
+        cur.execute('''
+            INSERT INTO shelves (shelf_name, location, notes)
+            VALUES (?, ?, ?)
+        ''', (shelf_name, location, notes))
+        
+        conn.commit()
+        shelf_id = cur.lastrowid
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'message': f'Shelf "{shelf_name}" created successfully',
+            'shelf_id': shelf_id
+        })
+    
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+
+@app.route('/api/list_shelves', methods=['GET'])
+def api_list_shelves():
+    """List all shelf images from static/shelves directory with metadata"""
+    try:
+        shelves_dir = os.path.join('static', 'shelves')
+        if not os.path.exists(shelves_dir):
+            os.makedirs(shelves_dir)
+            return jsonify({'success': True, 'shelves': []})
+        
+        shelves = []
+        for filename in os.listdir(shelves_dir):
+            if filename.lower().endswith('.png'):
+                filepath = os.path.join(shelves_dir, filename)
+                code = os.path.splitext(filename)[0]  # Remove .png extension
+                created_time = os.path.getctime(filepath)
+                
+                shelves.append({
+                    'code': code,
+                    'filename': filename,
+                    'url': f'/static/shelves/{filename}',
+                    'created': created_time
+                })
+        
+        # Sort by creation date (newest first)
+        shelves.sort(key=lambda x: x['created'], reverse=True)
+        
+        return jsonify({'success': True, 'shelves': shelves})
+    
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/check_shelf_code', methods=['POST'])
+def api_check_shelf_code():
+    """Check if a shelf code already exists in filesystem or searchRack database"""
+    try:
+        data = request.get_json() or {}
+        code = (data.get('code') or '').strip()
+        
+        if not code:
+            return jsonify({'exists': False, 'reason': 'No code provided'})
+        
+        # Check filesystem
+        shelves_dir = os.path.join('static', 'shelves')
+        filename = f'{code}.png'
+        filepath = os.path.join(shelves_dir, filename)
+        
+        if os.path.exists(filepath):
+            return jsonify({'exists': True, 'reason': 'File already exists in static/shelves'})
+        
+        # Check searchRack database for ITEM_POSITION values
+        try:
+            conn = sqlite3.connect('searchRack.db')
+            cur = conn.cursor()
+            cur.execute('SELECT COUNT(*) FROM SEARCHRACK WHERE ITEM_POSITION = ?', (code,))
+            count = cur.fetchone()[0]
+            conn.close()
+            
+            if count > 0:
+                return jsonify({'exists': True, 'reason': f'Code already used by {count} item(s) in searchRack'})
+        except Exception as db_error:
+            # If table doesn't exist or query fails, just continue
+            print(f'Database check error: {db_error}')
+        
+        return jsonify({'exists': False})
+    
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/delete_shelf/<shelf_code>', methods=['POST'])
+def api_delete_shelf(shelf_code):
+    """Delete a shelf image, but only if no items in rack.db reference it"""
+    try:
+        # Check rack.db for any items referencing this shelf
+        try:
+            conn = sqlite3.connect('rack.db')
+            cur = conn.cursor()
+            cur.execute('SELECT COUNT(*) FROM items WHERE ITEM_POSITION = ?', (shelf_code,))
+            count = cur.fetchone()[0]
+            conn.close()
+            
+            if count > 0:
+                return jsonify({
+                    'success': False,
+                    'error': f'Cannot delete: {count} item(s) still on this shelf in rack.db'
+                }), 400
+        except Exception as db_error:
+            print(f'Database check error: {db_error}')
+            # If rack.db doesn't exist or query fails, allow deletion
+        
+        # Delete the file
+        shelves_dir = os.path.join('static', 'shelves')
+        filename = f'{shelf_code}.png'
+        filepath = os.path.join(shelves_dir, filename)
+        
+        if os.path.exists(filepath):
+            os.remove(filepath)
+            return jsonify({'success': True, 'message': f'Shelf {shelf_code} deleted'})
+        else:
+            return jsonify({'success': False, 'error': 'Shelf file not found'}), 404
+    
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/upload_shelf', methods=['POST'])
+def api_upload_shelf():
+    """Upload and save a shelf image with drawn rectangle"""
+    try:
+        # Get shelf code and image data from request
+        code = request.form.get('code', '').strip()
+        
+        if not code:
+            return jsonify({'success': False, 'error': 'Shelf code is required'}), 400
+        
+        # Check if image data is provided
+        if 'image' not in request.files:
+            return jsonify({'success': False, 'error': 'No image provided'}), 400
+        
+        image_file = request.files['image']
+        
+        if image_file.filename == '':
+            return jsonify({'success': False, 'error': 'No image selected'}), 400
+        
+        # Validate PNG format
+        if not image_file.filename.lower().endswith('.png'):
+            return jsonify({'success': False, 'error': 'Only PNG images are accepted'}), 400
+        
+        # Save the image
+        shelves_dir = os.path.join('static', 'shelves')
+        if not os.path.exists(shelves_dir):
+            os.makedirs(shelves_dir)
+        
+        filename = f'{code}.png'
+        filepath = os.path.join(shelves_dir, filename)
+        image_file.save(filepath)
+        
+        return jsonify({
+            'success': True,
+            'message': f'Shelf {code} saved successfully',
+            'url': f'/static/shelves/{filename}'
+        })
+    
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @app.route('/api/delete/<db_key>/<int:item_id>', methods=['POST'])
