@@ -1566,7 +1566,14 @@ def _get_table_and_pk(db_path, table_hint=None):
     if not tables:
         conn.close()
         return None, None
-    table = table_hint if table_hint in tables else (tables[0] if tables else None)
+    # Prefer common application tables if present (avoid picking auxiliary tables like ENRICH_META)
+    prefer_order = ['orders', 'INVENTORY', 'SEARCHRACK', 'searchrack', 'rack', 'items', 'bol_items']
+    prefer = None
+    for p in prefer_order:
+        if p in tables:
+            prefer = p
+            break
+    table = table_hint if table_hint in tables else (prefer or (tables[0] if tables else None))
     cur.execute(f"PRAGMA table_info('{table}')")
     cols = cur.fetchall()
     pk = None
