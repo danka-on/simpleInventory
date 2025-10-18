@@ -56,8 +56,9 @@ def _run_enrich_in_background():
                 _enrich_status['message'] = 'completed'
             except Exception as e:
                 _enrich_status['message'] = f'error: {e}'
-            _enrich_status['last_run'] = int(time.time())
-            _enrich_status['running'] = False
+            finally:
+                _enrich_status['running'] = False
+                _enrich_status['last_run'] = int(time.time())
     t = threading.Thread(target=_worker, daemon=True)
     t.start()
     return True
@@ -72,9 +73,8 @@ def tools():
 
 @app.route('/shelfcreator')
 def shelfcreator():
-    # legacy route - redirect to new Shelf Manager
-    return redirect(url_for('shelfmanager'))
-
+    # Legacy route; redirect to Shelf Manager
+    return redirect('/shelfmanager')
 
 @app.route('/shelfmanager')
 def shelfmanager():
@@ -2144,6 +2144,126 @@ def api_archived_list():
                 data = json.loads(r.get('data_json') or '{}')
             except Exception:
                 data = {}
+            # Normalize common fields across mixed sources; include UPPERCASE keys from SEARCHRACK
+            title_val = (
+                data.get('Title') or data.get('title') or data.get('TITLE') or
+                data.get('item_description') or data.get('DESCRIPTION') or data.get('description') or ''
+            )
+            image_val = (
+                data.get('Image') or data.get('image') or data.get('image_url') or data.get('IMAGE') or ''
+            )
+            barcode_val = (
+                data.get('BARCODE') or data.get('barcode') or data.get('upc') or
+                data.get('UPC') or data.get('ItemID') or ''
+            )
+            itemid_val = (
+                data.get('ItemID') or data.get('item_id') or data.get('ItemId') or
+                data.get('ITEMID') or data.get('id') or data.get('ID') or data.get('upc') or ''
+            )
+            picturepos_val = (
+                data.get('PICTUREPOSITION') or data.get('pictureposition') or data.get('picture_position') or ''
+            )
+            itempos_val = (
+                data.get('ITEM_POSITION') or data.get('item_position') or data.get('position') or ''
+            )
+            quantity_val = (
+                data.get('Quantity') or data.get('quantity') or data.get('qty') or data.get('QUANTITY') or ''
+            )
+
+            # Parse IMAGES field to extract a first URL if needed
+            imgs_field = data.get('IMAGES') or data.get('images')
+            if (not image_val) and imgs_field is not None:
+                try:
+                    if isinstance(imgs_field, list):
+                        for u in imgs_field:
+                            s = str(u or '')
+                            if s.lower().startswith('http'):
+                                image_val = s
+                                break
+                    elif isinstance(imgs_field, str):
+                        s = imgs_field.strip()
+                        if s.startswith('[') and s.endswith(']'):
+                            arr = json.loads(s)
+                            if isinstance(arr, list):
+                                for u in arr:
+                                    us = str(u or '')
+                                    if us.lower().startswith('http'):
+                                        image_val = us
+                                        break
+                        if not image_val:
+                            for sep in [',',';','|','\n','\t',' ']:
+                                if sep in s:
+                                    for part in s.split(sep):
+                                        ps = part.strip()
+                                        if ps.lower().startswith('http'):
+                                            image_val = ps
+                                            break
+                                    if image_val:
+                                        break
+                            if not image_val and s.lower().startswith('http'):
+                                image_val = s
+                except Exception:
+                    pass
+
+            # Enrich archived rows using UPC against ebayStore/bol for title/image/quantity if missing
+            def _to_int_like(q):
+                try:
+                    if q is None:
+                        return None
+                    s = str(q).strip()
+                    if not s:
+                        return None
+                    if s.isdigit():
+                        return int(s)
+                    if s.endswith('.0') and s.replace('.0','').isdigit():
+                        return int(float(s))
+                    f = float(s)
+                    if abs(f - int(f)) < 1e-9:
+                        return int(f)
+                    return None
+                except Exception:
+                    return None
+
+            if barcode_val:
+                try:
+                    es_conn = sqlite3.connect('ebayStore.db')
+                    es_conn.row_factory = sqlite3.Row
+                    es_cur = es_conn.cursor()
+                    es_cur.execute("SELECT Title, Image, ItemID, Quantity FROM INVENTORY WHERE UPC = ? COLLATE NOCASE LIMIT 1", (barcode_val,))
+                    row_es = es_cur.fetchone()
+                    if row_es:
+                        if not title_val:
+                            title_val = row_es['Title']
+                        if not image_val:
+                            image_val = row_es['Image']
+                        if not itemid_val:
+                            itemid_val = row_es['ItemID']
+                        if not quantity_val:
+                            quantity_val = row_es['Quantity']
+                    es_conn.close()
+                except Exception:
+                    pass
+                if (not title_val or not image_val):
+                    try:
+                        bol_conn = sqlite3.connect('bol.db')
+                        bol_conn.row_factory = sqlite3.Row
+                        bol_cur = bol_conn.cursor()
+                        bol_cur.execute('SELECT item_description, image_url, upc FROM bol_items WHERE upc = ? COLLATE NOCASE LIMIT 1', (barcode_val,))
+                        row_bol = bol_cur.fetchone()
+                        if row_bol:
+                            if not title_val:
+                                title_val = row_bol['item_description']
+                            if not image_val:
+                                image_val = row_bol['image_url']
+                            if not itemid_val:
+                                itemid_val = row_bol['upc']
+                        bol_conn.close()
+                    except Exception:
+                        pass
+
+            qn = _to_int_like(quantity_val)
+            if qn is not None:
+                quantity_val = qn
             item_out = {
                 'archived': True,
                 'archived_id': r.get('id'),
@@ -2154,13 +2274,13 @@ def api_archived_list():
                 'orig_pk': r.get('source_pk'),
                 'orig_id': r.get('source_id'),
                 'id': r.get('id'),
-                'title': data.get('Title') or data.get('title') or data.get('item_description') or '',
-                'image': data.get('Image') or data.get('image') or data.get('image_url') or '',
-                'barcode': data.get('BARCODE') or data.get('barcode') or data.get('upc') or data.get('ItemID') or '',
-                'item_id': data.get('ItemID') or data.get('item_id') or data.get('ItemId') or data.get('upc') or '',
-                'pictureposition': data.get('PICTUREPOSITION') or data.get('pictureposition') or data.get('picture_position') or '',
-                'item_position': data.get('ITEM_POSITION') or data.get('item_position') or data.get('position') or '',
-                'quantity': data.get('Quantity') or data.get('quantity') or data.get('qty') or '',
+                'title': title_val,
+                'image': image_val,
+                'barcode': barcode_val,
+                'item_id': itemid_val,
+                'pictureposition': picturepos_val,
+                'item_position': itempos_val,
+                'quantity': quantity_val,
                 'raw': data
             }
             results.append(item_out)

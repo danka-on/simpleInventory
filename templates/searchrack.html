@@ -203,18 +203,66 @@ function renderResults(results){
     if(!results || results.length===0){ container.innerHTML = '<div class="small-muted">No results</div>'; return; }
     let html = '<table><thead><tr><th>Title</th><th>Barcode</th><th>Item ID</th><th>Location</th><th>Qty</th><th>DB</th><th>Actions</th></tr></thead><tbody>';
     results.forEach(r=>{
-    const title = esc(r.title || (r.raw && (r.raw.Title || r.raw.title || r.raw.item_description || r.raw.description)) || '')
-    const img = esc(r.image|| (r.raw && (r.raw.image || r.raw.image_url)) || '')
-        const thumb = img ? img : (r.pictureposition?('/static/pictureposition/'+r.pictureposition):missingThumb())
+    const dbRaw = r.source_db || '';
+    const isArchived = !!(r.archived || dbRaw === 'archived');
+    const title = esc(
+        r.title ||
+        (r.raw && (r.raw.Title || r.raw.title || r.raw.TITLE || r.raw.item_description || r.raw.DESCRIPTION || r.raw.description)) ||
+        ''
+    )
+    // Build thumbnail: prefer explicit item image; if missing, try IMAGES first URL; only fallback to pictureposition for non-archived rows
+    let imgUrl = r.image || (r.raw && (r.raw.image || r.raw.image_url)) || '';
+    if(!imgUrl && r.raw && (r.raw.IMAGES || r.raw.images)){
+        const imgsField = r.raw.IMAGES || r.raw.images;
+        try{
+            if(Array.isArray(imgsField)){
+                const u = imgsField.find(u=> typeof u === 'string' && u.toLowerCase().startsWith('http'));
+                if(u) imgUrl = u;
+            } else if(typeof imgsField === 'string'){
+                const s = imgsField.trim();
+                if(s.startsWith('[') && s.endsWith(']')){
+                    const arr = JSON.parse(s);
+                    if(Array.isArray(arr)){
+                        const u = arr.find(u=> typeof u === 'string' && u.toLowerCase().startsWith('http'));
+                        if(u) imgUrl = u;
+                    }
+                }
+                if(!imgUrl){
+                    for(const sep of [',',';','|','\n','\t',' ']){
+                        if(s.includes(sep)){
+                            const cand = s.split(sep).map(x=> x.trim()).find(x=> x.toLowerCase().startsWith('http'));
+                            if(cand){ imgUrl = cand; break; }
+                        }
+                    }
+                    if(!imgUrl && s.toLowerCase().startsWith('http')) imgUrl = s;
+                }
+            }
+        }catch(e){ /* ignore parse errors */ }
+    }
+    const img = esc(imgUrl);
+    const thumb = img ? img : (!isArchived && r.pictureposition ? ('/static/pictureposition/'+r.pictureposition) : missingThumb());
     const barcode = esc(r.barcode || (r.raw && (r.raw.upc || r.raw.UPC || r.raw.Barcode || r.raw.barcode)) || '')
     const itemid = esc(r.item_id || (r.raw && (r.raw.ItemID || r.raw.item_id || r.raw.id || r.raw.upc)) || '')
-        const qty = esc(r.quantity||'')
-        const db = esc(r.source_db||'')
+        // Normalize quantity like inventory: default to 1 and coerce int-like values
+        function toIntLike(q){
+            try{
+                if(q === undefined || q === null) return 1;
+                const s = String(q).trim();
+                if(!s) return 1;
+                if(/^\d+$/.test(s)) return parseInt(s,10);
+                if(/^[0-9]+\.0$/.test(s)) return parseInt(parseFloat(s));
+                const f = parseFloat(s);
+                if(Number.isFinite(f) && Math.abs(f - Math.trunc(f)) < 1e-9) return Math.trunc(f);
+                return 1;
+            }catch(_){ return 1; }
+        }
+        const qty = esc(String(toIntLike(r.quantity)))
+        const db = esc(dbRaw)
         let locDisplay = '';
         if(r.pictureposition) locDisplay = r.pictureposition;
         else if(r.item_position) locDisplay = r.item_position;
             let actionHtml = '';
-        if(r.archived || db === 'archived'){
+        if(isArchived){
             // Archived row: show Restore and Delete Forever
             actionHtml = `<button class="btn btn-primary" onclick="onRestore(${r.id})">Restore</button> <button class="btn btn-danger" onclick="onDeleteArchive(${r.id})">Delete Forever</button>`;
         } else {
