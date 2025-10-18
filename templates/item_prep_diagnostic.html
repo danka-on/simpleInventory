@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Diagnostic</title>
+  <style>
+    body{font-family:Segoe UI,Arial,sans-serif;background:#f7fafc;margin:0;padding:18px}
+    .top{display:flex;align-items:center;gap:10px;justify-content:space-between}
+    .btn{padding:8px 14px;border-radius:6px;border:none;cursor:pointer}
+    .btn-primary{background:#00b894;color:#fff}
+    .btn-danger{background:#e74c3c;color:#fff}
+    .card{background:#fff;border:1px solid #e8e8e8;border-radius:10px;padding:14px;margin-top:14px}
+    .row{display:flex;gap:10px;flex-wrap:wrap}
+    .preview{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
+    .thumb-wrap{position:relative;width:100px;height:100px}
+    .thumb{width:100%;height:100%;object-fit:cover;border-radius:8px;background:#f0f0f0}
+    .del-x{position:absolute;top:-8px;right:-8px;background:#e74c3c;color:#fff;border:none;border-radius:50%;width:22px;height:22px;cursor:pointer;line-height:22px;text-align:center;font-weight:bold;box-shadow:0 1px 4px rgba(0,0,0,0.25)}
+    label{display:block;margin-top:8px}
+  </style>
+</head>
+<body>
+  <div class="top">
+    <a href="/item-prep"><button class="btn btn-danger">Back</button></a>
+    <h2>Diagnostic</h2>
+    <div style="width:100px"></div>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <div>UPC:</div>
+      <div id="upcText">{{ upc }}</div>
+    </div>
+    <form id="diagForm" enctype="multipart/form-data">
+      <input type="hidden" name="upc" value="{{ upc }}">
+      <label>Reason:
+        <select name="reason" required>
+          <option value="" disabled selected>Select reason</option>
+          <option>Missing pieces</option>
+          <option>Wrong item</option>
+          <option>Broken</option>
+          <option>Trash</option>
+          <option>Other</option>
+        </select>
+      </label>
+      <label>Note:
+        <textarea name="note" rows="3" style="width:100%;box-sizing:border-box"></textarea>
+      </label>
+      <label>Photos:
+        <input type="file" id="photos" accept="image/*" capture="environment" multiple>
+      </label>
+      <div style="margin-top:8px">
+        <div class="small-muted" style="display:flex;align-items:center;gap:10px;justify-content:space-between;flex-wrap:wrap">
+          <span>Or use camera</span>
+          <label style="display:flex;align-items:center;gap:6px;font-size:0.95rem">
+            <input type="checkbox" id="lowResToggle"> Low res (faster upload)
+          </label>
+        </div>
+        <video id="cam" playsinline muted style="width:100%;max-width:420px;aspect-ratio:1/1;background:#222;border-radius:8px"></video>
+        <canvas id="canvas" style="display:none"></canvas>
+        <div style="margin-top:8px;display:flex;gap:8px">
+          <button type="button" class="btn btn-primary" id="captureBtn">Capture</button>
+          <button type="button" class="btn" id="resetCamBtn">Reset</button>
+        </div>
+      </div>
+      <div id="preview" class="preview"></div>
+      <div style="margin-top:12px">
+        <button type="button" class="btn btn-primary" id="completeBtn">Complete</button>
+      </div>
+    </form>
+    <div id="msg" style="margin-top:10px"></div>
+  </div>
+
+  <script>
+    const photos = document.getElementById('photos');
+    const preview = document.getElementById('preview');
+    const lowResToggle = document.getElementById('lowResToggle');
+    let lowRes = false;
+    function uid(){ return 'id_'+Math.random().toString(36).slice(2); }
+    const pendingFiles = []; // {id, file}
+    const capturedFiles = []; // {id, file}
+
+    function makeThumb(entry, source){
+      const url = URL.createObjectURL(entry.file);
+      const wrap = document.createElement('div');
+      wrap.className='thumb-wrap';
+      const img = document.createElement('img'); img.className='thumb'; img.src=url; img.alt='photo';
+      const del = document.createElement('button'); del.type='button'; del.className='del-x'; del.textContent='×';
+      del.dataset.id = entry.id; del.dataset.source = source;
+      del.addEventListener('click', ()=>{
+        // remove from arrays
+        const src = del.dataset.source; const id = del.dataset.id;
+        if(src==='pending'){
+          const idx = pendingFiles.findIndex(x=>x.id===id); if(idx>-1) pendingFiles.splice(idx,1);
+        } else {
+          const idx = capturedFiles.findIndex(x=>x.id===id); if(idx>-1) capturedFiles.splice(idx,1);
+        }
+        URL.revokeObjectURL(url);
+        wrap.remove();
+      });
+      wrap.appendChild(img); wrap.appendChild(del);
+      preview.appendChild(wrap);
+    }
+
+    photos.addEventListener('change', ()=>{
+      const files = Array.from(photos.files||[]);
+      files.forEach(f=>{ const entry = {id: uid(), file: f}; pendingFiles.push(entry); makeThumb(entry,'pending'); });
+      // clear the input so we control the file list ourselves
+      photos.value = '';
+    });
+
+    // Camera capture that stacks multiple images without leaving the page
+    let stream=null;
+    let imageCapture=null;
+    const video = document.getElementById('cam');
+    const canvas = document.getElementById('canvas');
+    async function startCam(){
+      try{
+        const constraints = {
+          video:{
+            facingMode:{ideal:'environment'},
+            width: { ideal: lowRes ? 640 : 3840 },
+            height: { ideal: lowRes ? 480 : 2160 }
+          }
+        };
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+        video.srcObject = stream; await video.play();
+        const track = stream.getVideoTracks && stream.getVideoTracks()[0];
+        imageCapture = null;
+        if(track && 'ImageCapture' in window){
+          try { imageCapture = new ImageCapture(track); } catch(_) { imageCapture = null; }
+        }
+      }catch(e){ /* camera optional */ }
+    }
+    function stopCam(){ try{ stream && stream.getTracks().forEach(t=>t.stop()); }catch{}; stream=null; }
+    function dataURLtoFile(dataurl, filename) {
+      const arr = dataurl.split(','); const mime = arr[0].match(/:(.*?);/)[1];
+      const bstr = atob(arr[1]); let n = bstr.length; const u8arr = new Uint8Array(n);
+      while(n--) u8arr[n] = bstr.charCodeAt(n);
+      return new File([u8arr], filename, {type:mime});
+    }
+
+    document.getElementById('captureBtn').onclick = async ()=>{
+      if(!video || video.readyState < 2) return;
+      // Prefer full-quality ImageCapture if available
+      if(imageCapture && imageCapture.takePhoto && !lowRes){
+        try{
+          const blob = await imageCapture.takePhoto();
+          const file = new File([blob], `capture_${Date.now()}.jpg`, { type: blob.type || 'image/jpeg' });
+          const entry = {id: uid(), file};
+          capturedFiles.push(entry);
+          makeThumb(entry,'captured');
+          return;
+        }catch(e){ /* fall back */ }
+      }
+      // Fallback to canvas at chosen resolution/quality
+      let w = video.videoWidth || (lowRes?640:1920);
+      let h = video.videoHeight || (lowRes?480:1080);
+      // Optionally downscale if lowRes
+      if(lowRes){
+        const ratio = Math.min(640 / w, 480 / h, 1);
+        w = Math.round(w * ratio); h = Math.round(h * ratio);
+      }
+      canvas.width = w; canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, w, h);
+      const quality = lowRes ? 0.7 : 1.0;
+      const data = canvas.toDataURL('image/jpeg', quality);
+      const file = dataURLtoFile(data, `capture_${Date.now()}.jpg`);
+      const entry = {id: uid(), file};
+      capturedFiles.push(entry);
+      makeThumb(entry,'captured');
+    };
+    document.getElementById('resetCamBtn').onclick = ()=>{ stopCam(); startCam(); };
+    lowResToggle.addEventListener('change', ()=>{ lowRes = !!lowResToggle.checked; stopCam(); startCam(); });
+
+    document.getElementById('completeBtn').onclick = async ()=>{
+      const form = document.getElementById('diagForm');
+      const fd = new FormData(form);
+      // Append both pending and captured images
+      pendingFiles.forEach(({file})=> fd.append('photos[]', file, file.name));
+      capturedFiles.forEach(({file})=> fd.append('photos[]', file, file.name));
+      const res = await fetch('/api/items_prep/diagnostic',{method:'POST', body: fd});
+      const j = await res.json();
+      const msg = document.getElementById('msg');
+      if(j && j.success){ msg.textContent='Saved diagnostic'; setTimeout(()=>{ window.location.href='/item-prep'; }, 600); }
+      else { msg.textContent='Failed: '+(j.error||''); }
+    };
+
+    window.addEventListener('DOMContentLoaded', startCam);
+    window.addEventListener('beforeunload', stopCam);
+  </script>
+</body>
+</html>

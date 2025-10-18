@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Diagnostic Details</title>
+  <style>
+    :root{
+      --bg:#f7fafc; --card:#fff; --border:#e8e8e8; --text:#2c3e50; --muted:#666;
+      --pill-missing:#f39c12; --pill-wrong:#9b59b6; --pill-broken:#e74c3c; --pill-trash:#95a5a6; --pill-other:#3498db;
+    }
+    body{font-family:Segoe UI,Arial,sans-serif;background:var(--bg);margin:0;padding:18px;color:var(--text)}
+    .top{display:flex;align-items:center;gap:10px;justify-content:space-between}
+    .btn{padding:8px 14px;border-radius:6px;border:none;cursor:pointer}
+    .btn-danger{background:#e74c3c;color:#fff}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;margin-top:14px}
+    .row{display:flex;gap:14px;flex-wrap:wrap;align-items:center}
+    .muted{color:var(--muted)}
+    .title-wrap{display:flex;gap:14px;align-items:flex-start}
+    .hero-img{width:90px;height:90px;border-radius:10px;object-fit:cover;background:#eee}
+    h2.title{margin:0 0 6px 0;font-size:1.2rem}
+    .pill{display:inline-block;padding:6px 10px;border-radius:999px;color:#fff;font-weight:600;font-size:0.9rem}
+    .pill.missing{background:var(--pill-missing)}
+    .pill.wrong{background:var(--pill-wrong)}
+    .pill.broken{background:var(--pill-broken)}
+    .pill.trash{background:var(--pill-trash)}
+    .pill.other{background:var(--pill-other)}
+    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:12px;margin-top:10px}
+    .thumb{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:10px;background:#f0f0f0;cursor:pointer}
+    .img-actions{display:flex;justify-content:space-between;align-items:center;margin-top:4px}
+    .link{color:#2980b9;text-decoration:none}
+    .link:hover{text-decoration:underline}
+    /* Modal */
+    .modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:9999;align-items:center;justify-content:center}
+    .modal .inner{max-width:90vw;max-height:90vh}
+    .modal img{max-width:90vw;max-height:80vh;border-radius:8px;display:block}
+    .modal .bar{display:flex;justify-content:space-between;align-items:center;margin-top:10px;color:#fff}
+    .modal .bar a{color:#fff;text-decoration:underline}
+  </style>
+</head>
+<body>
+  <div class="top">
+    <a href="/items-to-list"><button class="btn btn-danger">Back</button></a>
+    <h2 style="margin:0">Diagnostic Details</h2>
+    <div style="width:100px"></div>
+  </div>
+
+  <div class="card">
+    <div class="title-wrap">
+      {% if bol and bol.image_url %}
+        <img class="hero-img" src="{{ bol.image_url }}" alt="item image" onerror="this.style.display='none'">
+      {% endif %}
+      <div>
+        <h2 class="title">{{ bol.item_description if bol else 'Item' }}</h2>
+        <div class="muted">UPC: {{ upc }}</div>
+        {% if status and status.reason %}
+          {% set r = status.reason.strip().lower() %}
+          {% set cls = 'other' %}
+          {% if 'missing' in r %}{% set cls = 'missing' %}{% elif 'wrong' in r %}{% set cls = 'wrong' %}{% elif 'broken' in r %}{% set cls = 'broken' %}{% elif 'trash' in r %}{% set cls = 'trash' %}{% endif %}
+          <div style="margin-top:8px"><span class="pill {{ cls }}">Reason: {{ status.reason }}</span></div>
+        {% endif %}
+        {% if status and status.updated_at %}
+          <div class="muted" style="margin-top:6px">Updated: <span id="updatedAt" data-iso="{{ status.updated_at }}">{{ status.updated_at }}</span></div>
+        {% endif %}
+        <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap">
+          <a class="btn btn-danger" href="/item-prep/diagnostic?upc={{ upc }}">Edit Diagnostic</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3 style="margin:0 0 8px 0">Notes</h3>
+    <div style="white-space:pre-wrap; border:1px solid var(--border); padding:12px; border-radius:8px; background:#fcfcfc; min-height:48px">{{ (status.note if status else '') or '—' }}</div>
+  </div>
+
+  <div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap">
+      <h3 style="margin:0">Photos</h3>
+      <div style="display:flex; gap:8px; align-items:center">
+        <a class="btn" href="/api/items_prep/diagnostic/{{ upc }}/photos.zip" style="background:#3498db;color:#fff">Download All</a>
+        <button type="button" class="btn btn-danger" id="btnDeleteAll">Delete All</button>
+      </div>
+    </div>
+    {% if images and images|length > 0 %}
+    <div class="grid">
+      {% for im in images %}
+        {% set src = url_for('static', filename=im.image_path) %}
+        <img class="thumb" src="{{ src }}" alt="photo" data-src="{{ src }}">
+      {% endfor %}
+    </div>
+    {% else %}
+      <div class="muted">No photos attached.</div>
+    {% endif %}
+  </div>
+
+  <div class="card" style="border:none; background:transparent; box-shadow:none; padding:0; margin-top:14px">
+    {% if bol and (bol.list_status or '')|lower == 'listed' %}
+      <button class="btn" id="btnMarkListed" disabled style="display:block; width:100%; padding:18px 0; font-size:1.1rem; background:#2ecc71; color:#fff; border-radius:10px">Listed</button>
+    {% else %}
+      <button class="btn" id="btnMarkListed" style="display:block; width:100%; padding:18px 0; font-size:1.1rem; background:#2ecc71; color:#fff; border-radius:10px">Mark as Listed</button>
+    {% endif %}
+  </div>
+
+  <div id="imgModal" class="modal">
+    <div class="inner">
+      <img id="modalImg" src="" alt="">
+      <div class="bar"><span>Tap anywhere to close</span> <a id="modalDownload" href="#" download>Download</a></div>
+    </div>
+  </div>
+
+  <script>
+    // Format Updated time to Eastern in a friendly way
+    (function(){
+      const el = document.getElementById('updatedAt');
+      if(!el) return;
+      const iso = el.getAttribute('data-iso');
+      try{
+        const d = new Date(iso);
+        const fmt = new Intl.DateTimeFormat('en-US', { timeZone:'America/New_York', dateStyle:'medium', timeStyle:'short' });
+        el.textContent = fmt.format(d) + ' ET';
+      }catch(e){ /* leave as-is */ }
+    })();
+
+    // Click-to-enlarge images + download
+    (function(){
+      const modal = document.getElementById('imgModal');
+      const modalImg = document.getElementById('modalImg');
+      const modalDl = document.getElementById('modalDownload');
+      function openModal(src){ modalImg.src = src; modalDl.href = src; modal.style.display='flex'; }
+      function closeModal(){ modal.style.display='none'; modalImg.src=''; }
+      document.querySelectorAll('.thumb').forEach(img=>{
+        img.addEventListener('click', ()=> openModal(img.getAttribute('data-src')));
+      });
+      modal.addEventListener('click', closeModal);
+      document.addEventListener('keydown', (e)=>{ if(e.key==='Escape') closeModal(); });
+    })();
+
+    // Delete all photos
+    (function(){
+      const btn = document.getElementById('btnDeleteAll');
+      if(!btn) return;
+      btn.addEventListener('click', async ()=>{
+        if(!confirm('Delete all diagnostic photos for this item? This cannot be undone.')) return;
+        try{
+          btn.disabled = true; btn.textContent = 'Deleting...';
+          const res = await fetch('/api/items_prep/diagnostic/{{ upc }}/photos', { method:'DELETE' });
+          const j = await res.json();
+          if(!(j && j.success)){
+            btn.disabled = false; btn.textContent = 'Delete All';
+            alert('Failed to delete photos: '+(j&&j.error||'unknown'));
+            return;
+          }
+          // Replace grid content with empty message
+          const grid = document.querySelector('.grid');
+          if(grid){
+            const msg = document.createElement('div');
+            msg.className = 'muted'; msg.textContent = 'No photos attached.';
+            grid.replaceWith(msg);
+          }
+          btn.disabled = true; btn.textContent = 'Deleted';
+        }catch(e){ btn.disabled = false; btn.textContent = 'Delete All'; alert('Error: '+e); }
+      });
+    })();
+
+    // Mark as Listed action
+    (function(){
+      const btn = document.getElementById('btnMarkListed');
+      if(!btn) return;
+      btn.addEventListener('click', async ()=>{
+        if(btn.disabled) return;
+        const proceed = confirm('Marking as listed will delete all diagnostic photos for this item. Make sure you have downloaded them first. Continue?');
+        if(!proceed) return;
+        try{
+          btn.disabled = true; btn.textContent = 'Marking...';
+          // 1) set list status
+          const res = await fetch('/api/bol_items/list_status', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ upc: '{{ upc }}', list_status: 'listed' })});
+          const j = await res.json();
+          if(!(j && j.success)){
+            btn.disabled = false; btn.textContent = 'Mark as Listed'; alert('Failed to mark listed: '+(j&&j.error||'unknown')); return;
+          }
+          // 2) delete photos
+          const delRes = await fetch('/api/items_prep/diagnostic/{{ upc }}/photos', { method:'DELETE' });
+          const dj = await delRes.json();
+          if(!(dj && dj.success)){
+            alert('Marked listed, but failed to delete photos: '+(dj&&dj.error||'unknown'));
+          }
+          // 3) reflect UI
+          btn.textContent = 'Listed'; btn.style.background = '#2ecc71'; btn.style.color = '#fff';
+          // Remove photos grid to reflect deletion
+          document.querySelectorAll('.grid .thumb').forEach(el=> el.remove());
+        }catch(e){ btn.disabled = false; btn.textContent = 'Mark as Listed'; alert('Failed: '+e); }
+      });
+    })();
+  </script>
+</body>
+</html>

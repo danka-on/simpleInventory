@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Trash Manager</title>
+  <style>
+    body{font-family:Segoe UI,Arial,sans-serif;background:#f7f7f8;margin:0;padding:18px}
+    .top{display:flex;align-items:center;gap:10px;justify-content:space-between}
+    .btn{padding:8px 14px;border-radius:6px;border:none;cursor:pointer}
+    .btn-primary{background:#0984e3;color:#fff}
+    .btn-success{background:#2ecc71;color:#fff}
+    .btn-warning{background:#f39c12;color:#fff}
+    .btn-danger{background:#e74c3c;color:#fff}
+    .btn-outline{background:#fff;border:1px solid #ccc;color:#333}
+    .card{background:#fff;border:1px solid #e6e6e6;border-radius:10px;padding:14px;margin-bottom:12px}
+    .row{display:flex;gap:12px;align-items:end;flex-wrap:wrap}
+    label{font-size:0.9rem;color:#444}
+    input[type=number]{padding:8px;border:1px solid #ddd;border-radius:6px;width:140px}
+    table{width:100%;border-collapse:collapse;margin-top:12px}
+    th,td{padding:8px;border:1px solid #e6e6e6;text-align:left}
+    th{background:#f0f0f0}
+    img.thumb{height:50px;object-fit:cover;border-radius:6px}
+    code{font-size:0.85rem;color:#444}
+  </style>
+</head>
+<body>
+<div class="top">
+  <a href="/tools"><button class="btn btn-danger">Back</button></a>
+  <h2 style="margin:0">Trash Manager</h2>
+  <div style="width:100px"></div>
+</div>
+
+<p class="text-muted">Manage soft-deleted diagnostic photos. Adjust retention, restore, or permanently delete.</p>
+
+<div class="card">
+  <div class="row">
+    <div>
+      <label for="retentionDays">Retention (days)</label><br>
+      <input type="number" id="retentionDays" min="1" max="365" />
+    </div>
+    <button id="saveRetention" class="btn btn-primary">Save</button>
+    <button id="purgeExpired" class="btn btn-warning">Purge Expired Now</button>
+    <div style="margin-left:auto">
+      <button id="hardDeleteAll" class="btn btn-danger">Hard Delete All</button>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="row" style="justify-content:space-between">
+    <h3 style="margin:0">Trashed Photos</h3>
+    <div>
+      <button id="restoreSelected" class="btn btn-success">Restore Selected</button>
+      <button id="hardDeleteSelected" class="btn btn-danger">Hard Delete Selected</button>
+    </div>
+  </div>
+  <div class="table-responsive">
+    <table>
+      <thead>
+        <tr>
+          <th><input type="checkbox" id="selectAll" /></th>
+          <th>Preview</th>
+          <th>UPC</th>
+          <th>Deleted</th>
+          <th>Expires</th>
+          <th>Path</th>
+        </tr>
+      </thead>
+      <tbody id="trashRows"></tbody>
+    </table>
+  </div>
+  <div class="row" style="justify-content:space-between">
+    <button id="prevPage" class="btn btn-outline">Prev</button>
+    <div><span id="pageInfo">Page 1</span></div>
+    <button id="nextPage" class="btn btn-outline">Next</button>
+  </div>
+</div>
+
+<script>
+let page = 1;
+let size = 50;
+
+async function loadSettings(){
+  const r = await fetch('/api/trash/settings');
+  const j = await r.json();
+  if(j && typeof j.retention_days !== 'undefined'){
+    document.getElementById('retentionDays').value = j.retention_days;
+  }
+}
+
+async function saveSettings(){
+  const days = parseInt(document.getElementById('retentionDays').value || '0', 10);
+  if(!days || days < 1){
+    alert('Please enter a valid number of days (>=1).');
+    return;
+  }
+  const r = await fetch('/api/trash/settings', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({retention_days: days})});
+  const j = await r.json();
+  if(!j.success){
+    alert('Failed to save: ' + (j.error || 'unknown'));
+  }
+}
+
+function fmtET(iso){
+  if(!iso) return '';
+  try{
+    const d = new Date(iso + (iso.endsWith('Z')? '': 'Z'));
+    return d.toLocaleString('en-US', { timeZone: 'America/New_York' });
+  }catch(e){ return iso; }
+}
+
+async function loadTrash(){
+  const r = await fetch(`/api/trash/list?page=${page}&size=${size}`);
+  const j = await r.json();
+  const tbody = document.getElementById('trashRows');
+  tbody.innerHTML = '';
+  if(!j.success){
+    tbody.innerHTML = `<tr><td colspan="6" class="text-danger">${j.error || 'Failed to load trash'}</td></tr>`;
+    return;
+  }
+  const rows = j.results || [];
+  if(rows.length === 0){
+    tbody.innerHTML = '<tr><td colspan="6" class="text-muted">No trashed photos.</td></tr>';
+  }
+  for(const r of rows){
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><input type="checkbox" class="rowCheck" data-id="${r.id}" data-upc="${r.upc}" /></td>
+      <td>${r.url ? `<img src="${r.url}" alt="preview" style="height:50px;object-fit:cover" />` : ''}</td>
+      <td><a href="/item-prep/diagnostic/view?upc=${encodeURIComponent(r.upc)}">${r.upc}</a></td>
+      <td>${fmtET(r.deleted_at)}</td>
+      <td>${fmtET(r.expires_at)}</td>
+      <td><code>${r.trash_path || r.image_path || ''}</code></td>
+    `;
+    tbody.appendChild(tr);
+  }
+  const total = j.total || 0;
+  const totalPages = Math.max(1, Math.ceil(total/size));
+  document.getElementById('pageInfo').textContent = `Page ${page} of ${totalPages} (${total} items)`;
+}
+
+function selectedIds(){
+  return Array.from(document.querySelectorAll('.rowCheck:checked')).map(cb => parseInt(cb.dataset.id));
+}
+
+function selectedUpcs(){
+  return Array.from(document.querySelectorAll('.rowCheck:checked')).map(cb => cb.dataset.upc).filter((v,i,a)=>a.indexOf(v)===i);
+}
+
+async function restoreSelected(){
+  const upcs = selectedUpcs();
+  if(upcs.length === 0){ alert('Select at least one row.'); return; }
+  // restore per UPC for simplicity
+  for(const u of upcs){
+    await fetch(`/api/items_prep/diagnostic/${encodeURIComponent(u)}/trash/restore`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ all: true })});
+  }
+  await loadTrash();
+}
+
+async function hardDeleteSelected(){
+  const upcs = selectedUpcs();
+  if(upcs.length === 0){ alert('Select at least one row.'); return; }
+  if(!confirm('Permanently delete selected UPC groups? This cannot be undone.')) return;
+  for(const u of upcs){
+    await fetch(`/api/items_prep/diagnostic/${encodeURIComponent(u)}/photos?hard=1`, {method:'DELETE'});
+  }
+  await loadTrash();
+}
+
+async function hardDeleteAll(){
+  if(!confirm('Hard delete ALL trashed photos? This cannot be undone.')) return;
+  const r = await fetch('/api/trash/hard_delete_all', {method:'POST'});
+  const j = await r.json();
+  if(!j.success){
+    alert('Failed: ' + (j.error || 'unknown'));
+  }
+  await loadTrash();
+}
+
+async function purgeExpired(){
+  const r = await fetch('/api/trash/purge_expired', {method:'POST'});
+  const j = await r.json();
+  if(!j.success){
+    alert('Failed to purge: ' + (j.error || 'unknown'));
+  }
+  await loadTrash();
+}
+
+window.addEventListener('DOMContentLoaded', async () => {
+  await loadSettings();
+  await loadTrash();
+  document.getElementById('saveRetention').addEventListener('click', saveSettings);
+  document.getElementById('purgeExpired').addEventListener('click', purgeExpired);
+  document.getElementById('hardDeleteAll').addEventListener('click', hardDeleteAll);
+  document.getElementById('restoreSelected').addEventListener('click', restoreSelected);
+  document.getElementById('hardDeleteSelected').addEventListener('click', hardDeleteSelected);
+  document.getElementById('selectAll').addEventListener('change', (e)=>{
+    document.querySelectorAll('.rowCheck').forEach(cb=> cb.checked = e.target.checked);
+  });
+  document.getElementById('prevPage').addEventListener('click', ()=>{ if(page>1){ page--; loadTrash(); }});
+  document.getElementById('nextPage').addEventListener('click', ()=>{ page++; loadTrash(); });
+});
+</script>
+</body>
+</html>

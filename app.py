@@ -71,6 +71,496 @@ def _run_enrich_in_background():
 def tools():
     return render_template('tools.html')
 
+# =========== Item Preparation Helpers and Routes ===========
+def _normalize_upc(upc):
+    try:
+        if upc is None:
+            return ''
+        s = str(upc).strip()
+        if not s:
+            return ''
+        # handle float-like strings ending with .0
+        if s.endswith('.0') and s.replace('.0', '').isdigit():
+            return str(int(float(s)))
+        # handle numeric floats
+        if s.replace('.', '', 1).isdigit():
+            try:
+                f = float(s)
+                if abs(f - int(f)) < 1e-9:
+                    return str(int(f))
+            except Exception:
+                pass
+        return s
+    except Exception:
+        return str(upc or '')
+
+def _ensure_items_prep_tables():
+    try:
+        conn = sqlite3.connect('bol.db')
+        cur = conn.cursor()
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS items_prep_status (
+                upc TEXT PRIMARY KEY,
+                status TEXT,
+                reason TEXT,
+                note TEXT,
+                updated_at TEXT
+            )
+        ''')
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS items_prep_images (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                upc TEXT,
+                image_path TEXT,
+                created_at TEXT,
+                deleted_at TEXT,
+                expires_at TEXT,
+                trash_path TEXT
+            )
+        ''')
+        # Add missing columns if table existed earlier
+        cur.execute("PRAGMA table_info(items_prep_images)")
+        cols = [r[1] for r in cur.fetchall()]
+        if 'deleted_at' not in cols:
+            cur.execute("ALTER TABLE items_prep_images ADD COLUMN deleted_at TEXT")
+        if 'expires_at' not in cols:
+            cur.execute("ALTER TABLE items_prep_images ADD COLUMN expires_at TEXT")
+        if 'trash_path' not in cols:
+            cur.execute("ALTER TABLE items_prep_images ADD COLUMN trash_path TEXT")
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print('Failed ensuring items_prep tables:', e)
+
+def _now_iso():
+    import datetime as _dt
+    return _dt.datetime.utcnow().isoformat()
+
+def _trash_retention_days():
+    # Prefer app_settings table value; fallback to env var; then default 7
+    try:
+        conn = sqlite3.connect('bol.db')
+        cur = conn.cursor()
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='app_settings'")
+        if cur.fetchone():
+            cur.execute("SELECT value FROM app_settings WHERE key='TRASH_RETENTION_DAYS'")
+            row = cur.fetchone()
+            if row and row[0] is not None:
+                conn.close()
+                return int(row[0])
+        conn.close()
+    except Exception:
+        pass
+    try:
+        return int(os.getenv('TRASH_RETENTION_DAYS', '7'))
+    except Exception:
+        return 7
+
+def _ensure_app_settings():
+    try:
+        conn = sqlite3.connect('bol.db')
+        cur = conn.cursor()
+        cur.execute('''CREATE TABLE IF NOT EXISTS app_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )''')
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print('Failed ensuring app_settings:', e)
+
+def _set_trash_retention_days(days: int):
+    try:
+        days = int(days)
+        _ensure_app_settings()
+        conn = sqlite3.connect('bol.db')
+        cur = conn.cursor()
+        cur.execute("INSERT INTO app_settings(key, value) VALUES('TRASH_RETENTION_DAYS', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(days),))
+        # Update expires_at for existing trashed items
+        cur.execute("SELECT id, deleted_at FROM items_prep_images WHERE deleted_at IS NOT NULL")
+        rows = cur.fetchall()
+        import datetime as _dt
+        for rid, del_at in rows:
+            try:
+                base = _dt.datetime.fromisoformat(del_at)
+            except Exception:
+                base = _dt.datetime.utcnow()
+            new_exp = (base + _dt.timedelta(days=days)).isoformat()
+            cur.execute('UPDATE items_prep_images SET expires_at=? WHERE id=?', (new_exp, rid))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print('Failed setting retention days:', e)
+        return False
+
+def _move_to_trash(abs_path, upc):
+    try:
+        # Build trash path under static/items_prep_trash/YYYY/MM/UPC
+        import datetime as _dt
+        base = os.path.join(app.root_path, 'static', 'items_prep_trash')
+        now = _dt.datetime.utcnow()
+        year = str(now.year)
+        month = f"{now.month:02d}"
+        target_dir = os.path.join(base, year, month, str(upc))
+        os.makedirs(target_dir, exist_ok=True)
+        fname = os.path.basename(abs_path)
+        target = os.path.join(target_dir, fname)
+        # If name exists, add counter
+        if os.path.exists(target):
+            name, ext = os.path.splitext(fname)
+            k = 1
+            while os.path.exists(target):
+                target = os.path.join(target_dir, f"{name}_{k}{ext}")
+                k += 1
+        os.replace(abs_path, target)
+        # Return relative path under static
+        rel = os.path.relpath(target, os.path.join(app.root_path, 'static')).replace('\\','/')
+        return rel
+    except Exception as e:
+        print('Failed move to trash:', e)
+        return None
+
+def _purge_expired_trash():
+    try:
+        _ensure_items_prep_tables()
+        conn = sqlite3.connect('bol.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute("SELECT id, trash_path FROM items_prep_images WHERE deleted_at IS NOT NULL AND expires_at IS NOT NULL AND expires_at <= ?", (_now_iso(),))
+        rows = cur.fetchall()
+        count = 0
+        for r in rows:
+            tr = r['trash_path']
+            if tr:
+                abs_path = os.path.join(app.root_path, 'static', tr)
+                try:
+                    if os.path.isfile(abs_path):
+                        os.remove(abs_path)
+                except Exception as fe:
+                    print('Purge remove failed:', fe)
+            try:
+                cur.execute('DELETE FROM items_prep_images WHERE id = ?', (r['id'],))
+                count += 1
+            except Exception as de:
+                print('Purge delete row failed:', de)
+        conn.commit()
+        conn.close()
+        return count
+    except Exception as e:
+        print('Purge error:', e)
+        return 0
+
+_trash_purger_started = False
+def _start_trash_purger_thread():
+    global _trash_purger_started
+    if _trash_purger_started:
+        return
+    _trash_purger_started = True
+    def _runner():
+        import time as _time
+        while True:
+            try:
+                _purge_expired_trash()
+            except Exception as e:
+                print('Trash purge tick error:', e)
+            _time.sleep(24*60*60)
+    t = threading.Thread(target=_runner, daemon=True)
+    t.start()
+
+def _ensure_bol_list_status_column():
+    """Ensure bol_items has a list_status column for tracking if item is listed."""
+    try:
+        conn = sqlite3.connect('bol.db')
+        cur = conn.cursor()
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='bol_items'")
+        if not cur.fetchone():
+            conn.close()
+            return
+        cur.execute("PRAGMA table_info(bol_items)")
+        cols = [r[1] for r in cur.fetchall()]
+        if 'list_status' not in cols:
+            cur.execute("ALTER TABLE bol_items ADD COLUMN list_status TEXT")
+            conn.commit()
+        conn.close()
+    except Exception as e:
+        print('Failed ensuring list_status column in bol_items:', e)
+
+@app.route('/item-prep')
+def item_prep_page():
+    return render_template('item_prep.html')
+
+@app.route('/item-prep/diagnostic')
+def item_prep_diagnostic_page():
+    upc = (request.args.get('upc') or '').strip()
+    return render_template('item_prep_diagnostic.html', upc=upc)
+
+@app.route('/item-prep/diagnostic/view')
+def item_prep_diagnostic_view_page():
+    upc = _normalize_upc(request.args.get('upc'))
+    # Load status, images, and (optionally) bol item details
+    status = None
+    images = []
+    bol = None
+    try:
+        _ensure_items_prep_tables()
+        _ensure_bol_list_status_column()
+        conn = sqlite3.connect('bol.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute('SELECT status, reason, note, updated_at FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (upc,))
+        row = cur.fetchone()
+        status = dict(row) if row else None
+        cur.execute("SELECT id, image_path, created_at FROM items_prep_images WHERE upc = ? COLLATE NOCASE AND (deleted_at IS NULL OR TRIM(COALESCE(deleted_at,'')) = '') ORDER BY created_at DESC, id DESC", (upc,))
+        images = [dict(r) for r in cur.fetchall()]
+        cur.execute('SELECT id, upc, item_description, image_url, lot_number, bol_number, import_date, list_status FROM bol_items WHERE upc = ? COLLATE NOCASE LIMIT 1', (upc,))
+        b = cur.fetchone()
+        bol = dict(b) if b else None
+        conn.close()
+    except Exception as e:
+        print('Diagnostic view load error:', e)
+    return render_template('item_prep_diagnostic_view.html', upc=upc, status=status, images=images, bol=bol)
+
+ 
+
+@app.route('/api/bol_lookup', methods=['GET'])
+def api_bol_lookup():
+    """Lookup a BOL item by UPC in bol.db and return normalized fields."""
+    try:
+        upc = _normalize_upc(request.args.get('upc'))
+        if not upc:
+            return jsonify({'found': False, 'error': 'Missing upc'}), 400
+        conn = sqlite3.connect('bol.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute("SELECT id, upc, item_description, image_url, lot_number, bol_number, import_date FROM bol_items WHERE upc = ? COLLATE NOCASE LIMIT 1", (upc,))
+        row = cur.fetchone()
+        conn.close()
+        if not row:
+            return jsonify({'found': False})
+        item = dict(row)
+        # also include current prep status if exists
+        try:
+            _ensure_items_prep_tables()
+            conn2 = sqlite3.connect('bol.db')
+            conn2.row_factory = sqlite3.Row
+            cur2 = conn2.cursor()
+            cur2.execute('SELECT status, reason, note, updated_at FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (upc,))
+            srow = cur2.fetchone()
+            conn2.close()
+            if srow:
+                item['prep_status'] = dict(srow)
+        except Exception:
+            item['prep_status'] = None
+        return jsonify({'found': True, 'item': item})
+    except Exception as e:
+        return jsonify({'found': False, 'error': str(e)}), 500
+
+@app.route('/api/items_prep/status', methods=['POST'])
+def api_items_prep_status():
+    """Upsert preparation status for a UPC. JSON: { upc, status, reason?, note? }"""
+    try:
+        data = request.get_json() or {}
+        upc = _normalize_upc(data.get('upc'))
+        status = (data.get('status') or '').strip().lower()
+        reason = (data.get('reason') or '').strip()
+        note = (data.get('note') or '').strip()
+        if not upc or status not in ('good', 'bad', 'unchecked'):
+            return jsonify({'success': False, 'error': 'Missing upc or invalid status'}), 400
+        _ensure_items_prep_tables()
+        import datetime
+        ts = datetime.datetime.utcnow().isoformat()
+        conn = sqlite3.connect('bol.db')
+        cur = conn.cursor()
+        # upsert
+        cur.execute('SELECT upc FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (upc,))
+        if cur.fetchone():
+            cur.execute('UPDATE items_prep_status SET status=?, reason=?, note=?, updated_at=? WHERE upc=?', (status, reason, note, ts, upc))
+        else:
+            cur.execute('INSERT INTO items_prep_status (upc, status, reason, note, updated_at) VALUES (?,?,?,?,?)', (upc, status, reason, note, ts))
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/items_prep/diagnostic', methods=['POST'])
+def api_items_prep_diagnostic():
+    """Save diagnostic info and photos for a UPC. form-data: upc, reason, note, files: photos[]"""
+    try:
+        _ensure_items_prep_tables()
+        upc = _normalize_upc(request.form.get('upc'))
+        reason = (request.form.get('reason') or '').strip()
+        note = (request.form.get('note') or '').strip()
+        if not upc:
+            return jsonify({'success': False, 'error': 'Missing upc'}), 400
+        # save files under static/items_prep
+        from werkzeug.utils import secure_filename
+        save_dir = os.path.join(app.root_path, 'static', 'items_prep')
+        os.makedirs(save_dir, exist_ok=True)
+        saved = []
+        files = request.files.getlist('photos[]') or request.files.getlist('photos') or ([] if 'photo' not in request.files else [request.files['photo']])
+        import datetime
+        ts = datetime.datetime.utcnow().isoformat()
+        if files:
+            conn_i = sqlite3.connect('bol.db')
+            cur_i = conn_i.cursor()
+            for f in files:
+                if not f or not getattr(f, 'filename', ''):
+                    continue
+                fn = secure_filename(f.filename)
+                name, ext = os.path.splitext(fn)
+                unique = f"{_normalize_upc(upc)}_{int(time.time()*1000)}{ext or '.jpg'}"
+                path = os.path.join(save_dir, unique)
+                try:
+                    f.save(path)
+                    rel = f"items_prep/{unique}"
+                    cur_i.execute('INSERT INTO items_prep_images (upc, image_path, created_at) VALUES (?,?,?)', (upc, rel, ts))
+                    saved.append(rel)
+                except Exception as se:
+                    print('Failed to save diagnostic image:', se)
+            conn_i.commit()
+            conn_i.close()
+        # set status to bad with reason/note
+        conn = sqlite3.connect('bol.db')
+        cur = conn.cursor()
+        cur.execute('SELECT upc FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (upc,))
+        if cur.fetchone():
+            cur.execute('UPDATE items_prep_status SET status=?, reason=?, note=?, updated_at=? WHERE upc=?', ('bad', reason, note, ts, upc))
+        else:
+            cur.execute('INSERT INTO items_prep_status (upc, status, reason, note, updated_at) VALUES (?,?,?,?,?)', (upc, 'bad', reason, note, ts))
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True, 'saved': saved})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/items_prep/diagnostic/<upc>', methods=['GET'])
+def api_items_prep_diagnostic_get(upc):
+    try:
+        upc_n = _normalize_upc(upc)
+        _ensure_items_prep_tables()
+        conn = sqlite3.connect('bol.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute('SELECT status, reason, note, updated_at FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (upc_n,))
+        srow = cur.fetchone()
+        cur.execute("SELECT id, image_path, created_at FROM items_prep_images WHERE upc = ? COLLATE NOCASE AND (deleted_at IS NULL OR TRIM(COALESCE(deleted_at,'')) = '') ORDER BY created_at DESC, id DESC", (upc_n,))
+        images = [dict(r) for r in cur.fetchall()]
+        conn.close()
+        return jsonify({'upc': upc_n, 'status': dict(srow) if srow else None, 'images': images})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/items_prep/diagnostic/<upc>/photos', methods=['DELETE'])
+def api_items_prep_diagnostic_delete_photos(upc):
+    """Soft-delete all diagnostic photos for a UPC by moving them to trash and setting retention expiry.
+    Query param hard=1 to permanently delete files and rows.
+    """
+    try:
+        upc_n = _normalize_upc(upc)
+        hard = (request.args.get('hard') or '0') in ('1','true','yes')
+        _ensure_items_prep_tables()
+        conn = sqlite3.connect('bol.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        if hard:
+            cur.execute('SELECT id, image_path, trash_path, deleted_at FROM items_prep_images WHERE upc = ? COLLATE NOCASE', (upc_n,))
+            rows = cur.fetchall()
+            for r in rows:
+                # remove from whichever exists
+                for rel in [r['trash_path'], r['image_path']]:
+                    if rel:
+                        abs_path = os.path.join(app.root_path, 'static', rel) if not os.path.isabs(rel) else rel
+                        try:
+                            if os.path.isfile(abs_path):
+                                os.remove(abs_path)
+                        except Exception as fe:
+                            print('Failed hard remove photo', abs_path, fe)
+            cur.execute('DELETE FROM items_prep_images WHERE upc = ? COLLATE NOCASE', (upc_n,))
+            deleted = cur.rowcount
+            conn.commit()
+            conn.close()
+            return jsonify({'success': True, 'deleted': deleted, 'hard': True})
+        else:
+            # Soft delete only active (not already deleted) rows
+            cur.execute("SELECT id, image_path FROM items_prep_images WHERE upc = ? COLLATE NOCASE AND (deleted_at IS NULL OR TRIM(COALESCE(deleted_at,'')) = '')", (upc_n,))
+            rows = cur.fetchall()
+            deleted = 0
+            for r in rows:
+                rel = r['image_path']
+                if not rel:
+                    continue
+                abs_path = os.path.join(app.root_path, 'static', rel) if not os.path.isabs(rel) else rel
+                new_rel = None
+                if os.path.isfile(abs_path):
+                    new_rel = _move_to_trash(abs_path, upc_n)
+                # mark as deleted with expiry
+                del_at = _now_iso()
+                import datetime as _dt
+                exp = ( _dt.datetime.utcnow() + _dt.timedelta(days=_trash_retention_days()) ).isoformat()
+                cur.execute('UPDATE items_prep_images SET deleted_at=?, expires_at=?, trash_path=? WHERE id=?', (del_at, exp, new_rel or rel, r['id']))
+                deleted += 1
+            conn.commit()
+            conn.close()
+            return jsonify({'success': True, 'deleted': deleted, 'hard': False, 'retention_days': _trash_retention_days()})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/items_prep/diagnostic/<upc>/trash', methods=['GET'])
+def api_items_prep_trash_list(upc):
+    try:
+        upc_n = _normalize_upc(upc)
+        _ensure_items_prep_tables()
+        conn = sqlite3.connect('bol.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute('SELECT id, trash_path, deleted_at, expires_at FROM items_prep_images WHERE upc = ? COLLATE NOCASE AND deleted_at IS NOT NULL ORDER BY deleted_at DESC', (upc_n,))
+        rows = [dict(r) for r in cur.fetchall()]
+        conn.close()
+        return jsonify({'success': True, 'results': rows})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/items_prep/diagnostic/<upc>/trash/restore', methods=['POST'])
+def api_items_prep_trash_restore(upc):
+    try:
+        data = request.get_json() or {}
+        ids = data.get('ids')  # optional list of ids to restore; if missing, restore all for UPC
+        upc_n = _normalize_upc(upc)
+        _ensure_items_prep_tables()
+        conn = sqlite3.connect('bol.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        if ids and isinstance(ids, list):
+            placeholders = ','.join('?' for _ in ids)
+            cur.execute(f'SELECT id, image_path, trash_path FROM items_prep_images WHERE id IN ({placeholders}) AND deleted_at IS NOT NULL', tuple(ids))
+            rows = cur.fetchall()
+        else:
+            cur.execute('SELECT id, image_path, trash_path FROM items_prep_images WHERE upc = ? COLLATE NOCASE AND deleted_at IS NOT NULL', (upc_n,))
+            rows = cur.fetchall()
+        restored = 0
+        for r in rows:
+            tr = r['trash_path']
+            if not tr:
+                continue
+            abs_trash = os.path.join(app.root_path, 'static', tr)
+            abs_orig = os.path.join(app.root_path, 'static', r['image_path'])
+            # ensure destination dir exists
+            os.makedirs(os.path.dirname(abs_orig), exist_ok=True)
+            try:
+                if os.path.isfile(abs_trash):
+                    os.replace(abs_trash, abs_orig)
+                cur.execute('UPDATE items_prep_images SET deleted_at=NULL, expires_at=NULL, trash_path=NULL WHERE id=?', (r['id'],))
+                restored += 1
+            except Exception as e:
+                print('Restore failed:', e)
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True, 'restored': restored})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/shelfcreator')
 def shelfcreator():
     # Legacy route; redirect to Shelf Manager
@@ -88,13 +578,142 @@ def extractor():
 def items_to_list_page():
     return render_template('items_to_list.html')
 
+@app.route('/trash-manager')
+def trash_manager_page():
+    return render_template('trash_manager.html')
+
+@app.route('/api/trash/settings', methods=['GET','POST'])
+def api_trash_settings():
+    if request.method == 'GET':
+        return jsonify({'retention_days': _trash_retention_days()})
+    try:
+        data = request.get_json() or {}
+        days = int(data.get('retention_days'))
+        ok = _set_trash_retention_days(days)
+        return jsonify({'success': ok, 'retention_days': _trash_retention_days()})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/trash/list', methods=['GET'])
+def api_trash_list():
+    try:
+        page = int(request.args.get('page', 1))
+        size = max(1, min(200, int(request.args.get('size', 50))))
+        offset = (page-1) * size
+        _ensure_items_prep_tables()
+        conn = sqlite3.connect('bol.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute('SELECT COUNT(*) FROM items_prep_images WHERE deleted_at IS NOT NULL')
+        total = cur.fetchone()[0]
+        cur.execute('''
+            SELECT id, upc, trash_path, image_path, deleted_at, expires_at
+            FROM items_prep_images
+            WHERE deleted_at IS NOT NULL
+            ORDER BY deleted_at DESC, id DESC
+            LIMIT ? OFFSET ?
+        ''', (size, offset))
+        rows = [dict(r) for r in cur.fetchall()]
+        conn.close()
+        # add absolute-ish URLs for preview (served from static)
+        for r in rows:
+            r['url'] = url_for('static', filename=(r.get('trash_path') or r.get('image_path') or ''))
+        return jsonify({'success': True, 'results': rows, 'total': total, 'page': page, 'size': size})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/trash/restore', methods=['POST'])
+def api_trash_restore():
+    try:
+        data = request.get_json() or {}
+        ids = data.get('ids') or []
+        upc = data.get('upc')
+        if upc and not ids:
+            # restore all for UPC
+            return api_items_prep_trash_restore(upc)
+        if not ids:
+            return jsonify({'success': False, 'error': 'No ids provided'})
+        # we need UPC per id; fetch
+        conn = sqlite3.connect('bol.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        placeholders = ','.join('?' for _ in ids)
+        cur.execute(f'SELECT id, upc FROM items_prep_images WHERE id IN ({placeholders})', tuple(ids))
+        rows = cur.fetchall()
+        conn.close()
+        restored_total = 0
+        for r in rows:
+            resp = api_items_prep_trash_restore(r['upc'])
+            # ignore details; this restores all for UPC—fine for simplicity now
+            restored_total += 1
+        return jsonify({'success': True, 'restored_groups': restored_total})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/trash/hard_delete', methods=['POST'])
+def api_trash_hard_delete():
+    try:
+        data = request.get_json() or {}
+        ids = data.get('ids') or []
+        upc = data.get('upc')
+        if upc and not ids:
+            # hard delete all for UPC
+            return api_items_prep_diagnostic_delete_photos(upc)
+        if not ids:
+            return jsonify({'success': False, 'error': 'No ids provided'})
+        conn = sqlite3.connect('bol.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        placeholders = ','.join('?' for _ in ids)
+        cur.execute(f'SELECT DISTINCT upc FROM items_prep_images WHERE id IN ({placeholders})', tuple(ids))
+        upcs = [r['upc'] for r in cur.fetchall()]
+        conn.close()
+        deleted_total = 0
+        for u in upcs:
+            resp = api_items_prep_diagnostic_delete_photos(u)
+            deleted_total += 1
+        return jsonify({'success': True, 'deleted_groups': deleted_total})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/trash/hard_delete_all', methods=['POST'])
+def api_trash_hard_delete_all():
+    try:
+        # Hard delete everything currently in trash (deleted_at not null)
+        _ensure_items_prep_tables()
+        conn = sqlite3.connect('bol.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute('SELECT DISTINCT upc FROM items_prep_images WHERE deleted_at IS NOT NULL')
+        upcs = [r['upc'] for r in cur.fetchall()]
+        conn.close()
+        total = 0
+        for u in upcs:
+            # hard=1 ensures permanent deletion
+            with app.test_request_context(query_string={'hard':'1'}):
+                resp = api_items_prep_diagnostic_delete_photos(u)
+                total += 1
+        return jsonify({'success': True, 'deleted_groups': total})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/trash/purge_expired', methods=['POST'])
+def api_trash_purge_expired():
+    try:
+        count = _purge_expired_trash()
+        return jsonify({'success': True, 'purged': count})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
 @app.route('/api/bol_items', methods=['GET'])
 def api_bol_items():
     """Return BOL items with sorting and filters: lot (exact), import_date (exact), sort by date/name/qty."""
     try:
+        _ensure_bol_list_status_column()
         sort = request.args.get('sort', 'date_desc')
         lot = (request.args.get('lot') or '').strip()
         import_date = (request.args.get('import_date') or '').strip()
+        status_filter = (request.args.get('status') or '').strip().lower()
         conn = sqlite3.connect('bol.db')
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
@@ -102,6 +721,8 @@ def api_bol_items():
         if not cur.fetchone():
             conn.close()
             return jsonify({'results': []})
+        # Ensure prep tables exist for left join and statuses
+        _ensure_items_prep_tables()
         where = []
         params = []
         if lot:
@@ -111,6 +732,7 @@ def api_bol_items():
             where.append('import_date = ?')
             params.append(import_date)
         where_sql = (' WHERE ' + ' AND '.join(where)) if where else ''
+        # Build sort
         order_sql = ' ORDER BY '
         if sort == 'date_asc':
             order_sql += "import_date ASC, id ASC"
@@ -119,10 +741,55 @@ def api_bol_items():
         else:
             # date_desc default
             order_sql += "import_date DESC, id DESC"
-        sql = 'SELECT id, upc, item_description, image_url, lot_number, bol_number, import_date FROM bol_items' + where_sql + order_sql
+        # Left join items_prep_status to include status
+        sql = (
+            'SELECT b.id, b.upc, b.item_description, b.image_url, b.lot_number, b.bol_number, b.import_date, b.list_status, '
+            's.status as prep_status, s.reason as prep_reason, s.note as prep_note, s.updated_at as prep_updated_at '
+            'FROM bol_items b '
+            'LEFT JOIN items_prep_status s ON s.upc = b.upc'
+            + where_sql + order_sql
+        )
         cur.execute(sql, params)
-        rows = [dict(r) for r in cur.fetchall()]
+        rows_all = [dict(r) for r in cur.fetchall()]
         conn.close()
+        # Build a status map keyed by both raw UPC and normalized UPC to handle formats like '16094950.0'
+        status_map = {}
+        try:
+            _ensure_items_prep_tables()
+            c2 = sqlite3.connect('bol.db')
+            c2.row_factory = sqlite3.Row
+            k2 = c2.cursor()
+            k2.execute('SELECT upc, status, reason, note, updated_at FROM items_prep_status')
+            for rr in k2.fetchall():
+                raw_upc = rr['upc']
+                st = {'prep_status': rr['status'], 'prep_reason': rr['reason'], 'prep_note': rr['note'], 'prep_updated_at': rr['updated_at']}
+                if raw_upc:
+                    status_map[str(raw_upc)] = st
+                    nu = _normalize_upc(raw_upc)
+                    status_map[nu] = st
+            c2.close()
+        except Exception:
+            status_map = {}
+        # Apply status filter in Python for flexibility (unchecked = no status or explicit 'unchecked')
+        def status_of(row):
+            # fallback to status_map using normalized upc if join didn't match
+            st = (row.get('prep_status') or '').strip().lower()
+            if not st:
+                up = _normalize_upc(row.get('upc'))
+                sm = status_map.get(up)
+                if sm:
+                    row['prep_status'] = sm.get('prep_status')
+                    row['prep_reason'] = sm.get('prep_reason')
+                    row['prep_note'] = sm.get('prep_note')
+                    row['prep_updated_at'] = sm.get('prep_updated_at')
+                    st = (row.get('prep_status') or '').strip().lower()
+            return st if st in ('good','bad','unchecked') else 'unchecked'
+        rows = rows_all
+        if status_filter in ('good','bad','unchecked'):
+            if status_filter == 'unchecked':
+                rows = [r for r in rows_all if status_of(r) == 'unchecked']
+            else:
+                rows = [r for r in rows_all if status_of(r) == status_filter]
         # Normalize for UI
         results = []
         for r in rows:
@@ -134,9 +801,72 @@ def api_bol_items():
                 'lot_number': r.get('lot_number') or '',
                 'bol_number': r.get('bol_number') or '',
                 'import_date': r.get('import_date') or '',
-                'status': 'unchecked'
+                'status': (r.get('prep_status') or 'unchecked'),
+                'list_status': (r.get('list_status') or '')
             })
         return jsonify({'results': results})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/bol_items/list_status', methods=['POST'])
+def api_bol_items_set_list_status():
+    """Set list_status for a BOL item by UPC. JSON: { upc, list_status } where list_status in ['listed', '']"""
+    try:
+        data = request.get_json() or {}
+        upc = _normalize_upc(data.get('upc'))
+        list_status = (data.get('list_status') or '').strip().lower()
+        if not upc:
+            return jsonify({'success': False, 'error': 'Missing upc'}), 400
+        if list_status not in ('listed', ''):
+            return jsonify({'success': False, 'error': 'Invalid list_status'}), 400
+        _ensure_bol_list_status_column()
+        conn = sqlite3.connect('bol.db')
+        cur = conn.cursor()
+        if list_status:
+            cur.execute('UPDATE bol_items SET list_status=? WHERE upc = ? COLLATE NOCASE', (list_status, upc))
+        else:
+            cur.execute('UPDATE bol_items SET list_status=NULL WHERE upc = ? COLLATE NOCASE', (upc,))
+        conn.commit()
+        updated = cur.rowcount
+        conn.close()
+        return jsonify({'success': True, 'updated': updated})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/items_prep/diagnostic/<upc>/photos.zip', methods=['GET'])
+def api_items_prep_diagnostic_photos_zip(upc):
+    """Bundle all diagnostic photos for a UPC into a zip and return as attachment."""
+    try:
+        upc_n = _normalize_upc(upc)
+        _ensure_items_prep_tables()
+        conn = sqlite3.connect('bol.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute("SELECT image_path FROM items_prep_images WHERE upc = ? COLLATE NOCASE AND (deleted_at IS NULL OR TRIM(COALESCE(deleted_at,'')) = '') ORDER BY created_at DESC, id DESC", (upc_n,))
+        rows = cur.fetchall()
+        conn.close()
+        if not rows:
+            return jsonify({'error': 'No photos for this UPC'}), 404
+        import zipfile
+        mem = io.BytesIO()
+        with zipfile.ZipFile(mem, mode='w', compression=zipfile.ZIP_DEFLATED) as zf:
+            for r in rows:
+                rel = r['image_path']
+                # Build absolute path
+                abs_path = os.path.join(app.root_path, 'static', rel.replace('..','').replace('\\','/').split('static/')[-1]) if not os.path.isabs(rel) else rel
+                # Fix double static if rel already starts with items_prep/
+                if not os.path.isabs(rel):
+                    abs_path = os.path.join(app.root_path, 'static', rel)
+                try:
+                    # Name inside zip: use basename
+                    arcname = os.path.basename(abs_path)
+                    if os.path.isfile(abs_path):
+                        zf.write(abs_path, arcname)
+                except Exception as e:
+                    print('Zip add failed:', e)
+        mem.seek(0)
+        filename = f"diagnostic_{upc_n}.zip"
+        return send_file(mem, mimetype='application/zip', as_attachment=True, download_name=filename)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -2448,6 +3178,8 @@ if __name__ == "__main__":
     time.sleep(2)
     orders()
     finalize_barcodes()
+    # Start trash purger daily
+    _start_trash_purger_thread()
 
     # Keep main thread alive
     while True:

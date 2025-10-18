@@ -44,6 +44,14 @@
         <option value="name">Name</option>
       </select>
     </label>
+    <label>Status:
+      <select id="status-select">
+        <option value="">All</option>
+        <option value="unchecked">Unchecked</option>
+        <option value="good">Good</option>
+        <option value="bad">Bad</option>
+      </select>
+    </label>
     <button class="btn" id="apply-filters">Apply</button>
   </div>
 
@@ -59,10 +67,12 @@ async function loadItems(){
   const lot = document.getElementById('filter-lot').value.trim();
   const import_date = document.getElementById('filter-date').value.trim();
   const sort = document.getElementById('sort-select').value;
+  const status = document.getElementById('status-select').value;
   const params = new URLSearchParams();
   if(lot) params.set('lot', lot);
   if(import_date) params.set('import_date', import_date);
   if(sort) params.set('sort', sort);
+  if(status) params.set('status', status);
   const resp = await fetch('/api/bol_items?'+params.toString());
   const j = await resp.json();
   render(j.results||[]);
@@ -71,7 +81,7 @@ async function loadItems(){
 function render(results){
   const container = document.getElementById('results');
   if(!results.length){ container.innerHTML = '<div class="small-muted">No items</div>'; return; }
-  let html = '<table><thead><tr><th>Status</th><th>Title</th><th>UPC</th><th>Lot #</th><th>BOL #</th><th>Import Date</th></tr></thead><tbody>';
+  let html = '<table><thead><tr><th>Status</th><th>Listing</th><th>Title</th><th>UPC</th><th>Lot #</th><th>BOL #</th><th>Import Date</th></tr></thead><tbody>';
   results.forEach(r=>{
     const title = esc(r.title||'');
     const img = esc(r.image||'');
@@ -80,8 +90,16 @@ function render(results){
     const lot = esc(r.lot_number||'');
     const bol = esc(r.bol_number||'');
     const imp = esc(r.import_date||'');
+    const status = (r.status||'').toLowerCase();
+    let pill = '<span class="status-box" title="Unchecked">unchecked</span>';
+    if(status==='good') pill = '<span class="status-box" style="background:#2ecc71" title="Good">good</span>';
+    if(status==='bad') pill = '<span class="status-box" style="background:#e74c3c" title="Bad">bad</span>';
+    const lstatus = (r.list_status||'').toLowerCase();
+    let lpill = '<span class="status-box" style="background:#9aa0a6" title="Not listed">not listed</span>';
+    if(lstatus==='listed') lpill = '<span class="status-box" style="background:#2ecc71" title="Listed">listed</span>';
     html += `<tr>`+
-            `<td><span class="status-box" title="Unchecked">unchecked</span></td>`+
+      `<td>${pill}${status==='bad'?` <a href="#" class="diag-link" data-upc="${upc}">Diagnostic</a>`:''}</td>`+
+      `<td>${lpill}</td>`+
             `<td><div class="title-cell"><img class="thumb" src="${thumb}" onerror="this.src='${missingThumb(48,48,'No Img')}'"><a href="#" class="img-link" data-img="${img}" data-title="${title}">${title}</a></div></td>`+
             `<td>${upc}</td>`+
             `<td>${lot}</td>`+
@@ -92,6 +110,7 @@ function render(results){
   html += '</tbody></table>';
   container.innerHTML = html;
   document.querySelectorAll('.img-link').forEach(el=> el.addEventListener('click', onOpenImg));
+  document.querySelectorAll('.diag-link').forEach(el=> el.addEventListener('click', onOpenDiag));
 }
 
 function onOpenImg(e){
@@ -108,6 +127,7 @@ function onOpenImg(e){
 
 document.getElementById('closeImg').addEventListener('click', ()=>{ document.getElementById('imgModal').style.display='none'; });
 document.getElementById('apply-filters').addEventListener('click', loadItems);
+function onOpenDiag(e){ e.preventDefault(); const upc = e.currentTarget.dataset.upc; if(!upc) return; window.location.href = '/item-prep/diagnostic/view?upc='+encodeURIComponent(upc); }
 
 // initial load
 loadItems();

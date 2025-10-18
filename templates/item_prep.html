@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Item Preparation</title>
+  <style>
+    body{font-family:Segoe UI,Arial,sans-serif;background:#f7fafc;margin:0;padding:18px}
+    .top{display:flex;align-items:center;gap:10px;justify-content:space-between}
+    .btn{padding:8px 14px;border-radius:6px;border:none;cursor:pointer}
+    .btn-primary{background:#00b894;color:#fff}
+    .btn-danger{background:#e74c3c;color:#fff}
+    .btn-gray{background:#95a5a6;color:#fff}
+    .card{background:#fff;border:1px solid #e8e8e8;border-radius:10px;padding:14px;margin-top:14px}
+    .row{display:flex;gap:10px;flex-wrap:wrap}
+    .item{display:flex;gap:12px;align-items:center}
+    .thumb{width:56px;height:56px;border-radius:8px;object-fit:cover;background:#f0f0f0}
+    .title{font-weight:600}
+    .muted{color:#666;font-size:0.9rem}
+    #statusMsg{margin-top:10px;font-size:0.95rem}
+    .ok{color:#2ecc71}
+    .bad{color:#e74c3c}
+    .hidden{display:none}
+  </style>
+  <script src="https://unpkg.com/@zxing/library@0.19.1/umd/index.min.js"></script>
+</head>
+<body>
+  <div class="top">
+    <a href="/tools"><button class="btn btn-danger">Back</button></a>
+    <h2>Item Preparation</h2>
+    <div style="width:100px"></div>
+  </div>
+
+  <div class="card">
+    <div id="scanner" style="max-width:320px">
+      <video id="video" playsinline style="width:100%;aspect-ratio:1/1;background:#222;border-radius:8px"></video>
+      <div id="scanMsg" class="muted">Initializing camera...</div>
+    </div>
+
+    <div class="row" style="align-items:center;margin-top:12px">
+      <input type="text" id="manualUpc" placeholder="Enter/scan UPC" style="padding:8px;border:1px solid #ddd;border-radius:6px;flex:1;min-width:200px">
+      <button class="btn" id="lookupBtn">Lookup</button>
+    </div>
+
+    <div id="result" class="item hidden" style="margin-top:12px">
+      <img id="thumb" class="thumb" src="" alt="thumb">
+      <div>
+        <div class="title" id="title"></div>
+        <div class="muted"><span id="upcTxt"></span> • <span id="lotTxt"></span> • <span id="bolTxt"></span></div>
+      </div>
+    </div>
+
+    <div class="row hidden" id="actions" style="margin-top:12px">
+      <button class="btn btn-primary" id="goodBtn">Good</button>
+      <button class="btn btn-danger" id="badBtn">Bad → Diagnostic</button>
+      <button class="btn btn-gray" id="skipBtn">Skip</button>
+    </div>
+
+    <div id="statusMsg" class="muted"></div>
+  </div>
+
+  <script>
+    const video = document.getElementById('video');
+    const scanMsg = document.getElementById('scanMsg');
+    let reader = null;
+    let stream = null;
+
+    function missingThumb(width=56,height=56,text='No Img'){return 'data:image/svg+xml;utf8,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="'+width+'" height="'+height+'"><rect width="100%" height="100%" fill="#f8f8f8"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#b0b0b0" font-size="10">'+text+'</text></svg>');}
+
+    async function startScanner(){
+      try{
+        reader = new ZXing.BrowserMultiFormatReader();
+        if (video.srcObject) video.srcObject.getTracks().forEach(t=>t.stop());
+        const ms = await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
+        stream = ms;
+        video.srcObject = ms;
+        await video.play();
+        scanMsg.textContent = 'Ready to scan UPC';
+        await reader.decodeFromVideoDevice(undefined,'video',(res,err)=>{
+          if(res){ const upc = res.getText().trim(); onScan(upc); }
+        });
+      }catch(e){ scanMsg.textContent = 'Camera unavailable: '+(e.message||''); }
+    }
+
+    function stopScanner(){ try{ reader && reader.reset(); }catch{}; try{ stream && stream.getTracks().forEach(t=>t.stop()); }catch{}; reader=null; stream=null; }
+
+    async function onScan(upc){ stopScanner(); document.getElementById('manualUpc').value = upc; await lookup(upc); }
+
+    function esc(s){return String(s||'').replace(/[&<>]/g, c=>({"&":"&amp;","<":"&lt;","<":"&lt;",">":"&gt;"}[c]));}
+
+    async function lookup(upc){
+      const r = await fetch('/api/bol_lookup?upc='+encodeURIComponent(upc));
+      const j = await r.json();
+      const resEl = document.getElementById('result');
+      const actions = document.getElementById('actions');
+      const statusMsg = document.getElementById('statusMsg');
+      if(!j.found){
+        resEl.classList.add('hidden'); actions.classList.add('hidden');
+        statusMsg.innerHTML = '<span class="bad">Not found in BOL</span>';
+        setTimeout(()=>{ statusMsg.textContent=''; startScanner(); }, 1000);
+        return;
+      }
+      const it = j.item||{};
+      document.getElementById('thumb').src = it.image_url || missingThumb();
+      document.getElementById('title').textContent = it.item_description || '';
+      document.getElementById('upcTxt').textContent = it.upc || '';
+      document.getElementById('lotTxt').textContent = it.lot_number || '';
+      document.getElementById('bolTxt').textContent = it.bol_number || '';
+      resEl.classList.remove('hidden'); actions.classList.remove('hidden');
+      statusMsg.textContent='';
+    }
+
+    async function setStatus(upc, status){
+      const r = await fetch('/api/items_prep/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({upc,status})});
+      const j = await r.json();
+      return j && j.success;
+    }
+
+    document.getElementById('lookupBtn').onclick = ()=>{ const v=document.getElementById('manualUpc').value.trim(); if(v) lookup(v); };
+    document.getElementById('goodBtn').onclick = async ()=>{
+      const upc = document.getElementById('manualUpc').value.trim();
+      if(!upc) return;
+      const ok = await setStatus(upc,'good');
+      const statusMsg = document.getElementById('statusMsg');
+      if(ok){ statusMsg.innerHTML='<span class="ok">Marked GOOD</span>'; } else { statusMsg.innerHTML='<span class="bad">Failed to mark</span>'; }
+      setTimeout(()=>{ statusMsg.textContent=''; document.getElementById('result').classList.add('hidden'); document.getElementById('actions').classList.add('hidden'); document.getElementById('manualUpc').value=''; setupDeviceMode(); }, 600);
+    };
+
+    document.getElementById('badBtn').onclick = ()=>{
+      const upc = document.getElementById('manualUpc').value.trim(); if(!upc) return; window.location.href = '/item-prep/diagnostic?upc='+encodeURIComponent(upc);
+    };
+
+    document.getElementById('skipBtn').onclick = ()=>{ document.getElementById('manualUpc').value=''; document.getElementById('result').classList.add('hidden'); document.getElementById('actions').classList.add('hidden'); setupDeviceMode(); };
+
+    // Device detection similar to barcode.html
+    function getDeviceType(){
+      const ua = navigator.userAgent;
+      if (/iPad|Macintosh/.test(ua) && 'ontouchend' in document) return 'iPad';
+      if (/Android/.test(ua) && !/Mobile/.test(ua)) return 'Android Tablet';
+      if (/iPhone|Android.*Mobile|Windows Phone|webOS|BlackBerry|Opera Mini|IEMobile|Mobile/.test(ua)) return 'Mobile';
+      return 'Desktop';
+    }
+    function setupDeviceMode(){
+      const type = getDeviceType();
+      const scannerDiv = document.getElementById('scanner');
+      const input = document.getElementById('manualUpc');
+      // Requirement: iPad or Desktop -> manual input only; Mobile phones -> camera
+      if (type === 'iPad' || type === 'Desktop'){
+        if (scannerDiv) scannerDiv.style.display = 'none';
+        stopScanner();
+        if (input){ input.style.display=''; input.focus(); }
+        scanMsg.textContent = '';
+      } else {
+        if (scannerDiv) scannerDiv.style.display = '';
+        if (input){ input.style.display=''; }
+        startScanner();
+      }
+    }
+    // Treat Enter key or change as a trigger for lookup (works well with USB scanners on desktop)
+    const manual = document.getElementById('manualUpc');
+    manual.addEventListener('keydown', (e)=>{ if (e.key === 'Enter'){ e.preventDefault(); const v = manual.value.trim(); if(v) lookup(v); }});
+    manual.addEventListener('change', ()=>{ const v = manual.value.trim(); if(v) lookup(v); });
+
+    window.addEventListener('DOMContentLoaded', setupDeviceMode);
+    window.addEventListener('beforeunload', stopScanner);
+  </script>
+</body>
+</html>
