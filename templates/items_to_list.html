@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Items to List</title>
+  <style>
+    body{font-family:Segoe UI,Arial,sans-serif;background:#f7f7f8;margin:0;padding:18px}
+    .top{display:flex;align-items:center;gap:10px;justify-content:space-between}
+    .btn{padding:8px 14px;border-radius:6px;border:none;cursor:pointer}
+    .btn-primary{background:#00b894;color:#fff}
+    .btn-danger{background:#e74c3c;color:#fff}
+    .filters{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+    input,select{padding:8px;border:1px solid #ddd;border-radius:6px}
+    table{width:100%;border-collapse:collapse;margin-top:12px}
+    th,td{padding:8px;border:1px solid #e6e6e6;text-align:left}
+    th{background:#f0f0f0}
+    .thumb{width:48px;height:48px;object-fit:cover;border-radius:6px;margin-right:8px}
+    .title-cell{display:flex;align-items:center}
+    .status-box{display:inline-block;padding:4px 8px;border-radius:6px;background:#bbb;color:#fff;font-size:0.85rem}
+    .small-muted{color:#777;font-size:0.9rem}
+    .modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;align-items:center;justify-content:center}
+    .modal .card{background:#fff;padding:18px;border-radius:8px;max-width:720px;max-height:80vh;overflow:auto}
+  </style>
+</head>
+<body>
+  <div class="top">
+    <a href="/tools"><button class="btn btn-danger">Back</button></a>
+    <h2>Items to List</h2>
+    <div style="width:100px"></div>
+  </div>
+
+  <div class="filters" style="margin-top:10px">
+    <label>Lot:
+      <input type="text" id="filter-lot" placeholder="e.g. 1234">
+    </label>
+    <label>Import date:
+      <input type="date" id="filter-date">
+    </label>
+    <label>Sort:
+      <select id="sort-select">
+        <option value="date_desc">Date (newest)</option>
+        <option value="date_asc">Date (oldest)</option>
+        <option value="name">Name</option>
+      </select>
+    </label>
+    <button class="btn" id="apply-filters">Apply</button>
+  </div>
+
+  <div id="results"></div>
+
+  <div id="imgModal" class="modal"><div class="card"><div style="text-align:right"><button id="closeImg">Close</button></div><div id="imgContent"></div></div></div>
+
+<script>
+function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function missingThumb(width=48,height=48,text='No Img'){ return 'data:image/svg+xml;utf8,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="'+width+'" height="'+height+'"><rect width="100%" height="100%" fill="#f8f8f8"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#b0b0b0" font-size="10">'+text+'</text></svg>'); }
+
+async function loadItems(){
+  const lot = document.getElementById('filter-lot').value.trim();
+  const import_date = document.getElementById('filter-date').value.trim();
+  const sort = document.getElementById('sort-select').value;
+  const params = new URLSearchParams();
+  if(lot) params.set('lot', lot);
+  if(import_date) params.set('import_date', import_date);
+  if(sort) params.set('sort', sort);
+  const resp = await fetch('/api/bol_items?'+params.toString());
+  const j = await resp.json();
+  render(j.results||[]);
+}
+
+function render(results){
+  const container = document.getElementById('results');
+  if(!results.length){ container.innerHTML = '<div class="small-muted">No items</div>'; return; }
+  let html = '<table><thead><tr><th>Status</th><th>Title</th><th>UPC</th><th>Lot #</th><th>BOL #</th><th>Import Date</th></tr></thead><tbody>';
+  results.forEach(r=>{
+    const title = esc(r.title||'');
+    const img = esc(r.image||'');
+    const thumb = img ? img : missingThumb();
+    const upc = esc(r.upc||'');
+    const lot = esc(r.lot_number||'');
+    const bol = esc(r.bol_number||'');
+    const imp = esc(r.import_date||'');
+    html += `<tr>`+
+            `<td><span class="status-box" title="Unchecked">unchecked</span></td>`+
+            `<td><div class="title-cell"><img class="thumb" src="${thumb}" onerror="this.src='${missingThumb(48,48,'No Img')}'"><a href="#" class="img-link" data-img="${img}" data-title="${title}">${title}</a></div></td>`+
+            `<td>${upc}</td>`+
+            `<td>${lot}</td>`+
+            `<td>${bol}</td>`+
+            `<td>${imp}</td>`+
+            `</tr>`;
+  });
+  html += '</tbody></table>';
+  container.innerHTML = html;
+  document.querySelectorAll('.img-link').forEach(el=> el.addEventListener('click', onOpenImg));
+}
+
+function onOpenImg(e){
+  e.preventDefault();
+  const img = e.currentTarget.dataset.img;
+  const title = e.currentTarget.dataset.title;
+  const modal = document.getElementById('imgModal');
+  const content = document.getElementById('imgContent');
+  content.innerHTML = `<div><div class="small-muted" style="margin-bottom:8px">${esc(title)}</div>`+
+                      (img?`<img src="${esc(img)}" style="max-width:100%">`:'<div class="small-muted">No image</div>')+
+                      `</div>`;
+  modal.style.display = 'flex';
+}
+
+document.getElementById('closeImg').addEventListener('click', ()=>{ document.getElementById('imgModal').style.display='none'; });
+document.getElementById('apply-filters').addEventListener('click', loadItems);
+
+// initial load
+loadItems();
+</script>
+</body>
+</html>

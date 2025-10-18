@@ -84,6 +84,62 @@ def shelfmanager():
 def extractor():
     return render_template('extractor.html')
 
+@app.route('/items-to-list')
+def items_to_list_page():
+    return render_template('items_to_list.html')
+
+@app.route('/api/bol_items', methods=['GET'])
+def api_bol_items():
+    """Return BOL items with sorting and filters: lot (exact), import_date (exact), sort by date/name/qty."""
+    try:
+        sort = request.args.get('sort', 'date_desc')
+        lot = (request.args.get('lot') or '').strip()
+        import_date = (request.args.get('import_date') or '').strip()
+        conn = sqlite3.connect('bol.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='bol_items'")
+        if not cur.fetchone():
+            conn.close()
+            return jsonify({'results': []})
+        where = []
+        params = []
+        if lot:
+            where.append('lot_number = ?')
+            params.append(lot)
+        if import_date:
+            where.append('import_date = ?')
+            params.append(import_date)
+        where_sql = (' WHERE ' + ' AND '.join(where)) if where else ''
+        order_sql = ' ORDER BY '
+        if sort == 'date_asc':
+            order_sql += "import_date ASC, id ASC"
+        elif sort == 'name':
+            order_sql += "item_description COLLATE NOCASE ASC"
+        else:
+            # date_desc default
+            order_sql += "import_date DESC, id DESC"
+        sql = 'SELECT id, upc, item_description, image_url, lot_number, bol_number, import_date FROM bol_items' + where_sql + order_sql
+        cur.execute(sql, params)
+        rows = [dict(r) for r in cur.fetchall()]
+        conn.close()
+        # Normalize for UI
+        results = []
+        for r in rows:
+            results.append({
+                'id': r.get('id'),
+                'title': r.get('item_description') or '',
+                'image': r.get('image_url') or '',
+                'upc': r.get('upc') or '',
+                'lot_number': r.get('lot_number') or '',
+                'bol_number': r.get('bol_number') or '',
+                'import_date': r.get('import_date') or '',
+                'status': 'unchecked'
+            })
+        return jsonify({'results': results})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route("/token-status")
 def token_status():
     try:
