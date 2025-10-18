@@ -1,6 +1,6 @@
 from contextlib import nullcontext
 
-from flask import Flask, request, send_file, url_for, render_template, jsonify
+from flask import Flask, request, send_file, url_for, render_template, jsonify, redirect
 from PIL import Image, ImageDraw
 import io, time, subprocess, os, requests, json, threading, sqlite3
 import xml.etree.ElementTree as ET
@@ -72,7 +72,13 @@ def tools():
 
 @app.route('/shelfcreator')
 def shelfcreator():
-    return render_template('shelfcreator.html')
+    # legacy route - redirect to new Shelf Manager
+    return redirect(url_for('shelfmanager'))
+
+
+@app.route('/shelfmanager')
+def shelfmanager():
+    return render_template('shelfmanager.html')
 
 @app.route('/extractor')
 def extractor():
@@ -1915,20 +1921,101 @@ def api_clear_shelf_inventory(code):
 
 @app.route('/api/list_shelves', methods=['GET'])
 def api_list_shelves():
-    """Return list of shelf images from static/shelves as JSON"""
+    """Return list of shelf images from static/shelves as JSON, with optional sorting and counts."""
     try:
+        sort = (request.args.get('sort') or 'name').lower()
         shelves_dir = os.path.join(app.root_path, 'static', 'shelves')
         results = []
+        codes = []
         if os.path.isdir(shelves_dir):
-            for fname in sorted(os.listdir(shelves_dir)):
-                if not fname.lower().endswith('.png'):
-                    continue
+            files = [f for f in os.listdir(shelves_dir) if f.lower().endswith('.png')]
+            codes = [os.path.splitext(f)[0] for f in files]
+
+            # created_at map from searchRack.db.shelves (optional)
+            created_map = {}
+            # counts map from searchRack.db.SEARCHRACK (ITEM_POSITION)
+            counts_map = {}
+            sdb_path = os.path.join(app.root_path, 'searchRack.db')
+            # Query created_at; ignore if table missing
+            try:
+                conn = sqlite3.connect(sdb_path)
+                cur = conn.cursor()
+                if codes:
+                    placeholders = ','.join('?' for _ in codes)
+                    cur.execute(f"SELECT shelf_name, created_at FROM shelves WHERE shelf_name IN ({placeholders})", tuple(codes))
+                    for r in cur.fetchall():
+                        created_map[r[0]] = r[1]
+                conn.close()
+            except Exception:
+                created_map = {}
+            # Query counts; handle missing table separately
+            try:
+                conn = sqlite3.connect(sdb_path)
+                cur = conn.cursor()
+                cur.execute("SELECT LOWER(TRIM(ITEM_POSITION)) as pos, COUNT(*) FROM SEARCHRACK GROUP BY LOWER(TRIM(ITEM_POSITION))")
+                for pos, cnt in cur.fetchall():
+                    counts_map[pos] = cnt
+                conn.close()
+            except Exception:
+                counts_map = {}
+
+            for fname in files:
                 code = os.path.splitext(fname)[0]
                 path = os.path.join(shelves_dir, fname)
-                mtime = os.path.getmtime(path)
+                try:
+                    mtime = os.path.getmtime(path)
+                except Exception:
+                    mtime = 0
                 url = url_for('static', filename=f'shelves/{fname}')
-                results.append({'code': code, 'filename': fname, 'url': url, 'lastModified': int(mtime)})
+                count = counts_map.get(code.lower().strip(), 0)
+                results.append({'code': code, 'filename': fname, 'url': url, 'lastModified': int(mtime), 'created_at': created_map.get(code), 'count': int(count)})
+
+            # Apply server-side sorting
+            if sort == 'items':
+                results.sort(key=lambda x: x.get('count', 0), reverse=True)
+            elif sort == 'created':
+                # Sort by created_at desc; fallback to lastModified desc
+                def created_key(x):
+                    ca = x.get('created_at')
+                    # Expect 'YYYY-MM-DD HH:MM:SS' from SQLite; parse safely
+                    try:
+                        # Replace space with 'T' to help Date.parse on clients; here we can prioritize lastModified for server order
+                        return (x.get('lastModified') or 0) if not ca else x.get('lastModified') or 0
+                    except Exception:
+                        return x.get('lastModified') or 0
+                # Use lastModified as reliable proxy for Newest first
+                results.sort(key=lambda x: x.get('lastModified', 0), reverse=True)
+            else:
+                # name
+                results.sort(key=lambda x: (x.get('code') or '').lower())
         return jsonify({'success': True, 'shelves': results})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/shelf_counts', methods=['POST'])
+def api_shelf_counts():
+    """Return a map of shelf_code -> counts of items referencing that shelf from both SEARCHRACK and INVENTORY."""
+    try:
+        codes = request.get_json() or {}
+        codes = codes.get('codes', []) if isinstance(codes, dict) else codes
+        if not isinstance(codes, list):
+            return jsonify({'success': False, 'error': 'codes must be a list'}), 400
+
+        result = {}
+        try:
+            sconn = sqlite3.connect('searchRack.db')
+            scur = sconn.cursor()
+            for code in codes:
+                scur.execute("SELECT COUNT(*) FROM SEARCHRACK WHERE LOWER(TRIM(ITEM_POSITION)) = LOWER(TRIM(?))", (code,))
+                r = scur.fetchone()
+                result[code] = {'searchrack': r[0] if r else 0}
+            sconn.close()
+        except Exception:
+            for code in codes:
+                result[code] = {'searchrack': 0}
+
+        return jsonify({'success': True, 'counts': result})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 

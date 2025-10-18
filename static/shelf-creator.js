@@ -80,6 +80,13 @@ function setupEventListeners() {
     // Enable save when code changes
     const codeInput = document.getElementById('shelf-code');
     if (codeInput) codeInput.addEventListener('input', enableSaveIfReady);
+
+    // Apply sort button (if present)
+    const applyBtn = document.getElementById('apply-sort-btn');
+    if (applyBtn) applyBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        loadShelves();
+    });
 }
 
 /**
@@ -101,17 +108,23 @@ function enableSaveIfReady() {
  */
 function loadShelves() {
     console.log('Loading shelves...');
-    
-    fetch('/api/list_shelves')
+    const sortSel = document.getElementById('shelf-sort');
+    const sortBy = sortSel ? sortSel.value : 'name';
+
+    fetch(`/api/list_shelves?sort=${encodeURIComponent(sortBy)}`)
         .then(r => r.json())
-        .then(data => {
+        .then(async data => {
             console.log('Shelves loaded:', data);
-            if (data.success) {
-                state.shelves = data.shelves;
-                renderShelves();
-            } else {
+            if (!data.success) {
                 showError('Failed to load shelves');
+                return;
             }
+
+            state.shelves = data.shelves || [];
+            state.currentSort = sortBy;
+
+            // Server returns shelves in the requested order and includes 'count', use it directly
+            renderShelves();
         })
         .catch(err => {
             console.error('Error loading shelves:', err);
@@ -140,11 +153,13 @@ function renderShelves() {
         const classes = ['shelf-item'];
         if (isSelected) classes.push('selected');
         if (state.selectMode) classes.push('selecting');
+        const countVal = (typeof shelf.count !== 'undefined' ? shelf.count : 0);
         
         return `
         <div class="${classes.join(' ')}" 
              data-code="${shelf.code}"
              onclick="handleShelfClick('${shelf.code}')">
+            <span class="shelf-count" data-code="${shelf.code}">${countVal}</span>
             <img src="${shelf.url}" alt="${shelf.code}" loading="lazy">
             <div class="shelf-code">${shelf.code}</div>
         </div>
@@ -152,6 +167,12 @@ function renderShelves() {
     
     updatePrintButton();
     console.log(`Rendered ${state.shelves.length} shelves, selected: ${state.selectedShelves.size}`);
+
+    // After rendering, ensure badges reflect latest counts
+    state.shelves.forEach(s => {
+        const badge = document.querySelector(`.shelf-count[data-code='${s.code}']`);
+        if (badge && typeof s.count !== 'undefined') badge.textContent = s.count;
+    });
 }
 
 /**
