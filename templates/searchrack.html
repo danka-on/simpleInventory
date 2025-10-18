@@ -52,6 +52,18 @@
     <div class="search-row">
         <input type="text" id="search-input" placeholder="Search by title, barcode, item id, ...">
         <button class="btn btn-primary" id="search-btn">Search</button>
+        <div style="margin-left:auto; display:flex; gap:8px; align-items:center">
+            <label>Sort:
+                <select id="sort-select" style="margin-left:6px;padding:6px;border-radius:6px;border:1px solid #ddd">
+                    <option value="time_desc">Time (newest)</option>
+                    <option value="time_asc">Time (oldest)</option>
+                    <option value="name">Name</option>
+                    <option value="qty">Qty</option>
+                    <option value="qty_asc">Qty (least)</option>
+                </select>
+            </label>
+            <button id="sort-apply" class="btn">Apply</button>
+        </div>
     </div>
 
     <div style="margin-top:10px; display:flex; gap:12px; align-items:center;">
@@ -94,6 +106,7 @@ const defaultChecked = {'searchRack':true};
 let _allResults = [];
 let _currentPage = 1;
 let _pageSize = 10;
+let _sortMode = 'time_desc';
 
 function createFilters(){
     const container = document.getElementById('db-filters');
@@ -161,12 +174,35 @@ async function doSearch(){
 }
 
 function renderPagedResults(){
-    const total = _allResults.length;
+    // sort before paginating
+    const sorted = [..._allResults];
+    if(_sortMode === 'time_desc'){
+        sorted.sort((a,b)=>{
+            const ta = Date.parse(a.deleted_at || a.created_at || 0) || 0;
+            const tb = Date.parse(b.deleted_at || b.created_at || 0) || 0;
+            return tb - ta;
+        });
+    } else if(_sortMode === 'time_asc'){
+        sorted.sort((a,b)=>{
+            const ta = Date.parse(a.deleted_at || a.created_at || 0) || 0;
+            const tb = Date.parse(b.deleted_at || b.created_at || 0) || 0;
+            return ta - tb;
+        });
+    } else if(_sortMode === 'name'){
+        sorted.sort((a,b)=> String(a.title||'').localeCompare(String(b.title||'')));
+    } else if(_sortMode === 'qty'){
+        function q(x){ const s = String(x||'').trim(); if(/^\d+$/.test(s)) return parseInt(s,10); if(/^[0-9]+\.0$/.test(s)) return parseInt(parseFloat(s)); const f = parseFloat(s); return Number.isFinite(f)?Math.trunc(f):0; }
+        sorted.sort((a,b)=> q(b.quantity) - q(a.quantity));
+    } else if(_sortMode === 'qty_asc'){
+        function q(x){ const s = String(x||'').trim(); if(/^\d+$/.test(s)) return parseInt(s,10); if(/^[0-9]+\.0$/.test(s)) return parseInt(parseFloat(s)); const f = parseFloat(s); return Number.isFinite(f)?Math.trunc(f):0; }
+        sorted.sort((a,b)=> q(a.quantity) - q(b.quantity));
+    }
+    const total = sorted.length;
     const pages = Math.max(1, Math.ceil(total / _pageSize));
     if(_currentPage > pages) _currentPage = pages;
     const start = (_currentPage - 1) * _pageSize;
     const end = start + _pageSize;
-    const slice = _allResults.slice(start, end);
+    const slice = sorted.slice(start, end);
     renderResults(slice);
     renderPagination(total, pages);
 }
@@ -192,6 +228,7 @@ function renderPagination(total, pages){
 }
 
 document.getElementById('page-size').addEventListener('change', ()=>{ _pageSize = parseInt(document.getElementById('page-size').value,10); _currentPage = 1; renderPagedResults(); });
+document.getElementById('sort-apply').addEventListener('click', ()=>{ _sortMode = document.getElementById('sort-select').value || 'time_desc'; _currentPage=1; renderPagedResults(); });
     // page-size control hidden when fetching all by default
 
 function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
@@ -275,8 +312,11 @@ function renderResults(results){
             }
             actionHtml = picBtn + editBtn + `<button class="btn btn-primary" onclick="onEdit('${db}',${r.id})">Edit</button> <button class="btn btn-danger" onclick="onDelete('${db}',${r.id})">Delete</button>`;
         }
-        html += `<tr data-src="${db}" data-id="${r.id}">`+
-                `<td><div class="title-cell"><img class="thumb" src="${thumb}" onerror="this.src='${missingThumb(48,48,'No Img')}'"><a href="#" class="title-link" data-src="${db}" data-id="${r.id}" data-image="${img}" data-title="${title}">${title}</a></div></td>`+
+    function fmtLocal(ts){ try{ if(!ts) return ''; const d = new Date(ts); if(isNaN(d.getTime())) return esc(ts); return d.toLocaleString(); }catch(_){ return esc(ts||''); } }
+    const deletedInfo = (isArchived && r.deleted_at) ? `<div class="small-muted">Deleted: ${fmtLocal(r.deleted_at)}</div>` : '';
+    const createdInfo = (!isArchived && r.created_at) ? `<div class="small-muted">Added: ${fmtLocal(r.created_at)}</div>` : '';
+    html += `<tr data-src="${db}" data-id="${r.id}">`+
+        `<td><div class="title-cell"><img class="thumb" src="${thumb}" onerror="this.src='${missingThumb(48,48,'No Img')}'"><div><a href="#" class="title-link" data-src="${db}" data-id="${r.id}" data-image="${img}" data-title="${title}">${title}</a>${deletedInfo}${createdInfo}</div></div></td>`+
                 `<td>${barcode}</td>`+
                 `<td>${itemid}</td>`+
                 `<td>${ locDisplay ? `<a href="#" class=\"location-link\" data-src=\"${db}\" data-id=\"${r.id}\" data-barcode=\"${barcode}\" data-picture=\"${esc(r.pictureposition||'')}\">${esc(locDisplay)}</a>` : '' }</td>`+

@@ -1,4 +1,5 @@
 import sqlite3
+import datetime
 try:
     import pandas as pd
 except Exception:
@@ -70,6 +71,15 @@ def addToRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITION=Non
                 PICTUREPOSITION TEXT
             )
         ''')
+        # Ensure CREATED_AT exists for older databases
+        try:
+            cursor.execute('PRAGMA table_info(INVENTORY)')
+            cols = [r[1] for r in cursor.fetchall()]
+            if 'CREATED_AT' not in cols:
+                cursor.execute('ALTER TABLE INVENTORY ADD COLUMN CREATED_AT TEXT')
+                conn.commit()
+        except Exception:
+            pass
         
         # Check if barcode already exists
         cursor.execute("SELECT ID FROM INVENTORY WHERE BARCODE = ?", (BARCODE,))
@@ -87,10 +97,11 @@ def addToRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITION=Non
             action = "updated"
         else:
             # Insert new record
+            now_iso = datetime.datetime.utcnow().isoformat()
             cursor.execute("""
-                INSERT INTO INVENTORY (ITEM_POSITION, BARCODE, IMAGES, PICTUREPOSITION) 
-                VALUES (?, ?, ?, ?)
-            """, (ITEM_POSITION, BARCODE, IMAGES, PICTUREPOSITION))
+                INSERT INTO INVENTORY (ITEM_POSITION, BARCODE, IMAGES, PICTUREPOSITION, CREATED_AT) 
+                VALUES (?, ?, ?, ?, ?)
+            """, (ITEM_POSITION, BARCODE, IMAGES, PICTUREPOSITION, now_iso))
             action = "added"
             
         conn.commit()
@@ -304,16 +315,39 @@ def createSearchRackDB():
             PICTUREPOSITION TEXT
         )
     ''')
+    # Ensure CREATED_AT column exists
+    try:
+        search_cur.execute('PRAGMA table_info(SEARCHRACK)')
+        cols = [r[1] for r in search_cur.fetchall()]
+        if 'CREATED_AT' not in cols:
+            search_cur.execute('ALTER TABLE SEARCHRACK ADD COLUMN CREATED_AT TEXT')
+            search_conn.commit()
+    except Exception:
+        pass
     # Get all rack items
-    rack_cur.execute('SELECT BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION FROM INVENTORY')
+        rack_cur.execute('SELECT BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION FROM INVENTORY')
+        rack_items = rack_cur.fetchall()
+        now_iso = datetime.datetime.utcnow().isoformat()
+        for barcode, item_position, images, pictureposition in rack_items:
+            # Get item_description from bol.db by upc (barcode)
+            bol_cur.execute('SELECT item_description FROM bol_items WHERE upc=? COLLATE NOCASE', (barcode,))
+            bol_row = bol_cur.fetchone()
+            title = bol_row[0] if bol_row else None
+            search_cur.execute('INSERT INTO SEARCHRACK (TITLE, BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION, CREATED_AT) VALUES (?,?,?,?,?,?)',
+                (title, barcode, item_position, images, pictureposition, now_iso))
+        search_conn.commit()
+        rack_conn.close()
+        bol_conn.close()
+        search_conn.close()
     rack_items = rack_cur.fetchall()
+    now_iso = datetime.datetime.utcnow().isoformat()
     for barcode, item_position, images, pictureposition in rack_items:
         # Get item_description from bol.db by upc (barcode)
         bol_cur.execute('SELECT item_description FROM bol_items WHERE upc=? COLLATE NOCASE', (barcode,))
         bol_row = bol_cur.fetchone()
         title = bol_row[0] if bol_row else None
-        search_cur.execute('INSERT INTO SEARCHRACK (TITLE, BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION) VALUES (?,?,?,?,?)',
-            (title, barcode, item_position, images, pictureposition))
+        search_cur.execute('INSERT INTO SEARCHRACK (TITLE, BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION, CREATED_AT) VALUES (?,?,?,?,?,?)',
+            (title, barcode, item_position, images, pictureposition, now_iso))
     search_conn.commit()
     rack_conn.close()
     bol_conn.close()
@@ -326,18 +360,42 @@ def updateSearchRackDB():
     rack_cur = rack_conn.cursor()
     bol_cur = bol_conn.cursor()
     search_cur = search_conn.cursor()
+    # Ensure CREATED_AT column exists
+    try:
+        search_cur.execute('PRAGMA table_info(SEARCHRACK)')
+        cols = [r[1] for r in search_cur.fetchall()]
+        if 'CREATED_AT' not in cols:
+            search_cur.execute('ALTER TABLE SEARCHRACK ADD COLUMN CREATED_AT TEXT')
+            search_conn.commit()
+    except Exception:
+        pass
+
+    # Preserve created_at per (BARCODE, ITEM_POSITION) before clearing
+    created_map = {}
+    try:
+        search_cur.execute('SELECT BARCODE, ITEM_POSITION, CREATED_AT FROM SEARCHRACK')
+        for b, pos, ca in search_cur.fetchall():
+            key = (str(b or '').strip().lower(), str(pos or '').strip().lower())
+            if key not in created_map and ca:
+                created_map[key] = ca
+    except Exception:
+        created_map = {}
+
     # Clear existing data
     search_cur.execute('DELETE FROM SEARCHRACK')
     # Get all rack items
     rack_cur.execute('SELECT BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION FROM INVENTORY')
     rack_items = rack_cur.fetchall()
+    now_iso = datetime.datetime.utcnow().isoformat()
     for barcode, item_position, images, pictureposition in rack_items:
         # Get item_description from bol.db by upc (barcode)
         bol_cur.execute('SELECT item_description FROM bol_items WHERE upc=? COLLATE NOCASE', (barcode,))
         bol_row = bol_cur.fetchone()
         title = bol_row[0] if bol_row else None
-        search_cur.execute('INSERT INTO SEARCHRACK (TITLE, BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION) VALUES (?,?,?,?,?)',
-            (title, barcode, item_position, images, pictureposition))
+        key = (str(barcode or '').strip().lower(), str(item_position or '').strip().lower())
+        created_val = created_map.get(key) or now_iso
+        search_cur.execute('INSERT INTO SEARCHRACK (TITLE, BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION, CREATED_AT) VALUES (?,?,?,?,?,?)',
+            (title, barcode, item_position, images, pictureposition, created_val))
     search_conn.commit()
     rack_conn.close()
     bol_conn.close()

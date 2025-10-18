@@ -1226,6 +1226,24 @@ def api_search_db(db_key):
         if db_key not in mapping:
             return jsonify({'error': 'Unknown db_key'}), 400
         db_path = mapping[db_key]
+        # Ensure created_at exists for searchRack so the UI can show timestamps
+        if db_key == 'searchRack':
+            try:
+                conn_m = sqlite3.connect(db_path)
+                cur_m = conn_m.cursor()
+                cur_m.execute("PRAGMA table_info(SEARCHRACK)")
+                cols_m = [r[1] for r in cur_m.fetchall()]
+                if 'CREATED_AT' not in cols_m:
+                    cur_m.execute('ALTER TABLE SEARCHRACK ADD COLUMN CREATED_AT TEXT')
+                # Set CREATED_AT for any missing rows to current UTC so timestamps appear
+                import datetime as _dt
+                now_iso = _dt.datetime.utcnow().isoformat()
+                cur_m.execute("UPDATE SEARCHRACK SET CREATED_AT = ? WHERE CREATED_AT IS NULL OR TRIM(COALESCE(CREATED_AT,'')) = ''", (now_iso,))
+                conn_m.commit()
+                conn_m.close()
+            except Exception:
+                # Don't block search if migration fails
+                pass
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
@@ -1339,6 +1357,8 @@ def api_search_db(db_key):
                 'pictureposition': item.get('PICTUREPOSITION') or item.get('pictureposition') or item.get('picture_position') or '',
                 'item_position': item.get('ITEM_POSITION') or item.get('item_position') or item.get('position') or '',
                 'quantity': item.get('Quantity') or item.get('quantity') or item.get('qty') or '',
+                # created_at available on SEARCHRACK rows populated by DBmanager
+                'created_at': item.get('CREATED_AT') or item.get('created_at') or '',
                 'raw': item
             }
             # If this row comes from searchRack (the inventory snapshot), try to enrich it
@@ -2059,6 +2079,7 @@ def api_delete_row(db_key, item_id):
             data_json TEXT
         )''')
         import datetime, json
+        # Store deletion time in ISO8601 UTC
         deleted_at = datetime.datetime.utcnow().isoformat()
         dcur.execute('INSERT INTO deleted_items (source_db, source_table, source_pk, source_id, deleted_at, data_json) VALUES (?,?,?,?,?,?)',
                      (db_key, table, pk, str(item_id), deleted_at, json.dumps(rowdict)))
@@ -2284,6 +2305,42 @@ def api_archived_list():
                 'raw': data
             }
             results.append(item_out)
+        # Merge archived rows similar to searchRack: group by barcode+item_position and sum quantities
+        if results:
+            merged = {}
+            for r in results:
+                bc = (r.get('barcode') or '').strip().lower()
+                pos = (r.get('item_position') or '').strip().lower()
+                if not bc:
+                    key = f"__{id(r)}_{len(merged)}"
+                else:
+                    key = f"{bc}||{pos}"
+                # normalize qty: if not int-like, treat as 1
+                try:
+                    q = r.get('quantity')
+                    if isinstance(q, str):
+                        q = q.strip()
+                    if q is None or (isinstance(q, str) and not q):
+                        n = 1
+                    elif isinstance(q, int):
+                        n = q
+                    elif isinstance(q, float) and abs(q - int(q)) < 1e-9:
+                        n = int(q)
+                    elif isinstance(q, str) and q.isdigit():
+                        n = int(q)
+                    elif isinstance(q, str) and q.endswith('.0') and q.replace('.0','').isdigit():
+                        n = int(float(q))
+                    else:
+                        n = 1
+                except Exception:
+                    n = 1
+                if key not in merged:
+                    r_copy = r.copy()
+                    r_copy['quantity'] = n
+                    merged[key] = r_copy
+                else:
+                    merged[key]['quantity'] = merged[key].get('quantity', 0) + n
+            results = list(merged.values())
         conn.close()
         return jsonify({'results': results})
     except Exception as e:
