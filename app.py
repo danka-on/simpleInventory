@@ -1,6 +1,7 @@
 from contextlib import nullcontext
 
 from flask import Flask, request, send_file, url_for, render_template, jsonify, redirect
+from werkzeug.exceptions import RequestEntityTooLarge
 from PIL import Image, ImageDraw
 import io, time, subprocess, os, requests, json, threading, sqlite3
 import xml.etree.ElementTree as ET
@@ -27,7 +28,8 @@ CLIENT_ID = os.getenv("EBAY_CLIENT_ID")
 CLIENT_SECRET = os.getenv("EBAY_CLIENT_SECRET")
 RUNAME = os.getenv("EBAY_RUNAME")
 app = Flask(__name__)
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16 MB limit for uploads
+# Increase upload limit to better accommodate multiple high-res photos
+app.config['MAX_CONTENT_LENGTH'] = 64 * 1024 * 1024  # 64 MB limit for uploads
 #for ebay api calls
 
 from token_manager import get_access_token, load_tokens, is_expired
@@ -433,7 +435,17 @@ def api_items_prep_diagnostic():
         conn.close()
         return jsonify({'success': True, 'saved': saved})
     except Exception as e:
+        try:
+            import traceback
+            print('Diagnostic upload error:', e)
+            traceback.print_exc()
+        except Exception:
+            pass
         return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.errorhandler(RequestEntityTooLarge)
+def handle_file_too_large(e):
+    return jsonify({'success': False, 'error': 'Upload too large. Try fewer photos or enable Low res.'}), 413
 
 @app.route('/api/items_prep/diagnostic/<upc>', methods=['GET'])
 def api_items_prep_diagnostic_get(upc):
@@ -713,6 +725,7 @@ def api_bol_items():
         sort = request.args.get('sort', 'date_desc')
         lot = (request.args.get('lot') or '').strip()
         import_date = (request.args.get('import_date') or '').strip()
+        q = (request.args.get('q') or '').strip()
         status_filter = (request.args.get('status') or '').strip().lower()
         conn = sqlite3.connect('bol.db')
         conn.row_factory = sqlite3.Row
@@ -731,6 +744,10 @@ def api_bol_items():
         if import_date:
             where.append('import_date = ?')
             params.append(import_date)
+        if q:
+            where.append('(upc LIKE ? COLLATE NOCASE OR item_description LIKE ? COLLATE NOCASE)')
+            like = f"%{q}%"
+            params.extend([like, like])
         where_sql = (' WHERE ' + ' AND '.join(where)) if where else ''
         # Build sort
         order_sql = ' ORDER BY '
@@ -811,6 +828,36 @@ def api_bol_items():
                 'list_status': (r.get('list_status') or '')
             })
         return jsonify({'results': results})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/bol_lots', methods=['GET'])
+def api_bol_lots():
+    """Return list of available lots with most recent import_date. Sorted newest first."""
+    try:
+        conn = sqlite3.connect('bol.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='bol_items'")
+        if not cur.fetchone():
+            conn.close()
+            return jsonify({'lots': []})
+        sql = (
+            "SELECT lot_number, MAX(import_date) AS import_date "
+            "FROM bol_items "
+            "WHERE TRIM(COALESCE(lot_number,'')) <> '' "
+            "GROUP BY lot_number "
+            "ORDER BY import_date DESC"
+        )
+        cur.execute(sql)
+        lots = []
+        for r in cur.fetchall():
+            lots.append({
+                'lot_number': r['lot_number'],
+                'import_date': r['import_date'] or ''
+            })
+        conn.close()
+        return jsonify({'lots': lots})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

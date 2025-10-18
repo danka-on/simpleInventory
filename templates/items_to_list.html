@@ -22,6 +22,8 @@
     .modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;align-items:center;justify-content:center}
     .modal .card{background:#fff;padding:18px;border-radius:8px;max-width:720px;max-height:80vh;overflow:auto}
     .btn-sm{padding:6px 10px;font-size:0.9rem}
+    .btn-copy{background:rgba(32,201,151,0.3) !important;color:#00875a !important;border:1px solid rgba(32,201,151,0.5) !important}
+    .btn-copied{background:rgba(46,204,113,0.85) !important;color:#fff !important;font-weight:600 !important}
   </style>
 </head>
 <body>
@@ -32,11 +34,11 @@
   </div>
 
   <div class="filters" style="margin-top:10px">
-    <label>Lot:
-      <input type="text" id="filter-lot" placeholder="e.g. 1234">
+    <label>Search:
+      <input type="text" id="filter-q" placeholder="UPC or Title">
     </label>
-    <label>Import date:
-      <input type="date" id="filter-date">
+    <label>Lot:
+      <select id="filter-lot"><option value="">All lots</option></select>
     </label>
     <label>Sort:
       <select id="sort-select">
@@ -66,14 +68,23 @@
 function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function missingThumb(width=48,height=48,text='No Img'){ return 'data:image/svg+xml;utf8,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="'+width+'" height="'+height+'"><rect width="100%" height="100%" fill="#f8f8f8"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#b0b0b0" font-size="10">'+text+'</text></svg>'); }
 
+function setFiltersFromURL(){
+  const p = new URLSearchParams(window.location.search);
+  const lot = p.get('lot')||''; const q = p.get('q')||''; const sort = p.get('sort')||''; const status = p.get('status')||'';
+  if(q) document.getElementById('filter-q').value = q;
+  if(lot) document.getElementById('filter-lot').value = lot;
+  if(sort) document.getElementById('sort-select').value = sort;
+  if(status) document.getElementById('status-select').value = status;
+}
+
 async function loadItems(){
   const lot = document.getElementById('filter-lot').value.trim();
-  const import_date = document.getElementById('filter-date').value.trim();
+  const q = document.getElementById('filter-q').value.trim();
   const sort = document.getElementById('sort-select').value;
   const status = document.getElementById('status-select').value;
   const params = new URLSearchParams();
   if(lot) params.set('lot', lot);
-  if(import_date) params.set('import_date', import_date);
+  if(q) params.set('q', q);
   if(sort) params.set('sort', sort);
   if(status) params.set('status', status);
   const resp = await fetch('/api/bol_items?'+params.toString());
@@ -107,7 +118,7 @@ function render(results){
       `<td>${pill}${status==='bad'?` <a href="#" class="diag-link" data-upc="${upc}">Diagnostic</a>`:''}</td>`+
       `<td>${lpill}</td>`+
             `<td><div class="title-cell"><img class="thumb" src="${thumb}" onerror="this.src='${missingThumb(48,48,'No Img')}'"><a href="#" class="img-link" data-img="${img}" data-title="${title}">${title}</a></div></td>`+
-            `<td>${upc}</td>`+
+            `<td><div style=\"display:flex;gap:6px;align-items:center\"><span>${upc}</span><button type=\"button\" class=\"btn btn-sm btn-copy\" data-upc=\"${upc}\" title=\"Copy UPC\">Copy</button></div></td>`+
             `<td>${lot}</td>`+
             `<td>${bol}</td>`+
             `<td>${imp}</td>`+
@@ -120,6 +131,7 @@ function render(results){
   document.querySelectorAll('.diag-link').forEach(el=> el.addEventListener('click', onOpenDiag));
   document.querySelectorAll('.btn-list').forEach(el=> el.addEventListener('click', onMarkListed));
   document.querySelectorAll('.btn-unlist').forEach(el=> el.addEventListener('click', onUnlist));
+  document.querySelectorAll('.btn-copy').forEach(el=> el.addEventListener('click', onCopyUpc));
 }
 
 function onOpenImg(e){
@@ -136,7 +148,24 @@ function onOpenImg(e){
 
 document.getElementById('closeImg').addEventListener('click', ()=>{ document.getElementById('imgModal').style.display='none'; });
 document.getElementById('apply-filters').addEventListener('click', loadItems);
-function onOpenDiag(e){ e.preventDefault(); const upc = e.currentTarget.dataset.upc; if(!upc) return; window.location.href = '/item-prep/diagnostic/view?upc='+encodeURIComponent(upc); }
+// Auto-refresh on dropdown changes
+document.getElementById('filter-lot').addEventListener('change', loadItems);
+document.getElementById('sort-select').addEventListener('change', loadItems);
+document.getElementById('status-select').addEventListener('change', loadItems);
+function onOpenDiag(e){
+  e.preventDefault(); const upc = e.currentTarget.dataset.upc; if(!upc) return;
+  const p = new URLSearchParams();
+  const lot = document.getElementById('filter-lot').value.trim();
+  const q = document.getElementById('filter-q').value.trim();
+  const sort = document.getElementById('sort-select').value;
+  const status = document.getElementById('status-select').value;
+  if(lot) p.set('lot', lot);
+  if(q) p.set('q', q);
+  if(sort) p.set('sort', sort);
+  if(status) p.set('status', status);
+  const ret = '/items-to-list' + (p.toString()? ('?'+p.toString()) : '');
+  window.location.href = '/item-prep/diagnostic/view?upc='+encodeURIComponent(upc)+'&from=items&return='+encodeURIComponent(ret);
+}
 
 async function onMarkListed(e){
   e.preventDefault();
@@ -180,8 +209,79 @@ async function onUnlist(e){
   loadItems();
 }
 
-// initial load
-loadItems();
+// Copy UPC to clipboard
+async function onCopyUpc(e){
+  console.log('[onCopyUpc] Click handler fired');
+  e.preventDefault();
+  // Capture button reference immediately before any async operations
+  const btn = e.currentTarget;
+  const upc = btn.dataset.upc || '';
+  const oldText = btn.textContent;
+  console.log('[onCopyUpc] UPC:', upc);
+  if(!upc) return;
+  let copied = false;
+  try{
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      console.log('[onCopyUpc] Attempting clipboard API...');
+      await navigator.clipboard.writeText(upc);
+      copied = true;
+      console.log('[onCopyUpc] Clipboard API success');
+    }
+  }catch(err){
+    console.log('[onCopyUpc] Clipboard API failed:', err);
+  }
+  if(!copied){
+    console.log('[onCopyUpc] Attempting fallback execCommand...');
+    try{
+      const ta = document.createElement('textarea');
+      ta.value = upc;
+      ta.style.position = 'fixed'; ta.style.opacity = '0'; ta.style.pointerEvents = 'none';
+      document.body.appendChild(ta);
+      ta.focus(); ta.select();
+      copied = document.execCommand && document.execCommand('copy');
+      document.body.removeChild(ta);
+      console.log('[onCopyUpc] Fallback result:', copied);
+    }catch(err2){
+      console.log('[onCopyUpc] Fallback error:', err2);
+    }
+  }
+  // Show feedback clearly: change text, color, and disable briefly
+  console.log('[onCopyUpc] Changing button from', oldText, 'to "Copied"');
+  btn.textContent = 'Copied';
+  btn.classList.add('btn-copied');
+  btn.disabled = true;
+  setTimeout(()=>{ 
+    console.log('[onCopyUpc] Reverting button to', oldText);
+    btn.textContent = oldText; 
+    btn.classList.remove('btn-copied'); 
+    btn.disabled = false; 
+  }, 1200);
+}
+
+// Populate lot dropdown with newest-first lots and import dates
+async function loadLots(){
+  try{
+    const r = await fetch('/api/bol_lots');
+    const j = await r.json();
+    const sel = document.getElementById('filter-lot');
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">All lots</option>';
+    (j.lots||[]).forEach(x=>{
+      const opt = document.createElement('option');
+      opt.value = x.lot_number; opt.textContent = `${x.lot_number} — ${x.import_date||''}`;
+      sel.appendChild(opt);
+    });
+    if(cur) sel.value = cur;
+  }catch{}
+}
+
+// initial load: restore filters, populate lots, then load
+setFiltersFromURL();
+loadLots().then(loadItems);
+// Trigger load on Enter in search
+document.getElementById('filter-q').addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ e.preventDefault(); loadItems(); } });
+
+
 </script>
 </body>
 </html>

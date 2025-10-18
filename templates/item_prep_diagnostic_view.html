@@ -27,6 +27,8 @@
     .pill.other{background:var(--pill-other)}
     .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:12px;margin-top:10px}
     .thumb{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:10px;background:#f0f0f0;cursor:pointer}
+  .thumb-wrap{position:relative}
+  .badge-quality{position:absolute;left:6px;bottom:6px;background:rgba(0,0,0,0.7);color:#fff;border-radius:10px;padding:2px 6px;font-size:0.75rem}
     .img-actions{display:flex;justify-content:space-between;align-items:center;margin-top:4px}
     .link{color:#2980b9;text-decoration:none}
     .link:hover{text-decoration:underline}
@@ -86,7 +88,7 @@
     <div class="grid">
       {% for im in images %}
         {% set src = url_for('static', filename=im.image_path) %}
-        <img class="thumb" src="{{ src }}" alt="photo" data-src="{{ src }}">
+        <div class="thumb-wrap"><img class="thumb" src="{{ src }}" alt="photo" data-src="{{ src }}"></div>
       {% endfor %}
     </div>
     {% else %}
@@ -122,10 +124,12 @@
       }catch(e){ /* leave as-is */ }
     })();
 
-    // Back button logic: default back to Item Prep with UPC; if came from Trash Manager, go back there
+    // Back button logic: if return param provided from Items to List, use that; else default to Item Prep with UPC; if from=trash, go Trash Manager
     (function(){
       try{
         const params = new URLSearchParams(window.location.search);
+        const ret = params.get('return') || '';
+        if(ret){ const a = document.getElementById('backLink'); if(a) a.href = ret; return; }
         if((params.get('from')||'').toLowerCase()==='trash'){
           const a = document.getElementById('backLink');
           if(a) a.href = '/trash-manager';
@@ -145,6 +149,30 @@
       });
       modal.addEventListener('click', closeModal);
       document.addEventListener('keydown', (e)=>{ if(e.key==='Escape') closeModal(); });
+    })();
+
+    // Add quality badges based on image intrinsic size (LOW/MED/HIGH)
+    (function(){
+      function labelFor(w, h){
+        const maxSide = Math.max(w||0, h||0);
+        if(maxSide <= 900) return 'LOW';
+        if(maxSide <= 2200) return 'MED';
+        return 'HIGH';
+      }
+      document.querySelectorAll('.thumb').forEach(img=>{
+        function apply(){
+          const q = labelFor(img.naturalWidth, img.naturalHeight);
+          const badge = document.createElement('span');
+          badge.className = 'badge-quality';
+          badge.textContent = q;
+          const wrap = img.parentElement;
+          if(wrap && wrap.classList.contains('thumb-wrap')){
+            wrap.appendChild(badge);
+          }
+        }
+        if(img.complete && img.naturalWidth){ apply(); }
+        else { img.addEventListener('load', apply, { once: true }); }
+      });
     })();
 
     // Delete all photos

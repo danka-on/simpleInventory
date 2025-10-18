@@ -12,10 +12,11 @@
     .btn-danger{background:#e74c3c;color:#fff}
     .card{background:#fff;border:1px solid #e8e8e8;border-radius:12px;padding:16px;margin-top:14px}
     .row{display:flex;gap:10px;flex-wrap:wrap}
-    .preview{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
-    .thumb-wrap{position:relative;width:100px;height:100px}
+  .preview{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
+  .thumb-wrap{position:relative;width:110px;height:110px}
     .thumb{width:100%;height:100%;object-fit:cover;border-radius:8px;background:#f0f0f0}
     .del-x{position:absolute;top:-8px;right:-8px;background:#e74c3c;color:#fff;border:none;border-radius:50%;width:22px;height:22px;cursor:pointer;line-height:22px;text-align:center;font-weight:bold;box-shadow:0 1px 4px rgba(0,0,0,0.25)}
+  .badge-quality{position:absolute;left:6px;bottom:6px;background:rgba(0,0,0,0.7);color:#fff;border-radius:10px;padding:2px 6px;font-size:0.75rem;cursor:pointer}
     label{display:block;margin-top:8px}
     /* Prominent reason selection */
   .reason-group{display:flex;gap:10px;flex-wrap:wrap;margin:8px 0}
@@ -38,7 +39,9 @@
   <div class="top">
     <a href="/item-prep?upc={{ upc }}"><button class="btn btn-danger">Back</button></a>
     <h2>Diagnostic</h2>
-    <div style="width:100px"></div>
+    <div style="display:flex;gap:8px">
+      <button type="button" class="btn" id="resetBtn" style="background:#f39c12;color:#fff">Reset</button>
+    </div>
   </div>
 
   <div class="card">
@@ -66,9 +69,14 @@
       <div style="margin-top:8px">
         <div class="small-muted" style="display:flex;align-items:center;gap:10px;justify-content:space-between;flex-wrap:wrap">
           <span>Or use camera</span>
-          <label style="display:flex;align-items:center;gap:6px;font-size:0.95rem">
-            <input type="checkbox" id="lowResToggle"> Low res (faster upload)
-          </label>
+          <div style="display:flex;align-items:center;gap:8px">
+            <span>Quality:</span>
+            <div id="qualityGroup" style="display:flex;gap:6px">
+              <button type="button" class="btn" data-q="low" style="padding:6px 10px">Low</button>
+              <button type="button" class="btn" data-q="med" style="padding:6px 10px;background:#00b894;color:#fff">Med</button>
+              <button type="button" class="btn" data-q="high" style="padding:6px 10px">High</button>
+            </div>
+          </div>
         </div>
         <video id="cam" playsinline muted style="width:100%;max-width:420px;aspect-ratio:1/1;background:#222;border-radius:8px"></video>
         <canvas id="canvas" style="display:none"></canvas>
@@ -97,13 +105,13 @@
   <script>
   const photos = document.getElementById('photos');
     const preview = document.getElementById('preview');
-    const lowResToggle = document.getElementById('lowResToggle');
+    const qualityGroup = document.getElementById('qualityGroup');
   const reasonSelect = document.getElementById('reasonSelect');
   const reasonBtns = Array.from(document.querySelectorAll('.reason-btn'));
-    let lowRes = false;
+    let currentQuality = 'med'; // 'low' | 'med' | 'high'
     function uid(){ return 'id_'+Math.random().toString(36).slice(2); }
-    const pendingFiles = []; // {id, file}
-    const capturedFiles = []; // {id, file}
+    const pendingFiles = []; // {id, file, quality}
+    const capturedFiles = []; // {id, file, quality}
 
     function makeThumb(entry, source){
       const url = URL.createObjectURL(entry.file);
@@ -112,6 +120,8 @@
       const img = document.createElement('img'); img.className='thumb'; img.src=url; img.alt='photo';
       const del = document.createElement('button'); del.type='button'; del.className='del-x'; del.textContent='×';
       del.dataset.id = entry.id; del.dataset.source = source;
+      const badge = document.createElement('span'); badge.className='badge-quality'; badge.dataset.badge = entry.id; badge.textContent = ((entry.quality||'').toUpperCase()||'');
+      badge.title = 'Click to change quality';
       del.addEventListener('click', ()=>{
         // remove from arrays
         const src = del.dataset.source; const id = del.dataset.id;
@@ -123,16 +133,40 @@
         URL.revokeObjectURL(url);
         wrap.remove();
       });
-      wrap.appendChild(img); wrap.appendChild(del);
+      badge.addEventListener('click', async ()=>{
+        const seq = ['low','med','high'];
+        const next = seq[(seq.indexOf(entry.quality||'med')+1)%seq.length];
+        await reencodeEntry(entry, next);
+        badge.textContent = next.toUpperCase();
+      });
+      wrap.appendChild(img); wrap.appendChild(del); wrap.appendChild(badge);
       preview.appendChild(wrap);
     }
 
     photos.addEventListener('change', ()=>{
       const files = Array.from(photos.files||[]);
-      files.forEach(f=>{ const entry = {id: uid(), file: f}; pendingFiles.push(entry); makeThumb(entry,'pending'); });
+      files.forEach(f=>{ const entry = {id: uid(), file: f, quality: 'med'}; pendingFiles.push(entry); makeThumb(entry,'pending'); annotateQualityFromImage(entry); });
       // clear the input so we control the file list ourselves
       photos.value = '';
     });
+
+    function annotateQualityFromImage(entry){
+      try{
+        const img = new Image();
+        const url = URL.createObjectURL(entry.file);
+        img.onload = ()=>{
+          const w = img.naturalWidth, h = img.naturalHeight;
+          URL.revokeObjectURL(url);
+          const maxSide = Math.max(w,h);
+          let q = 'high';
+          if(maxSide <= 900) q = 'low'; else if(maxSide <= 2200) q = 'med';
+          entry.quality = q;
+          const badge = document.querySelector(`[data-badge="${entry.id}"]`);
+          if(badge) badge.textContent = q.toUpperCase();
+        };
+        img.src = url;
+      }catch{}
+    }
 
     // Camera capture that stacks multiple images without leaving the page
     let stream=null;
@@ -144,8 +178,8 @@
         const constraints = {
           video:{
             facingMode:{ideal:'environment'},
-            width: { ideal: lowRes ? 640 : 3840 },
-            height: { ideal: lowRes ? 480 : 2160 }
+            width: { ideal: currentQuality==='low' ? 640 : (currentQuality==='med' ? 1920 : 3840) },
+            height: { ideal: currentQuality==='low' ? 480 : (currentQuality==='med' ? 1080 : 2160) }
           }
         };
         stream = await navigator.mediaDevices.getUserMedia(constraints);
@@ -168,36 +202,69 @@
     document.getElementById('captureBtn').onclick = async ()=>{
       if(!video || video.readyState < 2) return;
       // Prefer full-quality ImageCapture if available
-      if(imageCapture && imageCapture.takePhoto && !lowRes){
+      if(imageCapture && imageCapture.takePhoto){
         try{
-          const blob = await imageCapture.takePhoto();
+          let blob = await imageCapture.takePhoto();
+          // Downscale as needed
+          if(currentQuality !== 'high'){
+            blob = await downscaleBlob(blob, currentQuality);
+          }
           const file = new File([blob], `capture_${Date.now()}.jpg`, { type: blob.type || 'image/jpeg' });
-          const entry = {id: uid(), file};
+          const entry = {id: uid(), file, quality: currentQuality};
           capturedFiles.push(entry);
           makeThumb(entry,'captured');
           return;
         }catch(e){ /* fall back */ }
       }
       // Fallback to canvas at chosen resolution/quality
-      let w = video.videoWidth || (lowRes?640:1920);
-      let h = video.videoHeight || (lowRes?480:1080);
-      // Optionally downscale if lowRes
-      if(lowRes){
-        const ratio = Math.min(640 / w, 480 / h, 1);
-        w = Math.round(w * ratio); h = Math.round(h * ratio);
-      }
+      let w = video.videoWidth || (currentQuality==='low'?640:(currentQuality==='med'?1920:3840));
+      let h = video.videoHeight || (currentQuality==='low'?480:(currentQuality==='med'?1080:2160));
+      const target = currentQuality==='low' ? {w:640,h:480} : (currentQuality==='med'?{w:1920,h:1080}:{w:3840,h:2160});
+      const ratio = Math.min(target.w / w, target.h / h, 1);
+      w = Math.round(w * ratio); h = Math.round(h * ratio);
       canvas.width = w; canvas.height = h;
       const ctx = canvas.getContext('2d');
       ctx.drawImage(video, 0, 0, w, h);
-      const quality = lowRes ? 0.7 : 1.0;
-      const data = canvas.toDataURL('image/jpeg', quality);
+      const qf = currentQuality==='low' ? 0.7 : 0.95;
+      const data = canvas.toDataURL('image/jpeg', qf);
       const file = dataURLtoFile(data, `capture_${Date.now()}.jpg`);
-      const entry = {id: uid(), file};
+      const entry = {id: uid(), file, quality: currentQuality};
       capturedFiles.push(entry);
       makeThumb(entry,'captured');
     };
     document.getElementById('resetCamBtn').onclick = ()=>{ stopCam(); startCam(); };
-    lowResToggle.addEventListener('change', ()=>{ lowRes = !!lowResToggle.checked; stopCam(); startCam(); });
+    qualityGroup.addEventListener('click', (e)=>{
+      const b = e.target.closest('button[data-q]'); if(!b) return;
+      currentQuality = b.getAttribute('data-q');
+      qualityGroup.querySelectorAll('button').forEach(x=>{ x.style.background=''; x.style.color=''; });
+      b.style.background = '#00b894'; b.style.color = '#fff';
+      stopCam(); startCam();
+    });
+
+    async function reencodeEntry(entry, nextQuality){
+      try{
+        const blob = entry.file instanceof Blob ? entry.file : new Blob([entry.file], {type: entry.file.type||'image/jpeg'});
+        const re = await downscaleBlob(blob, nextQuality);
+        entry.file = new File([re], `re_${Date.now()}.jpg`, {type: re.type||'image/jpeg'});
+        entry.quality = nextQuality;
+      }catch(e){ /* ignore */ }
+    }
+    async function downscaleBlob(blob, mode){
+      const img = await blobToImage(blob);
+      const target = mode==='low' ? {w:640,h:480} : (mode==='med'?{w:1920,h:1080}:{w:3840,h:2160});
+      const ratio = Math.min(target.w / img.width, target.h / img.height, 1);
+      const w = Math.round(img.width * ratio), h = Math.round(img.height * ratio);
+      canvas.width = w; canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, w, h);
+      const qf = mode==='low' ? 0.7 : (mode==='med'?0.95:0.98);
+      const dataUrl = canvas.toDataURL('image/jpeg', qf);
+      const arr = dataUrl.split(','); const mime = arr[0].match(/:(.*?);/)[1];
+      const bstr = atob(arr[1]); let n = bstr.length; const u8arr = new Uint8Array(n);
+      while(n--) u8arr[n] = bstr.charCodeAt(n);
+      return new Blob([u8arr], {type: mime});
+    }
+    function blobToImage(blob){ return new Promise((resolve)=>{ const url=URL.createObjectURL(blob); const img=new Image(); img.onload=()=>{ URL.revokeObjectURL(url); resolve(img); }; img.src=url; }); }
 
     document.getElementById('completeBtn').onclick = async ()=>{
       const form = document.getElementById('diagForm');
@@ -209,10 +276,15 @@
       try{ document.getElementById('uploadOverlay').style.display='flex'; }catch{}
       try{
         const res = await fetch('/api/items_prep/diagnostic',{method:'POST', body: fd});
-        const j = await res.json();
+        let j = null;
+        try{ j = await res.json(); }catch(_jsonErr){ j = null; }
         const msg = document.getElementById('msg');
-        if(j && j.success){ msg.textContent='Saved diagnostic'; setTimeout(()=>{ window.location.href='/item-prep'; }, 600); }
-        else { msg.textContent='Failed: '+(j.error||''); }
+        if(res.ok && j && j.success){
+          msg.textContent='Saved diagnostic'; setTimeout(()=>{ window.location.href='/item-prep?forceFocus=1'; }, 600);
+        } else {
+          const errText = (j && j.error) ? j.error : ('HTTP '+res.status+' '+(res.statusText||''));
+          msg.textContent = 'Failed: '+ errText;
+        }
       }catch(e){
         const msg = document.getElementById('msg'); msg.textContent = 'Failed: '+e;
       } finally {
@@ -267,6 +339,47 @@
           document.getElementById('imgModal').addEventListener('click', ()=>{ const m=document.getElementById('imgModal'); const mi=document.getElementById('modalImg'); mi.src=''; m.style.display='none'; });
         }
       }catch(e){ /* ignore */ }
+    });
+
+    // Reset diagnostic: set unchecked, unlist, delete photos (with warning)
+    document.getElementById('resetBtn').addEventListener('click', async ()=>{
+      const upc = '{{ upc }}'.trim(); if(!upc) return;
+      let hasPhotos = false;
+      try{
+        const r = await fetch(`/api/items_prep/diagnostic/${encodeURIComponent(upc)}`);
+        const j = await r.json();
+        hasPhotos = Array.isArray(j.images) && j.images.length > 0;
+      }catch{}
+      const msg = hasPhotos ? 'Reset will delete all diagnostic photos and clear status/listing. Continue?' : 'Reset will clear status and listing. Continue?';
+      if(!confirm(msg)) return;
+      try{
+        // Show overlay
+        try{ document.getElementById('uploadOverlay').style.display='flex'; }catch{}
+        // 1) Delete photos if any
+        if(hasPhotos){
+          try{
+            const delRes = await fetch(`/api/items_prep/diagnostic/${encodeURIComponent(upc)}/photos`, { method:'DELETE' });
+            const dj = await delRes.json();
+            if(!(dj && dj.success)){
+              alert('Photos could not be deleted: '+(dj&&dj.error||'unknown'));
+            }
+          }catch(e){ alert('Photos could not be deleted: '+e); }
+        }
+        // 2) Uncheck status (clear reason/note)
+        await fetch('/api/items_prep/status', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ upc, status: 'unchecked', reason: '', note: '' })});
+        // 3) Unlist
+        await fetch('/api/bol_items/list_status', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ upc, list_status: '' })});
+        // 4) Clear UI
+        reasonBtns.forEach(b=> b.classList.remove('active')); reasonSelect.value='';
+        const ta = document.querySelector('textarea[name=note]'); if(ta) ta.value = '';
+        // clear pending/captured previews
+        try{ document.getElementById('preview').innerHTML = ''; }catch{}
+        // clear existing photos section
+        try{ document.getElementById('existingGrid').innerHTML=''; document.getElementById('existingCard').style.display='none'; }catch{}
+        const m = document.getElementById('msg'); if(m) m.textContent = 'Reset complete';
+      } finally {
+        try{ document.getElementById('uploadOverlay').style.display='none'; }catch{}
+      }
     });
   </script>
 </body>

@@ -42,7 +42,7 @@
     </div>
 
     <div class="row" style="align-items:center;margin-top:12px">
-      <input type="text" id="manualUpc" placeholder="Enter/scan UPC" style="padding:8px;border:1px solid #ddd;border-radius:6px;flex:1;min-width:200px">
+  <input type="text" id="manualUpc" placeholder="Enter/scan UPC" autofocus style="padding:8px;border:1px solid #ddd;border-radius:6px;flex:1;min-width:200px">
       <button class="btn" id="lookupBtn">Lookup</button>
     </div>
 
@@ -165,7 +165,7 @@
       if (type === 'iPad' || type === 'Desktop'){
         if (scannerDiv) scannerDiv.style.display = 'none';
         stopScanner();
-        if (input){ input.style.display=''; input.focus(); }
+        if (input){ input.style.display=''; try{ input.focus({preventScroll:true}); if(input.select) input.select(); }catch{} }
         scanMsg.textContent = '';
       } else {
         if (scannerDiv) scannerDiv.style.display = '';
@@ -178,7 +178,40 @@
     manual.addEventListener('keydown', (e)=>{ if (e.key === 'Enter'){ e.preventDefault(); const v = manual.value.trim(); if(v) lookup(v); }});
     manual.addEventListener('change', ()=>{ const v = manual.value.trim(); if(v) lookup(v); });
 
-    window.addEventListener('DOMContentLoaded', setupDeviceMode);
+    function ensureUpcFocus(){
+      const input = document.getElementById('manualUpc');
+      if(!input) return;
+      try{ input.focus({preventScroll:true}); if(input.select) input.select(); }catch{}
+      // Retry a few times in case something steals focus on load
+      let attempts = 0;
+      const timer = setInterval(()=>{
+        attempts++;
+        if(document.activeElement !== input){
+          try{ input.focus({preventScroll:true}); if(input.select) input.select(); }catch{}
+        }
+        if(document.activeElement === input || attempts >= 6){ clearInterval(timer); }
+      }, 120);
+    }
+
+    window.addEventListener('DOMContentLoaded', ()=>{
+      setupDeviceMode();
+      // If no UPC param, focus the manual input for quick scanning/typing
+      try{
+        const params = new URLSearchParams(window.location.search);
+        const upc = (params.get('upc')||'').trim();
+        const forceFocus = (params.get('forceFocus')||'') === '1';
+        if(forceFocus){
+          // Force manual mode focus regardless of device; stop scanner and focus/select input
+          try{ stopScanner(); }catch{}
+          const scannerDiv = document.getElementById('scanner'); if(scannerDiv) scannerDiv.style.display = 'none';
+          ensureUpcFocus();
+          // Clean the URL so future reloads aren't affected
+          try{ const url = new URL(window.location.href); url.searchParams.delete('forceFocus'); window.history.replaceState({}, '', url.toString()); }catch{}
+        } else if(!upc){
+          ensureUpcFocus();
+        }
+      }catch{}
+    });
     window.addEventListener('beforeunload', stopScanner);
 
     // Auto-trigger lookup if ?upc= is provided
