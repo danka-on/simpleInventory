@@ -142,8 +142,32 @@ async function onMarkListed(e){
   e.preventDefault();
   const upc = e.currentTarget.dataset.upc; if(!upc) return;
   try{
+    // Check if there are diagnostic photos first
+    let hasPhotos = false;
+    try{
+      const r = await fetch(`/api/items_prep/diagnostic/${encodeURIComponent(upc)}`);
+      const j = await r.json();
+      hasPhotos = Array.isArray(j.images) && j.images.length > 0;
+    }catch{}
+    if(hasPhotos){
+      const ok = confirm('Marking as listed will delete all diagnostic photos for this item. Make sure you have downloaded them first. Continue?');
+      if(!ok) return;
+    }
+    // 1) Set list status
     await fetch('/api/bol_items/list_status', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ upc, list_status: 'listed' })});
-  }catch{}
+    // 2) If photos present, delete them (soft-delete)
+    if(hasPhotos){
+      try{
+        const delRes = await fetch(`/api/items_prep/diagnostic/${encodeURIComponent(upc)}/photos`, { method:'DELETE' });
+        const dj = await delRes.json();
+        if(!(dj && dj.success)){
+          alert('Marked listed, but failed to delete photos: '+(dj&&dj.error||'unknown'));
+        }
+      }catch(e){
+        alert('Marked listed, but failed to delete photos: '+e);
+      }
+    }
+  }catch(e){ /* ignore, refresh below */ }
   loadItems();
 }
 

@@ -7,16 +7,32 @@
   <style>
     body{font-family:Segoe UI,Arial,sans-serif;background:#f7fafc;margin:0;padding:18px}
     .top{display:flex;align-items:center;gap:10px;justify-content:space-between}
-    .btn{padding:8px 14px;border-radius:6px;border:none;cursor:pointer}
+    .btn{padding:10px 16px;border-radius:8px;border:none;cursor:pointer}
     .btn-primary{background:#00b894;color:#fff}
     .btn-danger{background:#e74c3c;color:#fff}
-    .card{background:#fff;border:1px solid #e8e8e8;border-radius:10px;padding:14px;margin-top:14px}
+    .card{background:#fff;border:1px solid #e8e8e8;border-radius:12px;padding:16px;margin-top:14px}
     .row{display:flex;gap:10px;flex-wrap:wrap}
     .preview{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
     .thumb-wrap{position:relative;width:100px;height:100px}
     .thumb{width:100%;height:100%;object-fit:cover;border-radius:8px;background:#f0f0f0}
     .del-x{position:absolute;top:-8px;right:-8px;background:#e74c3c;color:#fff;border:none;border-radius:50%;width:22px;height:22px;cursor:pointer;line-height:22px;text-align:center;font-weight:bold;box-shadow:0 1px 4px rgba(0,0,0,0.25)}
     label{display:block;margin-top:8px}
+    /* Prominent reason selection */
+    .reason-group{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}
+    .reason-btn{padding:10px 14px;border-radius:999px;border:1px solid #ddd;background:#f9f9f9;cursor:pointer}
+    .reason-btn.active{background:#00b894;color:#fff;border-color:#00b894}
+    select[name=reason]{font-size:1.1rem;padding:12px;border-radius:10px;width:100%}
+    textarea[name=note]{font-size:1rem}
+    /* Existing photos grid */
+    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px}
+    .existing-thumb{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:10px;background:#f0f0f0;cursor:pointer}
+    /* Modal */
+    .modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:9999;align-items:center;justify-content:center}
+    .modal img{max-width:90vw;max-height:88vh;border-radius:8px}
+    /* Upload overlay */
+    #uploadOverlay{display:none;position:fixed;inset:0;background:rgba(255,255,255,0.85);z-index:9998;align-items:center;justify-content:center}
+    .spinner{width:56px;height:56px;border:6px solid #eee;border-top-color:#00b894;border-radius:50%;animation:spin 1s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
   </style>
 </head>
 <body>
@@ -33,16 +49,22 @@
     </div>
     <form id="diagForm" enctype="multipart/form-data">
       <input type="hidden" name="upc" value="{{ upc }}">
-      <label>Reason:
-        <select name="reason" required>
-          <option value="" disabled selected>Select reason</option>
-          <option>Missing pieces</option>
-          <option>Wrong item</option>
-          <option>Broken</option>
-          <option>Trash</option>
-          <option>Other</option>
-        </select>
-      </label>
+      <label style="font-weight:600">Reason:</label>
+      <div class="reason-group" role="group" aria-label="Select reason">
+        <button type="button" class="reason-btn" data-val="Missing pieces">Missing pieces</button>
+        <button type="button" class="reason-btn" data-val="Wrong item">Wrong item</button>
+        <button type="button" class="reason-btn" data-val="Broken">Broken</button>
+        <button type="button" class="reason-btn" data-val="Trash">Trash</button>
+        <button type="button" class="reason-btn" data-val="Other">Other</button>
+      </div>
+      <select name="reason" id="reasonSelect" required>
+        <option value="" disabled selected>Select reason</option>
+        <option>Missing pieces</option>
+        <option>Wrong item</option>
+        <option>Broken</option>
+        <option>Trash</option>
+        <option>Other</option>
+      </select>
       <label>Note:
         <textarea name="note" rows="3" style="width:100%;box-sizing:border-box"></textarea>
       </label>
@@ -71,10 +93,21 @@
     <div id="msg" style="margin-top:10px"></div>
   </div>
 
+  <div class="card" id="existingCard" style="display:none">
+    <h3 style="margin:0 0 8px 0">Existing Diagnostic</h3>
+    <div id="existingMeta" class="muted"></div>
+    <div id="existingGrid" class="grid" style="margin-top:10px"></div>
+  </div>
+
+  <div id="imgModal" class="modal"><img id="modalImg" src="" alt=""></div>
+  <div id="uploadOverlay"><div class="spinner" title="Uploading..."></div></div>
+
   <script>
-    const photos = document.getElementById('photos');
+  const photos = document.getElementById('photos');
     const preview = document.getElementById('preview');
     const lowResToggle = document.getElementById('lowResToggle');
+  const reasonSelect = document.getElementById('reasonSelect');
+  const reasonBtns = Array.from(document.querySelectorAll('.reason-btn'));
     let lowRes = false;
     function uid(){ return 'id_'+Math.random().toString(36).slice(2); }
     const pendingFiles = []; // {id, file}
@@ -180,15 +213,70 @@
       // Append both pending and captured images
       pendingFiles.forEach(({file})=> fd.append('photos[]', file, file.name));
       capturedFiles.forEach(({file})=> fd.append('photos[]', file, file.name));
-      const res = await fetch('/api/items_prep/diagnostic',{method:'POST', body: fd});
-      const j = await res.json();
-      const msg = document.getElementById('msg');
-      if(j && j.success){ msg.textContent='Saved diagnostic'; setTimeout(()=>{ window.location.href='/item-prep'; }, 600); }
-      else { msg.textContent='Failed: '+(j.error||''); }
+      // Show uploading overlay
+      try{ document.getElementById('uploadOverlay').style.display='flex'; }catch{}
+      try{
+        const res = await fetch('/api/items_prep/diagnostic',{method:'POST', body: fd});
+        const j = await res.json();
+        const msg = document.getElementById('msg');
+        if(j && j.success){ msg.textContent='Saved diagnostic'; setTimeout(()=>{ window.location.href='/item-prep'; }, 600); }
+        else { msg.textContent='Failed: '+(j.error||''); }
+      }catch(e){
+        const msg = document.getElementById('msg'); msg.textContent = 'Failed: '+e;
+      } finally {
+        try{ document.getElementById('uploadOverlay').style.display='none'; }catch{}
+      }
     };
 
     window.addEventListener('DOMContentLoaded', startCam);
     window.addEventListener('beforeunload', stopCam);
+
+    // Reason buttons sync with select
+    reasonBtns.forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        reasonBtns.forEach(b=> b.classList.remove('active'));
+        btn.classList.add('active');
+        reasonSelect.value = btn.dataset.val;
+      });
+    });
+
+    // Load existing diagnostic (reason/note and photos)
+    window.addEventListener('DOMContentLoaded', async ()=>{
+      const upc = '{{ upc }}'.trim();
+      if(!upc) return;
+      try{
+        const r = await fetch(`/api/items_prep/diagnostic/${encodeURIComponent(upc)}`);
+        const j = await r.json();
+        const st = j && j.status ? j.status : null;
+        const imgs = Array.isArray(j && j.images) ? j.images : [];
+        if(st){
+          const val = (st.reason||'').trim();
+          // Set reason select and active pill
+          const valid = ['Missing pieces','Wrong item','Broken','Trash','Other'];
+          reasonSelect.value = valid.includes(val) ? val : 'Other';
+          const targetBtn = reasonBtns.find(b=> b.dataset.val === reasonSelect.value);
+          if(targetBtn){ reasonBtns.forEach(b=> b.classList.remove('active')); targetBtn.classList.add('active'); }
+          // Note
+          const ta = document.querySelector('textarea[name=note]');
+          if(ta){ ta.value = st.note || ''; }
+        }
+        if(imgs.length){
+          const card = document.getElementById('existingCard');
+          const grid = document.getElementById('existingGrid');
+          const meta = document.getElementById('existingMeta');
+          card.style.display = '';
+          meta.textContent = st && st.updated_at ? ('Updated: '+ st.updated_at) : '';
+          imgs.forEach(im=>{
+            const src = im.image_path ? `/static/${im.image_path}` : '';
+            if(!src) return;
+            const img = document.createElement('img'); img.className='existing-thumb'; img.src = src; img.alt='existing photo'; img.dataset.src = src;
+            img.addEventListener('click', ()=>{ const m=document.getElementById('imgModal'); const mi=document.getElementById('modalImg'); mi.src = src; m.style.display='flex'; });
+            grid.appendChild(img);
+          });
+          document.getElementById('imgModal').addEventListener('click', ()=>{ const m=document.getElementById('imgModal'); const mi=document.getElementById('modalImg'); mi.src=''; m.style.display='none'; });
+        }
+      }catch(e){ /* ignore */ }
+    });
   </script>
 </body>
 </html>
