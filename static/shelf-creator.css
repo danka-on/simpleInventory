@@ -194,6 +194,7 @@ h2 {
     font-size: 0.8rem;
     font-weight: 600;
     z-index: 5;
+    cursor: pointer;
 }
 
 /* Add Button */

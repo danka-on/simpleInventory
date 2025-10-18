@@ -156,10 +156,10 @@ function renderShelves() {
         const countVal = (typeof shelf.count !== 'undefined' ? shelf.count : 0);
         
         return `
-        <div class="${classes.join(' ')}" 
-             data-code="${shelf.code}"
-             onclick="handleShelfClick('${shelf.code}')">
-            <span class="shelf-count" data-code="${shelf.code}">${countVal}</span>
+       <div class="${classes.join(' ')}" 
+           data-code="${shelf.code}"
+           onclick="handleShelfClick(event,'${shelf.code}')">
+            <span class="shelf-count" data-code="${shelf.code}" title="View items" onclick="onCountClick(event,'${shelf.code}')">${countVal}</span>
             <img src="${shelf.url}" alt="${shelf.code}" loading="lazy">
             <div class="shelf-code">${shelf.code}</div>
         </div>
@@ -176,9 +176,27 @@ function renderShelves() {
 }
 
 /**
+ * Click handler for shelf count badge: prevent parent click and navigate to searchrack
+ */
+function onCountClick(e, code) {
+    if (e) {
+        if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+        if (e.stopPropagation) e.stopPropagation();
+        if (e.preventDefault) e.preventDefault();
+    }
+    if (!code) return false;
+    window.location.href = `/searchrack?q=${encodeURIComponent(code)}`;
+    return false;
+}
+
+/**
  * Handle shelf item click (enlarge or select based on mode)
  */
-function handleShelfClick(code) {
+function handleShelfClick(event, code) {
+    if (event && event.target && event.target.closest && event.target.closest('.shelf-count')) {
+        // Click originated from the badge; don't propagate to card
+        return;
+    }
     if (state.selectMode) {
         console.log('Selecting shelf:', code);
         toggleShelfSelection(code);
