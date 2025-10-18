@@ -727,6 +727,7 @@ def api_bol_items():
         import_date = (request.args.get('import_date') or '').strip()
         q = (request.args.get('q') or '').strip()
         status_filter = (request.args.get('status') or '').strip().lower()
+        print(f"[api_bol_items] Filters - lot: '{lot}', import_date: '{import_date}', q: '{q}', status_filter: '{status_filter}'")
         conn = sqlite3.connect('bol.db')
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
@@ -739,25 +740,25 @@ def api_bol_items():
         where = []
         params = []
         if lot:
-            where.append('lot_number = ?')
+            where.append('b.lot_number = ?')
             params.append(lot)
         if import_date:
-            where.append('import_date = ?')
+            where.append('b.import_date = ?')
             params.append(import_date)
         if q:
-            where.append('(upc LIKE ? COLLATE NOCASE OR item_description LIKE ? COLLATE NOCASE)')
+            where.append('(b.upc LIKE ? COLLATE NOCASE OR b.item_description LIKE ? COLLATE NOCASE)')
             like = f"%{q}%"
             params.extend([like, like])
         where_sql = (' WHERE ' + ' AND '.join(where)) if where else ''
         # Build sort
         order_sql = ' ORDER BY '
         if sort == 'date_asc':
-            order_sql += "import_date ASC, id ASC"
+            order_sql += "b.import_date ASC, b.id ASC"
         elif sort == 'name':
-            order_sql += "item_description COLLATE NOCASE ASC"
+            order_sql += "b.item_description COLLATE NOCASE ASC"
         else:
             # date_desc default
-            order_sql += "import_date DESC, id DESC"
+            order_sql += "b.import_date DESC, b.id DESC"
         # Left join items_prep_status to include status
         sql = (
             'SELECT b.id, b.upc, b.item_description, b.image_url, b.lot_number, b.bol_number, b.import_date, b.list_status, '
@@ -766,8 +767,11 @@ def api_bol_items():
             'LEFT JOIN items_prep_status s ON s.upc = b.upc'
             + where_sql + order_sql
         )
+        print(f"[api_bol_items] SQL: {sql}")
+        print(f"[api_bol_items] Params: {params}")
         cur.execute(sql, params)
         rows_all = [dict(r) for r in cur.fetchall()]
+        print(f"[api_bol_items] rows_all count before status filter: {len(rows_all)}")
         conn.close()
         # Build a status map keyed by both raw UPC and normalized UPC to handle formats like '16094950.0'
         status_map = {}
