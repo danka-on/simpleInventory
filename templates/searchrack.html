@@ -312,7 +312,20 @@ function renderResults(results){
             }
             actionHtml = picBtn + editBtn + `<button class="btn btn-primary" onclick="onEdit('${db}',${r.id})">Edit</button> <button class="btn btn-danger" onclick="onDelete('${db}',${r.id})">Delete</button>`;
         }
-    function fmtLocal(ts){ try{ if(!ts) return ''; const d = new Date(ts); if(isNaN(d.getTime())) return esc(ts); return d.toLocaleString(); }catch(_){ return esc(ts||''); } }
+    function fmtLocal(ts){
+        try{
+            if(!ts) return '';
+            const d = new Date(ts);
+            if(isNaN(d.getTime())) return esc(ts);
+            const fmt = new Intl.DateTimeFormat('en-US', {
+                timeZone: 'America/New_York',
+                year: 'numeric', month: '2-digit', day: '2-digit',
+                hour: 'numeric', minute: '2-digit',
+                hour12: true
+            });
+            return fmt.format(d);
+        }catch(_){ return esc(ts||''); }
+    }
     const deletedInfo = (isArchived && r.deleted_at) ? `<div class="small-muted">Deleted: ${fmtLocal(r.deleted_at)}</div>` : '';
     const createdInfo = (!isArchived && r.created_at) ? `<div class="small-muted">Added: ${fmtLocal(r.created_at)}</div>` : '';
     html += `<tr data-src="${db}" data-id="${r.id}">`+
@@ -337,7 +350,7 @@ function renderResults(results){
                 const aid = tr.dataset.id;
                 // show modal with restore/delete
                 const rec = _allResults.find(r=> String(r.id) === String(aid));
-                let html = `<div><h3>Archived item</h3><div class=\"small-muted\">Deleted at: ${esc(rec.deleted_at||'')}</div>`+
+                let html = `<div><h3>Archived item</h3><div class=\"small-muted\">Deleted at: ${fmtLocal(rec.deleted_at)}</div>`+
                            `<div style=\"margin-top:8px;\">Title: ${esc(rec.title||'')}</div>`+
                            `<div style=\"margin-top:8px;\">Source: ${esc(rec.orig_source_db||'')}</div>`+
                            `<div style=\"margin-top:12px;display:flex;gap:8px;justify-content:flex-end\">`+
