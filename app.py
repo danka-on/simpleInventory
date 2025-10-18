@@ -12,7 +12,12 @@ import xml.dom.minidom as minidom
 from inventory import find_item  # adjust this to match your actual import
 from DBmanager import ebayStoreDB, addToRack, store_ebay_order, createSearchRackDB, updateSearchRackDB
 from DBmanager import enrich_searchrack_db
-from BOLextractor import process_bol_excel
+try:
+    from BOLextractor import process_bol_excel
+    BOL_AVAILABLE = True
+except ImportError:
+    BOL_AVAILABLE = False
+    print("Warning: BOLextractor not available (pandas missing)")
 from manualMatcher import get_bol_items, get_ebay_items, fuse_and_store_match
 
 oldAuth_token = 'v^1.1#i^1#I^3#f^0#p^3#r^1#t^Ul4xMF82OkYwRjY2Q0VFOUY1QUM0MkEyMjkyMDY5Q0E5NjY0NjIxXzFfMSNFXjI2MA=='
@@ -858,6 +863,8 @@ def start_tunnel():
 
 @app.route('/extractor/upload', methods=['POST'])
 def extractor_upload():
+    if not BOL_AVAILABLE:
+        return jsonify({'success': False, 'error': 'BOL extractor not available (pandas not installed)'})
     if 'excel_file' not in request.files or 'import_date' not in request.form:
         return jsonify({'success': False, 'error': 'Missing file or import date.'})
     file = request.files['excel_file']
@@ -1273,19 +1280,56 @@ def api_search_db(db_key):
         results = []
         for r in rows:
             item = dict(r)
-            # Prefer UPC for ebayStore entries
+            # default mappings
             if db_key == 'ebayStore':
                 barcode_val = item.get('UPC') or item.get('upc') or item.get('BARCODE') or item.get('barcode') or item.get('Barcode') or ''
             else:
                 barcode_val = item.get('BARCODE') or item.get('barcode') or item.get('Barcode') or ''
+
+            # bol.db normalization: different column names (item_description, upc, image_url)
+            title_val = item.get('Title') or item.get('title') or item.get('name') or item.get('Name') or ''
+            image_val = item.get('Image') or item.get('image') or item.get('image_url') or item.get('images') or ''
+            if db_key == 'bol':
+                # barcode from upc field
+                b = item.get('upc') or item.get('UPC') or item.get('Upc') or barcode_val
+                # normalize numeric-like UPCs (e.g., '16094950.0') to '16094950'
+                if isinstance(b, float) or (isinstance(b, str) and b.endswith('.0') and b.replace('.0','').isdigit()):
+                    try:
+                        b = str(int(float(b)))
+                    except Exception:
+                        b = str(b)
+                elif b is None:
+                    b = ''
+                else:
+                    b = str(b)
+                barcode_val = b
+
+                # title from item_description or description
+                t = item.get('item_description') or item.get('description') or title_val
+                if not t:
+                    # fallback: pick the longest non-URL text field from the row
+                    longest = ''
+                    for v in item.values():
+                        try:
+                            s = str(v or '')
+                        except Exception:
+                            continue
+                        if s and not s.lower().startswith('http') and len(s) > len(longest):
+                            longest = s
+                    t = longest
+                title_val = t or ''
+
+                # image from image_url if present
+                image_val = item.get('image_url') or item.get('image') or image_val or ''
+
             item_out = {
                 'source_db': db_key,
                 'source_table': table,
                 'id': item.get('id') or item.get('ID') or item.get('rowid'),
-                'title': item.get('Title') or item.get('title') or item.get('name') or item.get('Name') or '',
-                'image': item.get('Image') or item.get('image') or item.get('image_url') or item.get('images') or '',
+                'title': title_val,
+                'image': image_val,
                 'barcode': barcode_val,
-                'item_id': item.get('ItemID') or item.get('item_id') or item.get('ItemId') or '',
+                'item_id': item.get('ItemID') or item.get('item_id') or item.get('ItemId') or (barcode_val if barcode_val else ''),
                 'pictureposition': item.get('PICTUREPOSITION') or item.get('pictureposition') or item.get('picture_position') or '',
                 'item_position': item.get('ITEM_POSITION') or item.get('item_position') or item.get('position') or '',
                 'quantity': item.get('Quantity') or item.get('quantity') or item.get('qty') or '',
@@ -1353,6 +1397,20 @@ def api_search_db(db_key):
             results = list(merged.values())
             # adjust total_count to reflect merged items count
             total_count = len(results)
+
+        # If client requested debug info, return table/schema/samples plus normalized results
+        if data.get('debug'):
+            debug_samples = rows[:10] if isinstance(rows, list) else []
+            return jsonify({
+                'debug': True,
+                'db_key': db_key,
+                'db_path': db_path,
+                'table': table,
+                'columns': cols,
+                'samples_raw': debug_samples,
+                'results': results,
+                'total': total_count
+            })
 
         return jsonify({'results': results, 'total': total_count})
     except Exception as e:
@@ -1684,151 +1742,193 @@ def api_create_shelf():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/api/update_shelf', methods=['POST'])
+def api_update_shelf():
+    """Update an existing shelf image and/or rename the shelf code.
+    Expects form-data: old_code (required), new_code (optional), image (optional file)
+    """
+    try:
+        old_code = (request.form.get('old_code') or '').strip()
+        new_code = (request.form.get('new_code') or '').strip()
+
+        if not old_code:
+            return jsonify({'success': False, 'error': 'old_code is required'}), 400
+
+        shelves_dir = os.path.join('static', 'shelves')
+        old_path = os.path.join(shelves_dir, f"{old_code}.png")
+
+        # If image provided, overwrite or write to new path
+        file = request.files.get('image')
+        if file:
+            target_code = new_code if new_code else old_code
+            target_path = os.path.join(shelves_dir, f"{target_code}.png")
+            file.save(target_path)
+
+        # If renaming requested and file exists, rename on disk
+        if new_code and new_code != old_code:
+            new_path = os.path.join(shelves_dir, f"{new_code}.png")
+            # If image was uploaded we already saved to new_path; otherwise rename existing file
+            if not os.path.exists(new_path) and os.path.exists(old_path):
+                os.rename(old_path, new_path)
+
+            # Cascade rename into searchRack.db (SEARCHRACK.ITEM_POSITION) and rack.db (INVENTORY.ITEM_POSITION)
+            try:
+                # Update searchRack.db
+                sconn = sqlite3.connect('searchRack.db')
+                scur = sconn.cursor()
+                scur.execute("UPDATE SEARCHRACK SET ITEM_POSITION = ? WHERE LOWER(TRIM(ITEM_POSITION)) = LOWER(TRIM(?))", (new_code, old_code))
+                s_updated = scur.rowcount
+                sconn.commit()
+                sconn.close()
+            except Exception:
+                s_updated = None
+
+            try:
+                # Update rack.db (INVENTORY table)
+                rconn = sqlite3.connect('rack.db')
+                rcur = rconn.cursor()
+                rcur.execute("UPDATE INVENTORY SET ITEM_POSITION = ? WHERE LOWER(TRIM(ITEM_POSITION)) = LOWER(TRIM(?))", (new_code, old_code))
+                r_updated = rcur.rowcount
+                rconn.commit()
+                rconn.close()
+            except Exception:
+                r_updated = None
+
+            # Log rename cascade results
+            try:
+                with open('clear_shelf.log', 'a', encoding='utf-8') as lf:
+                    lf.write(f"SHELF_RENAME: {time.strftime('%Y-%m-%d %H:%M:%S')} {old_code} -> {new_code} searchRack_updated={s_updated} rack_updated={r_updated}\n")
+            except Exception:
+                pass
+
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/clear_shelf_inventory/<code>', methods=['POST'])
+def api_clear_shelf_inventory(code):
+    """Clear ITEM_POSITION (or similar) in rack.db for any rows matching the shelf code.
+    Returns count of rows updated.
+    """
+    try:
+        # Log incoming request for debugging
+        try:
+            with open('clear_shelf.log', 'a', encoding='utf-8') as lf:
+                lf.write(f"CLEAR_REQUEST: {time.strftime('%Y-%m-%d %H:%M:%S')} code={repr(code)}\n")
+        except Exception:
+            pass
+
+        code = (code or '').strip()
+        if not code:
+            return jsonify({'success': False, 'error': 'code required'}), 400
+
+        db_path = 'rack.db'
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+
+        # Determine which table holds inventory rows (try common names)
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        tables = [r[0] for r in cur.fetchall()]
+        table_name = None
+        for candidate in ('items', 'INVENTORY', 'inventory'):
+            if candidate in tables:
+                table_name = candidate
+                break
+        # fallback: pick a table that looks like inventory
+        if not table_name:
+            for t in tables:
+                if 'item' in t.lower() or 'invent' in t.lower():
+                    table_name = t
+                    break
+
+        if not table_name:
+            conn.close()
+            return jsonify({'success': False, 'error': 'No inventory-like table found in rack.db'}), 400
+
+        # Find likely location columns in the chosen table
+        cur.execute(f"PRAGMA table_info({table_name})")
+        cols = [r[1] for r in cur.fetchall()]
+        loc_cols = [c for c in cols if c.lower() in ('item_position','itemposition','position','location')]
+        if not loc_cols:
+            # fallback: try common column name substrings
+            loc_cols = [c for c in cols if 'position' in c.lower() or 'location' in c.lower()]
+
+        updated = 0
+        if loc_cols:
+            # Use case-insensitive, trimmed comparison to increase match robustness
+            for col in loc_cols:
+                sql = f"UPDATE {table_name} SET {col} = '' WHERE LOWER(TRIM({col})) = LOWER(TRIM(?))"
+                cur.execute(sql, (code,))
+                updated += cur.rowcount
+            try:
+                with open('clear_shelf.log', 'a', encoding='utf-8') as lf:
+                    lf.write(f"CLEAR_SQL: table={table_name} loc_cols={loc_cols} code={repr(code)} updated={updated}\n")
+            except Exception:
+                pass
+            try:
+                with open('clear_shelf.log', 'a', encoding='utf-8') as lf:
+                    lf.write(f"CLEAR_RESULT: updated={updated}, loc_cols={loc_cols}\n")
+            except Exception:
+                pass
+        else:
+            # Nothing to update
+            conn.close()
+            return jsonify({'success': False, 'error': 'No location column found in items table'}), 400
+
+        conn.commit()
+        conn.close()
+
+        # Also clear searchRack.db ITEM_POSITION if present
+        search_updated = 0
+        try:
+            sconn = sqlite3.connect('searchRack.db')
+            scur = sconn.cursor()
+            # Check for SEARCHRACK table and ITEM_POSITION column
+            scur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='SEARCHRACK'")
+            if scur.fetchone():
+                scur.execute("PRAGMA table_info(SEARCHRACK)")
+                scols = [r[1] for r in scur.fetchall()]
+                if 'ITEM_POSITION' in scols:
+                    scur.execute("UPDATE SEARCHRACK SET ITEM_POSITION = '' WHERE LOWER(TRIM(ITEM_POSITION)) = LOWER(TRIM(?))", (code,))
+                    search_updated = scur.rowcount
+                    sconn.commit()
+            sconn.close()
+        except Exception as e:
+            try:
+                with open('clear_shelf.log', 'a', encoding='utf-8') as lf:
+                    lf.write(f"CLEAR_SEARCH_ERROR: {time.strftime('%Y-%m-%d %H:%M:%S')} error={e}\n")
+            except Exception:
+                pass
+
+        # Log final counts
+        try:
+            with open('clear_shelf.log', 'a', encoding='utf-8') as lf:
+                lf.write(f"CLEAR_FINAL: code={repr(code)} inventory_updated={updated} searchrack_updated={search_updated}\n")
+        except Exception:
+            pass
+
+        return jsonify({'success': True, 'updated': updated, 'search_updated': search_updated})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 
 @app.route('/api/list_shelves', methods=['GET'])
 def api_list_shelves():
-    """List all shelf images from static/shelves directory with metadata"""
+    """Return list of shelf images from static/shelves as JSON"""
     try:
-        shelves_dir = os.path.join('static', 'shelves')
-        if not os.path.exists(shelves_dir):
-            os.makedirs(shelves_dir)
-            return jsonify({'success': True, 'shelves': []})
-        
-        shelves = []
-        for filename in os.listdir(shelves_dir):
-            if filename.lower().endswith('.png'):
-                filepath = os.path.join(shelves_dir, filename)
-                code = os.path.splitext(filename)[0]  # Remove .png extension
-                created_time = os.path.getctime(filepath)
-                
-                shelves.append({
-                    'code': code,
-                    'filename': filename,
-                    'url': f'/static/shelves/{filename}',
-                    'created': created_time
-                })
-        
-        # Sort by creation date (newest first)
-        shelves.sort(key=lambda x: x['created'], reverse=True)
-        
-        return jsonify({'success': True, 'shelves': shelves})
-    
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-
-@app.route('/api/check_shelf_code', methods=['POST'])
-def api_check_shelf_code():
-    """Check if a shelf code already exists in filesystem or searchRack database"""
-    try:
-        data = request.get_json() or {}
-        code = (data.get('code') or '').strip()
-        
-        if not code:
-            return jsonify({'exists': False, 'reason': 'No code provided'})
-        
-        # Check filesystem
-        shelves_dir = os.path.join('static', 'shelves')
-        filename = f'{code}.png'
-        filepath = os.path.join(shelves_dir, filename)
-        
-        if os.path.exists(filepath):
-            return jsonify({'exists': True, 'reason': 'File already exists in static/shelves'})
-        
-        # Check searchRack database for ITEM_POSITION values
-        try:
-            conn = sqlite3.connect('searchRack.db')
-            cur = conn.cursor()
-            cur.execute('SELECT COUNT(*) FROM SEARCHRACK WHERE ITEM_POSITION = ?', (code,))
-            count = cur.fetchone()[0]
-            conn.close()
-            
-            if count > 0:
-                return jsonify({'exists': True, 'reason': f'Code already used by {count} item(s) in searchRack'})
-        except Exception as db_error:
-            # If table doesn't exist or query fails, just continue
-            print(f'Database check error: {db_error}')
-        
-        return jsonify({'exists': False})
-    
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-
-@app.route('/api/delete_shelf/<shelf_code>', methods=['POST'])
-def api_delete_shelf(shelf_code):
-    """Delete a shelf image, but only if no items in rack.db reference it"""
-    try:
-        # Check rack.db for any items referencing this shelf
-        try:
-            conn = sqlite3.connect('rack.db')
-            cur = conn.cursor()
-            cur.execute('SELECT COUNT(*) FROM items WHERE ITEM_POSITION = ?', (shelf_code,))
-            count = cur.fetchone()[0]
-            conn.close()
-            
-            if count > 0:
-                return jsonify({
-                    'success': False,
-                    'error': f'Cannot delete: {count} item(s) still on this shelf in rack.db'
-                }), 400
-        except Exception as db_error:
-            print(f'Database check error: {db_error}')
-            # If rack.db doesn't exist or query fails, allow deletion
-        
-        # Delete the file
-        shelves_dir = os.path.join('static', 'shelves')
-        filename = f'{shelf_code}.png'
-        filepath = os.path.join(shelves_dir, filename)
-        
-        if os.path.exists(filepath):
-            os.remove(filepath)
-            return jsonify({'success': True, 'message': f'Shelf {shelf_code} deleted'})
-        else:
-            return jsonify({'success': False, 'error': 'Shelf file not found'}), 404
-    
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-
-@app.route('/api/upload_shelf', methods=['POST'])
-def api_upload_shelf():
-    """Upload and save a shelf image with drawn rectangle"""
-    try:
-        # Get shelf code and image data from request
-        code = request.form.get('code', '').strip()
-        
-        if not code:
-            return jsonify({'success': False, 'error': 'Shelf code is required'}), 400
-        
-        # Check if image data is provided
-        if 'image' not in request.files:
-            return jsonify({'success': False, 'error': 'No image provided'}), 400
-        
-        image_file = request.files['image']
-        
-        if image_file.filename == '':
-            return jsonify({'success': False, 'error': 'No image selected'}), 400
-        
-        # Validate PNG format
-        if not image_file.filename.lower().endswith('.png'):
-            return jsonify({'success': False, 'error': 'Only PNG images are accepted'}), 400
-        
-        # Save the image
-        shelves_dir = os.path.join('static', 'shelves')
-        if not os.path.exists(shelves_dir):
-            os.makedirs(shelves_dir)
-        
-        filename = f'{code}.png'
-        filepath = os.path.join(shelves_dir, filename)
-        image_file.save(filepath)
-        
-        return jsonify({
-            'success': True,
-            'message': f'Shelf {code} saved successfully',
-            'url': f'/static/shelves/{filename}'
-        })
-    
+        shelves_dir = os.path.join(app.root_path, 'static', 'shelves')
+        results = []
+        if os.path.isdir(shelves_dir):
+            for fname in sorted(os.listdir(shelves_dir)):
+                if not fname.lower().endswith('.png'):
+                    continue
+                code = os.path.splitext(fname)[0]
+                path = os.path.join(shelves_dir, fname)
+                mtime = os.path.getmtime(path)
+                url = url_for('static', filename=f'shelves/{fname}')
+                results.append({'code': code, 'filename': fname, 'url': url, 'lastModified': int(mtime)})
+        return jsonify({'success': True, 'shelves': results})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 

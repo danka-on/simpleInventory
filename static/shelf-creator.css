@@ -57,7 +57,48 @@ h2 {
 /* Action Bar */
 .action-bar {
     margin: 20px 0;
-    text-align: center;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+}
+
+.action-bar .action-left {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.action-bar .action-right {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.back-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    text-decoration: none;
+    color: #2c3e50;
+    border: 1px solid var(--border);
+    background: transparent;
+}
+
+.btn-outline {
+    background: transparent;
+}
+
+@media (max-width: 480px) {
+    .action-bar {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .action-bar .action-right {
+        justify-content: flex-end;
+    }
 }
 
 /* Shelf Grid */
@@ -231,6 +272,16 @@ h2 {
     color: white;
 }
 
+.btn-select {
+    background: var(--primary);
+    color: white;
+}
+
+.btn-exit {
+    background: var(--danger);
+    color: white;
+}
+
 .btn-warning {
     background: var(--warning);
     color: #333;
@@ -249,6 +300,13 @@ h2 {
 
 .btn-group .btn {
     flex: 1;
+}
+
+.modal-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    margin-top: 12px;
 }
 
 /* Camera/Upload Section */

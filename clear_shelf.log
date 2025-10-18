@@ -1,0 +1,7 @@
+CLEAR_REQUEST: 2025-10-18 11:20:53 code='gr2s4'
+CLEAR_SQL: table=INVENTORY loc_cols=['ITEM_POSITION'] code='gr2s4' updated=5
+CLEAR_RESULT: updated=5, loc_cols=['ITEM_POSITION']
+CLEAR_REQUEST: 2025-10-18 11:30:11 code='gr2s4'
+CLEAR_SQL: table=INVENTORY loc_cols=['ITEM_POSITION'] code='gr2s4' updated=0
+CLEAR_RESULT: updated=0, loc_cols=['ITEM_POSITION']
+CLEAR_FINAL: code='gr2s4' inventory_updated=0 searchrack_updated=2

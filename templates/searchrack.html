@@ -434,27 +434,39 @@ async function onDeleteArchive(archive_id){
 // close edit modal
 document.getElementById('closeEdit').addEventListener('click', ()=>document.getElementById('editModal').style.display='none');
 
-// initial load: search default DBs
-window.addEventListener('load', ()=>{ document.getElementById('search-input').focus(); doSearch(); });
-
-// If returning from an edit flow, restore previous search state
+// initial load: restore session state OR read ?q= param OR run default search
 window.addEventListener('load', ()=>{
     try{
+        // focus the input
+        document.getElementById('search-input').focus();
+
+        // If returning from an edit flow, restore previous search state
         const st = sessionStorage.getItem('searchrack_return_state');
         if(st){
             const s = JSON.parse(st);
             document.getElementById('search-input').value = s.q || '';
             if(s.pageSize) document.getElementById('page-size').value = s.pageSize;
-            // restore selected DB (radio). s.checkedDBs was previously an array; take first entry if present
             if(Array.isArray(s.checkedDBs) && s.checkedDBs.length){
                 const first = s.checkedDBs[0];
                 DBS.forEach(k=>{ const el = document.getElementById('chk-'+k); if(el) el.checked = (k === first); });
             }
-            // clear saved state then run search
             sessionStorage.removeItem('searchrack_return_state');
             doSearch();
+            return;
         }
-    }catch(e){ console.error('restore state failed', e); }
+
+        // If ?q= is present in URL, prefill and search
+        const params = new URLSearchParams(window.location.search);
+        const qParam = params.get('q') || params.get('search');
+        if(qParam){
+            document.getElementById('search-input').value = qParam;
+            doSearch();
+            return;
+        }
+
+        // Default behavior: run an empty search to populate page
+        doSearch();
+    }catch(e){ console.error('initial load failed', e); }
 });
 
 // Refresh handler: call refresh API and poll status

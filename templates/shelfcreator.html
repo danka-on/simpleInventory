@@ -5,7 +5,7 @@
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.ico') }}">
     <title>Shelf Creator - Sweet Shelves</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
-    <link rel="stylesheet" href="{{ url_for('static', filename='shelf-creator.css') }}?v=4">
+    <link rel="stylesheet" href="{{ url_for('static', filename='shelf-creator.css') }}?v=5">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 </head>
 <body>
@@ -15,12 +15,19 @@
         <!-- List View -->
         <div id="list-view" class="view active">
             <div class="action-bar">
-                <button class="btn btn-secondary" id="select-mode-btn">
-                    <i class="fas fa-check-square"></i> Select
-                </button>
-                <button class="btn btn-primary" id="print-qr-btn" style="display: none;">
-                    <i class="fas fa-qrcode"></i> Print QR Codes (<span id="selected-count">0</span>)
-                </button>
+                <div class="action-left">
+                    <a href="/tools" class="back-btn btn btn-exit" id="exit-btn">
+                        <i class="fas fa-times-circle"></i> Exit
+                    </a>
+                    <button class="btn btn-primary" id="print-qr-btn" style="display: none;">
+                        <i class="fas fa-qrcode"></i> Print QR Codes (<span id="selected-count">0</span>)
+                    </button>
+                </div>
+                <div class="action-right">
+                    <button class="btn btn-select" id="select-mode-btn">
+                        <i class="fas fa-check-square"></i> Select
+                    </button>
+                </div>
             </div>
             <div id="shelf-list" class="shelf-grid">
                 <div class="loading">
@@ -30,9 +37,6 @@
             <button class="add-shelf-btn" id="add-btn">
                 <i class="fas fa-plus"></i>
             </button>
-            <a href="/tools" class="back-btn">
-                <i class="fas fa-arrow-left"></i> Back to Tools
-            </a>
         </div>
         
         <!-- Add/Edit View -->
@@ -105,16 +109,22 @@
             </button>
             <img id="modal-image" src="" alt="Shelf">
             <div class="modal-actions">
+                <button class="btn btn-info" id="view-items-btn">
+                    <i class="fas fa-list"></i> View Items
+                </button>
                 <button class="btn btn-primary" id="edit-shelf-btn">
                     <i class="fas fa-edit"></i> Edit
                 </button>
                 <button class="btn btn-danger" id="delete-shelf-btn">
                     <i class="fas fa-trash"></i> Delete
                 </button>
+                <button class="btn btn-warning" id="clear-inventory-btn" title="Clear all items linked to this shelf">
+                    <i class="fas fa-broom"></i> Clear All Inventory
+                </button>
             </div>
         </div>
     </div>
     
-    <script src="{{ url_for('static', filename='shelf-creator.js') }}?v=4"></script>
+    <script src="{{ url_for('static', filename='shelf-creator.js') }}?v=5"></script>
 </body>
 </html>

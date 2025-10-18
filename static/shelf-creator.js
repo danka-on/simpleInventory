@@ -65,9 +65,35 @@ function setupEventListeners() {
     document.getElementById('modal-close-btn').addEventListener('click', closeModal);
     document.getElementById('edit-shelf-btn').addEventListener('click', editShelf);
     document.getElementById('delete-shelf-btn').addEventListener('click', deleteShelf);
+    const clearBtn = document.getElementById('clear-inventory-btn');
+    if (clearBtn) clearBtn.addEventListener('click', clearInventory);
+    const viewBtn = document.getElementById('view-items-btn');
+    if (viewBtn) viewBtn.addEventListener('click', () => {
+        const code = state.currentShelfCode;
+        if (!code) return;
+        // navigate to searchrack with query for this shelf code
+        window.location.href = `/searchrack?q=${encodeURIComponent(code)}`;
+    });
     
     // Code validation
     setupCodeValidation();
+    // Enable save when code changes
+    const codeInput = document.getElementById('shelf-code');
+    if (codeInput) codeInput.addEventListener('input', enableSaveIfReady);
+}
+
+/**
+ * Enable the Save button if a code is present and an image is loaded into the canvas
+ */
+function enableSaveIfReady() {
+    const code = (document.getElementById('shelf-code') || {}).value || '';
+    const saveBtn = document.getElementById('save-btn');
+    if (!saveBtn) return;
+    if (code.trim() && state.currentImage) {
+        saveBtn.disabled = false;
+    } else {
+        saveBtn.disabled = true;
+    }
 }
 
 /**
@@ -218,6 +244,81 @@ function closeModal() {
     document.getElementById('image-modal').classList.remove('active');
 }
 
+/**
+ * Begin editing the currently-viewed shelf: load its image into the editor and prefill code
+ */
+function editShelf() {
+    const code = state.currentShelfCode;
+    if (!code) return;
+
+    const shelf = state.shelves.find(s => s.code === code);
+    if (!shelf) {
+        showError('Shelf not found');
+        return;
+    }
+
+    // Prepare editor
+    state.isEditing = true;
+    document.getElementById('form-title').textContent = `Edit Shelf: ${code}`;
+    document.getElementById('shelf-code').value = code;
+
+    // Load image into canvas
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+        const canvas = document.getElementById('editor-canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        ctx.clearRect(0,0,canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0);
+        // store current image and reset any rectangle
+        state.canvas = canvas;
+        state.ctx = ctx;
+        state.currentImage = img;
+        state.rectX = 0; state.rectY = 0; state.rectW = 0; state.rectH = 0;
+        enableSaveIfReady();
+    };
+    img.onerror = () => showError('Failed to load shelf image into editor');
+    img.src = shelf.url + '?_=' + Date.now(); // cache bust
+
+    // Show add/edit view
+    closeModal();
+    document.getElementById('list-view').classList.remove('active');
+    document.getElementById('add-view').classList.add('active');
+}
+
+/**
+ * Clear all inventory entries that reference the current shelf code in rack.db
+ */
+function clearInventory() {
+    const code = state.currentShelfCode;
+    if (!code) return;
+    if (!confirm(`Remove shelf code '${code}' from all items in the rack database? This will clear the location for all items referencing this shelf.`)) return;
+
+    fetch(`/api/clear_shelf_inventory/${encodeURIComponent(code)}`, { method: 'POST' })
+        .then(async r => {
+            const txt = await r.text();
+            try {
+                const data = JSON.parse(txt);
+                if (data.success) {
+                    showSuccess(`Cleared ${data.updated} items from inventory for shelf ${code}`);
+                    closeModal();
+                } else {
+                    showError(data.error || 'Failed to clear inventory');
+                }
+            } catch (e) {
+                // Not JSON - show the raw response (likely HTML error page)
+                console.error('Clear inventory non-JSON response', r.status, txt.substring(0,1000));
+                showError('Error clearing inventory: server returned unexpected response (see console)');
+            }
+        })
+        .catch(err => {
+            console.error('Clear inventory fetch error:', err);
+            showError('Error clearing inventory: ' + err.message);
+        });
+}
+
 // ============================================================================
 // STEP 2: ADD SHELF FORM
 // ============================================================================
@@ -268,6 +369,7 @@ function resetForm() {
     document.getElementById('editor-container').classList.remove('active');
     state.currentImage = null;
     state.rectX = state.rectY = state.rectW = state.rectH = 0;
+    state.isEditing = false;
 }
 
 /**
@@ -622,39 +724,60 @@ function saveShelf() {
     // Convert canvas to blob
     state.canvas.toBlob(blob => {
         const formData = new FormData();
-        formData.append('code', code);
         formData.append('image', blob, `${code}.png`);
-        
-        fetch('/api/upload_shelf', {
-            method: 'POST',
-            body: formData
-        })
-        .then(r => r.json())
-        .then(data => {
-            if (data.success) {
-                showSuccess('Shelf saved successfully!');
-                cancelAdd();
-                loadShelves();
-            } else {
-                showError(data.error || 'Failed to save shelf');
-            }
-        })
-        .catch(err => {
-            console.error('Save error:', err);
-            showError('Error saving shelf: ' + err.message);
-        });
+
+        if (state.isEditing) {
+            const oldCode = state.currentShelfCode;
+            formData.append('old_code', oldCode);
+            if (oldCode !== code) formData.append('new_code', code);
+
+            fetch('/api/update_shelf', {
+                method: 'POST',
+                body: formData
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    showSuccess('Shelf updated successfully!');
+                    state.isEditing = false;
+                    state.currentShelfCode = '';
+                    cancelAdd();
+                    loadShelves();
+                } else {
+                    showError(data.error || 'Failed to update shelf');
+                }
+            })
+            .catch(err => {
+                console.error('Update error:', err);
+                showError('Error updating shelf: ' + err.message);
+            });
+        } else {
+            formData.append('code', code);
+            fetch('/api/upload_shelf', {
+                method: 'POST',
+                body: formData
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    showSuccess('Shelf saved successfully!');
+                    cancelAdd();
+                    loadShelves();
+                } else {
+                    showError(data.error || 'Failed to save shelf');
+                }
+            })
+            .catch(err => {
+                console.error('Save error:', err);
+                showError('Error saving shelf: ' + err.message);
+            });
+        }
     }, 'image/png');
 }
 
 // ============================================================================
-// STEP 6: EDIT/DELETE FUNCTIONALITY (Placeholder)
+// STEP 6: EDIT/DELETE FUNCTIONALITY
 // ============================================================================
-
-function editShelf() {
-    console.log('Edit shelf:', state.currentShelfCode);
-    closeModal();
-    showError('Edit feature coming in next step!');
-}
 
 function deleteShelf() {
     const code = state.currentShelfCode;
