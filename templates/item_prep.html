@@ -180,6 +180,23 @@
 
     window.addEventListener('DOMContentLoaded', setupDeviceMode);
     window.addEventListener('beforeunload', stopScanner);
+
+    // Auto-trigger lookup if ?upc= is provided
+    window.addEventListener('DOMContentLoaded', async ()=>{
+      try{
+        const params = new URLSearchParams(window.location.search);
+        const upc = (params.get('upc')||'').trim();
+        if(upc){
+          document.getElementById('manualUpc').value = upc;
+          await lookup(upc);
+          // stop scanner while viewing result
+          stopScanner();
+          // Ensure result is visible and actions are big
+          document.getElementById('result').classList.remove('hidden');
+          document.getElementById('actions').classList.remove('hidden');
+        }
+      }catch(e){}
+    });
   </script>
 </body>
 </html>

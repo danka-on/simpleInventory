@@ -40,7 +40,7 @@
 </head>
 <body>
   <div class="top">
-    <a id="backLink" href="/items-to-list"><button class="btn btn-danger">Back</button></a>
+    <a id="backLink" href="/item-prep?upc={{ upc }}"><button class="btn btn-danger">Back</button></a>
     <h2 style="margin:0">Diagnostic Details</h2>
     <div style="width:100px"></div>
   </div>
@@ -122,7 +122,7 @@
       }catch(e){ /* leave as-is */ }
     })();
 
-    // Back button logic: if came from Trash Manager, go back there
+    // Back button logic: default back to Item Prep with UPC; if came from Trash Manager, go back there
     (function(){
       try{
         const params = new URLSearchParams(window.location.search);
