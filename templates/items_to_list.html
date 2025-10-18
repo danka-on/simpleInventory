@@ -21,6 +21,7 @@
     .small-muted{color:#777;font-size:0.9rem}
     .modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;align-items:center;justify-content:center}
     .modal .card{background:#fff;padding:18px;border-radius:8px;max-width:720px;max-height:80vh;overflow:auto}
+    .btn-sm{padding:6px 10px;font-size:0.9rem}
   </style>
 </head>
 <body>
@@ -50,6 +51,8 @@
         <option value="unchecked">Unchecked</option>
         <option value="good">Good</option>
         <option value="bad">Bad</option>
+        <option value="listed">Listed</option>
+        <option value="not_listed">Not listed</option>
       </select>
     </label>
     <button class="btn" id="apply-filters">Apply</button>
@@ -81,7 +84,7 @@ async function loadItems(){
 function render(results){
   const container = document.getElementById('results');
   if(!results.length){ container.innerHTML = '<div class="small-muted">No items</div>'; return; }
-  let html = '<table><thead><tr><th>Status</th><th>Listing</th><th>Title</th><th>UPC</th><th>Lot #</th><th>BOL #</th><th>Import Date</th></tr></thead><tbody>';
+  let html = '<table><thead><tr><th>Status</th><th>Listing</th><th>Title</th><th>UPC</th><th>Lot #</th><th>BOL #</th><th>Import Date</th><th>Actions</th></tr></thead><tbody>';
   results.forEach(r=>{
     const title = esc(r.title||'');
     const img = esc(r.image||'');
@@ -97,6 +100,9 @@ function render(results){
     const lstatus = (r.list_status||'').toLowerCase();
     let lpill = '<span class="status-box" style="background:#9aa0a6" title="Not listed">not listed</span>';
     if(lstatus==='listed') lpill = '<span class="status-box" style="background:#2ecc71" title="Listed">listed</span>';
+    const actionBtn = (lstatus==='listed')
+      ? `<button class="btn btn-danger btn-sm btn-unlist" data-upc="${upc}" title="Mark as not listed">✕</button>`
+      : `<button class="btn btn-primary btn-sm btn-list" data-upc="${upc}">Mark as Listed</button>`;
     html += `<tr>`+
       `<td>${pill}${status==='bad'?` <a href="#" class="diag-link" data-upc="${upc}">Diagnostic</a>`:''}</td>`+
       `<td>${lpill}</td>`+
@@ -105,12 +111,15 @@ function render(results){
             `<td>${lot}</td>`+
             `<td>${bol}</td>`+
             `<td>${imp}</td>`+
+            `<td>${actionBtn}</td>`+
             `</tr>`;
   });
   html += '</tbody></table>';
   container.innerHTML = html;
   document.querySelectorAll('.img-link').forEach(el=> el.addEventListener('click', onOpenImg));
   document.querySelectorAll('.diag-link').forEach(el=> el.addEventListener('click', onOpenDiag));
+  document.querySelectorAll('.btn-list').forEach(el=> el.addEventListener('click', onMarkListed));
+  document.querySelectorAll('.btn-unlist').forEach(el=> el.addEventListener('click', onUnlist));
 }
 
 function onOpenImg(e){
@@ -128,6 +137,24 @@ function onOpenImg(e){
 document.getElementById('closeImg').addEventListener('click', ()=>{ document.getElementById('imgModal').style.display='none'; });
 document.getElementById('apply-filters').addEventListener('click', loadItems);
 function onOpenDiag(e){ e.preventDefault(); const upc = e.currentTarget.dataset.upc; if(!upc) return; window.location.href = '/item-prep/diagnostic/view?upc='+encodeURIComponent(upc); }
+
+async function onMarkListed(e){
+  e.preventDefault();
+  const upc = e.currentTarget.dataset.upc; if(!upc) return;
+  try{
+    await fetch('/api/bol_items/list_status', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ upc, list_status: 'listed' })});
+  }catch{}
+  loadItems();
+}
+
+async function onUnlist(e){
+  e.preventDefault();
+  const upc = e.currentTarget.dataset.upc; if(!upc) return;
+  try{
+    await fetch('/api/bol_items/list_status', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ upc, list_status: '' })});
+  }catch{}
+  loadItems();
+}
 
 // initial load
 loadItems();

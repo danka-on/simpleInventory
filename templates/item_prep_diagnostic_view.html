@@ -40,7 +40,7 @@
 </head>
 <body>
   <div class="top">
-    <a href="/items-to-list"><button class="btn btn-danger">Back</button></a>
+    <a id="backLink" href="/items-to-list"><button class="btn btn-danger">Back</button></a>
     <h2 style="margin:0">Diagnostic Details</h2>
     <div style="width:100px"></div>
   </div>
@@ -120,6 +120,17 @@
         const fmt = new Intl.DateTimeFormat('en-US', { timeZone:'America/New_York', dateStyle:'medium', timeStyle:'short' });
         el.textContent = fmt.format(d) + ' ET';
       }catch(e){ /* leave as-is */ }
+    })();
+
+    // Back button logic: if came from Trash Manager, go back there
+    (function(){
+      try{
+        const params = new URLSearchParams(window.location.search);
+        if((params.get('from')||'').toLowerCase()==='trash'){
+          const a = document.getElementById('backLink');
+          if(a) a.href = '/trash-manager';
+        }
+      }catch(e){}
     })();
 
     // Click-to-enlarge images + download

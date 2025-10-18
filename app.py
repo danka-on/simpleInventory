@@ -785,11 +785,17 @@ def api_bol_items():
                     st = (row.get('prep_status') or '').strip().lower()
             return st if st in ('good','bad','unchecked') else 'unchecked'
         rows = rows_all
-        if status_filter in ('good','bad','unchecked'):
-            if status_filter == 'unchecked':
+        sf = status_filter.replace(' ', '_') if status_filter else ''
+        if sf in ('good','bad','unchecked'):
+            if sf == 'unchecked':
                 rows = [r for r in rows_all if status_of(r) == 'unchecked']
             else:
-                rows = [r for r in rows_all if status_of(r) == status_filter]
+                rows = [r for r in rows_all if status_of(r) == sf]
+        elif sf in ('listed','not_listed'):
+            if sf == 'listed':
+                rows = [r for r in rows_all if (str(r.get('list_status') or '').strip().lower() == 'listed')]
+            else:
+                rows = [r for r in rows_all if not (str(r.get('list_status') or '').strip().lower() == 'listed')]
         # Normalize for UI
         results = []
         for r in rows:

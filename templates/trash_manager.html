@@ -40,7 +40,6 @@
       <input type="number" id="retentionDays" min="1" max="365" />
     </div>
     <button id="saveRetention" class="btn btn-primary">Save</button>
-    <button id="purgeExpired" class="btn btn-warning">Purge Expired Now</button>
     <div style="margin-left:auto">
       <button id="hardDeleteAll" class="btn btn-danger">Hard Delete All</button>
     </div>
@@ -127,8 +126,8 @@ async function loadTrash(){
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td><input type="checkbox" class="rowCheck" data-id="${r.id}" data-upc="${r.upc}" /></td>
-      <td>${r.url ? `<img src="${r.url}" alt="preview" style="height:50px;object-fit:cover" />` : ''}</td>
-      <td><a href="/item-prep/diagnostic/view?upc=${encodeURIComponent(r.upc)}">${r.upc}</a></td>
+      <td>${r.url ? `<img class="thumb" src="${r.url}" alt="preview" style="height:50px;object-fit:cover;cursor:pointer" data-full="${r.url}" />` : ''}</td>
+      <td><a href="/item-prep/diagnostic/view?upc=${encodeURIComponent(r.upc)}&from=trash">${r.upc}</a></td>
       <td>${fmtET(r.deleted_at)}</td>
       <td>${fmtET(r.expires_at)}</td>
       <td><code>${r.trash_path || r.image_path || ''}</code></td>
@@ -191,7 +190,6 @@ window.addEventListener('DOMContentLoaded', async () => {
   await loadSettings();
   await loadTrash();
   document.getElementById('saveRetention').addEventListener('click', saveSettings);
-  document.getElementById('purgeExpired').addEventListener('click', purgeExpired);
   document.getElementById('hardDeleteAll').addEventListener('click', hardDeleteAll);
   document.getElementById('restoreSelected').addEventListener('click', restoreSelected);
   document.getElementById('hardDeleteSelected').addEventListener('click', hardDeleteSelected);
@@ -200,7 +198,24 @@ window.addEventListener('DOMContentLoaded', async () => {
   });
   document.getElementById('prevPage').addEventListener('click', ()=>{ if(page>1){ page--; loadTrash(); }});
   document.getElementById('nextPage').addEventListener('click', ()=>{ page++; loadTrash(); });
+  // delegate click to enlarge preview
+  document.body.addEventListener('click', (e)=>{
+    const t = e.target;
+    if(t && t.matches('img.thumb')){
+      openModal(t.getAttribute('data-full'));
+    }
+    if(t && t.id==='imgModal') closeModal();
+  });
 });
+</script>
+
+<!-- Simple modal for preview -->
+<div id="imgModal" class="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:9999;align-items:center;justify-content:center">
+  <img id="imgModalImg" src="" alt="" style="max-width:90vw;max-height:90vh;border-radius:8px" />
+</div>
+<script>
+function openModal(src){ const m=document.getElementById('imgModal'); const i=document.getElementById('imgModalImg'); i.src = src; m.style.display='flex'; }
+function closeModal(){ const m=document.getElementById('imgModal'); const i=document.getElementById('imgModalImg'); i.src=''; m.style.display='none'; }
 </script>
 </body>
 </html>
