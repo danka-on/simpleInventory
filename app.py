@@ -129,6 +129,13 @@ def _ensure_items_prep_tables():
             cur.execute("ALTER TABLE items_prep_images ADD COLUMN expires_at TEXT")
         if 'trash_path' not in cols:
             cur.execute("ALTER TABLE items_prep_images ADD COLUMN trash_path TEXT")
+        # Add rotation column to keep track of image orientation (degrees)
+        if 'rotation' not in cols:
+            try:
+                cur.execute("ALTER TABLE items_prep_images ADD COLUMN rotation INTEGER DEFAULT 0")
+            except Exception:
+                # some older sqlite versions may behave differently; ignore errors
+                pass
         conn.commit()
         conn.close()
     except Exception as e:
@@ -402,12 +409,14 @@ def api_items_prep_diagnostic():
         os.makedirs(save_dir, exist_ok=True)
         saved = []
         files = request.files.getlist('photos[]') or request.files.getlist('photos') or ([] if 'photo' not in request.files else [request.files['photo']])
+        # optional per-file rotations can be provided as rotations[] in the same form-data (one per file, same order)
+        rotations = request.form.getlist('rotations[]') or request.form.getlist('rotations') or []
         import datetime
         ts = datetime.datetime.utcnow().isoformat()
         if files:
             conn_i = sqlite3.connect('bol.db')
             cur_i = conn_i.cursor()
-            for f in files:
+            for idx, f in enumerate(files):
                 if not f or not getattr(f, 'filename', ''):
                     continue
                 fn = secure_filename(f.filename)
@@ -417,7 +426,14 @@ def api_items_prep_diagnostic():
                 try:
                     f.save(path)
                     rel = f"items_prep/{unique}"
-                    cur_i.execute('INSERT INTO items_prep_images (upc, image_path, created_at) VALUES (?,?,?)', (upc, rel, ts))
+                    # parse rotation for this file (if provided), default to 0
+                    rot = 0
+                    try:
+                        if idx < len(rotations):
+                            rot = int(rotations[idx] or 0)
+                    except Exception:
+                        rot = 0
+                    cur_i.execute('INSERT INTO items_prep_images (upc, image_path, created_at, rotation) VALUES (?,?,?,?)', (upc, rel, ts, rot))
                     saved.append(rel)
                 except Exception as se:
                     print('Failed to save diagnostic image:', se)
@@ -457,7 +473,7 @@ def api_items_prep_diagnostic_get(upc):
         cur = conn.cursor()
         cur.execute('SELECT status, reason, note, updated_at FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (upc_n,))
         srow = cur.fetchone()
-        cur.execute("SELECT id, image_path, created_at FROM items_prep_images WHERE upc = ? COLLATE NOCASE AND (deleted_at IS NULL OR TRIM(COALESCE(deleted_at,'')) = '') ORDER BY created_at DESC, id DESC", (upc_n,))
+        cur.execute("SELECT id, image_path, created_at, rotation FROM items_prep_images WHERE upc = ? COLLATE NOCASE AND (deleted_at IS NULL OR TRIM(COALESCE(deleted_at,'')) = '') ORDER BY created_at DESC, id DESC", (upc_n,))
         images = [dict(r) for r in cur.fetchall()]
         conn.close()
         return jsonify({'upc': upc_n, 'status': dict(srow) if srow else None, 'images': images})
