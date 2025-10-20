@@ -55,6 +55,9 @@
             margin-bottom: 12px;
             color: var(--primary);
         }
+        .tool-card.important i {
+            color: #00b894; /* green for important shortcuts */
+        }
         .tool-card h3 {
             margin: 0 0 8px 0;
             color: #2c3e50;
@@ -132,46 +135,27 @@
         <h1>Tools</h1>
         
         <div class="tools-grid">
-            <a href="/extractor" class="tool-card">
-                <i class="fas fa-file-import"></i>
-                <h3>BOL Extract</h3>
-                <p>Extract BOL data from Excel files</p>
-            </a>
-            
-            <a href="/manualmatcher" class="tool-card">
-                <i class="fas fa-handshake"></i>
-                <h3>Manual Matcher</h3>
-                <p>Match BOL items with eBay listings</p>
-            </a>
-            
-            <a href="/searchrack" class="tool-card">
-                <i class="fas fa-search"></i>
-                <h3>Search Rack</h3>
-                <p>Search your inventory</p>
-            </a>
-            
-            <a href="/position" class="tool-card">
-                <i class="fas fa-plus-circle"></i>
-                <h3>Add Item</h3>
-                <p>Add new item to inventory</p>
-            </a>
-            
-            <a href="/shelfmanager" class="tool-card">
-                <i class="fas fa-box"></i>
-                <h3>Shelf Manager</h3>
-                <p>Create and manage shelves</p>
-            </a>
-
-            <a href="/items-to-list" class="tool-card">
+            <!-- Top section: Items to List and Item Preparation (green icons) -->
+            <a href="/items-to-list" class="tool-card important">
                 <i class="fas fa-list"></i>
                 <h3>Items to List</h3>
                 <p>Review BOL items to list</p>
             </a>
 
-            <a href="/item-prep" class="tool-card">
+            <a href="/item-prep" class="tool-card important">
                 <i class="fas fa-diagnoses"></i>
                 <h3>Item Preparation</h3>
                 <p>Scan, mark good/bad, add diagnostics</p>
+            </a>
+
+            <!-- Separator row: visually spans two columns -->
+            <div style="grid-column: 1 / -1; height: 1px; background: var(--border); margin: 6px 0; border-radius: 2px;"></div>
+
+            <!-- Bottom section: shelf manager, trash manager, BOL extract -->
+            <a href="/shelfmanager" class="tool-card">
+                <i class="fas fa-box"></i>
+                <h3>Shelf Manager</h3>
+                <p>Create and manage shelves</p>
             </a>
 
             <a href="/trash-manager" class="tool-card">
@@ -179,9 +163,15 @@
                 <h3>Trash Manager</h3>
                 <p>Restore or purge diagnostic photos</p>
             </a>
+
+            <a href="/extractor" class="tool-card">
+                <i class="fas fa-file-import"></i>
+                <h3>BOL Extract</h3>
+                <p>Extract BOL data from Excel files</p>
+            </a>
         </div>
 
-        <div class="sold-orders-section">
+    <div class="sold-orders-section">
             <h2>Sold Orders</h2>
             <div class="form-group">
                 <label for="sold-days">Days to fetch:</label>

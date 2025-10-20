@@ -19,7 +19,7 @@ try:
 except ImportError:
     BOL_AVAILABLE = False
     print("Warning: BOLextractor not available (pandas missing)")
-from manualMatcher import get_bol_items, get_ebay_items, fuse_and_store_match
+# manualMatcher removed: functionality deprecated and files deleted
 
 oldAuth_token = 'v^1.1#i^1#I^3#f^0#p^3#r^1#t^Ul4xMF82OkYwRjY2Q0VFOUY1QUM0MkEyMjkyMDY5Q0E5NjY0NjIxXzFfMSNFXjI2MA=='
 
@@ -1727,24 +1727,7 @@ def extractor_upload():
     return jsonify({'success': False, 'error': 'Unknown error during file upload.'})
 
 
-@app.route('/manualmatcher')
-def manualmatcher():
-    bol_items = get_bol_items()
-    ebay_items = get_ebay_items()
-    return render_template('manualmatcher.html', bol_items=bol_items, ebay_items=ebay_items)
-
-@app.route('/match', methods=['POST'])
-def match_items():
-    data = request.json
-    bol_id = data.get('bol_id')
-    ebay_id = data.get('ebay_id')
-    if bol_id is not None and ebay_id is not None:
-        try:
-            fuse_and_store_match(bol_id, ebay_id)
-            return jsonify({'success': True})
-        except Exception as e:
-            return jsonify({'success': False, 'error': str(e)})
-    return jsonify({'success': False, 'error': 'Missing IDs'})
+# Manual matcher routes removed
 
 
 @app.route('/get-sold-orders', methods=['POST'])
