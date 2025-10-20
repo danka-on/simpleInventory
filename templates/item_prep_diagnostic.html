@@ -10,8 +10,20 @@
     .btn{padding:10px 16px;border-radius:8px;border:none;cursor:pointer}
     .btn-primary{background:#00b894;color:#fff}
     .btn-danger{background:#e74c3c;color:#fff}
-    .card{background:#fff;border:1px solid #e8e8e8;border-radius:12px;padding:16px;margin-top:14px}
-    .row{display:flex;gap:10px;flex-wrap:wrap}
+  .card{background:#fff;border:1px solid #e8e8e8;border-radius:12px;padding:16px;margin-top:14px}
+  .row{display:flex;gap:10px;flex-wrap:wrap}
+  /* Camera overlay controls */
+  .cam-wrap{position:relative;display:block;width:100%;max-width:420px}
+  .cam-wrap{margin:0 auto}
+  .cam-overlay-btn{position:absolute;bottom:18px;left:50%;transform:translateX(-50%);display:flex;gap:12px;align-items:center;justify-content:center;z-index:5}
+  .cam-btn{background:rgba(255,255,255,0.18);backdrop-filter:blur(4px);border:1px solid rgba(255,255,255,0.24);color:#fff;padding:18px 22px;border-radius:999px;cursor:pointer;font-size:1.2rem;box-shadow:0 8px 20px rgba(0,0,0,0.22)}
+  .cam-btn.large{padding:22px 28px;font-size:1.4rem}
+  /* Capture and reset on the right/left of feed as well (optional) */
+  .cam-side-btn{position:absolute;top:10px;right:10px;background:rgba(0,0,0,0.36);color:#fff;border:none;padding:8px;border-radius:8px;z-index:6;font-size:1rem}
+  /* Complete button styling: full width, light green */
+  .complete-wrap{margin-top:12px}
+  .btn-complete{display:block;width:100%;padding:16px 18px;border-radius:10px;border:none;background:#00c853;color:#fff;font-weight:800;font-size:1.05rem;box-shadow:0 8px 18px rgba(0,200,83,0.18);cursor:pointer}
+  .btn-complete:active{transform:translateY(1px)}
   .preview{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
   .thumb-wrap{position:relative;width:110px;height:110px}
     .thumb{width:100%;height:100%;object-fit:cover;border-radius:8px;background:#f0f0f0}
@@ -56,8 +68,7 @@
         <button type="button" class="reason-btn" data-val="Missing pieces">Missing pieces</button>
         <button type="button" class="reason-btn" data-val="Wrong item">Wrong item</button>
         <button type="button" class="reason-btn" data-val="Broken">Broken</button>
-        <button type="button" class="reason-btn" data-val="Trash">Trash</button>
-        <button type="button" class="reason-btn" data-val="Other">Other</button>
+        <button type="button" class="reason-btn" data-val="Return">Return</button>
       </div>
       <input type="hidden" name="reason" id="reasonSelect" required>
       <label>Note:
@@ -78,16 +89,27 @@
             </div>
           </div>
         </div>
-        <video id="cam" playsinline muted style="width:100%;max-width:420px;aspect-ratio:1/1;background:#222;border-radius:8px"></video>
-        <canvas id="canvas" style="display:none"></canvas>
-        <div style="margin-top:8px;display:flex;gap:8px">
-          <button type="button" class="btn btn-primary" id="captureBtn">Capture</button>
-          <button type="button" class="btn" id="resetCamBtn">Reset</button>
+        <div id="preview" class="preview"></div>
+        <div class="cam-wrap">
+          <video id="cam" playsinline muted style="width:100%;aspect-ratio:1/1;background:#222;border-radius:8px;display:block"></video>
+          <canvas id="canvas" style="display:none"></canvas>
+          <!-- Overlayed controls centered bottom -->
+          <div class="cam-overlay-btn">
+            <button type="button" class="cam-btn large" id="captureBtn">Capture</button>
+            <button type="button" class="cam-btn secondary" id="resetCamBtn">Reset</button>
+          </div>
+          <!-- Optional small side button for quick reset/access -->
+          <button type="button" class="cam-side-btn" id="sideResetBtn" title="Reset camera">⟳</button>
         </div>
       </div>
-      <div id="preview" class="preview"></div>
-      <div style="margin-top:12px">
-        <button type="button" class="btn btn-primary" id="completeBtn">Complete</button>
+      <div class="complete-wrap">
+        <button type="button" class="btn-complete" id="completeBtn">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle;margin-right:8px">
+            <rect x="1" y="1" width="22" height="22" rx="4" fill="#00c853"/>
+            <path d="M7 12.5L10 15.5L17 8.5" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          Complete
+        </button>
       </div>
     </form>
     <div id="msg" style="margin-top:10px"></div>
@@ -140,7 +162,13 @@
         badge.textContent = next.toUpperCase();
       });
       wrap.appendChild(img); wrap.appendChild(del); wrap.appendChild(badge);
-      preview.appendChild(wrap);
+      // insert at the start so newest appear above
+      if(preview.firstChild) preview.insertBefore(wrap, preview.firstChild); else preview.appendChild(wrap);
+      // Smooth scroll the Complete button into view so the user can press it easily
+      try{
+        const completeBtn = document.getElementById('completeBtn');
+        if(completeBtn){ completeBtn.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+      }catch(e){}
     }
 
     photos.addEventListener('change', ()=>{
@@ -233,6 +261,11 @@
       makeThumb(entry,'captured');
     };
     document.getElementById('resetCamBtn').onclick = ()=>{ stopCam(); startCam(); };
+    // side reset button (overlay) - mirror reset behavior
+    try{
+      const side = document.getElementById('sideResetBtn');
+      if(side) side.addEventListener('click', ()=>{ stopCam(); startCam(); });
+    }catch(e){}
     qualityGroup.addEventListener('click', (e)=>{
       const b = e.target.closest('button[data-q]'); if(!b) return;
       currentQuality = b.getAttribute('data-q');
@@ -295,12 +328,19 @@
     window.addEventListener('DOMContentLoaded', startCam);
     window.addEventListener('beforeunload', stopCam);
 
-    // Reason buttons sync with select
+    // Reason buttons sync with select and toggle when clicked again
     reasonBtns.forEach(btn=>{
       btn.addEventListener('click', ()=>{
+        const isActive = btn.classList.contains('active');
+        // clear all
         reasonBtns.forEach(b=> b.classList.remove('active'));
-        btn.classList.add('active');
-        reasonSelect.value = btn.dataset.val;
+        if(!isActive){
+          btn.classList.add('active');
+          reasonSelect.value = btn.dataset.val;
+        } else {
+          // toggle off
+          reasonSelect.value = '';
+        }
       });
     });
 
@@ -315,8 +355,8 @@
         const imgs = Array.isArray(j && j.images) ? j.images : [];
         if(st){
           const val = (st.reason||'').trim();
-          const valid = ['Missing pieces','Wrong item','Broken','Trash','Other'];
-          reasonSelect.value = valid.includes(val) ? val : 'Other';
+          const valid = ['Missing pieces','Wrong item','Broken','Return'];
+          reasonSelect.value = valid.includes(val) ? val : '';
           const targetBtn = reasonBtns.find(b=> b.dataset.val === reasonSelect.value);
           if(targetBtn){ reasonBtns.forEach(b=> b.classList.remove('active')); targetBtn.classList.add('active'); }
           // Note
