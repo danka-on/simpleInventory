@@ -535,6 +535,58 @@ def api_items_prep_diagnostic_delete_photos(upc):
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
+
+@app.route('/api/items_prep/photo/<int:photo_id>', methods=['DELETE'])
+def api_items_prep_delete_photo(photo_id):
+    """Soft-delete or hard-delete a single diagnostic photo by its id.
+    Query param hard=1 to permanently remove file and DB row.
+    """
+    try:
+        hard = (request.args.get('hard') or '0') in ('1','true','yes')
+        _ensure_items_prep_tables()
+        conn = sqlite3.connect('bol.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute('SELECT id, upc, image_path, trash_path, deleted_at FROM items_prep_images WHERE id = ?', (photo_id,))
+        r = cur.fetchone()
+        if not r:
+            conn.close()
+            return jsonify({'success': False, 'error': 'Photo not found'}), 404
+        if hard:
+            # remove file(s) if present then delete row
+            for rel in (r['trash_path'], r['image_path']):
+                if rel:
+                    abs_path = os.path.join(app.root_path, 'static', rel) if not os.path.isabs(rel) else rel
+                    try:
+                        if os.path.isfile(abs_path):
+                            os.remove(abs_path)
+                    except Exception as fe:
+                        print('Failed hard remove photo', abs_path, fe)
+            cur.execute('DELETE FROM items_prep_images WHERE id = ?', (photo_id,))
+            deleted = cur.rowcount
+            conn.commit()
+            conn.close()
+            return jsonify({'success': True, 'deleted': deleted, 'hard': True})
+        else:
+            # soft delete (mark deleted_at, set expires_at, move file to trash)
+            if r['deleted_at'] and str(r['deleted_at']).strip():
+                conn.close()
+                return jsonify({'success': False, 'error': 'Photo already deleted'}), 400
+            rel = r['image_path']
+            abs_path = os.path.join(app.root_path, 'static', rel) if not os.path.isabs(rel) else rel
+            new_rel = None
+            if os.path.isfile(abs_path):
+                new_rel = _move_to_trash(abs_path, r['upc'])
+            del_at = _now_iso()
+            import datetime as _dt
+            exp = (_dt.datetime.utcnow() + _dt.timedelta(days=_trash_retention_days())).isoformat()
+            cur.execute('UPDATE items_prep_images SET deleted_at=?, expires_at=?, trash_path=? WHERE id=?', (del_at, exp, new_rel or rel, photo_id))
+            conn.commit()
+            conn.close()
+            return jsonify({'success': True, 'deleted': 1, 'hard': False, 'retention_days': _trash_retention_days()})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/api/items_prep/diagnostic/<upc>/trash', methods=['GET'])
 def api_items_prep_trash_list(upc):
     try:

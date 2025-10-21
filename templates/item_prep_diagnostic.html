@@ -472,17 +472,44 @@
           const grid = document.getElementById('existingGrid');
           const meta = document.getElementById('existingMeta');
           card.style.display = '';
-          meta.textContent = st && st.updated_at ? ('Updated: '+ st.updated_at) : '';
-              imgs.forEach(im=>{
-                const src = im.image_path ? `/static/${im.image_path}` : '';
-                if(!src) return;
-                const wrap = document.createElement('div'); wrap.className = 'thumb-wrap';
-                const img = document.createElement('img'); img.className='existing-thumb'; img.src = src; img.alt='existing photo'; img.dataset.src = src;
-                const rot = document.createElement('button'); rot.type='button'; rot.className='rotate-btn'; rot.title='Rotate'; rot.textContent='⟲';
-                rot.addEventListener('click', (e)=>{ e.stopPropagation(); toggleRotate(img); });
-                img.addEventListener('click', ()=>{ const m=document.getElementById('imgModal'); const mi=document.getElementById('modalImg'); mi.src = src; m.style.display='flex'; });
-                wrap.appendChild(img); wrap.appendChild(rot); grid.appendChild(wrap);
-              });
+          // Friendly updated timestamp (e.g., 2025-10-18 6:30am)
+          function fmtFriendly(iso){
+            try{
+              const d = new Date(iso);
+              if(isNaN(d.getTime())) return iso;
+              const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', year:'numeric', month:'2-digit', day:'2-digit', hour:'numeric', minute:'2-digit', hour12:true }).formatToParts(d);
+              const vals = {}; parts.forEach(p=> vals[p.type]=p.value);
+              const year = vals.year || d.getFullYear(); const month = vals.month || String(d.getMonth()+1).padStart(2,'0'); const day = vals.day || String(d.getDate()).padStart(2,'0');
+              let hour = vals.hour || String(d.getHours()).padStart(2,'0'); let minute = vals.minute || String(d.getMinutes()).padStart(2,'0'); const ampm = (vals.dayPeriod||'').toLowerCase();
+              hour = String(hour).replace(/^0/,'');
+              return `${year}-${month}-${day} ${hour}:${minute}${ampm}`;
+            }catch(e){ return iso; }
+          }
+          meta.textContent = st && st.updated_at ? ('Updated: '+ fmtFriendly(st.updated_at)) : '';
+          imgs.forEach(im=>{
+            const src = im.image_path ? `/static/${im.image_path}` : '';
+            if(!src) return;
+            const wrap = document.createElement('div'); wrap.className = 'thumb-wrap';
+            const img = document.createElement('img'); img.className='existing-thumb'; img.src = src; img.alt='existing photo'; img.dataset.src = src;
+            const rot = document.createElement('button'); rot.type='button'; rot.className='rotate-btn'; rot.title='Rotate'; rot.textContent='⟲';
+            rot.addEventListener('click', (e)=>{ e.stopPropagation(); toggleRotate(img); });
+            img.addEventListener('click', ()=>{ const m=document.getElementById('imgModal'); const mi=document.getElementById('modalImg'); mi.src = src; m.style.display='flex'; });
+            // Add delete button for each existing photo (editor-only)
+            const del = document.createElement('button'); del.type='button'; del.className='del-x'; del.title='Delete photo'; del.textContent='×';
+            del.style.top = '-10px'; del.style.right = '-10px'; del.addEventListener('click', async (ev)=>{
+              ev.stopPropagation(); if(!confirm('Delete this photo? This moves it to trash.')) return;
+              try{
+                del.disabled = true; del.textContent = '...';
+                const resp = await fetch('/api/items_prep/photo/'+encodeURIComponent(im.id), { method: 'DELETE' });
+                const j = await resp.json();
+                if(!(j && j.success)){ alert('Delete failed: '+(j&&j.error||'unknown')); del.disabled=false; del.textContent='×'; return; }
+                // remove from DOM and if none left hide card
+                wrap.remove();
+                if(!document.querySelector('#existingGrid .thumb-wrap')){ document.getElementById('existingCard').style.display='none'; }
+              }catch(err){ alert('Error deleting: '+err); del.disabled=false; del.textContent='×'; }
+            });
+            wrap.appendChild(img); wrap.appendChild(rot); wrap.appendChild(del); grid.appendChild(wrap);
+          });
           document.getElementById('imgModal').addEventListener('click', ()=>{ const m=document.getElementById('imgModal'); const mi=document.getElementById('modalImg'); mi.src=''; m.style.display='none'; });
         }
       }catch(e){ /* ignore */ }

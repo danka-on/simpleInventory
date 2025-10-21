@@ -206,7 +206,7 @@ function render(results){
       ? `<button class="btn btn-danger btn-sm btn-unlist" data-upc="${upc}" title="Mark as not listed">✕</button>`
       : `<button class="btn btn-primary btn-sm btn-list" data-upc="${upc}">Mark as Listed</button>`;
     // Diagnostic link moved into its own Info column (first column)
-    const diagLink = `<a href="#" class="diag-link" data-upc="${upc}" style="font-size:0.95rem;color:#0066cc;text-decoration:underline">Open</a>`;
+  const diagLink = `<button class="btn btn-sm diag-link" style="background:transparent;border:1px solid #0066cc;color:#0066cc;border-radius:6px;padding:6px 10px;cursor:pointer" data-upc="${upc}">Open</button>`;
     // Pics count button — initially unknown, render placeholder and update later
     const picsCount = (r.pics_count || 0);
     const picsBtn = `<button type="button" class="btn btn-sm pics-count" data-upc="${upc}" title="View photos">${picsCount}</button>`;
@@ -228,7 +228,7 @@ function render(results){
   html += '</tbody></table>';
   container.innerHTML = html;
   document.querySelectorAll('.img-link').forEach(el=> el.addEventListener('click', onOpenImg));
-  document.querySelectorAll('.diag-link').forEach(el=> el.addEventListener('click', onOpenDiag));
+  document.querySelectorAll('.diag-link, button.diag-link').forEach(el=> el.addEventListener('click', onOpenDiag));
   document.querySelectorAll('.btn-list').forEach(el=> el.addEventListener('click', onMarkListed));
   document.querySelectorAll('.btn-unlist').forEach(el=> el.addEventListener('click', onUnlist));
   document.querySelectorAll('.btn-copy').forEach(el=> el.addEventListener('click', onCopyUpc));
@@ -278,18 +278,11 @@ const defectEl = document.getElementById('filter-defect'); if(defectEl) defectEl
 });
 function onOpenDiag(e){
   e.preventDefault(); const upc = e.currentTarget.dataset.upc; if(!upc) return;
-  const p = new URLSearchParams();
-  const lot = document.getElementById('filter-lot').value.trim();
-  const q = document.getElementById('filter-q').value.trim();
-  const sort = document.getElementById('sort-select').value;
-  const status = document.getElementById('status-select').value;
-  const defect = (document.getElementById('filter-defect') && document.getElementById('filter-defect').value) || '';
-  if(lot) p.set('lot', lot);
-  if(q) p.set('q', q);
-  if(sort) p.set('sort', sort);
-  if(status) p.set('status', status);
-  if(defect) p.set('defect', defect);
-  const ret = '/items-to-list' + (p.toString()? ('?'+p.toString()) : '');
+  // Build a compact return URL consisting of the active filter params so we can return to the same list state
+  const params = new URLSearchParams(window.location.search);
+  const returnParams = [];
+  ['lot','q','sort','status','defect'].forEach(k=>{ const v = params.get(k); if(v) returnParams.push(`${k}=${encodeURIComponent(v)}`); });
+  const ret = '/items-to-list' + (returnParams.length? ('?'+returnParams.join('&')) : '');
   window.location.href = '/item-prep/diagnostic/view?upc='+encodeURIComponent(upc)+'&from=items&return='+encodeURIComponent(ret);
 }
 
@@ -304,7 +297,12 @@ async function onOpenPics(e){
   const dlAll = document.getElementById('picsDownloadAll');
   area.innerHTML = '<div class="small-muted">Loading...</div>';
   large.innerHTML = '';
-  editLink.href = '/item-prep/diagnostic?upc='+encodeURIComponent(upc);
+  // Preserve return params so that Edit Diagnostic -> Back returns to Items-to-List
+  const params = new URLSearchParams(window.location.search);
+  const returnParams = [];
+  ['lot','q','sort','status','defect'].forEach(k=>{ const v = params.get(k); if(v) returnParams.push(`${k}=${encodeURIComponent(v)}`); });
+  const ret = '/items-to-list' + (returnParams.length? ('?'+returnParams.join('&')) : '');
+  editLink.href = '/item-prep/diagnostic?upc='+encodeURIComponent(upc)+'&from=items&return='+encodeURIComponent(ret);
   dlAll.href = '/api/items_prep/diagnostic/'+encodeURIComponent(upc)+'/photos.zip';
   try{
     const res = await fetch('/api/items_prep/diagnostic/'+encodeURIComponent(upc));

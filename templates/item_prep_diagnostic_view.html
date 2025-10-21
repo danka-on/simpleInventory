@@ -88,7 +88,9 @@
     <div class="grid">
       {% for im in images %}
         {% set src = url_for('static', filename=im.image_path) %}
-        <div class="thumb-wrap"><img class="thumb" src="{{ src }}" alt="photo" data-src="{{ src }}"></div>
+        <div class="thumb-wrap" data-id="{{ im.id }}" style="position:relative">
+          <img class="thumb" src="{{ src }}" alt="photo" data-src="{{ src }}">
+        </div>
       {% endfor %}
     </div>
     {% else %}
@@ -218,6 +220,40 @@
           }
           btn.disabled = true; btn.textContent = 'Deleted';
         }catch(e){ btn.disabled = false; btn.textContent = 'Delete All'; alert('Error: '+e); }
+      });
+    })();
+
+    // Per-photo delete buttons (red X overlays)
+    (function(){
+      async function deletePhoto(id, btn){
+        if(!confirm('Delete this photo? This will move it to trash.')) return false;
+        try{
+          btn.disabled = true; btn.textContent = '...';
+          const res = await fetch('/api/items_prep/photo/'+id, { method: 'DELETE' });
+          const j = await res.json();
+          if(!(j && j.success)){
+            alert('Failed to delete photo: '+(j&&j.error||'unknown'));
+            btn.disabled = false; btn.textContent = '✕';
+            return false;
+          }
+          // remove thumbnail element
+          const wrap = document.querySelector('.thumb-wrap[data-id="'+id+'"]');
+          if(wrap) wrap.remove();
+          // if no more thumbs, show message
+          const grid = document.querySelector('.grid');
+          if(grid && grid.querySelectorAll('.thumb-wrap').length===0){
+            const msg = document.createElement('div'); msg.className='muted'; msg.textContent='No photos attached.';
+            grid.replaceWith(msg);
+          }
+          return true;
+        }catch(e){ alert('Error: '+e); btn.disabled=false; btn.textContent='✕'; return false; }
+      }
+      document.querySelectorAll('.del-photo').forEach(btn=>{
+        btn.addEventListener('click', (ev)=>{
+          ev.preventDefault(); ev.stopPropagation();
+          const id = btn.getAttribute('data-id');
+          deletePhoto(id, btn);
+        });
       });
     })();
 
