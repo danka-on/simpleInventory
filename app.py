@@ -980,15 +980,34 @@ def api_bulk_delete_bol_items():
         ids = data.get('ids', [])
         if not ids:
             return jsonify({'success': False, 'error': 'No ids provided'}), 400
+        # Load UPCs for the requested ids and only allow deletion for UPCs
+        # that end with "-<number>" (e.g., 858557007115-1). Base UPCs (no dash-number suffix)
+        # are protected and will not be deleted.
+        import re
         conn = sqlite3.connect('bol.db')
+        conn.row_factory = sqlite3.Row
         cur = conn.cursor()
-        # Only delete if temporary = 1
         placeholders = ','.join('?' for _ in ids)
-        cur.execute(f'DELETE FROM bol_items WHERE id IN ({placeholders}) AND temporary = 1', ids)
-        deleted = cur.rowcount
-        conn.commit()
+        cur.execute(f'SELECT id, upc FROM bol_items WHERE id IN ({placeholders})', tuple(ids))
+        rows = cur.fetchall()
+        deletable_ids = []
+        protected_ids = []
+        for r in rows:
+            upc_val = r['upc']
+            s = '' if upc_val is None else str(upc_val).strip()
+            # Allow delete if UPC ends with -[digits]
+            if re.search(r'-\d+$', s):
+                deletable_ids.append(r['id'])
+            else:
+                protected_ids.append(r['id'])
+        deleted = 0
+        if deletable_ids:
+            ph2 = ','.join('?' for _ in deletable_ids)
+            cur.execute(f'DELETE FROM bol_items WHERE id IN ({ph2})', tuple(deletable_ids))
+            deleted = cur.rowcount
+            conn.commit()
         conn.close()
-        return jsonify({'success': True, 'deleted': deleted})
+        return jsonify({'success': True, 'deleted': deleted, 'protected': protected_ids, 'attempted': ids})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
