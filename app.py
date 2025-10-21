@@ -384,6 +384,25 @@ def api_bol_lookup():
     except Exception as e:
         return jsonify({'found': False, 'error': str(e)}), 500
 
+@app.route('/api/items_prep/status/<upc>', methods=['GET'])
+def api_items_prep_status_get(upc):
+    """Get preparation status for a UPC."""
+    try:
+        upc_n = _normalize_upc(upc)
+        _ensure_items_prep_tables()
+        conn = sqlite3.connect('bol.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute('SELECT status, reason, note, updated_at FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (upc_n,))
+        row = cur.fetchone()
+        conn.close()
+        if row:
+            return jsonify({'success': True, 'status': row['status'], 'reason': row['reason'], 'note': row['note'], 'updated_at': row['updated_at']})
+        else:
+            return jsonify({'success': True, 'status': 'unchecked', 'reason': None, 'note': None, 'updated_at': None})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/api/items_prep/status', methods=['POST'])
 def api_items_prep_status():
     """Upsert preparation status for a UPC. JSON: { upc, status, reason?, note? }"""

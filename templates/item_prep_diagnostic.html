@@ -34,11 +34,15 @@
     .thumb{width:100%;height:100%;object-fit:cover;border-radius:8px;background:#f0f0f0}
   .del-x{position:absolute;top:-10px;right:-10px;background:#e74c3c;color:#fff;border:none;border-radius:50%;width:36px;height:36px;cursor:pointer;line-height:36px;text-align:center;font-weight:bold;box-shadow:0 3px 8px rgba(0,0,0,0.25);font-size:18px}
   .badge-quality{position:absolute;left:6px;bottom:6px;background:rgba(0,0,0,0.7);color:#fff;border-radius:10px;padding:2px 6px;font-size:0.75rem;cursor:pointer}
-  /* Status pill colors */
-  .pill{display:inline-block;padding:6px 10px;border-radius:999px;color:#fff;font-weight:600;font-size:0.95rem}
-  .pill.good{background:#2ecc71}
-  .pill.bad{background:#e74c3c}
-  .pill.unchecked{background:#9aa0a6}
+  .status-bubbles{display:flex;gap:8px;margin:8px 0}
+  .status-bubble{padding:12px 20px;border-radius:25px;border:2px solid #ddd;background:#f9f9f9;cursor:pointer;font-size:1.1rem;font-weight:600;transition:all 0.2s}
+  .status-bubble.active{background:#00b894;color:#fff;border-color:#00b894}
+  .status-bubble.good.active{background:#2ecc71;border-color:#2ecc71}
+  .status-bubble.bad.active{background:#e74c3c;border-color:#e74c3c}
+  .status-bubble.unchecked.active{background:#9aa0a6;border-color:#9aa0a6}
+  .set-position-btn{background:#3498db;color:#fff;border:none;padding:16px 24px;border-radius:12px;cursor:pointer;font-size:1.2rem;font-weight:600;display:flex;align-items:center;gap:10px;margin:12px 0}
+  .set-position-btn:hover{background:#2980b9}
+  .set-position-btn i{font-size:1.4rem}
     label{display:block;margin-top:8px}
     /* Prominent reason selection */
   .reason-group{display:flex;gap:10px;flex-wrap:wrap;margin:8px 0}
@@ -73,33 +77,34 @@
   </div>
 
   <div class="card">
+    <!-- UPC at top -->
     <div class="row">
       <div>UPC:</div>
       <div id="upcText">{{ upc }}</div>
     </div>
-    <!-- Location display with Set Position button -->
-    <div style="margin-top:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-      <button type="button" class="btn" id="setPositionBtn" style="background:#3498db;color:#fff;padding:8px 14px">Set Position</button>
-      <div id="locationRow" style="display:none">
-        <span style="font-weight:600;margin-right:8px">Location:</span>
-        <span id="locationText" style="color:#2980b9;cursor:pointer;text-decoration:underline"></span>
-      </div>
+    
+    <!-- Status bubbles under UPC -->
+    <div class="status-bubbles">
+      <button type="button" class="status-bubble good" data-status="good">Good</button>
+      <button type="button" class="status-bubble bad" data-status="bad">Bad</button>
+      <button type="button" class="status-bubble unchecked active" data-status="unchecked">Unchecked</button>
     </div>
-    <!-- Status pill shown prominently at top -->
-    <div style="margin-top:8px;margin-bottom:6px">
-      <span style="font-weight:600;margin-right:8px">Status:</span>
-      <span id="statusPill" class="pill unchecked">Unchecked</span>
+    
+    <!-- Set position under status -->
+    <button type="button" class="set-position-btn" id="setPositionBtn">
+      <i class="fas fa-map-marker-alt"></i> Set Position
+    </button>
+    
+    <!-- Location display -->
+    <div id="locationRow" style="display:none;margin-top:8px">
+      <span style="font-weight:600;margin-right:8px">Location:</span>
+      <span id="locationText" style="color:#2980b9;cursor:pointer;text-decoration:underline"></span>
     </div>
     <form id="diagForm" enctype="multipart/form-data">
       <input type="hidden" name="upc" value="{{ upc }}">
+      <input type="hidden" name="status" id="statusInput" value="unchecked">
       <!-- Move the status select up so it is near the pill visually -->
-      <label style="margin-top:6px;margin-bottom:6px;display:block">Status:
-        <select id="diag-status" name="status">
-          <option value="unchecked">Unchecked</option>
-          <option value="good">Good</option>
-          <option value="bad">Bad</option>
-        </select>
-      </label>
+      <!-- Status dropdown removed, now using bubbles above -->
 
       <label style="font-weight:600;font-size:1.05rem">Defect:</label>
       <div class="reason-group" role="group" aria-label="Select defect">
@@ -399,7 +404,7 @@
         if(res.ok && j && j.success){
           // Also POST status (status, reason) - no note since we use notes table now
           try{
-            const statusVal = (document.getElementById('diag-status') && document.getElementById('diag-status').value) || 'unchecked';
+            const statusVal = statusInput.value || 'unchecked';
             const reasonVal = (document.getElementById('reasonSelect') && document.getElementById('reasonSelect').value) || '';
             await fetch('/api/items_prep/status', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ upc: '{{ upc }}', status: statusVal, reason: reasonVal, note: '' }) });
           }catch(e){ /* ignore status save errors */ }
@@ -432,20 +437,24 @@
         if(ret){ const bl = document.getElementById('back-link'); if(bl) bl.href = ret; }
       }catch(e){}
     });
-    // Keep the top status pill in sync with the select value
-    function updateStatusPill(val){
-      try{
-        const pill = document.getElementById('statusPill'); if(!pill) return;
-        const v = (val||'').toString().toLowerCase();
-        pill.classList.remove('good','bad','unchecked');
-        if(v==='good'){ pill.classList.add('good'); pill.textContent = 'Good'; }
-        else if(v==='bad'){ pill.classList.add('bad'); pill.textContent = 'Bad'; }
-        else { pill.classList.add('unchecked'); pill.textContent = 'Unchecked'; }
-      }catch(e){}
+    // Status bubbles functionality
+    const statusBubbles = document.querySelectorAll('.status-bubble');
+    const statusInput = document.getElementById('statusInput');
+    
+    function updateStatusBubbles(selectedStatus){
+      statusBubbles.forEach(bubble => {
+        const status = bubble.dataset.status;
+        bubble.classList.toggle('active', status === selectedStatus);
+      });
+      statusInput.value = selectedStatus;
     }
-    // Wire up select to update pill
-    const diagStatusEl = document.getElementById('diag-status');
-    if(diagStatusEl){ diagStatusEl.addEventListener('change', (e)=> updateStatusPill(e.target.value)); }
+    
+    statusBubbles.forEach(bubble => {
+      bubble.addEventListener('click', () => {
+        const status = bubble.dataset.status;
+        updateStatusBubbles(status);
+      });
+    });
     window.addEventListener('beforeunload', stopCam);
 
     // Reason buttons sync with select and toggle when clicked again
@@ -483,8 +492,9 @@
           reasonSelect.value = valid.includes(val) ? val : '';
           const targetBtn = reasonBtns.find(b=> b.dataset.val === reasonSelect.value);
           if(targetBtn){ reasonBtns.forEach(b=> b.classList.remove('active')); targetBtn.classList.add('active'); }
-          // Status dropdown
-          const statusSel = document.getElementById('diag-status'); if(statusSel){ statusSel.value = st.status || 'unchecked'; updateStatusPill(statusSel.value); }
+          // Status bubbles
+          const statusVal = st.status || 'unchecked';
+          updateStatusBubbles(statusVal);
         }
         if(imgs.length){
           const card = document.getElementById('existingCard');
@@ -574,11 +584,7 @@
         const params = new URLSearchParams(window.location.search);
         const from = params.get('from');
         if(from === 'bad'){
-          const statusSel = document.getElementById('diag-status');
-          if(statusSel){
-            statusSel.value = 'bad';
-            updateStatusPill('bad');
-          }
+          updateStatusBubbles('bad');
         }
       }catch(e){ /* ignore */ }
     });
@@ -609,6 +615,8 @@
         }
         // 2) Uncheck status (clear reason/note)
         await fetch('/api/items_prep/status', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ upc, status: 'unchecked', reason: '', note: '' })});
+        statusInput.value = 'unchecked';
+        updateStatusBubbles();
         // 2b) Delete all notes for this UPC
         try{
           const notesRes = await fetch(`/api/items_prep/notes/${encodeURIComponent(upc)}`);
@@ -797,13 +805,30 @@
         // Show shelf image from static/shelves/ - same as searchRack
         const modal = document.getElementById('imgModal');
         const modalImg = document.getElementById('modalImg');
-        modalImg.src = `/static/shelves/${shelfCode.toLowerCase()}.jpg`;
+        modalImg.src = `/static/shelves/${shelfCode.toLowerCase()}.png`;
         modal.style.display = 'flex';
+      }
+    }
+
+    // Load existing status on page load
+    async function loadExistingStatus(){
+      const upc = '{{ upc }}'.trim();
+      if(!upc) return;
+      try{
+        const res = await fetch(`/api/items_prep/status/${encodeURIComponent(upc)}`);
+        const j = await res.json();
+        if(j.success && j.status){
+          statusInput.value = j.status;
+          updateStatusBubbles();
+        }
+      }catch(e){
+        console.error('Failed to load existing status:', e);
       }
     }
 
     // Load location on page load
     window.addEventListener('DOMContentLoaded', loadLocation);
+    window.addEventListener('DOMContentLoaded', loadExistingStatus);
   </script>
 </body>
 </html>
