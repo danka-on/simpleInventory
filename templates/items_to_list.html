@@ -82,11 +82,14 @@
           </select>
         </label>
       </div>
-      <div class="dropdown-section" style="display:flex;align-items:center;gap:8px">
-        <div style="font-weight:600">Listed:</div>
-        <label style="display:flex;align-items:center;gap:6px"><input type="radio" name="filter_listed_radio" id="filter-listed-all" value="" checked> <span>All</span></label>
-        <label style="display:flex;align-items:center;gap:6px"><input type="radio" name="filter_listed_radio" id="filter-listed-listed" value="listed"> <span>Listed</span></label>
-        <label style="display:flex;align-items:center;gap:6px"><input type="radio" name="filter_listed_radio" id="filter-listed-not" value="not_listed"> <span>Not Listed</span></label>
+      <div class="dropdown-section">
+        <label>Listed:
+          <select id="filter-listed-select">
+            <option value="">All</option>
+            <option value="listed">Listed</option>
+            <option value="not_listed">Not Listed</option>
+          </select>
+        </label>
       </div>
     </div>
     <div style="margin-left:auto; display:flex; align-items:center; gap:10px">
@@ -139,9 +142,9 @@ function setFiltersFromURL(){
   if(defect) document.getElementById('filter-defect').value = defect;
   const listedFlag = (p.get('listed') === 'true') || (p.get('status') === 'listed');
   const notListedFlag = (p.get('not_listed') === 'true') || (p.get('status') === 'not_listed');
-  if(listedFlag){ document.getElementById('filter-listed-listed').checked = true; }
-  else if(notListedFlag){ document.getElementById('filter-listed-not').checked = true; }
-  else { document.getElementById('filter-listed-all').checked = true; }
+  if(listedFlag){ document.getElementById('filter-listed-select').value = 'listed'; }
+  else if(notListedFlag){ document.getElementById('filter-listed-select').value = 'not_listed'; }
+  else { document.getElementById('filter-listed-select').value = ''; }
 }
 
 // Format a timestamp into Eastern Time like: 2025-10-18 9:20am
@@ -284,10 +287,8 @@ document.getElementById('status-select').addEventListener('change', loadItems);
 // defect filter should behave like other filters
 const defectEl = document.getElementById('filter-defect'); if(defectEl) defectEl.addEventListener('change', loadItems);
 // radio buttons for listed filter
-['filter-listed-all','filter-listed-listed','filter-listed-not'].forEach(id=>{
-  const el = document.getElementById(id);
-  if(el) el.addEventListener('change', loadItems);
-});
+const listedEl = document.getElementById('filter-listed-select');
+if(listedEl) listedEl.addEventListener('change', loadItems);
 
 // Gear dropdown toggle and positioning
 const gearBtn = document.getElementById('filter-gear');
@@ -528,9 +529,8 @@ async function loadItems(){
   const sort = document.getElementById('sort-select').value;
   const status = document.getElementById('status-select').value;
   const defectFilter = (document.getElementById('filter-defect') && document.getElementById('filter-defect').value) || '';
-  // Determine listed/not_listed filter from the radio group
-  const listedRadio = document.querySelector('input[name="filter_listed_radio"]:checked');
-  const listedVal = listedRadio ? (listedRadio.value || '') : '';
+  // Determine listed/not_listed filter from the select
+  const listedVal = document.getElementById('filter-listed-select').value;
   const params = new URLSearchParams();
   if(lot) params.set('lot', lot);
   if(q) params.set('q', q);
