@@ -54,7 +54,7 @@
 </head>
 <body>
   <div class="top">
-    <a href="/item-prep?upc={{ upc }}"><button class="btn btn-danger">Back</button></a>
+    <a id="back-link" href="/item-prep?upc={{ upc }}"><button class="btn btn-danger">Back</button></a>
     <h2>Diagnostic</h2>
     <div style="display:flex;gap:8px">
       <button type="button" class="btn" id="resetBtn" style="background:#f39c12;color:#fff">Reset</button>
@@ -68,14 +68,22 @@
     </div>
     <form id="diagForm" enctype="multipart/form-data">
       <input type="hidden" name="upc" value="{{ upc }}">
-      <label style="font-weight:600;font-size:1.05rem">Reason:</label>
-      <div class="reason-group" role="group" aria-label="Select reason">
+      <label style="font-weight:600;font-size:1.05rem">Defect:</label>
+      <div class="reason-group" role="group" aria-label="Select defect">
         <button type="button" class="reason-btn" data-val="Missing pieces">Missing pieces</button>
         <button type="button" class="reason-btn" data-val="Wrong item">Wrong item</button>
         <button type="button" class="reason-btn" data-val="Broken">Broken</button>
         <button type="button" class="reason-btn" data-val="Return">Return</button>
+        <button type="button" class="reason-btn" data-val="Replacement">Replacement</button>
       </div>
       <input type="hidden" name="reason" id="reasonSelect" required>
+      <label style="margin-top:8px">Status:
+        <select id="diag-status" name="status">
+          <option value="unchecked">Unchecked</option>
+          <option value="good">Good</option>
+          <option value="bad">Bad</option>
+        </select>
+      </label>
       <label>Note:
         <textarea name="note" rows="3" style="width:100%;box-sizing:border-box"></textarea>
       </label>
@@ -357,7 +365,21 @@
         try{ j = await res.json(); }catch(_jsonErr){ j = null; }
         const msg = document.getElementById('msg');
         if(res.ok && j && j.success){
-          msg.textContent='Saved diagnostic'; setTimeout(()=>{ window.location.href='/item-prep?forceFocus=1'; }, 600);
+          // Also POST status (status, reason, note)
+          try{
+            const statusVal = (document.getElementById('diag-status') && document.getElementById('diag-status').value) || 'unchecked';
+            const reasonVal = (document.getElementById('reasonSelect') && document.getElementById('reasonSelect').value) || '';
+            const noteVal = (document.querySelector('textarea[name=note]') && document.querySelector('textarea[name=note]').value) || '';
+            await fetch('/api/items_prep/status', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ upc: '{{ upc }}', status: statusVal, reason: reasonVal, note: noteVal }) });
+          }catch(e){ /* ignore status save errors */ }
+          msg.textContent='Saved diagnostic';
+          // If a return URL was provided in query params, go back to it preserving filters
+          try{
+            const params = new URLSearchParams(window.location.search);
+            const ret = params.get('return');
+            if(ret){ setTimeout(()=>{ window.location.href = ret; }, 600); }
+            else { setTimeout(()=>{ window.location.href='/item-prep?forceFocus=1'; }, 600); }
+          }catch(_){ setTimeout(()=>{ window.location.href='/item-prep?forceFocus=1'; }, 600); }
         } else {
           const errText = (j && j.error) ? j.error : ('HTTP '+res.status+' '+(res.statusText||''));
           msg.textContent = 'Failed: '+ errText;
@@ -370,6 +392,14 @@
     };
 
     window.addEventListener('DOMContentLoaded', startCam);
+    // If a return param was provided, set the back link to that URL
+    window.addEventListener('DOMContentLoaded', ()=>{
+      try{
+        const params = new URLSearchParams(window.location.search);
+        const ret = params.get('return');
+        if(ret){ const bl = document.getElementById('back-link'); if(bl) bl.href = ret; }
+      }catch(e){}
+    });
     window.addEventListener('beforeunload', stopCam);
 
     // Reason buttons sync with select and toggle when clicked again
@@ -395,17 +425,19 @@
       try{
         const r = await fetch(`/api/items_prep/diagnostic/${encodeURIComponent(upc)}`);
         const j = await r.json();
-        const st = j && j.status ? j.status : null;
+  const st = j && j.status ? j.status : null;
         const imgs = Array.isArray(j && j.images) ? j.images : [];
         if(st){
           const val = (st.reason||'').trim();
-          const valid = ['Missing pieces','Wrong item','Broken','Return'];
+          const valid = ['Missing pieces','Wrong item','Broken','Return','Replacement'];
           reasonSelect.value = valid.includes(val) ? val : '';
           const targetBtn = reasonBtns.find(b=> b.dataset.val === reasonSelect.value);
           if(targetBtn){ reasonBtns.forEach(b=> b.classList.remove('active')); targetBtn.classList.add('active'); }
           // Note
           const ta = document.querySelector('textarea[name=note]');
           if(ta){ ta.value = st.note || ''; }
+          // Status dropdown
+          const statusSel = document.getElementById('diag-status'); if(statusSel) statusSel.value = st.status || 'unchecked';
         }
         if(imgs.length){
           const card = document.getElementById('existingCard');

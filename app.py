@@ -768,10 +768,16 @@ def api_bol_items():
         where_sql = (' WHERE ' + ' AND '.join(where)) if where else ''
         # Build sort
         order_sql = ' ORDER BY '
+        # Support sorting by last_edited (prep_updated_at if present, else import_date)
         if sort == 'date_asc':
             order_sql += "b.import_date ASC, b.id ASC"
         elif sort == 'name':
             order_sql += "b.item_description COLLATE NOCASE ASC"
+        elif sort == 'last_edited':
+            # newest last_edited first
+            order_sql += "COALESCE(s.updated_at, b.import_date) DESC, b.id DESC"
+        elif sort == 'last_edited_asc':
+            order_sql += "COALESCE(s.updated_at, b.import_date) ASC, b.id ASC"
         else:
             # date_desc default
             order_sql += "b.import_date DESC, b.id DESC"
@@ -836,6 +842,8 @@ def api_bol_items():
         # Normalize for UI
         results = []
         for r in rows:
+            # Determine last_edited: prefer items_prep_status.updated_at, fall back to import_date
+            last_edited = r.get('prep_updated_at') or r.get('import_date') or ''
             results.append({
                 'id': r.get('id'),
                 'title': r.get('item_description') or '',
@@ -844,6 +852,8 @@ def api_bol_items():
                 'lot_number': r.get('lot_number') or '',
                 'bol_number': r.get('bol_number') or '',
                 'import_date': r.get('import_date') or '',
+                'last_edited': last_edited,
+                'defect': (r.get('prep_reason') or ''),
                 'status': (r.get('prep_status') or 'unchecked'),
                 'list_status': (r.get('list_status') or '')
             })

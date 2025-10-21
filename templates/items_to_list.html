@@ -42,8 +42,10 @@
     </label>
     <label>Sort:
       <select id="sort-select">
-        <option value="date_desc">Date (newest)</option>
-        <option value="date_asc">Date (oldest)</option>
+        <option value="last_edited">Last Edited (newest)</option>
+        <option value="last_edited_asc">Last Edited (oldest)</option>
+        <option value="date_desc">Import Date (newest)</option>
+        <option value="date_asc">Import Date (oldest)</option>
         <option value="name">Name</option>
       </select>
     </label>
@@ -53,10 +55,13 @@
         <option value="unchecked">Unchecked</option>
         <option value="good">Good</option>
         <option value="bad">Bad</option>
-        <option value="listed">Listed</option>
-        <option value="not_listed">Not listed</option>
       </select>
     </label>
+    <div style="display:flex;align-items:center;gap:8px">
+      <label style="display:flex;align-items:center;gap:6px"><input type="radio" name="filter_listed_radio" id="filter-listed-all" value="" checked> <span>All</span></label>
+      <label style="display:flex;align-items:center;gap:6px"><input type="radio" name="filter_listed_radio" id="filter-listed-listed" value="listed"> <span>Listed</span></label>
+      <label style="display:flex;align-items:center;gap:6px"><input type="radio" name="filter_listed_radio" id="filter-listed-not" value="not_listed"> <span>Not Listed</span></label>
+    </div>
     <button class="btn" id="apply-filters">Apply</button>
   </div>
 
@@ -75,6 +80,13 @@ function setFiltersFromURL(){
   if(lot) document.getElementById('filter-lot').value = lot;
   if(sort) document.getElementById('sort-select').value = sort;
   if(status) document.getElementById('status-select').value = status;
+  // support legacy ?status=listed or ?listed=true
+  const listedFlag = (p.get('listed') === 'true') || (p.get('status') === 'listed');
+  const notListedFlag = (p.get('not_listed') === 'true') || (p.get('status') === 'not_listed');
+  // set radio selection
+  if(listedFlag){ document.getElementById('filter-listed-listed').checked = true; }
+  else if(notListedFlag){ document.getElementById('filter-listed-not').checked = true; }
+  else { document.getElementById('filter-listed-all').checked = true; }
 }
 
 async function loadItems(){
@@ -82,28 +94,72 @@ async function loadItems(){
   const q = document.getElementById('filter-q').value.trim();
   const sort = document.getElementById('sort-select').value;
   const status = document.getElementById('status-select').value;
+  // Determine listed/not_listed filter from the radio group
+  const listedRadio = document.querySelector('input[name="filter_listed_radio"]:checked');
+  const listedVal = listedRadio ? (listedRadio.value || '') : '';
   const params = new URLSearchParams();
   if(lot) params.set('lot', lot);
   if(q) params.set('q', q);
   if(sort) params.set('sort', sort);
   if(status) params.set('status', status);
+  // Radio value logic: '' = all, 'listed' or 'not_listed'
+  if(listedVal === 'listed') params.set('status', 'listed');
+  else if(listedVal === 'not_listed') params.set('status', 'not_listed');
   const resp = await fetch('/api/bol_items?'+params.toString());
   const j = await resp.json();
   render(j.results||[]);
 }
 
+// Format a timestamp into Eastern Time like: 2025-10-18 9:20am
+function formatLastEdited(raw){
+  if(!raw) return '';
+  // Try to parse
+  let dt = new Date(raw);
+  if(isNaN(dt.getTime())){
+    // try fallback parsing for date-only strings
+    try{
+      dt = new Date(raw.replace(' ', 'T'));
+    }catch(e){
+      return raw;
+    }
+    if(isNaN(dt.getTime())) return raw;
+  }
+  try{
+    // Use Intl to get components in America/New_York
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York',
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: 'numeric', minute: '2-digit', hour12: true
+    }).formatToParts(dt);
+    const vals = {};
+    parts.forEach(p=> vals[p.type] = p.value);
+    // parts give month/day/year as MM/DD/YYYY
+    const year = vals.year || dt.getFullYear();
+    const month = vals.month || String(dt.getMonth()+1).padStart(2,'0');
+    const day = vals.day || String(dt.getDate()).padStart(2,'0');
+    // hour may be like '9' or '11', minute is two-digit
+    let hour = vals.hour || dt.getHours();
+    let minute = vals.minute || String(dt.getMinutes()).padStart(2,'0');
+    const dayPeriod = (vals.dayPeriod || '').toLowerCase();
+    // Ensure hour no leading zero
+    hour = String(hour).replace(/^0/, '');
+    // Build like: 2025-10-18 9:20am
+    return `${year}-${month}-${day} ${hour}:${minute}${dayPeriod}`;
+  }catch(e){
+    return raw;
+  }
+}
+
 function render(results){
   const container = document.getElementById('results');
   if(!results.length){ container.innerHTML = '<div class="small-muted">No items</div>'; return; }
-  let html = '<table><thead><tr><th>Status</th><th>Listing</th><th>Title</th><th>UPC</th><th>Lot #</th><th>BOL #</th><th>Import Date</th><th>Actions</th></tr></thead><tbody>';
+  let html = '<table><thead><tr><th>Status</th><th>Defect</th><th>Title</th><th>UPC</th><th>List Status</th><th>Actions</th><th>Last Edited</th></tr></thead><tbody>';
   results.forEach(r=>{
     const title = esc(r.title||'');
     const img = esc(r.image||'');
     const thumb = img ? img : missingThumb();
     const upc = esc(r.upc||'');
-    const lot = esc(r.lot_number||'');
-    const bol = esc(r.bol_number||'');
-    const imp = esc(r.import_date||'');
+  const last_edited = esc(r.last_edited||'');
     const status = (r.status||'').toLowerCase();
     let pill = '<span class="status-box" title="Unchecked">unchecked</span>';
     if(status==='good') pill = '<span class="status-box" style="background:#2ecc71" title="Good">good</span>';
@@ -114,15 +170,19 @@ function render(results){
     const actionBtn = (lstatus==='listed')
       ? `<button class="btn btn-danger btn-sm btn-unlist" data-upc="${upc}" title="Mark as not listed">✕</button>`
       : `<button class="btn btn-primary btn-sm btn-list" data-upc="${upc}">Mark as Listed</button>`;
+    // Diagnostic link will appear under the status pill for all statuses
+    const diagShortcut = `<a href="#" class="diag-link" data-upc="${upc}" style="font-size:0.85rem;color:#0066cc;text-decoration:underline">Diagnostic</a>`;
     html += `<tr>`+
-      `<td>${pill}${status==='bad'?` <a href="#" class="diag-link" data-upc="${upc}">Diagnostic</a>`:''}</td>`+
-      `<td>${lpill}</td>`+
+      `<td><div style="display:flex;flex-direction:column;gap:4px;align-items:flex-start">`+
+            `<div>${pill}</div>`+
+            `<div>${diagShortcut}</div>`+
+          `</div></td>`+
+            `<td>${esc(r.defect||'')}</td>`+
             `<td><div class="title-cell"><img class="thumb" src="${thumb}" onerror="this.src='${missingThumb(48,48,'No Img')}'"><a href="#" class="img-link" data-img="${img}" data-title="${title}">${title}</a></div></td>`+
             `<td><div style=\"display:flex;gap:6px;align-items:center\"><span>${upc}</span><button type=\"button\" class=\"btn btn-sm btn-copy\" data-upc=\"${upc}\" title=\"Copy UPC\">Copy</button></div></td>`+
-            `<td>${lot}</td>`+
-            `<td>${bol}</td>`+
-            `<td>${imp}</td>`+
+          `<td>${lpill}</td>`+
             `<td>${actionBtn}</td>`+
+            `<td class="last-edited-cell" data-raw="${last_edited}">${formatLastEdited(last_edited)}</td>`+
             `</tr>`;
   });
   html += '</tbody></table>';
@@ -152,6 +212,11 @@ document.getElementById('apply-filters').addEventListener('click', loadItems);
 document.getElementById('filter-lot').addEventListener('change', loadItems);
 document.getElementById('sort-select').addEventListener('change', loadItems);
 document.getElementById('status-select').addEventListener('change', loadItems);
+// radio buttons for listed filter
+['filter-listed-all','filter-listed-listed','filter-listed-not'].forEach(id=>{
+  const el = document.getElementById(id);
+  if(el) el.addEventListener('change', loadItems);
+});
 function onOpenDiag(e){
   e.preventDefault(); const upc = e.currentTarget.dataset.upc; if(!upc) return;
   const p = new URLSearchParams();
