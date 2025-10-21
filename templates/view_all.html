@@ -109,12 +109,17 @@
 </head>
 <body>
     <div class="container">
-        <a href="/searchrack" class="back-link">← Back to Search</a>
+    <a href="/searchrack" class="back-link">← Back to Search Warehouse</a>
         <h1>{{ title }}</h1>
-        <h2>Sold Orders (last {{ request.args.get('days', 1) }} days)</h2>
-        <button id="refresh-orders" onclick="refreshOrders()">Refresh Orders</button>
-        <div id="orders-list"></div>
         <div id="wrapper"></div>
+    </div>
+
+    <!-- Modal for location images -->
+    <div id="locationModal" style="display:none;position:fixed;inset:0;z-index:2000;align-items:center;justify-content:center;background:rgba(0,0,0,0.8);">
+        <div style="max-width:90%;max-height:90%;margin:auto;"> 
+            <div id="locationTitle" style="text-align:center;color:#fff;margin-bottom:10px;font-size:18px;font-weight:600"></div>
+            <img id="locationImage" src="" alt="Location" style="display:block;margin:0 auto;max-width:90vw;max-height:80vh;border:3px solid #fff;border-radius:6px;">
+        </div>
     </div>
 
     <script>
@@ -122,75 +127,63 @@
         const items = {{ items | tojson | safe }};
         const dbType = '{{ db_type }}';
         
-        // Get column names from the first item
-        const columns = items.length > 0 ? Object.keys(items[0]) : [];
-        
-        // Create columns configuration for Grid.js
-        const gridColumns = columns.map(col => ({
-            name: col.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
-            id: col,
-            sort: true,
-            formatter: (cell, row) => {
-                return gridjs.html(`<div class="cell-content">${cell !== null ? cell : ''}</div>`);
-            }
-        }));
+        // If viewing the rack DB, render a condensed grid with a clickable Location column
+        if (dbType === 'rack') {
+            const rackColumns = [
+                { id: 'title', name: 'Title', width: '50%', formatter: cell => gridjs.html(String(cell || '')) },
+                { id: 'barcode', name: 'Barcode', formatter: cell => gridjs.html(String(cell || '')) },
+                { id: 'location', name: 'Location', formatter: (cell, row) => {
+                    // cell may come from item.item_position or item.pictureposition depending on data
+                    const data = row.cells.reduce((acc, c) => { acc[c._column.id] = c.data; return acc; }, {});
+                    // prefer pictureposition if present
+                    const picture = data.pictureposition || '';
+                    const position = (data.item_position || '').toString();
+                    if (picture) {
+                        return gridjs.html(`<a href="#" onclick="(function(){ showPicturePosition('${picture}');return false; })()">Picture</a>`);
+                    } else if (position) {
+                        return gridjs.html(`<a href="#" onclick="(function(){ showLocationImage('${position}');return false; })()">${position}</a>`);
+                    }
+                    return gridjs.html('');
+                } }
+            ];
 
-        // Add actions column
-        gridColumns.push({
-            name: 'Actions',
-            id: 'actions',
-            sort: false,
-            width: '120px',
-            formatter: (_, row) => {
-                return gridjs.h('button', {
-                    className: 'edit-btn',
-                    onClick: () => editRow(row)
-                }, 'Edit');
-            }
-        });
-
-        // Initialize the grid
-        const grid = new gridjs.Grid({
-            columns: gridColumns,
-            data: items.map(item => {
-                const row = [];
-                columns.forEach(col => {
-                    row.push(item[col] !== null ? item[col] : '');
-                });
-                row.push(''); // Empty cell for actions
-                return row;
-            }),
-            search: true,
-            pagination: {
-                limit: 20,
-                summary: true
-            },
-            sort: true,
-            fixedHeader: true,
-            height: '600px',
-            style: {
-                table: {
-                    'white-space': 'nowrap'
-                },
-                th: {
-                    'background-color': '#f8f9fa',
-                    'font-weight': '600',
-                    'border-bottom': '1px solid #e0e0e0',
-                    'padding': '12px 16px'
-                },
-                td: {
-                    'border-bottom': '1px solid #f0f0f0',
-                    'padding': '12px 16px',
-                    'vertical-align': 'middle'
-                },
-                '.gridjs-tbody': {
-                    'font-size': '14px'
-                },
-                '.gridjs-td:last-child': {
-                    'text-align': 'center'
+            const grid = new gridjs.Grid({
+                columns: rackColumns,
+                data: items.map(item => ([item.title || '', item.barcode || '', ''])),
+                search: true,
+                pagination: { limit: 50, summary: true },
+                sort: true,
+                fixedHeader: true,
+                height: '600px'
+            }).render(document.getElementById('wrapper'));
+        } else {
+            // default generic grid for other DBs
+            const columns = items.length > 0 ? Object.keys(items[0]) : [];
+            const gridColumns = columns.map(col => ({
+                name: col.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+                id: col,
+                sort: true,
+                formatter: (cell, row) => {
+                    return gridjs.html(`<div class="cell-content">${cell !== null ? cell : ''}</div>`);
                 }
-            }
-        }).render(document.getElementById('wrapper'));
+            }));
+            gridColumns.push({ name: 'Actions', id: 'actions', sort: false, width: '120px', formatter: (_, row) => gridjs.h('button', { className: 'edit-btn', onClick: () => editRow(row) }, 'Edit') });
+
+            const grid = new gridjs.Grid({
+                columns: gridColumns,
+                data: items.map(item => {
+                    const row = [];
+                    columns.forEach(col => { row.push(item[col] !== null ? item[col] : ''); });
+                    row.push('');
+                    return row;
+                }),
+                search: true,
+                pagination: { limit: 20, summary: true },
+                sort: true,
+                fixedHeader: true,
+                height: '600px'
+            }).render(document.getElementById('wrapper'));
+        }
 
         // Function to handle row editing
         function editRow(row) {
@@ -329,25 +322,28 @@
                 alert('An error occurred while saving changes.');
             }
         }
+        // Modal helper functions for rack view
+        function showLocationImage(position) {
+            const modal = document.getElementById('locationModal');
+            const img = document.getElementById('locationImage');
+            const title = document.getElementById('locationTitle');
+            title.textContent = `Location: ${position}`;
+            img.onerror = function() { this.onerror = null; this.src = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="720" height="480"><rect width="100%" height="100%" fill="#f8f8f8"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#b0b0b0" font-size="24">Image missing</text></svg>'); };
+            img.src = `/static/shelves/${position.toLowerCase()}.png`;
+            modal.style.display = 'flex';
+            modal.onclick = function(e){ if (e.target === modal) modal.style.display = 'none'; };
+        }
 
-        function loadOrders() {
-            fetch('/sold-orders?days=' + (new URLSearchParams(window.location.search).get('days') || 1))
-                .then(response => response.json())
-                .then(data => {
-                    let html = '<ul>';
-                    for (const order of data) {
-                        html += `<li>Order ID: ${order.order_id || order.id} | Paid: ${order.paid_time || ''}</li>`;
-                    }
-                    html += '</ul>';
-                    document.getElementById('orders-list').innerHTML = html;
-                });
+        function showPicturePosition(fname) {
+            const modal = document.getElementById('locationModal');
+            const img = document.getElementById('locationImage');
+            const title = document.getElementById('locationTitle');
+            title.textContent = `Picture Position: ${fname}`;
+            img.onerror = function() { this.onerror = null; this.src = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="720" height="480"><rect width="100%" height="100%" fill="#f8f8f8"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#b0b0b0" font-size="24">Image missing</text></svg>'); };
+            img.src = `/static/pictureposition/${fname}`;
+            modal.style.display = 'flex';
+            modal.onclick = function(e){ if (e.target === modal) modal.style.display = 'none'; };
         }
-        function refreshOrders() {
-            loadOrders();
-        }
-        document.addEventListener('DOMContentLoaded', function() {
-            loadOrders();
-        });
     </script>
 </body>
 </html>

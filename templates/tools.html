@@ -132,26 +132,18 @@
 </head>
 <body>
     <div class="container">
-        <h1>Tools</h1>
-        
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
+            <a href="/" style="text-decoration:none;">
+                <button style="background:#e74c3c;color:#fff;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;display:flex;align-items:center;gap:8px;">
+                    <i class="fas fa-arrow-left"></i> Back
+                </button>
+            </a>
+            <h1 style="flex:1;text-align:center;margin:0;">Tools</h1>
+            <div style="width:84px"></div>
+        </div>
+
         <div class="tools-grid">
-            <!-- Top section: Items to List and Item Preparation (green icons) -->
-            <a href="/items-to-list" class="tool-card important">
-                <i class="fas fa-list"></i>
-                <h3>Items to List</h3>
-                <p>Review BOL items to list</p>
-            </a>
-
-            <a href="/item-prep" class="tool-card important">
-                <i class="fas fa-diagnoses"></i>
-                <h3>Item Preparation</h3>
-                <p>Scan, mark good/bad, add diagnostics</p>
-            </a>
-
-            <!-- Separator row: visually spans two columns -->
-            <div style="grid-column: 1 / -1; height: 1px; background: var(--border); margin: 6px 0; border-radius: 2px;"></div>
-
-            <!-- Bottom section: shelf manager, trash manager, BOL extract -->
+            <!-- Bottom section: shelf manager, trash manager, BOL extract (item manager and preperation removed as shortcuts) -->
             <a href="/shelfmanager" class="tool-card">
                 <i class="fas fa-box"></i>
                 <h3>Shelf Manager</h3>
@@ -185,9 +177,7 @@
             </button>
         </div>
 
-        <a href="/" class="back-btn">
-            <i class="fas fa-arrow-left"></i> Back to Home
-        </a>
+        
     </div>
 
     <script>

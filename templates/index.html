@@ -108,6 +108,9 @@
         .main-actions button:hover, .main-actions a > button:hover {
             background: var(--accent);
         }
+        /* Per-button hover variants: lighter shade for main buttons, darker for tools */
+        .btn-lighten:hover { filter: brightness(1.06); transition: filter 0.15s ease; }
+        .btn-darken:hover { filter: brightness(0.92); transition: filter 0.15s ease; }
         .section-card {
             background: var(--card);
             border-radius: var(--radius);
@@ -208,15 +211,11 @@
 </head>
 <body>
     <div class="container">
-        <div class="main-actions">
-            <form method="GET" action="/position" style="margin:0; width: 100%;">
-                <button type="submit" style="background:#27ae60; width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px;">
-                    <i class="fas fa-plus-circle"></i> Add Item to Shelf
-                </button>
-            </form>
-            <a href="/searchrack" style="text-decoration:none; width: 100%;">
-                <button type="button" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px;">
-                    <i class="fas fa-search"></i> Search My Rack
+
+        <div class="main-actions" style="margin-bottom:12px;">
+            <a href="/items-to-list" style="text-decoration:none; width: 100%;">
+                <button type="button" class="btn-lighten" style="width: 100%; font-size:1.2rem; padding:18px 0; background:var(--primary); color:#fff; border:none; border-radius:var(--radius); box-shadow:0 2px 8px rgba(0,0,0,0.04); display:flex;align-items:center;justify-content:center;gap:8px; margin-bottom:8px;">
+                    <i class="fas fa-list"></i> Item Manager
                 </button>
             </a>
         </div>
@@ -271,9 +270,31 @@
             </div>
         </div>
 
+        <div class="main-actions" style="margin-top: 18px;">
+            <form method="GET" action="/position" style="margin:0; width: 100%;">
+                <button type="submit" class="btn-lighten" style="background:#27ae60; width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                    <i class="fas fa-plus-circle"></i> Add Item to Shelf
+                </button>
+            </form>
+
+            <a href="/searchrack" style="text-decoration:none; width: 100%;">
+                <button type="button" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                    <i class="fas fa-search"></i> Search Warehouse
+                </button>
+            </a>
+
+            <div style="height:1px;background:var(--border);margin:8px 0;border-radius:2px"></div>
+
+            <a href="/item-prep" style="text-decoration:none; width: 100%;">
+                <button type="button" class="btn-lighten" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; background: #7B3F00;">
+                    <i class="fas fa-diagnoses"></i> Preperation
+                </button>
+            </a>
+        </div>
+
         <div class="main-actions" style="margin-top: 20px;">
             <a href="/tools" style="text-decoration:none; width: 100%;">
-                <button type="button" style="width: 100%; background: #6c5ce7; margin: 0;">
+                <button type="button" class="btn-darken" style="width: 100%; background: #95a5a6; color: #fff; margin: 0;">
                     <i class="fas fa-tools" style="margin-right: 8px;"></i> Tools
                 </button>
             </a>

@@ -106,7 +106,12 @@
     </style>
 </head>
 <body>
-    <div style="display: flex; justify-content: center; align-items: center; margin-bottom: 20px; gap: 15px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;gap:12px;">
+        <a href="/" style="text-decoration:none;">
+            <button style="background:#e74c3c;color:#fff;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;display:flex;align-items:center;gap:8px;">
+                <i class="fas fa-arrow-left"></i> Back
+            </button>
+        </a>
         <h1 style="margin: 0;">Location</h1>
         <img src="/static/qrcode.jpg" alt="QR Code" style="width:50px; height:50px; object-fit:contain; border:2px solid #000; background:#fff;" />
     </div>
@@ -526,11 +531,6 @@
         <a href="/barcode" style="text-decoration: none; flex: 1; max-width: 200px;">
             <button style="background-color: #ffc107; color: #000; border: none; padding: 10px 24px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 1.1em; width: 100%;">
                 <i class="fas fa-forward"></i> Skip
-            </button>
-        </a>
-        <a href="/" style="text-decoration: none; flex: 1; max-width: 200px;">
-            <button style="background-color: #ff4444; color: white; border: none; padding: 10px 24px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 1.1em; width: 100%;">
-                <i class="fas fa-times"></i> Exit
             </button>
         </a>
     </div>

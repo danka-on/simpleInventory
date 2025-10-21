@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Items to List</title>
+  <title>Item Manager</title>
   <style>
     body{font-family:Segoe UI,Arial,sans-serif;background:#f7f7f8;margin:0;padding:18px}
     .top{display:flex;align-items:center;gap:10px;justify-content:space-between}
@@ -28,8 +28,8 @@
 </head>
 <body>
   <div class="top">
-    <a href="/tools"><button class="btn btn-danger">Back</button></a>
-    <h2>Items to List</h2>
+    <a href="/"><button class="btn btn-danger">Back</button></a>
+    <h2>Item Manager</h2>
     <div style="width:100px"></div>
   </div>
 
@@ -57,6 +57,17 @@
         <option value="bad">Bad</option>
       </select>
     </label>
+    <label>Defect:
+      <select id="filter-defect">
+        <option value="">All</option>
+        <option value="Missing pieces">Missing pieces</option>
+        <option value="Wrong item">Wrong item</option>
+        <option value="Broken">Broken</option>
+        <option value="Return">Return</option>
+        <option value="Replacement">Replacement</option>
+        <option value="Other">Other</option>
+      </select>
+    </label>
     <div style="display:flex;align-items:center;gap:8px">
       <label style="display:flex;align-items:center;gap:6px"><input type="radio" name="filter_listed_radio" id="filter-listed-all" value="" checked> <span>All</span></label>
       <label style="display:flex;align-items:center;gap:6px"><input type="radio" name="filter_listed_radio" id="filter-listed-listed" value="listed"> <span>Listed</span></label>
@@ -75,11 +86,12 @@ function missingThumb(width=48,height=48,text='No Img'){ return 'data:image/svg+
 
 function setFiltersFromURL(){
   const p = new URLSearchParams(window.location.search);
-  const lot = p.get('lot')||''; const q = p.get('q')||''; const sort = p.get('sort')||''; const status = p.get('status')||'';
+  const lot = p.get('lot')||''; const q = p.get('q')||''; const sort = p.get('sort')||''; const status = p.get('status')||''; const defect = p.get('defect')||'';
   if(q) document.getElementById('filter-q').value = q;
   if(lot) document.getElementById('filter-lot').value = lot;
   if(sort) document.getElementById('sort-select').value = sort;
   if(status) document.getElementById('status-select').value = status;
+  if(defect) document.getElementById('filter-defect').value = defect;
   // support legacy ?status=listed or ?listed=true
   const listedFlag = (p.get('listed') === 'true') || (p.get('status') === 'listed');
   const notListedFlag = (p.get('not_listed') === 'true') || (p.get('status') === 'not_listed');
@@ -94,6 +106,7 @@ async function loadItems(){
   const q = document.getElementById('filter-q').value.trim();
   const sort = document.getElementById('sort-select').value;
   const status = document.getElementById('status-select').value;
+  const defectFilter = (document.getElementById('filter-defect') && document.getElementById('filter-defect').value) || '';
   // Determine listed/not_listed filter from the radio group
   const listedRadio = document.querySelector('input[name="filter_listed_radio"]:checked');
   const listedVal = listedRadio ? (listedRadio.value || '') : '';
@@ -107,7 +120,13 @@ async function loadItems(){
   else if(listedVal === 'not_listed') params.set('status', 'not_listed');
   const resp = await fetch('/api/bol_items?'+params.toString());
   const j = await resp.json();
-  render(j.results||[]);
+  let results = j.results||[];
+  // Client-side defect filtering (server does not yet support defect filter)
+  if(defectFilter){
+    const df = defectFilter.toLowerCase();
+    results = results.filter(r => (r.defect||'').toString().toLowerCase() === df);
+  }
+  render(results);
 }
 
 // Format a timestamp into Eastern Time like: 2025-10-18 9:20am
@@ -212,6 +231,8 @@ document.getElementById('apply-filters').addEventListener('click', loadItems);
 document.getElementById('filter-lot').addEventListener('change', loadItems);
 document.getElementById('sort-select').addEventListener('change', loadItems);
 document.getElementById('status-select').addEventListener('change', loadItems);
+// defect filter should behave like other filters
+const defectEl = document.getElementById('filter-defect'); if(defectEl) defectEl.addEventListener('change', loadItems);
 // radio buttons for listed filter
 ['filter-listed-all','filter-listed-listed','filter-listed-not'].forEach(id=>{
   const el = document.getElementById(id);
@@ -224,10 +245,12 @@ function onOpenDiag(e){
   const q = document.getElementById('filter-q').value.trim();
   const sort = document.getElementById('sort-select').value;
   const status = document.getElementById('status-select').value;
+  const defect = (document.getElementById('filter-defect') && document.getElementById('filter-defect').value) || '';
   if(lot) p.set('lot', lot);
   if(q) p.set('q', q);
   if(sort) p.set('sort', sort);
   if(status) p.set('status', status);
+  if(defect) p.set('defect', defect);
   const ret = '/items-to-list' + (p.toString()? ('?'+p.toString()) : '');
   window.location.href = '/item-prep/diagnostic/view?upc='+encodeURIComponent(upc)+'&from=items&return='+encodeURIComponent(ret);
 }
@@ -236,31 +259,8 @@ async function onMarkListed(e){
   e.preventDefault();
   const upc = e.currentTarget.dataset.upc; if(!upc) return;
   try{
-    // Check if there are diagnostic photos first
-    let hasPhotos = false;
-    try{
-      const r = await fetch(`/api/items_prep/diagnostic/${encodeURIComponent(upc)}`);
-      const j = await r.json();
-      hasPhotos = Array.isArray(j.images) && j.images.length > 0;
-    }catch{}
-    if(hasPhotos){
-      const ok = confirm('Marking as listed will delete all diagnostic photos for this item. Make sure you have downloaded them first. Continue?');
-      if(!ok) return;
-    }
-    // 1) Set list status
+    // Simply set list_status to 'listed' without deleting diagnostic photos
     await fetch('/api/bol_items/list_status', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ upc, list_status: 'listed' })});
-    // 2) If photos present, delete them (soft-delete)
-    if(hasPhotos){
-      try{
-        const delRes = await fetch(`/api/items_prep/diagnostic/${encodeURIComponent(upc)}/photos`, { method:'DELETE' });
-        const dj = await delRes.json();
-        if(!(dj && dj.success)){
-          alert('Marked listed, but failed to delete photos: '+(dj&&dj.error||'unknown'));
-        }
-      }catch(e){
-        alert('Marked listed, but failed to delete photos: '+e);
-      }
-    }
   }catch(e){ /* ignore, refresh below */ }
   loadItems();
 }
