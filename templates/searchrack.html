@@ -3,7 +3,10 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>Multi-DB Search</title>
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>Multi-DB Search v3</title>
     <style>
         body{font-family:Segoe UI,Arial,sans-serif;background:#f7f7f8;margin:0;padding:18px}
         .top {display:flex;gap:10px;align-items:center;justify-content:space-between}
@@ -29,6 +32,13 @@
         .modal .card{background:#fff;padding:18px;border-radius:8px;max-width:720px;max-height:80vh;overflow:auto}
         .form-row{display:flex;gap:8px;margin-bottom:8px}
         .form-row input, .form-row textarea{flex:1;padding:8px;border:1px solid #ddd;border-radius:6px}
+        /* Action dropdown styles */
+    .action-dropdown{display:none;position:fixed;z-index:10000;min-width:160px;max-width:92vw;background:#fff;border:1px solid #ddd;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.12);padding:8px}
+    .action-dropdown button{display:block;width:100%;text-align:left;padding:8px 12px;border:none;background:none;cursor:pointer;border-radius:4px}
+    .action-dropdown button:hover{background:#f0f0f0}
+    /* Scope gear styling to results actions only */
+    .results-actions .gear-btn{background:#f0f0f0;border:1px solid #ddd;padding:6px 8px;border-radius:4px;cursor:pointer;font-size:14px}
+    .results-actions .gear-btn:hover{background:#e0e0e0}
     </style>
 </head>
 <body>
@@ -100,6 +110,7 @@
     </div></div></div>
 
 <script>
+console.log('searchrack v3 loaded');
 const DBS = ['searchRack','ebayStore','bol','sold','archived'];
 const DB_LABELS = {searchRack:'Inventory', ebayStore:'Ebay live', bol:'Macy BOL', sold:'Sold', archived:'Archived'};
 const defaultChecked = {'searchRack':true};
@@ -300,17 +311,13 @@ function renderResults(results){
         else if(r.item_position) locDisplay = r.item_position;
             let actionHtml = '';
         if(isArchived){
-            // Archived row: show Restore and Delete Forever
-            actionHtml = `<button class="btn btn-primary" onclick="onRestore(${r.id})">Restore</button> <button class="btn btn-danger" onclick="onDeleteArchive(${r.id})">Delete Forever</button>`;
+            // Archived row: show gear button with dropdown for Restore and Delete Forever
+            console.log('Creating gear button for archived row', r.id);
+            actionHtml = `<button class="gear-btn" onclick="toggleActionDropdown(event, 'archived', ${r.id})">⚙️</button>`;
         } else {
-            // Add Edit Location and Picture Position buttons only for searchRack rows
-            let editBtn = '';
-            let picBtn = '';
-            if(db === 'searchRack'){
-                editBtn = `<button class="btn btn-blue" onclick="onEditLocation(${r.id}, '${esc(r.barcode||'')}')">Edit Location</button> `;
-                picBtn = '';
-            }
-            actionHtml = picBtn + editBtn + `<button class="btn btn-primary" onclick="onEdit('${db}',${r.id})">Edit</button> <button class="btn btn-danger" onclick="onDelete('${db}',${r.id})">Delete</button>`;
+            // Non-archived row: show gear button with dropdown for Edit Location (searchRack only), Edit, and Delete
+            console.log('Creating gear button for regular row', db, r.id);
+            actionHtml = `<button class="gear-btn" onclick="toggleActionDropdown(event, '${db}', ${r.id})">⚙️</button>`;
         }
     function parseISO(s){ if(!s) return new Date(NaN); try{ let str = String(s).trim(); if(/\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(str) && !(/[zZ]|[+-]\d{2}:?\d{2}$/.test(str))){ str = str.replace(' ','T'); if(!str.endsWith('Z')) str = str + 'Z'; } return new Date(str); }catch(e){ return new Date(NaN); } }
     function fmtLocal(ts){
@@ -337,7 +344,7 @@ function renderResults(results){
                 `<td>${ locDisplay ? `<a href="#" class=\"location-link\" data-src=\"${db}\" data-id=\"${r.id}\" data-barcode=\"${barcode}\" data-picture=\"${esc(r.pictureposition||'')}\" data-item_position=\"${esc((r.item_position||'').toLowerCase())}\">${esc(locDisplay)}</a>` : '' }</td>`+
                 `<td>${qty}</td>`+
                 `<td>${ (r.archived||db==='archived') ? ('Archive ('+esc(DB_LABELS[r.orig_source_db]||r.orig_source_db||'Unknown')+')') : esc(DB_LABELS[db] || db) }</td>`+
-                `<td>${actionHtml}</td>`+
+                `<td><div class="results-actions">${actionHtml}</div></td>`+
                 `</tr>`;
     })
     html += '</tbody></table>';
@@ -374,6 +381,79 @@ function renderResults(results){
             }
         });
     });
+}
+
+// Action dropdown functionality
+function toggleActionDropdown(event, db, id) {
+    event.stopPropagation();
+    const existing = document.querySelector('.action-dropdown');
+    if (existing) {
+        existing.remove();
+        return;
+    }
+    
+    const dropdown = document.createElement('div');
+    dropdown.className = 'action-dropdown';
+    
+    if (db === 'archived') {
+        dropdown.innerHTML = `
+            <button onclick="onRestore(${id}); closeActionDropdown()">Restore</button>
+            <button onclick="onDeleteArchive(${id}); closeActionDropdown()">Delete Forever</button>
+        `;
+    } else {
+        let buttons = `<button onclick="onEdit('${db}', ${id}); closeActionDropdown()">Edit</button>
+                      <button onclick="onDelete('${db}', ${id}); closeActionDropdown()">Delete</button>`;
+        if (db === 'searchRack') {
+            const row = document.querySelector(`tr[data-src="${db}"][data-id="${id}"]`);
+            const barcode = row ? row.children[1].textContent : '';
+            buttons = `<button onclick="onEditLocation(${id}, '${esc(barcode)}'); closeActionDropdown()">Edit Location</button>` + buttons;
+        }
+        dropdown.innerHTML = buttons;
+    }
+    
+    document.body.appendChild(dropdown);
+    positionDropdown(dropdown, event.target);
+    
+    // Close on click outside
+    setTimeout(() => {
+        document.addEventListener('click', closeActionDropdownOnClick);
+    }, 0);
+}
+
+function positionDropdown(dropdown, button) {
+    const rect = button.getBoundingClientRect();
+    const dropdownRect = dropdown.getBoundingClientRect();
+    
+    let left = rect.left;
+    let top = rect.bottom + 5;
+    
+    // Adjust if dropdown goes off screen
+    if (left + dropdownRect.width > window.innerWidth) {
+        left = window.innerWidth - dropdownRect.width - 10;
+    }
+    
+    if (top + dropdownRect.height > window.innerHeight) {
+        top = rect.top - dropdownRect.height - 5;
+    }
+    
+    dropdown.style.left = left + 'px';
+    dropdown.style.top = top + 'px';
+    dropdown.style.display = 'block';
+}
+
+function closeActionDropdown() {
+    const dropdown = document.querySelector('.action-dropdown');
+    if (dropdown) {
+        dropdown.remove();
+    }
+    document.removeEventListener('click', closeActionDropdownOnClick);
+}
+
+function closeActionDropdownOnClick(event) {
+    const dropdown = document.querySelector('.action-dropdown');
+    if (dropdown && !dropdown.contains(event.target)) {
+        closeActionDropdown();
+    }
 }
 
 // When editing location: save search state, then redirect to position page in edit mode

@@ -28,6 +28,24 @@ CLIENT_ID = os.getenv("EBAY_CLIENT_ID")
 CLIENT_SECRET = os.getenv("EBAY_CLIENT_SECRET")
 RUNAME = os.getenv("EBAY_RUNAME")
 app = Flask(__name__)
+# Ensure template changes hot-reload and disable caching for dev to avoid stale pages
+app.config['TEMPLATES_AUTO_RELOAD'] = True
+app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
+try:
+    app.jinja_env.auto_reload = True
+except Exception:
+    pass
+
+@app.after_request
+def add_no_cache_headers(response):
+    try:
+        # Strong no-cache to ensure browser and any proxy fetch fresh HTML/JS
+        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+    except Exception:
+        pass
+    return response
 # Increase upload limit to better accommodate multiple high-res photos
 app.config['MAX_CONTENT_LENGTH'] = 64 * 1024 * 1024  # 64 MB limit for uploads
 #for ebay api calls
