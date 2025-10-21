@@ -794,15 +794,15 @@
 
     function showLocationImage(picturePath, shelfCode){
       if(picturePath){
-        // Show the picture position image - use same path format as searchRack
+        // Show the picture position image
         const modal = document.getElementById('imgModal');
         const modalImg = document.getElementById('modalImg');
-        // If path doesn't start with /, prepend /static/
-        const imgPath = (picturePath.startsWith('/') ? picturePath : `/static/${picturePath}`) + `?t=${Date.now()}`;
+        // Picture positions are in /static/pictureposition/ folder
+        const imgPath = (picturePath.startsWith('/') ? picturePath : `/static/pictureposition/${picturePath}`) + `?t=${Date.now()}`;
         modalImg.src = imgPath;
         modal.style.display = 'flex';
       } else if(shelfCode){
-        // Show shelf image from static/shelves/ - same as searchRack
+        // Show shelf image from static/shelves/
         const modal = document.getElementById('imgModal');
         const modalImg = document.getElementById('modalImg');
         modalImg.src = `/static/shelves/${shelfCode.toLowerCase()}.png?t=${Date.now()}`;
