@@ -120,6 +120,14 @@ def _ensure_items_prep_tables():
                 trash_path TEXT
             )
         ''')
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS items_prep_notes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                upc TEXT,
+                note TEXT,
+                created_at TEXT
+            )
+        ''')
         # Add missing columns if table existed earlier
         cur.execute("PRAGMA table_info(items_prep_images)")
         cols = [r[1] for r in cur.fetchall()]
@@ -362,34 +370,6 @@ def api_bol_lookup():
             if srow:
                 item['prep_status'] = dict(srow)
         except Exception:
-            item['prep_status'] = None
-
-        # Check if UPC already has prep status - if so, create temporary duplicate entry
-        if item.get('prep_status'):
-            conn_check = sqlite3.connect('bol.db')
-            conn_check.row_factory = sqlite3.Row
-            cur_check = conn_check.cursor()
-            # Find next available suffix for temporary entry
-            cur_check.execute("SELECT upc FROM bol_items WHERE upc LIKE ? ESCAPE '\\'", (upc.replace('%', '\\%').replace('_', '\\_') + '%',))
-            existing = [r[0] for r in cur_check.fetchall()]
-            suffix_num = 1
-            while f"{upc}-{suffix_num}" in existing:
-                suffix_num += 1
-            new_upc = f"{upc}-{suffix_num}"
-
-            # Create temporary bol_items entry
-            import datetime
-            cur_check.execute(
-                "INSERT INTO bol_items (upc, item_description, image_url, lot_number, bol_number, import_date, temporary) VALUES (?, ?, ?, ?, ?, ?, 1)",
-                (new_upc, item['item_description'], item['image_url'], item['lot_number'], item['bol_number'], datetime.datetime.utcnow().isoformat())
-            )
-            conn_check.commit()
-            conn_check.close()
-
-            # Return the new temporary entry instead
-            item['upc'] = new_upc
-            item['temporary'] = True
-            # Clear prep_status for the new temporary entry
             item['prep_status'] = None
 
         return jsonify({'found': True, 'item': item})
@@ -692,6 +672,61 @@ def shelfmanager():
 @app.route('/extractor')
 def extractor():
     return render_template('extractor.html')
+
+@app.route('/api/items_prep/notes/<upc>', methods=['GET'])
+def api_items_prep_notes_get(upc):
+    """Get all notes for a UPC, ordered by created_at DESC."""
+    try:
+        upc_n = _normalize_upc(upc)
+        _ensure_items_prep_tables()
+        conn = sqlite3.connect('bol.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute('SELECT id, note, created_at FROM items_prep_notes WHERE upc = ? COLLATE NOCASE ORDER BY created_at DESC', (upc_n,))
+        notes = [dict(r) for r in cur.fetchall()]
+        conn.close()
+        return jsonify({'success': True, 'notes': notes})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/items_prep/notes', methods=['POST'])
+def api_items_prep_notes_add():
+    """Add a new note for a UPC. JSON: { upc, note }"""
+    try:
+        data = request.get_json() or {}
+        upc = _normalize_upc(data.get('upc'))
+        note = (data.get('note') or '').strip()
+        if not upc or not note:
+            return jsonify({'success': False, 'error': 'Missing upc or note'}), 400
+        _ensure_items_prep_tables()
+        import datetime
+        ts = datetime.datetime.utcnow().isoformat()
+        conn = sqlite3.connect('bol.db')
+        cur = conn.cursor()
+        cur.execute('INSERT INTO items_prep_notes (upc, note, created_at) VALUES (?,?,?)', (upc, note, ts))
+        note_id = cur.lastrowid
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True, 'id': note_id, 'created_at': ts})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/items_prep/notes/<int:note_id>', methods=['DELETE'])
+def api_items_prep_notes_delete(note_id):
+    """Delete a note by ID."""
+    try:
+        _ensure_items_prep_tables()
+        conn = sqlite3.connect('bol.db')
+        cur = conn.cursor()
+        cur.execute('DELETE FROM items_prep_notes WHERE id = ?', (note_id,))
+        deleted = cur.rowcount
+        conn.commit()
+        conn.close()
+        if deleted == 0:
+            return jsonify({'success': False, 'error': 'Note not found'}), 404
+        return jsonify({'success': True, 'deleted': deleted})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/items-to-list')
 def items_to_list_page():

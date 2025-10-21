@@ -38,6 +38,12 @@
     .modal img{max-width:90vw;max-height:80vh;border-radius:8px;display:block}
     .modal .bar{display:flex;justify-content:space-between;align-items:center;margin-top:10px;color:#fff}
     .modal .bar a{color:#fff;text-decoration:underline}
+    /* Note bubbles */
+    .note-bubble{display:flex;align-items:flex-start;gap:8px;padding:10px 12px;background:#f0f4f8;border-radius:10px;border:1px solid #e0e4e8;position:relative}
+    .note-bubble .note-text{flex:1;word-wrap:break-word;color:#333;font-size:0.95rem}
+    .note-bubble .note-time{font-size:0.8rem;color:#888;white-space:nowrap;margin-top:4px}
+    .note-bubble .note-delete{background:#e74c3c;color:#fff;border:none;border-radius:50%;width:24px;height:24px;cursor:pointer;font-size:16px;line-height:24px;text-align:center;flex-shrink:0}
+    .note-bubble .note-delete:hover{background:#c0392b}
   </style>
 </head>
 <body>
@@ -73,7 +79,11 @@
 
   <div class="card">
     <h3 style="margin:0 0 8px 0">Notes</h3>
-    <div style="white-space:pre-wrap; border:1px solid var(--border); padding:12px; border-radius:8px; background:#fcfcfc; min-height:48px">{{ (status.note if status else '') or '—' }}</div>
+    <div id="notesContainer" style="display:flex;flex-direction:column;gap:8px;margin:8px 0;max-height:240px;overflow-y:auto"></div>
+    <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+      <input type="text" id="newNoteInput" placeholder="Add a note..." style="flex:1;padding:10px;border:1px solid #ddd;border-radius:8px">
+      <button type="button" id="addNoteBtn" class="btn btn-primary" style="background:#00b894;color:#fff;padding:10px 18px">+ Add</button>
+    </div>
   </div>
 
   <div class="card">
@@ -308,6 +318,126 @@
         }catch(e){ btn.disabled = false; btn.textContent = 'Mark as Listed'; alert('Failed: '+e); }
       });
     })();
+
+    // Notes functionality
+    function formatNoteTimestamp(iso){
+      try{
+        function parseISO(s){
+          if(!s) return new Date(NaN);
+          try{
+            let str = String(s).trim();
+            if(/\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(str) && !(/[zZ]|[+-]\d{2}:?\d{2}$/.test(str))){
+              str = str.replace(' ', 'T');
+              if(!str.endsWith('Z')) str = str + 'Z';
+            }
+            return new Date(str);
+          }catch(e){ return new Date(NaN); }
+        }
+        const d = parseISO(iso);
+        if(isNaN(d.getTime())) return iso;
+        const parts = new Intl.DateTimeFormat('en-US', {
+          timeZone: 'America/New_York',
+          year: 'numeric', month: '2-digit', day: '2-digit',
+          hour: 'numeric', minute: '2-digit', hour12: true
+        }).formatToParts(d);
+        const vals = {};
+        parts.forEach(p=> vals[p.type] = p.value);
+        const year = vals.year || d.getFullYear();
+        const month = vals.month || String(d.getMonth()+1).padStart(2,'0');
+        const day = vals.day || String(d.getDate()).padStart(2,'0');
+        let hour = vals.hour || d.getHours();
+        let minute = vals.minute || String(d.getMinutes()).padStart(2,'0');
+        const dayPeriod = (vals.dayPeriod || '').toLowerCase();
+        hour = String(hour).replace(/^0/, '');
+        return `${year}-${month}-${day} ${hour}:${minute}${dayPeriod}`;
+      }catch(e){
+        return iso;
+      }
+    }
+
+    async function loadNotes(){
+      const upc = '{{ upc }}'.trim();
+      if(!upc) return;
+      try{
+        const res = await fetch(`/api/items_prep/notes/${encodeURIComponent(upc)}`);
+        const j = await res.json();
+        if(!j.success) return;
+        const container = document.getElementById('notesContainer');
+        container.innerHTML = '';
+        const notes = j.notes || [];
+        if(notes.length === 0){
+          container.innerHTML = '<div class="muted">No notes yet.</div>';
+          return;
+        }
+        notes.forEach(n=>{
+          const bubble = document.createElement('div');
+          bubble.className = 'note-bubble';
+          bubble.innerHTML = `
+            <div style="flex:1">
+              <div class="note-text">${escapeHtml(n.note||'')}</div>
+              <div class="note-time">${formatNoteTimestamp(n.created_at)}</div>
+            </div>
+            <button type="button" class="note-delete" data-id="${n.id}">×</button>
+          `;
+          bubble.querySelector('.note-delete').addEventListener('click', ()=> deleteNote(n.id));
+          container.appendChild(bubble);
+        });
+      }catch(e){
+        console.error('Failed to load notes:', e);
+      }
+    }
+
+    async function addNote(){
+      const upc = '{{ upc }}'.trim();
+      const input = document.getElementById('newNoteInput');
+      const note = (input.value || '').trim();
+      if(!note) return;
+      try{
+        const res = await fetch('/api/items_prep/notes', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ upc, note })
+        });
+        const j = await res.json();
+        if(j.success){
+          input.value = '';
+          await loadNotes();
+        } else {
+          alert('Failed to add note: ' + (j.error || 'unknown'));
+        }
+      }catch(e){
+        alert('Error adding note: ' + e);
+      }
+    }
+
+    async function deleteNote(noteId){
+      if(!confirm('Delete this note?')) return;
+      try{
+        const res = await fetch(`/api/items_prep/notes/${noteId}`, { method: 'DELETE' });
+        const j = await res.json();
+        if(j.success){
+          await loadNotes();
+        } else {
+          alert('Failed to delete note: ' + (j.error || 'unknown'));
+        }
+      }catch(e){
+        alert('Error deleting note: ' + e);
+      }
+    }
+
+    function escapeHtml(text){
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    document.getElementById('addNoteBtn').addEventListener('click', addNote);
+    document.getElementById('newNoteInput').addEventListener('keydown', (e)=>{
+      if(e.key === 'Enter'){ e.preventDefault(); addNote(); }
+    });
+
+    // Load notes on page load
+    window.addEventListener('DOMContentLoaded', loadNotes);
   </script>
 </body>
 </html>

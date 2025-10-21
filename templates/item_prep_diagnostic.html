@@ -45,6 +45,12 @@
   .reason-btn{padding:14px 18px;border-radius:999px;border:2px solid #ddd;background:#f9f9f9;cursor:pointer;font-size:1.05rem}
   .reason-btn.active{background:#00b894;color:#fff;border-color:#00b894}
     textarea[name=note]{font-size:1rem}
+    /* Note bubbles */
+    .note-bubble{display:flex;align-items:flex-start;gap:8px;padding:10px 12px;background:#f0f4f8;border-radius:10px;border:1px solid #e0e4e8;position:relative}
+    .note-bubble .note-text{flex:1;word-wrap:break-word;color:#333;font-size:0.95rem}
+    .note-bubble .note-time{font-size:0.8rem;color:#888;white-space:nowrap;margin-top:4px}
+    .note-bubble .note-delete{background:#e74c3c;color:#fff;border:none;border-radius:50%;width:24px;height:24px;cursor:pointer;font-size:16px;line-height:24px;text-align:center;flex-shrink:0}
+    .note-bubble .note-delete:hover{background:#c0392b}
     /* Existing photos grid */
     .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px}
     .existing-thumb{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:10px;background:#f0f0f0;cursor:pointer}
@@ -98,9 +104,13 @@
       </div>
       <input type="hidden" name="reason" id="reasonSelect" required>
       
-      <label>Note:
-        <textarea name="note" rows="3" style="width:100%;box-sizing:border-box"></textarea>
-      </label>
+      <label style="font-weight:600;font-size:1.05rem">Notes:</label>
+      <div id="notesContainer" style="display:flex;flex-direction:column;gap:8px;margin:8px 0;max-height:240px;overflow-y:auto"></div>
+      <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+        <input type="text" id="newNoteInput" placeholder="Add a note..." style="flex:1;padding:10px;border:1px solid #ddd;border-radius:8px">
+        <button type="button" id="addNoteBtn" class="btn btn-primary" style="padding:10px 18px">+ Add</button>
+      </div>
+      
       <label>Photos:
         <input type="file" id="photos" accept="image/*" capture="environment" multiple>
       </label>
@@ -379,12 +389,11 @@
         try{ j = await res.json(); }catch(_jsonErr){ j = null; }
         const msg = document.getElementById('msg');
         if(res.ok && j && j.success){
-          // Also POST status (status, reason, note)
+          // Also POST status (status, reason) - no note since we use notes table now
           try{
             const statusVal = (document.getElementById('diag-status') && document.getElementById('diag-status').value) || 'unchecked';
             const reasonVal = (document.getElementById('reasonSelect') && document.getElementById('reasonSelect').value) || '';
-            const noteVal = (document.querySelector('textarea[name=note]') && document.querySelector('textarea[name=note]').value) || '';
-            await fetch('/api/items_prep/status', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ upc: '{{ upc }}', status: statusVal, reason: reasonVal, note: noteVal }) });
+            await fetch('/api/items_prep/status', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ upc: '{{ upc }}', status: statusVal, reason: reasonVal, note: '' }) });
           }catch(e){ /* ignore status save errors */ }
           diagnosticCompleted = true; // Mark as completed to prevent cleanup
           msg.textContent='Saved diagnostic';
@@ -451,6 +460,10 @@
     window.addEventListener('DOMContentLoaded', async ()=>{
       const upc = '{{ upc }}'.trim();
       if(!upc) return;
+      
+      // Load notes
+      await loadNotes();
+      
       try{
         const r = await fetch(`/api/items_prep/diagnostic/${encodeURIComponent(upc)}`);
         const j = await r.json();
@@ -462,9 +475,6 @@
           reasonSelect.value = valid.includes(val) ? val : '';
           const targetBtn = reasonBtns.find(b=> b.dataset.val === reasonSelect.value);
           if(targetBtn){ reasonBtns.forEach(b=> b.classList.remove('active')); targetBtn.classList.add('active'); }
-          // Note
-          const ta = document.querySelector('textarea[name=note]');
-          if(ta){ ta.value = st.note || ''; }
           // Status dropdown
           const statusSel = document.getElementById('diag-status'); if(statusSel){ statusSel.value = st.status || 'unchecked'; updateStatusPill(statusSel.value); }
         }
@@ -591,6 +601,16 @@
         }
         // 2) Uncheck status (clear reason/note)
         await fetch('/api/items_prep/status', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ upc, status: 'unchecked', reason: '', note: '' })});
+        // 2b) Delete all notes for this UPC
+        try{
+          const notesRes = await fetch(`/api/items_prep/notes/${encodeURIComponent(upc)}`);
+          const notesJ = await notesRes.json();
+          if(notesJ.success && notesJ.notes){
+            for(const n of notesJ.notes){
+              await fetch(`/api/items_prep/notes/${n.id}`, {method: 'DELETE'});
+            }
+          }
+        }catch(e){ /* ignore note deletion errors */ }
         // 3) Unlist
         await fetch('/api/bol_items/list_status', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ upc, list_status: '' })});
         // 4) If this was a temporary entry, delete it
@@ -599,7 +619,8 @@
         }
         // 5) Clear UI
         reasonBtns.forEach(b=> b.classList.remove('active')); reasonSelect.value='';
-        const ta = document.querySelector('textarea[name=note]'); if(ta) ta.value = '';
+        document.getElementById('newNoteInput').value = '';
+        await loadNotes(); // refresh notes display
         // clear pending/captured previews
         try{ document.getElementById('preview').innerHTML = ''; }catch{}
         // clear existing photos section
@@ -608,6 +629,119 @@
       } finally {
         try{ document.getElementById('uploadOverlay').style.display='none'; }catch{}
       }
+    });
+
+    // Notes functionality
+    function formatNoteTimestamp(iso){
+      try{
+        function parseISO(s){
+          if(!s) return new Date(NaN);
+          try{
+            let str = String(s).trim();
+            if(/\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(str) && !(/[zZ]|[+-]\d{2}:?\d{2}$/.test(str))){
+              str = str.replace(' ', 'T');
+              if(!str.endsWith('Z')) str = str + 'Z';
+            }
+            return new Date(str);
+          }catch(e){ return new Date(NaN); }
+        }
+        const d = parseISO(iso);
+        if(isNaN(d.getTime())) return iso;
+        const parts = new Intl.DateTimeFormat('en-US', {
+          timeZone: 'America/New_York',
+          year: 'numeric', month: '2-digit', day: '2-digit',
+          hour: 'numeric', minute: '2-digit', hour12: true
+        }).formatToParts(d);
+        const vals = {};
+        parts.forEach(p=> vals[p.type] = p.value);
+        const year = vals.year || d.getFullYear();
+        const month = vals.month || String(d.getMonth()+1).padStart(2,'0');
+        const day = vals.day || String(d.getDate()).padStart(2,'0');
+        let hour = vals.hour || d.getHours();
+        let minute = vals.minute || String(d.getMinutes()).padStart(2,'0');
+        const dayPeriod = (vals.dayPeriod || '').toLowerCase();
+        hour = String(hour).replace(/^0/, '');
+        return `${year}-${month}-${day} ${hour}:${minute}${dayPeriod}`;
+      }catch(e){
+        return iso;
+      }
+    }
+
+    async function loadNotes(){
+      const upc = '{{ upc }}'.trim();
+      if(!upc) return;
+      try{
+        const res = await fetch(`/api/items_prep/notes/${encodeURIComponent(upc)}`);
+        const j = await res.json();
+        if(!j.success) return;
+        const container = document.getElementById('notesContainer');
+        container.innerHTML = '';
+        const notes = j.notes || [];
+        notes.forEach(n=>{
+          const bubble = document.createElement('div');
+          bubble.className = 'note-bubble';
+          bubble.innerHTML = `
+            <div style="flex:1">
+              <div class="note-text">${escapeHtml(n.note||'')}</div>
+              <div class="note-time">${formatNoteTimestamp(n.created_at)}</div>
+            </div>
+            <button type="button" class="note-delete" data-id="${n.id}">×</button>
+          `;
+          bubble.querySelector('.note-delete').addEventListener('click', ()=> deleteNote(n.id));
+          container.appendChild(bubble);
+        });
+      }catch(e){
+        console.error('Failed to load notes:', e);
+      }
+    }
+
+    async function addNote(){
+      const upc = '{{ upc }}'.trim();
+      const input = document.getElementById('newNoteInput');
+      const note = (input.value || '').trim();
+      if(!note) return;
+      try{
+        const res = await fetch('/api/items_prep/notes', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ upc, note })
+        });
+        const j = await res.json();
+        if(j.success){
+          input.value = '';
+          await loadNotes();
+        } else {
+          alert('Failed to add note: ' + (j.error || 'unknown'));
+        }
+      }catch(e){
+        alert('Error adding note: ' + e);
+      }
+    }
+
+    async function deleteNote(noteId){
+      if(!confirm('Delete this note?')) return;
+      try{
+        const res = await fetch(`/api/items_prep/notes/${noteId}`, { method: 'DELETE' });
+        const j = await res.json();
+        if(j.success){
+          await loadNotes();
+        } else {
+          alert('Failed to delete note: ' + (j.error || 'unknown'));
+        }
+      }catch(e){
+        alert('Error deleting note: ' + e);
+      }
+    }
+
+    function escapeHtml(text){
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    document.getElementById('addNoteBtn').addEventListener('click', addNote);
+    document.getElementById('newNoteInput').addEventListener('keydown', (e)=>{
+      if(e.key === 'Enter'){ e.preventDefault(); addNote(); }
     });
   </script>
 </body>
