@@ -776,8 +776,56 @@ def api_items_prep_location_set():
             cur.execute('UPDATE items_prep_status SET location=?, pictureposition=?, updated_at=? WHERE upc=?', (location, pictureposition, ts, upc))
         else:
             cur.execute('INSERT INTO items_prep_status (upc, location, pictureposition, updated_at) VALUES (?,?,?,?)', (upc, location, pictureposition, ts))
+        
+        # Get item description for searchRack
+        cur.execute('SELECT item_description FROM bol_items WHERE upc = ? COLLATE NOCASE LIMIT 1', (upc,))
+        bol_row = cur.fetchone()
+        title = bol_row[0] if bol_row else None
         conn.commit()
         conn.close()
+        
+        # Update searchRack.db
+        if location or pictureposition:
+            try:
+                search_conn = sqlite3.connect('searchRack.db')
+                search_cur = search_conn.cursor()
+                # Ensure table exists
+                search_cur.execute('''
+                    CREATE TABLE IF NOT EXISTS SEARCHRACK (
+                        ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                        TITLE TEXT,
+                        BARCODE TEXT,
+                        ITEM_POSITION TEXT,
+                        IMAGES TEXT,
+                        PICTUREPOSITION TEXT,
+                        ITEMID TEXT,
+                        QUANTITY INTEGER,
+                        CREATED_AT TEXT
+                    )
+                ''')
+                # Check if entry exists
+                search_cur.execute('SELECT ID FROM SEARCHRACK WHERE BARCODE = ? COLLATE NOCASE', (upc,))
+                existing = search_cur.fetchone()
+                
+                if existing:
+                    # Update existing
+                    search_cur.execute('''
+                        UPDATE SEARCHRACK 
+                        SET ITEM_POSITION = ?, PICTUREPOSITION = ?, TITLE = ?
+                        WHERE BARCODE = ? COLLATE NOCASE
+                    ''', (location, pictureposition, title, upc))
+                else:
+                    # Insert new
+                    search_cur.execute('''
+                        INSERT INTO SEARCHRACK (TITLE, BARCODE, ITEM_POSITION, PICTUREPOSITION, CREATED_AT)
+                        VALUES (?, ?, ?, ?, ?)
+                    ''', (title, upc, location, pictureposition, ts))
+                
+                search_conn.commit()
+                search_conn.close()
+            except Exception as e:
+                print(f'Warning: Failed to update searchRack: {e}')
+        
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -1492,8 +1540,55 @@ def position_diagnostic():
             cur.execute('INSERT INTO items_prep_status (upc, location, pictureposition, updated_at) VALUES (?,?,?,?)', 
                        (upc, location, pictureposition, ts))
         
+        # Get item description for searchRack
+        cur.execute('SELECT item_description FROM bol_items WHERE upc = ? COLLATE NOCASE LIMIT 1', (upc,))
+        bol_row = cur.fetchone()
+        title = bol_row[0] if bol_row else None
+        
         conn.commit()
         conn.close()
+        
+        # Update searchRack.db
+        if location or pictureposition:
+            try:
+                search_conn = sqlite3.connect('searchRack.db')
+                search_cur = search_conn.cursor()
+                # Ensure table exists
+                search_cur.execute('''
+                    CREATE TABLE IF NOT EXISTS SEARCHRACK (
+                        ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                        TITLE TEXT,
+                        BARCODE TEXT,
+                        ITEM_POSITION TEXT,
+                        IMAGES TEXT,
+                        PICTUREPOSITION TEXT,
+                        ITEMID TEXT,
+                        QUANTITY INTEGER,
+                        CREATED_AT TEXT
+                    )
+                ''')
+                # Check if entry exists
+                search_cur.execute('SELECT ID FROM SEARCHRACK WHERE BARCODE = ? COLLATE NOCASE', (upc,))
+                existing_sr = search_cur.fetchone()
+                
+                if existing_sr:
+                    # Update existing
+                    search_cur.execute('''
+                        UPDATE SEARCHRACK 
+                        SET ITEM_POSITION = ?, PICTUREPOSITION = ?, TITLE = ?
+                        WHERE BARCODE = ? COLLATE NOCASE
+                    ''', (location, pictureposition, title, upc))
+                else:
+                    # Insert new
+                    search_cur.execute('''
+                        INSERT INTO SEARCHRACK (TITLE, BARCODE, ITEM_POSITION, PICTUREPOSITION, CREATED_AT)
+                        VALUES (?, ?, ?, ?, ?)
+                    ''', (title, upc, location, pictureposition, ts))
+                
+                search_conn.commit()
+                search_conn.close()
+            except Exception as e:
+                print(f'Warning: Failed to update searchRack: {e}')
         
         # Redirect back to the diagnostic page
         if return_url:

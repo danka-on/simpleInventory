@@ -68,7 +68,6 @@
     <a id="back-link" href="/"><button class="btn btn-danger">Back</button></a>
     <h2>Diagnostic</h2>
     <div style="display:flex;gap:8px">
-      <button type="button" class="btn" id="setPositionBtn" style="background:#3498db;color:#fff">Set Position</button>
       <button type="button" class="btn" id="resetBtn" style="background:#f39c12;color:#fff">Reset</button>
     </div>
   </div>
@@ -78,10 +77,13 @@
       <div>UPC:</div>
       <div id="upcText">{{ upc }}</div>
     </div>
-    <!-- Location display -->
-    <div class="row" id="locationRow" style="display:none;margin-top:8px">
-      <div style="font-weight:600">Location:</div>
-      <div id="locationText" style="color:#2980b9;cursor:pointer;text-decoration:underline"></div>
+    <!-- Location display with Set Position button -->
+    <div style="margin-top:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <button type="button" class="btn" id="setPositionBtn" style="background:#3498db;color:#fff;padding:8px 14px">Set Position</button>
+      <div id="locationRow" style="display:none">
+        <span style="font-weight:600;margin-right:8px">Location:</span>
+        <span id="locationText" style="color:#2980b9;cursor:pointer;text-decoration:underline"></span>
+      </div>
     </div>
     <!-- Status pill shown prominently at top -->
     <div style="margin-top:8px;margin-bottom:6px">
@@ -784,13 +786,15 @@
 
     function showLocationImage(picturePath, shelfCode){
       if(picturePath){
-        // Show the picture position image
+        // Show the picture position image - use same path format as searchRack
         const modal = document.getElementById('imgModal');
         const modalImg = document.getElementById('modalImg');
-        modalImg.src = `/static/${picturePath}`;
+        // If path doesn't start with /, prepend /static/
+        const imgPath = picturePath.startsWith('/') ? picturePath : `/static/${picturePath}`;
+        modalImg.src = imgPath;
         modal.style.display = 'flex';
       } else if(shelfCode){
-        // Show shelf image from static/shelves/
+        // Show shelf image from static/shelves/ - same as searchRack
         const modal = document.getElementById('imgModal');
         const modalImg = document.getElementById('modalImg');
         modalImg.src = `/static/shelves/${shelfCode.toLowerCase()}.jpg`;
