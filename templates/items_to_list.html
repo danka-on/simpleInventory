@@ -80,6 +80,22 @@
 
   <div id="imgModal" class="modal"><div class="card"><div style="text-align:right"><button id="closeImg">Close</button></div><div id="imgContent"></div></div></div>
 
+  <!-- Pics preview modal: shows thumbnails and an edit button linking to diagnostic edit -->
+  <div id="picsModal" class="modal"><div class="card" style="max-width:800px; width:95%;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <div style="font-weight:700">Photos</div>
+      <div><button id="closePics" class="btn-sm">Close</button></div>
+    </div>
+    <div id="picsPreviewArea" style="display:flex;gap:12px;flex-direction:column;align-items:stretch;">
+      <div id="picsLarge" style="text-align:center;background:#f6f6f6;padding:12px;border-radius:8px;min-height:220px;display:flex;align-items:center;justify-content:center;"></div>
+      <div id="picsGrid" style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:8px"></div>
+      <div style="display:flex;justify-content:flex-end;margin-top:10px">
+        <a id="picsEditLink" class="btn btn-sm" href="#" style="background:#e74c3c;color:#fff;margin-right:8px">Edit Diagnostic</a>
+        <a id="picsDownloadAll" class="btn btn-sm" href="#" style="background:#3498db;color:#fff">Download All</a>
+      </div>
+    </div>
+  </div></div>
+
 <script>
 function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function missingThumb(width=48,height=48,text='No Img'){ return 'data:image/svg+xml;utf8,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="'+width+'" height="'+height+'"><rect width="100%" height="100%" fill="#f8f8f8"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#b0b0b0" font-size="10">'+text+'</text></svg>'); }
@@ -172,7 +188,7 @@ function formatLastEdited(raw){
 function render(results){
   const container = document.getElementById('results');
   if(!results.length){ container.innerHTML = '<div class="small-muted">No items</div>'; return; }
-  let html = '<table><thead><tr><th>Status</th><th>Defect</th><th>Title</th><th>UPC</th><th>List Status</th><th>Actions</th><th>Last Edited</th></tr></thead><tbody>';
+  let html = '<table><thead><tr><th>Info</th><th>Status</th><th>Defect</th><th>Pics</th><th>Title</th><th>UPC</th><th>List Status</th><th>Actions</th><th>Last Edited</th></tr></thead><tbody>';
   results.forEach(r=>{
     const title = esc(r.title||'');
     const img = esc(r.image||'');
@@ -189,14 +205,19 @@ function render(results){
     const actionBtn = (lstatus==='listed')
       ? `<button class="btn btn-danger btn-sm btn-unlist" data-upc="${upc}" title="Mark as not listed">✕</button>`
       : `<button class="btn btn-primary btn-sm btn-list" data-upc="${upc}">Mark as Listed</button>`;
-    // Diagnostic link will appear under the status pill for all statuses
-    const diagShortcut = `<a href="#" class="diag-link" data-upc="${upc}" style="font-size:0.85rem;color:#0066cc;text-decoration:underline">Diagnostic</a>`;
+    // Diagnostic link moved into its own Info column (first column)
+    const diagLink = `<a href="#" class="diag-link" data-upc="${upc}" style="font-size:0.95rem;color:#0066cc;text-decoration:underline">Open</a>`;
+    // Pics count button — initially unknown, render placeholder and update later
+    const picsCount = (r.pics_count || 0);
+    const picsBtn = `<button type="button" class="btn btn-sm pics-count" data-upc="${upc}" title="View photos">${picsCount}</button>`;
+
     html += `<tr>`+
+      `<td style="width:64px;text-align:center">${diagLink}</td>`+
       `<td><div style="display:flex;flex-direction:column;gap:4px;align-items:flex-start">`+
             `<div>${pill}</div>`+
-            `<div>${diagShortcut}</div>`+
           `</div></td>`+
             `<td>${esc(r.defect||'')}</td>`+
+            `<td style="text-align:center">${picsBtn}</td>`+
             `<td><div class="title-cell"><img class="thumb" src="${thumb}" onerror="this.src='${missingThumb(48,48,'No Img')}'"><a href="#" class="img-link" data-img="${img}" data-title="${title}">${title}</a></div></td>`+
             `<td><div style=\"display:flex;gap:6px;align-items:center\"><span>${upc}</span><button type=\"button\" class=\"btn btn-sm btn-copy\" data-upc=\"${upc}\" title=\"Copy UPC\">Copy</button></div></td>`+
           `<td>${lpill}</td>`+
@@ -211,6 +232,22 @@ function render(results){
   document.querySelectorAll('.btn-list').forEach(el=> el.addEventListener('click', onMarkListed));
   document.querySelectorAll('.btn-unlist').forEach(el=> el.addEventListener('click', onUnlist));
   document.querySelectorAll('.btn-copy').forEach(el=> el.addEventListener('click', onCopyUpc));
+  // Wire pics-count handlers
+  document.querySelectorAll('.pics-count').forEach(btn=> btn.addEventListener('click', onOpenPics));
+  // After rendering, for each displayed UPC, fetch the actual images count in the background and update the button
+  document.querySelectorAll('.pics-count').forEach(async (btn)=>{
+    const upc = btn.dataset.upc;
+    if(!upc) return;
+    try{
+      const res = await fetch('/api/items_prep/diagnostic/'+encodeURIComponent(upc));
+      if(!res.ok) return;
+      const j = await res.json();
+      const n = (j.images || []).length;
+      btn.textContent = n;
+      // show disabled style when 0
+      btn.disabled = (n===0);
+    }catch(e){ /* ignore */ }
+  });
 }
 
 function onOpenImg(e){
@@ -226,6 +263,7 @@ function onOpenImg(e){
 }
 
 document.getElementById('closeImg').addEventListener('click', ()=>{ document.getElementById('imgModal').style.display='none'; });
+document.getElementById('closePics').addEventListener('click', ()=>{ document.getElementById('picsModal').style.display='none'; });
 document.getElementById('apply-filters').addEventListener('click', loadItems);
 // Auto-refresh on dropdown changes
 document.getElementById('filter-lot').addEventListener('change', loadItems);
@@ -253,6 +291,39 @@ function onOpenDiag(e){
   if(defect) p.set('defect', defect);
   const ret = '/items-to-list' + (p.toString()? ('?'+p.toString()) : '');
   window.location.href = '/item-prep/diagnostic/view?upc='+encodeURIComponent(upc)+'&from=items&return='+encodeURIComponent(ret);
+}
+
+async function onOpenPics(e){
+  e.preventDefault();
+  const upc = e.currentTarget.dataset.upc || e.currentTarget.getAttribute('data-upc');
+  if(!upc) return;
+  const modal = document.getElementById('picsModal');
+  const area = document.getElementById('picsGrid');
+  const large = document.getElementById('picsLarge');
+  const editLink = document.getElementById('picsEditLink');
+  const dlAll = document.getElementById('picsDownloadAll');
+  area.innerHTML = '<div class="small-muted">Loading...</div>';
+  large.innerHTML = '';
+  editLink.href = '/item-prep/diagnostic?upc='+encodeURIComponent(upc);
+  dlAll.href = '/api/items_prep/diagnostic/'+encodeURIComponent(upc)+'/photos.zip';
+  try{
+    const res = await fetch('/api/items_prep/diagnostic/'+encodeURIComponent(upc));
+    if(!res.ok){ area.innerHTML = '<div class="small-muted">Failed to load</div>'; modal.style.display='flex'; return; }
+    const j = await res.json();
+    const imgs = j.images || [];
+    if(imgs.length===0){ area.innerHTML = '<div class="small-muted">No photos</div>'; modal.style.display='flex'; return; }
+    area.innerHTML = '';
+    imgs.forEach((im, idx)=>{
+      const src = (im.image_path && im.image_path.indexOf('static/')===-1) ? ('/static/'+im.image_path) : im.image_path;
+      const wrap = document.createElement('div'); wrap.style.display='flex'; wrap.style.flexDirection='column'; wrap.style.alignItems='center';
+      const t = document.createElement('img'); t.src = src; t.style.width='120px'; t.style.height='120px'; t.style.objectFit='cover'; t.style.borderRadius='8px'; t.style.cursor='pointer';
+      t.addEventListener('click', ()=>{ large.innerHTML = `<img src="${src}" style="max-width:100%;max-height:60vh;border-radius:8px">`; });
+      wrap.appendChild(t);
+      area.appendChild(wrap);
+      if(idx===0){ large.innerHTML = `<img src="${src}" style="max-width:100%;max-height:60vh;border-radius:8px">`; }
+    });
+    modal.style.display = 'flex';
+  }catch(e){ area.innerHTML = '<div class="small-muted">Error loading images</div>'; modal.style.display='flex'; }
 }
 
 async function onMarkListed(e){
