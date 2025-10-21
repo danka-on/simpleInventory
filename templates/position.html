@@ -138,6 +138,9 @@
     </div>
     <form id="scan_form" action="/submitposition" method="POST" style="display: none;">
         <input name="scanned_result" type="text" id="scanned_result">
+        <input name="for_diagnostic" type="hidden" id="for_diagnostic">
+        <input name="return_url" type="hidden" id="return_url">
+        <input name="upc" type="hidden" id="upc_field">
     </form>
     <form action="/toggle" method="POST" style="margin-top: 10px; text-align: center;">
         <label>
@@ -370,9 +373,18 @@
     document.getElementById('picturePositionBtn').addEventListener('click', function() {
         const params = new URLSearchParams(window.location.search);
         const editId = params.get('edit_rack_id');
+        const forDiagnostic = params.get('for_diagnostic');
+        const returnUrl = params.get('return');
         if(editId){
             // forward the edit id so pictureposition.html knows to persist PICTUREPOSITION for this searchRack row
             window.location.href = '/pictureposition?edit_rack_id=' + encodeURIComponent(editId);
+        } else if(forDiagnostic){
+            // forward diagnostic parameters
+            let url = '/pictureposition?for_diagnostic=' + encodeURIComponent(forDiagnostic);
+            if(returnUrl){
+                url += '&return=' + encodeURIComponent(returnUrl);
+            }
+            window.location.href = url;
         } else {
             window.location.href = '/pictureposition';
         }
@@ -520,8 +532,20 @@
         });
     }
 
-    // Start scanner on page load
     window.addEventListener('load', () => {
+        // Check if this is for diagnostic workflow
+        const urlParams = new URLSearchParams(window.location.search);
+        const forDiagnostic = urlParams.get('for_diagnostic');
+        const returnUrl = urlParams.get('return');
+        if(forDiagnostic){
+            document.getElementById('for_diagnostic').value = forDiagnostic;
+            document.getElementById('upc_field').value = forDiagnostic;
+            if(returnUrl){
+                document.getElementById('return_url').value = returnUrl;
+            }
+            // Change form action to diagnostic endpoint
+            document.getElementById('scan_form').action = '/position/diagnostic';
+        }
         setTimeout(startScanner, 500);
     });
     </script>

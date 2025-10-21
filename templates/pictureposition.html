@@ -27,8 +27,8 @@
         <button id="confirm-btn" style="display:none;">Confirm</button>
         <button id="retake-btn" style="display:none;">Retake</button>
         <button id="abort-btn" style="display:none;background:#d32f2f;color:#fff;">Abort</button>
-        <a href="/barcode"><button id="skip-btn" type="button">Skip</button></a>
-        <a href="/position"><button id="back-btn" type="button" style="background:#eee;color:#222;">Back</button></a>
+        <a href="/barcode" id="skip-link"><button id="skip-btn" type="button">Skip</button></a>
+        <a href="/position" id="back-link"><button id="back-btn" type="button" style="background:#eee;color:#222;">Back</button></a>
     </div>
     <div id="status"></div>
     <div id="progress-container" style="width:100%;max-width:350px;margin-top:12px;display:none;">
@@ -136,6 +136,9 @@
                 // If page was opened in edit mode, after upload we should persist the pictureposition to searchRack and return
                 const params = new URLSearchParams(window.location.search);
                 const editId = params.get('edit_rack_id');
+                const forDiagnostic = params.get('for_diagnostic');
+                const returnUrl = params.get('return');
+                
                 if(editId){
                     // POST to API to set pictureposition and mark ITEM_POSITION as 'picture'
                     fetch('/api/set_rack_location', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id: editId, pictureposition: result.path})})
@@ -151,6 +154,27 @@
                             // still navigate back but include error flag
                             window.location.href = '/searchrack?pic_error=1';
                         });
+                    return;
+                } else if(forDiagnostic){
+                    // Diagnostic mode: save to items_prep and return
+                    fetch('/api/items_prep/location', {
+                        method:'POST', 
+                        headers:{'Content-Type':'application/json'}, 
+                        body: JSON.stringify({upc: forDiagnostic, pictureposition: result.path, location: ''})
+                    })
+                    .then(r=>r.json())
+                    .then(j=>{
+                        sessionStorage.removeItem('pictureposition_path');
+                        sessionStorage.removeItem('pictureposition_upload_status');
+                        if(returnUrl){
+                            window.location.href = returnUrl;
+                        } else {
+                            window.location.href = '/item-prep/diagnostic?upc=' + encodeURIComponent(forDiagnostic);
+                        }
+                    }).catch(e=>{
+                        console.error('Failed to set pictureposition', e);
+                        statusDiv.textContent = 'Failed to save location';
+                    });
                     return;
                 }
                 // Non-edit mode: continue to barcode flow
@@ -238,6 +262,24 @@
     window.addEventListener('DOMContentLoaded', showErrorIfNeeded);
     window.addEventListener('DOMContentLoaded', startCamera);
     window.addEventListener('beforeunload', stopCamera);
+    
+    // Update back button for diagnostic mode
+    window.addEventListener('DOMContentLoaded', ()=>{
+        const params = new URLSearchParams(window.location.search);
+        const forDiagnostic = params.get('for_diagnostic');
+        const returnUrl = params.get('return');
+        if(forDiagnostic){
+            const backLink = document.getElementById('back-link');
+            const skipLink = document.getElementById('skip-link');
+            let url = '/position?for_diagnostic=' + encodeURIComponent(forDiagnostic);
+            if(returnUrl){
+                url += '&return=' + encodeURIComponent(returnUrl);
+            }
+            if(backLink) backLink.href = url;
+            // Hide skip button in diagnostic mode
+            if(skipLink) skipLink.style.display = 'none';
+        }
+    });
     </script>
 </body>
 </html>

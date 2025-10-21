@@ -129,6 +129,14 @@ def _ensure_items_prep_tables():
             )
         ''')
         # Add missing columns if table existed earlier
+        # Add location to items_prep_status if not exists
+        cur.execute("PRAGMA table_info(items_prep_status)")
+        status_cols = [r[1] for r in cur.fetchall()]
+        if 'location' not in status_cols:
+            cur.execute('ALTER TABLE items_prep_status ADD COLUMN location TEXT')
+        if 'pictureposition' not in status_cols:
+            cur.execute('ALTER TABLE items_prep_status ADD COLUMN pictureposition TEXT')
+        
         cur.execute("PRAGMA table_info(items_prep_images)")
         cols = [r[1] for r in cur.fetchall()]
         if 'deleted_at' not in cols:
@@ -725,6 +733,52 @@ def api_items_prep_notes_delete(note_id):
         if deleted == 0:
             return jsonify({'success': False, 'error': 'Note not found'}), 404
         return jsonify({'success': True, 'deleted': deleted})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/items_prep/location/<upc>', methods=['GET'])
+def api_items_prep_location_get(upc):
+    """Get location for a UPC."""
+    try:
+        upc = _normalize_upc(upc)
+        _ensure_items_prep_tables()
+        conn = sqlite3.connect('bol.db')
+        cur = conn.cursor()
+        cur.execute('SELECT location, pictureposition FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (upc,))
+        row = cur.fetchone()
+        conn.close()
+        if row:
+            return jsonify({'success': True, 'location': row[0], 'pictureposition': row[1]})
+        else:
+            return jsonify({'success': True, 'location': None, 'pictureposition': None})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/items_prep/location', methods=['POST'])
+def api_items_prep_location_set():
+    """Set location for a UPC. JSON: { upc, location, pictureposition }"""
+    try:
+        data = request.get_json() or {}
+        upc = _normalize_upc(data.get('upc'))
+        location = (data.get('location') or '').strip()
+        pictureposition = (data.get('pictureposition') or '').strip()
+        if not upc:
+            return jsonify({'success': False, 'error': 'Missing upc'}), 400
+        _ensure_items_prep_tables()
+        import datetime
+        ts = datetime.datetime.utcnow().isoformat()
+        conn = sqlite3.connect('bol.db')
+        cur = conn.cursor()
+        # Check if status exists
+        cur.execute('SELECT upc FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (upc,))
+        exists = cur.fetchone()
+        if exists:
+            cur.execute('UPDATE items_prep_status SET location=?, pictureposition=?, updated_at=? WHERE upc=?', (location, pictureposition, ts, upc))
+        else:
+            cur.execute('INSERT INTO items_prep_status (upc, location, pictureposition, updated_at) VALUES (?,?,?,?)', (upc, location, pictureposition, ts))
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
@@ -1404,8 +1458,50 @@ def pictures_page():
 #adding inventory flow #1/3
 @app.route("/position")
 def position_page():
-
     return render_template("position.html")
+
+
+@app.route('/position/diagnostic', methods=['POST'])
+def position_diagnostic():
+    """Handle position submission from diagnostic pages."""
+    try:
+        upc = request.form.get('upc', '').strip()
+        location = request.form.get('scanned_result', '').strip()
+        pictureposition = request.form.get('pictureposition', '').strip()
+        return_url = request.form.get('return_url', '').strip()
+        
+        if not upc:
+            return jsonify({'success': False, 'error': 'Missing UPC'}), 400
+        
+        upc = _normalize_upc(upc)
+        _ensure_items_prep_tables()
+        
+        import datetime
+        ts = datetime.datetime.utcnow().isoformat()
+        conn = sqlite3.connect('bol.db')
+        cur = conn.cursor()
+        
+        # Check if status exists
+        cur.execute('SELECT upc FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (upc,))
+        exists = cur.fetchone()
+        
+        if exists:
+            cur.execute('UPDATE items_prep_status SET location=?, pictureposition=?, updated_at=? WHERE upc=?', 
+                       (location, pictureposition, ts, upc))
+        else:
+            cur.execute('INSERT INTO items_prep_status (upc, location, pictureposition, updated_at) VALUES (?,?,?,?)', 
+                       (upc, location, pictureposition, ts))
+        
+        conn.commit()
+        conn.close()
+        
+        # Redirect back to the diagnostic page
+        if return_url:
+            return redirect(return_url)
+        else:
+            return redirect(f'/item-prep/diagnostic?upc={upc}')
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 #inventory flow #2

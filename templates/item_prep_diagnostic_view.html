@@ -61,6 +61,11 @@
       <div>
         <h2 class="title">{{ bol.item_description if bol else 'Item' }}</h2>
         <div class="muted">UPC: {{ upc }}</div>
+        <!-- Location display -->
+        <div id="locationRow" style="display:none;margin-top:8px">
+          <span style="font-weight:600;margin-right:8px">Location:</span>
+          <span id="locationText" style="color:#2980b9;cursor:pointer;text-decoration:underline"></span>
+        </div>
         {% if status and status.reason %}
           {% set r = status.reason.strip().lower() %}
           {% set cls = 'other' %}
@@ -438,6 +443,51 @@
 
     // Load notes on page load
     window.addEventListener('DOMContentLoaded', loadNotes);
+
+    // Location functionality
+    async function loadLocation(){
+      const upc = '{{ upc }}'.trim();
+      if(!upc) return;
+      try{
+        const res = await fetch(`/api/items_prep/location/${encodeURIComponent(upc)}`);
+        const j = await res.json();
+        if(j.success && (j.location || j.pictureposition)){
+          const row = document.getElementById('locationRow');
+          const text = document.getElementById('locationText');
+          if(j.pictureposition){
+            text.textContent = 'Picture Position (click to view)';
+            text.style.cursor = 'pointer';
+            text.onclick = ()=> showLocationImage(j.pictureposition);
+          } else if(j.location){
+            text.textContent = j.location.toUpperCase();
+            text.style.cursor = 'pointer';
+            text.onclick = ()=> showLocationImage(null, j.location);
+          }
+          row.style.display = 'block';
+        }
+      }catch(e){
+        console.error('Failed to load location:', e);
+      }
+    }
+
+    function showLocationImage(picturePath, shelfCode){
+      if(picturePath){
+        // Show the picture position image
+        const modal = document.getElementById('imgModal');
+        const modalImg = document.getElementById('modalImg');
+        modalImg.src = `/static/${picturePath}`;
+        modal.style.display = 'flex';
+      } else if(shelfCode){
+        // Show shelf image from static/shelves/
+        const modal = document.getElementById('imgModal');
+        const modalImg = document.getElementById('modalImg');
+        modalImg.src = `/static/shelves/${shelfCode.toLowerCase()}.jpg`;
+        modal.style.display = 'flex';
+      }
+    }
+
+    // Load location on page load
+    window.addEventListener('DOMContentLoaded', loadLocation);
   </script>
 </body>
 </html>
