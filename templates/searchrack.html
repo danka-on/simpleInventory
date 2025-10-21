@@ -334,7 +334,7 @@ function renderResults(results){
         `<td><div class="title-cell"><img class="thumb" src="${thumb}" onerror="this.src='${missingThumb(48,48,'No Img')}'"><div><a href="#" class="title-link" data-src="${db}" data-id="${r.id}" data-image="${img}" data-title="${title}">${title}</a>${deletedInfo}${createdInfo}</div></div></td>`+
                 `<td>${barcode}</td>`+
                 `<td>${itemid}</td>`+
-                `<td>${ locDisplay ? `<a href="#" class=\"location-link\" data-src=\"${db}\" data-id=\"${r.id}\" data-barcode=\"${barcode}\" data-picture=\"${esc(r.pictureposition||'')}\">${esc(locDisplay)}</a>` : '' }</td>`+
+                `<td>${ locDisplay ? `<a href="#" class=\"location-link\" data-src=\"${db}\" data-id=\"${r.id}\" data-barcode=\"${barcode}\" data-picture=\"${esc(r.pictureposition||'')}\" data-item_position=\"${esc((r.item_position||'').toLowerCase())}\">${esc(locDisplay)}</a>` : '' }</td>`+
                 `<td>${qty}</td>`+
                 `<td>${ (r.archived||db==='archived') ? ('Archive ('+esc(DB_LABELS[r.orig_source_db]||r.orig_source_db||'Unknown')+')') : esc(DB_LABELS[db] || db) }</td>`+
                 `<td>${actionHtml}</td>`+
@@ -462,28 +462,25 @@ async function onViewLocation(e){
     const picture = el.dataset.picture;
     const barcode = el.dataset.barcode;
     const id = el.dataset.id;
+    const itemPosition = el.dataset.item_position;
     
-    // For searchRack rows, use the location data directly from the row
+    // For searchRack rows, use the location data directly from the data attributes
     if(db === 'searchRack'){
         if(picture){
-            showViewModal(`<div><h4>Picture Position</h4><img src="/static/pictureposition/${picture}" style="max-width:640px;max-height:60vh;" onerror="this.src='${missingThumb(720,480,'Image missing')}'"></div>`);
+            // Picture position can be .jpg, .png, or any format - use as-is
+            showViewModal(`<div><h4>Picture Position</h4><img src="/static/pictureposition/${picture}?t=${Date.now()}" style="max-width:640px;max-height:60vh;" onerror="this.src='${missingThumb(720,480,'Image missing')}'"></div>`);
+        } else if(itemPosition){
+            // Use the item_position from data attribute (already lowercase from rendering)
+            showViewModal(`<div><h4>Shelf Position</h4><img src="/static/shelves/${itemPosition}.png?t=${Date.now()}" style="max-width:640px;max-height:60vh;" onerror="this.src='${missingThumb(720,480,'Image missing')}'"></div>`);
         } else {
-            // Find the row data to get item_position
-            const tr = el.closest('tr');
-            const locLink = tr.querySelector('.location-link');
-            const locText = locLink ? locLink.textContent.trim() : '';
-            if(locText && locText !== ''){
-                showViewModal(`<div><h4>Shelf Position</h4><img src="/static/shelves/${locText.toLowerCase()}.png" style="max-width:640px;max-height:60vh;" onerror="this.src='${missingThumb(720,480,'Image missing')}'"></div>`);
-            } else {
-                showViewModal('<div class="small-muted">No location info available</div>');
-            }
+            showViewModal('<div class="small-muted">No location info available</div>');
         }
         return;
     }
     
     // For other databases, use the API lookup
     if(picture){
-        showViewModal(`<div><h4>Picture Position</h4><img src="/static/pictureposition/${picture}" style="max-width:640px;max-height:60vh;" onerror="this.src='${missingThumb(720,480,'Image missing')}'"></div>`);
+        showViewModal(`<div><h4>Picture Position</h4><img src="/static/pictureposition/${picture}?t=${Date.now()}" style="max-width:640px;max-height:60vh;" onerror="this.src='${missingThumb(720,480,'Image missing')}'"></div>`);
         return;
     }
     try{
@@ -491,9 +488,9 @@ async function onViewLocation(e){
         const j = await resp.json();
         if(j.found){
             if(j.pictureposition){
-                showViewModal(`<div><h4>Picture Position</h4><img src="/static/pictureposition/${j.pictureposition}" style="max-width:640px;max-height:60vh;" onerror="this.src='${missingThumb(720,480,'Image missing')}'"></div>`);
+                showViewModal(`<div><h4>Picture Position</h4><img src="/static/pictureposition/${j.pictureposition}?t=${Date.now()}" style="max-width:640px;max-height:60vh;" onerror="this.src='${missingThumb(720,480,'Image missing')}'"></div>`);
             } else if(j.item_position){
-                showViewModal(`<div><h4>Shelf Position</h4><img src="/static/shelves/${j.item_position.toLowerCase()}.png" style="max-width:640px;max-height:60vh;" onerror="this.src='${missingThumb(720,480,'Image missing')}'"></div>`);
+                showViewModal(`<div><h4>Shelf Position</h4><img src="/static/shelves/${j.item_position.toLowerCase()}.png?t=${Date.now()}" style="max-width:640px;max-height:60vh;" onerror="this.src='${missingThumb(720,480,'Image missing')}'"></div>`);
             } else {
                 showViewModal('<div class="small-muted">No location info available</div>');
             }
