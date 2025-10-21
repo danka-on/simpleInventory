@@ -461,6 +461,27 @@ async function onViewLocation(e){
     const db = el.dataset.src;
     const picture = el.dataset.picture;
     const barcode = el.dataset.barcode;
+    const id = el.dataset.id;
+    
+    // For searchRack rows, use the location data directly from the row
+    if(db === 'searchRack'){
+        if(picture){
+            showViewModal(`<div><h4>Picture Position</h4><img src="/static/pictureposition/${picture}" style="max-width:640px;max-height:60vh;" onerror="this.src='${missingThumb(720,480,'Image missing')}'"></div>`);
+        } else {
+            // Find the row data to get item_position
+            const tr = el.closest('tr');
+            const locLink = tr.querySelector('.location-link');
+            const locText = locLink ? locLink.textContent.trim() : '';
+            if(locText && locText !== ''){
+                showViewModal(`<div><h4>Shelf Position</h4><img src="/static/shelves/${locText.toLowerCase()}.png" style="max-width:640px;max-height:60vh;" onerror="this.src='${missingThumb(720,480,'Image missing')}'"></div>`);
+            } else {
+                showViewModal('<div class="small-muted">No location info available</div>');
+            }
+        }
+        return;
+    }
+    
+    // For other databases, use the API lookup
     if(picture){
         showViewModal(`<div><h4>Picture Position</h4><img src="/static/pictureposition/${picture}" style="max-width:640px;max-height:60vh;" onerror="this.src='${missingThumb(720,480,'Image missing')}'"></div>`);
         return;
