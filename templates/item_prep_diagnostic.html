@@ -34,6 +34,11 @@
     .thumb{width:100%;height:100%;object-fit:cover;border-radius:8px;background:#f0f0f0}
   .del-x{position:absolute;top:-10px;right:-10px;background:#e74c3c;color:#fff;border:none;border-radius:50%;width:36px;height:36px;cursor:pointer;line-height:36px;text-align:center;font-weight:bold;box-shadow:0 3px 8px rgba(0,0,0,0.25);font-size:18px}
   .badge-quality{position:absolute;left:6px;bottom:6px;background:rgba(0,0,0,0.7);color:#fff;border-radius:10px;padding:2px 6px;font-size:0.75rem;cursor:pointer}
+  /* Status pill colors */
+  .pill{display:inline-block;padding:6px 10px;border-radius:999px;color:#fff;font-weight:600;font-size:0.95rem}
+  .pill.good{background:#2ecc71}
+  .pill.bad{background:#e74c3c}
+  .pill.unchecked{background:#9aa0a6}
     label{display:block;margin-top:8px}
     /* Prominent reason selection */
   .reason-group{display:flex;gap:10px;flex-wrap:wrap;margin:8px 0}
@@ -66,8 +71,22 @@
       <div>UPC:</div>
       <div id="upcText">{{ upc }}</div>
     </div>
+    <!-- Status pill shown prominently at top -->
+    <div style="margin-top:8px;margin-bottom:6px">
+      <span style="font-weight:600;margin-right:8px">Status:</span>
+      <span id="statusPill" class="pill unchecked">Unchecked</span>
+    </div>
     <form id="diagForm" enctype="multipart/form-data">
       <input type="hidden" name="upc" value="{{ upc }}">
+      <!-- Move the status select up so it is near the pill visually -->
+      <label style="margin-top:6px;margin-bottom:6px;display:block">Status:
+        <select id="diag-status" name="status">
+          <option value="unchecked">Unchecked</option>
+          <option value="good">Good</option>
+          <option value="bad">Bad</option>
+        </select>
+      </label>
+
       <label style="font-weight:600;font-size:1.05rem">Defect:</label>
       <div class="reason-group" role="group" aria-label="Select defect">
         <button type="button" class="reason-btn" data-val="Missing pieces">Missing pieces</button>
@@ -75,15 +94,10 @@
         <button type="button" class="reason-btn" data-val="Broken">Broken</button>
         <button type="button" class="reason-btn" data-val="Return">Return</button>
         <button type="button" class="reason-btn" data-val="Replacement">Replacement</button>
+        <button type="button" class="reason-btn" data-val="Other">Other</button>
       </div>
       <input type="hidden" name="reason" id="reasonSelect" required>
-      <label style="margin-top:8px">Status:
-        <select id="diag-status" name="status">
-          <option value="unchecked">Unchecked</option>
-          <option value="good">Good</option>
-          <option value="bad">Bad</option>
-        </select>
-      </label>
+      
       <label>Note:
         <textarea name="note" rows="3" style="width:100%;box-sizing:border-box"></textarea>
       </label>
@@ -400,6 +414,20 @@
         if(ret){ const bl = document.getElementById('back-link'); if(bl) bl.href = ret; }
       }catch(e){}
     });
+    // Keep the top status pill in sync with the select value
+    function updateStatusPill(val){
+      try{
+        const pill = document.getElementById('statusPill'); if(!pill) return;
+        const v = (val||'').toString().toLowerCase();
+        pill.classList.remove('good','bad','unchecked');
+        if(v==='good'){ pill.classList.add('good'); pill.textContent = 'Good'; }
+        else if(v==='bad'){ pill.classList.add('bad'); pill.textContent = 'Bad'; }
+        else { pill.classList.add('unchecked'); pill.textContent = 'Unchecked'; }
+      }catch(e){}
+    }
+    // Wire up select to update pill
+    const diagStatusEl = document.getElementById('diag-status');
+    if(diagStatusEl){ diagStatusEl.addEventListener('change', (e)=> updateStatusPill(e.target.value)); }
     window.addEventListener('beforeunload', stopCam);
 
     // Reason buttons sync with select and toggle when clicked again
@@ -429,7 +457,7 @@
         const imgs = Array.isArray(j && j.images) ? j.images : [];
         if(st){
           const val = (st.reason||'').trim();
-          const valid = ['Missing pieces','Wrong item','Broken','Return','Replacement'];
+          const valid = ['Missing pieces','Wrong item','Broken','Return','Replacement','Other'];
           reasonSelect.value = valid.includes(val) ? val : '';
           const targetBtn = reasonBtns.find(b=> b.dataset.val === reasonSelect.value);
           if(targetBtn){ reasonBtns.forEach(b=> b.classList.remove('active')); targetBtn.classList.add('active'); }
@@ -437,7 +465,7 @@
           const ta = document.querySelector('textarea[name=note]');
           if(ta){ ta.value = st.note || ''; }
           // Status dropdown
-          const statusSel = document.getElementById('diag-status'); if(statusSel) statusSel.value = st.status || 'unchecked';
+          const statusSel = document.getElementById('diag-status'); if(statusSel){ statusSel.value = st.status || 'unchecked'; updateStatusPill(statusSel.value); }
         }
         if(imgs.length){
           const card = document.getElementById('existingCard');

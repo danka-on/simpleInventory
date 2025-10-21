@@ -65,7 +65,7 @@
           <div class="muted" style="margin-top:6px">Updated: <span id="updatedAt" data-iso="{{ status.updated_at }}">{{ status.updated_at }}</span></div>
         {% endif %}
         <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap">
-          <a class="btn btn-danger" href="/item-prep/diagnostic?upc={{ upc }}">Edit Diagnostic</a>
+          <a id="editDiagLink" class="btn btn-danger" href="/item-prep/diagnostic?upc={{ upc }}">Edit Diagnostic</a>
         </div>
       </div>
     </div>
@@ -133,6 +133,25 @@
         if((params.get('from')||'').toLowerCase()==='trash'){
           const a = document.getElementById('backLink');
           if(a) a.href = '/trash-manager';
+        }
+      }catch(e){}
+    })();
+
+    // If this details page was opened from Items-to-List with a return param, ensure the Edit link also preserves that return/from
+    (function(){
+      try{
+        const params = new URLSearchParams(window.location.search);
+        const ret = params.get('return');
+        const from = params.get('from');
+        const edit = document.getElementById('editDiagLink');
+        if(edit){
+          // Build a proper href preserving upc and optional from/return
+          const base = edit.getAttribute('href') || ('/item-prep/diagnostic?upc={{ upc }}');
+          const u = new URL(base, window.location.origin);
+          u.searchParams.set('upc', '{{ upc }}');
+          if(from) u.searchParams.set('from', from);
+          if(ret) u.searchParams.set('return', ret);
+          edit.href = u.pathname + u.search;
         }
       }catch(e){}
     })();
