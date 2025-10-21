@@ -600,6 +600,57 @@ def api_items_prep_diagnostic_delete_photos(upc):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/api/items_prep/diagnostic/<upc>/photos', methods=['POST'])
+def api_items_prep_diagnostic_add_photos(upc):
+    """Upload additional diagnostic photos for a UPC without changing status.
+    Expects multipart/form-data with files in photos[] (or photos/photo) and optional rotations[]
+    Returns: { success, images: [{id, image_path, created_at, rotation}] }
+    """
+    try:
+        upc_n = _normalize_upc(upc)
+        if not upc_n:
+            return jsonify({'success': False, 'error': 'Missing upc'}), 400
+        _ensure_items_prep_tables()
+        from werkzeug.utils import secure_filename
+        save_dir = os.path.join(app.root_path, 'static', 'items_prep')
+        os.makedirs(save_dir, exist_ok=True)
+        files = request.files.getlist('photos[]') or request.files.getlist('photos') or ([] if 'photo' not in request.files else [request.files['photo']])
+        rotations = request.form.getlist('rotations[]') or request.form.getlist('rotations') or []
+        if not files:
+            return jsonify({'success': False, 'error': 'No files uploaded'}), 400
+        import datetime
+        ts = datetime.datetime.utcnow().isoformat()
+        conn = sqlite3.connect('bol.db')
+        cur = conn.cursor()
+        out = []
+        for idx, f in enumerate(files):
+            if not f or not getattr(f, 'filename', ''):
+                continue
+            fn = secure_filename(f.filename)
+            name, ext = os.path.splitext(fn)
+            unique = f"{upc_n}_{int(time.time()*1000)}{ext or '.jpg'}"
+            abs_path = os.path.join(save_dir, unique)
+            try:
+                f.save(abs_path)
+                rel = f"items_prep/{unique}"
+                rot = 0
+                try:
+                    if idx < len(rotations):
+                        rot = int(rotations[idx] or 0)
+                except Exception:
+                    rot = 0
+                cur.execute('INSERT INTO items_prep_images (upc, image_path, created_at, rotation) VALUES (?,?,?,?)', (upc_n, rel, ts, rot))
+                img_id = cur.lastrowid
+                out.append({'id': img_id, 'image_path': rel, 'created_at': ts, 'rotation': rot})
+            except Exception as se:
+                print('Failed to save diagnostic image (add):', se)
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True, 'images': out})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/items_prep/photo/<int:photo_id>', methods=['DELETE'])
 def api_items_prep_delete_photo(photo_id):
     """Soft-delete or hard-delete a single diagnostic photo by its id.

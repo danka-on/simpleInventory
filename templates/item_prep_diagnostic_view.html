@@ -32,6 +32,9 @@
     .img-actions{display:flex;justify-content:space-between;align-items:center;margin-top:4px}
     .link{color:#2980b9;text-decoration:none}
     .link:hover{text-decoration:underline}
+  /* Delete overlay for photos */
+  .thumb-wrap .del-photo{position:absolute;top:6px;right:6px;background:#e74c3c;color:#fff;border:none;border-radius:50%;width:26px;height:26px;line-height:26px;text-align:center;cursor:pointer;font-weight:700}
+  .thumb-wrap .del-photo:hover{background:#c0392b}
     /* Modal */
     .modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:9999;align-items:center;justify-content:center}
     .modal .inner{max-width:90vw;max-height:90vh}
@@ -99,7 +102,7 @@
     </div>
   </div>
 
-  <div class="card">
+  <div class="card" id="photosSection">
     <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap">
       <h3 style="margin:0">Photos</h3>
       <div style="display:flex; gap:8px; align-items:center">
@@ -107,11 +110,17 @@
         <button type="button" class="btn btn-danger" id="btnDeleteAll">Delete All</button>
       </div>
     </div>
+    <!-- Photo upload controls at top of Photos card -->
+    <div style="display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap">
+      <input type="file" id="uploadPhotosInput" accept="image/*" multiple style="flex:1;min-width:220px">
+      <span id="uploadStatus" class="muted" style="display:none">Uploading...</span>
+    </div>
     {% if images and images|length > 0 %}
-    <div class="grid">
+    <div class="grid" id="photosGrid">
       {% for im in images %}
         {% set src = url_for('static', filename=im.image_path) %}
         <div class="thumb-wrap" data-id="{{ im.id }}" style="position:relative">
+          <button class="del-photo" data-id="{{ im.id }}" title="Delete photo">✕</button>
           <img class="thumb" src="{{ src }}" alt="photo" data-src="{{ src }}">
         </div>
       {% endfor %}
@@ -268,7 +277,7 @@
       });
     })();
 
-    // Per-photo delete buttons (red X overlays)
+    // Per-photo delete buttons (red X overlays) with event delegation
     (function(){
       async function deletePhoto(id, btn){
         if(!confirm('Delete this photo? This will move it to trash.')) return false;
@@ -285,7 +294,7 @@
           const wrap = document.querySelector('.thumb-wrap[data-id="'+id+'"]');
           if(wrap) wrap.remove();
           // if no more thumbs, show message
-          const grid = document.querySelector('.grid');
+          const grid = document.getElementById('photosGrid');
           if(grid && grid.querySelectorAll('.thumb-wrap').length===0){
             const msg = document.createElement('div'); msg.className='muted'; msg.textContent='No photos attached.';
             grid.replaceWith(msg);
@@ -293,12 +302,12 @@
           return true;
         }catch(e){ alert('Error: '+e); btn.disabled=false; btn.textContent='✕'; return false; }
       }
-      document.querySelectorAll('.del-photo').forEach(btn=>{
-        btn.addEventListener('click', (ev)=>{
-          ev.preventDefault(); ev.stopPropagation();
-          const id = btn.getAttribute('data-id');
-          deletePhoto(id, btn);
-        });
+      document.addEventListener('click', (ev)=>{
+        const btn = ev.target.closest('.del-photo');
+        if(!btn) return;
+        ev.preventDefault(); ev.stopPropagation();
+        const id = btn.getAttribute('data-id');
+        deletePhoto(id, btn);
       });
     })();
 
@@ -376,6 +385,7 @@
         const j = await res.json();
         if(!j.success) return;
         const container = document.getElementById('notesContainer');
+        if(!container) return;
         container.innerHTML = '';
         const notes = j.notes || [];
         if(notes.length === 0){
@@ -444,13 +454,102 @@
       return div.innerHTML;
     }
 
-    document.getElementById('addNoteBtn').addEventListener('click', addNote);
-    document.getElementById('newNoteInput').addEventListener('keydown', (e)=>{
-      if(e.key === 'Enter'){ e.preventDefault(); addNote(); }
-    });
+    (function(){
+      const addBtn = document.getElementById('addNoteBtn');
+      const noteInput = document.getElementById('newNoteInput');
+      if(addBtn) addBtn.addEventListener('click', addNote);
+      if(noteInput) noteInput.addEventListener('keydown', (e)=>{
+        if(e.key === 'Enter'){ e.preventDefault(); addNote(); }
+      });
+    })();
 
     // Load notes on page load
     window.addEventListener('DOMContentLoaded', loadNotes);
+
+    // Upload photos handling (auto-upload on file selection)
+    (function(){
+      const input = document.getElementById('uploadPhotosInput');
+      const statusEl = document.getElementById('uploadStatus');
+      if(!input) return;
+      function showStatus(on){ if(!statusEl) return; statusEl.style.display = on ? 'inline' : 'none'; }
+      async function doUpload(){
+        const files = Array.from(input.files || []);
+        if(files.length === 0){ return; }
+        try{
+          input.disabled = true; showStatus(true);
+          const fd = new FormData();
+          files.forEach(f=> fd.append('photos[]', f));
+          const res = await fetch('/api/items_prep/diagnostic/{{ upc }}/photos', { method:'POST', body: fd });
+          const j = await res.json().catch(()=>({success:false,error:'Invalid response'}));
+          if(!(j && j.success)){
+            alert('Upload failed: ' + (j && j.error || 'unknown'));
+            input.disabled = false; showStatus(false);
+            return;
+          }
+          // Ensure photos grid exists
+          let grid = document.getElementById('photosGrid');
+          const section = document.getElementById('photosSection');
+          if(!grid && section){
+            const muted = section.querySelector('.muted');
+            if(muted) muted.remove();
+            grid = document.createElement('div');
+            grid.className = 'grid'; grid.id = 'photosGrid';
+            section.appendChild(grid);
+          }
+          // append new thumbnails
+          const images = j.images || [];
+          images.forEach(im=>{
+            const rel = im.image_path || im.path || '';
+            if(!rel) return;
+            const src = '/static/' + rel + '?t=' + Date.now();
+            const wrap = document.createElement('div');
+            wrap.className = 'thumb-wrap';
+            wrap.setAttribute('data-id', im.id);
+            wrap.style.position = 'relative';
+            const del = document.createElement('button');
+            del.className = 'del-photo';
+            del.setAttribute('data-id', im.id);
+            del.title = 'Delete photo';
+            del.textContent = '✕';
+            const img = document.createElement('img');
+            img.className = 'thumb'; img.src = src; img.setAttribute('data-src', src);
+            img.alt = 'photo';
+            img.addEventListener('click', ()=>{
+              const modal = document.getElementById('imgModal');
+              const modalImg = document.getElementById('modalImg');
+              const modalDl = document.getElementById('modalDownload');
+              modalImg.src = src; modalDl.href = src; modal.style.display='flex';
+            });
+            wrap.appendChild(del);
+            wrap.appendChild(img);
+            if(grid) grid.prepend(wrap); // newest first
+          });
+          // Recompute quality badges for the newly added images
+          setTimeout(()=>{
+            document.querySelectorAll('#photosGrid .thumb-wrap').forEach(w=>{
+              const img = w.querySelector('img.thumb');
+              if(!img) return;
+              const existing = w.querySelector('.badge-quality');
+              if(existing) existing.remove();
+              function labelFor(wi, hi){ const m=Math.max(wi||0,hi||0); if(m<=900) return 'LOW'; if(m<=2200) return 'MED'; return 'HIGH'; }
+              function apply(){
+                const q = labelFor(img.naturalWidth, img.naturalHeight);
+                const badge = document.createElement('span');
+                badge.className = 'badge-quality'; badge.textContent = q; w.appendChild(badge);
+              }
+              if(img.complete && img.naturalWidth){ apply(); }
+              else { img.addEventListener('load', apply, { once: true }); }
+            });
+          }, 50);
+        }catch(e){
+          alert('Upload error: ' + e);
+        } finally {
+          input.value = '';
+          input.disabled = false; showStatus(false);
+        }
+      }
+      input.addEventListener('change', doUpload);
+    })();
 
     // Location functionality
     async function loadLocation(){
@@ -462,6 +561,7 @@
         if(j.success && (j.location || j.pictureposition)){
           const row = document.getElementById('locationRow');
           const text = document.getElementById('locationText');
+          if(!row || !text) return;
           if(j.pictureposition){
             text.textContent = 'Picture Position (click to view)';
             text.style.cursor = 'pointer';
@@ -500,11 +600,15 @@
     window.addEventListener('DOMContentLoaded', loadLocation);
 
     // Position button functionality
-    document.getElementById('setPositionBtn').addEventListener('click', ()=>{
-      const upc = '{{ upc }}'.trim();
-      const currentUrl = window.location.href;
-      window.location.href = `/position?for_diagnostic=${encodeURIComponent(upc)}&return=${encodeURIComponent(currentUrl)}`;
-    });
+    (function(){
+      const btn = document.getElementById('setPositionBtn');
+      if(!btn) return;
+      btn.addEventListener('click', ()=>{
+        const upc = '{{ upc }}'.trim();
+        const currentUrl = window.location.href;
+        window.location.href = `/position?for_diagnostic=${encodeURIComponent(upc)}&return=${encodeURIComponent(currentUrl)}`;
+      });
+    })();
   </script>
 </body>
 </html>
