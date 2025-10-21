@@ -834,6 +834,11 @@ def api_bol_items():
         import_date = (request.args.get('import_date') or '').strip()
         q = (request.args.get('q') or '').strip()
         status_filter = (request.args.get('status') or '').strip().lower()
+        page = int(request.args.get('page', 1))
+        limit = int(request.args.get('limit', 25))
+        if page < 1: page = 1
+        if limit < 1 or limit > 100: limit = 25
+        offset = (page - 1) * limit
         print(f"[api_bol_items] Filters - lot: '{lot}', import_date: '{import_date}', q: '{q}', status_filter: '{status_filter}'")
         conn = sqlite3.connect('bol.db')
         conn.row_factory = sqlite3.Row
@@ -846,10 +851,11 @@ def api_bol_items():
         _ensure_items_prep_tables()
         cur.execute("PRAGMA table_info(bol_items)")
         cols = [r[1] for r in cur.fetchall()]
-        has_temporary = 'temporary' in cols
+        has_temporary = any(c.lower() == 'temporary' for c in cols)
         where = []
         params = []
-        if lot:
+        # Treat 'all' or 'all lots' as no lot filter
+        if lot and lot.lower() not in ('all', 'all lots'):
             where.append('b.lot_number = ?')
             params.append(lot)
         if import_date:
@@ -859,6 +865,7 @@ def api_bol_items():
             where.append('(b.upc LIKE ? COLLATE NOCASE OR b.item_description LIKE ? COLLATE NOCASE)')
             like = f"%{q}%"
             params.extend([like, like])
+        # Build WHERE clause only when we actually have conditions
         where_sql = (' WHERE ' + ' AND '.join(where)) if where else ''
         # Build sort
         order_sql = ' ORDER BY '
@@ -876,18 +883,22 @@ def api_bol_items():
             # date_desc default
             order_sql += "b.import_date DESC, b.id DESC"
         # Left join items_prep_status to include status
-        # Build the WHERE clause combining temporary filter and other conditions
-        temp_condition = '(b.temporary IS NULL OR b.temporary = 0)' if has_temporary else '1=1'
-        all_conditions = [temp_condition] + where
-        where_clause = ' WHERE ' + ' AND '.join(all_conditions)
+        # Use the computed where_sql which may be empty
+        # Get total count
+        count_sql = 'SELECT COUNT(*) FROM bol_items b LEFT JOIN items_prep_status s ON s.upc = b.upc ' + where_sql
+        cur.execute(count_sql, params)
+        total = cur.fetchone()[0]
         
         sql = (
-            'SELECT b.id, b.upc, b.item_description, b.image_url, b.lot_number, b.bol_number, b.import_date, b.list_status, '
+            'SELECT b.id, b.upc, b.item_description, b.image_url, b.lot_number, b.bol_number, b.import_date, b.list_status, ' +
+            ('b.temporary, ' if has_temporary else '') +
             's.status as prep_status, s.reason as prep_reason, s.note as prep_note, s.updated_at as prep_updated_at '
             'FROM bol_items b '
             'LEFT JOIN items_prep_status s ON s.upc = b.upc '
-            + where_clause + order_sql
+            + where_sql + order_sql
         )
+        sql += ' LIMIT ? OFFSET ?'
+        params.extend([limit, offset])
         print(f"[api_bol_items] SQL: {sql}")
         print(f"[api_bol_items] Params: {params}")
         cur.execute(sql, params)
@@ -954,11 +965,32 @@ def api_bol_items():
                 'last_edited': last_edited,
                 'defect': (r.get('prep_reason') or ''),
                 'status': (r.get('prep_status') or 'unchecked'),
-                'list_status': (r.get('list_status') or '')
+                'list_status': (r.get('list_status') or ''),
+                'temporary': r.get('temporary')
             })
-        return jsonify({'results': results})
+        return jsonify({'results': results, 'total': total, 'page': page, 'limit': limit})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/bulk_delete_bol_items', methods=['POST'])
+def api_bulk_delete_bol_items():
+    """Delete selected BOL items, only if they are temporary (duplicate) entries."""
+    try:
+        data = request.get_json() or {}
+        ids = data.get('ids', [])
+        if not ids:
+            return jsonify({'success': False, 'error': 'No ids provided'}), 400
+        conn = sqlite3.connect('bol.db')
+        cur = conn.cursor()
+        # Only delete if temporary = 1
+        placeholders = ','.join('?' for _ in ids)
+        cur.execute(f'DELETE FROM bol_items WHERE id IN ({placeholders}) AND temporary = 1', ids)
+        deleted = cur.rowcount
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True, 'deleted': deleted})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/bol_lots', methods=['GET'])
 def api_bol_lots():
@@ -971,13 +1003,25 @@ def api_bol_lots():
         if not cur.fetchone():
             conn.close()
             return jsonify({'lots': []})
-        sql = (
-            "SELECT lot_number, MAX(import_date) AS import_date "
-            "FROM bol_items "
-            "WHERE TRIM(COALESCE(lot_number,'')) <> '' "
-            "GROUP BY lot_number "
-            "ORDER BY import_date DESC"
-        )
+        cur.execute("PRAGMA table_info(bol_items)")
+        cols = [r[1] for r in cur.fetchall()]
+        has_temporary = any(c.lower() == 'temporary' for c in cols)
+        if has_temporary:
+            sql = (
+                "SELECT lot_number, MAX(import_date) AS import_date "
+                "FROM bol_items "
+                "WHERE (temporary IS NULL OR temporary = 0) AND TRIM(COALESCE(lot_number,'')) <> '' "
+                "GROUP BY lot_number "
+                "ORDER BY import_date DESC"
+            )
+        else:
+            sql = (
+                "SELECT lot_number, MAX(import_date) AS import_date "
+                "FROM bol_items "
+                "WHERE TRIM(COALESCE(lot_number,'')) <> '' "
+                "GROUP BY lot_number "
+                "ORDER BY import_date DESC"
+            )
         cur.execute(sql)
         lots = []
         for r in cur.fetchall():

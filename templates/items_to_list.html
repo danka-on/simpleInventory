@@ -30,6 +30,9 @@
   <div class="top">
     <a href="/"><button class="btn btn-danger">Back</button></a>
     <h2>Item Manager</h2>
+    <button class="btn" id="select-btn">Select</button>
+    <button class="btn btn-danger" id="delete-selected" style="display:none">Delete Selected</button>
+    <label id="select-all-label" style="margin-left:10px;display:none"><input type="checkbox" id="select-all"> Select All</label>
     <div style="width:100px"></div>
   </div>
 
@@ -131,18 +134,26 @@ async function loadItems(){
   if(q) params.set('q', q);
   if(sort) params.set('sort', sort);
   if(status) params.set('status', status);
+  params.set('page', currentPage);
+  params.set('limit', currentLimit);
   // Radio value logic: '' = all, 'listed' or 'not_listed'
   if(listedVal === 'listed') params.set('status', 'listed');
   else if(listedVal === 'not_listed') params.set('status', 'not_listed');
   const resp = await fetch('/api/bol_items?'+params.toString());
   const j = await resp.json();
   let results = j.results||[];
+  const total = j.total || 0;
+  const page = j.page || 1;
+  currentPage = page;
+  const limit = j.limit || 25;
+  currentLimit = limit;
   // Client-side defect filtering (server does not yet support defect filter)
   if(defectFilter){
     const df = defectFilter.toLowerCase();
     results = results.filter(r => (r.defect||'').toString().toLowerCase() === df);
   }
   render(results);
+  renderPagination(total, page, limit);
 }
 
 // Format a timestamp into Eastern Time like: 2025-10-18 9:20am
@@ -196,7 +207,9 @@ function formatLastEdited(raw){
 function render(results){
   const container = document.getElementById('results');
   if(!results.length){ container.innerHTML = '<div class="small-muted">No items</div>'; return; }
-  let html = '<table><thead><tr><th>Info</th><th>Status</th><th>Defect</th><th>Pics</th><th>Title</th><th>UPC</th><th>List Status</th><th>Actions</th><th>Last Edited</th></tr></thead><tbody>';
+  let html = '<table><thead><tr>';
+  if (selectMode) html += '<th>Select</th>';
+  html += '<th>Info</th><th>Status</th><th>Defect</th><th>Pics</th><th>Title</th><th>UPC</th><th>List Status</th><th>Actions</th><th>Last Edited</th></tr></thead><tbody>';
   results.forEach(r=>{
     const title = esc(r.title||'');
     const img = esc(r.image||'');
@@ -219,8 +232,11 @@ function render(results){
     const picsCount = (r.pics_count || 0);
     const picsBtn = `<button type="button" class="btn btn-sm pics-count" data-upc="${upc}" title="View photos">${picsCount}</button>`;
 
-    html += `<tr>`+
-      `<td style="width:64px;text-align:center">${diagLink}</td>`+
+    html += `<tr>`;
+    if (selectMode) {
+      html += `<td><input type="checkbox" class="item-checkbox" data-id="${r.id}"></td>`;
+    }
+    html += `<td style="width:64px;text-align:center">${diagLink}</td>`+
       `<td><div style="display:flex;flex-direction:column;gap:4px;align-items:flex-start">`+
             `<div>${pill}</div>`+
           `</div></td>`+
@@ -235,6 +251,14 @@ function render(results){
   });
   html += '</tbody></table>';
   container.innerHTML = html;
+  // Add select all listener
+  const selectAllEl = document.getElementById('select-all');
+  if (selectAllEl) {
+    selectAllEl.addEventListener('change', (e) => {
+      const checked = e.target.checked;
+      document.querySelectorAll('.item-checkbox').forEach(cb => cb.checked = checked);
+    });
+  }
   document.querySelectorAll('.img-link').forEach(el=> el.addEventListener('click', onOpenImg));
   document.querySelectorAll('.diag-link, button.diag-link').forEach(el=> el.addEventListener('click', onOpenDiag));
   document.querySelectorAll('.btn-list').forEach(el=> el.addEventListener('click', onMarkListed));
@@ -422,6 +446,102 @@ setFiltersFromURL();
 loadLots().then(loadItems);
 // Trigger load on Enter in search
 document.getElementById('filter-q').addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ e.preventDefault(); loadItems(); } });
+
+// Select mode and delete handlers
+let selectMode = false;
+let currentPage = 1;
+let currentLimit = 25;
+
+document.getElementById('select-btn').addEventListener('click', () => {
+  selectMode = !selectMode;
+  document.getElementById('select-btn').textContent = selectMode ? 'Cancel Select' : 'Select';
+  document.getElementById('delete-selected').style.display = selectMode ? 'inline-block' : 'none';
+  document.getElementById('select-all-label').style.display = selectMode ? 'inline' : 'none';
+  document.getElementById('select-all').checked = false;
+  loadItems();
+});
+
+document.getElementById('delete-selected').addEventListener('click', async () => {
+  const checked = document.querySelectorAll('.item-checkbox:checked');
+  const ids = Array.from(checked).map(cb => cb.dataset.id);
+  if (!ids.length) return alert('No items selected');
+  if (!confirm(`Delete ${ids.length} selected items?`)) return;
+  try {
+    const resp = await fetch('/api/bulk_delete_bol_items', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ids})});
+    const j = await resp.json();
+    if (j.success) {
+      alert(`Deleted ${j.deleted} items`);
+      loadItems();
+    } else {
+      alert('Error: ' + j.error);
+    }
+  } catch (e) {
+    alert('Error: ' + e);
+  }
+});
+
+function renderPagination(total, page, limit) {
+  const totalPages = Math.ceil(total / limit);
+  let html = '';
+  if (totalPages > 1) {
+    html += '<div style="margin-top:20px;text-align:center">';
+    if (page > 1) html += `<button class="btn" onclick="changePage(${page-1})">Prev</button>`;
+    for (let p = Math.max(1, page-2); p <= Math.min(totalPages, page+2); p++) {
+      html += `<button class="btn ${p===page?'btn-primary':''}" onclick="changePage(${p})">${p}</button>`;
+    }
+    if (page < totalPages) html += `<button class="btn" onclick="changePage(${page+1})">Next</button>`;
+    html += '</div>';
+  }
+  let pagDiv = document.getElementById('pagination');
+  if (!pagDiv) {
+    pagDiv = document.createElement('div');
+    pagDiv.id = 'pagination';
+    document.getElementById('results').appendChild(pagDiv);
+  }
+  pagDiv.innerHTML = html;
+}
+
+function changePage(p) {
+  currentPage = p;
+  loadItems();
+}
+
+// Update loadItems to include page and limit
+async function loadItems(){
+  const lot = document.getElementById('filter-lot').value.trim();
+  const q = document.getElementById('filter-q').value.trim();
+  const sort = document.getElementById('sort-select').value;
+  const status = document.getElementById('status-select').value;
+  const defectFilter = (document.getElementById('filter-defect') && document.getElementById('filter-defect').value) || '';
+  // Determine listed/not_listed filter from the radio group
+  const listedRadio = document.querySelector('input[name="filter_listed_radio"]:checked');
+  const listedVal = listedRadio ? (listedRadio.value || '') : '';
+  const params = new URLSearchParams();
+  if(lot) params.set('lot', lot);
+  if(q) params.set('q', q);
+  if(sort) params.set('sort', sort);
+  if(status) params.set('status', status);
+  params.set('page', currentPage);
+  params.set('limit', currentLimit);
+  // Radio value logic: '' = all, 'listed' or 'not_listed'
+  if(listedVal === 'listed') params.set('status', 'listed');
+  else if(listedVal === 'not_listed') params.set('status', 'not_listed');
+  const resp = await fetch('/api/bol_items?'+params.toString());
+  const j = await resp.json();
+  let results = j.results||[];
+  const total = j.total || 0;
+  const page = j.page || 1;
+  currentPage = page;
+  const limit = j.limit || 25;
+  currentLimit = limit;
+  // Client-side defect filtering (server does not yet support defect filter)
+  if(defectFilter){
+    const df = defectFilter.toLowerCase();
+    results = results.filter(r => (r.defect||'').toString().toLowerCase() === df);
+  }
+  render(results);
+  renderPagination(total, page, limit);
+}
 
 
 </script>
