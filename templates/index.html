@@ -78,6 +78,13 @@
             padding: 0;
             min-height: 100vh;
         }
+        body.loading {
+            opacity: 0;
+        }
+        body.loaded {
+            opacity: 1;
+            transition: opacity 0.2s ease-in;
+        }
         .container {
             max-width: 480px;
             margin: 0 auto;
@@ -209,7 +216,7 @@
         }
     </style>
 </head>
-<body>
+<body class="loading">
     <div class="container">
 
         <div class="main-actions" style="margin-bottom:12px;">
@@ -543,7 +550,7 @@ function renderSoldOrders(orders) {
 }
 function fetchAndShowSoldOrders(days) {
     // First, fetch new sold orders for the given days
-    fetch('/get-sold-orders', {
+    return fetch('/get-sold-orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ days })
@@ -551,14 +558,14 @@ function fetchAndShowSoldOrders(days) {
     .then(r => r.json())
     .then(data => {
         // After fetching, load and display the sold orders
-        loadSoldOrders(days);
+        return loadSoldOrders(days);
     });
 }
 function loadSoldOrders(days, force = false) {
     if (!isSoldOrdersTabActive && !force) return;
     
     days = days || parseInt(document.getElementById('sold-orders-days').value) || 2;
-    fetch(`/sold-orders?days=${days}`)
+    return fetch(`/sold-orders?days=${days}`)
         .then(r => r.json())
         .then(renderSoldOrders);
 }
@@ -606,8 +613,17 @@ window.addEventListener('DOMContentLoaded', function() {
     // Set up tab functionality
     setupTabs();
     
-    // On load, fetch and show last 48 hours (2 days)
-    fetchAndShowSoldOrders(2);
+    // On load, fetch and show last 48 hours (2 days), then reveal the page
+    fetchAndShowSoldOrders(2).then(() => {
+        // Remove loading class and add loaded class to fade in the page
+        document.body.classList.remove('loading');
+        document.body.classList.add('loaded');
+    }).catch((error) => {
+        console.error('Error loading orders:', error);
+        // Still show the page even if there's an error
+        document.body.classList.remove('loading');
+        document.body.classList.add('loaded');
+    });
     
     // Set up the sold orders button click handler
     const soldOrdersBtn = document.getElementById('get-sold-orders-btn');
