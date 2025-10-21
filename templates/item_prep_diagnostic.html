@@ -473,9 +473,17 @@
           const meta = document.getElementById('existingMeta');
           card.style.display = '';
           // Friendly updated timestamp (e.g., 2025-10-18 6:30am)
+          function parseISO(s){
+            if(!s) return new Date(NaN);
+            try{
+              let str = String(s).trim();
+              if(/\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(str) && !(/[zZ]|[+-]\d{2}:?\d{2}$/.test(str))){ str = str.replace(' ','T'); if(!str.endsWith('Z')) str = str + 'Z'; }
+              return new Date(str);
+            }catch(e){ return new Date(NaN); }
+          }
           function fmtFriendly(iso){
             try{
-              const d = new Date(iso);
+              const d = parseISO(iso);
               if(isNaN(d.getTime())) return iso;
               const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', year:'numeric', month:'2-digit', day:'2-digit', hour:'numeric', minute:'2-digit', hour12:true }).formatToParts(d);
               const vals = {}; parts.forEach(p=> vals[p.type]=p.value);

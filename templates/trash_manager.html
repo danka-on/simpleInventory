@@ -105,7 +105,11 @@ function fmtET(iso){
   if(!iso) return '';
   try{
     const d = new Date(iso + (iso.endsWith('Z')? '': 'Z'));
-    return d.toLocaleString('en-US', { timeZone: 'America/New_York' });
+    const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', year:'numeric', month:'2-digit', day:'2-digit', hour:'numeric', minute:'2-digit', hour12:true }).formatToParts(d);
+    const vals = {}; parts.forEach(p=> vals[p.type] = p.value);
+    const year = vals.year || d.getFullYear(); const month = vals.month || String(d.getMonth()+1).padStart(2,'0'); const day = vals.day || String(d.getDate()).padStart(2,'0');
+    let hour = vals.hour || String(d.getHours()).padStart(2,'0'); let minute = vals.minute || String(d.getMinutes()).padStart(2,'0'); const ampm = (vals.dayPeriod||'').toLowerCase(); hour = String(hour).replace(/^0/, '');
+    return `${year}-${month}-${day} ${hour}:${minute}${ampm}`;
   }catch(e){ return iso; }
 }
 
