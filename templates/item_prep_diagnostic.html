@@ -386,6 +386,7 @@
             const noteVal = (document.querySelector('textarea[name=note]') && document.querySelector('textarea[name=note]').value) || '';
             await fetch('/api/items_prep/status', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ upc: '{{ upc }}', status: statusVal, reason: reasonVal, note: noteVal }) });
           }catch(e){ /* ignore status save errors */ }
+          diagnosticCompleted = true; // Mark as completed to prevent cleanup
           msg.textContent='Saved diagnostic';
           // If a return URL was provided in query params, go back to it preserving filters
           try{
@@ -523,6 +524,47 @@
       }catch(e){ /* ignore */ }
     });
 
+    // Check if this is a temporary entry and set up cleanup on exit
+    let isTemporaryEntry = false;
+    let diagnosticCompleted = false;
+    window.addEventListener('DOMContentLoaded', async ()=>{
+      try{
+        const upc = '{{ upc }}'.trim();
+        if(!upc) return;
+        const r = await fetch(`/api/bol_lookup?upc=${encodeURIComponent(upc)}`);
+        const j = await r.json();
+        if(j.found && j.item && j.item.temporary){
+          isTemporaryEntry = true;
+        }
+      }catch(e){ /* ignore */ }
+    });
+
+    // Clean up temporary entry if user exits without completing
+    window.addEventListener('beforeunload', ()=>{
+      if(isTemporaryEntry && !diagnosticCompleted){
+        // Use sendBeacon for reliable cleanup on page unload
+        const upc = '{{ upc }}'.trim();
+        if(upc){
+          navigator.sendBeacon('/api/cleanup_temporary_entry', JSON.stringify({upc: upc}));
+        }
+      }
+    });
+
+    // Auto-select "bad" status if accessed via "Bad → Diagnostic" button
+    window.addEventListener('DOMContentLoaded', ()=>{
+      try{
+        const params = new URLSearchParams(window.location.search);
+        const from = params.get('from');
+        if(from === 'bad'){
+          const statusSel = document.getElementById('diag-status');
+          if(statusSel){
+            statusSel.value = 'bad';
+            updateStatusPill('bad');
+          }
+        }
+      }catch(e){ /* ignore */ }
+    });
+
     // Reset diagnostic: set unchecked, unlist, delete photos (with warning)
     document.getElementById('resetBtn').addEventListener('click', async ()=>{
       const upc = '{{ upc }}'.trim(); if(!upc) return;
@@ -551,7 +593,11 @@
         await fetch('/api/items_prep/status', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ upc, status: 'unchecked', reason: '', note: '' })});
         // 3) Unlist
         await fetch('/api/bol_items/list_status', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ upc, list_status: '' })});
-        // 4) Clear UI
+        // 4) If this was a temporary entry, delete it
+        if(isTemporaryEntry){
+          await fetch('/api/cleanup_temporary_entry', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ upc })});
+        }
+        // 5) Clear UI
         reasonBtns.forEach(b=> b.classList.remove('active')); reasonSelect.value='';
         const ta = document.querySelector('textarea[name=note]'); if(ta) ta.value = '';
         // clear pending/captured previews

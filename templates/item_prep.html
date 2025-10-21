@@ -51,7 +51,7 @@
         <img id="thumb" class="thumb" src="" alt="thumb">
         <div>
           <div class="title" id="title"></div>
-          <div class="muted"><span id="upcTxt"></span> • <span id="lotTxt"></span> • <span id="bolTxt"></span></div>
+          <div class="muted"><span id="upcTxt"></span></div>
         </div>
       </div>
       <img id="hero" class="hero" src="" alt="item image" onerror="this.style.display='none'" style="margin-top:10px">
@@ -95,6 +95,8 @@
 
     function esc(s){return String(s||'').replace(/[&<>]/g, c=>({"&":"&amp;","<":"&lt;","<":"&lt;",">":"&gt;"}[c]));}
 
+    let currentUpc = null; // Store the actual UPC returned from server (may be suffixed)
+
     async function lookup(upc){
       const r = await fetch('/api/bol_lookup?upc='+encodeURIComponent(upc));
       const j = await r.json();
@@ -105,15 +107,15 @@
         resEl.classList.add('hidden'); actions.classList.add('hidden');
         statusMsg.innerHTML = '<span class="bad">Not found in BOL</span>';
         setTimeout(()=>{ statusMsg.textContent=''; startScanner(); }, 1000);
+        currentUpc = null;
         return;
       }
       const it = j.item||{};
+      currentUpc = it.upc || upc; // Store the actual UPC (may be suffixed if duplicate)
       document.getElementById('thumb').src = it.image_url || missingThumb();
       const hero = document.getElementById('hero'); hero.style.display=''; hero.src = it.image_url || '';
       document.getElementById('title').textContent = it.item_description || '';
       document.getElementById('upcTxt').textContent = it.upc || '';
-      document.getElementById('lotTxt').textContent = it.lot_number || '';
-      document.getElementById('bolTxt').textContent = it.bol_number || '';
       // Show existing prep status summary
       const prep = it.prep_status || null;
       const sum = document.getElementById('prepSummary');
@@ -135,19 +137,18 @@
 
     document.getElementById('lookupBtn').onclick = ()=>{ const v=document.getElementById('manualUpc').value.trim(); if(v) lookup(v); };
     document.getElementById('goodBtn').onclick = async ()=>{
-      const upc = document.getElementById('manualUpc').value.trim();
-      if(!upc) return;
-      const ok = await setStatus(upc,'good');
+      if(!currentUpc) return;
+      const ok = await setStatus(currentUpc,'good');
       const statusMsg = document.getElementById('statusMsg');
       if(ok){ statusMsg.innerHTML='<span class="ok">Marked GOOD</span>'; } else { statusMsg.innerHTML='<span class="bad">Failed to mark</span>'; }
-      setTimeout(()=>{ statusMsg.textContent=''; document.getElementById('result').classList.add('hidden'); document.getElementById('actions').classList.add('hidden'); document.getElementById('manualUpc').value=''; setupDeviceMode(); }, 600);
+      setTimeout(()=>{ statusMsg.textContent=''; document.getElementById('result').classList.add('hidden'); document.getElementById('actions').classList.add('hidden'); document.getElementById('manualUpc').value=''; currentUpc = null; setupDeviceMode(); }, 600);
     };
 
     document.getElementById('badBtn').onclick = ()=>{
-      const upc = document.getElementById('manualUpc').value.trim(); if(!upc) return; window.location.href = '/item-prep/diagnostic?upc='+encodeURIComponent(upc);
+      if(!currentUpc) return; window.location.href = '/item-prep/diagnostic?upc='+encodeURIComponent(currentUpc)+'&from=bad&return='+encodeURIComponent('/item-prep?forceFocus=1');
     };
 
-    document.getElementById('skipBtn').onclick = ()=>{ document.getElementById('manualUpc').value=''; document.getElementById('result').classList.add('hidden'); document.getElementById('actions').classList.add('hidden'); setupDeviceMode(); };
+    document.getElementById('skipBtn').onclick = ()=>{ document.getElementById('manualUpc').value=''; document.getElementById('result').classList.add('hidden'); document.getElementById('actions').classList.add('hidden'); currentUpc = null; setupDeviceMode(); };
 
     // Device detection similar to barcode.html
     function getDeviceType(){

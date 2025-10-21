@@ -290,10 +290,12 @@ def _ensure_bol_list_status_column():
         cols = [r[1] for r in cur.fetchall()]
         if 'list_status' not in cols:
             cur.execute("ALTER TABLE bol_items ADD COLUMN list_status TEXT")
-            conn.commit()
+        if 'temporary' not in cols:
+            cur.execute("ALTER TABLE bol_items ADD COLUMN temporary INTEGER DEFAULT 0")
+        conn.commit()
         conn.close()
     except Exception as e:
-        print('Failed ensuring list_status column in bol_items:', e)
+        print('Failed ensuring list_status and temporary columns in bol_items:', e)
 
 @app.route('/item-prep')
 def item_prep_page():
@@ -361,6 +363,35 @@ def api_bol_lookup():
                 item['prep_status'] = dict(srow)
         except Exception:
             item['prep_status'] = None
+
+        # Check if UPC already has prep status - if so, create temporary duplicate entry
+        if item.get('prep_status'):
+            conn_check = sqlite3.connect('bol.db')
+            conn_check.row_factory = sqlite3.Row
+            cur_check = conn_check.cursor()
+            # Find next available suffix for temporary entry
+            cur_check.execute("SELECT upc FROM bol_items WHERE upc LIKE ? ESCAPE '\\'", (upc.replace('%', '\\%').replace('_', '\\_') + '%',))
+            existing = [r[0] for r in cur_check.fetchall()]
+            suffix_num = 1
+            while f"{upc}-{suffix_num}" in existing:
+                suffix_num += 1
+            new_upc = f"{upc}-{suffix_num}"
+
+            # Create temporary bol_items entry
+            import datetime
+            cur_check.execute(
+                "INSERT INTO bol_items (upc, item_description, image_url, lot_number, bol_number, import_date, temporary) VALUES (?, ?, ?, ?, ?, ?, 1)",
+                (new_upc, item['item_description'], item['image_url'], item['lot_number'], item['bol_number'], datetime.datetime.utcnow().isoformat())
+            )
+            conn_check.commit()
+            conn_check.close()
+
+            # Return the new temporary entry instead
+            item['upc'] = new_upc
+            item['temporary'] = True
+            # Clear prep_status for the new temporary entry
+            item['prep_status'] = None
+
         return jsonify({'found': True, 'item': item})
     except Exception as e:
         return jsonify({'found': False, 'error': str(e)}), 500
@@ -403,6 +434,14 @@ def api_items_prep_diagnostic():
         note = (request.form.get('note') or '').strip()
         if not upc:
             return jsonify({'success': False, 'error': 'Missing upc'}), 400
+
+        # Mark temporary entry as permanent if it exists
+        conn_temp = sqlite3.connect('bol.db')
+        cur_temp = conn_temp.cursor()
+        cur_temp.execute('UPDATE bol_items SET temporary = 0 WHERE upc = ? COLLATE NOCASE AND temporary = 1', (upc,))
+        conn_temp.commit()
+        conn_temp.close()
+
         # save files under static/items_prep
         from werkzeug.utils import secure_filename
         save_dir = os.path.join(app.root_path, 'static', 'items_prep')
@@ -805,6 +844,9 @@ def api_bol_items():
             return jsonify({'results': []})
         # Ensure prep tables exist for left join and statuses
         _ensure_items_prep_tables()
+        cur.execute("PRAGMA table_info(bol_items)")
+        cols = [r[1] for r in cur.fetchall()]
+        has_temporary = 'temporary' in cols
         where = []
         params = []
         if lot:
@@ -834,12 +876,17 @@ def api_bol_items():
             # date_desc default
             order_sql += "b.import_date DESC, b.id DESC"
         # Left join items_prep_status to include status
+        # Build the WHERE clause combining temporary filter and other conditions
+        temp_condition = '(b.temporary IS NULL OR b.temporary = 0)' if has_temporary else '1=1'
+        all_conditions = [temp_condition] + where
+        where_clause = ' WHERE ' + ' AND '.join(all_conditions)
+        
         sql = (
             'SELECT b.id, b.upc, b.item_description, b.image_url, b.lot_number, b.bol_number, b.import_date, b.list_status, '
             's.status as prep_status, s.reason as prep_reason, s.note as prep_note, s.updated_at as prep_updated_at '
             'FROM bol_items b '
-            'LEFT JOIN items_prep_status s ON s.upc = b.upc'
-            + where_sql + order_sql
+            'LEFT JOIN items_prep_status s ON s.upc = b.upc '
+            + where_clause + order_sql
         )
         print(f"[api_bol_items] SQL: {sql}")
         print(f"[api_bol_items] Params: {params}")
@@ -968,7 +1015,26 @@ def api_bol_items_set_list_status():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
-@app.route('/api/items_prep/diagnostic/<upc>/photos.zip', methods=['GET'])
+@app.route('/api/cleanup_temporary_entry', methods=['POST'])
+def api_cleanup_temporary_entry():
+    """Delete a temporary bol_items entry that was created but not completed."""
+    try:
+        data = request.get_json() or {}
+        upc = _normalize_upc(data.get('upc'))
+        if not upc:
+            return jsonify({'success': False, 'error': 'Missing upc'}), 400
+        
+        conn = sqlite3.connect('bol.db')
+        cur = conn.cursor()
+        # Only delete if it's marked as temporary
+        cur.execute('DELETE FROM bol_items WHERE upc = ? COLLATE NOCASE AND temporary = 1', (upc,))
+        deleted = cur.rowcount
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True, 'deleted': deleted})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 def api_items_prep_diagnostic_photos_zip(upc):
     """Bundle all diagnostic photos for a UPC into a zip and return as attachment."""
     try:
