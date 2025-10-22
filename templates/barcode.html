@@ -634,6 +634,8 @@
                 setTimeout(function() {
                     document.getElementById('scan_form').submit();
                 }, 500);
+                // Auto-clear the input after processing
+                barcodeInput.value = '';
             });
         }
 

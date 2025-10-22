@@ -461,6 +461,8 @@ async function loadLots(){
 // initial load: restore filters, populate lots, then load
 setFiltersFromURL();
 loadLots().then(loadItems);
+// Focus the search input on load
+document.getElementById('filter-q').focus();
 // Trigger load on Enter in search
 document.getElementById('filter-q').addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ e.preventDefault(); loadItems(); } });
 
@@ -591,6 +593,8 @@ async function loadItems(){
   }
   render(results);
   renderPagination(total, page, limit);
+  // Auto-clear the search input after loading items
+  document.getElementById('filter-q').value = '';
 }
 
 // per-page selector wiring

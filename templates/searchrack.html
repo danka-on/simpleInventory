@@ -182,6 +182,8 @@ async function doSearch(){
     const activeLabel = dbs.map(d=>DB_LABELS[d]).join(', ');
     document.getElementById('active-dbs').textContent = `${activeLabel} — ${_allResults.length} results`;
     renderPagedResults();
+    // Auto-clear the search input after search completes
+    document.getElementById('search-input').value = '';
 }
 
 function renderPagedResults(){

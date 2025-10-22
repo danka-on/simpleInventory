@@ -108,6 +108,8 @@
         statusMsg.innerHTML = '<span class="bad">Not found in BOL</span>';
         setTimeout(()=>{ statusMsg.textContent=''; startScanner(); }, 1000);
         currentUpc = null;
+        // Auto-clear the input after lookup completes
+        document.getElementById('manualUpc').value = '';
         return;
       }
       const it = j.item||{};
@@ -127,6 +129,8 @@
       }
       resEl.classList.remove('hidden'); actions.classList.remove('hidden');
       statusMsg.textContent='';
+      // Auto-clear the input after lookup completes
+      document.getElementById('manualUpc').value = '';
     }
 
     async function setStatus(upc, status){
