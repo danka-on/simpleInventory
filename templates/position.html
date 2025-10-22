@@ -273,7 +273,7 @@
                         }).catch(err=>{ console.error('Failed to set rack location', err); setTimeout(()=>{ window.location.href = '/searchrack'; }, 600); });
                     } else {
                         // normal flow: submit form to /submitposition
-                        setTimeout(() => { document.getElementById("scan_form").submit(); }, 500);
+                        setTimeout(() => { document.getElementById("scan_form").submit(); }, 250);
                     }
             },
             (error) => {}
@@ -490,7 +490,7 @@
                         setTimeout(()=>{ window.location.href = '/searchrack'; }, 600);
                     }).catch(err=>{ console.error('set location failed',err); setTimeout(()=>{ window.location.href = '/searchrack'; }, 600); });
                 } else {
-                    setTimeout(function() { document.getElementById('scan_form').submit(); }, 400);
+                    setTimeout(function() { document.getElementById('scan_form').submit(); }, 200);
                 }
                 if (flashMsg) {
                     flashMsg.style.display = 'none';

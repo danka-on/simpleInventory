@@ -131,32 +131,24 @@
                 sessionStorage.setItem('pictureposition_path', result.path);
                 sessionStorage.setItem('pictureposition_upload_status', 'done');
                 statusDiv.textContent = 'Upload complete.';
-                // change confirm button text to Continue
-                confirmBtn.textContent = 'Continue';
-                // If page was opened in edit mode, after upload we should persist the pictureposition to searchRack and return
+                // Immediately redirect after upload, no extra click
                 const params = new URLSearchParams(window.location.search);
                 const editId = params.get('edit_rack_id');
                 const forDiagnostic = params.get('for_diagnostic');
                 const returnUrl = params.get('return');
-                
                 if(editId){
-                    // POST to API to set pictureposition and mark ITEM_POSITION as 'picture'
                     fetch('/api/set_rack_location', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id: editId, pictureposition: result.path})})
                         .then(r=>r.json())
                         .then(j=>{
-                            // Clear saved picture state used during the upload
                             sessionStorage.removeItem('pictureposition_path');
                             sessionStorage.removeItem('pictureposition_upload_status');
-                            // After updating, go back to searchrack. searchrack will restore UI state from sessionStorage
                             window.location.href = '/searchrack';
                         }).catch(e=>{
                             console.error('Failed to set pictureposition', e);
-                            // still navigate back but include error flag
                             window.location.href = '/searchrack?pic_error=1';
                         });
                     return;
                 } else if(forDiagnostic){
-                    // Diagnostic mode: save to items_prep and return
                     fetch('/api/items_prep/location', {
                         method:'POST', 
                         headers:{'Content-Type':'application/json'}, 
@@ -177,8 +169,8 @@
                     });
                     return;
                 }
-                // Non-edit mode: continue to barcode flow
-                confirmBtn.onclick = function() { window.location.href = '/barcode?pictureposition=1'; };
+                // Non-edit mode: go directly to barcode flow
+                window.location.href = '/barcode?pictureposition=1';
             } else {
                 sessionStorage.setItem('pictureposition_upload_status', 'error');
                 statusDiv.textContent = 'Upload failed. Please retry or retake.';

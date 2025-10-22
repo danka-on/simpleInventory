@@ -137,10 +137,11 @@
     </form>
 
     <div style="margin: 20px 0; display: flex; flex-direction: column; gap: 15px; width: 100%; max-width: 300px;">
-        <button onclick="restartScanner()" style="background-color: #2196F3; color: white; border: none; padding: 12px; border-radius: 6px; cursor: pointer; font-size: 1.1em; display: flex; align-items: center; justify-content: center; gap: 8px;">
-            <i class="fas fa-sync-alt"></i> Restart Scanner
-        </button>
+        <!-- Scanner action button removed as per new flow -->
     </div>
+    
+    <!-- Hidden input field for scanner to populate -->
+    <input type="text" id="scannerInput" style="position: absolute; left: -9999px;" autocomplete="off" />
     <!-- ZXing Library -->
     <script src="https://unpkg.com/@zxing/library@0.19.1/umd/index.min.js"></script>
     
@@ -301,8 +302,6 @@
             scannedResultInput.value = '';
             scannedResultInput.readOnly = false;
             window.__barcodeSubmitted = false;
-            const restartBtn = document.querySelector('button[onclick="restartScanner()"]');
-            if (restartBtn) restartBtn.disabled = false;
             loadingMessage.style.display = '';
             loadingMessage.textContent = 'Restarting camera...';
             setTimeout(() => {
@@ -310,207 +309,6 @@
             }, 300);
         }
         
-        // Check if the browser supports mediaDevices
-        function hasGetUserMedia() {
-            return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
-        }
-
-        // Check if the browser supports the permissions API
-        async function checkCameraPermission() {
-            if (!navigator.permissions) return null;
-            try {
-                const permissionStatus = await navigator.permissions.query({ name: 'camera' });
-                return permissionStatus.state;
-            } catch (e) {
-                console.warn('Permissions API not supported:', e);
-                return null;
-            }
-        }
-
-        // Show a user-friendly error message
-        function showCameraError(message) {
-            console.error('Camera Error:', message);
-            loadingMessage.textContent = message;
-            loadingMessage.style.color = '#ff4444';
-            
-            // Add a retry button
-            const retryButton = document.createElement('button');
-            retryButton.textContent = 'Retry';
-            retryButton.style.marginTop = '10px';
-            retryButton.style.padding = '8px 16px';
-            retryButton.onclick = initializeCamera;
-            
-            // Clear previous content and add new message with retry button
-            loadingMessage.innerHTML = '';
-            loadingMessage.appendChild(document.createTextNode(message));
-            loadingMessage.appendChild(document.createElement('br'));
-            loadingMessage.appendChild(retryButton);
-        }
-
-        // Debug function to log camera capabilities
-        async function logCameraCapabilities(track) {
-            if (!track || !track.getCapabilities) return;
-            
-            try {
-                const capabilities = track.getCapabilities();
-                const settings = track.getSettings();
-                console.log('Camera Capabilities:', capabilities);
-                console.log('Camera Settings:', settings);
-                
-                // Log supported constraints
-                const supportedConstraints = navigator.mediaDevices.getSupportedConstraints();
-                console.log('Supported Constraints:', supportedConstraints);
-                
-            } catch (e) {
-                console.warn('Could not get camera capabilities:', e);
-            }
-        }
-
-        // Initialize camera with appropriate constraints
-        async function initializeCamera() {
-            console.log('Starting camera initialization...');
-            loadingMessage.textContent = 'Initializing camera...';
-            loadingMessage.style.color = 'white';
-            
-            if (!hasGetUserMedia()) {
-                const errorMsg = 'Your browser does not support camera access. Please try a modern browser like Chrome or Firefox.';
-                console.error(errorMsg);
-                showCameraError(errorMsg);
-                return;
-            }
-
-            // Reset any existing stream
-            if (stream) {
-                stream.getTracks().forEach(track => track.stop());
-                stream = null;
-            }
-
-            try {
-                console.log('Requesting camera access...');
-                
-                // First try with basic constraints
-                const constraints = {
-                    video: {
-                        width: { ideal: 1280 },
-                        height: { ideal: 720 },
-                        facingMode: 'environment'
-                    },
-                    audio: false
-                };
-
-                console.log('Trying with constraints:', JSON.stringify(constraints));
-                
-                // Request camera access
-                const mediaStream = await navigator.mediaDevices.getUserMedia(constraints)
-                    .catch(async (err) => {
-                        console.warn('Error with ideal constraints, trying more permissive...', err);
-                        // Try with minimal constraints
-                        return navigator.mediaDevices.getUserMedia({
-                            video: true,
-                            audio: false
-                        });
-                    });
-
-                console.log('Got media stream:', mediaStream);
-                
-                // Check if we got a video track
-                const videoTracks = mediaStream.getVideoTracks();
-                if (videoTracks.length === 0) {
-                    throw new Error('No video track found in the stream');
-                }
-
-                // Log camera capabilities
-                logCameraCapabilities(videoTracks[0]);
-                
-                // Set up the video element
-                stream = mediaStream;
-                video.srcObject = stream;
-                
-                // Handle video play promise
-                console.log('Attempting to play video...');
-                try {
-                    await video.play();
-                    console.log('Video is playing');
-                    // Show scanning line when video starts playing
-                    document.getElementById('scanningLine').style.display = 'block';
-                } catch (playError) {
-                    console.error('Error playing video:', playError);
-                    // Try again with autoplay attribute
-                    video.setAttribute('autoplay', '');
-                    video.setAttribute('muted', '');
-                    video.setAttribute('playsinline', '');
-                    try {
-                        await video.play();
-                        console.log('Video is playing after retry');
-                        // Show scanning line when video starts playing after retry
-                        document.getElementById('scanningLine').style.display = 'block';
-                    } catch (retryError) {
-                        console.error('Still could not play video:', retryError);
-                        throw new Error('Could not start the camera feed: ' + (retryError.message || 'Unknown error'));
-                    }
-                }
-
-                // Show that camera is ready
-                console.log('Camera is ready, initializing scanner...');
-                loadingMessage.textContent = 'Ready to scan...';
-                
-                // Small delay before initializing scanner to ensure video is displayed
-                setTimeout(async () => {
-                    try {
-                        await initScanner();
-                        loadingMessage.style.display = 'none';
-                    } catch (scannerError) {
-                        console.error('Scanner initialization failed:', scannerError);
-                        showCameraError('Scanner error: ' + (scannerError.message || 'Unknown error'));
-                    }
-                }, 500);
-                
-            } catch (err) {
-                console.error('Camera initialization failed:', err);
-                let errorMessage = 'Failed to access the camera. ';
-                
-                if (err.name === 'NotAllowedError') {
-                    errorMessage = 'Camera access was denied. Please allow camera access in your browser settings and refresh the page.';
-                } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
-                    errorMessage = 'No camera found on this device.';
-                } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
-                    errorMessage = 'The camera is already in use by another application.';
-                } else if (err.name === 'OverconstrainedError' || err.name === 'ConstraintNotSatisfiedError') {
-                    errorMessage = 'The requested camera configuration is not supported. ' + (err.message || '');
-                } else if (err.name === 'NotSupportedError') {
-                    errorMessage = 'Camera access is not supported in this browser. Try Chrome or Firefox on Android, or Safari on iOS.';
-                } else {
-                    errorMessage += 'Error: ' + (err.message || 'Please try again or check your browser settings.');
-                }
-                
-                showCameraError(errorMessage);
-                
-                // Clean up if there was an error after getting the stream
-                if (stream) {
-                    stream.getTracks().forEach(track => track.stop());
-                    stream = null;
-                }
-            }
-        }
-
-        // Fetch allowed UPCs from backend on page load
-        async function fetchAllowedUPCs() {
-            try {
-                const response = await fetch('/get_bol_upcs');
-                const data = await response.json();
-                if (data.upcs) {
-                    allowedUPCs = data.upcs.map(String); // ensure all are strings
-                    upcListLoaded = true;
-                } else {
-                    allowedUPCs = [];
-                    upcListLoaded = false;
-                }
-            } catch (e) {
-                allowedUPCs = [];
-                upcListLoaded = false;
-            }
-        }
-
         // Show spinner/status if upload is in progress, or redirect if error
         function checkPictureUploadStatus() {
             const status = sessionStorage.getItem('pictureposition_upload_status');
@@ -611,8 +409,7 @@
                 var code = this.value.trim();
                 document.getElementById('scanned_result').value = code;
                 sessionStorage.setItem('barcode', code);
-                var greenScreen = document.getElementById('green-screen');
-                if (greenScreen) greenScreen.classList.add('visible');
+                
                 // Play positive beep
                 try {
                     var ctx = window.audioCtx || new (window.AudioContext || window.webkitAudioContext)();
@@ -631,10 +428,14 @@
                         gain.disconnect();
                     };
                 } catch(e) {}
-                setTimeout(function() {
-                    document.getElementById('scan_form').submit();
-                }, 500);
-                // Auto-clear the input after processing
+                
+                // Auto-submit the form
+                const form = document.getElementById('scan_form');
+                if (form) {
+                    form.submit();
+                }
+                
+                // Clear input value after submission
                 barcodeInput.value = '';
             });
         }
@@ -644,6 +445,45 @@
             // Unlock audio on user interaction
             window.addEventListener('touchstart', unlockAudio, { once: true });
             window.addEventListener('mousedown', unlockAudio, { once: true });
+            
+            // Set up scanner input listener
+            const scannerInput = document.getElementById('scannerInput');
+            if (scannerInput) {
+                // Keep focus on scanner input to catch barcode scanner data
+                scannerInput.focus();
+                
+                // Refocus if user clicks elsewhere
+                document.addEventListener('click', () => {
+                    if (document.activeElement !== scannerInput) {
+                        scannerInput.focus();
+                    }
+                });
+                
+                // Listen for Enter key (scanner sends Enter after barcode)
+                scannerInput.addEventListener('keypress', function(e) {
+                    if (e.key === 'Enter' || e.keyCode === 13) {
+                        e.preventDefault();
+                        const code = this.value.trim();
+                        if (code) {
+                            handleBarcodeScan(code);
+                            this.value = ''; // Clear for next scan
+                        }
+                    }
+                });
+                
+                // Also handle paste events (some scanners use paste)
+                scannerInput.addEventListener('paste', function(e) {
+                    e.preventDefault();
+                    const code = (e.clipboardData || window.clipboardData).getData('text').trim();
+                    if (code) {
+                        setTimeout(() => {
+                            handleBarcodeScan(code);
+                            this.value = '';
+                        }, 50);
+                    }
+                });
+            }
+            
             // Add a small delay to ensure the DOM is fully loaded
             var deviceType = getDeviceType();
             if (deviceType !== 'iPad' && deviceType !== 'Android Tablet') {
@@ -655,7 +495,7 @@
             if (window.location.search.includes('pictureposition=1')) {
                 checkPictureUploadStatus();
             }
-            // PERSIST BARCODE: If barcode exists in sessionStorage, pre-fill input
+            // PERSIST BARCODE: If barcode exists in sessionStorage, pre-fill input and update button
             const storedBarcode = sessionStorage.getItem('barcode');
             if (storedBarcode) {
                 scannedResultInput.value = storedBarcode;
@@ -688,29 +528,10 @@
             document.getElementById('scanned_result').value = code;
             sessionStorage.setItem('barcode', code);
             playBeep();
-            const scanBox = document.querySelector('.scan-box');
-            if (scanBox) {
-                scanBox.style.borderColor = '#4CAF50';
-                scanBox.style.boxShadow = '0 0 20px #4CAF50';
-                setTimeout(() => {
-                    scanBox.style.borderColor = 'white';
-                    scanBox.style.boxShadow = '0 0 0 100vmax rgba(0, 0, 0, 0.5)';
-                }, 1000);
-            }
-            if (!window.__barcodeSubmitted) {
-                window.__barcodeSubmitted = true;
-                scannedResultInput.readOnly = true;
-                const restartBtn = document.querySelector('button[onclick="restartScanner()"]');
-                if (restartBtn) restartBtn.disabled = true;
-                if (codeReader) codeReader.reset();
-                setTimeout(() => {
-                    const form = document.getElementById('scan_form');
-                    if (form) {
-                        form.submit();
-                    } else {
-                        console.error('Form element not found');
-                    }
-                }, 200);
+            // Immediately submit the form after scan
+            const form = document.getElementById('scan_form');
+            if (form) {
+                form.submit();
             }
         }
     </script>

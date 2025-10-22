@@ -11,7 +11,7 @@ import xml.dom.minidom as minidom
 
 
 from inventory import find_item  # adjust this to match your actual import
-from DBmanager import ebayStoreDB, addToRack, store_ebay_order, createSearchRackDB, updateSearchRackDB
+from DBmanager import ebayStoreDB, addToRack, store_ebay_order, createSearchRackDB, updateSearchRackDB, addToSearchRack
 from DBmanager import enrich_searchrack_db
 try:
     from BOLextractor import process_bol_excel
@@ -1563,6 +1563,11 @@ def additemtrue():
         item_position_to_store = 'picture' if pictureposition_path else position_code
         addToRack(item_position_to_store, barcode, None, pictureposition_path)
         print(f"Added to rack: position={item_position_to_store}, barcode={barcode}, pictureposition={pictureposition_path}")
+        
+        # Also add to searchRack.db
+        addToSearchRack(item_position_to_store, barcode, None, pictureposition_path)
+        print(f"Added to searchRack: position={item_position_to_store}, barcode={barcode}, pictureposition={pictureposition_path}")
+        
         position_code = None
         barcode = None
         pictureposition_path = None

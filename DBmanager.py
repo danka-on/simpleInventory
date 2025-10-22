@@ -111,6 +111,112 @@ def addToRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITION=Non
     finally:
         conn.close()
 
+def addToSearchRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITION=None):
+    """Add item directly to searchRack.db with enrichment from ebayStore.db and bol.db"""
+    conn = sqlite3.connect('searchRack.db')
+    cursor = conn.cursor()
+    try:
+        # Ensure SEARCHRACK table exists with all columns
+        cursor.execute('''CREATE TABLE IF NOT EXISTS SEARCHRACK (
+            ID INTEGER PRIMARY KEY AUTOINCREMENT,
+            TITLE TEXT,
+            BARCODE TEXT,
+            ITEM_POSITION TEXT,
+            IMAGES TEXT,
+            PICTUREPOSITION TEXT,
+            ITEMID TEXT,
+            QUANTITY INTEGER,
+            CREATED_AT TEXT
+        )''')
+        
+        # Ensure IMAGE column exists (for older databases)
+        try:
+            cursor.execute('PRAGMA table_info(SEARCHRACK)')
+            cols = [r[1] for r in cursor.fetchall()]
+            if 'IMAGE' not in cols:
+                cursor.execute('ALTER TABLE SEARCHRACK ADD COLUMN IMAGE TEXT')
+                conn.commit()
+        except Exception:
+            pass
+        
+        # Get title and other enrichment data
+        title = None
+        itemid = None
+        quantity = None
+        image = None
+        
+        # First try ebayStore.db
+        try:
+            ebay_conn = sqlite3.connect('ebayStore.db')
+            ebay_conn.row_factory = sqlite3.Row
+            ebay_cur = ebay_conn.cursor()
+            ebay_cur.execute("SELECT Title, ItemID, Quantity, Image FROM INVENTORY WHERE UPC = ? COLLATE NOCASE LIMIT 1", (BARCODE,))
+            ebay_row = ebay_cur.fetchone()
+            if ebay_row:
+                title = ebay_row['Title']
+                itemid = ebay_row['ItemID']
+                quantity = ebay_row['Quantity']
+                image = ebay_row['Image']
+            ebay_conn.close()
+        except Exception as e:
+            print(f"Warning: Could not lookup in ebayStore.db: {e}")
+        
+        # If not found in ebayStore, try bol.db
+        if not title:
+            try:
+                bol_conn = sqlite3.connect('bol.db')
+                bol_conn.row_factory = sqlite3.Row
+                bol_cur = bol_conn.cursor()
+                bol_cur.execute('SELECT item_description, image_url FROM bol_items WHERE upc = ? COLLATE NOCASE LIMIT 1', (BARCODE,))
+                bol_row = bol_cur.fetchone()
+                if bol_row:
+                    title = bol_row['item_description']
+                    image = bol_row['image_url']
+                    itemid = BARCODE  # Use barcode as itemid for bol items
+                bol_conn.close()
+            except Exception as e:
+                print(f"Warning: Could not lookup in bol.db: {e}")
+        
+        # Check if same barcode at same location exists
+        cursor.execute("""
+            SELECT ID, QUANTITY FROM SEARCHRACK 
+            WHERE BARCODE = ? COLLATE NOCASE 
+            AND ITEM_POSITION = ? COLLATE NOCASE
+        """, (BARCODE, ITEM_POSITION))
+        existing_same_location = cursor.fetchone()
+        
+        now_iso = datetime.datetime.utcnow().isoformat()
+        
+        if existing_same_location:
+            # Same barcode at same location - increment quantity by 1
+            existing_id, existing_qty = existing_same_location
+            new_qty = (existing_qty or 0) + 1
+            cursor.execute("""
+                UPDATE SEARCHRACK 
+                SET QUANTITY = ?,
+                    IMAGES = COALESCE(?, IMAGES),
+                    PICTUREPOSITION = COALESCE(?, PICTUREPOSITION),
+                    TITLE = COALESCE(?, TITLE),
+                    ITEMID = COALESCE(?, ITEMID),
+                    IMAGE = COALESCE(?, IMAGE)
+                WHERE ID = ?
+            """, (new_qty, IMAGES, PICTUREPOSITION, title, itemid, image, existing_id))
+            action = f"incremented quantity to {new_qty}"
+        else:
+            # Different location or new barcode - create new record
+            cursor.execute("""
+                INSERT INTO SEARCHRACK (TITLE, BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION, ITEMID, QUANTITY, IMAGE, CREATED_AT) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (title, BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION, itemid, 1, image, now_iso))
+            action = "added new entry"
+            
+        conn.commit()
+        print(f"{action} to searchRack: position={ITEM_POSITION}, barcode={BARCODE}, title={title}")
+    except sqlite3.Error as e:
+        print("Error in addToSearchRack:", e)
+    finally:
+        conn.close()
+
 def ebayStoreDB(title, item_id, sku = None, price = None, quantity = None, image = None, List_State = None, Sold_Date = None, List_Date = None, URL = None):
     conn = sqlite3.connect('ebayStore.db')
     cursor = conn.cursor()
