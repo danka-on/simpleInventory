@@ -35,6 +35,39 @@
             to { opacity: 1; }
         }
         
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        
+        @keyframes slideOut {
+            from {
+                transform: translateX(0);
+                opacity: 1;
+            }
+            to {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+        }
+        
+        @keyframes slideUp {
+            from {
+                transform: translateY(20px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+        
         .tab-button {
             background: none;
             border: none;
@@ -229,11 +262,15 @@
 
         <div class="section-card" style="overflow-x: auto;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                <div style="display: flex; gap: 10px;">
+                <div style="display: flex; gap: 10px; align-items: center;">
                     <button class="tab-button active" data-tab="pending">Ready to Ship</button>
                     <button class="tab-button" data-tab="completed">Completed</button>
+                    <span id="pending-count" style="background: #4caf50; color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; font-weight: bold;">0</span>
                 </div>
                 <div style="display: flex; align-items: center; gap: 8px;">
+                    <button id="refresh-orders-btn" title="Refresh orders" style="background: none; border: 1px solid #ddd; padding: 4px 8px; border-radius: 4px; cursor: pointer; display: flex; align-items: center;">
+                        <i class="fas fa-sync-alt" style="font-size: 0.85rem; color: #666;"></i>
+                    </button>
                     <label for="sold-orders-days" style="font-size:0.9rem; white-space: nowrap;">Days:</label>
                     <input type="number" id="sold-orders-days" value="2" min="1" max="120" style="width: 50px; padding: 4px; border: 1px solid #ddd; border-radius: 4px;">
                 </div>
@@ -250,7 +287,13 @@
                                 <th style="padding: 8px; text-align: center; border-bottom: 2px solid #e0e0e0; font-size: 0.85rem; width: 80px;">Status</th>
                             </tr>
                         </thead>
-                        <tbody style="font-size: 0.85rem;"></tbody>
+                        <tbody style="font-size: 0.85rem;">
+                            <tr class="loading-row">
+                                <td colspan="5" style="text-align: center; padding: 20px; color: #666;">
+                                    <i class="fas fa-spinner fa-spin"></i> Loading orders...
+                                </td>
+                            </tr>
+                        </tbody>
                     </table>
                 </div>
             </div>
@@ -268,8 +311,10 @@
                             </tr>
                         </thead>
                         <tbody style="font-size: 0.85rem;">
-                            <tr>
-                                <td colspan="5" style="text-align: center; padding: 20px; color: #666;">No completed orders yet</td>
+                            <tr class="loading-row">
+                                <td colspan="5" style="text-align: center; padding: 20px; color: #666;">
+                                    <i class="fas fa-spinner fa-spin"></i> Loading orders...
+                                </td>
                             </tr>
                         </tbody>
                     </table>
@@ -309,351 +354,478 @@
     </div>
 
 <script>
+// ============================================================================
+// READY TO SHIP - MODERNIZED ORDER MANAGEMENT SYSTEM
+// ============================================================================
+
+// Global state management
+const OrderManager = {
+    orders: new Map(),
+    isLoading: false,
+    currentDays: 2,
+    
+    // Add or update order in cache (normalize ID to string)
+    setOrder(order) {
+        const id = String(order.id);
+        this.orders.set(id, { ...order, id });
+    },
+    
+    // Get order from cache (normalize ID to string)
+    getOrder(id) {
+        return this.orders.get(String(id));
+    },
+    
+    // Get all orders with optional filter
+    getOrders(filter = null) {
+        const allOrders = Array.from(this.orders.values());
+        if (!filter) return allOrders;
+        return allOrders.filter(filter);
+    },
+    
+    // Update order status in cache (normalize ID to string)
+    updateOrderStatus(id, isHandled) {
+        const order = this.orders.get(String(id));
+        if (order) {
+            order.isHandled = isHandled;
+        }
+    }
+};
+
+// Utility functions
 function esc(s) {
     return String(s||'').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
+
 function tdTitle(order) {
-    var fullTitle = esc(order.title || '');
-    var imgSrc = esc(order.image || order.image_url || '');
-    // small thumbnail to the left of the title (48x48)
+    const fullTitle = esc(order.title || '');
+    const imgSrc = esc(order.image || order.image_url || '');
     const missingDataUrlThumb = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48"><rect width="100%" height="100%" fill="#f8f8f8"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#b0b0b0" font-size="8">No Img</text></svg>');
-    var thumbHtml = '';
-    if (imgSrc) {
-        thumbHtml = `<img src="${imgSrc}" style="width:48px;height:48px;object-fit:cover;border-radius:6px;margin-right:8px;vertical-align:middle;" onerror="this.src='${missingDataUrlThumb}'">`;
-    } else {
-        thumbHtml = `<img src='${missingDataUrlThumb}' style="width:48px;height:48px;object-fit:cover;border-radius:6px;margin-right:8px;vertical-align:middle;">`;
-    }
-    return `<td class='sold-td-small'><a href="#" class="order-title-link" data-title="${fullTitle}" data-image="${imgSrc}" style="display:flex;align-items:center;">${thumbHtml}<span style="display:inline-block;max-width:220px;vertical-align:middle;">${fullTitle}</span></a></td>`;
+    const thumbHtml = imgSrc 
+        ? `<img src="${imgSrc}" style="width:48px;height:48px;object-fit:cover;border-radius:6px;margin-right:8px;vertical-align:middle;" onerror="this.src='${missingDataUrlThumb}'" loading="lazy">`
+        : `<img src='${missingDataUrlThumb}' style="width:48px;height:48px;object-fit:cover;border-radius:6px;margin-right:8px;vertical-align:middle;">`;
+    return `<td class='sold-td-small'><a href="#" class="order-title-link" data-order-id="${order.id}" style="display:flex;align-items:center;">${thumbHtml}<span style="display:inline-block;max-width:220px;vertical-align:middle;">${fullTitle}</span></a></td>`;
 }
 
 function tdInfo(order) {
-    var buyer = esc(order.shipping_name || '');
-    var address = [order.shipping_street1, order.shipping_street2, order.shipping_city, order.shipping_state, order.shipping_postal_code, order.shipping_country].filter(Boolean).map(esc).join(' ');
-    var info = `${buyer}${address ? ' - ' + address : ''}`;
-    return `<td class='sold-td-small'><a href="#" class="order-info-link" data-info="${info}">${buyer}</a></td>`;
+    const buyer = esc(order.shipping_name || '');
+    const address = [order.shipping_street1, order.shipping_street2, order.shipping_city, order.shipping_state, order.shipping_postal_code, order.shipping_country].filter(Boolean).map(esc).join(' ');
+    return `<td class='sold-td-small'><a href="#" class="order-info-link" data-order-id="${order.id}">${buyer}</a></td>`;
 }
 
 function tdLocation(order) {
-    var locationText = esc(order.location || '');
-    // If location looks like a picture filename, show a thumbnail linking to the pictureposition static file
-    if (locationText.match(/\.(jpg|jpeg|png)$/i)) {
-        var thumb = `/static/pictureposition/${locationText}`;
-    // show a small inline placeholder on error instead of default gr1new.png
+    const locationText = esc(order.location || '');
     const missingDataUrl = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="120" height="80"><rect width="100%" height="100%" fill="#f8f8f8"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#b0b0b0" font-size="12">Image missing</text></svg>');
-    return `<td class='sold-td-small'><a href="#" class="order-loc-link" data-loc="${locationText}"><img src="${thumb}" style="max-width:60px;max-height:60px;border-radius:6px;" onerror="this.src='${missingDataUrl}'"></a></td>`;
+    
+    if (locationText.match(/\.(jpg|jpeg|png)$/i)) {
+        const thumb = `/static/pictureposition/${locationText}`;
+        return `<td class='sold-td-small'><a href="#" class="order-loc-link" data-order-id="${order.id}"><img src="${thumb}" style="max-width:60px;max-height:60px;border-radius:6px;" onerror="this.src='${missingDataUrl}'" loading="lazy"></a></td>`;
     }
-    return `<td class='sold-td-small'><a href="#" class="order-loc-link" data-loc="${locationText}">${locationText}</a></td>`;
+    return `<td class='sold-td-small'><a href="#" class="order-loc-link" data-order-id="${order.id}">${locationText}</a></td>`;
 }
 
 function tdQuantity(order) {
-    var qty = order.quantity || '1';
-    var highlight = parseInt(qty) > 1 ? ' style="color:#e53935;font-weight:bold;background:#ffeaea;"' : '';
+    const qty = order.quantity || '1';
+    const highlight = parseInt(qty) > 1 ? ' style="color:#e53935;font-weight:bold;background:#ffeaea;"' : '';
     return `<td${highlight}>${qty}</td>`;
 }
 
-function renderSoldOrders(orders) {
-    // Clear the orders list before rendering new data
-    document.querySelector('#sold-orders-table tbody').innerHTML = '';
-    document.querySelector('#completed-orders-table tbody').innerHTML = '';
+// Create a single order row
+function createOrderRow(order, isCompleted = false) {
+    const tr = document.createElement('tr');
+    tr.dataset.orderId = order.id;
+    tr.style.transition = 'all 0.3s ease';
     
-    // Create table rows for each order
-    orders.forEach(function(order) {
-        var tr = document.createElement('tr');
-        tr.orderData = order; // Attach order data for info popup
+    const buttonHtml = isCompleted
+        ? `<button class="handle-btn undo-btn" 
+                data-id="${order.id}" 
+                style="background:#ff9800;color:white;border:none;padding:8px 12px;border-radius:20px;font-size:14px;cursor:pointer;transition:all 0.3s ease;width:60px;display:inline-flex;align-items:center;justify-content:center;gap:4px;">
+            <span style="font-size:16px;">↩</span>
+        </button>`
+        : `<button class="handle-btn" 
+                data-id="${order.id}" 
+                style="background:#4caf50;color:white;border:none;padding:8px 12px;border-radius:20px;font-size:14px;cursor:pointer;transition:all 0.3s ease;width:60px;display:inline-flex;align-items:center;justify-content:center;gap:4px;">
+            <span style="font-size:16px;">✓</span>
+        </button>`;
+    
+    tr.innerHTML = tdTitle(order) + tdInfo(order) + tdLocation(order) + tdQuantity(order) + 
+        `<td style="text-align: center;">${buttonHtml}</td>`;
+    
+    return tr;
+}
+
+// Update pending count badge
+function updatePendingCount() {
+    const count = OrderManager.getOrders(o => !o.isHandled).length;
+    const badge = document.getElementById('pending-count');
+    if (badge) {
+        badge.textContent = count;
+        badge.style.display = count > 0 ? 'inline-block' : 'none';
+    }
+}
+
+// Render orders to tables with performance optimization
+function renderSoldOrders(orders) {
+    const pendingTbody = document.querySelector('#sold-orders-table tbody');
+    const completedTbody = document.querySelector('#completed-orders-table tbody');
+    
+    // Use DocumentFragment for better performance
+    const pendingFragment = document.createDocumentFragment();
+    const completedFragment = document.createDocumentFragment();
+    
+    let hasPending = false;
+    let hasCompleted = false;
+    
+    orders.forEach(order => {
+        OrderManager.setOrder(order);
+        const row = createOrderRow(order, order.isHandled);
+        
         if (order.isHandled) {
-            // Add to completed table
-            tr.innerHTML =
-                tdTitle(order) +
-                tdInfo(order) +
-                tdLocation(order) +
-                tdQuantity(order) +
-                `<td style="text-align: center;">
-                    <button class="handle-btn undo-btn" 
-                            data-id="${order.id}" 
-                            style="background:#ff9800;color:white;border:none;padding:8px 12px;border-radius:20px;font-size:14px;cursor:pointer;transition:all 0.3s ease;width:60px;display:inline-flex;align-items:center;justify-content:center;gap:4px;">
-                        <span style="font-size:16px;">↩</span>
-                    </button>
-                </td>`;
-            document.querySelector('#completed-orders-table tbody').appendChild(tr);
-            
-            // Remove "No orders" message if it exists
-            const noOrdersRow = document.querySelector('#completed-orders-table tbody tr td[colspan="5"]');
-            if (noOrdersRow) {
-                noOrdersRow.closest('tr').remove();
-            }
+            completedFragment.appendChild(row);
+            hasCompleted = true;
         } else {
-            // Add to pending table
-            tr.innerHTML =
-                tdTitle(order) +
-                tdInfo(order) +
-                tdLocation(order) +
-                tdQuantity(order) +
-                `<td style="text-align: center;">
-                    <button class="handle-btn" 
-                            data-id="${order.id}" 
-                            style="background:#4caf50;color:white;border:none;padding:8px 12px;border-radius:20px;font-size:14px;cursor:pointer;transition:all 0.3s ease;width:60px;display:inline-flex;align-items:center;justify-content:center;gap:4px;">
-                        <span style="font-size:16px;">✓</span>
-                    </button>
-                </td>`;
-            document.querySelector('#sold-orders-table tbody').appendChild(tr);
+            pendingFragment.appendChild(row);
+            hasPending = true;
         }
     });
     
-    // Show "No orders" message if no completed orders
-    if (document.querySelectorAll('#completed-orders-table tbody tr').length === 0) {
-        const noOrdersRow = document.createElement('tr');
-        noOrdersRow.innerHTML = '<td colspan="5" style="text-align: center; padding: 20px; color: #666;">No completed orders yet</td>';
-        document.querySelector('#completed-orders-table tbody').appendChild(noOrdersRow);
+    // Clear and update pending table
+    pendingTbody.innerHTML = '';
+    if (hasPending) {
+        pendingTbody.appendChild(pendingFragment);
+    } else {
+        pendingTbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 20px; color: #666;">No pending orders</td></tr>';
     }
-    // Handle tab switching
-    document.querySelectorAll('.tab-button').forEach(button => {
-        button.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            
-            // Update active tab
-            document.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'));
-            button.classList.add('active');
-            
-            // Show corresponding content
-            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
-            document.getElementById(`${button.dataset.tab}-orders`).classList.add('active');
-        });
-    });
-
-    // Event delegation for handle buttons
-    document.addEventListener('click', function(e) {
-        const handleBtn = e.target.closest('.handle-btn');
-        if (!handleBtn) return;
-        
-        const tr = handleBtn.closest('tr');
-        const orderId = handleBtn.getAttribute('data-id');
-        const isUndo = handleBtn.classList.contains('undo-btn');
-        
-        // Add slide-out animation
-        tr.classList.add('slide-out');
-        
-        // After animation completes, move between tables
-        setTimeout(() => {
-            if (isUndo) {
-                // Move from completed back to pending
-                const orderId = tr.querySelector('.handle-btn').getAttribute('data-id');
-                
-                // First, mark the order as unhandled on the server
-                fetch('/mark-order-unhandled', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        id: orderId
-                    })
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (!data.success) {
-                        console.error('Failed to update order status:', data.error);
-                        return;
-                    }
-                    
-                    // Then fetch the updated order details
-                    return fetch(`/get-order?id=${orderId}`);
-                })
-                .then(response => response.json())
-                .then(order => {
-                    if (!order) return;
-                    
-                    const pendingTable = document.querySelector('#sold-orders-table tbody');
-                    const pendingRow = document.createElement('tr');
-                    
-                    // Rebuild the row with all order data
-                    pendingRow.innerHTML = `
-                        ${tdTitle(order)}
-                        ${tdInfo(order)}
-                        ${tdLocation(order)}
-                        ${tdQuantity(order)}
-                        <td style="text-align: center;">
-                            <button class="handle-btn" 
-                                    data-id="${order.id}" 
-                                    style="background:#4caf50;color:white;border:none;padding:8px 12px;border-radius:20px;font-size:14px;cursor:pointer;transition:all 0.3s ease;width:60px;display:inline-flex;align-items:center;justify-content:center;gap:4px;">
-                                <span style="font-size:16px;">✓</span>
-                            </button>
-                        </td>
-                    `;
-                    
-                    // Add to pending table with fade-in effect
-                    pendingRow.style.opacity = '0';
-                    pendingTable.prepend(pendingRow);
-                    setTimeout(() => pendingRow.style.opacity = '1', 10);
-                    
-                    // Remove from completed table
-                    tr.remove();
-                })
-                    .catch(error => {
-                        console.error('Error fetching order:', error);
-                        // Fallback to simple row move if fetch fails
-                        const pendingTable = document.querySelector('#sold-orders-table tbody');
-                        const pendingRow = tr.cloneNode(true);
-                        
-                        // Update the status button
-                        const pendingBtn = pendingRow.querySelector('.handle-btn');
-                        if (pendingBtn) {
-                            pendingBtn.innerHTML = '<span style="font-size:16px;">✓</span>';
-                            pendingBtn.style.backgroundColor = '#4caf50';
-                            pendingBtn.classList.remove('undo-btn');
-                            pendingBtn.style.pointerEvents = 'auto';
-                        }
-                        
-                        pendingTable.prepend(pendingRow);
-                        tr.remove();
-                    });
-            } else {
-                // Move from pending to completed
-                const completedTable = document.querySelector('#completed-orders-table tbody');
-                const completedRow = tr.cloneNode(true);
-                
-                // Update the status button
-                const completeBtn = completedRow.querySelector('.handle-btn');
-                if (completeBtn) {
-                    completeBtn.innerHTML = '<span style="font-size:16px;">↩</span>';
-                    completeBtn.style.backgroundColor = '#ff9800';
-                    completeBtn.classList.add('undo-btn');
-                    completeBtn.style.pointerEvents = 'auto';
-                }
-                
-                // Remove the "No orders" message if it exists
-                const noOrdersRow = completedTable.querySelector('tr td[colspan="5"]');
-                if (noOrdersRow) {
-                    noOrdersRow.closest('tr').remove();
-                }
-                
-                // Add to completed table with fade-in effect
-                completedRow.style.opacity = '0';
-                completedTable.prepend(completedRow);
-                setTimeout(() => completedRow.style.opacity = '1', 10);
-                
-                // Remove from pending table
-                tr.remove();
-            }
-            
-            // Update the server - using the appropriate endpoint based on action
-            const endpoint = isUndo ? '/mark-order-unhandled' : '/mark-order-handled';
-            fetch(endpoint, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id: orderId })
-            })
-            .catch(error => console.error('Error updating order status:', error));
-        }, 400);
-    });
+    
+    // Clear and update completed table
+    completedTbody.innerHTML = '';
+    if (hasCompleted) {
+        completedTbody.appendChild(completedFragment);
+    } else {
+        completedTbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 20px; color: #666;">No completed orders yet</td></tr>';
+    }
+    
+    updatePendingCount();
     attachPopups();
 }
-function fetchAndShowSoldOrders(days) {
-    // First, fetch new sold orders for the given days
-    return fetch('/get-sold-orders', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ days })
-    })
-    .then(r => r.json())
-    .then(data => {
-        // After fetching, load and display the sold orders
-        return loadSoldOrders(days);
-    });
+
+// ============================================================================
+// ORDER STATUS CHANGE HANDLER - With optimistic updates and rollback
+// ============================================================================
+
+async function handleOrderStatusChange(orderId, isUndo) {
+    console.log('handleOrderStatusChange called with:', orderId, 'isUndo:', isUndo);
+    
+    const order = OrderManager.getOrder(orderId);
+    if (!order) {
+        console.error('Order not found in cache:', orderId);
+        console.log('Available orders:', Array.from(OrderManager.orders.keys()));
+        return;
+    }
+    
+    let tr = document.querySelector(`tr[data-order-id="${orderId}"]`);
+    if (!tr) {
+        // Fallback: try to find by button data-id
+        console.log('Row not found by data-order-id, trying button search...');
+        const btn = document.querySelector(`.handle-btn[data-id="${orderId}"]`);
+        if (btn) {
+            tr = btn.closest('tr');
+        }
+    }
+    if (!tr) {
+        console.error('Could not find table row for order:', orderId);
+        return;
+    }
+    
+    const btn = tr.querySelector('.handle-btn');
+    if (!btn) return;
+    
+    // Disable button during operation
+    btn.disabled = true;
+    btn.style.opacity = '0.5';
+    btn.style.cursor = 'not-allowed';
+    
+    // Store original state for rollback
+    const originalState = order.isHandled;
+    
+    // Optimistic update
+    OrderManager.updateOrderStatus(orderId, !originalState);
+    
+    // Animate out
+    tr.style.transform = 'translateX(100%)';
+    tr.style.opacity = '0';
+    
+    try {
+        // Update server
+        const endpoint = isUndo ? '/mark-order-unhandled' : '/mark-order-handled';
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: orderId })
+        });
+        
+        const data = await response.json();
+        
+        if (!data.success) {
+            throw new Error(data.error || 'Failed to update order');
+        }
+        
+        // Success - wait for animation, then move to other table
+        setTimeout(() => {
+            tr.remove();
+            
+            // Get fresh order data and render to new table
+            const updatedOrder = OrderManager.getOrder(orderId);
+            const newRow = createOrderRow(updatedOrder, updatedOrder.isHandled);
+            
+            const targetTable = updatedOrder.isHandled 
+                ? document.querySelector('#completed-orders-table tbody')
+                : document.querySelector('#sold-orders-table tbody');
+            
+            // Remove "no orders" message if it exists
+            const noOrdersMsg = targetTable.querySelector('td[colspan="5"]');
+            if (noOrdersMsg) {
+                noOrdersMsg.closest('tr').remove();
+            }
+            
+            // Add with fade-in animation
+            newRow.style.opacity = '0';
+            newRow.style.transform = 'translateX(-20px)';
+            targetTable.insertBefore(newRow, targetTable.firstChild);
+            
+            requestAnimationFrame(() => {
+                newRow.style.transition = 'all 0.3s ease';
+                newRow.style.opacity = '1';
+                newRow.style.transform = 'translateX(0)';
+            });
+            
+            updatePendingCount();
+            attachPopups();
+            
+            // Check if source table is now empty
+            const sourceTable = updatedOrder.isHandled
+                ? document.querySelector('#sold-orders-table tbody')
+                : document.querySelector('#completed-orders-table tbody');
+            
+            if (sourceTable.children.length === 0) {
+                const emptyMsg = updatedOrder.isHandled 
+                    ? 'No pending orders'
+                    : 'No completed orders yet';
+                sourceTable.innerHTML = `<tr><td colspan="5" style="text-align: center; padding: 20px; color: #666;">${emptyMsg}</td></tr>`;
+            }
+        }, 300);
+        
+    } catch (error) {
+        console.error('Error updating order status:', error);
+        
+        // Rollback on error
+        OrderManager.updateOrderStatus(orderId, originalState);
+        
+        // Restore button and row
+        tr.style.transform = '';
+        tr.style.opacity = '1';
+        btn.disabled = false;
+        btn.style.opacity = '1';
+        btn.style.cursor = 'pointer';
+        
+        // Show error toast
+        showToast('Failed to update order: ' + error.message, 'error');
+    }
 }
-function loadSoldOrders(days, force = false) {
+
+// Simple toast notification
+function showToast(message, type = 'info') {
+    const toast = document.createElement('div');
+    toast.textContent = message;
+    toast.style.cssText = `
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        background: ${type === 'error' ? '#f44336' : '#4caf50'};
+        color: white;
+        padding: 12px 24px;
+        border-radius: 8px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        z-index: 10000;
+        animation: slideIn 0.3s ease;
+    `;
+    
+    document.body.appendChild(toast);
+    
+    setTimeout(() => {
+        toast.style.animation = 'slideOut 0.3s ease';
+        setTimeout(() => toast.remove(), 300);
+    }, 3000);
+}
+// ============================================================================
+// DATA FETCHING - With loading states and error handling
+// ============================================================================
+
+async function fetchAndShowSoldOrders(days) {
+    if (OrderManager.isLoading) return;
+    
+    OrderManager.isLoading = true;
+    OrderManager.currentDays = days;
+    
+    try {
+        // Show loading state
+        const pendingTbody = document.querySelector('#sold-orders-table tbody');
+        const completedTbody = document.querySelector('#completed-orders-table tbody');
+        pendingTbody.innerHTML = '<tr class="loading-row"><td colspan="5" style="text-align: center; padding: 20px; color: #666;"><i class="fas fa-spinner fa-spin"></i> Loading orders...</td></tr>';
+        completedTbody.innerHTML = '<tr class="loading-row"><td colspan="5" style="text-align: center; padding: 20px; color: #666;"><i class="fas fa-spinner fa-spin"></i> Loading orders...</td></tr>';
+        
+        // Fetch new orders from API
+        const fetchResponse = await fetch('/get-sold-orders', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ days })
+        });
+        
+        const fetchData = await fetchResponse.json();
+        
+        if (!fetchData.success) {
+            throw new Error(fetchData.error || 'Failed to fetch orders');
+        }
+        
+        // Now load and display the orders
+        await loadSoldOrders(days, true);
+        
+    } catch (error) {
+        console.error('Error fetching orders:', error);
+        showToast('Failed to fetch orders: ' + error.message, 'error');
+        
+        // Show error state
+        const pendingTbody = document.querySelector('#sold-orders-table tbody');
+        const completedTbody = document.querySelector('#completed-orders-table tbody');
+        pendingTbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 20px; color: #e53935;">Failed to load orders. <a href="#" onclick="fetchAndShowSoldOrders(' + days + '); return false;">Retry</a></td></tr>';
+        completedTbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 20px; color: #666;">No completed orders yet</td></tr>';
+    } finally {
+        OrderManager.isLoading = false;
+    }
+}
+
+async function loadSoldOrders(days, force = false) {
     if (!isSoldOrdersTabActive && !force) return;
     
     days = days || parseInt(document.getElementById('sold-orders-days').value) || 2;
-    return fetch(`/sold-orders?days=${days}`)
-        .then(r => r.json())
-        .then(renderSoldOrders);
+    
+    try {
+        const response = await fetch(`/sold-orders?days=${days}`);
+        const orders = await response.json();
+        renderSoldOrders(orders);
+    } catch (error) {
+        console.error('Error loading orders:', error);
+        showToast('Failed to load orders', 'error');
+    }
 }
-document.getElementById('sold-orders-days').onchange = function() {
-    const days = parseInt(this.value) || 2;
-    fetchAndShowSoldOrders(days);
-};
 
-// Track tab visibility
+// Track tab visibility for auto-refresh
 let isSoldOrdersTabActive = true;
 
-// Listen for tab changes
 document.addEventListener('visibilitychange', function() {
     isSoldOrdersTabActive = !document.hidden;
     if (isSoldOrdersTabActive) {
-        // Refresh data when tab becomes active
         loadSoldOrders(null, true);
     }
 });
-// Tab switching functionality
+
+// ============================================================================
+// TAB MANAGEMENT
+// ============================================================================
+
 function setupTabs() {
     const tabButtons = document.querySelectorAll('.tab-button');
     const tabContents = document.querySelectorAll('.tab-content');
     
     tabButtons.forEach(button => {
         button.addEventListener('click', () => {
-            // Remove active class from all buttons and contents
             tabButtons.forEach(btn => btn.classList.remove('active'));
             tabContents.forEach(content => content.classList.remove('active'));
             
-            // Add active class to clicked button and corresponding content
             button.classList.add('active');
             const tabId = button.getAttribute('data-tab') + '-orders';
             document.getElementById(tabId).classList.add('active');
-            
-            // If switching to pending tab, refresh the data
-            if (button.getAttribute('data-tab') === 'pending') {
-                loadSoldOrders();
-            }
         });
     });
 }
 
-window.addEventListener('DOMContentLoaded', function() {
-    // Set up tab functionality
+// ============================================================================
+// EVENT DELEGATION - Single handler for all order interactions
+// ============================================================================
+
+function setupEventDelegation() {
+    document.addEventListener('click', function(e) {
+        // Handle order status buttons (check/undo)
+        const handleBtn = e.target.closest('.handle-btn');
+        if (handleBtn) {
+            e.preventDefault();
+            e.stopPropagation();
+            const orderId = handleBtn.getAttribute('data-id');
+            const isUndo = handleBtn.classList.contains('undo-btn');
+            console.log('Button clicked:', orderId, 'isUndo:', isUndo);
+            handleOrderStatusChange(orderId, isUndo);
+            return;
+        }
+        
+        // Handle order detail popups
+        const titleLink = e.target.closest('.order-title-link');
+        const infoLink = e.target.closest('.order-info-link');
+        const locLink = e.target.closest('.order-loc-link');
+        
+        if (titleLink || infoLink || locLink) {
+            e.preventDefault();
+            e.stopPropagation();
+            const link = titleLink || infoLink || locLink;
+            const orderId = link.getAttribute('data-order-id');
+            console.log('Link clicked:', orderId);
+            const order = OrderManager.getOrder(orderId);
+            
+            if (order) {
+                if (titleLink) {
+                    showOrderPopup(order.title, order.image || order.image_url, null, null);
+                } else if (infoLink) {
+                    const buyer = order.shipping_name || '';
+                    const address = [order.shipping_street1, order.shipping_street2, order.shipping_city, 
+                                    order.shipping_state, order.shipping_postal_code, order.shipping_country]
+                        .filter(Boolean).join(' ');
+                    const info = `${buyer}${address ? ' - ' + address : ''}`;
+                    const price = order.price ? `$${parseFloat(order.price).toFixed(2)}` : 'N/A';
+                    const paidTime = order.paid_time ? fmtET(order.paid_time) : 'N/A';
+                    showOrderPopup(null, null, info, null, price, paidTime);
+                } else if (locLink) {
+                    showOrderPopup(null, null, null, order.location);
+                }
+            } else {
+                console.error('Order not found in cache:', orderId);
+            }
+        }
+    });
+}
+
+// ============================================================================
+// INITIALIZATION
+// ============================================================================
+
+window.addEventListener('DOMContentLoaded', async function() {
+    console.log('DOM loaded, initializing...');
+    
+    // Set up event delegation FIRST
+    setupEventDelegation();
+    
     setupTabs();
     
-    // On load, fetch and show last 48 hours (2 days), then reveal the page
-    fetchAndShowSoldOrders(2).then(() => {
-        // Remove loading class and add loaded class to fade in the page
-        document.body.classList.remove('loading');
-        document.body.classList.add('loaded');
-    }).catch((error) => {
-        console.error('Error loading orders:', error);
-        // Still show the page even if there's an error
-        document.body.classList.remove('loading');
-        document.body.classList.add('loaded');
-    });
-    
-    // Set up the sold orders button click handler
-    const soldOrdersBtn = document.getElementById('get-sold-orders-btn');
-    if (soldOrdersBtn) {
-        soldOrdersBtn.onclick = function(e) {
-            e.preventDefault();
-            const days = parseInt(document.getElementById('sold-days').value) || 90;
-            fetch('/get-sold-orders', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ days })
-            })
-            .then(r => r.json())
-            .then(data => {
-                if (data.success) {
-                    alert('Sold orders fetched and stored!');
-                    // Refresh the orders after fetching
-                    loadSoldOrders();
-                } else {
-                    alert('Error: ' + (data.error || 'Unknown error'));
-                }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                alert('Error fetching sold orders');
-            });
-        };
+    // Set up refresh button
+    const refreshBtn = document.getElementById('refresh-orders-btn');
+    if (refreshBtn) {
+        refreshBtn.addEventListener('click', async function() {
+            const icon = this.querySelector('i');
+            icon.classList.add('fa-spin');
+            const days = parseInt(document.getElementById('sold-orders-days').value) || 2;
+            await fetchAndShowSoldOrders(days);
+            icon.classList.remove('fa-spin');
+        });
     }
     
-    // Add event listener for days dropdown change
+    // Set up days input change handler
     const soldOrdersDays = document.getElementById('sold-orders-days');
     if (soldOrdersDays) {
         soldOrdersDays.addEventListener('change', function() {
@@ -661,150 +833,124 @@ window.addEventListener('DOMContentLoaded', function() {
             fetchAndShowSoldOrders(days);
         });
     }
-}); // End of DOMContentLoaded
+    
+    // Initial load
+    try {
+        await fetchAndShowSoldOrders(2);
+        console.log('Initial orders loaded');
+    } catch (error) {
+        console.error('Error during initial load:', error);
+    } finally {
+        document.body.classList.remove('loading');
+        document.body.classList.add('loaded');
+    }
+});
+
+// ============================================================================
+// ORDER DETAIL POPUP
+// ============================================================================
 
 function showOrderPopup(title, imageUrl, info, loc, price, paidTime) {
-    // Remove any existing popup
     const oldPopup = document.getElementById('order-popup');
     if (oldPopup) oldPopup.remove();
-    // Create overlay
+    
     const overlay = document.createElement('div');
     overlay.id = 'order-popup';
-    overlay.style.position = 'fixed';
-    overlay.style.top = 0;
-    overlay.style.left = 0;
-    overlay.style.width = '100vw';
-    overlay.style.height = '100vh';
-    overlay.style.background = 'rgba(0,0,0,0.35)';
-    overlay.style.display = 'flex';
-    overlay.style.alignItems = 'center';
-    overlay.style.justifyContent = 'center';
-    overlay.style.zIndex = 9999;
-    overlay.onclick = function(e) {
-        if (e.target === overlay) overlay.remove();
-    };
-    // Create popup content
+    overlay.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100vh;
+        background: rgba(0,0,0,0.5);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 9999;
+        animation: fadeIn 0.2s ease;
+    `;
+    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+    
     const popup = document.createElement('div');
-    popup.style.background = '#fff';
-    popup.style.borderRadius = '14px';
-    popup.style.boxShadow = '0 2px 16px rgba(0,0,0,0.18)';
-    popup.style.padding = '28px 24px';
-    popup.style.maxWidth = '340px';
-    popup.style.textAlign = 'center';
-    popup.style.position = 'relative';
-    popup.onclick = function(e) { e.stopPropagation(); };
-    // Info tab formatting (old system)
+    popup.style.cssText = `
+        background: #fff;
+        border-radius: 14px;
+        box-shadow: 0 4px 24px rgba(0,0,0,0.2);
+        padding: 28px 24px;
+        max-width: 360px;
+        max-height: 80vh;
+        overflow-y: auto;
+        text-align: center;
+        position: relative;
+        animation: slideUp 0.3s ease;
+    `;
+    popup.onclick = (e) => e.stopPropagation();
+    
+    const missingDataUrlPopup = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="360" height="220"><rect width="100%" height="100%" fill="#f8f8f8"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#b0b0b0" font-size="18">Image missing</text></svg>');
+    
+    let content = '';
+    
+    if (title) {
+        content += `<div style="font-weight: bold; font-size: 1.1rem; margin-bottom: 12px;">${esc(title)}</div>`;
+    }
+    
+    if (imageUrl) {
+        content += `<img src="${esc(imageUrl)}" alt="${esc(title || 'Order')}" style="max-width: 100%; border-radius: 10px; margin-bottom: 18px;">`;
+    }
+    
     if (info) {
-        // info = buyer + address
-        let infoParts = info.split(' - ');
-        let buyer = infoParts[0] || '';
-        let address = infoParts[1] || '';
-        const infoHtml = `
-            <div style='max-width:300px;'>
-                <div style='margin-bottom:10px;'>
-                    <b>${buyer}</b><br>
-                    <span style='font-size:0.98em;'>${address}</span>
+        const infoParts = info.split(' - ');
+        const buyer = infoParts[0] || '';
+        const address = infoParts[1] || '';
+        content += `
+            <div style="max-width: 300px; margin: 0 auto;">
+                <div style="margin-bottom: 10px;">
+                    <strong>${esc(buyer)}</strong><br>
+                    <span style="font-size: 0.95em; color: #666;">${esc(address)}</span>
                 </div>
-                <hr style='border:none;border-top:1px solid #ddd;margin:10px 0;'>
-                <div style='margin-bottom:5px;'><b>Price:</b> ${price || 'N/A'}</div>
-                <div><b>Paid:</b> ${paidTime || 'N/A'}</div>
+                <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 12px 0;">
+                <div style="text-align: left; font-size: 0.95em;">
+                    <div style="margin-bottom: 6px;"><strong>Price:</strong> ${price || 'N/A'}</div>
+                    <div><strong>Paid:</strong> ${paidTime || 'N/A'}</div>
+                </div>
             </div>
         `;
-        popup.innerHTML += infoHtml;
     }
-    // Location tab formatting (show shelf image)
+    
     if (loc) {
-        const locEl = document.createElement('div');
-        locEl.textContent = 'Location: ' + loc;
-        locEl.style.fontSize = '0.98rem';
-        locEl.style.marginBottom = '8px';
-        popup.appendChild(locEl);
-        // Shelf image
-        // If the location looks like an image filename, show the pictureposition image
-        const missingDataUrlPopup = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="360" height="220"><rect width="100%" height="100%" fill="#f8f8f8"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#b0b0b0" font-size="18">Image missing</text></svg>');
+        content += `<div style="font-size: 0.98rem; margin-bottom: 12px; font-weight: 500;">Location: ${esc(loc)}</div>`;
+        
         if (loc.match(/\.(jpg|jpeg|png)$/i)) {
-            const img = document.createElement('img');
-            img.src = '/static/pictureposition/' + loc;
-            img.alt = loc;
-            img.style.maxWidth = '220px';
-            img.style.borderRadius = '10px';
-            img.style.marginBottom = '18px';
-            img.onerror = function() { img.src = missingDataUrlPopup; };
-            popup.appendChild(img);
+            content += `<img src="/static/pictureposition/${esc(loc)}" alt="${esc(loc)}" style="max-width: 280px; border-radius: 10px; margin-bottom: 18px;" onerror="this.src='${missingDataUrlPopup}'">`;
         } else {
-            const img = document.createElement('img');
-            const locationLower = loc.toLowerCase();
-            img.src = '/static/shelves/' + locationLower + '.png';
-            img.alt = loc;
-            img.style.maxWidth = '220px';
-            img.style.borderRadius = '10px';
-            img.style.marginBottom = '18px';
-            img.onerror = function() { img.src = missingDataUrlPopup; };
-            popup.appendChild(img);
+            content += `<img src="/static/shelves/${esc(loc.toLowerCase())}.png" alt="${esc(loc)}" style="max-width: 280px; border-radius: 10px; margin-bottom: 18px;" onerror="this.src='${missingDataUrlPopup}'">`;
         }
     }
-    // Title and image (for title tab)
-    if (title) {
-        const nameEl = document.createElement('div');
-        nameEl.textContent = title;
-        nameEl.style.fontWeight = 'bold';
-        nameEl.style.fontSize = '1.1rem';
-        nameEl.style.marginBottom = '8px';
-        popup.appendChild(nameEl);
-    }
-    if (imageUrl) {
-        const img = document.createElement('img');
-        img.src = imageUrl;
-        img.alt = title;
-        img.style.maxWidth = '220px';
-        img.style.borderRadius = '10px';
-        img.style.marginBottom = '18px';
-        popup.appendChild(img);
-    }
-    // Add close button
-    const closeBtn = document.createElement('button');
-    closeBtn.textContent = 'Close';
-    closeBtn.style.marginTop = '12px';
-    closeBtn.style.background = '#0984e3';
-    closeBtn.style.color = '#fff';
-    closeBtn.style.border = 'none';
-    closeBtn.style.borderRadius = '6px';
-    closeBtn.style.padding = '8px 18px';
-    closeBtn.style.cursor = 'pointer';
-    closeBtn.onclick = function() { overlay.remove(); };
-    popup.appendChild(closeBtn);
+    
+    popup.innerHTML = content + `
+        <button onclick="this.closest('#order-popup').remove()" style="
+            margin-top: 16px;
+            background: #0984e3;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            padding: 10px 24px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: background 0.2s ease;
+        " onmouseover="this.style.background='#0770c9'" onmouseout="this.style.background='#0984e3'">
+            Close
+        </button>
+    `;
+    
     overlay.appendChild(popup);
     document.body.appendChild(overlay);
 }
-// Attach to all title, info, and loc clickable elements
+
+// Simplified attachPopups - now only used for legacy compatibility
 function attachPopups() {
-    document.querySelectorAll('.order-title-link').forEach(el => {
-        el.onclick = function(e) {
-            e.preventDefault();
-            showOrderPopup(el.dataset.title, el.dataset.image, null, null);
-        };
-    });
-    document.querySelectorAll('.order-info-link').forEach(el => {
-        el.onclick = function(e) {
-            e.preventDefault();
-            // Get price and paidTime from parent row
-            const tr = el.closest('tr');
-            let price = 'N/A', paidTime = 'N/A';
-            if (tr && tr.orderData) {
-                price = tr.orderData.price ? `$${parseFloat(tr.orderData.price).toFixed(2)}` : 'N/A';
-                paidTime = tr.orderData.paid_time ? fmtET(tr.orderData.paid_time) : 'N/A';
-            }
-            showOrderPopup(null, null, el.dataset.info, null, price, paidTime);
-        };
-    });
-    document.querySelectorAll('.order-loc-link').forEach(el => {
-        el.onclick = function(e) {
-            e.preventDefault();
-            showOrderPopup(null, null, null, el.dataset.loc);
-        };
-    });
+    // Event delegation handles clicks now, this is just a placeholder
 }
-document.addEventListener('DOMContentLoaded', attachPopups);
 // Friendly Eastern Time formatter used across pages
 function fmtET(ts){
     try{
