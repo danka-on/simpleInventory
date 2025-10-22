@@ -215,27 +215,47 @@ function renderPagedResults(){
     const end = start + _pageSize;
     const slice = sorted.slice(start, end);
     renderResults(slice);
-    renderPagination(total, pages);
+    renderPagination(total, _currentPage, _pageSize);
 }
 
-function renderPagination(total, pages){
+function renderPagination(total, page, limit){
+    const totalPages = Math.ceil(total / limit);
     const container = document.getElementById('pagination-controls');
-    if(pages <= 1){ container.innerHTML = `<span class="small-muted">${total} results</span>`; return; }
+    if(totalPages <= 1){ container.innerHTML = `<span class="small-muted">${total} results</span>`; return; }
     let html = '';
-    html += `<button class=\"btn\" id=\"pg-prev\">Prev</button>`;
-    // show up to 7 page buttons centered around current
-    const win = 7;
-    let start = Math.max(1, _currentPage - Math.floor(win/2));
-    let finish = Math.min(pages, start + win - 1);
-    if(finish - start < win - 1) start = Math.max(1, finish - win + 1);
-    for(let p=start;p<=finish;p++){
-        html += `<button class=\"btn\" data-page=\"${p}\" style=\"${p===_currentPage? 'font-weight:bold; background:#ddd':''}\">${p}</button>`;
+    
+    // Prev button
+    if (page > 1) html += `<button class="btn" onclick="_currentPage=${page-1}; renderPagedResults()">Prev</button>`;
+    
+    // Always show page 1
+    html += `<button class="btn" onclick="_currentPage=1; renderPagedResults()" style="${page===1? 'font-weight:bold; background:#ddd':''}"}>1</button>`;
+    
+    // Show ellipsis if there's a gap between page 1 and the current range
+    if (page > 4) {
+      html += `<span style="padding: 0 5px;">...</span>`;
     }
-    html += `<button class=\"btn\" id=\"pg-next\">Next</button>`;
+    
+    // Show pages around current (but not page 1 or last page, we handle those separately)
+    for (let p = Math.max(2, page-2); p <= Math.min(totalPages-1, page+2); p++) {
+      // Skip if this is page 1 (already shown) or overlaps with page 1
+      if (p === 1) continue;
+      html += `<button class="btn" onclick="_currentPage=${p}; renderPagedResults()" style="${p===page? 'font-weight:bold; background:#ddd':''}">${p}</button>`;
+    }
+    
+    // Show ellipsis if there's a gap between current range and last page
+    if (page < totalPages - 3) {
+      html += `<span style="padding: 0 5px;">...</span>`;
+    }
+    
+    // Always show last page (if more than 1 page)
+    if (totalPages > 1) {
+      html += `<button class="btn" onclick="_currentPage=${totalPages}; renderPagedResults()" style="${page===totalPages? 'font-weight:bold; background:#ddd':''}">${totalPages}</button>`;
+    }
+    
+    // Next button
+    if (page < totalPages) html += `<button class="btn" onclick="_currentPage=${page+1}; renderPagedResults()">Next</button>`;
+    
     container.innerHTML = html;
-    document.getElementById('pg-prev').addEventListener('click', ()=>{ if(_currentPage>1){ _currentPage--; renderPagedResults(); } });
-    document.getElementById('pg-next').addEventListener('click', ()=>{ if(_currentPage<pages){ _currentPage++; renderPagedResults(); } });
-    container.querySelectorAll('button[data-page]').forEach(b=> b.addEventListener('click', (e)=>{ _currentPage = parseInt(e.currentTarget.dataset.page,10); renderPagedResults(); }));
 }
 
 document.getElementById('page-size').addEventListener('change', ()=>{ _pageSize = parseInt(document.getElementById('page-size').value,10); _currentPage = 1; renderPagedResults(); });

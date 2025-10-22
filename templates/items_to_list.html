@@ -501,10 +501,35 @@ function renderPagination(total, page, limit) {
   const totalPages = Math.ceil(total / limit);
   let html = '';
   if (totalPages > 1) {
+    // Prev button
     if (page > 1) html += `<button class="btn" onclick="changePage(${page-1})">Prev</button>`;
-    for (let p = Math.max(1, page-2); p <= Math.min(totalPages, page+2); p++) {
+    
+    // Always show page 1
+    html += `<button class="btn ${page===1?'btn-primary':''}" onclick="changePage(1)">1</button>`;
+    
+    // Show ellipsis if there's a gap between page 1 and the current range
+    if (page > 4) {
+      html += `<span style="padding: 0 5px;">...</span>`;
+    }
+    
+    // Show pages around current (but not page 1 or last page, we handle those separately)
+    for (let p = Math.max(2, page-2); p <= Math.min(totalPages-1, page+2); p++) {
+      // Skip if this is page 1 (already shown) or overlaps with page 1
+      if (p === 1) continue;
       html += `<button class="btn ${p===page?'btn-primary':''}" onclick="changePage(${p})">${p}</button>`;
     }
+    
+    // Show ellipsis if there's a gap between current range and last page
+    if (page < totalPages - 3) {
+      html += `<span style="padding: 0 5px;">...</span>`;
+    }
+    
+    // Always show last page (if more than 1 page)
+    if (totalPages > 1) {
+      html += `<button class="btn ${page===totalPages?'btn-primary':''}" onclick="changePage(${totalPages})">${totalPages}</button>`;
+    }
+    
+    // Next button
     if (page < totalPages) html += `<button class="btn" onclick="changePage(${page+1})">Next</button>`;
   }
   let pagDiv = document.getElementById('top-pagination');
