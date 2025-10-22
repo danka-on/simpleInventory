@@ -2641,6 +2641,8 @@ def update_item(db_type, item_id):
 def api_search_db(db_key):
     data = request.get_json() or {}
     q = (data.get('q') or '').strip()
+    # Strip leading zeros from barcode searches
+    q_stripped = q.lstrip('0') if q and q.isdigit() else q
     # Accept limit from client. If limit is 0 or None, we will NOT apply a SQL LIMIT (i.e., return all rows).
     limit_raw = data.get('limit')
     try:
@@ -2697,11 +2699,11 @@ def api_search_db(db_key):
         params = []
         # Accept optional location filter (from client UI) to search Item_Position specifically
         location = (data.get('location') or '').strip()
-        if q:
+        if q_stripped:
             likes = []
             for c in cols:
                 likes.append(f"LOWER(COALESCE({c},'')) LIKE ?")
-                params.append(f"%{q.lower()}%")
+                params.append(f"%{q_stripped.lower()}%")
             where_clause = ' WHERE ' + ' OR '.join(likes)
         # If a specific location was provided, add an AND clause to filter by item position columns
         if location:
