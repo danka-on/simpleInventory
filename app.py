@@ -2233,6 +2233,7 @@ def start_tunnel():
 
 @app.route('/extractor/upload', methods=['POST'])
 def extractor_upload():
+    """Legacy route - kept for backward compatibility but not used by new UI"""
     if not BOL_AVAILABLE:
         return jsonify({'success': False, 'error': 'BOL extractor not available (pandas not installed)'})
     if 'excel_file' not in request.files or 'import_date' not in request.form:
@@ -2246,6 +2247,82 @@ def extractor_upload():
         result = process_bol_excel(file, import_date)
         return jsonify(result)
     return jsonify({'success': False, 'error': 'Unknown error during file upload.'})
+
+@app.route('/api/rawbol/upload', methods=['POST'])
+def api_rawbol_upload():
+    """Upload .xls file to raw BOL database and auto-sync"""
+    if not BOL_AVAILABLE:
+        return jsonify({'success': False, 'error': 'BOL extractor not available (pandas not installed)'})
+    
+    if 'excel_file' not in request.files or 'lot_number' not in request.form or 'import_date' not in request.form:
+        return jsonify({'success': False, 'error': 'Missing file, lot number, or import date.'})
+    
+    file = request.files['excel_file']
+    lot_number = request.form['lot_number'].strip()
+    import_date = request.form['import_date'].strip()
+    
+    if file.filename == '':
+        return jsonify({'success': False, 'error': 'No file selected.'})
+    
+    if not lot_number:
+        return jsonify({'success': False, 'error': 'Lot number is required.'})
+    
+    print(f'DEBUG: Received file: {file.filename}, Lot: {lot_number}, Date: {import_date}')
+    
+    # Upload to rawbol.db
+    result = process_bol_excel(file, lot_number, import_date)
+    
+    # If upload successful, auto-sync ONLY THIS LOT to bol.db
+    if result.get('success'):
+        from rawbol_manager import sync_rawbol_to_bol
+        sync_result = sync_rawbol_to_bol(specific_lot=lot_number)
+        
+        if sync_result.get('success'):
+            # Combine results
+            result['synced'] = True
+            result['sync_updated'] = sync_result.get('updated', 0)
+            result['sync_inserted'] = sync_result.get('inserted', 0)
+        else:
+            result['synced'] = False
+            result['sync_error'] = sync_result.get('error', 'Unknown sync error')
+    
+    return jsonify(result)
+
+@app.route('/api/rawbol/view', methods=['GET'])
+def api_rawbol_view():
+    """Get all raw BOL items"""
+    from rawbol_manager import get_all_raw_bol_items
+    result = get_all_raw_bol_items()
+    return jsonify(result)
+
+@app.route('/api/rawbol/logs', methods=['GET'])
+def api_rawbol_logs():
+    """Get upload logs"""
+    from rawbol_manager import get_upload_logs
+    result = get_upload_logs()
+    return jsonify(result)
+
+@app.route('/api/rawbol/stats', methods=['GET'])
+def api_rawbol_stats():
+    """Get rawbol.db statistics"""
+    from rawbol_manager import get_rawbol_stats
+    result = get_rawbol_stats()
+    return jsonify(result)
+
+@app.route('/api/rawbol/delete/<lot_number>', methods=['DELETE'])
+def api_rawbol_delete_lot(lot_number):
+    """Delete a specific lot and desync from bol.db"""
+    from rawbol_manager import delete_lot
+    result = delete_lot(lot_number)
+    return jsonify(result)
+
+@app.route('/api/rawbol/desync', methods=['POST'])
+def api_rawbol_desync_all():
+    """Desync (undo) ALL raw BOL from main BOL database"""
+    from rawbol_manager import desync_all_rawbol
+    result = desync_all_rawbol()
+    return jsonify(result)
+
 
 
 # Manual matcher routes removed
@@ -2476,13 +2553,13 @@ def searchbol_api():
     q = request.args.get('q', '').strip()
     results = []
     if q:
-        conn = sqlite3.connect('bol.db')
+        conn = sqlite3.connect('rawbol.db')
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         cur.execute('''
             SELECT item_description as description, upc, client_cost, 
-                   total_client_cost as total_cost, lot_number, bol_number 
-            FROM bol_items 
+                   total_client_cost as total_cost, lot_number, bol_number, quantity
+            FROM raw_bol_items 
             WHERE item_description LIKE ? OR upc LIKE ?
         ''', (f'%{q}%', f'%{q}%'))
         results = [dict(row) for row in cur.fetchall()]
@@ -2500,10 +2577,10 @@ def view_all(db_type):
         title = 'All Inventory Items'
         conn.close()
     elif db_type == 'bol':
-        conn = sqlite3.connect('bol.db')
+        conn = sqlite3.connect('rawbol.db')
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
-        cur.execute('SELECT * FROM bol_items')
+        cur.execute('SELECT * FROM raw_bol_items')
         items = [dict(row) for row in cur.fetchall()]
         title = 'All BOL Items'
         conn.close()
@@ -2525,12 +2602,12 @@ def update_item(db_type, item_id):
         if db_type == 'rack':
             conn = sqlite3.connect('searchRack.db')
         else:  # bol
-            conn = sqlite3.connect('bol.db')
+            conn = sqlite3.connect('rawbol.db')
         
         cur = conn.cursor()
         
         # Get column names to validate fields
-        cur.execute(f'PRAGMA table_info({"SEARCHRACK" if db_type == "rack" else "bol_items"})')
+        cur.execute(f'PRAGMA table_info({"SEARCHRACK" if db_type == "rack" else "raw_bol_items"})')
         columns = [col[1] for col in cur.fetchall()]
         
         # Build update query
@@ -2541,7 +2618,7 @@ def update_item(db_type, item_id):
         if not set_clause:
             return jsonify({'success': False, 'error': 'No valid fields to update'}), 400
         
-        query = f'UPDATE {"SEARCHRACK" if db_type == "rack" else "bol_items"} SET {set_clause} WHERE id=?'
+        query = f'UPDATE {"SEARCHRACK" if db_type == "rack" else "raw_bol_items"} SET {set_clause} WHERE id=?'
         cur.execute(query, values)
         conn.commit()
         

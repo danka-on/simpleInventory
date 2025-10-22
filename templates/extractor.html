@@ -2,53 +2,178 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Title</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>BOL Extractor</title>
+    <style>
+        body{font-family:Arial,sans-serif;max-width:1200px;margin:20px auto;padding:0 20px}
+        .top{display:flex;align-items:center;gap:10px;margin-bottom:20px}
+        .btn-back{padding:8px 14px;background:#e74c3c;color:#fff;border:none;border-radius:6px;cursor:pointer;text-decoration:none;display:inline-block}
+        .btn-back:hover{background:#c0392b}
+        h2{color:#333;margin:0}
+        .form-group{margin-bottom:15px}
+        label{display:inline-block;width:120px;font-weight:600}
+        input[type="file"],input[type="text"],input[type="date"]{padding:8px;border:1px solid #ccc;border-radius:4px;width:300px}
+        button{padding:10px 20px;background:#007bff;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:14px}
+        button:hover{background:#0056b3}
+        .message{margin-top:15px;padding:10px;border-radius:4px}
+        .message.success{background:#d4edda;color:#155724;border:1px solid #c3e6cb}
+        .message.error{background:#f8d7da;color:#721c24;border:1px solid #f5c6cb}
+        .section{margin-top:30px;padding:20px;border:1px solid #ddd;border-radius:8px;background:#f9f9f9}
+        .section h3{margin-top:0}
+        table{width:100%;border-collapse:collapse;margin-top:10px}
+        th,td{padding:8px;text-align:left;border-bottom:1px solid #ddd}
+        th{background:#007bff;color:#fff}
+        .btn-delete{background:#dc3545;color:#fff;border:none;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:12px}
+        .btn-delete:hover{background:#c82333}
+    </style>
 </head>
 <body>
-    <h2>BOL Excel Extractor</h2>
-    <form id="extractor-form" enctype="multipart/form-data" method="post" action="/extractor/upload">
-        <label for="excel-file">Upload Excel File:</label>
-        <input type="file" id="excel-file" name="excel_file" accept=".xlsx,.xls" required><br><br>
-        <label for="import-date">Date:</label>
-        <input type="date" id="import-date" name="import_date" required><br><br>
-        <button type="submit">Upload</button>
+    <div class="top">
+        <a href="/" class="btn-back">Back</a>
+        <h2>BOL Excel Extractor</h2>
+    </div>
+    <form id="extractor-form" enctype="multipart/form-data">
+        <div class="form-group">
+            <label for="excel-file">Upload Excel File:</label>
+            <input type="file" id="excel-file" name="excel_file" accept=".xls,.xlsx" required>
+        </div>
+        <div class="form-group">
+            <label for="lot-number">Lot #:</label>
+            <input type="text" id="lot-number" name="lot_number" required>
+        </div>
+        <div class="form-group">
+            <label for="import-date">Date:</label>
+            <input type="date" id="import-date" name="import_date" required>
+        </div>
+        <button type="submit">Upload & Sync to BOL</button>
     </form>
     <div id="message"></div>
+
+    <div class="section">
+        <h3>Database Statistics</h3>
+        <div id="stats-display">Loading...</div>
+    </div>
+
+    <div class="section">
+        <h3>Upload History</h3>
+        <div id="upload-logs">Loading...</div>
+    </div>
+
     <script>
-        // Drag and drop support
-        const form = document.getElementById('extractor-form');
-        const fileInput = document.getElementById('excel-file');
-        form.addEventListener('submit', function(e) {
+        // Set today's date as default
+        document.getElementById('import-date').valueAsDate = new Date();
+
+        // Load upload logs and stats on page load
+        loadUploadLogs();
+        loadStats();
+
+        // Form submission
+        document.getElementById('extractor-form').addEventListener('submit', async function(e) {
             e.preventDefault();
-            const formData = new FormData(form);
-            fetch('/extractor/upload', {
-                method: 'POST',
-                body: formData
-            })
-            .then(response => response.json())
-            .then(data => {
-                document.getElementById('message').innerText = data.success ? 'Upload successful!' : ('Error: ' + data.error);
-            })
-            .catch(err => {
-                document.getElementById('message').innerText = 'Error: ' + err;
-            });
-        });
-        // Optional: drag-and-drop
-        form.addEventListener('dragover', function(e) {
-            e.preventDefault();
-            form.style.background = '#e0e0e0';
-        });
-        form.addEventListener('dragleave', function(e) {
-            e.preventDefault();
-            form.style.background = '';
-        });
-        form.addEventListener('drop', function(e) {
-            e.preventDefault();
-            form.style.background = '';
-            if (e.dataTransfer.files.length) {
-                fileInput.files = e.dataTransfer.files;
+            const formData = new FormData(this);
+            const msgEl = document.getElementById('message');
+            msgEl.innerHTML = '<div class="message">Uploading and syncing...</div>';
+            
+            try {
+                const response = await fetch('/api/rawbol/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await response.json();
+                
+                if (data.success) {
+                    let msg = `Upload successful! ${data.inserted} rows imported.`;
+                    if (data.synced) {
+                        msg += ` Auto-synced to BOL.DB: ${data.sync_updated} updated, ${data.sync_inserted} inserted.`;
+                    } else if (data.sync_error) {
+                        msg += ` WARNING: Sync failed - ${data.sync_error}`;
+                    }
+                    msgEl.innerHTML = `<div class="message success">${msg}</div>`;
+                    document.getElementById('extractor-form').reset();
+                    document.getElementById('import-date').valueAsDate = new Date();
+                    loadUploadLogs();
+                    loadStats();
+                } else {
+                    msgEl.innerHTML = `<div class="message error">Error: ${data.error}</div>`;
+                }
+            } catch (err) {
+                msgEl.innerHTML = `<div class="message error">Error: ${err}</div>`;
             }
         });
+
+        async function loadUploadLogs() {
+            try {
+                const response = await fetch('/api/rawbol/logs');
+                const data = await response.json();
+                const logsEl = document.getElementById('upload-logs');
+                
+                if (data.success && data.logs && data.logs.length > 0) {
+                    let html = '<table><tr><th>Filename</th><th>Lot #</th><th>Date</th><th>Rows</th><th>Uploaded At</th><th>Action</th></tr>';
+                    data.logs.forEach(log => {
+                        const uploadedAt = new Date(log.uploaded_at).toLocaleString();
+                        html += `<tr>
+                            <td>${log.filename}</td>
+                            <td>${log.lot_number}</td>
+                            <td>${log.import_date}</td>
+                            <td>${log.rows_imported}</td>
+                            <td>${uploadedAt}</td>
+                            <td><button class="btn-delete" onclick="deleteLot('${log.lot_number}')">X</button></td>
+                        </tr>`;
+                    });
+                    html += '</table>';
+                    logsEl.innerHTML = html;
+                } else {
+                    logsEl.innerHTML = '<p>No uploads yet.</p>';
+                }
+            } catch (err) {
+                document.getElementById('upload-logs').innerHTML = `<p>Error loading logs: ${err}</p>`;
+            }
+        }
+
+        async function loadStats() {
+            try {
+                const response = await fetch('/api/rawbol/stats');
+                const data = await response.json();
+                const statsEl = document.getElementById('stats-display');
+                
+                if (data.success) {
+                    statsEl.innerHTML = `
+                        <p><strong>Total Unique Items:</strong> ${data.unique_items.toLocaleString()}</p>
+                        <p><strong>Total Quantity:</strong> ${data.total_quantity.toLocaleString()}</p>
+                    `;
+                } else {
+                    statsEl.innerHTML = `<p>Error loading stats: ${data.error}</p>`;
+                }
+            } catch (err) {
+                document.getElementById('stats-display').innerHTML = `<p>Error loading stats: ${err}</p>`;
+            }
+        }
+
+        async function deleteLot(lotNumber) {
+            if (!confirm(`⚠️ Delete Lot ${lotNumber}?\n\nThis will:\n- Remove all items from this lot in rawbol.db\n- Subtract quantities from bol.db\n- Remove items from bol.db if quantity reaches 0\n\nThis cannot be undone!`)) return;
+            
+            const msgEl = document.getElementById('message');
+            msgEl.innerHTML = '<div class="message">Deleting lot and desyncing...</div>';
+            
+            try {
+                const response = await fetch(`/api/rawbol/delete/${encodeURIComponent(lotNumber)}`, { 
+                    method: 'DELETE' 
+                });
+                const data = await response.json();
+                
+                if (data.success) {
+                    msgEl.innerHTML = `<div class="message success">Lot ${data.lot} deleted! ${data.updated} items updated, ${data.removed} items removed from BOL.DB.</div>`;
+                    loadUploadLogs();
+                    loadStats();
+                } else {
+                    msgEl.innerHTML = `<div class="message error">Delete error: ${data.error}</div>`;
+                }
+            } catch (err) {
+                msgEl.innerHTML = `<div class="message error">Delete error: ${err}</div>`;
+            }
+        }
     </script>
+</body>
+</html>
 </body>
 </html>
