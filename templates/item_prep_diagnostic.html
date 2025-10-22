@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Diagnostic</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
   <style>
     body{font-family:Segoe UI,Arial,sans-serif;background:#f7fafc;margin:0;padding:18px}
     .top{display:flex;align-items:center;gap:10px;justify-content:space-between}
@@ -72,7 +73,12 @@
     <a id="back-link" href="/"><button class="btn btn-danger">Back</button></a>
     <h2>Diagnostic</h2>
     <div style="display:flex;gap:8px">
-      <button type="button" class="btn" id="resetBtn" style="background:#f39c12;color:#fff">Reset</button>
+      <button type="button" class="btn" id="doneBtn" style="background:#00c853;color:#fff;display:flex;align-items:center;gap:6px">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M20 6L9 17L4 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        Done
+      </button>
     </div>
   </div>
 
@@ -158,7 +164,7 @@
             <rect x="1" y="1" width="22" height="22" rx="4" fill="#00c853"/>
             <path d="M7 12.5L10 15.5L17 8.5" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
-          Complete
+          Done
         </button>
           <!-- Hidden reset button placed below the Complete button to keep camera centered; visually off-screen but reachable via script or CSS if needed -->
           <button type="button" id="resetCamHiddenBtn" style="position:relative;left:-9999px;visibility:hidden;" aria-hidden="true">Reset Cam Hidden</button>
@@ -177,6 +183,7 @@
   <div id="uploadOverlay"><div class="spinner" title="Uploading..."></div></div>
 
   <script>
+  console.log('=== Diagnostic Edit Script Starting ===');
   const photos = document.getElementById('photos');
     const preview = document.getElementById('preview');
     const qualityGroup = document.getElementById('qualityGroup');
@@ -589,62 +596,10 @@
       }catch(e){ /* ignore */ }
     });
 
-    // Reset diagnostic: set unchecked, unlist, delete photos (with warning)
-    document.getElementById('resetBtn').addEventListener('click', async ()=>{
-      const upc = '{{ upc }}'.trim(); if(!upc) return;
-      let hasPhotos = false;
-      try{
-        const r = await fetch(`/api/items_prep/diagnostic/${encodeURIComponent(upc)}`);
-        const j = await r.json();
-        hasPhotos = Array.isArray(j.images) && j.images.length > 0;
-      }catch{}
-      const msg = hasPhotos ? 'Reset will delete all diagnostic photos and clear status/listing. Continue?' : 'Reset will clear status and listing. Continue?';
-      if(!confirm(msg)) return;
-      try{
-        // Show overlay
-        try{ document.getElementById('uploadOverlay').style.display='flex'; }catch{}
-        // 1) Delete photos if any
-        if(hasPhotos){
-          try{
-            const delRes = await fetch(`/api/items_prep/diagnostic/${encodeURIComponent(upc)}/photos`, { method:'DELETE' });
-            const dj = await delRes.json();
-            if(!(dj && dj.success)){
-              alert('Photos could not be deleted: '+(dj&&dj.error||'unknown'));
-            }
-          }catch(e){ alert('Photos could not be deleted: '+e); }
-        }
-        // 2) Uncheck status (clear reason/note)
-        await fetch('/api/items_prep/status', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ upc, status: 'unchecked', reason: '', note: '' })});
-        statusInput.value = 'unchecked';
-        updateStatusBubbles();
-        // 2b) Delete all notes for this UPC
-        try{
-          const notesRes = await fetch(`/api/items_prep/notes/${encodeURIComponent(upc)}`);
-          const notesJ = await notesRes.json();
-          if(notesJ.success && notesJ.notes){
-            for(const n of notesJ.notes){
-              await fetch(`/api/items_prep/notes/${n.id}`, {method: 'DELETE'});
-            }
-          }
-        }catch(e){ /* ignore note deletion errors */ }
-        // 3) Unlist
-        await fetch('/api/bol_items/list_status', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ upc, list_status: '' })});
-        // 4) If this was a temporary entry, delete it
-        if(isTemporaryEntry){
-          await fetch('/api/cleanup_temporary_entry', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ upc })});
-        }
-        // 5) Clear UI
-        reasonBtns.forEach(b=> b.classList.remove('active')); reasonSelect.value='';
-        document.getElementById('newNoteInput').value = '';
-        await loadNotes(); // refresh notes display
-        // clear pending/captured previews
-        try{ document.getElementById('preview').innerHTML = ''; }catch{}
-        // clear existing photos section
-        try{ document.getElementById('existingGrid').innerHTML=''; document.getElementById('existingCard').style.display='none'; }catch{}
-        const m = document.getElementById('msg'); if(m) m.textContent = 'Reset complete';
-      } finally {
-        try{ document.getElementById('uploadOverlay').style.display='none'; }catch{}
-      }
+    // Top-right Done button functionality (same as Complete button)
+    document.getElementById('doneBtn').addEventListener('click', async ()=>{
+      // Trigger the same logic as Complete button
+      document.getElementById('completeBtn').click();
     });
 
     // Notes functionality
@@ -760,12 +715,28 @@
       if(e.key === 'Enter'){ e.preventDefault(); addNote(); }
     });
 
-    // Position functionality
-    document.getElementById('setPositionBtn').addEventListener('click', ()=>{
-      const upc = '{{ upc }}'.trim();
-      const currentUrl = window.location.href;
-      window.location.href = `/position?for_diagnostic=${encodeURIComponent(upc)}&return=${encodeURIComponent(currentUrl)}`;
-    });
+    // Position functionality - bind directly since script is at end of body
+    console.log('=== About to look for setPositionBtn ===');
+    console.log('All elements with set-position-btn class:', document.querySelectorAll('.set-position-btn'));
+    console.log('Element with id setPositionBtn:', document.getElementById('setPositionBtn'));
+    (function(){
+      const btn = document.getElementById('setPositionBtn');
+      if(!btn){
+        console.error('ERROR: setPositionBtn not found!');
+        console.log('Available button IDs:', Array.from(document.querySelectorAll('button')).map(b => b.id).filter(id => id));
+        return;
+      }
+      console.log('SUCCESS: setPositionBtn found:', btn);
+      console.log('Button outer HTML:', btn.outerHTML.substring(0, 100));
+      btn.addEventListener('click', ()=>{
+        console.log('=== setPositionBtn CLICKED! ===');
+        const upc = '{{ upc }}'.trim();
+        const currentUrl = window.location.href;
+        console.log('Navigating to position with UPC:', upc);
+        window.location.href = `/position?for_diagnostic=${encodeURIComponent(upc)}&return=${encodeURIComponent(currentUrl)}`;
+      });
+      console.log('Click handler attached successfully');
+    })();
 
     async function loadLocation(){
       const upc = '{{ upc }}'.trim();

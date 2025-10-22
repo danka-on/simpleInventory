@@ -34,11 +34,10 @@
 </head>
 <body>
   <div class="top">
-    <a href="/"><button class="btn btn-danger" style="justify-self:start">Back</button></a>
+    <button class="btn btn-danger" id="back-btn" style="margin:0; justify-self:start">Back</button>
     <h2 style="margin:0; justify-self:center; text-align:center">Item Manager</h2>
     <div></div>
   </div>
-
   <div class="filters" style="margin-top:10px">
     <label>Search:
       <input type="text" id="filter-q" placeholder="UPC or Title">
@@ -463,6 +462,8 @@ setFiltersFromURL();
 loadLots().then(loadItems);
 // Focus the search input on load
 document.getElementById('filter-q').focus();
+// Back button navigates home; using button confines clickable area to the button
+document.getElementById('back-btn').addEventListener('click', ()=>{ window.location.href = '/'; });
 // Trigger load on Enter in search
 document.getElementById('filter-q').addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ e.preventDefault(); loadItems(); } });
 

@@ -107,7 +107,7 @@
 </head>
 <body>
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;gap:12px;">
-        <a href="/" style="text-decoration:none;">
+        <a id="backBtn" href="/" style="text-decoration:none;">
             <button style="background:#e74c3c;color:#fff;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;display:flex;align-items:center;gap:8px;">
                 <i class="fas fa-arrow-left"></i> Back
             </button>
@@ -539,6 +539,13 @@
         const urlParams = new URLSearchParams(window.location.search);
         const forDiagnostic = urlParams.get('for_diagnostic');
         const returnUrl = urlParams.get('return');
+        
+        // Update back button to return to diagnostic page if we came from there
+        if(returnUrl){
+            const backBtn = document.getElementById('backBtn');
+            if(backBtn) backBtn.href = returnUrl;
+        }
+        
         if(forDiagnostic){
             document.getElementById('for_diagnostic').value = forDiagnostic;
             document.getElementById('upc_field').value = forDiagnostic;
