@@ -342,7 +342,10 @@ def item_prep_diagnostic_page():
 
 @app.route('/item-prep/diagnostic/view')
 def item_prep_diagnostic_view_page():
-    upc = _normalize_upc(request.args.get('upc'))
+    upc_raw = request.args.get('upc', '').strip()
+    # Strip leading zeros from barcode
+    upc_stripped = upc_raw.lstrip('0') if upc_raw.isdigit() else upc_raw
+    upc = _normalize_upc(upc_stripped)
     # Load status, images, and (optionally) bol item details
     status = None
     images = []
@@ -1058,13 +1061,15 @@ def api_bol_items():
         lot = (request.args.get('lot') or '').strip()
         import_date = (request.args.get('import_date') or '').strip()
         q = (request.args.get('q') or '').strip()
+        # Strip leading zeros from barcode searches
+        q_stripped = q.lstrip('0') if q and q.isdigit() else q
         status_filter = (request.args.get('status') or '').strip().lower()
         page = int(request.args.get('page', 1))
         limit = int(request.args.get('limit', 25))
         if page < 1: page = 1
         if limit < 1 or limit > 100: limit = 25
         offset = (page - 1) * limit
-        print(f"[api_bol_items] Filters - lot: '{lot}', import_date: '{import_date}', q: '{q}', status_filter: '{status_filter}'")
+        print(f"[api_bol_items] Filters - lot: '{lot}', import_date: '{import_date}', q: '{q_stripped}', status_filter: '{status_filter}'")
         conn = sqlite3.connect('bol.db')
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
@@ -1086,9 +1091,9 @@ def api_bol_items():
         if import_date:
             where.append('b.import_date = ?')
             params.append(import_date)
-        if q:
+        if q_stripped:
             where.append('(b.upc LIKE ? COLLATE NOCASE OR b.item_description LIKE ? COLLATE NOCASE)')
-            like = f"%{q}%"
+            like = f"%{q_stripped}%"
             params.extend([like, like])
         # Build WHERE clause only when we actually have conditions
         where_sql = (' WHERE ' + ' AND '.join(where)) if where else ''
@@ -2511,11 +2516,13 @@ def searchrack_page():
 @app.route('/searchrack_api')
 def searchrack_api():
     q = request.args.get('q', '').strip()
+    # Strip leading zeros from barcode searches
+    q_stripped = q.lstrip('0') if q.isdigit() else q
     results = []
-    if q:
+    if q_stripped:
         conn = sqlite3.connect('searchRack.db')
         cur = conn.cursor()
-        cur.execute('''SELECT TITLE, BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION FROM SEARCHRACK WHERE TITLE LIKE ? OR BARCODE LIKE ?''', (f'%{q}%', f'%{q}%'))
+        cur.execute('''SELECT TITLE, BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION FROM SEARCHRACK WHERE TITLE LIKE ? OR BARCODE LIKE ?''', (f'%{q_stripped}%', f'%{q_stripped}%'))
         for row in cur.fetchall():
             results.append({
                 'title': row[0],
@@ -2551,8 +2558,10 @@ def searchrack_api():
 @app.route('/searchbol_api')
 def searchbol_api():
     q = request.args.get('q', '').strip()
+    # Strip leading zeros from barcode searches
+    q_stripped = q.lstrip('0') if q.isdigit() else q
     results = []
-    if q:
+    if q_stripped:
         conn = sqlite3.connect('rawbol.db')
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
@@ -2561,7 +2570,7 @@ def searchbol_api():
                    total_client_cost as total_cost, lot_number, bol_number, quantity
             FROM raw_bol_items 
             WHERE item_description LIKE ? OR upc LIKE ?
-        ''', (f'%{q}%', f'%{q}%'))
+        ''', (f'%{q_stripped}%', f'%{q_stripped}%'))
         results = [dict(row) for row in cur.fetchall()]
         conn.close()
     return jsonify({'results': results})

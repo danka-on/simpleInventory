@@ -309,7 +309,10 @@ function renderResults(results){
     }
     const img = esc(imgUrl);
     const thumb = img ? img : (!isArchived && r.pictureposition ? ('/static/pictureposition/'+r.pictureposition) : missingThumb());
-    const barcode = esc(r.barcode || (r.raw && (r.raw.upc || r.raw.UPC || r.raw.Barcode || r.raw.barcode)) || '')
+    const barcodeRaw = r.barcode || (r.raw && (r.raw.upc || r.raw.UPC || r.raw.Barcode || r.raw.barcode)) || '';
+    // Strip leading zeros from barcode display
+    const barcodeStripped = barcodeRaw && /^\d+$/.test(String(barcodeRaw)) ? String(barcodeRaw).replace(/^0+/, '') : barcodeRaw;
+    const barcode = esc(barcodeStripped);
     const itemid = esc(r.item_id || (r.raw && (r.raw.ItemID || r.raw.item_id || r.raw.id || r.raw.upc)) || '')
         // Normalize quantity like inventory: default to 1 and coerce int-like values
         function toIntLike(q){

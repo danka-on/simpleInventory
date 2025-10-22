@@ -195,7 +195,10 @@ function render(results){
     const title = esc(r.title||'');
     const img = esc(r.image||'');
     const thumb = img ? img.replace('s-l1600.jpg', 's-l140.jpg') : '';
-    const upc = esc(r.upc||'');
+    const upcRaw = r.upc||'';
+    // Strip leading zeros from UPC display
+    const upcStripped = upcRaw && /^\d+$/.test(String(upcRaw)) ? String(upcRaw).replace(/^0+/, '') : upcRaw;
+    const upc = esc(upcStripped);
     const last_edited = esc(r.last_edited||'');
     const status = (r.status||'').toLowerCase();
     let pill = '<span class="status-box" title="Unchecked">unchecked</span>';
