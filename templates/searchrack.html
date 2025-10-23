@@ -387,7 +387,7 @@ function renderResults(results){
     const dateSoldCell = hasSold ? (dbRaw === 'sold' && r.raw && r.raw.paid_time ? `<td>${fmtLocal(r.raw.paid_time)}</td>` : '<td></td>') : '';
     const dateShippedCell = hasSold ? (dbRaw === 'sold' && r.raw && r.raw.shipped_time ? `<td>${fmtLocal(r.raw.shipped_time)}</td>` : '<td></td>') : '';
     
-    html += `<tr data-src="${db}" data-id="${r.id}">`+
+    html += `<tr data-src="${db}" data-id="${r.id}" data-qty="${qty}">`+
         `<td><div class="title-cell"><img class="thumb" src="${thumb}" onerror="this.src='${missingThumb(48,48,'No Img')}'"><div><a href="#" class="title-link" data-src="${db}" data-id="${r.id}" data-image="${img}" data-title="${title}">${title}</a>${deletedInfo}${createdInfo}</div></div></td>`+
                 `<td>${barcode}</td>`+
                 itemIdCell +
@@ -525,9 +525,9 @@ function onEditLocation(rackId, barcode){
     // Determine quantity for this row; if >1 ask how many to move
     const tr = document.querySelector(`tr[data-id="${rackId}"]`);
     let qty = 1;
-    try{
-        if(tr){ qty = parseInt(tr.children[4].textContent||'1', 10) || 1; }
-    }catch(e){ qty = 1; }
+    try {
+        if(tr) { qty = parseInt(tr.getAttribute('data-qty') || '1', 10) || 1; }
+    } catch(e) { qty = 1; }
     // If qty > 1 show qty modal, otherwise proceed immediately
     if(qty > 1){
         showQtyModal(rackId, qty);

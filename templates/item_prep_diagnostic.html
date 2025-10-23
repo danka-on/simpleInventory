@@ -585,13 +585,19 @@
       }
     });
 
-    // Auto-select "bad" status if accessed via "Bad → Diagnostic" button
+    // Auto-select "bad" status and first defect reason if accessed via "Bad → Diagnostic" button
     window.addEventListener('DOMContentLoaded', ()=>{
       try{
         const params = new URLSearchParams(window.location.search);
         const from = params.get('from');
         if(from === 'bad'){
           updateStatusBubbles('bad');
+          // Auto-select the first defect reason button
+          if (reasonBtns.length > 0) {
+            reasonBtns.forEach(b=> b.classList.remove('active'));
+            reasonBtns[0].classList.add('active');
+            reasonSelect.value = reasonBtns[0].dataset.val;
+          }
         }
       }catch(e){ /* ignore */ }
     });
