@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Miscellaneous Settings</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { font-family: sans-serif; max-width: 500px; margin: auto; padding: 20px; }
+        h1 { margin-bottom: 24px; }
+        label { font-weight: bold; margin-top: 18px; display: block; }
+        input[type="number"] { width: 80px; padding: 6px; font-size: 1.1em; margin-right: 10px; }
+        input[type="checkbox"] { margin-right: 8px; }
+        button { margin-top: 24px; padding: 10px 24px; font-size: 1.1em; background: #2196F3; color: #fff; border: none; border-radius: 6px; cursor: pointer; }
+        .desc { color: #555; font-size: 0.98em; margin-bottom: 18px; }
+    </style>
+</head>
+<body>
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;">
+        <a href="/tools" style="text-decoration:none;">
+            <button style="background:#e74c3c;color:#fff;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;display:flex;align-items:center;gap:8px;">
+                <i class="fas fa-arrow-left"></i> Back
+            </button>
+        </a>
+        <h1 style="flex:1;text-align:center;margin:0;">Miscellaneous Settings</h1>
+        <div style="width:84px"></div>
+    </div>
+    <div class="desc">Configure auto-submit timer for Add Item screen.</div>
+    <form id="miscSettingsForm">
+        <label for="autoSubmitTime">Auto-submit timer (seconds):</label>
+        <input type="number" id="autoSubmitTime" min="1" max="30" step="1">
+        <br>
+        <label><input type="checkbox" id="disableAutoSubmit"> Disable auto-submit timer</label>
+        <br>
+        <button type="submit">Save Settings</button>
+    </form>
+    <div id="saveStatus" style="margin-top:18px;color:#388e3c;font-weight:bold;display:none;">Settings saved!</div>
+    <script>
+        // Load settings from localStorage
+        function loadSettings() {
+            const t = localStorage.getItem('autoSubmitTime');
+            const d = localStorage.getItem('disableAutoSubmit');
+            document.getElementById('autoSubmitTime').value = t ? parseInt(t) : 3;
+            document.getElementById('disableAutoSubmit').checked = d === '1';
+        }
+        // Save settings to localStorage
+        document.getElementById('miscSettingsForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const t = document.getElementById('autoSubmitTime').value;
+            const d = document.getElementById('disableAutoSubmit').checked;
+            localStorage.setItem('autoSubmitTime', t);
+            localStorage.setItem('disableAutoSubmit', d ? '1' : '0');
+            document.getElementById('saveStatus').style.display = '';
+            setTimeout(()=>{document.getElementById('saveStatus').style.display='none';}, 1200);
+        });
+        // On page load, always show saved settings
+        document.addEventListener('DOMContentLoaded', loadSettings);
+    </script>
+</body>
+</html>

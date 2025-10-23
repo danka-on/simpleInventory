@@ -566,6 +566,24 @@
                 <i class="fas fa-forward"></i> Skip
             </button>
         </a>
+        <button id="exitBtn" type="button" style="background-color: #ff4444; color: white; border: none; padding: 10px 24px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 1.1em; width: 100%; max-width: 200px;">
+            <i class="fas fa-times"></i> Exit
+        </button>
     </div>
+    <script>
+    // Exit button clears sessionStorage and goes to index.html
+    document.addEventListener('DOMContentLoaded', function() {
+        var exitBtn = document.getElementById('exitBtn');
+        if (exitBtn) {
+            exitBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+                sessionStorage.removeItem('item_position');
+                sessionStorage.removeItem('barcode');
+                sessionStorage.removeItem('pictureposition_path');
+                window.location.href = '/';
+            });
+        }
+    });
+    </script>
 </body>
 </html>

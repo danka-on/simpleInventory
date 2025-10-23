@@ -91,6 +91,11 @@ def _run_enrich_in_background():
 def tools():
     return render_template('tools.html')
 
+# Route for misc settings page
+@app.route('/misc')
+def misc():
+    return render_template('misc.html')
+
 # =========== Item Preparation Helpers and Routes ===========
 def _normalize_upc(upc):
     try:
