@@ -72,7 +72,6 @@
                     <option value="qty_asc">Qty (least)</option>
                 </select>
             </label>
-            <button id="sort-apply" class="btn">Apply</button>
         </div>
     </div>
 
@@ -261,7 +260,11 @@ function renderPagination(total, page, limit){
 }
 
 document.getElementById('page-size').addEventListener('change', ()=>{ _pageSize = parseInt(document.getElementById('page-size').value,10); _currentPage = 1; renderPagedResults(); });
-document.getElementById('sort-apply').addEventListener('click', ()=>{ _sortMode = document.getElementById('sort-select').value || 'time_desc'; _currentPage=1; renderPagedResults(); });
+document.getElementById('sort-select').addEventListener('change', () => {
+    _sortMode = document.getElementById('sort-select').value || 'time_desc';
+    _currentPage = 1;
+    renderPagedResults();
+});
     // page-size control hidden when fetching all by default
 
 function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
