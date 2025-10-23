@@ -152,7 +152,25 @@
       if(!currentUpc) return; window.location.href = '/item-prep/diagnostic?upc='+encodeURIComponent(currentUpc)+'&from=bad&return='+encodeURIComponent('/item-prep?forceFocus=1');
     };
 
-    document.getElementById('skipBtn').onclick = ()=>{ document.getElementById('manualUpc').value=''; document.getElementById('result').classList.add('hidden'); document.getElementById('actions').classList.add('hidden'); currentUpc = null; setupDeviceMode(); };
+    document.getElementById('skipBtn').onclick = async ()=>{ 
+      if (currentUpc) {
+        // Cleanup temporary entry if it exists
+        try {
+          await fetch('/api/items_prep/cleanup_temp', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({upc: currentUpc})
+          });
+        } catch(e) {
+          console.error('Cleanup error:', e);
+        }
+      }
+      document.getElementById('manualUpc').value=''; 
+      document.getElementById('result').classList.add('hidden'); 
+      document.getElementById('actions').classList.add('hidden'); 
+      currentUpc = null; 
+      setupDeviceMode(); 
+    };
 
     // Device detection similar to barcode.html
     function getDeviceType(){

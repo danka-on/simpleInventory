@@ -378,27 +378,86 @@ def item_prep_diagnostic_view_page():
 
 @app.route('/api/bol_lookup', methods=['GET'])
 def api_bol_lookup():
-    """Lookup a BOL item by UPC in bol.db and return normalized fields."""
+    """Lookup a BOL item by UPC in bol.db and return normalized fields.
+    If duplicate UPC is encountered, create a temporary suffixed entry (e.g., barcode-1).
+    """
     try:
         upc = _normalize_upc(request.args.get('upc'))
         if not upc:
             return jsonify({'found': False, 'error': 'Missing upc'}), 400
+        
         conn = sqlite3.connect('bol.db')
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
-        cur.execute("SELECT id, upc, item_description, image_url, lot_number, bol_number, import_date FROM bol_items WHERE upc = ? COLLATE NOCASE LIMIT 1", (upc,))
-        row = cur.fetchone()
-        conn.close()
-        if not row:
+        
+        # Ensure temporary column exists
+        cur.execute('PRAGMA table_info(bol_items)')
+        cols = [r[1] for r in cur.fetchall()]
+        if 'temporary' not in cols:
+            cur.execute('ALTER TABLE bol_items ADD COLUMN temporary INTEGER DEFAULT 0')
+            conn.commit()
+        
+        # Check if this UPC already exists and has been processed
+        cur.execute("SELECT id, upc, item_description, image_url, lot_number, bol_number, import_date, temporary FROM bol_items WHERE upc = ? COLLATE NOCASE", (upc,))
+        rows = cur.fetchall()
+        
+        if not rows:
+            conn.close()
             return jsonify({'found': False})
-        item = dict(row)
-        # also include current prep status if exists
+        
+        # Find if there's already a permanent entry (temporary = 0 or NULL)
+        permanent_row = None
+        for r in rows:
+            if not r['temporary']:
+                permanent_row = r
+                break
+        
+        # If we found a permanent entry, this is a duplicate scan
+        # Create a temporary suffixed entry
+        if permanent_row:
+            # Find the next available suffix
+            suffix = 1
+            while True:
+                suffixed_upc = f"{upc}-{suffix}"
+                cur.execute("SELECT upc FROM bol_items WHERE upc = ? COLLATE NOCASE", (suffixed_upc,))
+                if not cur.fetchone():
+                    break
+                suffix += 1
+            
+            # Create temporary duplicate entry
+            cur.execute("""
+                INSERT INTO bol_items (upc, item_description, image_url, lot_number, bol_number, import_date, temporary)
+                VALUES (?, ?, ?, ?, ?, ?, 1)
+            """, (suffixed_upc, permanent_row['item_description'], permanent_row['image_url'], 
+                  permanent_row['lot_number'], permanent_row['bol_number'], permanent_row['import_date']))
+            conn.commit()
+            
+            # Return the new temporary entry
+            item = {
+                'id': cur.lastrowid,
+                'upc': suffixed_upc,
+                'item_description': permanent_row['item_description'],
+                'image_url': permanent_row['image_url'],
+                'lot_number': permanent_row['lot_number'],
+                'bol_number': permanent_row['bol_number'],
+                'import_date': permanent_row['import_date'],
+                'temporary': 1,
+                'is_duplicate': True
+            }
+        else:
+            # Return the existing row (could be temporary from a previous session)
+            item = dict(rows[0])
+            item['is_duplicate'] = False
+        
+        conn.close()
+        
+        # Also include current prep status if exists
         try:
             _ensure_items_prep_tables()
             conn2 = sqlite3.connect('bol.db')
             conn2.row_factory = sqlite3.Row
             cur2 = conn2.cursor()
-            cur2.execute('SELECT status, reason, note, updated_at FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (upc,))
+            cur2.execute('SELECT status, reason, note, updated_at FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (item['upc'],))
             srow = cur2.fetchone()
             conn2.close()
             if srow:
@@ -431,7 +490,9 @@ def api_items_prep_status_get(upc):
 
 @app.route('/api/items_prep/status', methods=['POST'])
 def api_items_prep_status():
-    """Upsert preparation status for a UPC. JSON: { upc, status, reason?, note? }"""
+    """Upsert preparation status for a UPC. JSON: { upc, status, reason?, note? }
+    If status is 'good', marks temporary entries as permanent.
+    """
     try:
         data = request.get_json() or {}
         upc = _normalize_upc(data.get('upc'))
@@ -440,6 +501,15 @@ def api_items_prep_status():
         note = (data.get('note') or '').strip()
         if not upc or status not in ('good', 'bad', 'unchecked'):
             return jsonify({'success': False, 'error': 'Missing upc or invalid status'}), 400
+        
+        # If status is 'good', mark temporary entry as permanent
+        if status == 'good':
+            conn_temp = sqlite3.connect('bol.db')
+            cur_temp = conn_temp.cursor()
+            cur_temp.execute('UPDATE bol_items SET temporary = 0 WHERE upc = ? COLLATE NOCASE AND temporary = 1', (upc,))
+            conn_temp.commit()
+            conn_temp.close()
+        
         _ensure_items_prep_tables()
         import datetime
         ts = datetime.datetime.utcnow().isoformat()
@@ -451,6 +521,25 @@ def api_items_prep_status():
             cur.execute('UPDATE items_prep_status SET status=?, reason=?, note=?, updated_at=? WHERE upc=?', (status, reason, note, ts, upc))
         else:
             cur.execute('INSERT INTO items_prep_status (upc, status, reason, note, updated_at) VALUES (?,?,?,?,?)', (upc, status, reason, note, ts))
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/items_prep/cleanup_temp', methods=['POST'])
+def api_items_prep_cleanup_temp():
+    """Delete temporary entries when user skips. JSON: { upc }"""
+    try:
+        data = request.get_json() or {}
+        upc = _normalize_upc(data.get('upc'))
+        if not upc:
+            return jsonify({'success': False, 'error': 'Missing upc'}), 400
+        
+        conn = sqlite3.connect('bol.db')
+        cur = conn.cursor()
+        # Delete temporary entries with this UPC
+        cur.execute('DELETE FROM bol_items WHERE upc = ? COLLATE NOCASE AND temporary = 1', (upc,))
         conn.commit()
         conn.close()
         return jsonify({'success': True})
