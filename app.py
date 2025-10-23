@@ -1547,10 +1547,30 @@ def additemtrue():
     global position_code
     global barcode
     global pictureposition_path
+    
+    # Get values from form data (preferred) or fall back to global variables
+    form_barcode = request.form.get('barcode', '').strip()
+    form_position = request.form.get('item_position', '').strip()
+    form_pictureposition = request.form.get('pictureposition', '').strip()
+    
+    # Use form data if available, otherwise use global variables
+    final_barcode = form_barcode or barcode
+    final_position = form_position or position_code
+    final_pictureposition = form_pictureposition or pictureposition_path
+    
+    # Validate that we have required data
+    if not final_barcode:
+        print("ERROR: No barcode provided!")
+        return "Error: Barcode is required", 400
+    
+    if not final_position and not final_pictureposition:
+        print("ERROR: No position provided!")
+        return "Error: Position is required", 400
+    
     try:
         # If a picture position was used, compress and convert to B&W
-        if pictureposition_path:
-            abs_path = os.path.join(os.getcwd(), pictureposition_path)
+        if final_pictureposition:
+            abs_path = os.path.join(os.getcwd(), final_pictureposition)
             try:
                 img = Image.open(abs_path)
                 img = img.convert('L')  # Convert to grayscale
@@ -1560,19 +1580,23 @@ def additemtrue():
                 print(f"Image processing failed: {e}")
         print("Flow Complete, adding to Rack....")
         # If picture position is set, store 'picture' in ITEM_POSITION
-        item_position_to_store = 'picture' if pictureposition_path else position_code
-        addToRack(item_position_to_store, barcode, None, pictureposition_path)
-        print(f"Added to rack: position={item_position_to_store}, barcode={barcode}, pictureposition={pictureposition_path}")
+        item_position_to_store = 'picture' if final_pictureposition else final_position
+        addToRack(item_position_to_store, final_barcode, None, final_pictureposition)
+        print(f"Added to rack: position={item_position_to_store}, barcode={final_barcode}, pictureposition={final_pictureposition}")
         
         # Also add to searchRack.db
-        addToSearchRack(item_position_to_store, barcode, None, pictureposition_path)
-        print(f"Added to searchRack: position={item_position_to_store}, barcode={barcode}, pictureposition={pictureposition_path}")
+        addToSearchRack(item_position_to_store, final_barcode, None, final_pictureposition)
+        print(f"Added to searchRack: position={item_position_to_store}, barcode={final_barcode}, pictureposition={final_pictureposition}")
         
+        # Clear global variables
         position_code = None
         barcode = None
         pictureposition_path = None
     except Exception as e:
         print("something went wrong with adding to RACK", e)
+        import traceback
+        traceback.print_exc()
+        return f"Error: {str(e)}", 500
     # Add script to clear sessionStorage after successful add
     clear_script = '''<script>
         sessionStorage.removeItem('barcode');
@@ -2527,7 +2551,7 @@ def searchrack_api():
     if q_stripped:
         conn = sqlite3.connect('searchRack.db')
         cur = conn.cursor()
-        cur.execute('''SELECT TITLE, BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION FROM SEARCHRACK WHERE TITLE LIKE ? OR BARCODE LIKE ?''', (f'%{q_stripped}%', f'%{q_stripped}%'))
+        cur.execute('''SELECT TITLE, BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION, QUANTITY, IMAGE, ITEMID FROM SEARCHRACK WHERE TITLE LIKE ? OR BARCODE LIKE ?''', (f'%{q_stripped}%', f'%{q_stripped}%'))
         for row in cur.fetchall():
             results.append({
                 'title': row[0],
@@ -2535,6 +2559,9 @@ def searchrack_api():
                 'item_position': row[2],
                 'images': row[3],
                 'pictureposition': row[4],
+                'quantity': row[5],
+                'image': row[6],
+                'itemid': row[7],
             })
         conn.close()
         # Merge results that share same barcode + item_position by summing quantities
@@ -2549,12 +2576,27 @@ def searchrack_api():
             else:
                 key = f"{bc.lower()}||{pos.lower()}"
             if key not in merged:
-                # initialize quantity: default 1 (assume single item if qty missing)
+                # initialize quantity from database value
                 merged[key] = r.copy()
-                merged[key]['quantity'] = int(r.get('quantity')) if str(r.get('quantity') or '').isdigit() else 1
+                # Properly handle quantity: use value from DB if present, otherwise default to 1
+                qty_val = r.get('quantity')
+                if qty_val is not None:
+                    try:
+                        merged[key]['quantity'] = int(qty_val)
+                    except (ValueError, TypeError):
+                        merged[key]['quantity'] = 1
+                else:
+                    merged[key]['quantity'] = 1
             else:
-                # sum quantities (assume 1 if missing/invalid)
-                add_q = int(r.get('quantity')) if str(r.get('quantity') or '').isdigit() else 1
+                # sum quantities from duplicate rows
+                qty_val = r.get('quantity')
+                if qty_val is not None:
+                    try:
+                        add_q = int(qty_val)
+                    except (ValueError, TypeError):
+                        add_q = 1
+                else:
+                    add_q = 1
                 merged[key]['quantity'] = merged[key].get('quantity', 0) + add_q
         # convert merged back to list
         results = list(merged.values())
@@ -2796,7 +2838,7 @@ def api_search_db(db_key):
                 'item_id': item.get('ItemID') or item.get('item_id') or item.get('ItemId') or (barcode_val if barcode_val else ''),
                 'pictureposition': item.get('PICTUREPOSITION') or item.get('pictureposition') or item.get('picture_position') or '',
                 'item_position': item.get('ITEM_POSITION') or item.get('item_position') or item.get('position') or '',
-                'quantity': item.get('Quantity') or item.get('quantity') or item.get('qty') or '',
+                'quantity': item.get('QUANTITY') or item.get('Quantity') or item.get('quantity') or item.get('qty') or '',
                 # created_at available on SEARCHRACK rows populated by DBmanager
                 'created_at': item.get('CREATED_AT') or item.get('created_at') or '',
                 'raw': item
@@ -2814,11 +2856,12 @@ def api_search_db(db_key):
                         es_cur.execute("SELECT Title, Image, ItemID, Quantity, UPC FROM INVENTORY WHERE UPC = ? COLLATE NOCASE LIMIT 1", (lookup_barcode,))
                         row_es = es_cur.fetchone()
                         if row_es:
-                            # prefer values from ebayStore if present
+                            # prefer values from ebayStore if present, BUT keep searchRack quantity (physical inventory)
                             item_out['title'] = item_out.get('title') or row_es['Title']
                             item_out['image'] = item_out.get('image') or row_es['Image']
                             item_out['item_id'] = item_out.get('item_id') or row_es['ItemID']
-                            item_out['quantity'] = item_out.get('quantity') or row_es['Quantity']
+                            # DO NOT override quantity from searchRack - it represents physical inventory
+                            # item_out['quantity'] = item_out.get('quantity') or row_es['Quantity']
                         es_conn.close()
                     except Exception:
                         # ignore lookup errors

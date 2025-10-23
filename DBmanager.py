@@ -177,12 +177,24 @@ def addToSearchRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITI
             except Exception as e:
                 print(f"Warning: Could not lookup in bol.db: {e}")
         
+        # Validate barcode and position are not empty
+        if not BARCODE or not str(BARCODE).strip():
+            print("Error: BARCODE is empty or None, skipping addToSearchRack")
+            return
+        if not ITEM_POSITION or not str(ITEM_POSITION).strip():
+            print("Error: ITEM_POSITION is empty or None, skipping addToSearchRack")
+            return
+        
+        # Normalize for comparison
+        barcode_norm = str(BARCODE).strip()
+        position_norm = str(ITEM_POSITION).strip()
+        
         # Check if same barcode at same location exists
         cursor.execute("""
             SELECT ID, QUANTITY FROM SEARCHRACK 
-            WHERE BARCODE = ? COLLATE NOCASE 
-            AND ITEM_POSITION = ? COLLATE NOCASE
-        """, (BARCODE, ITEM_POSITION))
+            WHERE TRIM(BARCODE) = ? COLLATE NOCASE 
+            AND TRIM(ITEM_POSITION) = ? COLLATE NOCASE
+        """, (barcode_norm, position_norm))
         existing_same_location = cursor.fetchone()
         
         now_iso = datetime.datetime.utcnow().isoformat()
@@ -191,23 +203,24 @@ def addToSearchRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITI
             # Same barcode at same location - increment quantity by 1
             existing_id, existing_qty = existing_same_location
             new_qty = (existing_qty or 0) + 1
+            
+            # When incrementing, update enrichment data but don't change position fields
+            # Position fields should already be correct since we matched on them
             cursor.execute("""
                 UPDATE SEARCHRACK 
                 SET QUANTITY = ?,
-                    IMAGES = COALESCE(?, IMAGES),
-                    PICTUREPOSITION = COALESCE(?, PICTUREPOSITION),
                     TITLE = COALESCE(?, TITLE),
                     ITEMID = COALESCE(?, ITEMID),
                     IMAGE = COALESCE(?, IMAGE)
                 WHERE ID = ?
-            """, (new_qty, IMAGES, PICTUREPOSITION, title, itemid, image, existing_id))
-            action = f"incremented quantity to {new_qty}"
+            """, (new_qty, title, itemid, image, existing_id))
+            action = f"incremented quantity to {new_qty} for barcode={barcode_norm}, position={position_norm}"
         else:
             # Different location or new barcode - create new record
             cursor.execute("""
                 INSERT INTO SEARCHRACK (TITLE, BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION, ITEMID, QUANTITY, IMAGE, CREATED_AT) 
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (title, BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION, itemid, 1, image, now_iso))
+            """, (title, barcode_norm, position_norm, IMAGES, PICTUREPOSITION, itemid, 1, image, now_iso))
             action = "added new entry"
             
         conn.commit()
