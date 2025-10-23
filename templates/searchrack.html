@@ -185,33 +185,33 @@ async function doSearch(){
     document.getElementById('search-input').value = '';
 }
 
-function renderPagedResults(){
-    // sort before paginating
-    const sorted = [..._allResults];
-    if(_sortMode === 'time_desc'){
-        sorted.sort((a,b)=>{
+function renderPagedResults() {
+    let sorted = [..._allResults];
+    if (_sortMode === 'time_desc') {
+        sorted.sort((a, b) => {
             const ta = Date.parse(a.deleted_at || a.created_at || 0) || 0;
             const tb = Date.parse(b.deleted_at || b.created_at || 0) || 0;
             return tb - ta;
         });
-    } else if(_sortMode === 'time_asc'){
-        sorted.sort((a,b)=>{
+    } else if (_sortMode === 'time_asc') {
+        sorted.sort((a, b) => {
             const ta = Date.parse(a.deleted_at || a.created_at || 0) || 0;
             const tb = Date.parse(b.deleted_at || b.created_at || 0) || 0;
             return ta - tb;
         });
-    } else if(_sortMode === 'name'){
-        sorted.sort((a,b)=> String(a.title||'').localeCompare(String(b.title||'')));
-    } else if(_sortMode === 'qty'){
-        function q(x){ const s = String(x||'').trim(); if(/^\d+$/.test(s)) return parseInt(s,10); if(/^[0-9]+\.0$/.test(s)) return parseInt(parseFloat(s)); const f = parseFloat(s); return Number.isFinite(f)?Math.trunc(f):0; }
-        sorted.sort((a,b)=> q(b.quantity) - q(a.quantity));
-    } else if(_sortMode === 'qty_asc'){
-        function q(x){ const s = String(x||'').trim(); if(/^\d+$/.test(s)) return parseInt(s,10); if(/^[0-9]+\.0$/.test(s)) return parseInt(parseFloat(s)); const f = parseFloat(s); return Number.isFinite(f)?Math.trunc(f):0; }
-        sorted.sort((a,b)=> q(a.quantity) - q(b.quantity));
+    } else if (_sortMode === 'name') {
+        sorted.sort((a, b) => String(a.title || '').localeCompare(String(b.title || '')));
+    } else if (_sortMode === 'qty') {
+        function q(x) { const s = String(x || '').trim(); if (/^\d+$/.test(s)) return parseInt(s, 10); if (/^[0-9]+\.0$/.test(s)) return parseInt(parseFloat(s)); const f = parseFloat(s); return Number.isFinite(f) ? Math.trunc(f) : 0; }
+        sorted.sort((a, b) => q(b.quantity) - q(a.quantity));
+    } else if (_sortMode === 'qty_asc') {
+        function q(x) { const s = String(x || '').trim(); if (/^\d+$/.test(s)) return parseInt(s, 10); if (/^[0-9]+\.0$/.test(s)) return parseInt(parseFloat(s)); const f = parseFloat(s); return Number.isFinite(f) ? Math.trunc(f) : 0; }
+        sorted.sort((a, b) => q(a.quantity) - q(b.quantity));
     }
+    // Do not merge on the client; rely on server to handle merging per location
     const total = sorted.length;
     const pages = Math.max(1, Math.ceil(total / _pageSize));
-    if(_currentPage > pages) _currentPage = pages;
+    if (_currentPage > pages) _currentPage = pages;
     const start = (_currentPage - 1) * _pageSize;
     const end = start + _pageSize;
     const slice = sorted.slice(start, end);

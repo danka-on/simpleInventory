@@ -345,21 +345,52 @@ def store_ebay_order(order):
         image TEXT,
         isHandled TEXT,
         isHandledDate TEXT,
-        location TEXT
+        location TEXT,
+        barcode TEXT
     )''')
-    # Prepare image: if order doesn't include an image URL, try to fetch from ebayStore.db by item_id
-    image_val = order.get('image')
-    if not image_val and order.get('item_id'):
+    
+    # Ensure barcode column exists (for older databases)
+    try:
+        cur.execute('PRAGMA table_info(orders)')
+        cols = [r[1] for r in cur.fetchall()]
+        if 'barcode' not in cols:
+            cur.execute('ALTER TABLE orders ADD COLUMN barcode TEXT')
+            conn.commit()
+    except Exception:
+        pass
+    
+    # Get barcode (UPC) from ebayStore.db using item_id
+    barcode_val = order.get('barcode')
+    if not barcode_val and order.get('item_id'):
         try:
             ebay_conn = sqlite3.connect('ebayStore.db')
             ebay_cur = ebay_conn.cursor()
-            ebay_cur.execute('SELECT Image FROM INVENTORY WHERE ItemID = ?', (order.get('item_id'),))
+            ebay_cur.execute('SELECT UPC FROM INVENTORY WHERE ItemID = ?', (order.get('item_id'),))
             row = ebay_cur.fetchone()
             if row and row[0]:
-                image_val = row[0]
+                barcode_val = row[0]
             ebay_conn.close()
         except Exception:
-            # If lookup fails, just leave image_val as-is (None)
+            pass
+    
+    # Enrich title and image from rawbol.db using barcode
+    title_val = order.get('title')
+    image_val = order.get('image')
+    if barcode_val:
+        try:
+            bol_conn = sqlite3.connect('rawbol.db')
+            bol_conn.row_factory = sqlite3.Row
+            bol_cur = bol_conn.cursor()
+            bol_cur.execute('SELECT item_description, image_url FROM raw_bol_items WHERE upc = ? COLLATE NOCASE LIMIT 1', (barcode_val,))
+            row_bol = bol_cur.fetchone()
+            if row_bol:
+                # Use rawbol data if not already provided
+                if not title_val and row_bol['item_description']:
+                    title_val = row_bol['item_description']
+                if not image_val and row_bol['image_url']:
+                    image_val = row_bol['image_url']
+            bol_conn.close()
+        except Exception:
             pass
 
     # Check for duplicate (order_id + item_id)
@@ -386,12 +417,12 @@ def store_ebay_order(order):
         except Exception:
             pass
     cur.execute('''INSERT INTO orders (
-        order_id, item_id, title, quantity, price, checkout_status, shipping_name, shipping_street1, shipping_street2, shipping_city, shipping_state, shipping_postal_code, shipping_country, paid_time, shipped_time, seller_fee, taxes, fees, image, isHandled, isHandledDate, location
-    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+        order_id, item_id, title, quantity, price, checkout_status, shipping_name, shipping_street1, shipping_street2, shipping_city, shipping_state, shipping_postal_code, shipping_country, paid_time, shipped_time, seller_fee, taxes, fees, image, isHandled, isHandledDate, location, barcode
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
         (
             order.get('order_id'),
             order.get('item_id'),
-            order.get('title'),
+            title_val,
             order.get('quantity'),
             order.get('price'),
             order.get('checkout_status'),
@@ -410,7 +441,8 @@ def store_ebay_order(order):
             image_val,
             order.get('isHandled'),
             order.get('isHandledDate'),
-            location_val
+            location_val,
+            barcode_val
         )
     )
     conn.commit()

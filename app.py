@@ -2799,12 +2799,18 @@ def api_search_db(db_key):
             # default mappings
             if db_key == 'ebayStore':
                 barcode_val = item.get('UPC') or item.get('upc') or item.get('BARCODE') or item.get('barcode') or item.get('Barcode') or ''
+            elif db_key == 'sold':
+                # Be robust to all case variants and explicit barcode field
+                barcode_val = item.get('barcode') or item.get('BARCODE') or item.get('Barcode') or item.get('upc') or item.get('UPC') or ''
             else:
                 barcode_val = item.get('BARCODE') or item.get('barcode') or item.get('Barcode') or ''
 
             # bol.db normalization: different column names (item_description, upc, image_url)
             title_val = item.get('Title') or item.get('title') or item.get('name') or item.get('Name') or ''
-            image_val = item.get('Image') or item.get('image') or item.get('image_url') or item.get('images') or ''
+            if db_key == 'sold':
+                image_val = item.get('image') or item.get('Image') or item.get('IMAGE') or item.get('image_url') or item.get('images') or ''
+            else:
+                image_val = item.get('Image') or item.get('image') or item.get('image_url') or item.get('images') or ''
             if db_key == 'bol':
                 # barcode from upc field
                 b = item.get('upc') or item.get('UPC') or item.get('Upc') or barcode_val
@@ -2892,39 +2898,37 @@ def api_search_db(db_key):
                             bol_conn.close()
                         except Exception:
                             pass
-                # If this row comes from sold.db, enrich with data from bol.db using barcode
+                # If this row comes from sold.db, the data should already be enriched during sync
+                # but we can still do a fallback enrichment if needed
                 elif db_key == 'sold':
-                    # First get barcode from ebayStore.db using ItemID
-                    lookup_item_id = item_out.get('item_id')
-                    lookup_barcode = None
-                    if lookup_item_id:
-                        try:
-                            es_conn = sqlite3.connect('ebayStore.db')
-                            es_conn.row_factory = sqlite3.Row
-                            es_cur = es_conn.cursor()
-                            es_cur.execute("SELECT UPC FROM INVENTORY WHERE ItemID = ? LIMIT 1", (lookup_item_id,))
-                            row_es = es_cur.fetchone()
-                            if row_es and row_es['UPC']:
-                                lookup_barcode = row_es['UPC']
-                                item_out['barcode'] = lookup_barcode
-                            es_conn.close()
-                        except Exception as e:
-                            print(f"Debug: sold barcode lookup error: {e}")
-                            pass
+                    # If barcode is missing, try to get it from ebayStore.db
+                    if not item_out.get('barcode'):
+                        lookup_item_id = item_out.get('item_id')
+                        if lookup_item_id:
+                            try:
+                                es_conn = sqlite3.connect('ebayStore.db')
+                                es_conn.row_factory = sqlite3.Row
+                                es_cur = es_conn.cursor()
+                                es_cur.execute("SELECT UPC FROM INVENTORY WHERE ItemID = ? LIMIT 1", (lookup_item_id,))
+                                row_es = es_cur.fetchone()
+                                if row_es and row_es['UPC']:
+                                    item_out['barcode'] = row_es['UPC']
+                                es_conn.close()
+                            except Exception as e:
+                                print(f"Debug: sold barcode lookup error: {e}")
+                                pass
                     
-                    # Now enrich title and image from rawbol.db using the barcode
-                    if lookup_barcode:
+                    # If title or image is missing, try to get from rawbol.db using barcode
+                    if item_out.get('barcode') and (not item_out.get('title') or not item_out.get('image')):
                         try:
                             bol_conn = sqlite3.connect('rawbol.db')
                             bol_conn.row_factory = sqlite3.Row
                             bol_cur = bol_conn.cursor()
-                            bol_cur.execute('SELECT item_description, image_url FROM raw_bol_items WHERE upc = ? COLLATE NOCASE LIMIT 1', (lookup_barcode,))
+                            bol_cur.execute('SELECT item_description, image_url FROM raw_bol_items WHERE upc = ? COLLATE NOCASE LIMIT 1', (item_out['barcode'],))
                             row_bol = bol_cur.fetchone()
                             if row_bol:
-                                # Enrich title
                                 if not item_out.get('title') and row_bol['item_description']:
                                     item_out['title'] = row_bol['item_description']
-                                # Enrich image
                                 if not item_out.get('image') and row_bol['image_url']:
                                     item_out['image'] = row_bol['image_url']
                             bol_conn.close()
@@ -2940,7 +2944,8 @@ def api_search_db(db_key):
             merged = {}
             for r in results:
                 bc = (r.get('barcode') or '').strip()
-                pos = (r.get('item_position') or '').strip()
+                # Use item_position, or if empty, fallback to pictureposition
+                pos = (r.get('item_position') or r.get('pictureposition') or '').strip()
                 if not bc:
                     key = f"__{id(r)}_{len(merged)}"
                 else:
