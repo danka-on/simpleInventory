@@ -132,8 +132,10 @@
         <button id="restartScannerBtn" onclick="restartScanner()" style="background-color: #2196F3; color: white; border: none; padding: 12px; border-radius: 6px; cursor: pointer; font-size: 1.1em; display: flex; align-items: center; justify-content: center; gap: 8px;">
             <i class="fas fa-sync-alt"></i> Restart Scanner
         </button>
-        <button id="picturePositionBtn" type="button" style="background-color: #2196F3; color: white; border: none; padding: 12px; border-radius: 6px; cursor: pointer; font-size: 1.1em; display: flex; align-items: center; justify-content: center; gap: 8px;">
-            <i class="fas fa-camera"></i> Picture Position (no shelf)
+        <!-- Picture Position button (50% smaller) -->
+        <button id="picturePositionBtn" type="button" style="background-color: #2196F3; color: white; border: none; padding: 20px; border-radius: 8px; cursor: pointer; font-size: 1.1em; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; width: 100%; box-shadow: 0 4px 12px rgba(33,150,243,0.25); font-weight: bold;">
+            <i class="fas fa-camera" style="font-size: 1.8em;"></i>
+            <span>Picture Position</span>
         </button>
     </div>
     <form id="scan_form" action="/submitposition" method="POST" style="display: none;">
@@ -142,11 +144,13 @@
         <input name="return_url" type="hidden" id="return_url">
         <input name="upc" type="hidden" id="upc_field">
     </form>
-    <form action="/toggle" method="POST" style="margin-top: 10px; text-align: center;">
-        <label>
-            <input type="checkbox" id="featureToggle"> KEEP SAME POSITION?
-        </label>
-    </form>
+    <!-- Lock Position button (replaces checkbox) -->
+    <div style="margin-top: 20px; text-align: center;">
+        <button id="lockPositionBtn" type="button" style="background-color: #757575; color: white; border: none; padding: 16px 24px; border-radius: 8px; cursor: pointer; font-size: 1.2em; display: inline-flex; align-items: center; justify-content: center; gap: 10px; font-weight: bold; transition: background 0.3s;">
+            <i class="fas fa-unlock" id="lockIcon"></i>
+            <span id="lockText">LOCK POSITION</span>
+        </button>
+    </div>
     <button id="flashBtn" type="button" style="display:none">Turn On Flashlight</button>
     <div id="flashMsg" style="color:red; display:none; font-size:0.9em;"></div>
     <div id="green-screen">
@@ -155,20 +159,56 @@
 
     <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
     <script>
-  document.getElementById('featureToggle').addEventListener('change', function () {
+  // Lock Position button logic (replaces checkbox)
+  let positionLocked = false;
+  const lockBtn = document.getElementById('lockPositionBtn');
+  const lockIcon = document.getElementById('lockIcon');
+  const lockText = document.getElementById('lockText');
+
+  // Load lock state from sessionStorage on page load
+  function loadLockState() {
+    const stored = sessionStorage.getItem('positionLocked');
+    if (stored === 'true') {
+      positionLocked = true;
+      lockBtn.style.backgroundColor = '#43a047';
+      lockIcon.className = 'fas fa-lock';
+      lockText.textContent = 'LOCKED';
+    }
+  }
+
+  lockBtn.addEventListener('click', function () {
+    positionLocked = !positionLocked;
+    if (positionLocked) {
+      lockBtn.style.backgroundColor = '#43a047'; // Green when locked
+      lockIcon.className = 'fas fa-lock';
+      lockText.textContent = 'LOCKED';
+      sessionStorage.setItem('positionLocked', 'true');
+    } else {
+      lockBtn.style.backgroundColor = '#757575'; // Gray when unlocked
+      lockIcon.className = 'fas fa-unlock';
+      lockText.textContent = 'LOCK POSITION';
+      sessionStorage.removeItem('positionLocked');
+      // Clear position when unlocking
+      sessionStorage.removeItem('item_position');
+      sessionStorage.removeItem('pictureposition_path');
+    }
+    // Send to server
     fetch('/toggle', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ checked: this.checked })
+      body: JSON.stringify({ checked: positionLocked })
     })
     .then(response => response.json())
     .then(data => {
-      console.log("Server says:", data.message);  // Optional feedback
+      console.log("Server says:", data.message);
     })
     .catch(error => console.error('Error:', error));
   });
+
+  // Load state on page load
+  loadLockState();
 
     let scannerActive = false;
     let html5QrCode = null;
@@ -430,7 +470,7 @@
                 var icon = document.createElement('i');
                 icon.className = 'fas fa-camera';
                 pictureBtn.appendChild(icon);
-                pictureBtn.appendChild(document.createTextNode(' Picture Position (no shelf)'));
+                pictureBtn.appendChild(document.createTextNode(' Picture Position'));
             }
         } else {
             // Mobile or desktop: keep camera, hide QR input
@@ -580,6 +620,13 @@
                 sessionStorage.removeItem('item_position');
                 sessionStorage.removeItem('barcode');
                 sessionStorage.removeItem('pictureposition_path');
+                sessionStorage.removeItem('positionLocked');
+                // Notify server to clear lock state
+                fetch('/toggle', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ checked: false })
+                }).catch(err => console.error('Error clearing lock:', err));
                 window.location.href = '/';
             });
         }

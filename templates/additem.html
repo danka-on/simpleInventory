@@ -73,6 +73,10 @@
         <div style="display: flex; flex-direction: column; align-items: center; width: 100%; max-width: 350px; margin: 0 auto; gap: 0;">
             <!-- Timer display -->
             <div id="autoSubmitTimer" style="font-size:1.5em; color:#1976d2; margin-bottom: 12px; display:none;"></div>
+            <!-- Unlock Position button (only shows if locked) -->
+            <button id="unlockPositionBtn" type="button" style="background-color: #2196F3; color: white; border: none; padding: 14px 24px; border-radius: 8px; cursor: pointer; font-size: 1.1em; width: 100%; margin-bottom: 18px; display: none; align-items: center; justify-content: center; gap: 10px; font-weight: bold;">
+                <i class="fas fa-lock"></i> UNLOCK POSITION
+            </button>
             <!-- Add Item button (larger, more pronounced) -->
             <button id="addItemBtn" type="submit" form="addItemForm" style="background-color: #43a047; color: white; border: none; padding: 28px 0; border-radius: 10px; cursor: pointer; font-size: 2em; width: 100%; margin-bottom: 32px; display: flex; align-items: center; justify-content: center; gap: 14px; box-shadow: 0 4px 16px rgba(67,160,71,0.12); font-weight: bold; letter-spacing: 1px;">
                 <i class="fas fa-plus" style="font-size:1.2em;"></i> Add Item
@@ -101,6 +105,29 @@
         document.getElementById('form_barcode').value = barcode;
         document.getElementById('form_position').value = itemPosition;
         document.getElementById('form_pictureposition').value = picturePosition;
+
+        // Show unlock button if position is locked
+        const isLocked = sessionStorage.getItem('positionLocked') === 'true';
+        if (isLocked) {
+            document.getElementById('unlockPositionBtn').style.display = 'flex';
+        }
+    });
+
+    // Unlock button handler
+    document.getElementById('unlockPositionBtn').addEventListener('click', function() {
+        // Clear lock state
+        sessionStorage.removeItem('positionLocked');
+        sessionStorage.removeItem('item_position');
+        sessionStorage.removeItem('pictureposition_path');
+        // Notify server
+        fetch('/toggle', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ checked: false })
+        }).then(() => {
+            // Redirect to position page to restart flow
+            window.location.href = '/position';
+        }).catch(err => console.error('Error unlocking:', err));
     });
     
     function updateChecklist() {
@@ -275,6 +302,13 @@
         sessionStorage.removeItem('item_position');
         sessionStorage.removeItem('barcode');
         sessionStorage.removeItem('pictureposition_path');
-    window.location.href = '/';
+        sessionStorage.removeItem('positionLocked');
+        // Notify server to clear lock state
+        fetch('/toggle', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ checked: false })
+        }).catch(err => console.error('Error clearing lock:', err));
+        window.location.href = '/';
     });
 </script>

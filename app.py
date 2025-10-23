@@ -1593,10 +1593,11 @@ def additemtrue():
         addToSearchRack(item_position_to_store, final_barcode, None, final_pictureposition)
         print(f"Added to searchRack: position={item_position_to_store}, barcode={final_barcode}, pictureposition={final_pictureposition}")
         
-        # Clear global variables
-        position_code = None
+        # Clear global variables (but keep position if locked)
+        if not same_position:
+            position_code = None
+            pictureposition_path = None
         barcode = None
-        pictureposition_path = None
     except Exception as e:
         print("something went wrong with adding to RACK", e)
         import traceback
@@ -1604,9 +1605,13 @@ def additemtrue():
         return f"Error: {str(e)}", 500
     # Add script to clear sessionStorage after successful add
     clear_script = '''<script>
-        sessionStorage.removeItem('barcode');
+        sessionStorage.removeItem('barcode');'''
+    # Only clear position if not locked
+    if not same_position:
+        clear_script += '''
         sessionStorage.removeItem('item_position');
-        sessionStorage.removeItem('pictureposition_path');
+        sessionStorage.removeItem('pictureposition_path');'''
+    clear_script += '''
     </script>'''
     if same_position:
         return render_template("barcode.html") + clear_script
