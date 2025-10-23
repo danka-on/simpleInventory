@@ -31,6 +31,24 @@
             color:#222;
             border: 1px solid #bbb;
             min-height: 40px;
+            transition: background 0.2s, color 0.2s;
+        }
+        /* Visual indicator for clickable/editable state */
+        #checklist .checkitem.clickable {
+            text-decoration: underline dotted;
+            box-shadow: 0 2px 10px rgba(0,128,64,0.07);
+            position: relative;
+        }
+        #checklist .checkitem .edit-icon {
+            margin-left: 10px;
+            font-size: 1.1em;
+            color: #fff;
+            opacity: 0.85;
+        }
+        /* New shade of green for set state */
+        #checklist .checkitem.set {
+            background: #2ecc71 !important;
+            color: #fff !important;
         }
         </style>
 </head>
@@ -53,12 +71,14 @@
         <input type="hidden" name="item_position" id="form_position" value="">
         <input type="hidden" name="pictureposition" id="form_pictureposition" value="">
         <div style="display: flex; flex-direction: column; align-items: center; width: 100%; max-width: 350px; margin: 0 auto; gap: 0;">
-            <!-- Add Item button -->
-            <button id="addItemBtn" type="submit" form="addItemForm" style="background-color: #4CAF50; color: white; border: none; padding: 14px; border-radius: 6px; cursor: pointer; font-size: 1.1em; width: 100%; margin-bottom: 10px; display: flex; align-items: center; justify-content: center; gap: 8px;">
-                <i class="fas fa-plus"></i> Add Item
+            <!-- Timer display -->
+            <div id="autoSubmitTimer" style="font-size:1.5em; color:#1976d2; margin-bottom: 12px; display:none;"></div>
+            <!-- Add Item button (larger, more pronounced) -->
+            <button id="addItemBtn" type="submit" form="addItemForm" style="background-color: #43a047; color: white; border: none; padding: 28px 0; border-radius: 10px; cursor: pointer; font-size: 2em; width: 100%; margin-bottom: 32px; display: flex; align-items: center; justify-content: center; gap: 14px; box-shadow: 0 4px 16px rgba(67,160,71,0.12); font-weight: bold; letter-spacing: 1px;">
+                <i class="fas fa-plus" style="font-size:1.2em;"></i> Add Item
             </button>
-            <!-- Clear button below Add Item -->
-            <button id="clearBtn" type="button" style="background-color: #ff4444; color: white; border: none; padding: 14px; border-radius: 6px; cursor: pointer; font-size: 1.1em; width: 100%; margin-bottom: 18px; display: flex; align-items: center; justify-content: center; gap: 8px;">
+            <!-- Clear button below Add Item, with extra space above -->
+            <button id="clearBtn" type="button" style="background-color: #ff4444; color: white; border: none; padding: 14px; border-radius: 6px; cursor: pointer; font-size: 1.1em; width: 100%; margin-bottom: 18px; margin-top: 18px; display: flex; align-items: center; justify-content: center; gap: 8px;">
                 <i class="fas fa-trash"></i> Clear
             </button>
             <!-- Divider -->
@@ -96,14 +116,13 @@
         // Position logic
         let posText = '', posColor = '', posGoto = '';
         if (picturePosition) {
-            posText = `Position set - picture`;
-            posColor = '#43a047';
+            posText = `Position set - picture <i class=\"fas fa-pen edit-icon\"></i>`;
+            posColor = '#2ecc71'; // new green
             posGoto = '/position'; // Always go to position.html
-            // If a picture position is set, clear any previous item_position to avoid confusion
             sessionStorage.removeItem('item_position');
         } else if (itemPosition) {
-            posText = `Position set - ${itemPosition}`;
-            posColor = '#43a047';
+            posText = `Position set - ${itemPosition} <i class=\"fas fa-pen edit-icon\"></i>`;
+            posColor = '#2ecc71';
             posGoto = '/position';
         } else {
             posText = 'Position NOT set';
@@ -113,8 +132,8 @@
         // Barcode logic
         let barText = '', barColor = '', barGoto = '';
         if (barcode) {
-            barText = `Barcode set - ${barcode}`;
-            barColor = '#43a047';
+            barText = `Barcode set - ${barcode} <i class=\"fas fa-pen edit-icon\"></i>`;
+            barColor = '#2ecc71';
             barGoto = '/barcode';
         } else {
             barText = 'Barcode NOT set';
@@ -126,19 +145,63 @@
         if (posDiv) {
             posDiv.style.backgroundColor = posColor;
             posDiv.style.color = '#fff';
-            document.getElementById('position-status').textContent = posText;
+            posDiv.classList.remove('set', 'clickable');
+            if (picturePosition || itemPosition) {
+                posDiv.classList.add('set', 'clickable');
+            }
+            // Use innerHTML to allow icon
+            document.getElementById('position-status').innerHTML = posText;
             posDiv.onclick = () => { window.location.href = posGoto; };
         }
         const barDiv = document.getElementById('barcode-check');
         if (barDiv) {
             barDiv.style.backgroundColor = barColor;
             barDiv.style.color = '#fff';
-            document.getElementById('barcode-status').textContent = barText;
+            barDiv.classList.remove('set', 'clickable');
+            if (barcode) {
+                barDiv.classList.add('set', 'clickable');
+            }
+            document.getElementById('barcode-status').innerHTML = barText;
             barDiv.onclick = () => { window.location.href = barGoto; };
         }
     }
     // Always show checklist on load
     document.addEventListener('DOMContentLoaded', updateChecklist);
+    // --- Auto-submit timer logic ---
+    let autoSubmitTimeout = null;
+    let timerInterval = null;
+    function startAutoSubmitTimer() {
+        const timerDiv = document.getElementById('autoSubmitTimer');
+        let seconds = 3;
+        timerDiv.textContent = `Auto-adding in ${seconds}...`;
+        timerDiv.style.display = '';
+        timerInterval = setInterval(() => {
+            seconds--;
+            if (seconds > 0) {
+                timerDiv.textContent = `Auto-adding in ${seconds}...`;
+            } else {
+                clearInterval(timerInterval);
+                timerDiv.textContent = 'Adding...';
+            }
+        }, 1000);
+        autoSubmitTimeout = setTimeout(() => {
+            clearInterval(timerInterval);
+            timerDiv.textContent = 'Adding...';
+            document.getElementById('addItemForm').submit();
+        }, 3000);
+    }
+    function cancelAutoSubmitTimer() {
+        if (autoSubmitTimeout) clearTimeout(autoSubmitTimeout);
+        if (timerInterval) clearInterval(timerInterval);
+        const timerDiv = document.getElementById('autoSubmitTimer');
+        timerDiv.style.display = 'none';
+    }
+    // Cancel timer on any user input or touch
+    ['keydown','mousedown','touchstart'].forEach(evt => {
+        window.addEventListener(evt, cancelAutoSubmitTimer, { once: true, passive: true });
+    });
+    // Start timer on page load
+    document.addEventListener('DOMContentLoaded', startAutoSubmitTimer);
     </script>
 </body>
 </html>
