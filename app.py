@@ -2953,12 +2953,14 @@ def api_search_db(db_key):
             try:
                 if db_key == 'searchRack' and item_out.get('barcode'):
                     lookup_barcode = item_out.get('barcode')
+                    # Strip suffix from barcode for enrichment lookup (e.g., 123456-1 -> 123456)
+                    base_barcode = str(lookup_barcode).split('-')[0] if lookup_barcode else lookup_barcode
                     # lookup in ebayStore.db
                     try:
                         es_conn = sqlite3.connect('ebayStore.db')
                         es_conn.row_factory = sqlite3.Row
                         es_cur = es_conn.cursor()
-                        es_cur.execute("SELECT Title, Image, ItemID, Quantity, UPC FROM INVENTORY WHERE UPC = ? COLLATE NOCASE LIMIT 1", (lookup_barcode,))
+                        es_cur.execute("SELECT Title, Image, ItemID, Quantity, UPC FROM INVENTORY WHERE UPC = ? COLLATE NOCASE LIMIT 1", (base_barcode,))
                         row_es = es_cur.fetchone()
                         if row_es:
                             # prefer values from ebayStore if present, BUT keep searchRack quantity (physical inventory)
@@ -2977,7 +2979,7 @@ def api_search_db(db_key):
                             bol_conn = sqlite3.connect('bol.db')
                             bol_conn.row_factory = sqlite3.Row
                             bol_cur = bol_conn.cursor()
-                            bol_cur.execute('SELECT item_description, image_url, upc FROM bol_items WHERE upc = ? COLLATE NOCASE LIMIT 1', (lookup_barcode,))
+                            bol_cur.execute('SELECT item_description, image_url, upc FROM bol_items WHERE upc = ? COLLATE NOCASE LIMIT 1', (base_barcode,))
                             row_bol = bol_cur.fetchone()
                             if row_bol:
                                 item_out['title'] = item_out.get('title') or row_bol['item_description']

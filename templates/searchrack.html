@@ -296,7 +296,14 @@ function renderResults(results){
         ''
     )
     // Build thumbnail: prefer explicit item image; if missing, try IMAGES first URL; only fallback to pictureposition for non-archived rows
+    // If barcode has a -suffix, strip it for image lookup
+    const barcodeRaw = r.barcode || (r.raw && (r.raw.upc || r.raw.UPC || r.raw.Barcode || r.raw.barcode)) || '';
+    const baseBarcode = String(barcodeRaw).split('-')[0];
     let imgUrl = r.image || (r.raw && (r.raw.image || r.raw.image_url)) || '';
+    // If no image and barcode has a -suffix, try to find image by base barcode in raw
+    if(!imgUrl && barcodeRaw.includes('-') && r.raw && (r.raw.upc === baseBarcode || r.raw.UPC === baseBarcode || r.raw.Barcode === baseBarcode || r.raw.barcode === baseBarcode)){
+        imgUrl = r.raw.image || r.raw.image_url;
+    }
     if(!imgUrl && r.raw && (r.raw.IMAGES || r.raw.images)){
         const imgsField = r.raw.IMAGES || r.raw.images;
         try{
@@ -325,8 +332,8 @@ function renderResults(results){
         }catch(e){ /* ignore parse errors */ }
     }
     const img = esc(imgUrl);
-    const thumb = img ? img : (!isArchived && r.pictureposition ? ('/static/pictureposition/'+r.pictureposition) : missingThumb());
-    const barcodeRaw = r.barcode || (r.raw && (r.raw.upc || r.raw.UPC || r.raw.Barcode || r.raw.barcode)) || '';
+    // Only use pictureposition if there is no actual item image at all
+    const thumb = (imgUrl && imgUrl.trim() && imgUrl.trim() !== '') ? img : (!isArchived && r.pictureposition ? ('/static/pictureposition/'+r.pictureposition) : missingThumb());
     // Strip leading zeros from barcode display
     const barcodeStripped = barcodeRaw && /^\d+$/.test(String(barcodeRaw)) ? String(barcodeRaw).replace(/^0+/, '') : barcodeRaw;
     const barcode = esc(barcodeStripped);
