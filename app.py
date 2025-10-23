@@ -907,9 +907,9 @@ def api_items_prep_location_set():
                     # Update existing
                     search_cur.execute('''
                         UPDATE SEARCHRACK 
-                        SET ITEM_POSITION = ?, PICTUREPOSITION = ?, TITLE = ?
+                        SET ITEM_POSITION = ?, PICTUREPOSITION = ?, TITLE = ?, CREATED_AT = ?
                         WHERE BARCODE = ? COLLATE NOCASE
-                    ''', (location, pictureposition, title, upc))
+                    ''', (location, pictureposition, title, ts, upc))
                 else:
                     # Insert new
                     search_cur.execute('''
@@ -1707,9 +1707,9 @@ def position_diagnostic():
                     # Update existing
                     search_cur.execute('''
                         UPDATE SEARCHRACK 
-                        SET ITEM_POSITION = ?, PICTUREPOSITION = ?, TITLE = ?
+                        SET ITEM_POSITION = ?, PICTUREPOSITION = ?, TITLE = ?, CREATED_AT = ?
                         WHERE BARCODE = ? COLLATE NOCASE
-                    ''', (location, pictureposition, title, upc))
+                    ''', (location, pictureposition, title, ts, upc))
                 else:
                     # Insert new
                     search_cur.execute('''

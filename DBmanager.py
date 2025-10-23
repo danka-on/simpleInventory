@@ -204,16 +204,17 @@ def addToSearchRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITI
             existing_id, existing_qty = existing_same_location
             new_qty = (existing_qty or 0) + 1
             
-            # When incrementing, update enrichment data but don't change position fields
+            # When incrementing, update enrichment data and CREATED_AT timestamp
             # Position fields should already be correct since we matched on them
             cursor.execute("""
                 UPDATE SEARCHRACK 
                 SET QUANTITY = ?,
                     TITLE = COALESCE(?, TITLE),
                     ITEMID = COALESCE(?, ITEMID),
-                    IMAGE = COALESCE(?, IMAGE)
+                    IMAGE = COALESCE(?, IMAGE),
+                    CREATED_AT = ?
                 WHERE ID = ?
-            """, (new_qty, title, itemid, image, existing_id))
+            """, (new_qty, title, itemid, image, now_iso, existing_id))
             action = f"incremented quantity to {new_qty} for barcode={barcode_norm}, position={position_norm}"
         else:
             # Different location or new barcode - create new record
