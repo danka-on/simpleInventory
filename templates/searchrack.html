@@ -276,8 +276,17 @@ function renderResults(results){
     if(!results || results.length===0){ container.innerHTML = '<div class="small-muted">No results</div>'; return; }
     // Check if any results are from searchRack to decide whether to show Date Added column
     const hasSearchRack = results.some(r => r.source_db === 'searchRack');
-    const dateHeader = hasSearchRack ? '<th>Date Added</th>' : '';
-    let html = `<table><thead><tr><th>Title</th><th>Barcode</th><th>Item ID</th><th>Location</th><th>Qty</th>${dateHeader}<th>DB</th><th>Actions</th></tr></thead><tbody>`;
+    const hasEbayStore = results.some(r => r.source_db === 'ebayStore');
+    const hasSold = results.some(r => r.source_db === 'sold');
+    
+    // Build dynamic headers based on which databases are present
+    const dateAddedHeader = hasSearchRack ? '<th>Date Added</th>' : '';
+    const itemIdHeader = hasEbayStore ? '<th>Item ID</th>' : '';
+    const locationHeader = (!hasEbayStore && !hasSold) ? '<th>Location</th>' : ''; // Hide location for ebay live and sold
+    const dateSoldHeader = hasSold ? '<th>Date Sold</th>' : '';
+    const dateShippedHeader = hasSold ? '<th>Date Shipped</th>' : '';
+    
+    let html = `<table><thead><tr><th>Title</th><th>Barcode</th>${itemIdHeader}${locationHeader}<th>Qty</th>${dateAddedHeader}${dateSoldHeader}${dateShippedHeader}<th>DB</th><th>Actions</th></tr></thead><tbody>`;
     results.forEach(r=>{
     const dbRaw = r.source_db || '';
     const isArchived = !!(r.archived || dbRaw === 'archived');
@@ -368,15 +377,25 @@ function renderResults(results){
     }
     const deletedInfo = (isArchived && r.deleted_at) ? `<div class="small-muted">Deleted: ${fmtLocal(r.deleted_at)}</div>` : '';
     const createdInfo = (!isArchived && r.created_at) ? `<div class="small-muted">Added: ${fmtLocal(r.created_at)}</div>` : '';
-    // Date Added column (only for searchRack)
+    
+    // Dynamic column cells based on which databases are shown
     const dateCell = hasSearchRack ? (dbRaw === 'searchRack' && r.created_at ? `<td>${fmtLocal(r.created_at)}</td>` : '<td></td>') : '';
+    const itemIdCell = hasEbayStore ? `<td>${itemid}</td>` : '';
+    const locationCell = (!hasEbayStore && !hasSold) ? `<td>${ locDisplay ? `<a href="#" class=\"location-link\" data-src=\"${db}\" data-id=\"${r.id}\" data-barcode=\"${barcode}\" data-picture=\"${esc(r.pictureposition||'')}\" data-item_position=\"${esc((r.item_position||'').toLowerCase())}\">${esc(locDisplay)}</a>` : '' }</td>` : '';
+    
+    // Date sold and date shipped cells (only for sold items)
+    const dateSoldCell = hasSold ? (dbRaw === 'sold' && r.raw && r.raw.paid_time ? `<td>${fmtLocal(r.raw.paid_time)}</td>` : '<td></td>') : '';
+    const dateShippedCell = hasSold ? (dbRaw === 'sold' && r.raw && r.raw.shipped_time ? `<td>${fmtLocal(r.raw.shipped_time)}</td>` : '<td></td>') : '';
+    
     html += `<tr data-src="${db}" data-id="${r.id}">`+
         `<td><div class="title-cell"><img class="thumb" src="${thumb}" onerror="this.src='${missingThumb(48,48,'No Img')}'"><div><a href="#" class="title-link" data-src="${db}" data-id="${r.id}" data-image="${img}" data-title="${title}">${title}</a>${deletedInfo}${createdInfo}</div></div></td>`+
                 `<td>${barcode}</td>`+
-                `<td>${itemid}</td>`+
-                `<td>${ locDisplay ? `<a href="#" class=\"location-link\" data-src=\"${db}\" data-id=\"${r.id}\" data-barcode=\"${barcode}\" data-picture=\"${esc(r.pictureposition||'')}\" data-item_position=\"${esc((r.item_position||'').toLowerCase())}\">${esc(locDisplay)}</a>` : '' }</td>`+
+                itemIdCell +
+                locationCell +
                 `<td>${qty}</td>`+
                 dateCell +
+                dateSoldCell +
+                dateShippedCell +
                 `<td>${ (r.archived||db==='archived') ? ('Archive ('+esc(DB_LABELS[r.orig_source_db]||r.orig_source_db||'Unknown')+')') : esc(DB_LABELS[db] || db) }</td>`+
                 `<td><div class="results-actions">${actionHtml}</div></td>`+
                 `</tr>`;

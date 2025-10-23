@@ -2892,6 +2892,45 @@ def api_search_db(db_key):
                             bol_conn.close()
                         except Exception:
                             pass
+                # If this row comes from sold.db, enrich with data from bol.db using barcode
+                elif db_key == 'sold':
+                    # First get barcode from ebayStore.db using ItemID
+                    lookup_item_id = item_out.get('item_id')
+                    lookup_barcode = None
+                    if lookup_item_id:
+                        try:
+                            es_conn = sqlite3.connect('ebayStore.db')
+                            es_conn.row_factory = sqlite3.Row
+                            es_cur = es_conn.cursor()
+                            es_cur.execute("SELECT UPC FROM INVENTORY WHERE ItemID = ? LIMIT 1", (lookup_item_id,))
+                            row_es = es_cur.fetchone()
+                            if row_es and row_es['UPC']:
+                                lookup_barcode = row_es['UPC']
+                                item_out['barcode'] = lookup_barcode
+                            es_conn.close()
+                        except Exception as e:
+                            print(f"Debug: sold barcode lookup error: {e}")
+                            pass
+                    
+                    # Now enrich title and image from rawbol.db using the barcode
+                    if lookup_barcode:
+                        try:
+                            bol_conn = sqlite3.connect('rawbol.db')
+                            bol_conn.row_factory = sqlite3.Row
+                            bol_cur = bol_conn.cursor()
+                            bol_cur.execute('SELECT item_description, image_url FROM raw_bol_items WHERE upc = ? COLLATE NOCASE LIMIT 1', (lookup_barcode,))
+                            row_bol = bol_cur.fetchone()
+                            if row_bol:
+                                # Enrich title
+                                if not item_out.get('title') and row_bol['item_description']:
+                                    item_out['title'] = row_bol['item_description']
+                                # Enrich image
+                                if not item_out.get('image') and row_bol['image_url']:
+                                    item_out['image'] = row_bol['image_url']
+                            bol_conn.close()
+                        except Exception as e:
+                            print(f"Debug: rawbol enrichment error: {e}")
+                            pass
             except Exception:
                 pass
             results.append(item_out)
