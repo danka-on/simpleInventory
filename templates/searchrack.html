@@ -110,8 +110,8 @@
 
 <script>
 console.log('searchrack v3 loaded');
-const DBS = ['searchRack','ebayStore','bol','sold','archived'];
-const DB_LABELS = {searchRack:'Inventory', ebayStore:'Ebay live', bol:'Macy BOL', sold:'Sold', archived:'Archived'};
+const DBS = ['searchRack','ebayStore','amazonStore','bol','sold','archived'];
+const DB_LABELS = {searchRack:'Inventory', ebayStore:'Ebay live', amazonStore:'Amazon live', bol:'Macy BOL', sold:'Sold', archived:'Archived'};
 const defaultChecked = {'searchRack':true};
 let _allResults = [];
 let _currentPage = 1;
@@ -277,12 +277,13 @@ function renderResults(results){
     // Check if any results are from searchRack to decide whether to show Date Added column
     const hasSearchRack = results.some(r => r.source_db === 'searchRack');
     const hasEbayStore = results.some(r => r.source_db === 'ebayStore');
+    const hasAmazonStore = results.some(r => r.source_db === 'amazonStore');
     const hasSold = results.some(r => r.source_db === 'sold');
     
     // Build dynamic headers based on which databases are present
     const dateAddedHeader = hasSearchRack ? '<th>Date Added</th>' : '';
-    const itemIdHeader = hasEbayStore ? '<th>Item ID</th>' : '';
-    const locationHeader = (!hasEbayStore && !hasSold) ? '<th>Location</th>' : ''; // Hide location for ebay live and sold
+    const itemIdHeader = (hasEbayStore || hasAmazonStore) ? '<th>Item ID</th>' : '';
+    const locationHeader = (!hasEbayStore && !hasAmazonStore && !hasSold) ? '<th>Location</th>' : ''; // Hide location for ebay/amazon live and sold
     const dateSoldHeader = hasSold ? '<th>Date Sold</th>' : '';
     const dateShippedHeader = hasSold ? '<th>Date Shipped</th>' : '';
     
@@ -387,8 +388,8 @@ function renderResults(results){
     
     // Dynamic column cells based on which databases are shown
     const dateCell = hasSearchRack ? (dbRaw === 'searchRack' && r.created_at ? `<td>${fmtLocal(r.created_at)}</td>` : '<td></td>') : '';
-    const itemIdCell = hasEbayStore ? `<td>${itemid}</td>` : '';
-    const locationCell = (!hasEbayStore && !hasSold) ? `<td>${ locDisplay ? `<a href="#" class=\"location-link\" data-src=\"${db}\" data-id=\"${r.id}\" data-barcode=\"${barcode}\" data-picture=\"${esc(r.pictureposition||'')}\" data-item_position=\"${esc((r.item_position||'').toLowerCase())}\">${esc(locDisplay)}</a>` : '' }</td>` : '';
+    const itemIdCell = (hasEbayStore || hasAmazonStore) ? `<td>${itemid}</td>` : '';
+    const locationCell = (!hasEbayStore && !hasAmazonStore && !hasSold) ? `<td>${ locDisplay ? `<a href="#" class=\"location-link\" data-src=\"${db}\" data-id=\"${r.id}\" data-barcode=\"${barcode}\" data-picture=\"${esc(r.pictureposition||'')}\" data-item_position=\"${esc((r.item_position||'').toLowerCase())}\">${esc(locDisplay)}</a>` : '' }</td>` : '';
     
     // Date sold and date shipped cells (only for sold items)
     const dateSoldCell = hasSold ? (dbRaw === 'sold' && r.raw && r.raw.paid_time ? `<td>${fmtLocal(r.raw.paid_time)}</td>` : '<td></td>') : '';

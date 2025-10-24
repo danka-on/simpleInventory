@@ -11,7 +11,7 @@ import xml.dom.minidom as minidom
 
 
 from inventory import find_item  # adjust this to match your actual import
-from DBmanager import ebayStoreDB, addToRack, store_ebay_order, createSearchRackDB, updateSearchRackDB, addToSearchRack
+from DBmanager import ebayStoreDB, amazonStoreDB, addToRack, store_ebay_order, createSearchRackDB, updateSearchRackDB, addToSearchRack
 from DBmanager import enrich_searchrack_db
 try:
     from BOLextractor import process_bol_excel
@@ -2799,6 +2799,7 @@ def api_search_db(db_key):
         mapping = {
             'rack': 'rack.db',
             'ebayStore': 'ebayStore.db',
+            'amazonStore': 'amazonStore.db',
             'sold': 'sold.db',
             'searchRack': 'searchRack.db',
             'found': 'found.db',
@@ -2888,6 +2889,8 @@ def api_search_db(db_key):
             # default mappings
             if db_key == 'ebayStore':
                 barcode_val = item.get('UPC') or item.get('upc') or item.get('BARCODE') or item.get('barcode') or item.get('Barcode') or ''
+            elif db_key == 'amazonStore':
+                barcode_val = item.get('UPC') or item.get('upc') or item.get('BARCODE') or item.get('barcode') or item.get('Barcode') or ''
             elif db_key == 'sold':
                 # Be robust to all case variants and explicit barcode field
                 barcode_val = item.get('barcode') or item.get('BARCODE') or item.get('Barcode') or item.get('upc') or item.get('UPC') or ''
@@ -2940,7 +2943,7 @@ def api_search_db(db_key):
                 'title': title_val,
                 'image': image_val,
                 'barcode': barcode_val,
-                'item_id': item.get('ItemID') or item.get('item_id') or item.get('ItemId') or (barcode_val if barcode_val else ''),
+                'item_id': item.get('ItemID') or item.get('item_id') or item.get('ItemId') or item.get('ASIN') or item.get('asin') or (barcode_val if barcode_val else ''),
                 'pictureposition': item.get('PICTUREPOSITION') or item.get('pictureposition') or item.get('picture_position') or '',
                 'item_position': item.get('ITEM_POSITION') or item.get('item_position') or item.get('position') or '',
                 'quantity': item.get('QUANTITY') or item.get('Quantity') or item.get('quantity') or item.get('qty') or '',
@@ -2973,6 +2976,21 @@ def api_search_db(db_key):
                     except Exception:
                         # ignore lookup errors
                         pass
+                    # if still missing, try amazonStore.db
+                    if not item_out.get('title') or not item_out.get('image'):
+                        try:
+                            am_conn = sqlite3.connect('amazonStore.db')
+                            am_conn.row_factory = sqlite3.Row
+                            am_cur = am_conn.cursor()
+                            am_cur.execute("SELECT Title, Image, ASIN, Quantity, UPC FROM INVENTORY WHERE UPC = ? COLLATE NOCASE LIMIT 1", (base_barcode,))
+                            row_am = am_cur.fetchone()
+                            if row_am:
+                                item_out['title'] = item_out.get('title') or row_am['Title']
+                                item_out['image'] = item_out.get('image') or row_am['Image']
+                                item_out['item_id'] = item_out.get('item_id') or row_am['ASIN']
+                            am_conn.close()
+                        except Exception:
+                            pass
                     # if still missing title/image, try bol.db
                     if not item_out.get('title') or not item_out.get('image'):
                         try:

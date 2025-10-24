@@ -273,6 +273,81 @@ def ebayStoreDB(title, item_id, sku = None, price = None, quantity = None, image
     except sqlite3.Error as e:
         print("Failed to close connection:", e)
 
+def createAmazonStoreDB():
+    conn = sqlite3.connect('amazonStore.db')
+    cursor = conn.cursor()
+    print("Amazon Store table starting creation")
+    try:
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS INVENTORY (
+                ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                Title TEXT,
+                ASIN TEXT,
+                SKU TEXT,
+                Price TEXT,
+                Quantity TEXT,
+                Image TEXT,
+                URL TEXT,
+                List_State TEXT,
+                Sold_Date TEXT,
+                List_Date TEXT,
+                UPC TEXT,
+                isFound TEXT
+            )
+        ''')
+        print("Amazon Store table created successfully")
+        conn.commit()
+        conn.close()
+        print("Amazon Store table closed successfully")
+    except sqlite3.Error as e:
+        print("Something went wrong with Amazon Store table:", e)
+        conn.close()
+
+def amazonStoreDB(title, asin, sku=None, price=None, quantity=None, image=None, List_State=None, Sold_Date=None, List_Date=None, URL=None, upc=None):
+    """Add item to amazonStore.db - similar to ebayStoreDB but uses ASIN instead of ItemID"""
+    conn = sqlite3.connect('amazonStore.db')
+    cursor = conn.cursor()
+    # Ensure the INVENTORY table exists before querying
+    cursor.execute('''CREATE TABLE IF NOT EXISTS INVENTORY (
+        ID INTEGER PRIMARY KEY AUTOINCREMENT,
+        Title TEXT,
+        ASIN TEXT,
+        SKU TEXT,
+        Price TEXT,
+        Quantity TEXT,
+        Image TEXT,
+        URL TEXT,
+        List_State TEXT,
+        Sold_Date TEXT,
+        List_Date TEXT,
+        UPC TEXT,
+        isFound TEXT 
+    )''')
+    conn.commit()
+    cursor.execute("SELECT 1 FROM INVENTORY WHERE ASIN = ?", (asin,))
+    item_exist = cursor.fetchone() is not None
+    if item_exist:
+        print("Item already in Amazon inventory database, skipping")
+        conn.close()
+        return
+    try:
+        cursor.execute("INSERT INTO INVENTORY (Title, ASIN, SKU, Price, Quantity, Image, List_State, Sold_Date, List_Date, URL, UPC) VALUES (?,?,?,?,?,?,?,?,?,?,?)", 
+                      (title, asin, sku, price, quantity, image, List_State, Sold_Date, List_Date, URL, upc))
+        conn.commit()
+        print(f"Added {title} to Amazon Store successfully")
+    except sqlite3.Error as e:
+        print("Something went wrong adding to Amazon Store:", e)
+        try:
+            conn.close()
+            print("Closed successfully from amazonStoreDB")
+        except sqlite3.Error as e:
+            print("Failed to close connection:", e)
+    try:
+        conn.close()
+        print("Closed successfully from amazonStoreDB")
+    except sqlite3.Error as e:
+        print("Failed to close connection:", e)
+
 def insert_bol_items(df, import_date):
     """
     Insert BOL items from DataFrame into bol.db (bol_items table).
