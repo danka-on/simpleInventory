@@ -25,23 +25,26 @@
     .big-actions{display:flex;gap:12px;margin-top:12px}
     .big-actions .btn{flex:1;padding:18px 0;font-size:1.2rem}
     .pill{display:inline-block;padding:6px 10px;border-radius:999px;background:#eee}
-    .qty-display{display:flex;align-items:center;justify-content:center;gap:20px;margin:12px 0;padding:16px;background:#f8f9fa;border-radius:12px}
-    .qty-number{font-size:2.4rem;font-weight:700;min-width:64px;text-align:center;color:#2c3e50}
-    .qty-label{font-size:0.72rem;color:#7f8c8d;text-transform:uppercase;letter-spacing:1px}
-    .qty-btn{font-size:1.6rem;font-weight:700;padding:8px 16px;border:2px solid;border-radius:8px;cursor:pointer;background:#fff;transition:all 0.2s}
+  .qty-display{display:flex;flex-direction:column;gap:12px;margin:12px 0;padding:12px;background:#f8f9fa;border-radius:12px}
+  .qty-number{font-size:2.2rem;font-weight:700;min-width:80px;text-align:center;color:#2c3e50}
+  .qty-label{font-size:0.72rem;color:#7f8c8d;text-transform:uppercase;letter-spacing:1px;text-align:center;margin-bottom:6px}
+  .qty-controls{display:flex;gap:12px;width:100%;align-items:center;justify-content:space-between}
+  .qty-btn{font-size:2rem;font-weight:700;padding:12px 0;border:3px solid;border-radius:12px;cursor:pointer;background:#fff;transition:all 0.2s;flex:1;max-width:33vw}
     .qty-btn.plus{color:#00b894;border-color:#00b894}
     .qty-btn.plus:hover{background:#00b894;color:#fff}
     .qty-btn.minus{color:#e74c3c;border-color:#e74c3c}
     .qty-btn.minus:hover{background:#e74c3c;color:#fff}
     .qty-btn:active{transform:scale(0.95)}
+    .undo-btn{background:#f39c12;color:#fff;padding:10px 20px;border-radius:10px;margin-top:12px;font-size:1rem}
+    .undo-btn:hover{background:#e67e22}
   </style>
   <script src="https://unpkg.com/@zxing/library@0.19.1/umd/index.min.js"></script>
 </head>
 <body>
   <div class="top">
-    <a href="/"><button class="btn btn-danger">Back</button></a>
-    <h2>Preperation</h2>
-    <div style="width:100px"></div>
+  <a href="/"><button class="btn btn-danger">Back</button></a>
+  <h2 style="margin:0 auto;text-align:center;flex:1">Preperation</h2>
+  <button class="btn undo-btn hidden" id="undoBtn">↶ Undo Last Entry</button>
   </div>
 
   <div class="card">
@@ -66,13 +69,11 @@
       <img id="hero" class="hero" src="" alt="item image" onerror="this.style.display='none'" style="margin-top:10px">
       <div id="prepSummary" class="muted" style="margin-top:8px"></div>
       <div id="qtyDisplay" class="qty-display hidden">
-        <div style="text-align:center">
-          <div class="qty-label">Quantity</div>
-          <div style="display:flex;align-items:center;gap:12px">
-            <button class="qty-btn minus" id="qtyMinusBtn" style="font-size:2.6rem;width:56px;height:56px;">&#8722;</button>
-            <span class="qty-number" id="qtyNumber">1</span>
-            <button class="qty-btn plus" id="qtyPlusBtn" style="font-size:2.6rem;width:56px;height:56px;">&#43;</button>
-          </div>
+        <div class="qty-label">Quantity</div>
+        <div class="qty-controls">
+          <button class="qty-btn minus" id="qtyMinusBtn">&#8722;</button>
+          <span class="qty-number" id="qtyNumber">1</span>
+          <button class="qty-btn plus" id="qtyPlusBtn">&#43;</button>
         </div>
       </div>
       <div class="big-actions" id="actions">
@@ -116,6 +117,7 @@
 
     let currentUpc = null; // Store the actual UPC returned from server (may be suffixed)
     let currentQty = 1; // Track quantity for visual display, start at 1
+    let lastEntry = null; // Store last entry for undo: {upc, status, qty}
 
     function updateQtyDisplay(change) {
       let newQty = currentQty + change;
@@ -138,6 +140,31 @@
       document.getElementById('qtyNumber').style.transform = 'scale(1)';
       document.getElementById('qtyNumber').style.color = '#2c3e50';
       document.getElementById('qtyDisplay').classList.add('hidden');
+    }
+
+    function showUndoButton() {
+      const undoBtn = document.getElementById('undoBtn');
+      undoBtn.classList.remove('hidden');
+    }
+
+    function hideUndoButton() {
+      const undoBtn = document.getElementById('undoBtn');
+      undoBtn.classList.add('hidden');
+    }
+
+    async function updateQuantity(upc, qty) {
+      try {
+        const r = await fetch('/api/bol_items/quantity', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({upc, quantity: qty})
+        });
+        const j = await r.json();
+        return j && j.success;
+      } catch(e) {
+        console.error('Failed to update quantity:', e);
+        return false;
+      }
     }
 
     async function lookup(upc){
@@ -179,7 +206,9 @@
       document.getElementById('manualUpc').value = '';
     }
 
-    async function setStatus(upc, status){
+    async function setStatus(upc, status, qty){
+      // Update quantity first
+      await updateQuantity(upc, qty);
       const r = await fetch('/api/items_prep/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({upc,status})});
       const j = await r.json();
       return j && j.success;
@@ -190,11 +219,33 @@
     document.getElementById('qtyPlusBtn').onclick = ()=>{ updateQtyDisplay(1); };
     document.getElementById('qtyMinusBtn').onclick = ()=>{ updateQtyDisplay(-1); };
     
+    document.getElementById('undoBtn').onclick = async ()=>{
+      if(!lastEntry) return;
+      if(!confirm('Undo last entry for UPC: ' + lastEntry.upc + '?')) return;
+      const statusMsg = document.getElementById('statusMsg');
+      try {
+        // Delete the status
+        await fetch('/api/items_prep/status/' + encodeURIComponent(lastEntry.upc), {method: 'DELETE'});
+        // Reset quantity to 1
+        await updateQuantity(lastEntry.upc, 1);
+        statusMsg.innerHTML='<span class="ok">✓ Undone</span>';
+        lastEntry = null;
+        hideUndoButton();
+        setTimeout(()=>{ statusMsg.textContent=''; }, 2000);
+      } catch(e) {
+        statusMsg.innerHTML='<span class="bad">Failed to undo</span>';
+        setTimeout(()=>{ statusMsg.textContent=''; }, 2000);
+      }
+    };
+    
     document.getElementById('goodBtn').onclick = async ()=>{
       if(!currentUpc) return;
-      const ok = await setStatus(currentUpc,'good');
+      // Store for undo
+      lastEntry = {upc: currentUpc, status: 'good', qty: currentQty};
+      showUndoButton();
+      const ok = await setStatus(currentUpc, 'good', currentQty);
       const statusMsg = document.getElementById('statusMsg');
-      if(ok){ statusMsg.innerHTML='<span class="ok">Marked GOOD</span>'; } else { statusMsg.innerHTML='<span class="bad">Failed to mark</span>'; }
+      if(ok){ statusMsg.innerHTML='<span class="ok">Marked GOOD (Qty: '+currentQty+')</span>'; } else { statusMsg.innerHTML='<span class="bad">Failed to mark</span>'; }
       setTimeout(()=>{ statusMsg.textContent=''; document.getElementById('result').classList.add('hidden'); document.getElementById('actions').classList.add('hidden'); document.getElementById('manualUpc').value=''; currentUpc = null; resetQtyDisplay(); setupDeviceMode(); }, 600);
     };
 

@@ -546,6 +546,48 @@ def api_items_prep_cleanup_temp():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
+@app.route('/api/bol_items/quantity', methods=['POST'])
+def api_bol_items_update_quantity():
+    """Update quantity for a BOL item. JSON: { upc, quantity }"""
+    try:
+        data = request.get_json() or {}
+        upc = _normalize_upc(data.get('upc'))
+        quantity = data.get('quantity')
+        if not upc or quantity is None:
+            return jsonify({'success': False, 'error': 'Missing upc or quantity'}), 400
+        
+        try:
+            quantity = int(quantity)
+        except (ValueError, TypeError):
+            return jsonify({'success': False, 'error': 'Invalid quantity'}), 400
+        
+        conn = sqlite3.connect('bol.db')
+        cur = conn.cursor()
+        cur.execute('UPDATE bol_items SET quantity = ? WHERE upc = ? COLLATE NOCASE', (quantity, upc))
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/items_prep/status/<upc>', methods=['DELETE'])
+def api_items_prep_status_delete(upc):
+    """Delete preparation status for a UPC (for undo functionality)."""
+    try:
+        upc = _normalize_upc(upc)
+        if not upc:
+            return jsonify({'success': False, 'error': 'Missing upc'}), 400
+        
+        _ensure_items_prep_tables()
+        conn = sqlite3.connect('bol.db')
+        cur = conn.cursor()
+        cur.execute('DELETE FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (upc,))
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/api/items_prep/diagnostic', methods=['POST'])
 def api_items_prep_diagnostic():
     """Save diagnostic info and photos for a UPC. form-data: upc, reason, note, files: photos[]"""
