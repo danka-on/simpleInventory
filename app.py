@@ -2510,6 +2510,9 @@ def get_sold_orders_route():
     try:
         days = request.json.get('days', 90) if request.is_json else 90
         get_ebay_orders(days=days)
+        # Process inventory reduction after fetching sold orders
+        from DBmanager import process_sold_orders_inventory_reduction
+        process_sold_orders_inventory_reduction()
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})

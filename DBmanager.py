@@ -421,15 +421,19 @@ def store_ebay_order(order):
         isHandled TEXT,
         isHandledDate TEXT,
         location TEXT,
-        barcode TEXT
+        barcode TEXT,
+        rackupdated INTEGER DEFAULT 0
     )''')
     
-    # Ensure barcode column exists (for older databases)
+    # Ensure barcode and rackupdated columns exist (for older databases)
     try:
         cur.execute('PRAGMA table_info(orders)')
         cols = [r[1] for r in cur.fetchall()]
         if 'barcode' not in cols:
             cur.execute('ALTER TABLE orders ADD COLUMN barcode TEXT')
+            conn.commit()
+        if 'rackupdated' not in cols:
+            cur.execute('ALTER TABLE orders ADD COLUMN rackupdated INTEGER DEFAULT 0')
             conn.commit()
     except Exception:
         pass
@@ -880,4 +884,92 @@ def enrich_searchrack_db(batch_size=500, do_backup=True):
 
     print(f'Enrichment complete: updated approximately {total_updates} rows')
 
+def process_sold_orders_inventory_reduction():
+    """
+    Process sold orders and reduce searchRack.db quantities.
+    Only processes orders where rackupdated = 0.
+    Marks orders as rackupdated = 1 after processing (whether found in searchRack or not).
+    """
+    print("🔄 Processing sold orders for inventory reduction...")
+    
+    try:
+        # Connect to sold.db
+        sold_conn = sqlite3.connect('sold.db')
+        sold_conn.row_factory = sqlite3.Row
+        sold_cur = sold_conn.cursor()
+        
+        # Get all unprocessed orders with barcodes
+        sold_cur.execute('''
+            SELECT id, barcode, quantity, order_id, item_id, title 
+            FROM orders 
+            WHERE rackupdated = 0 AND barcode IS NOT NULL AND barcode != ''
+        ''')
+        unprocessed_orders = sold_cur.fetchall()
+        
+        if not unprocessed_orders:
+            print("  ✓ No unprocessed sold orders found")
+            sold_conn.close()
+            return
+        
+        print(f"  Found {len(unprocessed_orders)} unprocessed sold orders")
+        
+        # Connect to searchRack.db
+        rack_conn = sqlite3.connect('searchRack.db')
+        rack_cur = rack_conn.cursor()
+        
+        # Determine which quantity column to use
+        rack_cur.execute("PRAGMA table_info(SEARCHRACK)")
+        columns = [row[1] for row in rack_cur.fetchall()]
+        qty_col = 'QUANTITY' if 'QUANTITY' in columns else 'QTY'
+        
+        updated_count = 0
+        not_found_count = 0
+        
+        for order in unprocessed_orders:
+            order_id = order['id']
+            barcode = order['barcode']
+            sold_qty = order['quantity'] or 1
+            
+            try:
+                # Try to find item in searchRack by barcode (ITEMID column)
+                rack_cur.execute(f"SELECT ID, {qty_col} FROM SEARCHRACK WHERE ITEMID = ? COLLATE NOCASE", (barcode,))
+                rack_item = rack_cur.fetchone()
+                
+                if rack_item:
+                    rack_id = rack_item[0]
+                    current_qty = rack_item[1] or 0
+                    new_qty = max(0, current_qty - sold_qty)  # Don't go below 0
+                    
+                    # Update the quantity in searchRack
+                    rack_cur.execute(f"UPDATE SEARCHRACK SET {qty_col} = ? WHERE ID = ?", (new_qty, rack_id))
+                    rack_conn.commit()
+                    
+                    print(f"  ✓ Reduced {barcode}: {current_qty} → {new_qty} (sold {sold_qty})")
+                    updated_count += 1
+                else:
+                    print(f"  ⚠ Barcode {barcode} not found in searchRack (Order: {order['order_id']})")
+                    not_found_count += 1
+                
+            except Exception as e:
+                print(f"  ✗ Error processing barcode {barcode}: {e}")
+            
+            finally:
+                # Mark as processed regardless of whether found or not
+                sold_cur.execute("UPDATE orders SET rackupdated = 1 WHERE id = ?", (order_id,))
+                sold_conn.commit()
+        
+        rack_conn.close()
+        sold_conn.close()
+        
+        print(f"✅ Inventory reduction complete:")
+        print(f"   - Updated: {updated_count} items")
+        print(f"   - Not found: {not_found_count} items")
+        print(f"   - Total processed: {len(unprocessed_orders)} orders")
+        
+    except Exception as e:
+        print(f"❌ Error in process_sold_orders_inventory_reduction: {e}")
+        import traceback
+        traceback.print_exc()
+
 # No top-level code or __main__ block
+
