@@ -904,6 +904,15 @@ def process_sold_orders_inventory_reduction():
         sold_conn = sqlite3.connect('sold.db')
         sold_conn.row_factory = sqlite3.Row
         sold_cur = sold_conn.cursor()
+        # Ensure settings table exists and read grace period hours (default 48)
+        try:
+            sold_cur.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)")
+            sold_conn.commit()
+            sold_cur.execute("SELECT value FROM settings WHERE key = 'removal_grace_hours'")
+            row = sold_cur.fetchone()
+            grace_period_hours = int(row[0]) if row and str(row[0]).strip().isdigit() else 48
+        except Exception:
+            grace_period_hours = 48
         
         # Ensure removal_cancelled column exists
         try:
@@ -935,11 +944,10 @@ def process_sold_orders_inventory_reduction():
             sold_conn.close()
             return
         
-        print(f"  Found {len(unprocessed_orders)} shipped orders, checking grace period...")
+        print(f"  Found {len(unprocessed_orders)} shipped orders, checking grace period (grace={grace_period_hours}h)...")
         
-        # Filter orders by 48-hour grace period
+        # Filter orders by grace period
         now = datetime.datetime.utcnow()
-        grace_period_hours = 48
         eligible_orders = []
         
         for order in unprocessed_orders:
@@ -984,6 +992,30 @@ def process_sold_orders_inventory_reduction():
         # Connect to searchRack.db
         rack_conn = sqlite3.connect('searchRack.db')
         rack_cur = rack_conn.cursor()
+
+        # Prepare removed.db for logging removals
+        rem_conn = sqlite3.connect('removed.db')
+        rem_cur = rem_conn.cursor()
+        rem_cur.execute('''
+            CREATE TABLE IF NOT EXISTS removed (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT,
+                barcode TEXT,
+                qty INTEGER,
+                time_removed TEXT,
+                undone_at TEXT
+            )
+        ''')
+        rem_conn.commit()
+        # Ensure undone_at exists for older schemas
+        try:
+            rem_cur.execute('PRAGMA table_info(removed)')
+            cols = [r[1] for r in rem_cur.fetchall()]
+            if 'undone_at' not in cols:
+                rem_cur.execute('ALTER TABLE removed ADD COLUMN undone_at TEXT')
+                rem_conn.commit()
+        except Exception:
+            pass
         
         # Determine which quantity column to use
         rack_cur.execute("PRAGMA table_info(SEARCHRACK)")
@@ -1011,12 +1043,54 @@ def process_sold_orders_inventory_reduction():
                     # Update the quantity in searchRack
                     rack_cur.execute(f"UPDATE SEARCHRACK SET {qty_col} = ? WHERE ID = ?", (new_qty, rack_id))
                     rack_conn.commit()
+                    # Log removal entry
+                    try:
+                        # Try to capture a descriptive name
+                        name_val = None
+                        try:
+                            # sqlite3.Row supports key access
+                            if hasattr(order, 'keys') and 'title' in order.keys():
+                                name_val = order['title']
+                        except Exception:
+                            name_val = None
+                        # If empty, try to query SEARCHRACK title
+                        if not name_val:
+                            try:
+                                rack_cur.execute("SELECT TITLE FROM SEARCHRACK WHERE ID = ?", (rack_id,))
+                                rr = rack_cur.fetchone()
+                                name_val = rr[0] if rr and rr[0] else ''
+                            except Exception:
+                                name_val = ''
+                        time_iso = datetime.datetime.utcnow().isoformat() + 'Z'
+                        rem_cur.execute(
+                            "INSERT INTO removed (name, barcode, qty, time_removed) VALUES (?,?,?,?)",
+                            (name_val or '', barcode, int(sold_qty) if sold_qty else 1, time_iso)
+                        )
+                        rem_conn.commit()
+                    except Exception:
+                        pass
                     
                     print(f"  ✓ Reduced {barcode}: {current_qty} → {new_qty} (sold {sold_qty})")
                     updated_count += 1
                 else:
                     print(f"  ⚠ Barcode {barcode} not found in searchRack (Order: {order['order_id']})")
                     not_found_count += 1
+                    # Still log this removal and mark order processed to avoid repeated attempts
+                    try:
+                        time_iso = datetime.datetime.utcnow().isoformat() + 'Z'
+                        name_val = None
+                        try:
+                            if hasattr(order, 'keys') and 'title' in order.keys():
+                                name_val = order['title']
+                        except Exception:
+                            name_val = None
+                        rem_cur.execute(
+                            "INSERT INTO removed (name, barcode, qty, time_removed) VALUES (?,?,?,?)",
+                            (name_val or '', barcode, int(sold_qty) if sold_qty else 1, time_iso)
+                        )
+                        rem_conn.commit()
+                    except Exception:
+                        pass
                 
             except Exception as e:
                 print(f"  ✗ Error processing barcode {barcode}: {e}")
@@ -1027,6 +1101,10 @@ def process_sold_orders_inventory_reduction():
                 sold_conn.commit()
         
         rack_conn.close()
+        try:
+            rem_conn.close()
+        except Exception:
+            pass
         sold_conn.close()
         
         print(f"✅ Inventory reduction complete:")

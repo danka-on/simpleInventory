@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Removed Items</title>
+  <style>
+    body { font-family: Segoe UI, Arial, sans-serif; background:#f7f7f8; margin:0; padding:18px; }
+    .top { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+    .btn { padding:8px 14px; border-radius:6px; border:none; cursor:pointer; }
+    .btn-danger{ background:#e74c3c; color:#fff }
+    table{ width:100%; border-collapse:collapse; margin-top:12px; background:#fff }
+    th, td{ padding:8px; border:1px solid #e6e6e6; text-align:left }
+    th{ background:#f0f0f0 }
+    .small-muted{ color:#777; font-size:0.9rem }
+    .controls { display:flex; align-items:center; gap:8px; }
+  </style>
+</head>
+<body>
+  <div class="top">
+    <a href="/tools" style="text-decoration:none"><button class="btn btn-danger">Back</button></a>
+    <h2 style="margin:0;">Removed Items</h2>
+    <div style="width:84px"></div>
+  </div>
+  <div class="controls" style="margin-top:10px; gap:8px;">
+    <input id="search" type="text" placeholder="Search by title or barcode" style="flex:1; min-width:220px; padding:8px; border:1px solid #ddd; border-radius:6px;">
+    <button id="searchBtn" class="btn">Search</button>
+    <button id="clearBtn" class="btn" style="background:#888">Clear</button>
+  </div>
+  <div id="status" class="small-muted" style="margin-top:8px"></div>
+  <div id="results"></div>
+
+  <script>
+    async function loadRemoved(query){
+      const statusEl = document.getElementById('status');
+      statusEl.textContent = 'Loading...';
+      try{
+        const url = query && query.trim() ? ('/api/removed?q=' + encodeURIComponent(query.trim())) : '/api/removed';
+        const r = await fetch(url);
+        const j = await r.json();
+        if(!j.success){ statusEl.textContent = 'Failed: '+(j.error||'Unknown'); return; }
+        statusEl.textContent = j.items.length + ' entries';
+        render(j.items);
+      }catch(e){ statusEl.textContent = 'Error loading list'; }
+    }
+    function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+    function parseISO(s){ try{ if(!s) return new Date(NaN); let str=String(s); if(/\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(str)&&!/([zZ]|[+-]\d{2}:?\d{2}$)/.test(str)){ str=str.replace(' ','T')+'Z'; } return new Date(str);}catch(_){return new Date(NaN);} }
+    function fmtLocal(ts){ try{ const d=parseISO(ts); if(isNaN(d)) return esc(ts); return new Intl.DateTimeFormat('en-US',{year:'numeric',month:'2-digit',day:'2-digit',hour:'numeric',minute:'2-digit'}).format(d); }catch(_){ return esc(ts||''); } }
+    function render(items){
+      const c = document.getElementById('results');
+      if(!items || !items.length){ c.innerHTML = '<div class="small-muted">No removed items logged yet</div>'; return; }
+      let html = '<table><thead><tr><th>Time Removed</th><th>Title</th><th>Barcode</th><th>Qty</th><th>Status</th><th>Action</th></tr></thead><tbody>';
+      items.forEach(it=>{
+        const undone = !!it.undone_at;
+        const status = undone ? ('Undone '+fmtLocal(it.undone_at)) : 'Removed';
+        const btn = undone ? '<button class="btn" disabled>Undone</button>' : `<button class="btn" onclick="undoRemoval(${it.id})" style="background:#e67e22">Undo</button>`;
+        html += '<tr>' +
+          '<td>'+fmtLocal(it.time_removed)+'</td>'+
+          '<td>'+esc(it.name)+'</td>'+
+          '<td>'+esc(it.barcode)+'</td>'+
+          '<td>'+esc(it.qty)+'</td>'+
+          '<td>'+esc(status)+'</td>'+
+          '<td>'+btn+'</td>'+
+        '</tr>';
+      });
+      html += '</tbody></table>';
+      c.innerHTML = html;
+    }
+    async function undoRemoval(id){
+      const ok = confirm('Restore inventory for this removal entry?');
+      if(!ok) return;
+      try{
+        const r = await fetch('/api/removed/undo/'+id, {method:'POST'});
+        const j = await r.json();
+        if(j.success){
+          alert('Restored. New quantity in inventory: '+j.new_qty);
+          loadRemoved(document.getElementById('search').value);
+        } else {
+          alert('Undo failed: '+(j.error||'Unknown'));
+        }
+      }catch(e){ alert('Undo failed'); }
+    }
+    document.getElementById('searchBtn').addEventListener('click', ()=> loadRemoved(document.getElementById('search').value));
+    document.getElementById('clearBtn').addEventListener('click', ()=>{ document.getElementById('search').value=''; loadRemoved(''); });
+    document.getElementById('search').addEventListener('keyup', (e)=>{ if(e.key==='Enter'){ loadRemoved(document.getElementById('search').value) } });
+    loadRemoved('');
+  </script>
+</body>
+</html>

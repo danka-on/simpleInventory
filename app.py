@@ -2596,6 +2596,15 @@ def get_pending_removals():
         conn = sqlite3.connect('sold.db')
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
+        # Read grace period from settings (default 48)
+        try:
+            cur.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)")
+            conn.commit()
+            cur.execute("SELECT value FROM settings WHERE key = 'removal_grace_hours'")
+            row = cur.fetchone()
+            grace_period_hours = int(row[0]) if row and str(row[0]).strip().isdigit() else 48
+        except Exception:
+            grace_period_hours = 48
         
         # Get orders that are shipped but not yet processed
         cur.execute('''
@@ -2609,12 +2618,10 @@ def get_pending_removals():
             AND barcode != ''
         ''')
         orders = cur.fetchall()
-        conn.close()
         
         # Calculate time remaining for each order
         import datetime
         now = datetime.datetime.utcnow()
-        grace_period_hours = 48
         
         result = []
         for order in orders:
@@ -2645,7 +2652,8 @@ def get_pending_removals():
                 print(f"Error processing order {order['order_id']}: {e}")
                 continue
         
-        return jsonify({'success': True, 'orders': result})
+        conn.close()
+        return jsonify({'success': True, 'orders': result, 'grace_hours': grace_period_hours})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
@@ -2696,6 +2704,232 @@ def allow_automatic_removal(order_id):
         
         conn.close()
         return jsonify({'success': True, 'message': 'Automatic removal re-enabled'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+# Grace period settings endpoints
+@app.route('/api/grace_period', methods=['GET'])
+def api_get_grace_period():
+    try:
+        conn = sqlite3.connect('sold.db')
+        cur = conn.cursor()
+        cur.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)")
+        conn.commit()
+        cur.execute("SELECT value FROM settings WHERE key = 'removal_grace_hours'")
+        row = cur.fetchone()
+        conn.close()
+        hours = int(row[0]) if row and str(row[0]).strip().isdigit() else 48
+        return jsonify({'success': True, 'hours': hours})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/grace_period', methods=['POST'])
+def api_set_grace_period():
+    try:
+        data = request.get_json(force=True) if request.is_json else {}
+        hours = int(data.get('hours', 48))
+        if hours < 0 or hours > 240:
+            return jsonify({'success': False, 'error': 'hours out of range (0-240)'}), 400
+        conn = sqlite3.connect('sold.db')
+        cur = conn.cursor()
+        cur.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)")
+        conn.commit()
+        cur.execute("INSERT INTO settings (key, value) VALUES ('removal_grace_hours', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", (str(hours),))
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True, 'hours': hours})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+# Removed items: list and page
+@app.route('/api/removed', methods=['GET'])
+def api_removed_list():
+    try:
+        conn = sqlite3.connect('removed.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS removed (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT,
+                barcode TEXT,
+                qty INTEGER,
+                time_removed TEXT,
+                undone_at TEXT
+            )
+        ''')
+        conn.commit()
+        # Ensure undone_at exists for older databases
+        try:
+            cur.execute('PRAGMA table_info(removed)')
+            cols = [r[1] for r in cur.fetchall()]
+            if 'undone_at' not in cols:
+                cur.execute('ALTER TABLE removed ADD COLUMN undone_at TEXT')
+                conn.commit()
+        except Exception:
+            pass
+
+        # Optional search filter
+        q = (request.args.get('q') or '').strip()
+        params = []
+        where = ''
+        if q:
+            where = 'WHERE (LOWER(COALESCE(name, "")) LIKE ? OR LOWER(COALESCE(barcode, "")) LIKE ?)' 
+            params.extend([f'%{q.lower()}%', f'%{q.lower()}%'])
+
+        cur.execute(f"SELECT id, name, barcode, qty, time_removed, undone_at FROM removed {where} ORDER BY time_removed DESC LIMIT 1000", params)
+        rows = [dict(r) for r in cur.fetchall()]
+        conn.close()
+        return jsonify({'success': True, 'items': rows})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/removed')
+def removed_page():
+    try:
+        return render_template('removed.html')
+    except Exception as e:
+        return f'Error loading page: {e}', 500
+
+@app.route('/api/removed/undo/<int:rem_id>', methods=['POST'])
+def api_removed_undo(rem_id: int):
+    """Undo a removal: increment searchRack quantity by qty for the barcode, and mark removed row undone."""
+    try:
+        # Open removed.db and fetch entry
+        rem_conn = sqlite3.connect('removed.db')
+        rem_conn.row_factory = sqlite3.Row
+        rem_cur = rem_conn.cursor()
+        # Ensure schema
+        rem_cur.execute('''
+            CREATE TABLE IF NOT EXISTS removed (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT,
+                barcode TEXT,
+                qty INTEGER,
+                time_removed TEXT,
+                undone_at TEXT
+            )
+        ''')
+        rem_conn.commit()
+        rem_cur.execute('SELECT id, name, barcode, qty, time_removed, undone_at FROM removed WHERE id = ?', (rem_id,))
+        row = rem_cur.fetchone()
+        if not row:
+            rem_conn.close()
+            return jsonify({'success': False, 'error': 'Removed entry not found'}), 404
+        if row['undone_at']:
+            rem_conn.close()
+            return jsonify({'success': False, 'error': 'Already undone'}), 400
+
+        barcode = (row['barcode'] or '').strip()
+        qty = int(row['qty'] or 0)
+        if not barcode or qty <= 0:
+            rem_conn.close()
+            return jsonify({'success': False, 'error': 'Invalid removed entry data'}), 400
+
+        # Update searchRack quantity by ITEMID (barcode)
+        rack_conn = sqlite3.connect('searchRack.db')
+        rack_cur = rack_conn.cursor()
+        rack_cur.execute('PRAGMA table_info(SEARCHRACK)')
+        cols = [r[1] for r in rack_cur.fetchall()]
+        qty_col = 'QUANTITY' if 'QUANTITY' in cols else ('QTY' if 'QTY' in cols else None)
+        if not qty_col:
+            rack_conn.close()
+            rem_conn.close()
+            return jsonify({'success': False, 'error': 'No quantity column in SEARCHRACK'}), 500
+
+        rack_cur.execute(f'SELECT ID, {qty_col} FROM SEARCHRACK WHERE ITEMID = ? COLLATE NOCASE', (barcode,))
+        found = rack_cur.fetchone()
+        if not found:
+            rack_conn.close()
+            rem_conn.close()
+            return jsonify({'success': False, 'error': 'No matching inventory found to restore'}), 404
+
+        rack_id = found[0]
+        current_qty = int(found[1] or 0)
+        new_qty = current_qty + qty
+        rack_cur.execute(f'UPDATE SEARCHRACK SET {qty_col} = ? WHERE ID = ?', (new_qty, rack_id))
+        rack_conn.commit()
+        rack_conn.close()
+
+        # Mark removed row undone
+        import datetime as _dt
+        rem_cur.execute('UPDATE removed SET undone_at = ? WHERE id = ?', (_dt.datetime.utcnow().isoformat() + 'Z', rem_id))
+        rem_conn.commit()
+        rem_conn.close()
+
+        return jsonify({'success': True, 'new_qty': new_qty})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/sold/remove-now/<int:order_id>', methods=['POST'])
+def api_sold_remove_now(order_id: int):
+    """Immediately reduce inventory for a specific sold order and log to removed.db, bypassing grace period."""
+    try:
+        # Fetch order details
+        s_conn = sqlite3.connect('sold.db')
+        s_conn.row_factory = sqlite3.Row
+        s_cur = s_conn.cursor()
+        s_cur.execute('SELECT id, order_id, title, barcode, quantity FROM orders WHERE id = ?', (order_id,))
+        order = s_cur.fetchone()
+        if not order:
+            s_conn.close()
+            return jsonify({'success': False, 'error': 'Order not found'}), 404
+        barcode = (order['barcode'] or '').strip()
+        sold_qty = int(order['quantity'] or 1)
+        if not barcode:
+            s_conn.close()
+            return jsonify({'success': False, 'error': 'Order missing barcode'}), 400
+
+        # Update searchRack quantity
+        r_conn = sqlite3.connect('searchRack.db')
+        r_cur = r_conn.cursor()
+        r_cur.execute('PRAGMA table_info(SEARCHRACK)')
+        cols = [r[1] for r in r_cur.fetchall()]
+        qty_col = 'QUANTITY' if 'QUANTITY' in cols else ('QTY' if 'QTY' in cols else None)
+        if not qty_col:
+            r_conn.close(); s_conn.close()
+            return jsonify({'success': False, 'error': 'No quantity column in SEARCHRACK'}), 500
+        r_cur.execute(f'SELECT ID, {qty_col} FROM SEARCHRACK WHERE ITEMID = ? COLLATE NOCASE', (barcode,))
+        row = r_cur.fetchone()
+        inventory_found = False
+        new_qty = None
+        if row:
+            inventory_found = True
+            rack_id = row[0]
+            current_qty = int(row[1] or 0)
+            new_qty = max(0, current_qty - sold_qty)
+            r_cur.execute(f'UPDATE SEARCHRACK SET {qty_col} = ? WHERE ID = ?', (new_qty, rack_id))
+            r_conn.commit()
+
+        # Log to removed.db
+        rem_conn = sqlite3.connect('removed.db')
+        rem_cur = rem_conn.cursor()
+        rem_cur.execute('''
+            CREATE TABLE IF NOT EXISTS removed (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT,
+                barcode TEXT,
+                qty INTEGER,
+                time_removed TEXT,
+                undone_at TEXT
+            )
+        ''')
+        rem_conn.commit()
+        import datetime as _dt
+        rem_cur.execute(
+            'INSERT INTO removed (name, barcode, qty, time_removed) VALUES (?,?,?,?)',
+            (order['title'] or '', barcode, sold_qty, _dt.datetime.utcnow().isoformat() + 'Z')
+        )
+        rem_conn.commit()
+        rem_conn.close()
+
+        # Mark order as processed
+        s_cur.execute('UPDATE orders SET rackupdated = 1 WHERE id = ?', (order_id,))
+        s_conn.commit()
+        s_conn.close()
+        r_conn.close()
+
+        return jsonify({'success': True, 'new_qty': new_qty, 'inventory_found': inventory_found})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 

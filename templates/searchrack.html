@@ -91,7 +91,10 @@
     <!-- Pending Removals Notice (only shown when viewing sold items) -->
     <div id="pending-removals-notice" style="display:none; margin-top:12px; padding:12px; background:#fff3cd; border:1px solid #ffc107; border-radius:8px;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-            <strong style="color:#856404;">⏰ Pending Automatic Inventory Removals</strong>
+            <div>
+                <strong style="color:#856404;">⏰ Pending Automatic Inventory Removals</strong>
+                <span id="pending-grace-info" style="color:#856404; opacity:0.9; margin-left:6px;"></span>
+            </div>
             <button id="refresh-pending-btn" class="btn" style="padding:4px 8px; font-size:0.9rem;">Refresh</button>
         </div>
         <div id="pending-removals-list" style="font-size:0.9rem; color:#856404;"></div>
@@ -795,6 +798,17 @@ async function fetchPendingRemovals(){
         console.log('Response status:', resp.status);
         const j = await resp.json();
         console.log('Response data:', j);
+        // Update grace period info if available
+        try{
+            const graceInfoEl = document.getElementById('pending-grace-info');
+            if (graceInfoEl) {
+                if (j && typeof j.grace_hours !== 'undefined' && j.grace_hours !== null) {
+                    graceInfoEl.textContent = `(grace: ${j.grace_hours}h)`;
+                } else {
+                    graceInfoEl.textContent = '';
+                }
+            }
+        }catch(_e){ /* no-op */ }
         if(j.success && j.orders && j.orders.length > 0){
             console.log(`Found ${j.orders.length} pending removals`);
             displayPendingRemovals(j.orders);
@@ -832,9 +846,15 @@ function displayPendingRemovals(orders){
         const statusColor = isCancelled ? '#dc3545' : 
                            order.is_eligible_for_removal ? '#ff6b6b' : '#856404';
         
-        const actionBtn = isCancelled ? 
-            `<button class="btn" style="padding:4px 8px; font-size:0.85rem; background:#28a745; color:white;" onclick="allowRemoval(${order.id})">Re-enable</button>` :
-            `<button class="btn" style="padding:4px 8px; font-size:0.85rem; background:#dc3545; color:white;" onclick="cancelRemoval(${order.id})">Cancel</button>`;
+        let actionBtn = '';
+        if (isCancelled) {
+            actionBtn = `<button class="btn" style="padding:4px 8px; font-size:0.85rem; background:#28a745; color:white;" onclick="allowRemoval(${order.id})">Re-enable</button>`;
+        } else {
+            const cancelBtn = `<button class="btn" style="padding:4px 8px; font-size:0.85rem; background:#dc3545; color:white;" onclick="cancelRemoval(${order.id})">Cancel</button>`;
+            // Show "Remove now" only when still in grace period (not yet eligible) and not cancelled
+            const removeNowBtn = !order.is_eligible_for_removal ? ` <button class="btn" style="padding:4px 8px; font-size:0.85rem; background:#6f42c1; color:white;" onclick="removeNow(${order.id})">Remove now</button>` : '';
+            actionBtn = cancelBtn + removeNowBtn;
+        }
         
         html += `<tr style="border-bottom:1px solid #dee2e6;">
             <td style="padding:6px;">${esc(order.order_id || '')}</td>
@@ -887,6 +907,26 @@ async function allowRemoval(orderId){
     }catch(err){
         console.error('Error re-enabling removal:', err);
         alert('Error re-enabling removal');
+    }
+}
+
+async function removeNow(orderId){
+    if(!confirm('Immediately reduce inventory for this order? This bypasses the grace period.')){
+        return;
+    }
+    try{
+        const resp = await fetch(`/api/sold/remove-now/${orderId}`, {method: 'POST'});
+        const j = await resp.json();
+        if(j.success){
+            alert('Inventory reduced successfully. New quantity: ' + (typeof j.new_qty !== 'undefined' ? j.new_qty : 'updated'));
+            // Refresh the pending list to remove this order from view
+            fetchPendingRemovals();
+        } else {
+            alert('Failed to remove now: ' + (j.error || 'Unknown error'));
+        }
+    }catch(err){
+        console.error('Error performing remove now:', err);
+        alert('Error performing remove now');
     }
 }
 
