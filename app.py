@@ -366,7 +366,7 @@ def item_prep_diagnostic_view_page():
         status = dict(row) if row else None
         cur.execute("SELECT id, image_path, created_at FROM items_prep_images WHERE upc = ? COLLATE NOCASE AND (deleted_at IS NULL OR TRIM(COALESCE(deleted_at,'')) = '') ORDER BY created_at DESC, id DESC", (upc,))
         images = [dict(r) for r in cur.fetchall()]
-        cur.execute('SELECT id, upc, item_description, image_url, lot_number, bol_number, import_date, list_status FROM bol_items WHERE upc = ? COLLATE NOCASE LIMIT 1', (upc,))
+        cur.execute('SELECT id, upc, item_description, image_url, lot_number, bol_number, import_date, list_status, quantity FROM bol_items WHERE upc = ? COLLATE NOCASE LIMIT 1', (upc,))
         b = cur.fetchone()
         bol = dict(b) if b else None
         conn.close()
@@ -1214,7 +1214,7 @@ def api_bol_items():
         total = cur.fetchone()[0]
         
         sql = (
-            'SELECT b.id, b.upc, b.item_description, b.image_url, b.lot_number, b.bol_number, b.import_date, b.list_status, ' +
+            'SELECT b.id, b.upc, b.item_description, b.image_url, b.lot_number, b.bol_number, b.import_date, b.list_status, b.quantity, ' +
             ('b.temporary, ' if has_temporary else '') +
             's.status as prep_status, s.reason as prep_reason, s.note as prep_note, s.updated_at as prep_updated_at '
             'FROM bol_items b '
@@ -1290,7 +1290,8 @@ def api_bol_items():
                 'defect': (r.get('prep_reason') or ''),
                 'status': (r.get('prep_status') or 'unchecked'),
                 'list_status': (r.get('list_status') or ''),
-                'temporary': r.get('temporary')
+                'temporary': r.get('temporary'),
+                'quantity': r.get('quantity') or 1
             })
         return jsonify({'results': results, 'total': total, 'page': page, 'limit': limit})
     except Exception as e:

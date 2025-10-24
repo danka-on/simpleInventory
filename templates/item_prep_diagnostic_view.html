@@ -74,6 +74,10 @@
       <div>
         <h2 class="title">{{ bol.item_description if bol else 'Item' }}</h2>
         <div class="muted">UPC: {{ upc }}</div>
+        {% set qty = bol.quantity if bol and bol.quantity else 1 %}
+        <div style="margin-top:8px">
+          <span style="font-weight:700;font-size:1.2rem;{% if qty > 1 %}color:#e74c3c{% else %}color:#555{% endif %}">QTY: {{ qty }}</span>
+        </div>
         <div style="margin-top:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
           <span style="color:#2980b9;text-decoration:underline;cursor:pointer;font-size:1rem" id="setPositionBtn">Set Position</span>
           <div id="locationRow" style="display:none">

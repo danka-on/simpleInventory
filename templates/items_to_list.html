@@ -189,7 +189,7 @@ function formatLastEdited(raw){
 function render(results){
   let html = '<table><thead><tr>';
   if (selectMode) html += '<th>Select</th>';
-  html += '<th>Info</th><th>Status</th><th>Defect</th><th>Pics</th><th>Title</th><th>UPC</th><th>Listed</th><th>Action</th><th>Last Edited</th></tr></thead><tbody>';
+  html += '<th>Info</th><th>Status</th><th>Defect</th><th>Pics</th><th>Title</th><th>QTY</th><th>UPC</th><th>Listed</th><th>Action</th><th>Last Edited</th></tr></thead><tbody>';
   for (const r of results) {
     const title = esc(r.title||'');
     const img = esc(r.image||'');
@@ -214,6 +214,10 @@ function render(results){
     // Pics count button — initially unknown, render placeholder and update later
     const picsCount = (r.pics_count || 0);
     const picsBtn = `<button type="button" class="btn btn-sm pics-count" data-upc="${upc}" title="View photos">${picsCount}</button>`;
+    // QTY display - make red if > 1
+    const qty = r.quantity || 1;
+    const qtyStyle = qty > 1 ? 'color:#e74c3c;font-weight:700;font-size:1.1rem' : '';
+    const qtyCell = `<td style="text-align:center"><span style="${qtyStyle}">${qty}</span></td>`;
     html += `<tr>`;
     if (selectMode) {
       const isDuplicate = /-\d+$/.test(upc);
@@ -227,6 +231,7 @@ function render(results){
             `<td>${esc(r.defect||'')}</td>`+
             `<td style="text-align:center">${picsBtn}</td>`+
             `<td><div class="title-cell"><img class="thumb" src="${thumb}" onerror="this.src='${missingThumb(48,48,'No Img')}'"><a href="#" class="img-link" data-img="${img}" data-title="${title}">${title}</a></div></td>`+
+            qtyCell+
             `<td><div style=\"display:flex;gap:6px;align-items:center\"><span>${upc}</span><button type=\"button\" class=\"btn btn-sm btn-copy\" data-upc=\"${upc}\" title=\"Copy UPC\">Copy</button></div></td>`+
           `<td>${lpill}</td>`+
             `<td>${actionBtn}</td>`+
