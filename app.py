@@ -2589,6 +2589,116 @@ def mark_order_unhandled():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
+@app.route('/api/sold/pending-removals', methods=['GET'])
+def get_pending_removals():
+    """Get list of sold orders pending automatic inventory removal (shipped but within 48h grace period)"""
+    try:
+        conn = sqlite3.connect('sold.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        
+        # Get orders that are shipped but not yet processed
+        cur.execute('''
+            SELECT id, order_id, item_id, barcode, title, quantity, 
+                   shipped_time, paid_time, image, removal_cancelled
+            FROM orders 
+            WHERE rackupdated = 0 
+            AND shipped_time IS NOT NULL 
+            AND shipped_time != ''
+            AND barcode IS NOT NULL
+            AND barcode != ''
+        ''')
+        orders = cur.fetchall()
+        conn.close()
+        
+        # Calculate time remaining for each order
+        import datetime
+        now = datetime.datetime.utcnow()
+        grace_period_hours = 48
+        
+        result = []
+        for order in orders:
+            try:
+                shipped_str = order['shipped_time']
+                if 'T' in shipped_str:
+                    if shipped_str.endswith('Z'):
+                        shipped_dt = datetime.datetime.fromisoformat(shipped_str.replace('Z', '+00:00'))
+                    elif '+' in shipped_str or shipped_str.count('-') > 2:
+                        shipped_dt = datetime.datetime.fromisoformat(shipped_str)
+                    else:
+                        shipped_dt = datetime.datetime.fromisoformat(shipped_str)
+                else:
+                    shipped_dt = datetime.datetime.fromisoformat(shipped_str)
+                
+                if shipped_dt.tzinfo:
+                    shipped_dt = shipped_dt.replace(tzinfo=None)
+                
+                hours_since_shipped = (now - shipped_dt).total_seconds() / 3600
+                hours_remaining = max(0, grace_period_hours - hours_since_shipped)
+                is_eligible = hours_since_shipped >= grace_period_hours
+                
+                order_dict = dict(order)
+                order_dict['hours_remaining'] = round(hours_remaining, 1)
+                order_dict['is_eligible_for_removal'] = is_eligible
+                result.append(order_dict)
+            except Exception as e:
+                print(f"Error processing order {order['order_id']}: {e}")
+                continue
+        
+        return jsonify({'success': True, 'orders': result})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/sold/cancel-removal/<int:order_id>', methods=['POST'])
+def cancel_automatic_removal(order_id):
+    """Cancel automatic inventory removal for a specific sold order"""
+    try:
+        conn = sqlite3.connect('sold.db')
+        cur = conn.cursor()
+        
+        # Ensure removal_cancelled column exists
+        try:
+            cur.execute('PRAGMA table_info(orders)')
+            cols = [r[1] for r in cur.fetchall()]
+            if 'removal_cancelled' not in cols:
+                cur.execute('ALTER TABLE orders ADD COLUMN removal_cancelled INTEGER DEFAULT 0')
+                conn.commit()
+        except Exception:
+            pass
+        
+        # Set removal_cancelled to 1
+        cur.execute('UPDATE orders SET removal_cancelled = 1 WHERE id = ?', (order_id,))
+        conn.commit()
+        
+        if cur.rowcount == 0:
+            conn.close()
+            return jsonify({'success': False, 'error': 'Order not found'})
+        
+        conn.close()
+        return jsonify({'success': True, 'message': 'Automatic removal cancelled'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/sold/allow-removal/<int:order_id>', methods=['POST'])
+def allow_automatic_removal(order_id):
+    """Re-enable automatic inventory removal for a specific sold order"""
+    try:
+        conn = sqlite3.connect('sold.db')
+        cur = conn.cursor()
+        
+        # Set removal_cancelled back to 0
+        cur.execute('UPDATE orders SET removal_cancelled = 0 WHERE id = ?', (order_id,))
+        conn.commit()
+        
+        if cur.rowcount == 0:
+            conn.close()
+            return jsonify({'success': False, 'error': 'Order not found'})
+        
+        conn.close()
+        return jsonify({'success': True, 'message': 'Automatic removal re-enabled'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
 
 @app.route('/undo_match', methods=['POST'])
 def undo_match():

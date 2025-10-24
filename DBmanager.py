@@ -435,6 +435,9 @@ def store_ebay_order(order):
         if 'rackupdated' not in cols:
             cur.execute('ALTER TABLE orders ADD COLUMN rackupdated INTEGER DEFAULT 0')
             conn.commit()
+        if 'removal_cancelled' not in cols:
+            cur.execute('ALTER TABLE orders ADD COLUMN removal_cancelled INTEGER DEFAULT 0')
+            conn.commit()
     except Exception:
         pass
     
@@ -887,7 +890,11 @@ def enrich_searchrack_db(batch_size=500, do_backup=True):
 def process_sold_orders_inventory_reduction():
     """
     Process sold orders and reduce searchRack.db quantities.
-    Only processes orders where rackupdated = 0.
+    Only processes orders where:
+    - rackupdated = 0
+    - Has a shipped_time (item has been shipped)
+    - 48 hours have passed since shipped_time
+    - removal_cancelled is not 1
     Marks orders as rackupdated = 1 after processing (whether found in searchRack or not).
     """
     print("🔄 Processing sold orders for inventory reduction...")
@@ -898,20 +905,81 @@ def process_sold_orders_inventory_reduction():
         sold_conn.row_factory = sqlite3.Row
         sold_cur = sold_conn.cursor()
         
-        # Get all unprocessed orders with barcodes
+        # Ensure removal_cancelled column exists
+        try:
+            sold_cur.execute('PRAGMA table_info(orders)')
+            cols = [r[1] for r in sold_cur.fetchall()]
+            if 'removal_cancelled' not in cols:
+                sold_cur.execute('ALTER TABLE orders ADD COLUMN removal_cancelled INTEGER DEFAULT 0')
+                sold_conn.commit()
+                print("  ✓ Added removal_cancelled column to orders table")
+        except Exception as e:
+            print(f"  ⚠ Could not add removal_cancelled column: {e}")
+        
+        # Get all unprocessed orders with barcodes that have been shipped
+        # and are past the 48-hour grace period
         sold_cur.execute('''
-            SELECT id, barcode, quantity, order_id, item_id, title 
+            SELECT id, barcode, quantity, order_id, item_id, title, shipped_time 
             FROM orders 
-            WHERE rackupdated = 0 AND barcode IS NOT NULL AND barcode != ''
+            WHERE rackupdated = 0 
+            AND barcode IS NOT NULL 
+            AND barcode != ''
+            AND shipped_time IS NOT NULL
+            AND shipped_time != ''
+            AND (removal_cancelled IS NULL OR removal_cancelled = 0)
         ''')
         unprocessed_orders = sold_cur.fetchall()
         
         if not unprocessed_orders:
-            print("  ✓ No unprocessed sold orders found")
+            print("  ✓ No unprocessed sold orders ready for inventory reduction")
             sold_conn.close()
             return
         
-        print(f"  Found {len(unprocessed_orders)} unprocessed sold orders")
+        print(f"  Found {len(unprocessed_orders)} shipped orders, checking grace period...")
+        
+        # Filter orders by 48-hour grace period
+        now = datetime.datetime.utcnow()
+        grace_period_hours = 48
+        eligible_orders = []
+        
+        for order in unprocessed_orders:
+            try:
+                # Parse shipped_time (ISO format from eBay API)
+                shipped_str = order['shipped_time']
+                # Handle various datetime formats
+                if 'T' in shipped_str:
+                    if shipped_str.endswith('Z'):
+                        shipped_dt = datetime.datetime.fromisoformat(shipped_str.replace('Z', '+00:00'))
+                    elif '+' in shipped_str or shipped_str.count('-') > 2:
+                        shipped_dt = datetime.datetime.fromisoformat(shipped_str)
+                    else:
+                        shipped_dt = datetime.datetime.fromisoformat(shipped_str)
+                else:
+                    shipped_dt = datetime.datetime.fromisoformat(shipped_str)
+                
+                # Remove timezone info for comparison
+                if shipped_dt.tzinfo:
+                    shipped_dt = shipped_dt.replace(tzinfo=None)
+                
+                # Check if 48 hours have passed
+                hours_since_shipped = (now - shipped_dt).total_seconds() / 3600
+                
+                if hours_since_shipped >= grace_period_hours:
+                    eligible_orders.append(order)
+                else:
+                    remaining = grace_period_hours - hours_since_shipped
+                    print(f"  ⏱ Order {order['order_id']}: {remaining:.1f}h remaining in grace period")
+                    
+            except Exception as e:
+                print(f"  ⚠ Could not parse shipped_time for order {order['order_id']}: {e}")
+                continue
+        
+        if not eligible_orders:
+            print("  ✓ No orders past 48-hour grace period")
+            sold_conn.close()
+            return
+        
+        print(f"  Found {len(eligible_orders)} orders eligible for inventory reduction")
         
         # Connect to searchRack.db
         rack_conn = sqlite3.connect('searchRack.db')
@@ -925,7 +993,7 @@ def process_sold_orders_inventory_reduction():
         updated_count = 0
         not_found_count = 0
         
-        for order in unprocessed_orders:
+        for order in eligible_orders:
             order_id = order['id']
             barcode = order['barcode']
             sold_qty = order['quantity'] or 1
@@ -964,7 +1032,7 @@ def process_sold_orders_inventory_reduction():
         print(f"✅ Inventory reduction complete:")
         print(f"   - Updated: {updated_count} items")
         print(f"   - Not found: {not_found_count} items")
-        print(f"   - Total processed: {len(unprocessed_orders)} orders")
+        print(f"   - Total processed: {len(eligible_orders)} orders")
         
     except Exception as e:
         print(f"❌ Error in process_sold_orders_inventory_reduction: {e}")
