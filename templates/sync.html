@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.ico') }}">
+    <title>Sync Manager - Sweet Shelves</title>
+    <style>
+        :root {
+            --primary: #0984e3;
+            --accent: #00b894;
+            --warning: #fdcb6e;
+            --danger: #e74c3c;
+            --bg: #f9f9f9;
+            --card: #fff;
+            --border: #e0e0e0;
+            --radius: 14px;
+        }
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background: var(--bg);
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px 16px 80px 16px;
+        }
+        h1 {
+            margin: 0 0 10px 0;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+        .subtitle {
+            color: #7f8c8d;
+            margin: 0 0 24px 0;
+            font-size: 14px;
+        }
+        
+        /* Sync All Section */
+        .sync-all-section {
+            background: linear-gradient(135deg, var(--primary), #74b9ff);
+            border-radius: var(--radius);
+            padding: 24px;
+            margin-bottom: 20px;
+            color: white;
+            box-shadow: 0 4px 12px rgba(9, 132, 227, 0.2);
+        }
+        .sync-all-section h2 {
+            margin: 0 0 12px 0;
+            font-size: 20px;
+            font-weight: 600;
+        }
+        .sync-all-btn {
+            width: 100%;
+            padding: 14px;
+            background: white;
+            color: var(--primary);
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        .sync-all-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        .sync-all-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        /* Card Sections */
+        .card {
+            background: var(--card);
+            border-radius: var(--radius);
+            padding: 20px;
+            margin-bottom: 16px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+            border: 1px solid var(--border);
+        }
+        .card h3 {
+            margin: 0 0 16px 0;
+            font-size: 18px;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+        
+        /* Last Sync Info */
+        .sync-info {
+            display: grid;
+            gap: 12px;
+        }
+        .sync-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px;
+            background: var(--bg);
+            border-radius: 8px;
+        }
+        .sync-item-label {
+            font-weight: 500;
+            color: #2c3e50;
+        }
+        .sync-item-value {
+            color: #7f8c8d;
+            font-size: 14px;
+        }
+        .sync-item-value.success {
+            color: var(--accent);
+        }
+        .sync-item-value.never {
+            color: var(--warning);
+        }
+        
+        /* Auto Sync Settings */
+        .setting-group {
+            margin-bottom: 16px;
+        }
+        .setting-label {
+            display: block;
+            font-weight: 500;
+            color: #2c3e50;
+            margin-bottom: 8px;
+        }
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 50px;
+            height: 26px;
+        }
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            border-radius: 26px;
+            transition: 0.3s;
+        }
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 20px;
+            width: 20px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            border-radius: 50%;
+            transition: 0.3s;
+        }
+        input:checked + .toggle-slider {
+            background-color: var(--accent);
+        }
+        input:checked + .toggle-slider:before {
+            transform: translateX(24px);
+        }
+        
+        select, input[type="number"] {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 15px;
+            background: white;
+        }
+        
+        .save-btn {
+            width: 100%;
+            padding: 12px;
+            background: var(--accent);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-top: 12px;
+        }
+        .save-btn:hover {
+            background: #00a383;
+            transform: translateY(-1px);
+        }
+        
+        /* Manual Sync Buttons */
+        .sync-buttons {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-top: 16px;
+        }
+        .sync-btn {
+            padding: 12px;
+            border: 1px solid var(--border);
+            background: white;
+            color: var(--primary);
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .sync-btn:hover {
+            background: var(--bg);
+            border-color: var(--primary);
+        }
+        .sync-btn.amazon {
+            color: #FF9900;
+            border-color: #FF9900;
+        }
+        .sync-btn.amazon:hover {
+            background: #fff5e6;
+        }
+        
+        /* Status Messages */
+        .status-message {
+            padding: 12px;
+            border-radius: 8px;
+            margin-top: 12px;
+            font-size: 14px;
+            display: none;
+        }
+        .status-message.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+            display: block;
+        }
+        .status-message.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+            display: block;
+        }
+        .status-message.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+            display: block;
+        }
+        
+        /* Progress Indicator */
+        .progress {
+            width: 100%;
+            height: 4px;
+            background: #e0e0e0;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 8px;
+            display: none;
+        }
+        .progress-bar {
+            height: 100%;
+            background: var(--primary);
+            width: 0%;
+            transition: width 0.3s;
+            animation: progress-animation 1.5s infinite;
+        }
+        @keyframes progress-animation {
+            0% { width: 0%; }
+            50% { width: 70%; }
+            100% { width: 100%; }
+        }
+        
+        /* Back Button */
+        .back-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            color: var(--primary);
+            text-decoration: none;
+            font-weight: 500;
+            margin-bottom: 16px;
+            padding: 8px 12px;
+            border-radius: 8px;
+            transition: background 0.2s;
+        }
+        .back-btn:hover {
+            background: var(--bg);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <a href="/tools" class="back-btn">← Back to Tools</a>
+        
+        <h1>Sync Manager</h1>
+        <p class="subtitle">Manage marketplace synchronization</p>
+        
+        <!-- Sync All Section -->
+        <div class="sync-all-section">
+            <h2>🔄 Sync Everything</h2>
+            <p style="margin: 0 0 16px 0; opacity: 0.9; font-size: 14px;">
+                Sync orders, listings, and UPCs from eBay and Amazon
+            </p>
+            <button class="sync-all-btn" onclick="syncAll()">
+                Sync All Now
+            </button>
+            <div class="progress" id="sync-all-progress">
+                <div class="progress-bar"></div>
+            </div>
+            <div class="status-message" id="sync-all-status"></div>
+        </div>
+        
+        <!-- Last Sync Info -->
+        <div class="card">
+            <h3>📊 Last Sync Status</h3>
+            <div class="sync-info">
+                <div class="sync-item">
+                    <span class="sync-item-label">eBay Orders</span>
+                    <span class="sync-item-value" id="ebay-orders-last">Loading...</span>
+                </div>
+                <div class="sync-item">
+                    <span class="sync-item-label">eBay Listings</span>
+                    <span class="sync-item-value" id="ebay-listings-last">Loading...</span>
+                </div>
+                <div class="sync-item">
+                    <span class="sync-item-label">Amazon Orders</span>
+                    <span class="sync-item-value" id="amazon-orders-last">Loading...</span>
+                </div>
+                <div class="sync-item">
+                    <span class="sync-item-label">Amazon Listings</span>
+                    <span class="sync-item-value" id="amazon-listings-last">Loading...</span>
+                </div>
+                <div class="sync-item">
+                    <span class="sync-item-label">Amazon UPCs</span>
+                    <span class="sync-item-value" id="amazon-upcs-last">Loading...</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Auto Sync Settings -->
+        <div class="card">
+            <h3>⚙️ Auto Sync Settings</h3>
+            
+            <div class="setting-group">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span class="setting-label" style="margin: 0;">Enable Auto Sync</span>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="auto-sync-enabled">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+            </div>
+            
+            <div class="setting-group">
+                <label class="setting-label" for="sync-interval">Sync Interval</label>
+                <select id="sync-interval">
+                    <option value="15">Every 15 minutes</option>
+                    <option value="30">Every 30 minutes</option>
+                    <option value="60" selected>Every hour</option>
+                    <option value="120">Every 2 hours</option>
+                    <option value="240">Every 4 hours</option>
+                    <option value="480">Every 8 hours</option>
+                    <option value="1440">Once daily</option>
+                </select>
+            </div>
+            
+            <div class="setting-group">
+                <label class="setting-label" for="orders-lookback">Orders Lookback Period (days)</label>
+                <input type="number" id="orders-lookback" min="1" max="90" value="30">
+            </div>
+            
+            <div class="setting-group">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span class="setting-label" style="margin: 0;">Auto-fetch UPCs for new items</span>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="auto-upc-enabled" checked>
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+                <p style="font-size: 13px; color: #7f8c8d; margin: 8px 0 0 0;">
+                    Only fetches UPCs for new Amazon products without barcodes
+                </p>
+            </div>
+            
+            <button class="save-btn" onclick="saveSettings()">Save Settings</button>
+            <div class="status-message" id="settings-status"></div>
+        </div>
+        
+        <!-- Manual Sync Options -->
+        <div class="card">
+            <h3>🔧 Manual Sync</h3>
+            <p style="margin: 0 0 12px 0; color: #7f8c8d; font-size: 14px;">
+                Trigger individual syncs manually
+            </p>
+            
+            <div class="sync-buttons">
+                <button class="sync-btn" onclick="manualSync('ebay-orders')">eBay Orders</button>
+                <button class="sync-btn" onclick="manualSync('ebay-listings')">eBay Listings</button>
+                <button class="sync-btn amazon" onclick="manualSync('amazon-orders')">Amazon Orders</button>
+                <button class="sync-btn amazon" onclick="manualSync('amazon-listings')">Amazon Listings</button>
+            </div>
+            <button class="sync-btn amazon" style="margin-top: 12px; width: 100%;" onclick="manualSync('amazon-upcs')">
+                Fetch Missing Amazon UPCs
+            </button>
+            <div class="status-message" id="manual-status"></div>
+        </div>
+    </div>
+    
+    <script>
+        // Load last sync times
+        async function loadSyncStatus() {
+            try {
+                const response = await fetch('/api/sync/status');
+                const data = await response.json();
+                
+                // Update last sync times
+                updateSyncTime('ebay-orders-last', data.ebay_orders);
+                updateSyncTime('ebay-listings-last', data.ebay_listings);
+                updateSyncTime('amazon-orders-last', data.amazon_orders);
+                updateSyncTime('amazon-listings-last', data.amazon_listings);
+                updateSyncTime('amazon-upcs-last', data.amazon_upcs);
+                
+                // Load settings
+                document.getElementById('auto-sync-enabled').checked = data.auto_sync_enabled || false;
+                document.getElementById('sync-interval').value = data.sync_interval || 60;
+                document.getElementById('orders-lookback').value = data.orders_lookback || 30;
+                document.getElementById('auto-upc-enabled').checked = data.auto_upc_enabled !== false;
+                
+            } catch (error) {
+                console.error('Error loading sync status:', error);
+            }
+        }
+        
+        function updateSyncTime(elementId, timestamp) {
+            const element = document.getElementById(elementId);
+            if (!timestamp) {
+                element.textContent = 'Never';
+                element.className = 'sync-item-value never';
+            } else {
+                const date = new Date(timestamp);
+                const now = new Date();
+                const diff = Math.floor((now - date) / 1000); // seconds
+                
+                let timeAgo;
+                if (diff < 60) {
+                    timeAgo = 'Just now';
+                } else if (diff < 3600) {
+                    timeAgo = Math.floor(diff / 60) + ' min ago';
+                } else if (diff < 86400) {
+                    timeAgo = Math.floor(diff / 3600) + ' hr ago';
+                } else {
+                    timeAgo = Math.floor(diff / 86400) + ' days ago';
+                }
+                
+                element.textContent = timeAgo;
+                element.className = 'sync-item-value success';
+            }
+        }
+        
+        async function syncAll() {
+            const btn = document.querySelector('.sync-all-btn');
+            const progress = document.getElementById('sync-all-progress');
+            const status = document.getElementById('sync-all-status');
+            
+            btn.disabled = true;
+            btn.textContent = 'Syncing...';
+            progress.style.display = 'block';
+            status.className = 'status-message';
+            
+            try {
+                const response = await fetch('/api/sync/all', { method: 'POST' });
+                const data = await response.json();
+                
+                if (data.success) {
+                    status.className = 'status-message success';
+                    status.textContent = `✅ ${data.message}`;
+                    loadSyncStatus(); // Reload status
+                } else {
+                    status.className = 'status-message error';
+                    status.textContent = `❌ ${data.message}`;
+                }
+            } catch (error) {
+                status.className = 'status-message error';
+                status.textContent = '❌ Error: ' + error.message;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Sync All Now';
+                progress.style.display = 'none';
+            }
+        }
+        
+        async function manualSync(type) {
+            const status = document.getElementById('manual-status');
+            status.className = 'status-message info';
+            status.textContent = `🔄 Syncing ${type.replace('-', ' ')}...`;
+            
+            try {
+                const response = await fetch(`/api/sync/${type}`, { method: 'POST' });
+                const data = await response.json();
+                
+                if (data.success) {
+                    status.className = 'status-message success';
+                    status.textContent = `✅ ${data.message}`;
+                    loadSyncStatus();
+                } else {
+                    status.className = 'status-message error';
+                    status.textContent = `❌ ${data.message}`;
+                }
+            } catch (error) {
+                status.className = 'status-message error';
+                status.textContent = '❌ Error: ' + error.message;
+            }
+        }
+        
+        async function saveSettings() {
+            const settings = {
+                auto_sync_enabled: document.getElementById('auto-sync-enabled').checked,
+                sync_interval: parseInt(document.getElementById('sync-interval').value),
+                orders_lookback: parseInt(document.getElementById('orders-lookback').value),
+                auto_upc_enabled: document.getElementById('auto-upc-enabled').checked
+            };
+            
+            const status = document.getElementById('settings-status');
+            
+            try {
+                const response = await fetch('/api/sync/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(settings)
+                });
+                const data = await response.json();
+                
+                if (data.success) {
+                    status.className = 'status-message success';
+                    status.textContent = '✅ Settings saved successfully';
+                    setTimeout(() => { status.className = 'status-message'; }, 3000);
+                } else {
+                    status.className = 'status-message error';
+                    status.textContent = '❌ Failed to save settings';
+                }
+            } catch (error) {
+                status.className = 'status-message error';
+                status.textContent = '❌ Error: ' + error.message;
+            }
+        }
+        
+        // Load status on page load
+        loadSyncStatus();
+        
+        // Auto-refresh status every 30 seconds
+        setInterval(loadSyncStatus, 30000);
+    </script>
+</body>
+</html>

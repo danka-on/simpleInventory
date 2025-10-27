@@ -97,6 +97,10 @@ def _run_enrich_in_background():
 def tools():
     return render_template('tools.html')
 
+@app.route('/sync')
+def sync():
+    return render_template('sync.html')
+
 # Route for misc settings page
 @app.route('/misc')
 def misc():
@@ -2561,6 +2565,26 @@ def sync_amazon_orders():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/api/amazon/sync-listings', methods=['POST'])
+def sync_amazon_listings():
+    """Sync Amazon active listings to amazonStore.db"""
+    if not AMAZON_AVAILABLE:
+        return jsonify({'success': False, 'error': 'Amazon integration not available'}), 500
+    
+    try:
+        print("🔄 Syncing Amazon listings...")
+        
+        amazon = AmazonManager()
+        count = amazon.sync_listings_to_db()
+        
+        return jsonify({'success': True, 'listings_synced': count})
+    except Exception as e:
+        print(f"❌ Error syncing Amazon listings: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/amazon/orders', methods=['GET'])
 def get_amazon_orders():
     """Get Amazon orders from sold.db"""
@@ -4485,6 +4509,297 @@ def test_sold_item():
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
+
+# =========== Sync Management API ===========
+
+@app.route('/api/sync/status', methods=['GET'])
+def get_sync_status():
+    """Get last sync timestamps and current settings"""
+    try:
+        conn = sqlite3.connect('sync_settings.db')
+        cur = conn.cursor()
+        
+        # Create table if not exists
+        cur.execute('''CREATE TABLE IF NOT EXISTS sync_status (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )''')
+        
+        # Get all sync timestamps
+        cur.execute('SELECT key, value FROM sync_status')
+        rows = cur.fetchall()
+        status = dict(rows)
+        
+        conn.close()
+        
+        return jsonify({
+            'ebay_orders': status.get('ebay_orders_last'),
+            'ebay_listings': status.get('ebay_listings_last'),
+            'amazon_orders': status.get('amazon_orders_last'),
+            'amazon_listings': status.get('amazon_listings_last'),
+            'amazon_upcs': status.get('amazon_upcs_last'),
+            'auto_sync_enabled': status.get('auto_sync_enabled') == 'true',
+            'sync_interval': int(status.get('sync_interval', 60)),
+            'orders_lookback': int(status.get('orders_lookback', 30)),
+            'auto_upc_enabled': status.get('auto_upc_enabled', 'true') == 'true'
+        })
+    except Exception as e:
+        print(f"❌ Error getting sync status: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/sync/settings', methods=['POST'])
+def save_sync_settings():
+    """Save sync settings"""
+    try:
+        data = request.json
+        conn = sqlite3.connect('sync_settings.db')
+        cur = conn.cursor()
+        
+        # Create table if not exists
+        cur.execute('''CREATE TABLE IF NOT EXISTS sync_status (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )''')
+        
+        # Save settings
+        settings = {
+            'auto_sync_enabled': 'true' if data.get('auto_sync_enabled') else 'false',
+            'sync_interval': str(data.get('sync_interval', 60)),
+            'orders_lookback': str(data.get('orders_lookback', 30)),
+            'auto_upc_enabled': 'true' if data.get('auto_upc_enabled') else 'false'
+        }
+        
+        for key, value in settings.items():
+            cur.execute('INSERT OR REPLACE INTO sync_status (key, value) VALUES (?, ?)', (key, value))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True})
+    except Exception as e:
+        print(f"❌ Error saving settings: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+def update_sync_timestamp(key):
+    """Helper function to update last sync timestamp"""
+    try:
+        conn = sqlite3.connect('sync_settings.db')
+        cur = conn.cursor()
+        cur.execute('''CREATE TABLE IF NOT EXISTS sync_status (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )''')
+        
+        from datetime import datetime
+        timestamp = datetime.now().isoformat()
+        cur.execute('INSERT OR REPLACE INTO sync_status (key, value) VALUES (?, ?)', (f'{key}_last', timestamp))
+        
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"⚠️ Error updating sync timestamp: {e}")
+
+@app.route('/api/sync/all', methods=['POST'])
+def sync_all():
+    """Sync everything - eBay and Amazon orders, listings, and UPCs"""
+    try:
+        results = {}
+        
+        # Sync eBay orders
+        try:
+            from DBmanager import orders as update_ebay_orders
+            update_ebay_orders()
+            update_sync_timestamp('ebay_orders')
+            results['ebay_orders'] = 'success'
+        except Exception as e:
+            print(f"⚠️ eBay orders sync failed: {e}")
+            results['ebay_orders'] = str(e)
+        
+        # Sync eBay listings (searchRack)
+        try:
+            from DBmanager import updateSearchRackDB
+            updateSearchRackDB()
+            update_sync_timestamp('ebay_listings')
+            results['ebay_listings'] = 'success'
+        except Exception as e:
+            print(f"⚠️ eBay listings sync failed: {e}")
+            results['ebay_listings'] = str(e)
+        
+        # Sync Amazon orders
+        if AMAZON_AVAILABLE:
+            try:
+                amazon = AmazonManager()
+                amazon.sync_orders_to_db(days_back=30)
+                from DBmanager import process_sold_orders_inventory_reduction
+                process_sold_orders_inventory_reduction()
+                update_sync_timestamp('amazon_orders')
+                results['amazon_orders'] = 'success'
+            except Exception as e:
+                print(f"⚠️ Amazon orders sync failed: {e}")
+                results['amazon_orders'] = str(e)
+            
+            # Sync Amazon listings
+            try:
+                amazon = AmazonManager()
+                amazon.sync_listings_to_db()
+                update_sync_timestamp('amazon_listings')
+                results['amazon_listings'] = 'success'
+            except Exception as e:
+                print(f"⚠️ Amazon listings sync failed: {e}")
+                results['amazon_listings'] = str(e)
+            
+            # Sync Amazon UPCs (only new items)
+            try:
+                count = sync_missing_upcs()
+                update_sync_timestamp('amazon_upcs')
+                results['amazon_upcs'] = f'success ({count} UPCs fetched)'
+            except Exception as e:
+                print(f"⚠️ Amazon UPC sync failed: {e}")
+                results['amazon_upcs'] = str(e)
+        
+        success_count = sum(1 for v in results.values() if 'success' in v)
+        total_count = len(results)
+        
+        return jsonify({
+            'success': True,
+            'message': f'Sync completed: {success_count}/{total_count} successful',
+            'details': results
+        })
+    except Exception as e:
+        print(f"❌ Error in sync all: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/sync/ebay-orders', methods=['POST'])
+def sync_ebay_orders_api():
+    """Sync eBay orders"""
+    try:
+        from DBmanager import orders as update_ebay_orders
+        update_ebay_orders()
+        update_sync_timestamp('ebay_orders')
+        return jsonify({'success': True, 'message': 'eBay orders synced successfully'})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/sync/ebay-listings', methods=['POST'])
+def sync_ebay_listings_api():
+    """Sync eBay listings"""
+    try:
+        from DBmanager import updateSearchRackDB
+        updateSearchRackDB()
+        update_sync_timestamp('ebay_listings')
+        return jsonify({'success': True, 'message': 'eBay listings synced successfully'})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/sync/amazon-orders', methods=['POST'])
+def sync_amazon_orders_api():
+    """Sync Amazon orders"""
+    if not AMAZON_AVAILABLE:
+        return jsonify({'success': False, 'message': 'Amazon integration not available'}), 500
+    try:
+        amazon = AmazonManager()
+        amazon.sync_orders_to_db(days_back=30)
+        from DBmanager import process_sold_orders_inventory_reduction
+        process_sold_orders_inventory_reduction()
+        update_sync_timestamp('amazon_orders')
+        return jsonify({'success': True, 'message': 'Amazon orders synced successfully'})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/sync/amazon-listings', methods=['POST'])
+def sync_amazon_listings_api():
+    """Sync Amazon listings"""
+    if not AMAZON_AVAILABLE:
+        return jsonify({'success': False, 'message': 'Amazon integration not available'}), 500
+    try:
+        amazon = AmazonManager()
+        amazon.sync_listings_to_db()
+        update_sync_timestamp('amazon_listings')
+        return jsonify({'success': True, 'message': 'Amazon listings synced successfully'})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+def sync_missing_upcs():
+    """Sync UPCs for Amazon items that don't have them (where UPC = ASIN)"""
+    import time
+    
+    conn = sqlite3.connect('amazonStore.db')
+    cur = conn.cursor()
+    
+    # Find items without UPCs (where UPC equals ASIN, meaning no UPC was set)
+    cur.execute('SELECT ASIN FROM amazonStore WHERE UPC = ASIN OR UPC IS NULL')
+    items_without_upcs = [row[0] for row in cur.fetchall()]
+    
+    if not items_without_upcs:
+        conn.close()
+        return 0
+    
+    print(f"🔍 Found {len(items_without_upcs)} items without UPCs. Fetching...")
+    
+    amazon = AmazonManager()
+    upcs_found = 0
+    
+    for i, asin in enumerate(items_without_upcs, 1):
+        try:
+            # Get catalog item
+            catalog_data = amazon.get_catalog_item(asin)
+            
+            if not catalog_data:
+                continue
+            
+            upc = None
+            
+            # Check attributes section first (most common)
+            if 'attributes' in catalog_data:
+                attrs = catalog_data['attributes']
+                if 'externally_assigned_product_identifier' in attrs:
+                    for identifier in attrs['externally_assigned_product_identifier']:
+                        if identifier.get('type') in ['upc', 'ean']:
+                            upc = identifier.get('value')
+                            break
+            
+            # Fallback to identifiers section
+            if not upc and 'identifiers' in catalog_data:
+                identifiers = catalog_data['identifiers']
+                if isinstance(identifiers, list):
+                    for id_group in identifiers:
+                        if 'identifiers' in id_group:
+                            for identifier in id_group['identifiers']:
+                                if identifier.get('identifierType') in ['UPC', 'EAN']:
+                                    upc = identifier.get('identifier')
+                                    break
+            
+            if upc:
+                cur.execute('UPDATE amazonStore SET UPC = ? WHERE ASIN = ?', (upc, asin))
+                upcs_found += 1
+                print(f"✅ [{i}/{len(items_without_upcs)}] {asin}: {upc}")
+            else:
+                print(f"⚠️ [{i}/{len(items_without_upcs)}] {asin}: No UPC found")
+            
+            # Rate limiting: 2 requests per second max
+            time.sleep(0.5)
+            
+        except Exception as e:
+            print(f"❌ [{i}/{len(items_without_upcs)}] {asin}: Error - {e}")
+            time.sleep(0.5)
+    
+    conn.commit()
+    conn.close()
+    
+    print(f"\n✅ UPC sync complete: {upcs_found} UPCs found for {len(items_without_upcs)} items")
+    return upcs_found
+
+@app.route('/api/sync/amazon-upcs', methods=['POST'])
+def sync_amazon_upcs_api():
+    """Sync UPCs for Amazon items without barcodes"""
+    if not AMAZON_AVAILABLE:
+        return jsonify({'success': False, 'message': 'Amazon integration not available'}), 500
+    try:
+        count = sync_missing_upcs()
+        update_sync_timestamp('amazon_upcs')
+        return jsonify({'success': True, 'message': f'Fetched {count} UPCs for items without barcodes'})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 if __name__ == "__main__":
     # Start Flask in a thread
