@@ -433,6 +433,32 @@ class AmazonManager:
                 # Get UPC - from product-id column
                 upc = listing.get('upc', '').strip()
                 
+                # Get image from rawbol.db if we have a UPC
+                image_url = listing.get('image', '')
+                if upc and not image_url:
+                    try:
+                        rawbol_conn = sqlite3.connect('rawbol.db')
+                        rawbol_cur = rawbol_conn.cursor()
+                        
+                        # Try exact match first
+                        rawbol_cur.execute("SELECT image_url FROM raw_bol_items WHERE upc = ?", (upc,))
+                        rawbol_row = rawbol_cur.fetchone()
+                        
+                        # If not found and UPC has leading zeros, try without them
+                        if not rawbol_row and upc.startswith('0'):
+                            upc_no_zero = upc.lstrip('0')
+                            rawbol_cur.execute("SELECT image_url FROM raw_bol_items WHERE upc = ?", (upc_no_zero,))
+                            rawbol_row = rawbol_cur.fetchone()
+                        
+                        if rawbol_row and rawbol_row[0]:
+                            # Skip if image_url is 'nan' string or similar invalid values
+                            img_val = str(rawbol_row[0])
+                            if img_val.lower() not in ['nan', 'none', '', 'null']:
+                                image_url = img_val
+                        rawbol_conn.close()
+                    except Exception as e:
+                        print(f"⚠️ Could not lookup image for UPC {upc}: {e}")
+                
                 # Check if listing exists
                 cur.execute('SELECT ID FROM ITEMS WHERE ASIN = ?', (asin,))
                 existing = cur.fetchone()
@@ -449,7 +475,7 @@ class AmazonManager:
                         WHERE ASIN = ?
                     ''', (
                         sku, listing.get('title', ''), price, quantity,
-                        listing.get('status', ''), listing.get('image', ''),
+                        listing.get('status', ''), image_url,
                         upc, listing.get('condition', ''),
                         listing.get('fulfillment_channel', ''), current_time,
                         asin
@@ -463,7 +489,7 @@ class AmazonManager:
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
                         asin, sku, listing.get('title', ''), price, quantity,
-                        listing.get('status', ''), listing.get('image', ''),
+                        listing.get('status', ''), image_url,
                         upc, listing.get('condition', ''),
                         listing.get('fulfillment_channel', ''), current_time
                     ))

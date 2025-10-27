@@ -840,6 +840,59 @@ def enrich_searchrack_db(batch_size=500, do_backup=True):
     except Exception as e:
         print('Warning: bol lookup failed:', e)
 
+    # For remaining barcodes not found in eBay or BOL, query Amazon (amazonStore.db + rawbol.db for images)
+    still_remaining = [b for b in norm_barcodes if b not in enrichment and b.lower() not in enrichment]
+    try:
+        if still_remaining:
+            amazon_conn = sqlite3.connect('amazonStore.db')
+            amazon_conn.row_factory = sqlite3.Row
+            amazon_cur = amazon_conn.cursor()
+            
+            # Also connect to rawbol for images
+            rawbol_conn = sqlite3.connect('rawbol.db')
+            rawbol_conn.row_factory = sqlite3.Row
+            rawbol_cur = rawbol_conn.cursor()
+            
+            for batch in chunks(still_remaining, batch_size):
+                placeholders = ','.join(['?'] * len(batch))
+                # Query amazonStore.db by UPC
+                amazon_cur.execute(f"SELECT UPC, TITLE, ASIN, IMAGE FROM ITEMS WHERE UPC IN ({placeholders})", batch)
+                for r in amazon_cur.fetchall():
+                    upc = (r['UPC'] or '').strip()
+                    if not upc:
+                        continue
+                    
+                    # Get image from rawbol.db if Amazon doesn't have it
+                    image_url = r['IMAGE']
+                    if not image_url:
+                        # Try exact match first
+                        rawbol_cur.execute("SELECT image_url FROM raw_bol_items WHERE upc = ?", (upc,))
+                        rawbol_row = rawbol_cur.fetchone()
+                        
+                        # If not found and UPC has leading zeros, try without them
+                        if not rawbol_row and upc.startswith('0'):
+                            upc_no_zero = upc.lstrip('0')
+                            rawbol_cur.execute("SELECT image_url FROM raw_bol_items WHERE upc = ?", (upc_no_zero,))
+                            rawbol_row = rawbol_cur.fetchone()
+                        
+                        if rawbol_row:
+                            image_url = rawbol_row['image_url']
+                    
+                    keys = {str(upc).strip(), str(upc).strip().lower()}
+                    for key in keys:
+                        enrichment[key] = {
+                            'title': r['TITLE'], 
+                            'itemid': r['ASIN'],  # Use ASIN as itemid for Amazon
+                            'quantity': None, 
+                            'image': image_url, 
+                            'source': 'amazonStore'
+                        }
+            
+            amazon_conn.close()
+            rawbol_conn.close()
+    except Exception as e:
+        print('Warning: Amazon lookup failed:', e)
+
     # Build mapping of barcode -> [ids] from SEARCHRACK for the barcodes we're processing
     id_by_barcode = {}
     try:

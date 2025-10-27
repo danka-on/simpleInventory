@@ -3393,8 +3393,11 @@ def api_search_db(db_key):
             title_val = item.get('Title') or item.get('title') or item.get('name') or item.get('Name') or ''
             if db_key == 'sold':
                 image_val = item.get('image') or item.get('Image') or item.get('IMAGE') or item.get('image_url') or item.get('images') or ''
+            elif db_key == 'amazonStore':
+                # amazonStore uses all-caps IMAGE column
+                image_val = item.get('IMAGE') or item.get('Image') or item.get('image') or item.get('image_url') or item.get('images') or ''
             else:
-                image_val = item.get('Image') or item.get('image') or item.get('image_url') or item.get('images') or ''
+                image_val = item.get('Image') or item.get('image') or item.get('IMAGE') or item.get('image_url') or item.get('images') or ''
             if db_key == 'bol':
                 # barcode from upc field
                 b = item.get('upc') or item.get('UPC') or item.get('Upc') or barcode_val
@@ -4499,9 +4502,11 @@ def api_delete_archive(archive_id):
 
 @app.route('/refresh_searchrack')
 def refresh_searchrack():
+    from DBmanager import enrich_searchrack_db
     createSearchRackDB()
     updateSearchRackDB()
-    return 'SearchRack database updated! <a href="/searchrack">Back to Search</a>'
+    enrich_searchrack_db(batch_size=500, do_backup=False)  # Enrich with all sources including Amazon
+    return 'SearchRack database updated and enriched! <a href="/searchrack">Back to Search</a>'
 
 @app.route('/test_sold_item', methods=['POST'])
 def test_sold_item():
@@ -4624,8 +4629,9 @@ def sync_all():
         
         # Sync eBay listings (searchRack)
         try:
-            from DBmanager import updateSearchRackDB
+            from DBmanager import updateSearchRackDB, enrich_searchrack_db
             updateSearchRackDB()
+            enrich_searchrack_db(batch_size=500, do_backup=False)  # Enrich with eBay, BOL, and Amazon
             update_sync_timestamp('ebay_listings')
             results['ebay_listings'] = 'success'
         except Exception as e:
@@ -4689,12 +4695,13 @@ def sync_ebay_orders_api():
 
 @app.route('/api/sync/ebay-listings', methods=['POST'])
 def sync_ebay_listings_api():
-    """Sync eBay listings"""
+    """Sync eBay listings and enrich with Amazon data"""
     try:
-        from DBmanager import updateSearchRackDB
+        from DBmanager import updateSearchRackDB, enrich_searchrack_db
         updateSearchRackDB()
+        enrich_searchrack_db(batch_size=500, do_backup=False)  # Enrich with eBay, BOL, and Amazon data
         update_sync_timestamp('ebay_listings')
-        return jsonify({'success': True, 'message': 'eBay listings synced successfully'})
+        return jsonify({'success': True, 'message': 'eBay listings synced and enriched successfully'})
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
 
