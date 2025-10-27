@@ -137,13 +137,13 @@ class AmazonManager:
                 image TEXT,
                 rackupdated INTEGER DEFAULT 0,
                 removal_cancelled INTEGER DEFAULT 0,
-                source TEXT DEFAULT 'amazon'
+                store TEXT DEFAULT 'amazon'
             )
         ''')
         
-        # Add source column if it doesn't exist
+        # Add store column if it doesn't exist
         try:
-            cur.execute('ALTER TABLE orders ADD COLUMN source TEXT DEFAULT "amazon"')
+            cur.execute('ALTER TABLE orders ADD COLUMN store TEXT DEFAULT "amazon"')
             conn.commit()
         except:
             pass
@@ -198,14 +198,14 @@ class AmazonManager:
                         cur.execute('''
                             UPDATE orders 
                             SET barcode = ?, title = ?, quantity = ?, price = ?, 
-                                shipped_time = ?, paid_time = ?, source = 'amazon'
+                                shipped_time = ?, paid_time = ?, store = 'amazon'
                             WHERE order_id = ?
                         ''', (barcode, title, quantity, price, shipped_time, purchase_date, amazon_order_id))
                     else:
                         # Insert new order
                         cur.execute('''
                             INSERT INTO orders 
-                            (order_id, item_id, barcode, title, quantity, price, shipped_time, paid_time, source)
+                            (order_id, item_id, barcode, title, quantity, price, shipped_time, paid_time, store)
                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'amazon')
                         ''', (amazon_order_id, asin, barcode, title, quantity, price, shipped_time, purchase_date))
                         synced_count += 1

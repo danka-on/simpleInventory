@@ -422,10 +422,11 @@ def store_ebay_order(order):
         isHandledDate TEXT,
         location TEXT,
         barcode TEXT,
-        rackupdated INTEGER DEFAULT 0
+        rackupdated INTEGER DEFAULT 0,
+        store TEXT DEFAULT 'ebay'
     )''')
     
-    # Ensure barcode and rackupdated columns exist (for older databases)
+    # Ensure barcode, rackupdated, and store columns exist (for older databases)
     try:
         cur.execute('PRAGMA table_info(orders)')
         cols = [r[1] for r in cur.fetchall()]
@@ -437,6 +438,9 @@ def store_ebay_order(order):
             conn.commit()
         if 'removal_cancelled' not in cols:
             cur.execute('ALTER TABLE orders ADD COLUMN removal_cancelled INTEGER DEFAULT 0')
+            conn.commit()
+        if 'store' not in cols:
+            cur.execute('ALTER TABLE orders ADD COLUMN store TEXT DEFAULT "ebay"')
             conn.commit()
     except Exception:
         pass
@@ -499,8 +503,8 @@ def store_ebay_order(order):
         except Exception:
             pass
     cur.execute('''INSERT INTO orders (
-        order_id, item_id, title, quantity, price, checkout_status, shipping_name, shipping_street1, shipping_street2, shipping_city, shipping_state, shipping_postal_code, shipping_country, paid_time, shipped_time, seller_fee, taxes, fees, image, isHandled, isHandledDate, location, barcode
-    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+        order_id, item_id, title, quantity, price, checkout_status, shipping_name, shipping_street1, shipping_street2, shipping_city, shipping_state, shipping_postal_code, shipping_country, paid_time, shipped_time, seller_fee, taxes, fees, image, isHandled, isHandledDate, location, barcode, store
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
         (
             order.get('order_id'),
             order.get('item_id'),
@@ -524,7 +528,8 @@ def store_ebay_order(order):
             order.get('isHandled'),
             order.get('isHandledDate'),
             location_val,
-            barcode_val
+            barcode_val,
+            'ebay'
         )
     )
     conn.commit()

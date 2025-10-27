@@ -2570,10 +2570,10 @@ def get_amazon_orders():
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         
-        # Get orders from Amazon source
+        # Get orders from Amazon store
         cur.execute('''
             SELECT * FROM orders 
-            WHERE source = 'amazon' 
+            WHERE store = 'amazon' 
             AND paid_time >= date('now', '-' || ? || ' days') 
             ORDER BY paid_time DESC
         ''', (days,))
