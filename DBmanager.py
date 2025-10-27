@@ -620,8 +620,24 @@ def updateSearchRackDB():
     except Exception:
         created_map = {}
 
-    # Clear existing data
+    # Verify DELETE actually cleared the table
     search_cur.execute('DELETE FROM SEARCHRACK')
+    search_conn.commit()  # Commit the DELETE immediately
+    
+    # Verify the table is empty
+    search_cur.execute('SELECT COUNT(*) FROM SEARCHRACK')
+    remaining = search_cur.fetchone()[0]
+    if remaining > 0:
+        print(f"⚠️ Warning: SEARCHRACK still has {remaining} rows after DELETE. Forcing cleanup...")
+        search_cur.execute('DROP TABLE IF EXISTS SEARCHRACK')
+        from DBmanager import createSearchRackDB
+        createSearchRackDB()
+        search_cur.execute('PRAGMA table_info(SEARCHRACK)')
+        cols = [r[1] for r in search_cur.fetchall()]
+        if 'CREATED_AT' not in cols:
+            search_cur.execute('ALTER TABLE SEARCHRACK ADD COLUMN CREATED_AT TEXT')
+            search_conn.commit()
+    
     # Get all rack items
     rack_cur.execute('SELECT BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION FROM INVENTORY')
     rack_items = rack_cur.fetchall()

@@ -3,7 +3,7 @@ from contextlib import nullcontext
 from flask import Flask, request, send_file, url_for, render_template, jsonify, redirect
 from werkzeug.exceptions import RequestEntityTooLarge
 from PIL import Image, ImageDraw
-import io, time, subprocess, os, requests, json, threading, sqlite3
+import io, time, subprocess, os, requests, json, threading, sqlite3, sys
 import xml.etree.ElementTree as ET
 from dotenv import load_dotenv
 import xml.dom.minidom as minidom
@@ -16,9 +16,16 @@ from DBmanager import enrich_searchrack_db
 try:
     from amazon_manager import AmazonManager
     AMAZON_AVAILABLE = True
+    print("✅ Amazon integration loaded successfully")
 except ImportError as e:
     AMAZON_AVAILABLE = False
-    print(f"Warning: Amazon integration not available: {e}")
+    print(f"⚠️ Warning: Amazon integration not available (import error): {e}")
+except Exception as e:
+    AMAZON_AVAILABLE = False
+    print(f"⚠️ Warning: Amazon integration not available (other error): {e}")
+
+# Print which Python is running the app (helps debug venv vs system Python issues)
+print(f"🔧 Python executable: {sys.executable}")
 try:
     from BOLextractor import process_bol_excel
     BOL_AVAILABLE = True
@@ -4607,8 +4614,8 @@ def sync_all():
         
         # Sync eBay orders
         try:
-            from DBmanager import orders as update_ebay_orders
-            update_ebay_orders()
+            # Use the local eBay orders sync function defined in this file
+            orders()
             update_sync_timestamp('ebay_orders')
             results['ebay_orders'] = 'success'
         except Exception as e:
@@ -4673,8 +4680,8 @@ def sync_all():
 def sync_ebay_orders_api():
     """Sync eBay orders"""
     try:
-        from DBmanager import orders as update_ebay_orders
-        update_ebay_orders()
+        # Use the local eBay orders sync function defined in this file
+        orders()
         update_sync_timestamp('ebay_orders')
         return jsonify({'success': True, 'message': 'eBay orders synced successfully'})
     except Exception as e:
@@ -4800,6 +4807,17 @@ def sync_amazon_upcs_api():
         return jsonify({'success': True, 'message': f'Fetched {count} UPCs for items without barcodes'})
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/sync/debug', methods=['GET'])
+def sync_debug():
+    """Debug endpoint to check sync system status"""
+    import sys
+    return jsonify({
+        'amazon_available': AMAZON_AVAILABLE,
+        'bol_available': BOL_AVAILABLE if 'BOL_AVAILABLE' in globals() else False,
+        'python_version': sys.version,
+        'working_directory': os.getcwd()
+    })
 
 if __name__ == "__main__":
     # Start Flask in a thread

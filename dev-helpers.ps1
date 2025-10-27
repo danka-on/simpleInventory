@@ -109,3 +109,22 @@ Write-Host "     Verify-FlaskRoutes <pattern>  (alias: vfr)" -ForegroundColor Wh
 Write-Host "     Quick-Check <pattern>         (alias: qc)" -ForegroundColor White
 Write-Host "     Compare-DiskVsMemory <pattern> (alias: cmp)" -ForegroundColor White
 Write-Host "     Check-AppFile" -ForegroundColor White
+
+# Run the app with virtual environment Python to avoid module mismatches
+function Start-App {
+    [CmdletBinding()]
+    param()
+    $root = Split-Path -Parent $PSCommandPath
+    $venvPython = Join-Path $root ".venv/Scripts/python.exe"
+    if (Test-Path $venvPython) {
+        Write-Host "🚀 Starting app with venv Python:" -ForegroundColor Cyan
+        Write-Host "    $venvPython" -ForegroundColor Gray
+        & $venvPython (Join-Path $root "app.py")
+    } else {
+        Write-Host "⚠️  venv Python not found, falling back to system python" -ForegroundColor Yellow
+        python (Join-Path $root "app.py")
+    }
+}
+
+Set-Alias -Name sa -Value Start-App
+Write-Host "     Start-App (alias: sa)" -ForegroundColor White

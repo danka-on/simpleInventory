@@ -176,13 +176,27 @@ class AmazonManager:
                     try:
                         store_conn = sqlite3.connect('amazonStore.db')
                         store_cur = store_conn.cursor()
-                        store_cur.execute('SELECT upc FROM ITEMS WHERE ASIN = ? OR SKU = ?', (asin, sku))
+                        store_cur.execute('SELECT UPC FROM ITEMS WHERE ASIN = ? OR SKU = ?', (asin, sku))
                         result = store_cur.fetchone()
                         if result:
                             barcode = result[0]
                         store_conn.close()
                     except:
                         pass
+                    
+                    # Try to find image from rawbol.db using the barcode
+                    image = None
+                    if barcode:
+                        try:
+                            rawbol_conn = sqlite3.connect('rawbol.db')
+                            rawbol_cur = rawbol_conn.cursor()
+                            rawbol_cur.execute('SELECT image_url FROM raw_bol_items WHERE upc = ?', (barcode,))
+                            result = rawbol_cur.fetchone()
+                            if result and result[0]:
+                                image = result[0]
+                            rawbol_conn.close()
+                        except:
+                            pass
                     
                     # Determine shipped time
                     shipped_time = None
@@ -198,16 +212,16 @@ class AmazonManager:
                         cur.execute('''
                             UPDATE orders 
                             SET barcode = ?, title = ?, quantity = ?, price = ?, 
-                                shipped_time = ?, paid_time = ?, store = 'amazon'
+                                shipped_time = ?, paid_time = ?, image = ?, store = 'amazon'
                             WHERE order_id = ?
-                        ''', (barcode, title, quantity, price, shipped_time, purchase_date, amazon_order_id))
+                        ''', (barcode, title, quantity, price, shipped_time, purchase_date, image, amazon_order_id))
                     else:
                         # Insert new order
                         cur.execute('''
                             INSERT INTO orders 
-                            (order_id, item_id, barcode, title, quantity, price, shipped_time, paid_time, store)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'amazon')
-                        ''', (amazon_order_id, asin, barcode, title, quantity, price, shipped_time, purchase_date))
+                            (order_id, item_id, barcode, title, quantity, price, shipped_time, paid_time, image, store)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'amazon')
+                        ''', (amazon_order_id, asin, barcode, title, quantity, price, shipped_time, purchase_date, image))
                         synced_count += 1
                 
                 conn.commit()
@@ -469,6 +483,34 @@ class AmazonManager:
         print(f"   - Total: {synced_count + updated_count} items")
         
         return synced_count + updated_count
+
+    def get_catalog_item(self, asin: str):
+        """Fetch a single catalog item (2022-04-01) and return payload dict.
+        Includes attributes and identifiers so we can extract UPC/EAN.
+        """
+        try:
+            ci = CatalogItems(credentials=self.credentials, marketplace=self.marketplace)
+            # Some library versions prefer marketplaceIds param
+            try:
+                resp = ci.get_catalog_item(
+                    asin=asin,
+                    marketplaceIds=[self.marketplace.marketplace_id],
+                    includedData=["attributes", "identifiers", "images", "summaries"],
+                )
+            except TypeError:
+                # Fallback signature without keyword args in some versions
+                resp = ci.get_catalog_item(
+                    asin,
+                    marketplaceIds=[self.marketplace.marketplace_id],
+                    includedData=["attributes", "identifiers", "images", "summaries"],
+                )
+            return resp.payload if hasattr(resp, 'payload') else resp
+        except SellingApiException as e:
+            print(f"❌ Amazon Catalog API error for {asin}: {e}")
+            return None
+        except Exception as e:
+            print(f"❌ Error fetching catalog item {asin}: {e}")
+            return None
     
     def get_inventory_summary(self):
         """
