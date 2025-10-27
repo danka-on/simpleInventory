@@ -2526,7 +2526,20 @@ def get_sold_orders_route():
     print("we're getting sold orders")
     try:
         days = request.json.get('days', 90) if request.is_json else 90
+        
+        # Sync eBay orders
         get_ebay_orders(days=days)
+        
+        # Also sync Amazon orders if available
+        if AMAZON_AVAILABLE:
+            try:
+                print(f"🔄 Syncing Amazon orders (last {days} days)...")
+                amazon = AmazonManager()
+                amazon.sync_orders_to_db(days_back=days)
+            except Exception as e:
+                print(f"⚠️ Error syncing Amazon orders: {e}")
+                # Don't fail the whole request if Amazon sync fails
+        
         # Process inventory reduction after fetching sold orders
         from DBmanager import process_sold_orders_inventory_reduction
         process_sold_orders_inventory_reduction()
