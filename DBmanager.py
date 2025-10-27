@@ -459,22 +459,49 @@ def store_ebay_order(order):
         except Exception:
             pass
     
-    # Enrich title and image from rawbol.db using barcode
+    # Enrich title and image from ebayStore.db and rawbol.db using barcode
     title_val = order.get('title')
     image_val = order.get('image')
+    
+    # First try to get image from ebayStore.db using item_id
+    if not image_val and order.get('item_id'):
+        try:
+            ebay_conn = sqlite3.connect('ebayStore.db')
+            ebay_cur = ebay_conn.cursor()
+            ebay_cur.execute('SELECT Image FROM INVENTORY WHERE ItemID = ?', (order.get('item_id'),))
+            row = ebay_cur.fetchone()
+            if row and row[0]:
+                image_val = row[0]
+            ebay_conn.close()
+        except Exception:
+            pass
+    
+    # Then try rawbol.db using barcode
     if barcode_val:
         try:
             bol_conn = sqlite3.connect('rawbol.db')
             bol_conn.row_factory = sqlite3.Row
             bol_cur = bol_conn.cursor()
+            
+            # Try exact match first
             bol_cur.execute('SELECT item_description, image_url FROM raw_bol_items WHERE upc = ? COLLATE NOCASE LIMIT 1', (barcode_val,))
             row_bol = bol_cur.fetchone()
+            
+            # If not found and barcode has leading zeros, try without them
+            if not row_bol and barcode_val.startswith('0'):
+                barcode_no_zero = barcode_val.lstrip('0')
+                bol_cur.execute('SELECT item_description, image_url FROM raw_bol_items WHERE upc = ? COLLATE NOCASE LIMIT 1', (barcode_no_zero,))
+                row_bol = bol_cur.fetchone()
+            
             if row_bol:
                 # Use rawbol data if not already provided
                 if not title_val and row_bol['item_description']:
                     title_val = row_bol['item_description']
                 if not image_val and row_bol['image_url']:
-                    image_val = row_bol['image_url']
+                    img_url = row_bol['image_url']
+                    # Skip 'nan' values
+                    if str(img_url).lower() not in ['nan', 'none', 'null', '']:
+                        image_val = img_url
             bol_conn.close()
         except Exception:
             pass
