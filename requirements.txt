@@ -4,6 +4,7 @@ requests
 Pillow
 python-dotenv
 sqlite3
+python-amazon-sp-api
 
 # Additional likely dependencies for your project:
 Werkzeug

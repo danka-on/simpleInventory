@@ -14,6 +14,12 @@ from inventory import find_item  # adjust this to match your actual import
 from DBmanager import ebayStoreDB, amazonStoreDB, addToRack, store_ebay_order, createSearchRackDB, updateSearchRackDB, addToSearchRack
 from DBmanager import enrich_searchrack_db
 try:
+    from amazon_manager import AmazonManager
+    AMAZON_AVAILABLE = True
+except ImportError as e:
+    AMAZON_AVAILABLE = False
+    print(f"Warning: Amazon integration not available: {e}")
+try:
     from BOLextractor import process_bol_excel
     BOL_AVAILABLE = True
 except ImportError:
@@ -2516,6 +2522,71 @@ def get_sold_orders_route():
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/api/amazon/test-connection', methods=['GET'])
+def test_amazon_connection():
+    """Test Amazon SP-API connection"""
+    if not AMAZON_AVAILABLE:
+        return jsonify({'success': False, 'error': 'Amazon integration not available'}), 500
+    
+    try:
+        amazon = AmazonManager()
+        success = amazon.test_connection()
+        return jsonify({'success': success})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/amazon/sync-orders', methods=['POST'])
+def sync_amazon_orders():
+    """Sync Amazon orders to sold.db"""
+    if not AMAZON_AVAILABLE:
+        return jsonify({'success': False, 'error': 'Amazon integration not available'}), 500
+    
+    try:
+        days = request.json.get('days', 30) if request.is_json else 30
+        print(f"🔄 Syncing Amazon orders (last {days} days)...")
+        
+        amazon = AmazonManager()
+        count = amazon.sync_orders_to_db(days_back=days)
+        
+        # Process inventory reduction after fetching sold orders
+        from DBmanager import process_sold_orders_inventory_reduction
+        process_sold_orders_inventory_reduction()
+        
+        return jsonify({'success': True, 'orders_synced': count})
+    except Exception as e:
+        print(f"❌ Error syncing Amazon orders: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/amazon/orders', methods=['GET'])
+def get_amazon_orders():
+    """Get Amazon orders from sold.db"""
+    try:
+        days = int(request.args.get('days', 30))
+        conn = sqlite3.connect('sold.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        
+        # Get orders from Amazon source
+        cur.execute('''
+            SELECT * FROM orders 
+            WHERE source = 'amazon' 
+            AND paid_time >= date('now', '-' || ? || ' days') 
+            ORDER BY paid_time DESC
+        ''', (days,))
+        
+        orders = cur.fetchall()
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'orders': [dict(order) for order in orders]
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @app.route('/sold-orders', methods=['GET'])
