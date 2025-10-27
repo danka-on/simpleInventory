@@ -157,6 +157,17 @@ class AmazonManager:
                 last_update_date = order.get('LastUpdateDate')
                 order_status = order.get('OrderStatus')
                 
+                # Extract shipping address (limited by Amazon API - no name or street)
+                shipping_address = order.get('ShippingAddress', {})
+                shipping_city = shipping_address.get('City', '')
+                shipping_state = shipping_address.get('StateOrRegion', '')
+                shipping_postal = shipping_address.get('PostalCode', '')
+                shipping_country = shipping_address.get('CountryCode', '')
+                
+                # Amazon doesn't provide buyer name or street address for privacy
+                # We'll use "Amazon Buyer" as placeholder for shipping_name
+                shipping_name = "Amazon Buyer"
+                
                 # Skip pending/cancelled orders
                 if order_status in ['Pending', 'Canceled']:
                     continue
@@ -228,16 +239,22 @@ class AmazonManager:
                         cur.execute('''
                             UPDATE orders 
                             SET barcode = ?, title = ?, quantity = ?, price = ?, 
-                                shipped_time = ?, paid_time = ?, image = ?, store = 'amazon'
+                                shipped_time = ?, paid_time = ?, image = ?, store = 'amazon',
+                                shipping_name = ?, shipping_city = ?, shipping_state = ?, 
+                                shipping_postal_code = ?, shipping_country = ?
                             WHERE order_id = ?
-                        ''', (barcode, title, quantity, price, shipped_time, purchase_date, image, amazon_order_id))
+                        ''', (barcode, title, quantity, price, shipped_time, purchase_date, image,
+                              shipping_name, shipping_city, shipping_state, shipping_postal, shipping_country,
+                              amazon_order_id))
                     else:
                         # Insert new order
                         cur.execute('''
                             INSERT INTO orders 
-                            (order_id, item_id, barcode, title, quantity, price, shipped_time, paid_time, image, store)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'amazon')
-                        ''', (amazon_order_id, asin, barcode, title, quantity, price, shipped_time, purchase_date, image))
+                            (order_id, item_id, barcode, title, quantity, price, shipped_time, paid_time, image, store,
+                             shipping_name, shipping_city, shipping_state, shipping_postal_code, shipping_country)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'amazon', ?, ?, ?, ?, ?)
+                        ''', (amazon_order_id, asin, barcode, title, quantity, price, shipped_time, purchase_date, image,
+                              shipping_name, shipping_city, shipping_state, shipping_postal, shipping_country))
                         synced_count += 1
                 
                 conn.commit()
