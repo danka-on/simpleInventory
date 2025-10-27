@@ -171,29 +171,45 @@ class AmazonManager:
                     quantity = item.get('QuantityOrdered', 1)
                     price = float(item.get('ItemPrice', {}).get('Amount', 0))
                     
-                    # Try to find barcode from amazonStore.db
+                    # Try to find barcode and image from amazonStore.db
                     barcode = None
+                    image = None
                     try:
                         store_conn = sqlite3.connect('amazonStore.db')
                         store_cur = store_conn.cursor()
-                        store_cur.execute('SELECT UPC FROM ITEMS WHERE ASIN = ? OR SKU = ?', (asin, sku))
+                        store_cur.execute('SELECT UPC, IMAGE FROM ITEMS WHERE ASIN = ? OR SKU = ?', (asin, sku))
                         result = store_cur.fetchone()
                         if result:
                             barcode = result[0]
+                            # Get image from amazonStore if available
+                            if result[1] and str(result[1]).lower() not in ['none', 'null', '']:
+                                image = result[1]
+                        store_cur.close()
                         store_conn.close()
                     except:
                         pass
                     
-                    # Try to find image from rawbol.db using the barcode
-                    image = None
-                    if barcode:
+                    # Fallback to rawbol.db if we have barcode but no image yet
+                    if barcode and not image:
                         try:
                             rawbol_conn = sqlite3.connect('rawbol.db')
                             rawbol_cur = rawbol_conn.cursor()
+                            
+                            # Try exact match first
                             rawbol_cur.execute('SELECT image_url FROM raw_bol_items WHERE upc = ?', (barcode,))
                             result = rawbol_cur.fetchone()
+                            
+                            # If not found and barcode has leading zeros, try without them
+                            if not result and barcode.startswith('0'):
+                                barcode_no_zero = barcode.lstrip('0')
+                                rawbol_cur.execute('SELECT image_url FROM raw_bol_items WHERE upc = ?', (barcode_no_zero,))
+                                result = rawbol_cur.fetchone()
+                            
                             if result and result[0]:
-                                image = result[0]
+                                # Skip 'nan' values
+                                img_val = str(result[0])
+                                if img_val.lower() not in ['nan', 'none', 'null', '']:
+                                    image = img_val
                             rawbol_conn.close()
                         except:
                             pass
@@ -433,8 +449,26 @@ class AmazonManager:
                 # Get UPC - from product-id column
                 upc = listing.get('upc', '').strip()
                 
-                # Get image from rawbol.db if we have a UPC
+                # Get image: Try Amazon Catalog API first, then fallback to rawbol.db
                 image_url = listing.get('image', '')
+                if not image_url:
+                    try:
+                        # Fetch from Amazon Catalog API
+                        catalog_data = self.get_catalog_item(asin)
+                        if catalog_data and 'images' in catalog_data:
+                            # Extract the MAIN variant image with largest size
+                            for image_group in catalog_data['images']:
+                                if 'images' in image_group:
+                                    for img in image_group['images']:
+                                        if img.get('variant') == 'MAIN' and img.get('height', 0) >= 500:
+                                            image_url = img.get('link', '')
+                                            break
+                                    if image_url:
+                                        break
+                    except Exception as e:
+                        print(f"⚠️ Could not fetch Amazon image for {asin}: {e}")
+                
+                # Fallback to rawbol.db if still no image and we have a UPC
                 if upc and not image_url:
                     try:
                         rawbol_conn = sqlite3.connect('rawbol.db')
