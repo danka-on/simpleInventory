@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Create New Item - Prep</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding:16px; background:#f5f5f5; }
+    .container { max-width:800px; margin:0 auto; }
+    h1 { margin-bottom:20px; color:#2c3e50; }
+    .card { background:#fff; padding:20px; border-radius:12px; box-shadow:0 2px 8px rgba(0,0,0,0.1); margin-bottom:16px; }
+    .btn { padding:10px 16px; border:none; border-radius:8px; font-size:14px; cursor:pointer; margin-right:8px; transition:all 0.2s; }
+    .btn-primary { background:#00b894; color:#fff; }
+    .btn-primary:hover { background:#00a383; }
+    .btn-danger { background:#e74c3c; color:#fff; }
+    .btn-danger:hover { background:#d63027; }
+    .btn-gray { background:#95a5a6; color:#fff; cursor:not-allowed; }
+    .btn-success { background:#27ae60; color:#fff; }
+    .btn-success:hover { background:#229954; }
+    .form-group { margin-bottom:20px; }
+    label { display:block; margin-bottom:8px; font-weight:600; color:#2c3e50; font-size:14px; }
+    input[type="text"] { width:100%; padding:12px; border:1px solid #ddd; border-radius:8px; font-size:14px; }
+    .barcode-display { background:#f8f9fa; padding:16px; border-radius:8px; border:2px solid #00b894; font-family:monospace; font-size:20px; text-align:center; margin-bottom:12px; }
+    .camera-container { position:relative; background:#000; border-radius:8px; overflow:hidden; margin-bottom:12px; }
+    video { width:100%; max-height:400px; display:block; }
+    canvas { display:none; }
+    .camera-controls { text-align:center; margin-top:12px; }
+    .preview-image { width:100%; max-width:400px; border-radius:8px; margin-top:12px; }
+    .status-msg { padding:12px; border-radius:8px; margin-top:12px; font-size:14px; }
+    .status-success { background:#d1f2eb; color:#00b894; border:1px solid #00b894; }
+    .status-error { background:#fadbd8; color:#e74c3c; border:1px solid #e74c3c; }
+    .status-warning { background:#fff3cd; color:#856404; border:1px solid #ffc107; }
+    .hidden { display:none; }
+    .field-status { display:inline-block; margin-left:8px; font-size:12px; }
+    .field-complete { color:#27ae60; }
+    .field-incomplete { color:#e74c3c; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>➕ Create New Item</h1>
+    
+    <div class="card">
+      <a href="/item-prep-no-barcode"><button class="btn btn-danger">← Back</button></a>
+      
+      <div style="margin-top:24px">
+        <div class="form-group">
+          <label>
+            Item Title / Description
+            <span class="field-status field-incomplete" id="titleStatus">✗ Required</span>
+          </label>
+          <input type="text" id="itemTitle" placeholder="Enter item description...">
+        </div>
+        
+        <div class="form-group">
+          <label>
+            Barcode (Auto-Generated)
+            <span class="field-status field-complete" id="barcodeStatus">✓ Generated</span>
+          </label>
+          <div class="barcode-display" id="barcodeDisplay">Loading...</div>
+          <button class="btn btn-primary" id="regenerateBtn">🔄 Regenerate Barcode</button>
+        </div>
+        
+        <div class="form-group">
+          <label>
+            Thumbnail Image
+            <span class="field-status field-incomplete" id="imageStatus">✗ Required</span>
+          </label>
+          <div class="camera-container" id="cameraContainer">
+            <video id="video" autoplay playsinline></video>
+          </div>
+          <canvas id="canvas"></canvas>
+          <img id="preview" class="preview-image hidden" alt="Captured image">
+          
+          <div class="camera-controls">
+            <button class="btn btn-primary" id="captureBtn">📷 Capture Photo</button>
+            <button class="btn btn-gray hidden" id="retakeBtn">🔄 Retake Photo</button>
+          </div>
+        </div>
+        
+        <div class="form-group">
+          <label>
+            Print Barcode
+            <span class="field-status field-incomplete" id="printStatus">✗ Not Printed</span>
+          </label>
+          <button class="btn btn-primary" id="printBarcodeBtn">🖨️ Print Barcode Label</button>
+          <div style="margin-top:12px; padding:12px; background:#fff3cd; border:1px solid #ffc107; border-radius:8px;">
+            <label style="display:flex; align-items:center; font-weight:normal; margin:0; cursor:pointer;">
+              <input type="checkbox" id="fakePrintCheckbox" style="width:20px; height:20px; margin-right:8px; cursor:pointer;">
+              <span>⚠️ TEMPORARY: Simulate print (for testing without printer)</span>
+            </label>
+          </div>
+        </div>
+        
+        <div id="statusMsg" class="hidden"></div>
+        
+        <div style="margin-top:32px; text-align:center">
+          <button class="btn btn-gray" id="completeBtn" disabled>
+            Complete & Continue to Prep
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let currentBarcode = '';
+    let capturedImageData = null;
+    let isPrinted = false;
+    let stream = null;
+    
+    const itemTitle = document.getElementById('itemTitle');
+    const barcodeDisplay = document.getElementById('barcodeDisplay');
+    const regenerateBtn = document.getElementById('regenerateBtn');
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const preview = document.getElementById('preview');
+    const captureBtn = document.getElementById('captureBtn');
+    const retakeBtn = document.getElementById('retakeBtn');
+    const printBarcodeBtn = document.getElementById('printBarcodeBtn');
+    const completeBtn = document.getElementById('completeBtn');
+    const statusMsg = document.getElementById('statusMsg');
+    const fakePrintCheckbox = document.getElementById('fakePrintCheckbox');
+    
+    const titleStatus = document.getElementById('titleStatus');
+    const imageStatus = document.getElementById('imageStatus');
+    const printStatus = document.getElementById('printStatus');
+    
+    function showStatus(message, type = 'success') {
+      statusMsg.textContent = message;
+      statusMsg.className = 'status-msg status-' + type;
+      statusMsg.classList.remove('hidden');
+    }
+    
+    function hideStatus() {
+      statusMsg.classList.add('hidden');
+    }
+    
+    async function generateBarcode() {
+      try {
+        const response = await fetch('/api/items-prep/generate-barcode', {
+          method: 'POST'
+        });
+        const data = await response.json();
+        
+        if (data.success) {
+          currentBarcode = data.barcode;
+          barcodeDisplay.textContent = currentBarcode;
+          isPrinted = false;
+          updatePrintStatus();
+          checkFormComplete();
+        } else {
+          showStatus('Failed to generate barcode: ' + data.error, 'error');
+        }
+      } catch (error) {
+        showStatus('Error generating barcode: ' + error.message, 'error');
+      }
+    }
+    
+    async function startCamera() {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ 
+          video: { facingMode: 'environment' },
+          audio: false
+        });
+        video.srcObject = stream;
+      } catch (error) {
+        showStatus('Camera access denied or unavailable: ' + error.message, 'error');
+      }
+    }
+    
+    function stopCamera() {
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+        stream = null;
+      }
+    }
+    
+    function capturePhoto() {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0);
+      
+      capturedImageData = canvas.toDataURL('image/jpeg', 0.8);
+      preview.src = capturedImageData;
+      preview.classList.remove('hidden');
+      
+      video.classList.add('hidden');
+      captureBtn.classList.add('hidden');
+      retakeBtn.classList.remove('hidden');
+      
+      stopCamera();
+      
+      imageStatus.textContent = '✓ Captured';
+      imageStatus.className = 'field-status field-complete';
+      
+      checkFormComplete();
+    }
+    
+    function retakePhoto() {
+      capturedImageData = null;
+      preview.classList.add('hidden');
+      video.classList.remove('hidden');
+      captureBtn.classList.remove('hidden');
+      retakeBtn.classList.add('hidden');
+      
+      imageStatus.textContent = '✗ Required';
+      imageStatus.className = 'field-status field-incomplete';
+      
+      startCamera();
+      checkFormComplete();
+    }
+    
+    async function printBarcode() {
+      if (!currentBarcode) {
+        showStatus('No barcode to print', 'error');
+        return;
+      }
+      
+      const title = itemTitle.value.trim();
+      if (!title) {
+        showStatus('Please enter item title before printing', 'warning');
+        return;
+      }
+      
+      try {
+        showStatus('Printing barcode...', 'warning');
+        const response = await fetch('/api/printer/print-barcode', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            upc: currentBarcode,
+            item_description: title,
+            quantity: 1
+          })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+          isPrinted = true;
+          updatePrintStatus();
+          showStatus('Barcode printed successfully!', 'success');
+          checkFormComplete();
+        } else {
+          showStatus('Print failed: ' + data.error + '. Check printer settings.', 'error');
+        }
+      } catch (error) {
+        showStatus('Print error: ' + error.message, 'error');
+      }
+    }
+    
+    function updatePrintStatus() {
+      if (isPrinted) {
+        printStatus.textContent = '✓ Printed';
+        printStatus.className = 'field-status field-complete';
+      } else {
+        printStatus.textContent = '✗ Not Printed';
+        printStatus.className = 'field-status field-incomplete';
+      }
+    }
+    
+    function handleFakePrint() {
+      if (fakePrintCheckbox.checked) {
+        isPrinted = true;
+        updatePrintStatus();
+        showStatus('Print simulated (checkbox enabled)', 'success');
+        checkFormComplete();
+      } else {
+        isPrinted = false;
+        updatePrintStatus();
+        checkFormComplete();
+      }
+    }
+    
+    function updateTitleStatus() {
+      const title = itemTitle.value.trim();
+      if (title) {
+        titleStatus.textContent = '✓ Complete';
+        titleStatus.className = 'field-status field-complete';
+      } else {
+        titleStatus.textContent = '✗ Required';
+        titleStatus.className = 'field-status field-incomplete';
+      }
+      checkFormComplete();
+    }
+    
+    function checkFormComplete() {
+      const title = itemTitle.value.trim();
+      const hasBarcode = !!currentBarcode;
+      const hasImage = !!capturedImageData;
+      const hasPrinted = isPrinted;
+      
+      const isComplete = title && hasBarcode && hasImage && hasPrinted;
+      
+      if (isComplete) {
+        completeBtn.disabled = false;
+        completeBtn.className = 'btn btn-success';
+        completeBtn.style.cursor = 'pointer';
+      } else {
+        completeBtn.disabled = true;
+        completeBtn.className = 'btn btn-gray';
+        completeBtn.style.cursor = 'not-allowed';
+      }
+    }
+    
+    async function completeAndContinue() {
+      const title = itemTitle.value.trim();
+      
+      if (!title || !currentBarcode || !capturedImageData || !isPrinted) {
+        const missing = [];
+        if (!title) missing.push('Title');
+        if (!currentBarcode) missing.push('Barcode');
+        if (!capturedImageData) missing.push('Image');
+        if (!isPrinted) missing.push('Printed barcode');
+        
+        showStatus('Missing required fields: ' + missing.join(', '), 'error');
+        return;
+      }
+      
+      try {
+        // Store the new item temporarily
+        const response = await fetch('/api/items-prep/temp-item', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            upc: currentBarcode,
+            item_description: title,
+            image_data: capturedImageData
+          })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+          // Store in sessionStorage and redirect to prep page
+          sessionStorage.setItem('prepUpc', currentBarcode);
+          window.location.href = '/item-prep';
+        } else {
+          showStatus('Failed to save item: ' + data.error, 'error');
+        }
+      } catch (error) {
+        showStatus('Error: ' + error.message, 'error');
+      }
+    }
+    
+    // Event listeners
+    regenerateBtn.addEventListener('click', generateBarcode);
+    captureBtn.addEventListener('click', capturePhoto);
+    retakeBtn.addEventListener('click', retakePhoto);
+    printBarcodeBtn.addEventListener('click', printBarcode);
+    completeBtn.addEventListener('click', completeAndContinue);
+    itemTitle.addEventListener('input', updateTitleStatus);
+    fakePrintCheckbox.addEventListener('change', handleFakePrint);
+    
+    // Initialize
+    generateBarcode();
+    startCamera();
+    
+    // Cleanup on page unload
+    window.addEventListener('beforeunload', stopCamera);
+  </script>
+</body>
+</html>

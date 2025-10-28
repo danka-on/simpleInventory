@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Printer Settings</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding:16px; background:#f5f5f5; }
+    .container { max-width:800px; margin:0 auto; }
+    h1 { margin-bottom:20px; color:#2c3e50; }
+    .card { background:#fff; padding:20px; border-radius:12px; box-shadow:0 2px 8px rgba(0,0,0,0.1); margin-bottom:16px; }
+    .btn { padding:10px 16px; border:none; border-radius:8px; font-size:14px; cursor:pointer; margin-right:8px; transition:all 0.2s; }
+    .btn-primary { background:#00b894; color:#fff; }
+    .btn-primary:hover { background:#00a383; }
+    .btn-secondary { background:#3498db; color:#fff; }
+    .btn-secondary:hover { background:#2980b9; }
+    .btn-danger { background:#e74c3c; color:#fff; }
+    .btn-danger:hover { background:#d63027; }
+    .btn-gray { background:#95a5a6; color:#fff; }
+    .btn-gray:hover { background:#7f8c8d; }
+    .form-group { margin-bottom:16px; }
+    label { display:block; margin-bottom:6px; font-weight:600; color:#2c3e50; }
+    input[type="text"], select { width:100%; padding:10px; border:1px solid #ddd; border-radius:8px; font-size:14px; }
+    .status-msg { margin-top:12px; padding:10px; border-radius:6px; font-size:14px; }
+    .status-success { background:#d1f2eb; color:#00b894; border:1px solid #00b894; }
+    .status-error { background:#fadbd8; color:#e74c3c; border:1px solid #e74c3c; }
+    .status-info { background:#d6eaf8; color:#3498db; border:1px solid #3498db; }
+    .hidden { display:none; }
+    .device-list { margin-top:12px; }
+    .device-item { padding:12px; background:#f8f9fa; margin-bottom:8px; border-radius:8px; cursor:pointer; border:2px solid transparent; }
+    .device-item:hover { background:#e9ecef; border-color:#3498db; }
+    .device-item.selected { background:#d6eaf8; border-color:#3498db; }
+    .device-name { font-weight:600; color:#2c3e50; }
+    .device-address { color:#7f8c8d; font-size:13px; margin-top:4px; }
+    .instructions { background:#fff3cd; padding:12px; border-radius:8px; margin-bottom:16px; border:1px solid #ffc107; color:#856404; }
+    .instructions h3 { margin-bottom:8px; font-size:16px; }
+    .instructions ul { margin-left:20px; }
+    .instructions li { margin-bottom:6px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🖨️ Printer Settings</h1>
+    
+    <div class="card">
+      <a href="/"><button class="btn btn-danger">← Back to Home</button></a>
+    </div>
+    
+    <div class="instructions">
+      <h3>📋 Setup Instructions</h3>
+      <div id="instructionsContent">
+        <p>Loading platform-specific instructions...</p>
+      </div>
+    </div>
+    
+    <div class="card">
+      <h2 style="margin-bottom:16px">Printer Configuration</h2>
+      
+      <div class="form-group">
+        <label>Printer Type</label>
+        <select id="printerType">
+          <option value="bluetooth">Bluetooth Printer (via COM port)</option>
+          <option value="serial">Serial/USB Printer</option>
+          <option value="network">Network Printer (Coming Soon)</option>
+        </select>
+      </div>
+      
+      <div class="form-group">
+        <label id="portLabel">Port/Address</label>
+        <input type="text" id="bluetoothAddress" placeholder="Loading...">
+        <small id="portHint" style="color:#7f8c8d; font-size:12px;">Loading platform info...</small>
+      </div>
+      
+      <div class="form-group">
+        <label>Printer Name (Optional)</label>
+        <input type="text" id="printerName" placeholder="e.g., Label Printer">
+      </div>
+      
+      <button class="btn btn-secondary" id="scanBtn">🔍 Scan for Devices</button>
+      <button class="btn btn-primary" id="saveBtn">💾 Save Configuration</button>
+      <button class="btn btn-gray" id="testBtn">🧪 Test Print</button>
+      
+      <div id="statusMsg" class="hidden"></div>
+      
+      <div id="deviceList" class="device-list hidden"></div>
+    </div>
+    
+    <div class="card">
+      <h2 style="margin-bottom:16px">Current Status</h2>
+      <div id="currentConfig" style="color:#7f8c8d;">Loading...</div>
+    </div>
+    
+    <div class="card">
+      <h2 style="margin-bottom:16px">Required Python Packages</h2>
+      <div id="packagesContent">
+        <p style="margin-bottom:12px">To use Bluetooth printing, install:</p>
+        <pre style="background:#f8f9fa; padding:12px; border-radius:8px; overflow-x:auto;">
+pip install python-escpos python-barcode Pillow pyserial</pre>
+        <p style="margin-top:12px; font-size:13px; color:#7f8c8d;">
+          <strong>Optional:</strong> For Bluetooth device scanning on Linux/Raspberry Pi: <code>pip install pybluez</code>
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const printerType = document.getElementById('printerType');
+    const bluetoothAddress = document.getElementById('bluetoothAddress');
+    const printerName = document.getElementById('printerName');
+    const saveBtn = document.getElementById('saveBtn');
+    const scanBtn = document.getElementById('scanBtn');
+    const testBtn = document.getElementById('testBtn');
+    const statusMsg = document.getElementById('statusMsg');
+    const deviceList = document.getElementById('deviceList');
+    const currentConfig = document.getElementById('currentConfig');
+    const instructionsContent = document.getElementById('instructionsContent');
+    const portLabel = document.getElementById('portLabel');
+    const portHint = document.getElementById('portHint');
+    
+    let platformInfo = null;
+    
+    // Detect platform from server
+    async function detectPlatform() {
+      try {
+        // Get platform info from a test API call
+        const response = await fetch('/api/printer/config');
+        const data = await response.json();
+        
+        // Determine platform from user agent or set Windows as default
+        const userAgent = navigator.userAgent.toLowerCase();
+        const isLinux = userAgent.includes('linux');
+        const isRaspberryPi = userAgent.includes('raspbian') || userAgent.includes('raspberry');
+        
+        if (isRaspberryPi) {
+          platformInfo = 'raspberry_pi';
+          showRaspberryPiInstructions();
+        } else if (isLinux) {
+          platformInfo = 'linux';
+          showLinuxInstructions();
+        } else {
+          platformInfo = 'windows';
+          showWindowsInstructions();
+        }
+      } catch (error) {
+        console.error('Error detecting platform:', error);
+        platformInfo = 'windows';
+        showWindowsInstructions();
+      }
+    }
+    
+    function showWindowsInstructions() {
+      instructionsContent.innerHTML = `
+        <ul>
+          <li><strong>Step 1:</strong> Pair your Bluetooth printer with Windows (Settings → Bluetooth & devices)</li>
+          <li><strong>Step 2:</strong> Find the COM port:
+            <ul style="margin-top:6px;">
+              <li>Press Win + X → Device Manager</li>
+              <li>Expand "Ports (COM & LPT)"</li>
+              <li>Look for "Standard Serial over Bluetooth link (COM3)"</li>
+              <li>Note the COM port number</li>
+            </ul>
+          </li>
+          <li><strong>Step 3:</strong> Enter the COM port below and save</li>
+          <li><strong>Step 4:</strong> Test print to verify</li>
+        </ul>
+      `;
+      portLabel.textContent = 'COM Port';
+      bluetoothAddress.placeholder = 'COM3';
+      portHint.textContent = 'Find in Device Manager → Ports (COM & LPT)';
+    }
+    
+    function showRaspberryPiInstructions() {
+      instructionsContent.innerHTML = `
+        <ul>
+          <li><strong>Step 1:</strong> Pair your Bluetooth printer:
+            <pre style="background:#f8f9fa; padding:8px; border-radius:4px; font-size:12px; margin-top:6px;">
+sudo bluetoothctl
+> scan on
+> pair XX:XX:XX:XX:XX:XX
+> connect XX:XX:XX:XX:XX:XX
+> trust XX:XX:XX:XX:XX:XX
+> exit</pre>
+          </li>
+          <li><strong>Step 2:</strong> Bind to RFCOMM:
+            <pre style="background:#f8f9fa; padding:8px; border-radius:4px; font-size:12px; margin-top:6px;">
+sudo rfcomm bind 0 XX:XX:XX:XX:XX:XX
+sudo chmod 666 /dev/rfcomm0</pre>
+          </li>
+          <li><strong>Step 3:</strong> Enter <code>/dev/rfcomm0</code> below or click "Scan for Devices"</li>
+          <li><strong>Step 4:</strong> Save and test print</li>
+        </ul>
+      `;
+      portLabel.textContent = 'Device Path';
+      bluetoothAddress.placeholder = '/dev/rfcomm0';
+      portHint.textContent = 'e.g., /dev/rfcomm0, /dev/ttyUSB0, or /dev/ttyAMA0';
+    }
+    
+    function showLinuxInstructions() {
+      instructionsContent.innerHTML = `
+        <ul>
+          <li><strong>Step 1:</strong> Pair your Bluetooth printer using your system's Bluetooth manager</li>
+          <li><strong>Step 2:</strong> Find the device path:
+            <ul style="margin-top:6px;">
+              <li>Serial/USB: <code>/dev/ttyUSB0</code> or <code>/dev/ttyAMA0</code></li>
+              <li>Bluetooth RFCOMM: <code>/dev/rfcomm0</code></li>
+              <li>Or click "Scan for Devices" below</li>
+            </ul>
+          </li>
+          <li><strong>Step 3:</strong> Make sure you have permissions: <code>sudo chmod 666 /dev/rfcomm0</code></li>
+          <li><strong>Step 4:</strong> Enter device path, save, and test</li>
+        </ul>
+      `;
+      portLabel.textContent = 'Device Path';
+      bluetoothAddress.placeholder = '/dev/rfcomm0';
+      portHint.textContent = 'e.g., /dev/rfcomm0, /dev/ttyUSB0, /dev/ttyAMA0';
+    }
+    
+    function showStatus(message, type = 'info') {
+      statusMsg.textContent = message;
+      statusMsg.className = 'status-msg status-' + type;
+      statusMsg.classList.remove('hidden');
+    }
+    
+    function hideStatus() {
+      statusMsg.classList.add('hidden');
+    }
+    
+    async function loadCurrentConfig() {
+      try {
+        const response = await fetch('/api/printer/config');
+        const data = await response.json();
+        
+        if (data.success && data.config) {
+          const config = data.config;
+          const portLabel = platformInfo === 'windows' ? 'COM Port' : 'Device Path';
+          currentConfig.innerHTML = `
+            <strong>Printer Type:</strong> ${config.printer_type || 'Not configured'}<br>
+            <strong>${portLabel}:</strong> ${config.bluetooth_address || 'Not configured'}<br>
+            <strong>Printer Name:</strong> ${config.printer_name || 'Not set'}<br>
+            <strong>Last Updated:</strong> ${config.updated_at || 'Never'}
+          `;
+          
+          // Pre-fill form
+          if (config.printer_type) printerType.value = config.printer_type;
+          if (config.bluetooth_address) bluetoothAddress.value = config.bluetooth_address;
+          if (config.printer_name) printerName.value = config.printer_name;
+        } else {
+          currentConfig.textContent = 'No printer configured yet.';
+        }
+      } catch (error) {
+        currentConfig.textContent = 'Error loading configuration: ' + error.message;
+      }
+    }
+    
+    scanBtn.addEventListener('click', async () => {
+      showStatus('Scanning for devices...', 'info');
+      scanBtn.disabled = true;
+      
+      try {
+        const response = await fetch('/api/printer/scan-bluetooth', {
+          method: 'POST'
+        });
+        const data = await response.json();
+        
+        if (data.success && data.devices.length > 0) {
+          showStatus(`Found ${data.devices.length} device(s)`, 'success');
+          renderDeviceList(data.devices);
+        } else if (data.success) {
+          showStatus('No devices found', 'info');
+          deviceList.classList.add('hidden');
+        } else {
+          showStatus('Scan failed: ' + data.error, 'error');
+        }
+      } catch (error) {
+        showStatus('Scan failed: ' + error.message, 'error');
+      } finally {
+        scanBtn.disabled = false;
+      }
+    });
+    
+    function renderDeviceList(devices) {
+      deviceList.innerHTML = '<h3 style="margin-bottom:12px">Available Devices</h3>' +
+        devices.map((device, index) => `
+          <div class="device-item" data-index="${index}">
+            <div class="device-name">${device.name}</div>
+            <div class="device-address">${device.address}</div>
+          </div>
+        `).join('');
+      
+      deviceList.classList.remove('hidden');
+      
+      // Add click handlers
+      document.querySelectorAll('.device-item').forEach((elem, index) => {
+        elem.addEventListener('click', () => {
+          document.querySelectorAll('.device-item').forEach(e => e.classList.remove('selected'));
+          elem.classList.add('selected');
+          bluetoothAddress.value = devices[index].address;
+          if (devices[index].name) {
+            printerName.value = devices[index].name;
+          }
+          showStatus('Device selected: ' + devices[index].name, 'success');
+        });
+      });
+    }
+    
+    saveBtn.addEventListener('click', async () => {
+      const config = {
+        printer_type: printerType.value,
+        bluetooth_address: bluetoothAddress.value.trim(),
+        printer_name: printerName.value.trim()
+      };
+      
+      if (!config.bluetooth_address) {
+        const hint = platformInfo === 'windows' ? 'COM port (e.g., COM3)' : 'device path (e.g., /dev/rfcomm0)';
+        showStatus(`Please enter a ${hint}`, 'error');
+        return;
+      }
+      
+      showStatus('Saving configuration...', 'info');
+      saveBtn.disabled = true;
+      
+      try {
+        const response = await fetch('/api/printer/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(config)
+        });
+        const data = await response.json();
+        
+        if (data.success) {
+          showStatus('Configuration saved successfully!', 'success');
+          loadCurrentConfig();
+        } else {
+          showStatus('Save failed: ' + data.error, 'error');
+        }
+      } catch (error) {
+        showStatus('Save failed: ' + error.message, 'error');
+      } finally {
+        saveBtn.disabled = false;
+      }
+    });
+    
+    testBtn.addEventListener('click', async () => {
+      if (!bluetoothAddress.value.trim()) {
+        showStatus('Please configure a printer first', 'error');
+        return;
+      }
+      
+      showStatus('Sending test print...', 'info');
+      testBtn.disabled = true;
+      
+      try {
+        const response = await fetch('/api/printer/test', {
+          method: 'POST'
+        });
+        const data = await response.json();
+        
+        if (data.success) {
+          showStatus('Test print sent successfully! Check your printer.', 'success');
+        } else {
+          showStatus('Test print failed: ' + data.error, 'error');
+        }
+      } catch (error) {
+        showStatus('Test print failed: ' + error.message, 'error');
+      } finally {
+        testBtn.disabled = false;
+      }
+    });
+    
+    // Load current config and detect platform on page load
+    detectPlatform().then(() => {
+      loadCurrentConfig();
+    });
+  </script>
+</body>
+</html>

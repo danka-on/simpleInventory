@@ -5,6 +5,12 @@ Pillow
 python-dotenv
 sqlite3
 python-amazon-sp-api
+python-barcode
+python-escpos
+pyserial
+
+# Optional for Bluetooth scanning on Linux/Raspberry Pi:
+# pybluez
 
 # Additional likely dependencies for your project:
 Werkzeug

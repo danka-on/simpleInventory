@@ -58,10 +58,10 @@
       <button class="btn" id="lookupBtn">Lookup</button>
     </div>
     
-    <div style="text-align:center;margin-top:8px">
-      <a href="/item-prep-no-barcode" style="text-decoration:none">
-        <button class="btn btn-gray" style="padding:8px 16px;border-radius:8px;background:#f8f9fa;border:1px solid #dee2e6;color:#495057">
-          No Barcode
+    <div id="noBarcodeBtn" style="margin-top:48px">
+      <a href="/item-prep-no-barcode" style="text-decoration:none;display:block">
+        <button class="btn" style="padding:36px 64px;border-radius:12px;background:#e74c3c;border:none;color:#fff;font-size:1.2rem;width:100%;box-shadow:0 2px 8px rgba(231,76,60,0.3);transition:all 0.2s" onmouseover="this.style.background='#c0392b'" onmouseout="this.style.background='#e74c3c'">
+          <span style="font-size:1.4rem;margin-right:8px">|||</span> No Barcode
         </button>
       </a>
     </div>
@@ -183,6 +183,7 @@
       const statusMsg = document.getElementById('statusMsg');
       if(!j.found){
         resEl.classList.add('hidden'); actions.classList.add('hidden');
+        document.getElementById('noBarcodeBtn').classList.remove('hidden');
         statusMsg.innerHTML = '<span class="bad">Not found in BOL</span>';
         setTimeout(()=>{ statusMsg.textContent=''; startScanner(); }, 1000);
         currentUpc = null;
@@ -207,6 +208,8 @@
       }
       resEl.classList.remove('hidden'); actions.classList.remove('hidden');
       statusMsg.textContent='';
+      // Hide No Barcode button when item is displayed
+      document.getElementById('noBarcodeBtn').classList.add('hidden');
       // Reset and show quantity display
       resetQtyDisplay();
       document.getElementById('qtyDisplay').classList.remove('hidden');
@@ -254,7 +257,7 @@
       const ok = await setStatus(currentUpc, 'good', currentQty);
       const statusMsg = document.getElementById('statusMsg');
       if(ok){ statusMsg.innerHTML='<span class="ok">Marked GOOD (Qty: '+currentQty+')</span>'; } else { statusMsg.innerHTML='<span class="bad">Failed to mark</span>'; }
-      setTimeout(()=>{ statusMsg.textContent=''; document.getElementById('result').classList.add('hidden'); document.getElementById('actions').classList.add('hidden'); document.getElementById('manualUpc').value=''; currentUpc = null; resetQtyDisplay(); setupDeviceMode(); }, 600);
+      setTimeout(()=>{ statusMsg.textContent=''; document.getElementById('result').classList.add('hidden'); document.getElementById('actions').classList.add('hidden'); document.getElementById('noBarcodeBtn').classList.remove('hidden'); document.getElementById('manualUpc').value=''; currentUpc = null; resetQtyDisplay(); setupDeviceMode(); }, 600);
     };
 
     document.getElementById('badBtn').onclick = ()=>{
@@ -281,6 +284,7 @@
       document.getElementById('manualUpc').value=''; 
       document.getElementById('result').classList.add('hidden'); 
       document.getElementById('actions').classList.add('hidden'); 
+      document.getElementById('noBarcodeBtn').classList.remove('hidden');
       currentUpc = null;
       resetQtyDisplay();
       setupDeviceMode(); 
@@ -374,6 +378,8 @@
           // Ensure result is visible and actions are big
           document.getElementById('result').classList.remove('hidden');
           document.getElementById('actions').classList.remove('hidden');
+          // Hide No Barcode button when item is displayed
+          document.getElementById('noBarcodeBtn').classList.add('hidden');
         }
       }catch(e){}
     });

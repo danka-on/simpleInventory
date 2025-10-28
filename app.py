@@ -64,6 +64,7 @@ app.config['MAX_CONTENT_LENGTH'] = 64 * 1024 * 1024  # 64 MB limit for uploads
 #for ebay api calls
 
 from token_manager import get_access_token, load_tokens, is_expired
+from printer_manager import printer_manager
 
 access_token = get_access_token()
 headers = {
@@ -448,11 +449,244 @@ def search_rawbol_api():
         print(f'Error searching rawbol: {e}')
         return jsonify({'success': False, 'error': str(e)})
 
+# ============================================================================
+# PRINTER ROUTES
+# ============================================================================
+
+@app.route('/printer-settings')
+def printer_settings_page():
+    """Printer configuration page"""
+    return render_template('printer_settings.html')
+
+@app.route('/api/printer/config', methods=['GET'])
+def get_printer_config():
+    """Get current printer configuration"""
+    try:
+        conn = sqlite3.connect('bol.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute('SELECT * FROM printer_config WHERE id = 1')
+        config = cur.fetchone()
+        conn.close()
+        
+        if config:
+            return jsonify({'success': True, 'config': dict(config)})
+        else:
+            return jsonify({'success': True, 'config': None})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/printer/config', methods=['POST'])
+def save_printer_config():
+    """Save printer configuration"""
+    try:
+        data = request.get_json()
+        printer_type = data.get('printer_type', 'bluetooth')
+        bluetooth_address = data.get('bluetooth_address', '')
+        printer_name = data.get('printer_name', '')
+        
+        success = printer_manager.save_printer_config(printer_type, bluetooth_address, printer_name)
+        
+        if success:
+            return jsonify({'success': True, 'message': 'Printer configuration saved'})
+        else:
+            return jsonify({'success': False, 'error': 'Failed to save configuration'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/printer/scan-bluetooth', methods=['POST'])
+def scan_bluetooth_devices():
+    """Scan for available Bluetooth devices"""
+    try:
+        devices = printer_manager.get_available_bluetooth_devices()
+        return jsonify({'success': True, 'devices': devices})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/printer/test', methods=['POST'])
+def test_printer():
+    """Test printer connection"""
+    try:
+        printer_manager.test_print()
+        return jsonify({'success': True, 'message': 'Test print sent successfully'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/printer/print-barcode', methods=['POST'])
+def print_barcode_api():
+    """Print barcode label"""
+    try:
+        data = request.get_json()
+        upc = data.get('upc', '').strip()
+        item_description = data.get('item_description', '')
+        quantity = int(data.get('quantity', 1))
+        
+        if not upc:
+            return jsonify({'success': False, 'error': 'UPC is required'})
+        
+        # Print the barcode
+        printer_manager.print_barcode(upc, item_description, quantity)
+        
+        return jsonify({'success': True, 'message': f'Printed {quantity} label(s)'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/printer/generate-barcode', methods=['POST'])
+def generate_barcode_api():
+    """Generate barcode image without printing (for preview/testing)"""
+    try:
+        data = request.get_json()
+        upc = data.get('upc', '').strip()
+        item_description = data.get('item_description', '')
+        
+        if not upc:
+            return jsonify({'success': False, 'error': 'UPC is required'})
+        
+        # Generate barcode file
+        filepath = printer_manager.generate_barcode_file(upc, item_description)
+        
+        # Return relative path for web access
+        web_path = filepath.replace('\\', '/').replace('static/', '/')
+        
+        return jsonify({'success': True, 'image_url': web_path, 'filepath': filepath})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+# ============================================================================
+# ITEM PREP - CREATE CUSTOM ITEM ROUTES
+# ============================================================================
+
+@app.route('/item-prep-create-item')
+def item_prep_create_item_page():
+    """Page for creating custom items with auto-generated 777 barcodes"""
+    return render_template('item_prep_create_item.html')
+
+@app.route('/api/items-prep/generate-barcode', methods=['POST'])
+def generate_custom_barcode():
+    """Generate auto-incremented 777 prefix barcode"""
+    try:
+        conn = sqlite3.connect('bol.db')
+        cur = conn.cursor()
+        
+        # Get the highest 777 barcode
+        cur.execute('''
+            SELECT MAX(CAST(upc AS INTEGER)) as max_barcode
+            FROM bol_items 
+            WHERE upc LIKE '777%' AND LENGTH(upc) = 12
+        ''')
+        result = cur.fetchone()
+        
+        # Also check temp_items table
+        cur.execute('''
+            SELECT MAX(CAST(upc AS INTEGER)) as max_barcode
+            FROM temp_items 
+            WHERE upc LIKE '777%' AND LENGTH(upc) = 12
+        ''')
+        temp_result = cur.fetchone()
+        conn.close()
+        
+        # Get the highest barcode from both tables
+        max_barcode = result[0] if result[0] else None
+        temp_max = temp_result[0] if temp_result[0] else None
+        
+        if temp_max and (not max_barcode or temp_max > max_barcode):
+            max_barcode = temp_max
+        
+        if max_barcode:
+            # Increment by 1
+            new_barcode = str(int(max_barcode) + 1)
+            # Ensure it still starts with 777
+            if not new_barcode.startswith('777'):
+                # Extract the numeric part after 777 and increment
+                numeric_part = int(str(max_barcode)[3:]) + 1
+                new_barcode = f"777{str(numeric_part).zfill(9)}"
+        else:
+            # Start at 777000000001 (12 digits with 777 prefix)
+            new_barcode = '777000000001'
+        
+        # Ensure it's exactly 12 digits and starts with 777
+        if len(new_barcode) < 12:
+            # Pad the numeric part after 777
+            if new_barcode.startswith('777'):
+                numeric_part = new_barcode[3:]
+                new_barcode = f"777{numeric_part.zfill(9)}"
+            else:
+                new_barcode = new_barcode.zfill(12)
+        
+        return jsonify({'success': True, 'barcode': new_barcode})
+    except Exception as e:
+        print(f'Error generating barcode: {e}')
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/items-prep/temp-item', methods=['POST'])
+def save_temp_item():
+    """Save temporary custom item with image data"""
+    try:
+        data = request.get_json()
+        upc = data.get('upc', '').strip()
+        item_description = data.get('item_description', '').strip()
+        image_data = data.get('image_data', '')
+        
+        if not upc or not item_description or not image_data:
+            return jsonify({'success': False, 'error': 'Missing required fields'})
+        
+        # Save image to file
+        import base64
+        import uuid
+        
+        # Remove data URL prefix if present
+        if image_data.startswith('data:image'):
+            image_data = image_data.split(',')[1]
+        
+        # Decode base64 image
+        image_bytes = base64.b64decode(image_data)
+        
+        # Create directory for temp items if it doesn't exist
+        temp_dir = os.path.join('static', 'temp_items')
+        os.makedirs(temp_dir, exist_ok=True)
+        
+        # Save with UPC as filename
+        image_filename = f"{upc}.jpg"
+        image_path = os.path.join(temp_dir, image_filename)
+        
+        with open(image_path, 'wb') as f:
+            f.write(image_bytes)
+        
+        # Store in session-like temp database table
+        conn = sqlite3.connect('bol.db')
+        cur = conn.cursor()
+        
+        # Create temp_items table if it doesn't exist
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS temp_items (
+                upc TEXT PRIMARY KEY,
+                item_description TEXT,
+                image_url TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # Insert or replace temp item
+        web_image_path = f"/static/temp_items/{image_filename}"
+        cur.execute('''
+            INSERT OR REPLACE INTO temp_items (upc, item_description, image_url)
+            VALUES (?, ?, ?)
+        ''', (upc, item_description, web_image_path))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True, 'message': 'Temporary item saved', 'image_url': web_image_path})
+    except Exception as e:
+        print(f'Error saving temp item: {e}')
+        return jsonify({'success': False, 'error': str(e)})
+
  
 
 @app.route('/api/bol_lookup', methods=['GET'])
 def api_bol_lookup():
     """Lookup a BOL item by UPC in bol.db and return normalized fields.
+    First checks temp_items for custom items, then bol_items.
     If duplicate UPC is encountered, create a temporary suffixed entry (e.g., barcode-1).
     """
     try:
@@ -464,7 +698,36 @@ def api_bol_lookup():
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         
-        # Ensure temporary column exists
+        # First check temp_items table for custom created items
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS temp_items (
+                upc TEXT PRIMARY KEY,
+                item_description TEXT,
+                image_url TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        cur.execute("SELECT upc, item_description, image_url FROM temp_items WHERE upc = ? COLLATE NOCASE", (upc,))
+        temp_item = cur.fetchone()
+        
+        if temp_item:
+            # Return the temp item in the expected format
+            item = {
+                'upc': temp_item['upc'],
+                'item_description': temp_item['item_description'],
+                'image_url': temp_item['image_url'],
+                'lot_number': None,
+                'bol_number': None,
+                'import_date': None,
+                'temporary': 1,
+                'is_duplicate': False,
+                'is_custom': True
+            }
+            conn.close()
+            return jsonify({'found': True, 'item': item})
+        
+        # Ensure temporary column exists in bol_items
         cur.execute('PRAGMA table_info(bol_items)')
         cols = [r[1] for r in cur.fetchall()]
         if 'temporary' not in cols:
@@ -566,6 +829,7 @@ def api_items_prep_status_get(upc):
 def api_items_prep_status():
     """Upsert preparation status for a UPC. JSON: { upc, status, reason?, note? }
     If status is 'good', marks temporary entries as permanent.
+    For custom items (777 prefix), moves from temp_items to bol_items permanently.
     """
     try:
         data = request.get_json() or {}
@@ -576,19 +840,37 @@ def api_items_prep_status():
         if not upc or status not in ('good', 'bad', 'unchecked'):
             return jsonify({'success': False, 'error': 'Missing upc or invalid status'}), 400
         
-        # If status is 'good', mark temporary entry as permanent
-        if status == 'good':
-            conn_temp = sqlite3.connect('bol.db')
-            cur_temp = conn_temp.cursor()
-            cur_temp.execute('UPDATE bol_items SET temporary = 0 WHERE upc = ? COLLATE NOCASE AND temporary = 1', (upc,))
-            conn_temp.commit()
-            conn_temp.close()
+        conn = sqlite3.connect('bol.db')
+        cur = conn.cursor()
+        
+        # If status is 'good' or 'bad', handle custom items (move from temp_items to bol_items)
+        if status in ('good', 'bad'):
+            # Check if this is a temp/custom item
+            cur.execute('SELECT upc, item_description, image_url FROM temp_items WHERE upc = ? COLLATE NOCASE', (upc,))
+            temp_row = cur.fetchone()
+            
+            if temp_row:
+                # Move to bol_items permanently
+                import datetime
+                import_date = datetime.datetime.utcnow().isoformat()
+                
+                cur.execute('''
+                    INSERT OR REPLACE INTO bol_items (upc, item_description, image_url, lot_number, bol_number, import_date, temporary)
+                    VALUES (?, ?, ?, ?, ?, ?, 0)
+                ''', (temp_row[0], temp_row[1], temp_row[2], None, None, import_date))
+                
+                # Delete from temp_items
+                cur.execute('DELETE FROM temp_items WHERE upc = ? COLLATE NOCASE', (upc,))
+                conn.commit()
+                print(f'Moved custom item {upc} from temp_items to bol_items')
+            
+            # Also mark any existing temporary entries as permanent
+            cur.execute('UPDATE bol_items SET temporary = 0 WHERE upc = ? COLLATE NOCASE AND temporary = 1', (upc,))
+            conn.commit()
         
         _ensure_items_prep_tables()
         import datetime
         ts = datetime.datetime.utcnow().isoformat()
-        conn = sqlite3.connect('bol.db')
-        cur = conn.cursor()
         # upsert
         cur.execute('SELECT upc FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (upc,))
         if cur.fetchone():

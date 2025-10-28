@@ -44,11 +44,19 @@
     <h1>🔍 Item Prep - No Barcode</h1>
     
     <div class="card">
-      <a href="/preperation"><button class="btn btn-danger">← Back to Prep</button></a>
+      <a href="/item-prep"><button class="btn btn-danger">← Back to Prep</button></a>
       
       <div style="margin-top:20px">
         <input type="text" id="searchInput" placeholder="Search by item name..." autofocus>
         <button class="btn btn-primary" id="searchBtn">Search</button>
+      </div>
+      
+      <div style="margin-top:20px; text-align:center">
+        <a href="/item-prep-create-item" style="text-decoration:none">
+          <button class="btn" style="background:#f39c12; color:#fff; padding:12px 24px; border-radius:8px; border:none; font-size:1rem">
+            ➕ No Item Found - Create New
+          </button>
+        </a>
       </div>
       
       <div id="searchResults" class="search-results hidden">
@@ -229,9 +237,36 @@
       searchItems(searchInput.value);
     });
     
-    // Print barcode button (placeholder)
-    printBarcodeBtn.addEventListener('click', () => {
-      alert('Print barcode functionality coming soon!\n\nBarcode: ' + (selectedItem?.upc || 'N/A'));
+    // Print barcode button
+    printBarcodeBtn.addEventListener('click', async () => {
+      if (!selectedItem) return;
+      
+      try {
+        statusMsg.textContent = 'Printing...';
+        const response = await fetch('/api/printer/print-barcode', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            upc: selectedItem.upc,
+            item_description: selectedItem.item_description,
+            quantity: 1
+          })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+          statusMsg.textContent = 'Barcode printed successfully!';
+          alert('Barcode printed successfully!');
+        } else {
+          statusMsg.textContent = 'Print failed: ' + data.error;
+          alert('Print failed: ' + data.error + '\n\nMake sure the printer is configured in Printer Settings.');
+        }
+      } catch (error) {
+        console.error('Print error:', error);
+        statusMsg.textContent = 'Print failed: ' + error.message;
+        alert('Print failed: ' + error.message);
+      }
     });
     
     // Continue to prep button
@@ -242,7 +277,7 @@
       sessionStorage.setItem('prepUpc', selectedItem.upc);
       
       // Redirect to prep page
-      window.location.href = '/preperation';
+      window.location.href = '/item-prep';
     });
   </script>
 </body>
