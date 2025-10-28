@@ -221,7 +221,9 @@ function render(results){
     html += `<tr>`;
     if (selectMode) {
       const isDuplicate = /-\d+$/.test(upc);
-      const disabledAttr = isDuplicate ? '' : 'disabled title="Base UPCs cannot be deleted"';
+      const isCustom = upc.startsWith('777');
+      const canDelete = isDuplicate || isCustom;
+      const disabledAttr = canDelete ? '' : 'disabled title="Base UPCs cannot be deleted"';
       html += `<td><input type="checkbox" class="item-checkbox" data-id="${r.id}" ${disabledAttr}></td>`;
     }
     html += `<td style="width:64px;text-align:center">${diagLink}</td>`+

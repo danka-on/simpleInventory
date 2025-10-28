@@ -17,7 +17,10 @@
     .btn-danger:hover { background:#d63027; }
     .btn-gray { background:#95a5a6; color:#fff; }
     .btn-gray:hover { background:#7f8c8d; }
-    input[type="text"] { width:100%; padding:12px; border:1px solid #ddd; border-radius:8px; font-size:14px; margin-bottom:12px; }
+    .search-box { display:flex; gap:8px; align-items:stretch; }
+    .search-box input[type="text"] { flex:1; padding:12px; border:1px solid #ddd; border-radius:8px; font-size:14px; margin-bottom:0; }
+    .search-box button { padding:12px 20px; border:none; border-radius:8px; background:#00b894; color:#fff; cursor:pointer; font-size:18px; transition:all 0.2s; }
+    .search-box button:hover { background:#00a383; }
     .search-results { margin-top:16px; }
     .result-item { background:#f8f9fa; padding:12px; margin-bottom:8px; border-radius:8px; cursor:pointer; transition:all 0.2s; border:2px solid transparent; }
     .result-item:hover { background:#e9ecef; border-color:#00b894; }
@@ -46,17 +49,11 @@
     <div class="card">
       <a href="/item-prep"><button class="btn btn-danger">← Back to Prep</button></a>
       
-      <div style="margin-top:20px">
-        <input type="text" id="searchInput" placeholder="Search by item name..." autofocus>
-        <button class="btn btn-primary" id="searchBtn">Search</button>
-      </div>
-      
-      <div style="margin-top:20px; text-align:center">
-        <a href="/item-prep-create-item" style="text-decoration:none">
-          <button class="btn" style="background:#f39c12; color:#fff; padding:12px 24px; border-radius:8px; border:none; font-size:1rem">
-            ➕ No Item Found - Create New
-          </button>
-        </a>
+      <div style="margin-top:20px; margin-bottom:20px">
+        <div class="search-box">
+          <input type="text" id="searchInput" placeholder="Search by item name..." autofocus>
+          <button id="searchBtn">🔍</button>
+        </div>
       </div>
       
       <div id="searchResults" class="search-results hidden">
@@ -77,6 +74,14 @@
             ✓ Continue to Prep
           </button>
         </div>
+      </div>
+      
+      <div style="margin-top:144px; text-align:center">
+        <a href="/item-prep-create-item" style="text-decoration:none; display:block;">
+          <button class="btn" style="background:#f39c12; color:#fff; padding:12px 24px; border-radius:8px; border:none; font-size:1rem; width:100%; display:block;">
+            ➕ No Item Found - Create New
+          </button>
+        </a>
       </div>
       
       <div id="statusMsg" class="muted"></div>

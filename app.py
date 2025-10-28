@@ -563,12 +563,22 @@ def item_prep_create_item_page():
 
 @app.route('/api/items-prep/generate-barcode', methods=['POST'])
 def generate_custom_barcode():
-    """Generate auto-incremented 777 prefix barcode"""
+    """Generate auto-incremented 777 prefix barcode with duplicate protection"""
     try:
         conn = sqlite3.connect('bol.db')
         cur = conn.cursor()
         
-        # Get the highest 777 barcode
+        # Create temp_items table if not exists
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS temp_items (
+                upc TEXT PRIMARY KEY,
+                item_description TEXT,
+                image_url TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # Get the highest 777 barcode from both tables
         cur.execute('''
             SELECT MAX(CAST(upc AS INTEGER)) as max_barcode
             FROM bol_items 
@@ -583,7 +593,6 @@ def generate_custom_barcode():
             WHERE upc LIKE '777%' AND LENGTH(upc) = 12
         ''')
         temp_result = cur.fetchone()
-        conn.close()
         
         # Get the highest barcode from both tables
         max_barcode = result[0] if result[0] else None
@@ -592,28 +601,52 @@ def generate_custom_barcode():
         if temp_max and (not max_barcode or temp_max > max_barcode):
             max_barcode = temp_max
         
-        if max_barcode:
-            # Increment by 1
-            new_barcode = str(int(max_barcode) + 1)
-            # Ensure it still starts with 777
-            if not new_barcode.startswith('777'):
-                # Extract the numeric part after 777 and increment
-                numeric_part = int(str(max_barcode)[3:]) + 1
-                new_barcode = f"777{str(numeric_part).zfill(9)}"
-        else:
-            # Start at 777000000001 (12 digits with 777 prefix)
-            new_barcode = '777000000001'
+        # Generate new barcode with duplicate check
+        attempts = 0
+        max_attempts = 100
         
-        # Ensure it's exactly 12 digits and starts with 777
-        if len(new_barcode) < 12:
-            # Pad the numeric part after 777
-            if new_barcode.startswith('777'):
-                numeric_part = new_barcode[3:]
-                new_barcode = f"777{numeric_part.zfill(9)}"
+        while attempts < max_attempts:
+            if max_barcode:
+                # Increment by 1
+                new_barcode = str(int(max_barcode) + 1)
+                # Ensure it still starts with 777
+                if not new_barcode.startswith('777'):
+                    # Extract the numeric part after 777 and increment
+                    numeric_part = int(str(max_barcode)[3:]) + 1
+                    new_barcode = f"777{str(numeric_part).zfill(9)}"
             else:
-                new_barcode = new_barcode.zfill(12)
+                # Start at 777000000001 (12 digits with 777 prefix)
+                new_barcode = '777000000001'
+            
+            # Ensure it's exactly 12 digits and starts with 777
+            if len(new_barcode) < 12:
+                # Pad the numeric part after 777
+                if new_barcode.startswith('777'):
+                    numeric_part = new_barcode[3:]
+                    new_barcode = f"777{numeric_part.zfill(9)}"
+                else:
+                    new_barcode = new_barcode.zfill(12)
+            
+            # Check if this barcode already exists in either table
+            cur.execute('SELECT upc FROM bol_items WHERE upc = ? COLLATE NOCASE', (new_barcode,))
+            exists_bol = cur.fetchone()
+            
+            cur.execute('SELECT upc FROM temp_items WHERE upc = ? COLLATE NOCASE', (new_barcode,))
+            exists_temp = cur.fetchone()
+            
+            if not exists_bol and not exists_temp:
+                # Barcode is unique, we're good!
+                conn.close()
+                return jsonify({'success': True, 'barcode': new_barcode})
+            
+            # Barcode exists, increment and try again
+            max_barcode = int(new_barcode)
+            attempts += 1
         
-        return jsonify({'success': True, 'barcode': new_barcode})
+        # If we exhausted attempts, return error
+        conn.close()
+        return jsonify({'success': False, 'error': 'Could not generate unique barcode after 100 attempts'})
+        
     except Exception as e:
         print(f'Error generating barcode: {e}')
         return jsonify({'success': False, 'error': str(e)})
@@ -1697,15 +1730,16 @@ def api_bol_items():
 
 @app.route('/api/bulk_delete_bol_items', methods=['POST'])
 def api_bulk_delete_bol_items():
-    """Delete selected BOL items, only if they are temporary (duplicate) entries."""
+    """Delete selected BOL items, only if they are temporary (duplicate) entries or custom 777 barcodes."""
     try:
         data = request.get_json() or {}
         ids = data.get('ids', [])
         if not ids:
             return jsonify({'success': False, 'error': 'No ids provided'}), 400
-        # Load UPCs for the requested ids and only allow deletion for UPCs
-        # that end with "-<number>" (e.g., 858557007115-1). Base UPCs (no dash-number suffix)
-        # are protected and will not be deleted.
+        # Load UPCs for the requested ids and only allow deletion for UPCs that:
+        # 1. End with "-<number>" (e.g., 858557007115-1) - duplicate entries
+        # 2. Start with "777" - custom created items
+        # Base UPCs (no dash-number suffix and not starting with 777) are protected.
         import re
         conn = sqlite3.connect('bol.db')
         conn.row_factory = sqlite3.Row
@@ -1718,8 +1752,8 @@ def api_bulk_delete_bol_items():
         for r in rows:
             upc_val = r['upc']
             s = '' if upc_val is None else str(upc_val).strip()
-            # Allow delete if UPC ends with -[digits]
-            if re.search(r'-\d+$', s):
+            # Allow delete if UPC ends with -[digits] OR starts with 777
+            if re.search(r'-\d+$', s) or s.startswith('777'):
                 deletable_ids.append(r['id'])
             else:
                 protected_ids.append(r['id'])

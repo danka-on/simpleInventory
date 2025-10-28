@@ -40,7 +40,6 @@
   .status-bubble.active{background:#00b894;color:#fff;border-color:#00b894}
   .status-bubble.good.active{background:#2ecc71;border-color:#2ecc71}
   .status-bubble.bad.active{background:#e74c3c;border-color:#e74c3c}
-  .status-bubble.unchecked.active{background:#9aa0a6;border-color:#9aa0a6}
   .set-position-btn{background:#3498db;color:#fff;border:none;padding:16px 24px;border-radius:12px;cursor:pointer;font-size:1.2rem;font-weight:600;display:flex;align-items:center;gap:10px;margin:12px 0}
   .set-position-btn:hover{background:#2980b9}
   .set-position-btn i{font-size:1.4rem}
@@ -93,7 +92,6 @@
     <div class="status-bubbles">
       <button type="button" class="status-bubble good" data-status="good">Good</button>
       <button type="button" class="status-bubble bad" data-status="bad">Bad</button>
-      <button type="button" class="status-bubble unchecked active" data-status="unchecked">Unchecked</button>
     </div>
     
     <!-- Set position under status -->
@@ -108,7 +106,7 @@
     </div>
     <form id="diagForm" enctype="multipart/form-data">
       <input type="hidden" name="upc" value="{{ upc }}">
-      <input type="hidden" name="status" id="statusInput" value="unchecked">
+      <input type="hidden" name="status" id="statusInput" value="">
       <!-- Move the status select up so it is near the pill visually -->
       <!-- Status dropdown removed, now using bubbles above -->
 
@@ -409,11 +407,13 @@
         try{ j = await res.json(); }catch(_jsonErr){ j = null; }
         const msg = document.getElementById('msg');
         if(res.ok && j && j.success){
-          // Also POST status (status, reason) - no note since we use notes table now
+          // Also POST status (status, reason) - only if status is set (good or bad)
           try{
-            const statusVal = statusInput.value || 'unchecked';
-            const reasonVal = (document.getElementById('reasonSelect') && document.getElementById('reasonSelect').value) || '';
-            await fetch('/api/items_prep/status', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ upc: '{{ upc }}', status: statusVal, reason: reasonVal, note: '' }) });
+            const statusVal = statusInput.value || '';
+            if(statusVal && (statusVal === 'good' || statusVal === 'bad')){
+              const reasonVal = (document.getElementById('reasonSelect') && document.getElementById('reasonSelect').value) || '';
+              await fetch('/api/items_prep/status', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ upc: '{{ upc }}', status: statusVal, reason: reasonVal, note: '' }) });
+            }
           }catch(e){ /* ignore status save errors */ }
           diagnosticCompleted = true; // Mark as completed to prevent cleanup
           msg.textContent='Saved diagnostic';
@@ -493,15 +493,19 @@
         const j = await r.json();
   const st = j && j.status ? j.status : null;
         const imgs = Array.isArray(j && j.images) ? j.images : [];
+        
+        // Update status bubbles if a status exists
+        if(st && st.status){
+          const statusVal = st.status;
+          updateStatusBubbles(statusVal);
+        }
+        
         if(st){
           const val = (st.reason||'').trim();
           const valid = ['Missing pieces','Wrong item','Broken','Return','Replacement','Other'];
           reasonSelect.value = valid.includes(val) ? val : '';
           const targetBtn = reasonBtns.find(b=> b.dataset.val === reasonSelect.value);
           if(targetBtn){ reasonBtns.forEach(b=> b.classList.remove('active')); targetBtn.classList.add('active'); }
-          // Status bubbles
-          const statusVal = st.status || 'unchecked';
-          updateStatusBubbles(statusVal);
         }
         if(imgs.length){
           const card = document.getElementById('existingCard');
@@ -796,7 +800,7 @@
         const j = await res.json();
         if(j.success && j.status){
           statusInput.value = j.status;
-          updateStatusBubbles();
+          updateStatusBubbles(j.status);
         }
       }catch(e){
         console.error('Failed to load existing status:', e);
