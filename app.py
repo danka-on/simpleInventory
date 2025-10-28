@@ -391,6 +391,63 @@ def item_prep_diagnostic_view_page():
         print('Diagnostic view load error:', e)
     return render_template('item_prep_diagnostic_view.html', upc=upc, status=status, images=images, bol=bol)
 
+@app.route('/item-prep-no-barcode')
+def item_prep_no_barcode_page():
+    """Page for searching items by name when there's no barcode"""
+    return render_template('item_prep_no_barcode.html')
+
+@app.route('/api/search-rawbol', methods=['POST'])
+def search_rawbol_api():
+    """Search rawbol.db by item description with pagination"""
+    try:
+        data = request.get_json()
+        query = data.get('query', '').strip()
+        page = int(data.get('page', 1))
+        per_page = 3  # Show only 3 items per page
+        offset = (page - 1) * per_page
+        
+        if not query:
+            return jsonify({'success': False, 'error': 'No search query provided'})
+        
+        # Search rawbol.db
+        conn = sqlite3.connect('rawbol.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        
+        # Get total count for pagination
+        search_pattern = f"%{query}%"
+        cur.execute('''
+            SELECT COUNT(*) as total
+            FROM raw_bol_items 
+            WHERE item_description LIKE ? COLLATE NOCASE
+        ''', (search_pattern,))
+        total = cur.fetchone()['total']
+        
+        # Get paginated results
+        cur.execute('''
+            SELECT upc, item_description, image_url 
+            FROM raw_bol_items 
+            WHERE item_description LIKE ? COLLATE NOCASE
+            LIMIT ? OFFSET ?
+        ''', (search_pattern, per_page, offset))
+        
+        results = [dict(row) for row in cur.fetchall()]
+        conn.close()
+        
+        total_pages = (total + per_page - 1) // per_page  # Ceiling division
+        
+        return jsonify({
+            'success': True, 
+            'results': results,
+            'page': page,
+            'per_page': per_page,
+            'total': total,
+            'total_pages': total_pages
+        })
+    except Exception as e:
+        print(f'Error searching rawbol: {e}')
+        return jsonify({'success': False, 'error': str(e)})
+
  
 
 @app.route('/api/bol_lookup', methods=['GET'])
