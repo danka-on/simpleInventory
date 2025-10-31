@@ -19,7 +19,9 @@ Jinja2
 MarkupSafe
 # If you use pandas for data manipulation:
 pandas
-# If you use openpyxl for Excel import/export:
+# If you use xlrd for .xls Excel import:
+xlrd
+# If you use openpyxl for .xlsx Excel import/export:
 openpyxl
 # If you use gunicorn for production server:
 gunicorn

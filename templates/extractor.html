@@ -87,6 +87,23 @@
                         msg += ` WARNING: Sync failed - ${data.sync_error}`;
                     }
                     msgEl.innerHTML = `<div class="message success">${msg}</div>`;
+                    
+                    // Add undo button
+                    const undoBtn = document.createElement('button');
+                    undoBtn.textContent = 'Undo Last Upload';
+                    undoBtn.style.cssText = 'margin-left:10px;padding:8px 16px;background:#dc3545;color:#fff;border:none;border-radius:4px;cursor:pointer;';
+                    undoBtn.onclick = () => undoLastUpload(data.lot_number);
+                    
+                    const messageDiv = msgEl.querySelector('.message');
+                    messageDiv.appendChild(undoBtn);
+                    
+                    // Auto-hide undo button after 10 seconds
+                    setTimeout(() => {
+                        if (undoBtn.parentNode) {
+                            undoBtn.remove();
+                        }
+                    }, 10000);
+                    
                     document.getElementById('extractor-form').reset();
                     document.getElementById('import-date').valueAsDate = new Date();
                     loadUploadLogs();
@@ -153,6 +170,33 @@
                 }
             } catch (err) {
                 document.getElementById('stats-display').innerHTML = `<p>Error loading stats: ${err}</p>`;
+            }
+        }
+
+        async function undoLastUpload(lotNumber) {
+            if (!confirm(`Are you sure you want to delete lot ${lotNumber}? This will remove all items from this BOL upload and desync from the main BOL database.`)) {
+                return;
+            }
+            
+            const msgEl = document.getElementById('message');
+            const originalContent = msgEl.innerHTML;
+            msgEl.innerHTML = '<div class="message">Deleting lot...</div>';
+            
+            try {
+                const response = await fetch(`/api/rawbol/delete/${lotNumber}`, {
+                    method: 'DELETE'
+                });
+                const data = await response.json();
+                
+                if (data.success) {
+                    msgEl.innerHTML = `<div class="message success">Lot ${lotNumber} deleted successfully! ${data.deleted_items} items removed from rawbol.db and desynced from bol.db.</div>`;
+                    loadUploadLogs();
+                    loadStats();
+                } else {
+                    msgEl.innerHTML = `<div class="message error">Error deleting lot: ${data.error}</div>`;
+                }
+            } catch (err) {
+                msgEl.innerHTML = `<div class="message error">Error: ${err}</div>`;
             }
         }
 
