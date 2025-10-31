@@ -137,13 +137,23 @@ def get_all_raw_bol_items():
         return {'success': False, 'error': str(e)}
 
 def get_upload_logs():
-    """Get all upload logs."""
+    """Get all upload logs with total quantity for each lot."""
     try:
         ensure_rawbol_db()
         conn = sqlite3.connect('rawbol.db')
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
-        cur.execute('SELECT * FROM upload_logs ORDER BY uploaded_at DESC LIMIT 50')
+        # Join with a subquery to get total quantity per lot
+        cur.execute('''
+            SELECT ul.*, COALESCE(lot_totals.total_quantity, 0) as total_quantity
+            FROM upload_logs ul
+            LEFT JOIN (
+                SELECT lot_number, SUM(quantity) as total_quantity
+                FROM raw_bol_items
+                GROUP BY lot_number
+            ) lot_totals ON ul.lot_number = lot_totals.lot_number
+            ORDER BY ul.uploaded_at DESC LIMIT 50
+        ''')
         rows = [dict(r) for r in cur.fetchall()]
         conn.close()
         return {'success': True, 'logs': rows}

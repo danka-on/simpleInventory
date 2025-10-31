@@ -23,8 +23,6 @@
         table{width:100%;border-collapse:collapse;margin-top:10px}
         th,td{padding:8px;text-align:left;border-bottom:1px solid #ddd}
         th{background:#007bff;color:#fff}
-        .btn-delete{background:#dc3545;color:#fff;border:none;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:12px}
-        .btn-delete:hover{background:#c82333}
     </style>
 </head>
 <body>
@@ -38,7 +36,7 @@
             <input type="file" id="excel-file" name="excel_file" accept=".xls,.xlsx" required>
         </div>
         <div class="form-group">
-            <label for="lot-number">Lot #:</label>
+            <label for="lot-number">BOL #:</label>
             <input type="text" id="lot-number" name="lot_number" required>
         </div>
         <div class="form-group">
@@ -103,21 +101,29 @@
 
         async function loadUploadLogs() {
             try {
-                const response = await fetch('/api/rawbol/logs');
+                const response = await fetch('/api/rawbol/logs?_=' + Date.now());
                 const data = await response.json();
                 const logsEl = document.getElementById('upload-logs');
                 
+                console.log('API Response:', data); // Debug logging
+                
                 if (data.success && data.logs && data.logs.length > 0) {
-                    let html = '<table><tr><th>Filename</th><th>Lot #</th><th>Date</th><th>Rows</th><th>Uploaded At</th><th>Action</th></tr>';
+                    let html = '<table><tr><th>Filename</th><th>BOL #</th><th>Date</th><th>Items</th><th>Uploaded At</th></tr>';
                     data.logs.forEach(log => {
                         const uploadedAt = new Date(log.uploaded_at).toLocaleString();
+                        let totalQty = 0;
+                        if (log.total_quantity !== undefined && log.total_quantity !== null) {
+                            totalQty = parseInt(log.total_quantity) || 0;
+                        } else if (log.rows_imported !== undefined && log.rows_imported !== null) {
+                            totalQty = parseInt(log.rows_imported) || 0;
+                        }
+                        console.log('Log data:', log, 'totalQty:', totalQty); // Debug logging
                         html += `<tr>
                             <td>${log.filename}</td>
                             <td>${log.lot_number}</td>
                             <td>${log.import_date}</td>
-                            <td>${log.rows_imported}</td>
+                            <td>${totalQty}</td>
                             <td>${uploadedAt}</td>
-                            <td><button class="btn-delete" onclick="deleteLot('${log.lot_number}')">X</button></td>
                         </tr>`;
                     });
                     html += '</table>';
@@ -126,13 +132,14 @@
                     logsEl.innerHTML = '<p>No uploads yet.</p>';
                 }
             } catch (err) {
+                console.error('Error loading logs:', err); // Debug logging
                 document.getElementById('upload-logs').innerHTML = `<p>Error loading logs: ${err}</p>`;
             }
         }
 
         async function loadStats() {
             try {
-                const response = await fetch('/api/rawbol/stats');
+                const response = await fetch('/api/rawbol/stats?_=' + Date.now());
                 const data = await response.json();
                 const statsEl = document.getElementById('stats-display');
                 
@@ -150,27 +157,8 @@
         }
 
         async function deleteLot(lotNumber) {
-            if (!confirm(`⚠️ Delete Lot ${lotNumber}?\n\nThis will:\n- Remove all items from this lot in rawbol.db\n- Subtract quantities from bol.db\n- Remove items from bol.db if quantity reaches 0\n\nThis cannot be undone!`)) return;
-            
-            const msgEl = document.getElementById('message');
-            msgEl.innerHTML = '<div class="message">Deleting lot and desyncing...</div>';
-            
-            try {
-                const response = await fetch(`/api/rawbol/delete/${encodeURIComponent(lotNumber)}`, { 
-                    method: 'DELETE' 
-                });
-                const data = await response.json();
-                
-                if (data.success) {
-                    msgEl.innerHTML = `<div class="message success">Lot ${data.lot} deleted! ${data.updated} items updated, ${data.removed} items removed from BOL.DB.</div>`;
-                    loadUploadLogs();
-                    loadStats();
-                } else {
-                    msgEl.innerHTML = `<div class="message error">Delete error: ${data.error}</div>`;
-                }
-            } catch (err) {
-                msgEl.innerHTML = `<div class="message error">Delete error: ${err}</div>`;
-            }
+            // Function removed - X button no longer available
+            alert('Delete functionality has been disabled.');
         }
     </script>
 </body>
