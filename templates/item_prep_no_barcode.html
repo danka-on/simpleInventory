@@ -6,7 +6,7 @@
   <title>Item Prep - No Barcode</title>
   <style>
     * { margin:0; padding:0; box-sizing:border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; padding:16px; background:#f5f5f5; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; padding:16px; background:#f5f5f5; }
     .container { max-width:800px; margin:0 auto; }
     h1 { margin-bottom:20px; color:#2c3e50; }
     .card { background:#fff; padding:20px; border-radius:12px; box-shadow:0 2px 8px rgba(0,0,0,0.1); margin-bottom:16px; }
@@ -45,55 +45,40 @@
 <body>
   <div class="container">
     <h1>🔍 Item Prep - No Barcode</h1>
-    
     <div class="card">
       <a href="/item-prep"><button class="btn btn-danger">← Back to Prep</button></a>
-      
       <div style="margin-top:20px; margin-bottom:20px">
         <div class="search-box">
           <input type="text" id="searchInput" placeholder="Search by item name..." autofocus>
           <button id="searchBtn">🔍</button>
         </div>
       </div>
-      
       <div id="searchResults" class="search-results hidden">
         <div id="resultsContainer"></div>
         <div id="pagination" class="pagination hidden"></div>
       </div>
-      
       <div id="selectedItemCard" class="selected-item-card hidden">
         <h3 style="margin-bottom:12px">Selected Item</h3>
         <div id="selectedItemInfo"></div>
         <div class="barcode-field" id="barcodeField"></div>
-        
         <div class="action-buttons">
-          <button class="btn btn-primary" id="printBarcodeBtn" style="flex:1">
-            🖨️ Print Barcode (Coming Soon)
-          </button>
-          <button class="btn btn-primary" id="continueBtn" style="flex:1">
-            ✓ Continue to Prep
-          </button>
+          <button class="btn btn-primary" id="printBarcodeBtn" style="flex:1">🖨️ Print Barcode</button>
+          <button class="btn btn-primary" id="continueBtn" style="flex:1">✓ Continue to Prep</button>
         </div>
       </div>
-      
       <div style="margin-top:144px; text-align:center">
         <a href="/item-prep-create-item" style="text-decoration:none; display:block;">
-          <button class="btn" style="background:#f39c12; color:#fff; padding:12px 24px; border-radius:8px; border:none; font-size:1rem; width:100%; display:block;">
-            ➕ No Item Found - Create New
-          </button>
+          <button class="btn" style="background:#f39c12; color:#fff; padding:12px 24px; border-radius:8px; border:none; font-size:1rem; width:100%; display:block;">➕ No Item Found - Create New</button>
         </a>
       </div>
-      
       <div id="statusMsg" class="muted"></div>
     </div>
   </div>
-
   <script>
     let selectedItem = null;
     let currentPage = 1;
-    let currentQuery = '';
     let totalPages = 1;
-    
+    let currentQuery = '';
     const searchInput = document.getElementById('searchInput');
     const searchBtn = document.getElementById('searchBtn');
     const searchResults = document.getElementById('searchResults');
@@ -105,161 +90,114 @@
     const printBarcodeBtn = document.getElementById('printBarcodeBtn');
     const continueBtn = document.getElementById('continueBtn');
     const statusMsg = document.getElementById('statusMsg');
-    
-    function missingThumb(width=60, height=60) {
-      return 'data:image/svg+xml;utf8,' + encodeURIComponent(
-        '<svg xmlns="http://www.w3.org/2000/svg" width="' + width + '" height="' + height + '">' +
-        '<rect width="100%" height="100%" fill="#f8f8f8"/>' +
-        '<text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#b0b0b0" font-size="10">No Img</text>' +
-        '</svg>'
-      );
-    }
-    
+
     function esc(s) {
-      return String(s || '').replace(/[&<>]/g, c => ({"&":"&amp;", "<":"&lt;", ">":"&gt;"}[c]));
+      return (s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
     }
-    
-    async function searchItems(query, page = 1) {
-      if (!query.trim()) {
-        statusMsg.textContent = 'Please enter a search term';
-        return;
-      }
-      
-      currentQuery = query;
-      currentPage = page;
-      
+    function missingThumb(w=200,h=200){ return `https://placehold.co/${w}x${h}?text=No+Image`; }
+
+    async function searchItems(query, page=1) {
+      if (!query.trim()) return;
       statusMsg.textContent = 'Searching...';
       resultsContainer.innerHTML = '';
-      pagination.classList.add('hidden');
+      selectedItem = null;
+      selectedItemCard.classList.add('hidden');
       searchResults.classList.remove('hidden');
-      
+      pagination.classList.add('hidden');
       try {
-        const response = await fetch('/api/search-rawbol', {
+        const resp = await fetch('/api/search-rawbol', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query: query, page: page })
+          body: JSON.stringify({ query, page })
         });
-        
-        const data = await response.json();
-        
-        if (data.success && data.results.length > 0) {
-          totalPages = data.total_pages || 1;
-          statusMsg.textContent = `Found ${data.total} items (showing page ${page} of ${totalPages})`;
-          renderResults(data.results);
-          renderPagination(data.page, data.total_pages, data.total);
+        const data = await resp.json();
+        if (!data.success) throw new Error(data.error || 'Search failed');
+        const items = data.results || [];
+        totalPages = Math.ceil((data.total || 0) / 3);
+        currentPage = page;
+        currentQuery = query;
+        resultsContainer.innerHTML = '';
+        if (items.length === 0) {
+          resultsContainer.innerHTML = '<div class="muted">No items found.</div>';
+          pagination.classList.add('hidden');
         } else {
-          statusMsg.textContent = 'No items found';
-          resultsContainer.innerHTML = '<div class="muted" style="text-align:center;padding:20px">No items found. Try a different search term.</div>';
+          items.forEach((item, idx) => {
+            const div = document.createElement('div');
+            div.className = 'result-item';
+            div.innerHTML = `<img src="${esc(item.image_url) || missingThumb(60,60)}" alt="item"><span class="result-item-info"><div class="result-title">${esc(item.item_description)}</div><div class="result-upc">UPC: ${esc(item.upc)}</div></span>`;
+            div.onclick = () => selectItem(item, div);
+            resultsContainer.appendChild(div);
+          });
+          pagination.classList.remove('hidden');
+          renderPagination();
         }
-      } catch (error) {
-        console.error('Search error:', error);
-        statusMsg.textContent = 'Search failed: ' + error.message;
+        statusMsg.textContent = '';
+      } catch (e) {
+        resultsContainer.innerHTML = '<div class="muted">Search failed: '+esc(e.message)+'</div>';
+        statusMsg.textContent = '';
       }
     }
-    
-    function renderPagination(page, totalPages, totalItems) {
-      if (totalPages <= 1) {
-        pagination.classList.add('hidden');
-        return;
-      }
-      
-      pagination.classList.remove('hidden');
-      
-      const prevDisabled = page <= 1;
-      const nextDisabled = page >= totalPages;
-      
-      pagination.innerHTML = `
-        <button class="pagination-btn" ${prevDisabled ? 'disabled' : ''} onclick="searchItems(currentQuery, ${page - 1})">
-          ← Prev
-        </button>
-        <span class="pagination-info">Page ${page} of ${totalPages}</span>
-        <button class="pagination-btn" ${nextDisabled ? 'disabled' : ''} onclick="searchItems(currentQuery, ${page + 1})">
-          Next →
-        </button>
-      `;
+
+    function renderPagination() {
+      pagination.innerHTML = '';
+      const prevBtn = document.createElement('button');
+      prevBtn.className = 'pagination-btn';
+      prevBtn.textContent = '← Prev';
+      prevBtn.disabled = currentPage <= 1;
+      prevBtn.onclick = () => searchItems(currentQuery, currentPage - 1);
+      pagination.appendChild(prevBtn);
+      const info = document.createElement('span');
+      info.className = 'pagination-info';
+      info.textContent = `Page ${currentPage} of ${totalPages}`;
+      pagination.appendChild(info);
+      const nextBtn = document.createElement('button');
+      nextBtn.className = 'pagination-btn';
+      nextBtn.textContent = 'Next →';
+      nextBtn.disabled = currentPage >= totalPages;
+      nextBtn.onclick = () => searchItems(currentQuery, currentPage + 1);
+      pagination.appendChild(nextBtn);
     }
-    
-    function renderResults(results) {
-      resultsContainer.innerHTML = results.map((item, index) => {
-        const imgUrl = item.image_url || missingThumb();
-        const title = esc(item.item_description || 'No description');
-        const upc = esc(item.upc || 'No UPC');
-        
-        return `
-          <div class="result-item" data-index="${index}">
-            <img src="${imgUrl}" alt="item" onerror="this.src='${missingThumb()}'">
-            <div class="result-item-info">
-              <div class="result-title">${title}</div>
-              <div class="result-upc">UPC: ${upc}</div>
-            </div>
-          </div>
-        `;
-      }).join('');
-      
-      // Add click handlers
-      document.querySelectorAll('.result-item').forEach((elem, index) => {
-        elem.addEventListener('click', () => selectItem(results[index], elem));
-      });
-    }
-    
+
     function selectItem(item, elem) {
-      // Remove previous selection
       document.querySelectorAll('.result-item').forEach(e => e.classList.remove('selected'));
       elem.classList.add('selected');
-      
       selectedItem = item;
-      
-      // Show selected item card
-      const imgUrl = item.image_url || missingThumb(200, 200);
-      const title = esc(item.item_description || 'No description');
-      const upc = esc(item.upc || 'No UPC');
-      
-      selectedItemInfo.innerHTML = `
-        <div class="result-title">${title}</div>
-        <div class="result-upc">UPC: ${upc}</div>
-        <img src="${imgUrl}" alt="item" onerror="this.src='${missingThumb(200, 200)}'">
-      `;
-      
-      barcodeField.textContent = `Barcode: ${upc}`;
+      selectedItemInfo.innerHTML = `<div class="result-title">${esc(item.item_description)}</div><div class="result-upc">UPC: ${esc(item.upc)}</div><img src="${esc(item.image_url) || missingThumb(200,200)}" alt="item" onerror="this.src='${missingThumb(200,200)}'">`;
+      barcodeField.textContent = `Barcode: ${item.upc}`;
       selectedItemCard.classList.remove('hidden');
       statusMsg.textContent = 'Item selected. Print barcode or continue to prep.';
-      
-      // Auto scroll to bottom of page
-      setTimeout(() => {
-        window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
-      }, 100);
+      setTimeout(() => { window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }); }, 100);
     }
-    
-    // Search on Enter key
-    searchInput.addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') {
-        searchItems(searchInput.value);
-      }
-    });
-    
-    // Search button click
-    searchBtn.addEventListener('click', () => {
-      searchItems(searchInput.value);
-    });
-    
-    // Print barcode button
+
+    searchInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') searchItems(searchInput.value); });
+    searchBtn.addEventListener('click', () => searchItems(searchInput.value));
+
+    function printBarcodeBrowser(barcodeData) {
+      const printWindow = window.open('', '_blank');
+      const html = `<!DOCTYPE html><html><head><title>Print Barcode</title><style>@media print {@page { margin: 0; size: 4in 2in; }body { margin: 0; }}body {font-family: Arial, sans-serif;margin: 0;padding: 0;display: flex;justify-content: center;align-items: center;min-height: 2in;}.barcode-container {text-align: center;padding: 0.25in;width: 4in;}.barcode-title {font-size: 14px;font-weight: bold;margin-bottom: 8px;word-wrap: break-word;}svg {max-width: 100%;height: auto;}</style></head><body><div class="barcode-container"><div class="barcode-title">${barcodeData.description}</div><svg id="barcode"></svg></div><script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"><\/script><script>JsBarcode('#barcode', '${barcodeData.upc}', {format: 'CODE128',width: 2,height: 80,displayValue: true,fontSize: 16,margin: 10});setTimeout(()=>{window.print();window.onafterprint=()=>window.close();},500);<\/script></body></html>`;
+      printWindow.document.write(html);
+      printWindow.document.close();
+    }
+
     printBarcodeBtn.addEventListener('click', async () => {
       if (!selectedItem) return;
-      
       try {
+        statusMsg.textContent = 'Preparing to print...';
+        const configResponse = await fetch('/api/printer/config');
+        const config = await configResponse.json();
+        if (config.print_method === 'browser') {
+          statusMsg.textContent = 'Opening print dialog...';
+          printBarcodeBrowser({ upc: selectedItem.upc, description: selectedItem.item_description });
+          statusMsg.textContent = 'Print dialog opened!';
+          return;
+        }
         statusMsg.textContent = 'Printing...';
         const response = await fetch('/api/printer/print-barcode', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            upc: selectedItem.upc,
-            item_description: selectedItem.item_description,
-            quantity: 1
-          })
+          body: JSON.stringify({ upc: selectedItem.upc, item_description: selectedItem.item_description, quantity: 1 })
         });
-        
         const data = await response.json();
-        
         if (data.success) {
           statusMsg.textContent = 'Barcode printed successfully!';
           alert('Barcode printed successfully!');
@@ -273,15 +211,10 @@
         alert('Print failed: ' + error.message);
       }
     });
-    
-    // Continue to prep button
+
     continueBtn.addEventListener('click', async () => {
       if (!selectedItem) return;
-      
-      // Store the UPC in session storage so the prep page can auto-fill it
       sessionStorage.setItem('prepUpc', selectedItem.upc);
-      
-      // Redirect to prep page
       window.location.href = '/item-prep';
     });
   </script>

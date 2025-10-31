@@ -482,10 +482,22 @@ def save_printer_config():
     try:
         data = request.get_json()
         printer_type = data.get('printer_type', 'bluetooth')
+        printer_mode = data.get('printer_mode', 'thermal')
+        print_method = data.get('print_method', 'escpos')
         bluetooth_address = data.get('bluetooth_address', '')
         printer_name = data.get('printer_name', '')
+        network_ip = data.get('network_ip', '')
+        network_port = int(data.get('network_port', 9100))
         
-        success = printer_manager.save_printer_config(printer_type, bluetooth_address, printer_name)
+        success = printer_manager.save_printer_config(
+            printer_type, 
+            bluetooth_address, 
+            printer_name,
+            network_ip,
+            network_port,
+            printer_mode,
+            print_method
+        )
         
         if success:
             return jsonify({'success': True, 'message': 'Printer configuration saved'})
@@ -528,6 +540,21 @@ def print_barcode_api():
         printer_manager.print_barcode(upc, item_description, quantity)
         
         return jsonify({'success': True, 'message': f'Printed {quantity} label(s)'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/printer/browser-print', methods=['POST'])
+def browser_print_barcode():
+    """Generate a printable page for browser-based barcode printing"""
+    try:
+        data = request.get_json()
+        barcodes = data.get('barcodes', [])  # Array of {upc, description}
+        
+        if not barcodes:
+            return jsonify({'success': False, 'error': 'No barcodes provided'})
+        
+        # Return the data for the frontend to generate the print window
+        return jsonify({'success': True, 'barcodes': barcodes})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
@@ -637,7 +664,7 @@ def generate_custom_barcode():
             if not exists_bol and not exists_temp:
                 # Barcode is unique, we're good!
                 conn.close()
-                return jsonify({'success': True, 'barcode': new_barcode})
+                return jsonify({'success': True, 'barcode': new_barcode.strip()})
             
             # Barcode exists, increment and try again
             max_barcode = int(new_barcode)

@@ -213,6 +213,76 @@
       checkFormComplete();
     }
     
+    function printBarcodeBrowser(barcodeData) {
+      // Create print window with barcode
+      const printWindow = window.open('', '_blank');
+      
+      const html = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Print Barcode</title>
+          <style>
+            @media print {
+              @page { margin: 0; size: 4in 2in; }
+              body { margin: 0; }
+            }
+            body {
+              font-family: Arial, sans-serif;
+              margin: 0;
+              padding: 0;
+              display: flex;
+              justify-content: center;
+              align-items: center;
+              min-height: 2in;
+            }
+            .barcode-container {
+              text-align: center;
+              padding: 0.25in;
+              width: 4in;
+            }
+            .barcode-title {
+              font-size: 14px;
+              font-weight: bold;
+              margin-bottom: 8px;
+              word-wrap: break-word;
+            }
+            svg {
+              max-width: 100%;
+              height: auto;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="barcode-container">
+            <div class="barcode-title">${barcodeData.description}</div>
+            <svg id="barcode"></svg>
+          </div>
+          <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
+          <script>
+            JsBarcode("#barcode", "${barcodeData.upc}", {
+              format: "CODE128",
+              width: 2,
+              height: 80,
+              displayValue: true,
+              fontSize: 16,
+              margin: 10
+            });
+            
+            setTimeout(() => {
+              window.print();
+              // Close window after printing (user can cancel)
+              window.onafterprint = () => window.close();
+            }, 500);
+          </script>
+        </body>
+        </html>
+      `;
+      
+      printWindow.document.write(html);
+      printWindow.document.close();
+    }
+
     async function printBarcode() {
       if (!currentBarcode) {
         showStatus('No barcode to print', 'error');
@@ -226,6 +296,29 @@
       }
       
       try {
+        // Check printer configuration first
+        const configResponse = await fetch('/api/printer/config');
+        const config = await configResponse.json();
+        
+        // If browser print mode, use browser print
+        if (config.print_method === 'browser') {
+          showStatus('Opening print dialog...', 'warning');
+          printBarcodeBrowser({
+            upc: currentBarcode,
+            description: title
+          });
+          
+          // Mark as printed after a short delay (user initiated print)
+          setTimeout(() => {
+            isPrinted = true;
+            updatePrintStatus();
+            showStatus('Print dialog opened! Complete printing to continue.', 'success');
+            checkFormComplete();
+          }, 1000);
+          return;
+        }
+        
+        // Otherwise use ESC/POS direct print
         showStatus('Printing barcode...', 'warning');
         const response = await fetch('/api/printer/print-barcode', {
           method: 'POST',
@@ -383,5 +476,6 @@
     // Cleanup on page unload
     window.addEventListener('beforeunload', stopCamera);
   </script>
+  <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
 </body>
 </html>

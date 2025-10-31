@@ -47,11 +47,9 @@
       <a href="/"><button class="btn btn-danger">← Back to Home</button></a>
     </div>
     
-    <div class="instructions">
-      <h3>📋 Setup Instructions</h3>
-      <div id="instructionsContent">
-        <p>Loading platform-specific instructions...</p>
-      </div>
+    <div class="card">
+      <h2 style="margin-bottom:16px">Current Status</h2>
+      <div id="currentConfig" style="color:#7f8c8d;">Loading...</div>
     </div>
     
     <div class="card">
@@ -60,16 +58,56 @@
       <div class="form-group">
         <label>Printer Type</label>
         <select id="printerType">
-          <option value="bluetooth">Bluetooth Printer (via COM port)</option>
-          <option value="serial">Serial/USB Printer</option>
-          <option value="network">Network Printer (Coming Soon)</option>
+          <option value="bluetooth">Bluetooth/Serial Printer (Direct Connection)</option>
+          <option value="network">Network Printer (WiFi/Ethernet - For iPad/Mobile)</option>
         </select>
       </div>
       
       <div class="form-group">
-        <label id="portLabel">Port/Address</label>
-        <input type="text" id="bluetoothAddress" placeholder="Loading...">
-        <small id="portHint" style="color:#7f8c8d; font-size:12px;">Loading platform info...</small>
+        <label>Print Method</label>
+        <select id="printMethod">
+          <option value="browser">Browser Print (Simple - Works with any printer)</option>
+          <option value="escpos">ESC/POS Direct (Advanced - Requires thermal printer)</option>
+        </select>
+        <small style="color:#7f8c8d; font-size:12px;">
+          <strong>Browser:</strong> Opens print dialog, works with any printer (like QR codes)<br>
+          <strong>ESC/POS:</strong> Direct printing to thermal/label printers via network/USB
+        </small>
+      </div>
+      
+      <div id="escposOnlyFields">
+        <div class="form-group">
+          <label>Printer Mode</label>
+          <select id="printerMode">
+            <option value="thermal">Thermal Printer (ESC/POS - Label/Receipt Printers)</option>
+            <option value="inkjet">Inkjet/LaserJet (Home/Office Printers like HP, Canon)</option>
+          </select>
+          <small style="color:#7f8c8d; font-size:12px;">
+            Thermal: Zebra, MUNBYN, Phomemo, Epson TM-series<br>
+            Inkjet: HP Envy, Canon PIXMA, Brother, Epson home printers
+          </small>
+        </div>
+      </div>
+      
+      <div id="directConnectionFields">
+        <div class="form-group">
+          <label id="portLabel">Port/Address</label>
+          <input type="text" id="bluetoothAddress" placeholder="Loading...">
+          <small id="portHint" style="color:#7f8c8d; font-size:12px;">Loading platform info...</small>
+        </div>
+      </div>
+      
+      <div id="networkFields" class="hidden">
+        <div class="form-group">
+          <label>Printer IP Address</label>
+          <input type="text" id="networkIp" placeholder="e.g., 192.168.1.100">
+          <small style="color:#7f8c8d; font-size:12px;">Find in printer's network settings or router</small>
+        </div>
+        <div class="form-group">
+          <label>Port (Default: 9100)</label>
+          <input type="number" id="networkPort" placeholder="9100" value="9100">
+          <small style="color:#7f8c8d; font-size:12px;">Most ESC/POS printers use port 9100</small>
+        </div>
       </div>
       
       <div class="form-group">
@@ -86,28 +124,22 @@
       <div id="deviceList" class="device-list hidden"></div>
     </div>
     
-    <div class="card">
-      <h2 style="margin-bottom:16px">Current Status</h2>
-      <div id="currentConfig" style="color:#7f8c8d;">Loading...</div>
-    </div>
-    
-    <div class="card">
-      <h2 style="margin-bottom:16px">Required Python Packages</h2>
-      <div id="packagesContent">
-        <p style="margin-bottom:12px">To use Bluetooth printing, install:</p>
-        <pre style="background:#f8f9fa; padding:12px; border-radius:8px; overflow-x:auto;">
-pip install python-escpos python-barcode Pillow pyserial</pre>
-        <p style="margin-top:12px; font-size:13px; color:#7f8c8d;">
-          <strong>Optional:</strong> For Bluetooth device scanning on Linux/Raspberry Pi: <code>pip install pybluez</code>
-        </p>
+    <div class="instructions">
+      <h3>📋 Setup Instructions</h3>
+      <div id="instructionsContent">
+        <p>Loading platform-specific instructions...</p>
       </div>
     </div>
   </div>
 
   <script>
     const printerType = document.getElementById('printerType');
+    const printerMode = document.getElementById('printerMode');
+    const printMethod = document.getElementById('printMethod');
     const bluetoothAddress = document.getElementById('bluetoothAddress');
     const printerName = document.getElementById('printerName');
+    const networkIp = document.getElementById('networkIp');
+    const networkPort = document.getElementById('networkPort');
     const saveBtn = document.getElementById('saveBtn');
     const scanBtn = document.getElementById('scanBtn');
     const testBtn = document.getElementById('testBtn');
@@ -117,8 +149,53 @@ pip install python-escpos python-barcode Pillow pyserial</pre>
     const instructionsContent = document.getElementById('instructionsContent');
     const portLabel = document.getElementById('portLabel');
     const portHint = document.getElementById('portHint');
+    const directConnectionFields = document.getElementById('directConnectionFields');
+    const networkFields = document.getElementById('networkFields');
+    const escposOnlyFields = document.getElementById('escposOnlyFields');
     
     let platformInfo = null;
+    
+    // Toggle fields based on print method
+    printMethod.addEventListener('change', () => {
+      if (printMethod.value === 'browser') {
+        // Browser print mode - hide all printer-specific fields
+        directConnectionFields.classList.add('hidden');
+        networkFields.classList.add('hidden');
+        escposOnlyFields.classList.add('hidden');
+        scanBtn.style.display = 'none';
+        testBtn.style.display = 'none';
+        showBrowserInstructions();
+      } else {
+        // ESC/POS mode - show printer configuration
+        escposOnlyFields.classList.remove('hidden');
+        testBtn.style.display = 'inline-block';
+        // Trigger printer type change to show correct fields
+        printerType.dispatchEvent(new Event('change'));
+      }
+    });
+    
+    // Toggle between network and direct connection fields
+    printerType.addEventListener('change', () => {
+      if (printMethod.value === 'browser') return; // Skip if browser mode
+      
+      if (printerType.value === 'network') {
+        directConnectionFields.classList.add('hidden');
+        networkFields.classList.remove('hidden');
+        scanBtn.style.display = 'none';
+        showNetworkInstructions();
+      } else {
+        directConnectionFields.classList.remove('hidden');
+        networkFields.classList.add('hidden');
+        scanBtn.style.display = 'inline-block';
+        if (platformInfo === 'raspberry_pi') {
+          showRaspberryPiInstructions();
+        } else if (platformInfo === 'linux') {
+          showLinuxInstructions();
+        } else {
+          showWindowsInstructions();
+        }
+      }
+    });
     
     // Detect platform from server
     async function detectPlatform() {
@@ -149,8 +226,65 @@ pip install python-escpos python-barcode Pillow pyserial</pre>
       }
     }
     
+    function showBrowserInstructions() {
+      instructionsContent.innerHTML = `
+        <h3>🖨️ Browser Print Mode (Simplest Option)</h3>
+        <ul>
+          <li><strong>How it works:</strong> Like printing QR codes in Shelf Manager
+            <ul style="margin-top:6px;">
+              <li>Click print button → Browser opens print preview</li>
+              <li>Choose any printer (HP Envy, Zebra, or any other)</li>
+              <li>Print or save as PDF</li>
+            </ul>
+          </li>
+          <li><strong>Advantages:</strong>
+            <ul style="margin-top:6px;">
+              <li>✅ Works with ANY printer (no setup needed)</li>
+              <li>✅ Works from iPad, phone, or desktop</li>
+              <li>✅ No drivers or configuration required</li>
+              <li>✅ Can print multiple barcodes at once</li>
+              <li>✅ Can save as PDF for later</li>
+            </ul>
+          </li>
+          <li><strong>Best for:</strong> Testing, occasional printing, using existing printers</li>
+        </ul>
+        <div style="background:#e8f5e9; padding:12px; border-radius:8px; margin-top:12px; border:1px solid #4caf50;">
+          <strong>💡 Recommended:</strong> Start with Browser Print mode. It's simple and works with your HP Envy right away!
+        </div>
+      `;
+    }
+    
+    function showNetworkInstructions() {
+      instructionsContent.innerHTML = `
+        <h3>🌐 Network Printer Setup (For iPad/Mobile Access)</h3>
+        <ul>
+          <li><strong>Step 1:</strong> Connect your thermal printer to WiFi/Ethernet
+            <ul style="margin-top:6px;">
+              <li>Most thermal printers have WiFi setup in their menu</li>
+              <li>Or use printer's mobile app to connect to your network</li>
+              <li>Make sure printer is on the SAME network as your Flask server</li>
+            </ul>
+          </li>
+          <li><strong>Step 2:</strong> Find printer's IP address:
+            <ul style="margin-top:6px;">
+              <li>Print network configuration page from printer menu</li>
+              <li>Check your router's connected devices list</li>
+              <li>Or use printer's app to view network settings</li>
+            </ul>
+          </li>
+          <li><strong>Step 3:</strong> Enter IP address below (e.g., 192.168.1.100)</li>
+          <li><strong>Step 4:</strong> Set port to 9100 (default for ESC/POS printers)</li>
+          <li><strong>Step 5:</strong> Save and test print</li>
+        </ul>
+        <div style="background:#e3f2fd; padding:12px; border-radius:8px; margin-top:12px; border:1px solid #2196f3;">
+          <strong>💡 Tip for iPad Users:</strong> Once configured, you can print from your iPad's browser by accessing this Flask app on your network (e.g., http://[server-ip]:5000)
+        </div>
+      `;
+    }
+    
     function showWindowsInstructions() {
       instructionsContent.innerHTML = `
+        <h3>🔵 Bluetooth/Serial Setup (Direct Connection)</h3>
         <ul>
           <li><strong>Step 1:</strong> Pair your Bluetooth printer with Windows (Settings → Bluetooth & devices)</li>
           <li><strong>Step 2:</strong> Find the COM port:
@@ -172,6 +306,7 @@ pip install python-escpos python-barcode Pillow pyserial</pre>
     
     function showRaspberryPiInstructions() {
       instructionsContent.innerHTML = `
+        <h3>🔵 Bluetooth/Serial Setup (Direct Connection)</h3>
         <ul>
           <li><strong>Step 1:</strong> Pair your Bluetooth printer:
             <pre style="background:#f8f9fa; padding:8px; border-radius:4px; font-size:12px; margin-top:6px;">
@@ -198,6 +333,7 @@ sudo chmod 666 /dev/rfcomm0</pre>
     
     function showLinuxInstructions() {
       instructionsContent.innerHTML = `
+        <h3>🔵 Bluetooth/Serial Setup (Direct Connection)</h3>
         <ul>
           <li><strong>Step 1:</strong> Pair your Bluetooth printer using your system's Bluetooth manager</li>
           <li><strong>Step 2:</strong> Find the device path:
@@ -233,18 +369,46 @@ sudo chmod 666 /dev/rfcomm0</pre>
         
         if (data.success && data.config) {
           const config = data.config;
-          const portLabel = platformInfo === 'windows' ? 'COM Port' : 'Device Path';
-          currentConfig.innerHTML = `
-            <strong>Printer Type:</strong> ${config.printer_type || 'Not configured'}<br>
-            <strong>${portLabel}:</strong> ${config.bluetooth_address || 'Not configured'}<br>
-            <strong>Printer Name:</strong> ${config.printer_name || 'Not set'}<br>
-            <strong>Last Updated:</strong> ${config.updated_at || 'Never'}
-          `;
+          
+          const method = config.print_method || 'escpos';
+          let configDisplay = `<strong>Print Method:</strong> ${method === 'browser' ? '🖨️ Browser Print' : '⚡ ESC/POS Direct'}<br>`;
+          
+          if (method === 'browser') {
+            configDisplay += `<small style="color:#28a745;">✓ Works with any printer via browser</small><br>`;
+          } else {
+            configDisplay += `<strong>Printer Type:</strong> ${config.printer_type || 'Not configured'}<br>`;
+            configDisplay += `<strong>Printer Mode:</strong> ${config.printer_mode || 'thermal'}<br>`;
+            
+            if (config.printer_type === 'network') {
+              configDisplay += `<strong>Network IP:</strong> ${config.network_ip || 'Not configured'}<br>`;
+              configDisplay += `<strong>Network Port:</strong> ${config.network_port || '9100'}<br>`;
+            } else {
+              const portLabel = platformInfo === 'windows' ? 'COM Port' : 'Device Path';
+              configDisplay += `<strong>${portLabel}:</strong> ${config.bluetooth_address || 'Not configured'}<br>`;
+            }
+            
+            configDisplay += `<strong>Printer Name:</strong> ${config.printer_name || 'Not set'}<br>`;
+          }
+          
+          configDisplay += `<strong>Last Updated:</strong> ${config.updated_at || 'Never'}`;
+          
+          currentConfig.innerHTML = configDisplay;
           
           // Pre-fill form
-          if (config.printer_type) printerType.value = config.printer_type;
+          if (config.print_method) {
+            printMethod.value = config.print_method;
+            printMethod.dispatchEvent(new Event('change'));
+          }
+          if (config.printer_type) {
+            printerType.value = config.printer_type;
+            // Trigger change event to show correct fields
+            printerType.dispatchEvent(new Event('change'));
+          }
+          if (config.printer_mode) printerMode.value = config.printer_mode;
           if (config.bluetooth_address) bluetoothAddress.value = config.bluetooth_address;
           if (config.printer_name) printerName.value = config.printer_name;
+          if (config.network_ip) networkIp.value = config.network_ip;
+          if (config.network_port) networkPort.value = config.network_port;
         } else {
           currentConfig.textContent = 'No printer configured yet.';
         }
@@ -306,15 +470,35 @@ sudo chmod 666 /dev/rfcomm0</pre>
     
     saveBtn.addEventListener('click', async () => {
       const config = {
+        print_method: printMethod.value,
         printer_type: printerType.value,
+        printer_mode: printerMode.value,
         bluetooth_address: bluetoothAddress.value.trim(),
-        printer_name: printerName.value.trim()
+        printer_name: printerName.value.trim(),
+        network_ip: networkIp.value.trim(),
+        network_port: networkPort.value || 9100
       };
       
-      if (!config.bluetooth_address) {
-        const hint = platformInfo === 'windows' ? 'COM port (e.g., COM3)' : 'device path (e.g., /dev/rfcomm0)';
-        showStatus(`Please enter a ${hint}`, 'error');
-        return;
+      // Validation
+      if (config.print_method === 'browser') {
+        // Browser mode needs no validation
+      } else if (config.printer_type === 'network') {
+        if (!config.network_ip) {
+          showStatus('Please enter printer IP address', 'error');
+          return;
+        }
+        // Validate IP format
+        const ipPattern = /^(\d{1,3}\.){3}\d{1,3}$/;
+        if (!ipPattern.test(config.network_ip)) {
+          showStatus('Invalid IP address format (e.g., 192.168.1.100)', 'error');
+          return;
+        }
+      } else {
+        if (!config.bluetooth_address) {
+          const hint = platformInfo === 'windows' ? 'COM port (e.g., COM3)' : 'device path (e.g., /dev/rfcomm0)';
+          showStatus(`Please enter a ${hint}`, 'error');
+          return;
+        }
       }
       
       showStatus('Saving configuration...', 'info');
@@ -342,8 +526,12 @@ sudo chmod 666 /dev/rfcomm0</pre>
     });
     
     testBtn.addEventListener('click', async () => {
-      if (!bluetoothAddress.value.trim()) {
-        showStatus('Please configure a printer first', 'error');
+      // Check if any printer is configured
+      if (printerType.value === 'network' && !networkIp.value.trim()) {
+        showStatus('Please configure network printer IP first', 'error');
+        return;
+      } else if (printerType.value !== 'network' && !bluetoothAddress.value.trim()) {
+        showStatus('Please configure printer port/address first', 'error');
         return;
       }
       
