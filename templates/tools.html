@@ -58,6 +58,9 @@
         .tool-card.important i {
             color: #00b894; /* green for important shortcuts */
         }
+        .tool-card.sync-orange i {
+            color: #FF9900; /* orange for sync manager */
+        }
         .tool-card h3 {
             margin: 0 0 8px 0;
             color: #2c3e50;
@@ -131,9 +134,6 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
 </head>
 <body>
-    <div style="margin-bottom:16px;">
-        <a href="/barcode-print-que" class="btn btn-primary" style="text-decoration:none;">🖨️ Barcode Print Que</a>
-    </div>
     <div class="container">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
             <a href="/" style="text-decoration:none;">
@@ -146,8 +146,15 @@
         </div>
 
         <div class="tools-grid">
-            <!-- Top: Sync Manager -->
-            <a href="/sync" class="tool-card important" style="grid-column: 1 / -1;">
+            <!-- Top: Barcode Print Que -->
+            <a href="/barcode-print-que" class="tool-card important" style="grid-column: 1 / -1;">
+                <i class="fas fa-print"></i>
+                <h3>Barcode Print Que</h3>
+                <p>Print queued barcodes</p>
+            </a>
+
+            <!-- Sync Manager -->
+            <a href="/sync" class="tool-card sync-orange">
                 <i class="fas fa-sync-alt"></i>
                 <h3>Sync Manager</h3>
                 <p>Manage eBay & Amazon syncing</p>
@@ -172,12 +179,6 @@
                 <p>Extract BOL data from Excel files</p>
             </a>
 
-            <a href="/misc" class="tool-card important">
-                <i class="fas fa-cogs"></i>
-                <h3>Misc</h3>
-                <p>Timer & workflow settings</p>
-            </a>
-
             <a href="/printer-settings" class="tool-card">
                 <i class="fas fa-print"></i>
                 <h3>Printer Settings</h3>
@@ -189,163 +190,17 @@
                 <h3>Removed Items</h3>
                 <p>View auto-removal log</p>
             </a>
-        </div>
 
-    <div class="sold-orders-section">
-            <h2>Sold Orders</h2>
-            <div class="form-group">
-                <label for="sold-days">Days to fetch:</label>
-                <input type="number" id="sold-days" value="90" min="1" max="120">
-            </div>
-            <button id="get-sold-orders-btn" class="btn">
-                <i class="fas fa-download"></i> Get eBay Sold Orders
-            </button>
-            <button id="test-sold-item-btn" class="btn" style="margin-top:18px;background:#2196F3;">
-                <i class="fas fa-vial"></i> Test Sold Item
-            </button>
-        </div>
-
-        <div class="sold-orders-section" style="margin-top:20px;">
-            <h2>🟠 Amazon Integration</h2>
-            <div class="form-group">
-                <label for="amazon-days">Days to fetch:</label>
-                <input type="number" id="amazon-days" value="30" min="1" max="90">
-            </div>
-            <button id="test-amazon-btn" class="btn" style="background:#FF9900;">
-                <i class="fas fa-plug"></i> Test Amazon Connection
-            </button>
-            <button id="sync-amazon-btn" class="btn" style="margin-top:12px;background:#FF9900;">
-                <i class="fas fa-sync"></i> Sync Amazon Orders
-            </button>
-            <button id="sync-amazon-listings-btn" class="btn" style="margin-top:12px;background:#FF9900;">
-                <i class="fas fa-boxes"></i> Sync Amazon Listings
-            </button>
-            <div id="amazon-status" style="margin-top:12px;padding:8px;border-radius:4px;display:none;"></div>
+            <a href="/misc" class="tool-card">
+                <i class="fas fa-cogs"></i>
+                <h3>Misc</h3>
+                <p>Timer & workflow settings</p>
+            </a>
         </div>
 
         
     </div>
 
-    <script>
-    document.getElementById('get-sold-orders-btn').onclick = function(e) {
-        e.preventDefault();
-        const days = parseInt(document.getElementById('sold-days').value) || 90;
-        fetch('/get-sold-orders', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ days })
-        })
-        .then(r => r.json())
-        .then(data => {
-            if (data.success) {
-                alert('Sold orders fetched and stored successfully!');
-            } else {
-                alert('Failed to fetch sold orders: ' + (data.error || 'Unknown error'));
-            }
-        })
-        .catch(error => {
-            console.error('Error:', error);
-            alert('An error occurred while fetching sold orders');
-        });
-    };
-
-    document.getElementById('test-sold-item-btn').onclick = function() {
-        fetch('/test_sold_item', {method: 'POST'})
-            .then(res => res.json())
-            .then(data => {
-                alert(data.success ? "Item 99 isHandled set to 0!" : "Error: " + data.error);
-            });
-    };
-
-    // Amazon integration
-    const amazonStatus = document.getElementById('amazon-status');
     
-    document.getElementById('test-amazon-btn').onclick = async function() {
-        amazonStatus.style.display = 'block';
-        amazonStatus.style.background = '#fff3cd';
-        amazonStatus.style.color = '#856404';
-        amazonStatus.textContent = '🔄 Testing connection...';
-        
-        try {
-            const res = await fetch('/api/amazon/test-connection');
-            const data = await res.json();
-            
-            if (data.success) {
-                amazonStatus.style.background = '#d4edda';
-                amazonStatus.style.color = '#155724';
-                amazonStatus.textContent = '✅ Amazon connection successful!';
-            } else {
-                amazonStatus.style.background = '#f8d7da';
-                amazonStatus.style.color = '#721c24';
-                amazonStatus.textContent = '❌ Connection failed: ' + (data.error || 'Unknown error');
-            }
-        } catch (error) {
-            amazonStatus.style.background = '#f8d7da';
-            amazonStatus.style.color = '#721c24';
-            amazonStatus.textContent = '❌ Error: ' + error.message;
-        }
-    };
-    
-    document.getElementById('sync-amazon-btn').onclick = async function() {
-        const days = parseInt(document.getElementById('amazon-days').value) || 30;
-        
-        amazonStatus.style.display = 'block';
-        amazonStatus.style.background = '#fff3cd';
-        amazonStatus.style.color = '#856404';
-        amazonStatus.textContent = `🔄 Syncing Amazon orders (last ${days} days)...`;
-        
-        try {
-            const res = await fetch('/api/amazon/sync-orders', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ days })
-            });
-            const data = await res.json();
-            
-            if (data.success) {
-                amazonStatus.style.background = '#d4edda';
-                amazonStatus.style.color = '#155724';
-                amazonStatus.textContent = `✅ Synced ${data.orders_synced || 0} Amazon orders successfully!`;
-            } else {
-                amazonStatus.style.background = '#f8d7da';
-                amazonStatus.style.color = '#721c24';
-                amazonStatus.textContent = '❌ Sync failed: ' + (data.error || 'Unknown error');
-            }
-        } catch (error) {
-            amazonStatus.style.background = '#f8d7da';
-            amazonStatus.style.color = '#721c24';
-            amazonStatus.textContent = '❌ Error: ' + error.message;
-        }
-    };
-    
-    document.getElementById('sync-amazon-listings-btn').onclick = async function() {
-        amazonStatus.style.display = 'block';
-        amazonStatus.style.background = '#fff3cd';
-        amazonStatus.style.color = '#856404';
-        amazonStatus.textContent = '🔄 Syncing Amazon listings (this may take 1-2 minutes)...';
-        
-        try {
-            const res = await fetch('/api/amazon/sync-listings', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
-            });
-            const data = await res.json();
-            
-            if (data.success) {
-                amazonStatus.style.background = '#d4edda';
-                amazonStatus.style.color = '#155724';
-                amazonStatus.textContent = `✅ Synced ${data.listings_synced || 0} Amazon listings successfully!`;
-            } else {
-                amazonStatus.style.background = '#f8d7da';
-                amazonStatus.style.color = '#721c24';
-                amazonStatus.textContent = '❌ Sync failed: ' + (data.error || 'Unknown error');
-            }
-        } catch (error) {
-            amazonStatus.style.background = '#f8d7da';
-            amazonStatus.style.color = '#721c24';
-            amazonStatus.textContent = '❌ Error: ' + error.message;
-        }
-    };
-    </script>
 </body>
 </html>

@@ -87,22 +87,44 @@
           </label>
           <button class="btn btn-primary" id="printBarcodeBtn" style="width:100%; padding:24px; font-size:1.1rem; display:block;">🖨️ Print Barcode Label</button>
           <button class="btn btn-primary" id="addToQueBtn" style="width:100%; padding:24px; font-size:1.1rem; display:block; margin-top:8px;">➕ Add to Print Que</button>
-          <div style="margin-top:12px; padding:12px; background:#fff3cd; border:1px solid #ffc107; border-radius:8px;">
-            <label style="display:flex; align-items:center; font-weight:normal; margin:0; cursor:pointer;">
-              <input type="checkbox" id="fakePrintCheckbox" style="width:20px; height:20px; margin-right:8px; cursor:pointer;">
-              <span>⚠️ TEMPORARY: Simulate print (for testing without printer)</span>
-            </label>
-          </div>
+          <a href="/barcode-print-que" style="text-decoration:none;"><button class="btn btn-primary" style="width:100%; padding:24px; font-size:1.1rem; display:block; margin-top:8px;">📋 View Print Que</button></a>
       </div>
       <script>
         // Add to Print Que logic
         const addToQueBtn = document.getElementById('addToQueBtn');
         addToQueBtn.disabled = true;
-        function updateAddToQueBtn() {
+        
+        async function checkIfInQueue() {
+          if (!currentBarcode) return false;
+          try {
+            const response = await fetch('/api/print-queue');
+            const data = await response.json();
+            return data.success && data.queue.some(item => item.barcode === currentBarcode);
+          } catch (error) {
+            return false;
+          }
+        }
+        
+        async function updateAddToQueBtn() {
           const title = itemTitle.value.trim();
+          const inQueue = await checkIfInQueue();
+          
+          if (inQueue) {
+            addToQueBtn.textContent = '➖ Remove from Print Que';
+            addToQueBtn.style.background = '#e74c3c';
+            addToQueBtn.onclick = removeFromQueueHandler;
+            isPrinted = true; // Mark as printed since it's in queue
+            updatePrintStatus();
+          } else {
+            addToQueBtn.textContent = '➕ Add to Print Que';
+            addToQueBtn.style.background = '#00b894';
+            addToQueBtn.onclick = addToQueueHandler;
+          }
+          
           addToQueBtn.disabled = !(title && currentBarcode);
         }
-        addToQueBtn.addEventListener('click', async () => {
+        
+        async function addToQueueHandler() {
           const title = itemTitle.value.trim();
           if (!title || !currentBarcode) return;
           try {
@@ -114,25 +136,12 @@
             });
             const data = await response.json();
             if (data.success) {
-              showStatus('Added to print queue!', 'success');
-              // Reset form for next item
-              itemTitle.value = '';
-              barcodeDisplay.textContent = 'Loading...';
-              currentBarcode = '';
-              isPrinted = false;
+              // Mark as printed since it's been added to queue
+              isPrinted = true;
               updatePrintStatus();
-              updateTitleStatus();
+              showStatus('Added to print queue!', 'success');
               checkFormComplete();
-              generateBarcode();
-              // Optionally, reset image
-              capturedImageData = null;
-              preview.classList.add('hidden');
-              video.classList.remove('hidden');
-              captureBtn.classList.remove('hidden');
-              retakeBtn.classList.add('hidden');
-              imageStatus.textContent = '✗ Required';
-              imageStatus.className = 'field-status field-incomplete';
-              startCamera();
+              updateAddToQueBtn();
             } else {
               showStatus('Failed to add to queue: ' + data.error, 'error');
             }
@@ -140,7 +149,33 @@
             console.error('Error adding to queue:', error);
             showStatus('Failed to add to queue: ' + error.message, 'error');
           }
-        });
+        }
+        
+        async function removeFromQueueHandler() {
+          if (!currentBarcode) return;
+          try {
+            showStatus('Removing from print queue...', 'warning');
+            const response = await fetch('/api/print-queue/item', {
+              method: 'DELETE',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ barcode: currentBarcode })
+            });
+            const data = await response.json();
+            if (data.success) {
+              isPrinted = false; // Mark as not printed since removed from queue
+              updatePrintStatus();
+              showStatus('Removed from print queue!', 'success');
+              checkFormComplete();
+              updateAddToQueBtn();
+            } else {
+              showStatus('Failed to remove from queue: ' + data.error, 'error');
+            }
+          } catch (error) {
+            console.error('Error removing from queue:', error);
+            showStatus('Failed to remove from queue: ' + error.message, 'error');
+          }
+        }
+        
         itemTitle.addEventListener('input', updateAddToQueBtn);
         // Also update on barcode generation
         const origGenerateBarcode = generateBarcode;
@@ -181,7 +216,6 @@
     const printBarcodeBtn = document.getElementById('printBarcodeBtn');
     const completeBtn = document.getElementById('completeBtn');
     const statusMsg = document.getElementById('statusMsg');
-    const fakePrintCheckbox = document.getElementById('fakePrintCheckbox');
     
     const titleStatus = document.getElementById('titleStatus');
     const imageStatus = document.getElementById('imageStatus');
@@ -409,19 +443,6 @@
       }
     }
     
-    function handleFakePrint() {
-      if (fakePrintCheckbox.checked) {
-        isPrinted = true;
-        updatePrintStatus();
-        showStatus('Print simulated (checkbox enabled)', 'success');
-        checkFormComplete();
-      } else {
-        isPrinted = false;
-        updatePrintStatus();
-        checkFormComplete();
-      }
-    }
-    
     function updateTitleStatus() {
       const title = itemTitle.value.trim();
       if (title) {
@@ -511,7 +532,6 @@
     printBarcodeBtn.addEventListener('click', printBarcode);
     completeBtn.addEventListener('click', completeAndContinue);
     itemTitle.addEventListener('input', updateTitleStatus);
-    fakePrintCheckbox.addEventListener('change', handleFakePrint);
     
     // Scroll on blur (when user exits the title input) or on Enter key
     itemTitle.addEventListener('blur', () => {
