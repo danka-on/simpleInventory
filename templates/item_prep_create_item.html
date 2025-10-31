@@ -222,32 +222,31 @@
         '<head>',
         '  <title>Print Barcode</title>',
         '  <style>',
-        '    @media print { @page { margin: 0; size: 4in 2in; } body { margin: 0; } }',
-        '    body { font-family: Arial, sans-serif; margin: 0; padding: 0; display: flex; justify-content: center; align-items: center; min-height: 2in; }',
-        '    .barcode-container { text-align: center; padding: 0.25in; width: 4in; }',
-        '    .barcode-title { font-size: 14px; font-weight: bold; margin-bottom: 8px; word-wrap: break-word; }',
-        '    svg { max-width: 100%; height: auto; }',
+        '    @page { size: 3in 1in; margin: 0; }',
+        '    body { font-family: Arial, sans-serif; background: white; margin: 0; padding: 0; display: flex; justify-content: center; align-items: center; height: 1in; }',
+        '    .barcode-label { width: 3in; height: 1in; display: flex; flex-direction: column; align-items: center; justify-content: center; page-break-inside: avoid; break-inside: avoid; padding: 0; }',
+        '    .barcode-title { font-size: 12px; font-weight: bold; text-align: center; margin-bottom: 2px; color: #000; max-width: 2.8in; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }',
+        '    #barcode { display: block; margin: 0 auto; width: 2.6in; height: 0.5in; }',
+        '    @media print { .barcode-label { border: none; page-break-inside: avoid; break-inside: avoid; } }',
         '  </style>',
         '  <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"><\/script>',
         '</head>',
         '<body>',
-        '  <div class="barcode-container">',
+        '  <div class="barcode-label">',
         '    <div class="barcode-title">' + (barcodeData.description || '') + '</div>',
         '    <svg id="barcode"></svg>',
         '  </div>',
         '  <script>',
-        '    window.onload = function() {',
-        '      JsBarcode("#barcode", "' + (barcodeData.upc || '') + '", {',
-        '        format: "CODE128",',
-        '        width: 2,',
-        '        height: 80,',
-        '        displayValue: true,',
-        '        fontSize: 16,',
-        '        margin: 10',
-        '      });',
-        '      setTimeout(function() { window.print(); }, 500);',
-        '      window.onafterprint = function() { window.close(); };',
-        '    };',
+        '    JsBarcode("#barcode", "' + (barcodeData.upc || '') + '", {',
+        '      format: "CODE128",',
+        '      width: 2,',
+        '      height: 40,',
+        '      displayValue: true,',
+        '      fontSize: 12,',
+        '      margin: 0',
+        '    });',
+        '    setTimeout(function() { window.print(); }, 400);',
+        '    window.onafterprint = function() { window.close(); };',
         '  <\/script>',
         '</body>',
         '</html>'
@@ -271,16 +270,15 @@
       try {
         // Check printer configuration first
         const configResponse = await fetch('/api/printer/config');
-        const config = await configResponse.json();
-        
+        const configData = await configResponse.json();
+        const printerConfig = configData.config || {};
         // If browser print mode, use browser print
-        if (config.print_method === 'browser') {
+        if (printerConfig.print_method === 'browser') {
           showStatus('Opening print dialog...', 'warning');
           printBarcodeBrowser({
             upc: currentBarcode,
             description: title
           });
-          
           // Mark as printed after a short delay (user initiated print)
           setTimeout(() => {
             isPrinted = true;
