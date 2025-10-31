@@ -3715,8 +3715,8 @@ def searchbol_api():
             SELECT item_description as description, upc, client_cost, 
                    total_client_cost as total_cost, lot_number, bol_number, quantity
             FROM raw_bol_items 
-            WHERE item_description LIKE ? OR upc LIKE ?
-        ''', (f'%{q_stripped}%', f'%{q_stripped}%'))
+            WHERE item_description LIKE ? OR upc LIKE ? OR lot_number LIKE ? OR bol_number LIKE ?
+        ''', (f'%{q_stripped}%', f'%{q_stripped}%', f'%{q_stripped}%', f'%{q_stripped}%'))
         results = [dict(row) for row in cur.fetchall()]
         conn.close()
     return jsonify({'results': results})
@@ -3803,7 +3803,7 @@ def api_search_db(db_key):
             'sold': 'sold.db',
             'searchRack': 'searchRack.db',
             'found': 'found.db',
-            'bol': 'bol.db'
+            'bol': 'rawbol.db'  # changed from bol.db to rawbol.db
         }
         if db_key not in mapping:
             return jsonify({'error': 'Unknown db_key'}), 400

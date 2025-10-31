@@ -1,0 +1,16 @@
+<html>
+<body>
+<!-- Summary table (should be ignored) -->
+<table border="1">
+<tr><th>LOCATION</th><th>LOT #</th><th>BOL #</th><th>CATEGORY</th></tr>
+<tr><td>STORE</td><td>LOT001</td><td>BOL001</td><td>CATEGORY1</td></tr>
+</table>
+
+<!-- Item details table (should be selected) -->
+<table border="1">
+<tr><th>UPC</th><th>ITEM DESCRIPTION</th><th>CLIENT COST</th><th>TOTAL CLIENT COST</th></tr>
+<tr><td>123456789012</td><td>Test Item 1</td><td>$52.47</td><td>$52.47</td></tr>
+<tr><td>987654321098</td><td>Test Item 2</td><td>$25.99</td><td>$51.98</td></tr>
+</table>
+</body>
+</html>

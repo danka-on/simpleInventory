@@ -23,6 +23,10 @@ pandas
 xlrd
 # If you use openpyxl for .xlsx Excel import/export:
 openpyxl
+# If you use lxml for HTML table parsing:
+lxml
+# If you use BeautifulSoup for HTML parsing:
+beautifulsoup4
 # If you use gunicorn for production server:
 gunicorn
 # If you use python-barcode for barcode generation:

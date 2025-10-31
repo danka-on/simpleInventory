@@ -82,6 +82,11 @@ def insert_raw_bol_items(df, lot_number, import_date):
                     qty = int(row['QTY'])
                 except:
                     qty = 1
+            elif 'ORIGINAL QTY' in row:
+                try:
+                    qty = int(row['ORIGINAL QTY'])
+                except:
+                    qty = 1
             
             cur.execute('''INSERT INTO raw_bol_items 
                 (upc, item_description, client_cost, total_client_cost, image_url, quantity, lot_number, bol_number, import_date, created_at)

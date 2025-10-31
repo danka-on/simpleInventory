@@ -51,21 +51,59 @@ def process_bol_excel(file, lot_number, import_date):
                 if not tables:
                     raise ValueError("No tables found in HTML")
                 
-                # Find the table with UPC data
+                # Find the table with UPC data - prioritize tables with UPC in headers
                 df_raw = None
+                
+                # First priority: table with 'UPC' in column headers
                 for table in tables:
-                    # Look for a table that has 'UPC' in its columns or data
-                    table_str = table.to_string().upper()
-                    if 'UPC' in table_str:
+                    if any('UPC' in str(col).upper() for col in table.columns):
                         df_raw = table
+                        print(f"DEBUG: Found table with UPC in headers: {len(table)} rows, {len(table.columns)} columns")
                         break
                 
+                # Second priority: table with UPC-like data (long numeric strings)
                 if df_raw is None:
-                    # If no table has UPC in header, try the first table with reasonable data
                     for table in tables:
-                        if len(table.columns) > 3 and len(table) > 1:  # At least 4 columns and 2 rows
-                            df_raw = table
+                        # Check if any column has UPC-like values (12-13 digit numbers)
+                        for col in table.columns:
+                            col_values = table[col].dropna().astype(str)
+                            upc_candidates = [v for v in col_values if v.isdigit() and 10 <= len(v) <= 14]
+                            if len(upc_candidates) > len(col_values) * 0.3:  # At least 30% UPC-like values
+                                df_raw = table
+                                print(f"DEBUG: Found table with UPC-like data: {len(table)} rows, {len(table.columns)} columns")
+                                break
+                
+                # Third priority: largest table with reasonable data (most columns and rows)
+                if df_raw is None:
+                    best_table = None
+                    best_score = 0
+                    for table in tables:
+                        # Score based on number of columns and rows
+                        score = len(table.columns) * len(table)
+                        if score > best_score and len(table.columns) > 3 and len(table) > 1:
+                            best_score = score
+                            best_table = table
+                    if best_table is not None:
+                        df_raw = best_table
+                        print(f"DEBUG: Using largest table: {len(best_table)} rows, {len(best_table.columns)} columns")
+                
+                # Special handling for Macy's BOL HTML: single table with multiple sections
+                if df_raw is not None and not any('UPC' in str(col).upper() for col in df_raw.columns):
+                    print("DEBUG: Table doesn't have UPC in headers, checking for UPC row within table...")
+                    # Look for a row containing 'UPC' and use it as header
+                    for idx, row in df_raw.iterrows():
+                        if any(str(cell).strip().upper() == 'UPC' for cell in row):
+                            print(f"DEBUG: Found UPC header in row {idx}, extracting from there")
+                            # Create new DataFrame starting from this row as header
+                            df_raw = df_raw.iloc[idx:].reset_index(drop=True)
+                            # Set the first row as column headers
+                            df_raw.columns = df_raw.iloc[0]
+                            df_raw = df_raw.iloc[1:].reset_index(drop=True)
+                            print(f"DEBUG: Extracted UPC table: {len(df_raw)} rows, {len(df_raw.columns)} columns")
                             break
+                
+                if df_raw is None:
+                    raise ValueError("Could not find a suitable table with item data")
                 
                 # If pandas parsing didn't work well, try BeautifulSoup
                 if df_raw is None or not any('UPC' in str(col).upper() for col in df_raw.columns):
@@ -73,31 +111,58 @@ def process_bol_excel(file, lot_number, import_date):
                     from bs4 import BeautifulSoup
                     
                     soup = BeautifulSoup(html_content, 'html.parser')
-                    table = soup.find('table')
+                    all_tables = soup.find_all('table')
                     
-                    if table:
+                    # Find the best table using similar logic
+                    best_table = None
+                    best_score = 0
+                    
+                    for table in all_tables:
                         rows = table.find_all('tr')
-                        if len(rows) > 1:  # Need at least header + 1 data row
-                            # Extract data from table rows
-                            table_data = []
-                            max_cols = 0
-                            for row in rows:
-                                cells = row.find_all(['td', 'th'])
-                                if cells:  # Skip empty rows
-                                    row_data = [cell.get_text(strip=True) for cell in cells]
-                                    if row_data and any(cell for cell in row_data):  # Skip completely empty rows
-                                        table_data.append(row_data)
-                                        max_cols = max(max_cols, len(row_data))
+                        if len(rows) < 2:  # Need at least header + 1 data row
+                            continue
                             
-                            if len(table_data) > 1:
-                                # Pad shorter rows with empty strings to match max_cols
-                                for row in table_data:
-                                    while len(row) < max_cols:
-                                        row.append('')
-                                
-                                # Convert to DataFrame
-                                df_raw = pd.DataFrame(table_data[1:], columns=table_data[0] if table_data else None)
-                                print(f"DEBUG: BeautifulSoup extracted {len(df_raw)} rows with {len(df_raw.columns)} columns")
+                        # Extract header row
+                        header_row = rows[0]
+                        header_cells = header_row.find_all(['td', 'th'])
+                        headers = [cell.get_text(strip=True) for cell in header_cells]
+                        
+                        # Check for UPC in headers
+                        if any('UPC' in header.upper() for header in headers):
+                            best_table = table
+                            print(f"DEBUG: BeautifulSoup found table with UPC in headers")
+                            break
+                        
+                        # Score based on number of columns and data rows
+                        num_cols = len(headers)
+                        num_data_rows = len(rows) - 1  # Subtract header row
+                        score = num_cols * num_data_rows
+                        
+                        if score > best_score and num_cols > 3 and num_data_rows > 1:
+                            best_score = score
+                            best_table = table
+                    
+                    if best_table:
+                        rows = best_table.find_all('tr')
+                        table_data = []
+                        max_cols = 0
+                        for row in rows:
+                            cells = row.find_all(['td', 'th'])
+                            if cells:  # Skip empty rows
+                                row_data = [cell.get_text(strip=True) for cell in cells]
+                                if row_data and any(cell for cell in row_data):  # Skip completely empty rows
+                                    table_data.append(row_data)
+                                    max_cols = max(max_cols, len(row_data))
+                        
+                        if len(table_data) > 1:
+                            # Pad shorter rows with empty strings to match max_cols
+                            for row in table_data:
+                                while len(row) < max_cols:
+                                    row.append('')
+                            
+                            # Convert to DataFrame
+                            df_raw = pd.DataFrame(table_data[1:], columns=table_data[0] if table_data else None)
+                            print(f"DEBUG: BeautifulSoup extracted {len(df_raw)} rows with {len(df_raw.columns)} columns")
                 
                 # For HTML tables, pandas.read_html() or BeautifulSoup should have already parsed headers correctly
                 # Just clean up the DataFrame
@@ -223,6 +288,8 @@ def process_bol_excel(file, lot_number, import_date):
         if result.get('success'):
             # Log the upload
             log_upload(filename, lot_number, import_date, result.get('inserted', 0))
+            # Include lot_number in response for frontend undo functionality
+            result['lot_number'] = lot_number
         
         return result
     except Exception as e:
