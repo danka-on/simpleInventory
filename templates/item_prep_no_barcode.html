@@ -45,6 +45,9 @@
 <body>
   <div class="container">
     <h1>🔍 Item Prep - No Barcode</h1>
+    <div style="margin-bottom:16px; text-align:right;">
+      <a href="/barcode-print-que" class="btn btn-primary" style="text-decoration:none;">🖨️ Barcode Print Que</a>
+    </div>
     <div class="card">
       <a href="/item-prep"><button class="btn btn-danger">← Back to Prep</button></a>
       <div style="margin-top:20px; margin-bottom:20px">
@@ -63,6 +66,7 @@
         <div class="barcode-field" id="barcodeField"></div>
         <div class="action-buttons">
           <button class="btn btn-primary" id="printBarcodeBtn" style="flex:1">🖨️ Print Barcode</button>
+          <button class="btn btn-primary" id="addToQueBtn" style="flex:1">➕ Add to Print Que</button>
           <button class="btn btn-primary" id="continueBtn" style="flex:1">✓ Continue to Prep</button>
         </div>
       </div>
@@ -87,9 +91,33 @@
     const selectedItemCard = document.getElementById('selectedItemCard');
     const selectedItemInfo = document.getElementById('selectedItemInfo');
     const barcodeField = document.getElementById('barcodeField');
-    const printBarcodeBtn = document.getElementById('printBarcodeBtn');
-    const continueBtn = document.getElementById('continueBtn');
-    const statusMsg = document.getElementById('statusMsg');
+    const addToQueBtn = document.getElementById('addToQueBtn');
+    addToQueBtn.disabled = true;
+
+    function updateAddToQueBtn() {
+      addToQueBtn.disabled = !selectedItem;
+    }
+
+    addToQueBtn.addEventListener('click', async () => {
+      if (!selectedItem) return;
+      try {
+        statusMsg.textContent = 'Adding to print queue...';
+        const response = await fetch('/api/print-queue', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: selectedItem.item_description, barcode: selectedItem.upc })
+        });
+        const data = await response.json();
+        if (data.success) {
+          statusMsg.textContent = 'Added to print queue!';
+        } else {
+          statusMsg.textContent = 'Failed to add to queue: ' + data.error;
+        }
+      } catch (error) {
+        console.error('Error adding to queue:', error);
+        statusMsg.textContent = 'Failed to add to queue: ' + error.message;
+      }
+    });
 
     function esc(s) {
       return (s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
@@ -102,6 +130,7 @@
       resultsContainer.innerHTML = '';
       selectedItem = null;
       selectedItemCard.classList.add('hidden');
+      updateAddToQueBtn();
       searchResults.classList.remove('hidden');
       pagination.classList.add('hidden');
       try {
@@ -166,6 +195,7 @@
       barcodeField.textContent = `Barcode: ${item.upc}`;
       selectedItemCard.classList.remove('hidden');
       statusMsg.textContent = 'Item selected. Print barcode or continue to prep.';
+      updateAddToQueBtn();
       setTimeout(() => { window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }); }, 100);
     }
 

@@ -86,12 +86,70 @@
             <span class="field-status field-incomplete" id="printStatus">✗ Not Printed</span>
           </label>
           <button class="btn btn-primary" id="printBarcodeBtn" style="width:100%; padding:24px; font-size:1.1rem; display:block;">🖨️ Print Barcode Label</button>
+          <button class="btn btn-primary" id="addToQueBtn" style="width:100%; padding:24px; font-size:1.1rem; display:block; margin-top:8px;">➕ Add to Print Que</button>
           <div style="margin-top:12px; padding:12px; background:#fff3cd; border:1px solid #ffc107; border-radius:8px;">
             <label style="display:flex; align-items:center; font-weight:normal; margin:0; cursor:pointer;">
               <input type="checkbox" id="fakePrintCheckbox" style="width:20px; height:20px; margin-right:8px; cursor:pointer;">
               <span>⚠️ TEMPORARY: Simulate print (for testing without printer)</span>
             </label>
           </div>
+      </div>
+      <script>
+        // Add to Print Que logic
+        const addToQueBtn = document.getElementById('addToQueBtn');
+        addToQueBtn.disabled = true;
+        function updateAddToQueBtn() {
+          const title = itemTitle.value.trim();
+          addToQueBtn.disabled = !(title && currentBarcode);
+        }
+        addToQueBtn.addEventListener('click', async () => {
+          const title = itemTitle.value.trim();
+          if (!title || !currentBarcode) return;
+          try {
+            showStatus('Adding to print queue...', 'warning');
+            const response = await fetch('/api/print-queue', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ title: title, barcode: currentBarcode })
+            });
+            const data = await response.json();
+            if (data.success) {
+              showStatus('Added to print queue!', 'success');
+              // Reset form for next item
+              itemTitle.value = '';
+              barcodeDisplay.textContent = 'Loading...';
+              currentBarcode = '';
+              isPrinted = false;
+              updatePrintStatus();
+              updateTitleStatus();
+              checkFormComplete();
+              generateBarcode();
+              // Optionally, reset image
+              capturedImageData = null;
+              preview.classList.add('hidden');
+              video.classList.remove('hidden');
+              captureBtn.classList.remove('hidden');
+              retakeBtn.classList.add('hidden');
+              imageStatus.textContent = '✗ Required';
+              imageStatus.className = 'field-status field-incomplete';
+              startCamera();
+            } else {
+              showStatus('Failed to add to queue: ' + data.error, 'error');
+            }
+          } catch (error) {
+            console.error('Error adding to queue:', error);
+            showStatus('Failed to add to queue: ' + error.message, 'error');
+          }
+        });
+        itemTitle.addEventListener('input', updateAddToQueBtn);
+        // Also update on barcode generation
+        const origGenerateBarcode = generateBarcode;
+        generateBarcode = async function() {
+          await origGenerateBarcode();
+          updateAddToQueBtn();
+        };
+        updateAddToQueBtn();
+      </script>
         </div>
         
         <div id="statusMsg" class="hidden"></div>
@@ -114,6 +172,7 @@
     const itemTitle = document.getElementById('itemTitle');
     const barcodeDisplay = document.getElementById('barcodeDisplay');
     const regenerateBtn = document.getElementById('regenerateBtn');
+    console.log('regenerateBtn element:', regenerateBtn);
     const video = document.getElementById('video');
     const canvas = document.getElementById('canvas');
     const preview = document.getElementById('preview');
@@ -139,11 +198,14 @@
     }
     
     async function generateBarcode() {
+      console.log('generateBarcode called');
       try {
+        console.log('Making API call...');
         const response = await fetch('/api/items-prep/generate-barcode', {
           method: 'POST'
         });
         const data = await response.json();
+        console.log('API response:', data);
         
         if (data.success) {
           currentBarcode = data.barcode;
@@ -151,10 +213,12 @@
           isPrinted = false;
           updatePrintStatus();
           checkFormComplete();
+          console.log('Barcode updated to:', currentBarcode);
         } else {
           showStatus('Failed to generate barcode: ' + data.error, 'error');
         }
       } catch (error) {
+        console.error('Error generating barcode:', error);
         showStatus('Error generating barcode: ' + error.message, 'error');
       }
     }
@@ -438,7 +502,10 @@
     }
     
     // Event listeners
-    regenerateBtn.addEventListener('click', generateBarcode);
+    regenerateBtn.addEventListener('click', () => {
+      console.log('Regenerate button clicked');
+      generateBarcode();
+    });
     captureBtn.addEventListener('click', capturePhoto);
     retakeBtn.addEventListener('click', retakePhoto);
     printBarcodeBtn.addEventListener('click', printBarcode);

@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Barcode Print Que</title>
+  <style>
+    body { font-family: Arial, sans-serif; background: #f5f5f5; margin: 0; padding: 0; }
+    .container { max-width: 800px; margin: 40px auto; background: #fff; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); padding: 24px; }
+    h1 { color: #2c3e50; margin-bottom: 24px; }
+    .que-list { margin-bottom: 24px; }
+    .que-item { display: flex; align-items: center; background: #f8f9fa; border-radius: 8px; padding: 12px; margin-bottom: 10px; box-shadow: 0 1px 2px rgba(0,0,0,0.03); }
+    .que-title { flex: 1; font-weight: 600; color: #2c3e50; }
+    .que-barcode { font-family: monospace; color: #636e72; margin-left: 16px; }
+    .remove-btn { background: #e74c3c; color: #fff; border: none; border-radius: 6px; padding: 6px 12px; cursor: pointer; margin-left: 16px; }
+    .remove-btn:hover { background: #c0392b; }
+    .actions { display: flex; gap: 12px; margin-bottom: 24px; }
+    .btn { padding: 10px 18px; border: none; border-radius: 8px; font-size: 15px; cursor: pointer; transition: all 0.2s; }
+    .btn-primary { background: #00b894; color: #fff; }
+    .btn-primary:hover { background: #00a383; }
+    .btn-danger { background: #e74c3c; color: #fff; }
+    .btn-danger:hover { background: #c0392b; }
+    .cleanup-notice { background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 8px; padding: 12px; margin-bottom: 16px; display: none; }
+    .cleanup-timer { color: #d63031; font-weight: bold; }
+    .cancel-cleanup { background: #6c5ce7; color: #fff; border: none; border-radius: 6px; padding: 6px 12px; cursor: pointer; margin-left: 12px; }
+    .cancel-cleanup:hover { background: #5f27cd; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🖨️ Barcode Print Que</h1>
+    <div id="cleanupNotice" class="cleanup-notice">
+      <span>Queue will auto-clear in <span id="cleanupTimer" class="cleanup-timer">10:00</span></span>
+      <button id="cancelCleanupBtn" class="cancel-cleanup">Cancel Auto-Clear</button>
+    </div>
+    <div class="actions">
+      <button class="btn btn-primary" id="printAllBtn">Print All</button>
+      <button class="btn btn-danger" id="resetBtn">Reset Que</button>
+    </div>
+    <div id="queList" class="que-list"></div>
+    <div id="emptyMsg" class="empty-msg" style="display:none;">No barcodes in the print que.</div>
+  </div>
+  <script>
+    // Use server-side API for que persistence
+    let cleanupTimer = null;
+    let cleanupTimeLeft = 0;
+    const CLEANUP_DELAY = 10 * 60 * 1000; // 10 minutes in milliseconds
+    
+    async function getQue() {
+      try {
+        const response = await fetch('/api/print-queue');
+        const data = await response.json();
+        return data.success ? data.queue : [];
+      } catch (error) {
+        console.error('Error fetching queue:', error);
+        return [];
+      }
+    }
+    
+    async function addToQue(title, barcode) {
+      try {
+        const response = await fetch('/api/print-queue', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title, barcode })
+        });
+        const data = await response.json();
+        return data.success;
+      } catch (error) {
+        console.error('Error adding to queue:', error);
+        return false;
+      }
+    }
+    
+    async function removeFromQue(barcode) {
+      try {
+        const response = await fetch('/api/print-queue/item', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ barcode })
+        });
+        const data = await response.json();
+        return data.success;
+      } catch (error) {
+        console.error('Error removing from queue:', error);
+        return false;
+      }
+    }
+    
+    async function clearQue() {
+      try {
+        const response = await fetch('/api/print-queue', {
+          method: 'DELETE'
+        });
+        const data = await response.json();
+        return data.success;
+      } catch (error) {
+        console.error('Error clearing queue:', error);
+        return false;
+      }
+    }
+    
+    function startCleanupTimer() {
+      cleanupTimeLeft = CLEANUP_DELAY;
+      updateCleanupDisplay();
+      document.getElementById('cleanupNotice').style.display = 'block';
+      
+      cleanupTimer = setInterval(async () => {
+        cleanupTimeLeft -= 1000;
+        updateCleanupDisplay();
+        
+        if (cleanupTimeLeft <= 0) {
+          clearCleanupTimer();
+          await clearQue(); // Clear queue from server
+          renderQue();
+        }
+      }, 1000);
+    }
+    
+    function clearCleanupTimer() {
+      if (cleanupTimer) {
+        clearInterval(cleanupTimer);
+        cleanupTimer = null;
+      }
+      document.getElementById('cleanupNotice').style.display = 'none';
+    }
+    
+    function updateCleanupDisplay() {
+      const minutes = Math.floor(cleanupTimeLeft / (60 * 1000));
+      const seconds = Math.floor((cleanupTimeLeft % (60 * 1000)) / 1000);
+      const timeString = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+      document.getElementById('cleanupTimer').textContent = timeString;
+    }
+    async function renderQue() {
+      const que = await getQue();
+      const queList = document.getElementById('queList');
+      const emptyMsg = document.getElementById('emptyMsg');
+      queList.innerHTML = '';
+      if (que.length === 0) {
+        emptyMsg.style.display = '';
+        return;
+      }
+      emptyMsg.style.display = 'none';
+      que.forEach((item, idx) => {
+        const div = document.createElement('div');
+        div.className = 'que-item';
+        div.innerHTML = `<span class="que-title">${item.title}</span><span class="que-barcode">${item.barcode}</span><button class="remove-btn" data-barcode="${item.barcode}">✖</button>`;
+        queList.appendChild(div);
+      });
+      // Attach remove handlers
+      document.querySelectorAll('.remove-btn').forEach(btn => {
+        btn.onclick = async function() {
+          const barcode = this.getAttribute('data-barcode');
+          const success = await removeFromQue(barcode);
+          if (success) {
+            clearCleanupTimer(); // Cancel cleanup timer when items are manually removed
+            renderQue();
+          }
+        };
+      });
+    }
+    document.getElementById('resetBtn').onclick = async function() {
+      if (confirm('Clear the entire print que?')) {
+        clearCleanupTimer();
+        const success = await clearQue();
+        if (success) {
+          renderQue();
+        }
+      }
+    };
+    
+    document.getElementById('cancelCleanupBtn').onclick = function() {
+      clearCleanupTimer();
+    };
+    
+    document.getElementById('printAllBtn').onclick = async function() {
+      const que = await getQue();
+      if (que.length === 0) return alert('No barcodes to print!');
+      
+      // Clear any existing cleanup timer
+      clearCleanupTimer();
+      
+      // Open print popup with all barcodes
+      const printWindow = window.open('', '', 'toolbar=0,location=0,menubar=0,scrollbars=0,status=0,titlebar=0');
+      const html = [
+        '<!DOCTYPE html>',
+        '<html>',
+        '<head>',
+        '  <title></title>',
+        '  <style>',
+        '    @page { size: 3in 1in; margin: 0; }',
+        '    body { font-family: Arial, sans-serif; background: white; margin: 0; padding: 0; display: flex; flex-direction: column; align-items: center; }',
+        '    .barcode-label { width: 3in; height: 1in; display: flex; flex-direction: column; align-items: center; justify-content: center; page-break-inside: avoid; break-inside: avoid; padding: 0; margin-bottom: 0.1in; }',
+        '    .barcode-title { font-size: 12px; font-weight: bold; text-align: center; margin-bottom: 2px; color: #000; max-width: 2.8in; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }',
+        '    .barcode-svg { display: block; margin: 0 auto; width: 2.6in; height: 0.5in; }',
+        '    @media print {',
+        '      .barcode-label { border: none; page-break-inside: avoid; break-inside: avoid; }',
+        '      body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }',
+        '      header, footer { display: none !important; }',
+        '    }',
+        '  </style>',
+        '  <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"><\/script>',
+        '</head>',
+        '<body>',
+        que.map(item => `\
+          <div class="barcode-label">\
+            <div class="barcode-title">${item.title}</div>\
+            <svg class="barcode-svg" id="barcode${item.barcode}"></svg>\
+          </div>\
+        `).join(''),
+        '<script>',
+        que.map(item => `JsBarcode('#barcode${item.barcode}', '${item.barcode}', { format: "CODE128", width: 2, height: 40, displayValue: true, fontSize: 12, margin: 0 });`).join('\n'),
+        'setTimeout(function() { window.print(); }, 400);',
+        'window.onafterprint = function() { window.close(); };',
+        '<\/script>',
+        '</body>',
+        '</html>'
+      ].join('\n');
+      printWindow.document.write(html);
+      printWindow.document.close();
+      printWindow.onload = function() { printWindow.document.title = ''; };
+      
+      // Start cleanup timer instead of clearing immediately
+      startCleanupTimer();
+    };
+    // Initialize the page
+    renderQue();
+  </script>
+</body>
+</html>
