@@ -5249,7 +5249,7 @@ def sync_missing_upcs():
     cur = conn.cursor()
     
     # Find items without UPCs (where UPC equals ASIN, meaning no UPC was set)
-    cur.execute('SELECT ASIN FROM amazonStore WHERE UPC = ASIN OR UPC IS NULL')
+    cur.execute('SELECT ASIN FROM ITEMS WHERE UPC = ASIN OR UPC IS NULL')
     items_without_upcs = [row[0] for row in cur.fetchall()]
     
     if not items_without_upcs:
@@ -5292,7 +5292,7 @@ def sync_missing_upcs():
                                     break
             
             if upc:
-                cur.execute('UPDATE amazonStore SET UPC = ? WHERE ASIN = ?', (upc, asin))
+                cur.execute('UPDATE ITEMS SET UPC = ? WHERE ASIN = ?', (upc, asin))
                 upcs_found += 1
                 print(f"✅ [{i}/{len(items_without_upcs)}] {asin}: {upc}")
             else:
