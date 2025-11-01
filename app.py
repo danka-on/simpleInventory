@@ -168,12 +168,12 @@ def api_financial_analytics():
         orders = sold_cur.fetchall()
         sold_conn.close()
         
-        # Connect to bol.db to get cost data
-        bol_conn = sqlite3.connect('bol.db')
-        bol_conn.row_factory = sqlite3.Row
-        bol_cur = bol_conn.cursor()
+        # Connect to rawbol.db to get cost data
+        rawbol_conn = sqlite3.connect('rawbol.db')
+        rawbol_conn.row_factory = sqlite3.Row
+        rawbol_cur = rawbol_conn.cursor()
         
-        # Also connect to ebayStore and amazonStore for fallback cost data
+        # Also connect to ebayStore and amazonStore for item verification
         ebay_conn = sqlite3.connect('ebayStore.db')
         ebay_conn.row_factory = sqlite3.Row
         ebay_cur = ebay_conn.cursor()
@@ -187,7 +187,7 @@ def api_financial_analytics():
         for order in orders:
             item_data = dict(order)
             
-            # Try to get cost from BOL first (priority 1)
+            # Try to get cost from rawbol.db
             upc = order['barcode'] or order['item_id']
             cost = None
             cost_source = None
@@ -195,12 +195,12 @@ def api_financial_analytics():
             bol_number = order['lot_number'] if order['lot_number'] and str(order['lot_number']).lower() not in ['', 'nan', 'none', 'null'] else None
             
             if upc:
-                # Check BOL - get cost only
-                bol_cur.execute('SELECT client_cost FROM bol_items WHERE upc = ? COLLATE NOCASE', (upc,))
-                bol_row = bol_cur.fetchone()
-                if bol_row and bol_row['client_cost']:
-                    cost = float(bol_row['client_cost'])
-                    cost_source = 'bol'
+                # Check rawbol for avg_cost
+                rawbol_cur.execute('SELECT avg_cost FROM raw_bol_items WHERE upc = ? COLLATE NOCASE ORDER BY created_at DESC LIMIT 1', (upc,))
+                rawbol_row = rawbol_cur.fetchone()
+                if rawbol_row and rawbol_row['avg_cost']:
+                    cost = float(rawbol_row['avg_cost'])
+                    cost_source = 'rawbol'
                 
                 # Fallback to eBay store data (could have cost in some cases)
                 if not cost:
@@ -223,26 +223,7 @@ def api_financial_analytics():
             
             transactions.append(item_data)
         
-        # Get BOL stats for each unique BOL number
-        bol_stats = {}
-        bol_cur.execute('''
-            SELECT 
-                bol_number,
-                COUNT(*) as item_count,
-                SUM(client_cost * quantity) as total_cost
-            FROM bol_items
-            WHERE bol_number IS NOT NULL 
-                AND bol_number != '' 
-                AND LOWER(bol_number) NOT IN ('nan', 'none', 'null')
-            GROUP BY bol_number
-        ''')
-        for row in bol_cur.fetchall():
-            bol_stats[row['bol_number']] = {
-                'item_count': row['item_count'],
-                'total_cost': float(row['total_cost']) if row['total_cost'] else 0
-            }
-        
-        bol_conn.close()
+        rawbol_conn.close()
         ebay_conn.close()
         amazon_conn.close()
         
@@ -292,7 +273,6 @@ def api_financial_analytics():
             'success': True,
             'transactions': transactions,
             'count': len(transactions),
-            'bol_stats': bol_stats,
             'lot_options': lot_options
         })
         
@@ -3231,7 +3211,7 @@ def api_rawbol_items(bol_number):
                 item_description,
                 quantity as original_qty,
                 image_url,
-                client_cost
+                avg_cost
             FROM raw_bol_items 
             WHERE bol_number = ?
             ORDER BY id
@@ -3955,10 +3935,10 @@ def searchbol_api():
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         cur.execute('''
-            SELECT item_description as description, upc, client_cost, 
-                   total_client_cost as total_cost, lot_number, bol_number, quantity
+            SELECT item_description as description, upc, avg_cost, 
+                   lot_number, bol_location, quantity
             FROM raw_bol_items 
-            WHERE item_description LIKE ? OR upc LIKE ? OR lot_number LIKE ? OR bol_number LIKE ?
+            WHERE item_description LIKE ? OR upc LIKE ? OR lot_number LIKE ? OR bol_location LIKE ?
         ''', (f'%{q_stripped}%', f'%{q_stripped}%', f'%{q_stripped}%', f'%{q_stripped}%'))
         results = [dict(row) for row in cur.fetchall()]
         conn.close()
