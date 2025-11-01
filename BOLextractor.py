@@ -8,9 +8,15 @@ def process_bol_excel(file, lot_number, import_date):
     """
     Process the uploaded Excel file (.xls, .xlsx, or .csv), find the row with 'UPC', 
     then read all data below it into rawbol.db.
-    Returns: {'success': True, 'inserted': n} or {'success': False, 'error': '...'}
+    Also extracts LOT # and TOTAL CLIENT COST from header section before UPC table.
+    Returns: {'success': True, 'inserted': n, 'extracted_lot_number': str, 'total_client_cost': float} 
+             or {'success': False, 'error': '...'}
     """
     try:
+        # Initialize header data
+        extracted_lot_number = None
+        total_client_cost_header = None
+        bol_location = None
         file_bytes = file.read()
         print('DEBUG: First 32 bytes of uploaded file:', file_bytes[:32])
         if not file_bytes or len(file_bytes) < 10:
@@ -171,15 +177,83 @@ def process_bol_excel(file, lot_number, import_date):
                 # Clean up column names (strip whitespace)
                 df.columns = [str(col).strip() for col in df.columns]
                 
-                # Clean currency-formatted columns (remove $ and convert to float)
-                currency_columns = ['CLIENT COST', 'TOTAL CLIENT COST', 'ORIGINAL COST', 'TOTAL ORIGINAL COST', 'ORIGINAL RETAIL', 'TOTAL ORIGINAL RETAIL']
-                for col in currency_columns:
-                    if col in df.columns:
-                        df[col] = df[col].astype(str).str.replace('$', '', regex=False).str.replace(',', '', regex=False).str.strip()
-                        # Convert to numeric, keeping NaN for empty strings
-                        df[col] = pd.to_numeric(df[col], errors='coerce')
-                
                 print(f"DEBUG: Processed HTML table into DataFrame with columns: {list(df.columns)}")
+                
+                # Extract header data from HTML content before the table
+                print(f"DEBUG: Extracting header data from HTML content...")
+                try:
+                    from bs4 import BeautifulSoup
+                    soup = BeautifulSoup(html_content, 'html.parser')
+                    
+                    # Try to find structured table data for LOCATION row
+                    tables_found = soup.find_all('table')
+                    location_row_found = False
+                    
+                    for table in tables_found:
+                        rows = table.find_all('tr')
+                        for row_idx, row in enumerate(rows):
+                            cells = row.find_all(['td', 'th'])
+                            if cells and len(cells) > 0:
+                                first_cell = cells[0].get_text(strip=True).upper()
+                                if first_cell == 'LOCATION':
+                                    print(f"DEBUG: Found LOCATION row in HTML table")
+                                    location_row_found = True
+                                    
+                                    # Find TOTAL CLIENT COST column index
+                                    total_cost_col_idx = None
+                                    for col_idx, cell in enumerate(cells):
+                                        cell_text = cell.get_text(strip=True).upper()
+                                        if 'TOTAL' in cell_text and 'CLIENT' in cell_text and 'COST' in cell_text:
+                                            total_cost_col_idx = col_idx
+                                            print(f"DEBUG: Found TOTAL CLIENT COST at column {col_idx}")
+                                            break
+                                    
+                                    # Go down in subsequent rows to find the last value in that column
+                                    if total_cost_col_idx is not None:
+                                        for next_row in rows[row_idx + 1:]:
+                                            next_cells = next_row.find_all(['td', 'th'])
+                                            if len(next_cells) > total_cost_col_idx:
+                                                cell_value = next_cells[total_cost_col_idx].get_text(strip=True)
+                                                # Check if this is the UPC row (stop before item table)
+                                                first_cell_text = next_cells[0].get_text(strip=True).upper()
+                                                if first_cell_text == 'UPC':
+                                                    break
+                                                
+                                                if cell_value and cell_value.lower() != 'nan':
+                                                    cell_value = cell_value.replace('$', '').replace(',', '').strip()
+                                                    try:
+                                                        total_client_cost_header = float(cell_value)
+                                                        print(f"DEBUG: Found TOTAL CLIENT COST value in HTML: ${total_client_cost_header}")
+                                                    except ValueError:
+                                                        pass
+                                    break
+                        if location_row_found:
+                            break
+                    
+                    # Fallback: Get all text content for LOT # extraction
+                    all_text = soup.get_text()
+                    lines = [line.strip() for line in all_text.split('\n') if line.strip()]
+                    
+                    # Look for LOT #
+                    for i, line in enumerate(lines):
+                        line_upper = line.upper().strip()
+                        
+                        # Look for LOT # or LOT NUMBER (more specific matching)
+                        if line_upper in ['LOT #', 'LOT#', 'LOT NUMBER', 'LOT NO', 'LOT NO.', 'LOT'] or line_upper.startswith('LOT #:') or line_upper.startswith('LOT NUMBER:'):
+                            # Try to extract the lot number from same line or next line
+                            lot_match = line.split(':')[-1].strip() if ':' in line else None
+                            if not lot_match or lot_match.upper().startswith('LOT'):
+                                # Check next line
+                                if i + 1 < len(lines):
+                                    lot_match = lines[i + 1].strip()
+                            if lot_match and not lot_match.upper().startswith('LOT') and len(lot_match) < 50:
+                                extracted_lot_number = lot_match
+                                print(f"DEBUG: Found LOT # in HTML: '{extracted_lot_number}'")
+                                break
+                    
+                except Exception as header_e:
+                    print(f"DEBUG: Could not extract header data from HTML: {header_e}")
+                
                 html_parsed = True
                 
             except Exception as html_e:
@@ -258,6 +332,71 @@ def process_bol_excel(file, lot_number, import_date):
             if upc_row_index is None:
                 return {'success': False, 'error': 'Could not find row with "UPC" header.'}
             
+            # Extract header data BEFORE the UPC table
+            print(f"DEBUG: Extracting header data from rows 0 to {upc_row_index}...")
+            
+            # Find the LOCATION row (first header row)
+            location_row_index = None
+            for idx in range(upc_row_index):
+                row = df_raw.iloc[idx]
+                first_cell = str(row.iloc[0]).strip().upper()
+                if first_cell == 'LOCATION':
+                    location_row_index = idx
+                    print(f"DEBUG: Found LOCATION header row at index {idx}")
+                    break
+            
+            # Extract TOTAL CLIENT COST and LOCATION from LOCATION row
+            if location_row_index is not None:
+                location_row = df_raw.iloc[location_row_index]
+                total_cost_col_idx = None
+                
+                # Find TOTAL CLIENT COST column in LOCATION row
+                for col_idx, cell in enumerate(location_row):
+                    cell_str = str(cell).strip().upper()
+                    if 'TOTAL' in cell_str and 'CLIENT' in cell_str and 'COST' in cell_str:
+                        total_cost_col_idx = col_idx
+                        print(f"DEBUG: Found TOTAL CLIENT COST column at index {col_idx} in LOCATION row")
+                        break
+                
+                # Go down in that column to find the last non-empty value
+                # Also extract the location from the first data row after LOCATION header
+                if total_cost_col_idx is not None:
+                    for idx in range(location_row_index + 1, upc_row_index):
+                        # Extract location from first column (first data row after LOCATION header)
+                        if bol_location is None and idx == location_row_index + 1:
+                            location_value = str(df_raw.iloc[idx, 0]).strip()
+                            if location_value and location_value.lower() != 'nan' and location_value.upper() != 'TOTAL':
+                                bol_location = location_value
+                                print(f"DEBUG: Found BOL location at row {idx}: '{bol_location}'")
+                        
+                        # Extract total cost
+                        cell_value = df_raw.iloc[idx, total_cost_col_idx]
+                        cell_str = str(cell_value).strip()
+                        if cell_str and cell_str.lower() != 'nan':
+                            # Clean currency formatting
+                            cell_str = cell_str.replace('$', '').replace(',', '').strip()
+                            try:
+                                total_client_cost_header = float(cell_str)
+                                print(f"DEBUG: Found TOTAL CLIENT COST value at row {idx}: ${total_client_cost_header}")
+                            except ValueError:
+                                print(f"DEBUG: Could not convert value '{cell_str}' to float")
+            
+            # Extract LOT # from any row before UPC table
+            for idx in range(upc_row_index):
+                row = df_raw.iloc[idx]
+                for col_idx, cell in enumerate(row):
+                    cell_str = str(cell).strip().upper()
+                    
+                    # Look for LOT # or LOT NUMBER (must match exactly or be at start of cell)
+                    # Avoid matching "LOT" within other words like "RALPH LAUREN"
+                    if cell_str in ['LOT #', 'LOT#', 'LOT NUMBER', 'LOT NO', 'LOT NO.', 'LOT']:
+                        # Check next column for the value
+                        if col_idx + 1 < len(row):
+                            lot_value = str(row.iloc[col_idx + 1]).strip()
+                            if lot_value and lot_value.lower() != 'nan' and len(lot_value) < 50:  # Reasonable length check
+                                extracted_lot_number = lot_value
+                                print(f"DEBUG: Found LOT # at row {idx}, col {col_idx}: '{extracted_lot_number}'")
+            
             # Re-read the file using the UPC row as header and skip everything above it
             in_memory_file.seek(0)
             if ext == '.csv':
@@ -267,14 +406,6 @@ def process_bol_excel(file, lot_number, import_date):
             
             # Clean up column names (strip whitespace)
             df.columns = [str(col).strip() for col in df.columns]
-            
-            # Clean currency-formatted columns (remove $ and convert to float)
-            currency_columns = ['CLIENT COST', 'TOTAL CLIENT COST', 'ORIGINAL COST', 'TOTAL ORIGINAL COST', 'ORIGINAL RETAIL', 'TOTAL ORIGINAL RETAIL']
-            for col in currency_columns:
-                if col in df.columns:
-                    df[col] = df[col].astype(str).str.replace('$', '', regex=False).str.replace(',', '', regex=False).str.strip()
-                    # Convert to numeric, keeping NaN for empty strings
-                    df[col] = pd.to_numeric(df[col], errors='coerce')
         
         # Validate required columns
         required_columns = ['UPC']
@@ -282,14 +413,45 @@ def process_bol_excel(file, lot_number, import_date):
             if col not in df.columns:
                 return {'success': False, 'error': f'Missing required column: {col}'}
         
+        # Calculate average cost: total BOL cost / total BOL quantity
+        avg_cost = None
+        if total_client_cost_header:
+            total_qty = 0
+            for _, row in df.iterrows():
+                qty = 1
+                if 'QUANTITY' in row:
+                    try:
+                        qty = int(row['QUANTITY'])
+                    except:
+                        qty = 1
+                elif 'QTY' in row:
+                    try:
+                        qty = int(row['QTY'])
+                    except:
+                        qty = 1
+                elif 'ORIGINAL QTY' in row:
+                    try:
+                        qty = int(row['ORIGINAL QTY'])
+                    except:
+                        qty = 1
+                total_qty += qty
+            
+            if total_qty > 0:
+                avg_cost = total_client_cost_header / total_qty
+                print(f"DEBUG: Calculated avg_cost = ${avg_cost:.2f} (total: ${total_client_cost_header} / qty: {total_qty})")
+        
         # Insert into rawbol.db
-        result = insert_raw_bol_items(df, lot_number, import_date)
+        result = insert_raw_bol_items(df, lot_number, import_date, avg_cost, extracted_lot_number, bol_location)
         
         if result.get('success'):
-            # Log the upload
-            log_upload(filename, lot_number, import_date, result.get('inserted', 0))
-            # Include lot_number in response for frontend undo functionality
+            # Log the upload with extracted header data
+            log_upload(filename, lot_number, import_date, result.get('inserted', 0), total_client_cost_header, extracted_lot_number, bol_location)
+            # Include extracted data in response
             result['lot_number'] = lot_number
+            result['extracted_lot_number'] = extracted_lot_number
+            result['bol_location'] = bol_location
+            result['total_client_cost'] = total_client_cost_header
+            result['avg_cost'] = avg_cost
         
         return result
     except Exception as e:

@@ -36,11 +36,7 @@
             <input type="file" id="excel-file" name="excel_file" accept=".xls,.xlsx" required>
         </div>
         <div class="form-group">
-            <label for="lot-number">BOL #:</label>
-            <input type="text" id="lot-number" name="lot_number" required>
-        </div>
-        <div class="form-group">
-            <label for="import-date">Date:</label>
+            <label for="import-date">Date of Purchase:</label>
             <input type="date" id="import-date" name="import_date" required>
         </div>
         <button type="submit">Upload & Sync to BOL</button>
@@ -81,10 +77,27 @@
                 
                 if (data.success) {
                     let msg = `Upload successful! ${data.inserted} rows imported.`;
+                    
+                    // Show extracted header data
+                    if (data.extracted_lot_number) {
+                        msg += `<br><strong>Extracted LOT #:</strong> ${data.extracted_lot_number}`;
+                    }
+                    if (data.bol_location) {
+                        msg += `<br><strong>Location:</strong> ${data.bol_location}`;
+                    }
+                    if (data.total_client_cost !== undefined && data.total_client_cost !== null) {
+                        const formattedCost = '$' + parseFloat(data.total_client_cost).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                        msg += `<br><strong>Total Client Cost:</strong> ${formattedCost}`;
+                    }
+                    if (data.avg_cost !== undefined && data.avg_cost !== null) {
+                        const formattedAvgCost = '$' + parseFloat(data.avg_cost).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                        msg += `<br><strong>Average Cost per Item:</strong> ${formattedAvgCost}`;
+                    }
+                    
                     if (data.synced) {
-                        msg += ` Auto-synced to BOL.DB: ${data.sync_updated} updated, ${data.sync_inserted} inserted.`;
+                        msg += `<br>Auto-synced to BOL.DB: ${data.sync_updated} updated, ${data.sync_inserted} inserted.`;
                     } else if (data.sync_error) {
-                        msg += ` WARNING: Sync failed - ${data.sync_error}`;
+                        msg += `<br>WARNING: Sync failed - ${data.sync_error}`;
                     }
                     msgEl.innerHTML = `<div class="message success">${msg}</div>`;
                     
@@ -125,7 +138,7 @@
                 console.log('API Response:', data); // Debug logging
                 
                 if (data.success && data.logs && data.logs.length > 0) {
-                    let html = '<table><tr><th>Filename</th><th>BOL #</th><th>Date</th><th>Items</th><th>Uploaded At</th></tr>';
+                    let html = '<table><tr><th>Filename</th><th>BOL #</th><th>Location</th><th>Date</th><th>Items</th><th>Total Client Cost</th><th>Uploaded At</th></tr>';
                     data.logs.forEach(log => {
                         const uploadedAt = new Date(log.uploaded_at).toLocaleString();
                         let totalQty = 0;
@@ -134,12 +147,22 @@
                         } else if (log.rows_imported !== undefined && log.rows_imported !== null) {
                             totalQty = parseInt(log.rows_imported) || 0;
                         }
+                        // Format total_client_cost
+                        let totalCost = '—';
+                        if (log.total_client_cost !== undefined && log.total_client_cost !== null) {
+                            totalCost = '$' + parseFloat(log.total_client_cost).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                        }
+                        // Show extracted BOL # instead of lot_number
+                        const bolNumber = log.bol_number || '—';
+                        const bolLocation = log.bol_location || '—';
                         console.log('Log data:', log, 'totalQty:', totalQty); // Debug logging
                         html += `<tr>
                             <td>${log.filename}</td>
-                            <td>${log.lot_number}</td>
+                            <td>${bolNumber}</td>
+                            <td>${bolLocation}</td>
                             <td>${log.import_date}</td>
                             <td>${totalQty}</td>
+                            <td>${totalCost}</td>
                             <td>${uploadedAt}</td>
                         </tr>`;
                     });

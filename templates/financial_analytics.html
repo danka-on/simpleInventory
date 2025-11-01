@@ -370,6 +370,13 @@
                     </select>
                 </div>
                 <div class="filter-group">
+                    <label>BOL Number</label>
+                    <select id="bolFilter">
+                        <option value="all">All BOLs</option>
+                        <!-- Populated dynamically -->
+                    </select>
+                </div>
+                <div class="filter-group">
                     <button id="applyFilters" class="btn btn-primary" style="width:100%;">Apply Filters</button>
                 </div>
             </div>
@@ -431,6 +438,7 @@
                                 <th data-sort="store">Store <span class="sort-icon">↕</span></th>
                                 <th data-sort="title">Item <span class="sort-icon">↕</span></th>
                                 <th data-sort="upc">UPC <span class="sort-icon">↕</span></th>
+                                <th data-sort="bol">BOL # <span class="sort-icon">↕</span></th>
                                 <th data-sort="qty">Qty <span class="sort-icon">↕</span></th>
                                 <th data-sort="price">Sale Price <span class="sort-icon">↕</span></th>
                                 <th data-sort="cost">Cost <span class="sort-icon">↕</span></th>
@@ -511,6 +519,8 @@
                 
                 if (data.success) {
                     allData = data.transactions;
+                    window.bolStats = data.bol_stats || {};
+                    populateBOLFilter();
                     applyFilters();
                 } else {
                     alert('Error loading data: ' + (data.error || 'Unknown error'));
@@ -523,10 +533,33 @@
             }
         }
         
+        function populateBOLFilter() {
+            const bolFilter = document.getElementById('bolFilter');
+            const bols = [...new Set(allData.map(item => item.bol_number).filter(bol => bol))];
+            bols.sort();
+            
+            // Clear existing options except "All BOLs"
+            bolFilter.innerHTML = '<option value="all">All BOLs</option>';
+            
+            // Add BOL options with stats
+            bols.forEach(bol => {
+                const stats = window.bolStats[bol];
+                let label = `BOL ${bol}`;
+                if (stats) {
+                    label += ` ($${stats.total_cost.toFixed(2)})`;
+                }
+                const option = document.createElement('option');
+                option.value = bol;
+                option.textContent = label;
+                bolFilter.appendChild(option);
+            });
+        }
+        
         function applyFilters() {
             const dateRange = document.getElementById('dateRange').value;
             const storeFilter = document.getElementById('storeFilter').value;
             const costFilter = document.getElementById('costFilter').value;
+            const bolFilter = document.getElementById('bolFilter').value;
             
             filteredData = allData.filter(item => {
                 // Date filter
@@ -552,6 +585,11 @@
                 if (costFilter === 'with-cost' && !item.cost) return false;
                 if (costFilter === 'no-cost' && item.cost) return false;
                 
+                // BOL filter
+                if (bolFilter !== 'all') {
+                    if (!item.bol_number || item.bol_number !== bolFilter) return false;
+                }
+                
                 return true;
             });
             
@@ -562,6 +600,7 @@
         }
         
         function updateSummary() {
+            const bolFilter = document.getElementById('bolFilter').value;
             const totalRevenue = filteredData.reduce((sum, item) => sum + (item.price * item.quantity), 0);
             const totalCosts = filteredData.reduce((sum, item) => sum + (item.cost ? item.cost * item.quantity : 0), 0);
             const totalFees = filteredData.reduce((sum, item) => sum + (item.seller_fee || 0) + (item.taxes || 0), 0);
@@ -574,8 +613,18 @@
             
             document.getElementById('totalRevenue').textContent = '$' + totalRevenue.toFixed(2);
             document.getElementById('itemsSold').textContent = filteredData.reduce((sum, i) => sum + i.quantity, 0) + ' items sold';
-            document.getElementById('totalCosts').textContent = '$' + totalCosts.toFixed(2);
-            document.getElementById('avgCost').textContent = 'Avg: $' + avgCost.toFixed(2) + '/item';
+            
+            // Show BOL cost comparison if filtering by BOL
+            let costsText = '$' + totalCosts.toFixed(2);
+            if (bolFilter !== 'all' && window.bolStats[bolFilter]) {
+                const bolTotalCost = window.bolStats[bolFilter].total_cost;
+                const roi = bolTotalCost > 0 ? ((totalRevenue - bolTotalCost) / bolTotalCost * 100) : 0;
+                costsText = '$' + totalCosts.toFixed(2);
+                document.getElementById('avgCost').textContent = `BOL Total: $${bolTotalCost.toFixed(2)} | ROI: ${roi.toFixed(1)}%`;
+            } else {
+                document.getElementById('avgCost').textContent = 'Avg: $' + avgCost.toFixed(2) + '/item';
+            }
+            document.getElementById('totalCosts').textContent = costsText;
             document.getElementById('totalFees').textContent = '$' + (totalFees + totalShipping).toFixed(2);
             document.getElementById('feeBreakdown').textContent = 'Seller + Taxes + Shipping';
             document.getElementById('netProfit').textContent = '$' + netProfit.toFixed(2);
@@ -753,6 +802,7 @@
                         <td><span class="store-badge ${item.store}">${item.store}</span></td>
                         <td>${item.title}</td>
                         <td>${item.item_id || '<span class="no-data">N/A</span>'}</td>
+                        <td>${item.bol_number || '<span class="no-data">—</span>'}</td>
                         <td>${item.quantity}</td>
                         <td>$${revenue.toFixed(2)}</td>
                         <td>${item.cost ? '$' + cost.toFixed(2) : '<span class="no-data">No data</span>'}</td>

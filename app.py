@@ -179,18 +179,20 @@ def api_financial_analytics():
         for order in orders:
             item_data = dict(order)
             
-            # Try to get cost from BOL first (priority 1)
+            # Try to get cost and BOL number from BOL first (priority 1)
             upc = order['barcode'] or order['item_id']
             cost = None
             cost_source = None
+            bol_number = None
             
             if upc:
-                # Check BOL
-                bol_cur.execute('SELECT client_cost FROM bol_items WHERE upc = ? COLLATE NOCASE', (upc,))
+                # Check BOL - get cost and BOL number
+                bol_cur.execute('SELECT client_cost, bol_number FROM bol_items WHERE upc = ? COLLATE NOCASE', (upc,))
                 bol_row = bol_cur.fetchone()
                 if bol_row and bol_row['client_cost']:
                     cost = float(bol_row['client_cost'])
                     cost_source = 'bol'
+                    bol_number = bol_row['bol_number'] if bol_row['bol_number'] and str(bol_row['bol_number']).lower() not in ['', 'nan', 'none', 'null'] else None
                 
                 # Fallback to eBay store data (could have cost in some cases)
                 if not cost:
@@ -209,8 +211,28 @@ def api_financial_analytics():
             item_data['cost'] = cost
             item_data['cost_source'] = cost_source
             item_data['upc'] = upc
+            item_data['bol_number'] = bol_number
             
             transactions.append(item_data)
+        
+        # Get BOL stats for each unique BOL number
+        bol_stats = {}
+        bol_cur.execute('''
+            SELECT 
+                bol_number,
+                COUNT(*) as item_count,
+                SUM(client_cost * quantity) as total_cost
+            FROM bol_items
+            WHERE bol_number IS NOT NULL 
+                AND bol_number != '' 
+                AND LOWER(bol_number) NOT IN ('nan', 'none', 'null')
+            GROUP BY bol_number
+        ''')
+        for row in bol_cur.fetchall():
+            bol_stats[row['bol_number']] = {
+                'item_count': row['item_count'],
+                'total_cost': float(row['total_cost']) if row['total_cost'] else 0
+            }
         
         bol_conn.close()
         ebay_conn.close()
@@ -219,7 +241,8 @@ def api_financial_analytics():
         return jsonify({
             'success': True,
             'transactions': transactions,
-            'count': len(transactions)
+            'count': len(transactions),
+            'bol_stats': bol_stats
         })
         
     except Exception as e:
@@ -3066,28 +3089,30 @@ def api_rawbol_upload():
     if not BOL_AVAILABLE:
         return jsonify({'success': False, 'error': 'BOL extractor not available (pandas not installed)'})
     
-    if 'excel_file' not in request.files or 'lot_number' not in request.form or 'import_date' not in request.form:
-        return jsonify({'success': False, 'error': 'Missing file, lot number, or import date.'})
+    if 'excel_file' not in request.files or 'import_date' not in request.form:
+        return jsonify({'success': False, 'error': 'Missing file or import date.'})
     
     file = request.files['excel_file']
-    lot_number = request.form['lot_number'].strip()
     import_date = request.form['import_date'].strip()
     
     if file.filename == '':
         return jsonify({'success': False, 'error': 'No file selected.'})
     
-    if not lot_number:
-        return jsonify({'success': False, 'error': 'Lot number is required.'})
+    print(f'DEBUG: Received file: {file.filename}, Date: {import_date}')
     
-    print(f'DEBUG: Received file: {file.filename}, Lot: {lot_number}, Date: {import_date}')
+    # Upload to rawbol.db - lot_number will be extracted from file
+    # Use filename without extension as temporary lot_number for database storage
+    import os
+    temp_lot_number = os.path.splitext(file.filename)[0]
     
-    # Upload to rawbol.db
-    result = process_bol_excel(file, lot_number, import_date)
+    result = process_bol_excel(file, temp_lot_number, import_date)
     
     # If upload successful, auto-sync ONLY THIS LOT to bol.db
     if result.get('success'):
         from rawbol_manager import sync_rawbol_to_bol
-        sync_result = sync_rawbol_to_bol(specific_lot=lot_number)
+        # Use extracted lot number if available, otherwise use temp lot number
+        lot_to_sync = result.get('extracted_lot_number') or temp_lot_number
+        sync_result = sync_rawbol_to_bol(specific_lot=lot_to_sync)
         
         if sync_result.get('success'):
             # Combine results
@@ -3134,6 +3159,49 @@ def api_rawbol_desync_all():
     from rawbol_manager import desync_all_rawbol
     result = desync_all_rawbol()
     return jsonify(result)
+
+@app.route('/api/rawbol/items/<bol_number>', methods=['GET'])
+def api_rawbol_items(bol_number):
+    """Get items for a specific BOL with calculated average cost"""
+    try:
+        conn = sqlite3.connect('rawbol.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        
+        # Get BOL total cost from upload_logs
+        cur.execute('SELECT total_client_cost FROM upload_logs WHERE lot_number = ?', (bol_number,))
+        log_row = cur.fetchone()
+        total_bol_cost = log_row['total_client_cost'] if log_row and log_row['total_client_cost'] else 0
+        
+        # Get items from raw_bol_items
+        cur.execute('''
+            SELECT 
+                upc,
+                item_description,
+                quantity as original_qty,
+                image_url,
+                client_cost
+            FROM raw_bol_items 
+            WHERE bol_number = ?
+            ORDER BY id
+        ''', (bol_number,))
+        items = [dict(row) for row in cur.fetchall()]
+        
+        # Calculate total quantity for avg cost calculation
+        total_qty = sum(item['original_qty'] or 0 for item in items)
+        avg_cost = (total_bol_cost / total_qty) if total_qty > 0 and total_bol_cost else 0
+        
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'items': items,
+            'total_bol_cost': total_bol_cost,
+            'total_qty': total_qty,
+            'avg_cost': avg_cost
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
 
 
 
