@@ -373,7 +373,7 @@ def store_ebay_order(order):
         store TEXT DEFAULT 'ebay'
     )''')
     
-    # Ensure barcode, rackupdated, and store columns exist (for older databases)
+    # Ensure barcode, rackupdated, store, and shipping_cost columns exist (for older databases)
     try:
         cur.execute('PRAGMA table_info(orders)')
         cols = [r[1] for r in cur.fetchall()]
@@ -388,6 +388,9 @@ def store_ebay_order(order):
             conn.commit()
         if 'store' not in cols:
             cur.execute('ALTER TABLE orders ADD COLUMN store TEXT DEFAULT "ebay"')
+            conn.commit()
+        if 'shipping_cost' not in cols:
+            cur.execute('ALTER TABLE orders ADD COLUMN shipping_cost REAL')
             conn.commit()
     except Exception:
         pass
@@ -453,11 +456,6 @@ def store_ebay_order(order):
         except Exception:
             pass
 
-    # Check for duplicate (order_id + item_id)
-    cur.execute('SELECT 1 FROM orders WHERE order_id = ? AND item_id = ?', (order.get('order_id'), order.get('item_id')))
-    if cur.fetchone():
-        conn.close()
-        return
     # Prepare location: if order doesn't include location, try to fetch from searchRack.db by barcode==item_id
     location_val = order.get('location')
     if not location_val and order.get('item_id'):
@@ -476,9 +474,44 @@ def store_ebay_order(order):
             rack_conn.close()
         except Exception:
             pass
+
+    # Check for duplicate (order_id + item_id)
+    cur.execute('SELECT id FROM orders WHERE order_id = ? AND item_id = ?', (order.get('order_id'), order.get('item_id')))
+    existing = cur.fetchone()
+    if existing:
+        # Update existing record with new data (especially shipping_cost)
+        cur.execute('''UPDATE orders SET
+            title = COALESCE(?, title),
+            quantity = COALESCE(?, quantity),
+            price = COALESCE(?, price),
+            seller_fee = COALESCE(?, seller_fee),
+            taxes = COALESCE(?, taxes),
+            image = COALESCE(?, image),
+            barcode = COALESCE(?, barcode),
+            location = COALESCE(?, location),
+            shipping_cost = COALESCE(?, shipping_cost)
+            WHERE id = ?''',
+            (
+                title_val,
+                order.get('quantity'),
+                order.get('price'),
+                order.get('seller_fee'),
+                order.get('taxes'),
+                image_val,
+                barcode_val,
+                location_val,
+                order.get('shipping_cost'),
+                existing[0]
+            )
+        )
+        conn.commit()
+        conn.close()
+        return
+    
+    # If not a duplicate, proceed with INSERT
     cur.execute('''INSERT INTO orders (
-        order_id, item_id, title, quantity, price, checkout_status, shipping_name, shipping_street1, shipping_street2, shipping_city, shipping_state, shipping_postal_code, shipping_country, paid_time, shipped_time, seller_fee, taxes, fees, image, isHandled, isHandledDate, location, barcode, store
-    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+        order_id, item_id, title, quantity, price, checkout_status, shipping_name, shipping_street1, shipping_street2, shipping_city, shipping_state, shipping_postal_code, shipping_country, paid_time, shipped_time, seller_fee, taxes, fees, image, isHandled, isHandledDate, location, barcode, store, shipping_cost
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
         (
             order.get('order_id'),
             order.get('item_id'),
@@ -503,7 +536,8 @@ def store_ebay_order(order):
             order.get('isHandledDate'),
             location_val,
             barcode_val,
-            'ebay'
+            'ebay',
+            order.get('shipping_cost')
         )
     )
     conn.commit()

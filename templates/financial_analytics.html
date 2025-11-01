@@ -382,9 +382,9 @@
                     <div class="subtext" id="avgCost">Avg: $0.00/item</div>
                 </div>
                 <div class="summary-card fees">
-                    <div class="label">Total Fees</div>
+                    <div class="label">Total Fees & Shipping</div>
                     <div class="value" id="totalFees">$0.00</div>
-                    <div class="subtext" id="feeBreakdown">Seller + Taxes</div>
+                    <div class="subtext" id="feeBreakdown">Seller + Taxes + Shipping</div>
                 </div>
                 <div class="summary-card profit">
                     <div class="label">Net Profit</div>
@@ -423,6 +423,7 @@
                                 <th data-sort="price">Sale Price <span class="sort-icon">↕</span></th>
                                 <th data-sort="cost">Cost <span class="sort-icon">↕</span></th>
                                 <th data-sort="fees">Fees <span class="sort-icon">↕</span></th>
+                                <th data-sort="shipping">Shipping <span class="sort-icon">↕</span></th>
                                 <th data-sort="profit">Net Profit <span class="sort-icon">↕</span></th>
                                 <th data-sort="margin">Margin % <span class="sort-icon">↕</span></th>
                             </tr>
@@ -552,7 +553,8 @@
             const totalRevenue = filteredData.reduce((sum, item) => sum + (item.price * item.quantity), 0);
             const totalCosts = filteredData.reduce((sum, item) => sum + (item.cost ? item.cost * item.quantity : 0), 0);
             const totalFees = filteredData.reduce((sum, item) => sum + (item.seller_fee || 0) + (item.taxes || 0), 0);
-            const netProfit = totalRevenue - totalCosts - totalFees;
+            const totalShipping = filteredData.reduce((sum, item) => sum + (item.shipping_cost || 0), 0);
+            const netProfit = totalRevenue - totalCosts - totalFees - totalShipping;
             const profitMargin = totalRevenue > 0 ? (netProfit / totalRevenue * 100) : 0;
             const avgCost = filteredData.filter(i => i.cost).length > 0 
                 ? totalCosts / filteredData.filter(i => i.cost).reduce((sum, i) => sum + i.quantity, 0) 
@@ -562,8 +564,8 @@
             document.getElementById('itemsSold').textContent = filteredData.reduce((sum, i) => sum + i.quantity, 0) + ' items sold';
             document.getElementById('totalCosts').textContent = '$' + totalCosts.toFixed(2);
             document.getElementById('avgCost').textContent = 'Avg: $' + avgCost.toFixed(2) + '/item';
-            document.getElementById('totalFees').textContent = '$' + totalFees.toFixed(2);
-            document.getElementById('feeBreakdown').textContent = 'Seller + Taxes';
+            document.getElementById('totalFees').textContent = '$' + (totalFees + totalShipping).toFixed(2);
+            document.getElementById('feeBreakdown').textContent = 'Seller + Taxes + Shipping';
             document.getElementById('netProfit').textContent = '$' + netProfit.toFixed(2);
             document.getElementById('profitMargin').textContent = profitMargin.toFixed(1) + '% margin';
             
@@ -691,14 +693,14 @@
                         valB = new Date(b.paid_time);
                         break;
                     case 'profit':
-                        valA = (a.price * a.quantity) - ((a.cost || 0) * a.quantity) - (a.seller_fee || 0) - (a.taxes || 0);
-                        valB = (b.price * b.quantity) - ((b.cost || 0) * b.quantity) - (b.seller_fee || 0) - (b.taxes || 0);
+                        valA = (a.price * a.quantity) - ((a.cost || 0) * a.quantity) - (a.seller_fee || 0) - (a.taxes || 0) - (a.shipping_cost || 0);
+                        valB = (b.price * b.quantity) - ((b.cost || 0) * b.quantity) - (b.seller_fee || 0) - (b.taxes || 0) - (b.shipping_cost || 0);
                         break;
                     case 'margin':
                         const revenueA = a.price * a.quantity;
                         const revenueB = b.price * b.quantity;
-                        valA = revenueA > 0 ? ((revenueA - ((a.cost || 0) * a.quantity) - (a.seller_fee || 0) - (a.taxes || 0)) / revenueA * 100) : 0;
-                        valB = revenueB > 0 ? ((revenueB - ((b.cost || 0) * b.quantity) - (b.seller_fee || 0) - (b.taxes || 0)) / revenueB * 100) : 0;
+                        valA = revenueA > 0 ? ((revenueA - ((a.cost || 0) * a.quantity) - (a.seller_fee || 0) - (a.taxes || 0) - (a.shipping_cost || 0)) / revenueA * 100) : 0;
+                        valB = revenueB > 0 ? ((revenueB - ((b.cost || 0) * b.quantity) - (b.seller_fee || 0) - (b.taxes || 0) - (b.shipping_cost || 0)) / revenueB * 100) : 0;
                         break;
                     default:
                         valA = a[sortColumn];
@@ -721,7 +723,8 @@
                 const revenue = item.price * item.quantity;
                 const cost = (item.cost || 0) * item.quantity;
                 const fees = (item.seller_fee || 0) + (item.taxes || 0);
-                const profit = revenue - cost - fees;
+                const shipping = item.shipping_cost || 0;
+                const profit = revenue - cost - fees - shipping;
                 const margin = revenue > 0 ? (profit / revenue * 100) : 0;
                 
                 return `
@@ -734,6 +737,7 @@
                         <td>$${revenue.toFixed(2)}</td>
                         <td>${item.cost ? '$' + cost.toFixed(2) : '<span class="no-data">No data</span>'}</td>
                         <td>$${fees.toFixed(2)}</td>
+                        <td>${shipping > 0 ? '$' + shipping.toFixed(2) : '<span class="no-data">$0.00</span>'}</td>
                         <td class="${profit >= 0 ? 'profit-positive' : 'profit-negative'}">$${profit.toFixed(2)}</td>
                         <td class="${margin >= 0 ? 'profit-positive' : 'profit-negative'}">${margin.toFixed(1)}%</td>
                     </tr>

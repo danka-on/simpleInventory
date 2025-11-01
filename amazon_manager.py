@@ -182,6 +182,18 @@ class AmazonManager:
                     quantity = item.get('QuantityOrdered', 1)
                     price = float(item.get('ItemPrice', {}).get('Amount', 0))
                     
+                    # Extract shipping cost from item
+                    shipping_price = item.get('ShippingPrice', {})
+                    shipping_cost = float(shipping_price.get('Amount', 0)) if shipping_price else 0
+                    
+                    # Also get seller fees if available
+                    seller_fee = 0
+                    taxes = 0
+                    
+                    # Amazon provides ItemTax
+                    item_tax = item.get('ItemTax', {})
+                    taxes = float(item_tax.get('Amount', 0)) if item_tax else 0
+                    
                     # Try to find barcode and image from amazonStore.db
                     barcode = None
                     image = None
@@ -241,20 +253,24 @@ class AmazonManager:
                             SET barcode = ?, title = ?, quantity = ?, price = ?, 
                                 shipped_time = ?, paid_time = ?, image = ?, store = 'amazon',
                                 shipping_name = ?, shipping_city = ?, shipping_state = ?, 
-                                shipping_postal_code = ?, shipping_country = ?
+                                shipping_postal_code = ?, shipping_country = ?, 
+                                shipping_cost = ?, seller_fee = ?, taxes = ?
                             WHERE order_id = ?
                         ''', (barcode, title, quantity, price, shipped_time, purchase_date, image,
                               shipping_name, shipping_city, shipping_state, shipping_postal, shipping_country,
+                              shipping_cost, seller_fee, taxes,
                               amazon_order_id))
                     else:
                         # Insert new order
                         cur.execute('''
                             INSERT INTO orders 
                             (order_id, item_id, barcode, title, quantity, price, shipped_time, paid_time, image, store,
-                             shipping_name, shipping_city, shipping_state, shipping_postal_code, shipping_country)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'amazon', ?, ?, ?, ?, ?)
+                             shipping_name, shipping_city, shipping_state, shipping_postal_code, shipping_country,
+                             shipping_cost, seller_fee, taxes)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'amazon', ?, ?, ?, ?, ?, ?, ?, ?)
                         ''', (amazon_order_id, asin, barcode, title, quantity, price, shipped_time, purchase_date, image,
-                              shipping_name, shipping_city, shipping_state, shipping_postal, shipping_country))
+                              shipping_name, shipping_city, shipping_state, shipping_postal, shipping_country,
+                              shipping_cost, seller_fee, taxes))
                         synced_count += 1
                 
                 conn.commit()

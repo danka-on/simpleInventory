@@ -151,7 +151,8 @@ def api_financial_analytics():
                 shipped_time,
                 barcode,
                 store,
-                location
+                location,
+                shipping_cost
             FROM orders
             WHERE paid_time IS NOT NULL
             ORDER BY paid_time DESC
@@ -2902,6 +2903,11 @@ def get_ebay_orders(days=90):
         shipping_state = shipping.find('ebay:StateOrProvince', ns) if shipping is not None else None
         shipping_postal_code = shipping.find('ebay:PostalCode', ns) if shipping is not None else None
         shipping_country = shipping.find('ebay:Country', ns) if shipping is not None else None
+        
+        # Extract shipping costs
+        shipping_service_cost = order.find('.//ebay:ShippingServiceSelected/ebay:ShippingServiceCost', ns)
+        shipping_insurance_cost = order.find('.//ebay:ShippingServiceSelected/ebay:ShippingInsuranceCost', ns)
+        
         print("inside first for loop end")
         try:
             for transaction in order.findall('.//ebay:Transaction', ns):
@@ -2914,6 +2920,10 @@ def get_ebay_orders(days=90):
                 seller_fee = transaction.find('.//ebay:FinalValueFee', ns)
                 taxes = transaction.find('.//ebay:Taxes/ebay:TotalTaxAmount', ns)
                 fees = transaction.find('.//ebay:TransactionSiteID', ns)  # Placeholder, adjust as needed
+                
+                # Extract actual cost of shipping from transaction
+                shipping_cost = transaction.find('.//ebay:ActualShippingCost', ns)
+                
                 # Extract image URL from item and convert to high-res string
                 picture_url = item.find('.//ebay:PictureDetails/ebay:GalleryURL', ns) if item is not None else None
                 high_res_url = get_high_res_image_url(picture_url.text) if (picture_url is not None and picture_url.text) else None
@@ -2936,6 +2946,7 @@ def get_ebay_orders(days=90):
                     'seller_fee': float(seller_fee.text) if seller_fee is not None and seller_fee.text.replace('.', '', 1).isdigit() else None,
                     'taxes': float(taxes.text) if taxes is not None and taxes.text.replace('.', '', 1).isdigit() else None,
                     'fees': fees.text if fees is not None else None,
+                    'shipping_cost': float(shipping_cost.text) if shipping_cost is not None and shipping_cost.text.replace('.', '', 1).isdigit() else None,
                     'image': high_res_url,
                     'isHandled': '',
                     'isHandledDate': ''
