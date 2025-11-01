@@ -1,0 +1,776 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.ico') }}">
+    <title>Financial Analytics - Sweet Shelves</title>
+    <style>
+        :root {
+            --primary: #0984e3;
+            --accent: #00b894;
+            --danger: #e74c3c;
+            --warning: #f39c12;
+            --bg: #f9f9f9;
+            --card: #fff;
+            --border: #e0e0e0;
+            --text: #2c3e50;
+            --text-muted: #666;
+            --radius: 14px;
+            --shadow: 0 2px 8px rgba(0,0,0,0.04);
+            --shadow-hover: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        * { box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background: var(--bg);
+            margin: 0;
+            padding: 0;
+            color: var(--text);
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 24px;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+        h1 {
+            margin: 0;
+            font-weight: 600;
+            font-size: 1.8rem;
+        }
+        .btn {
+            padding: 10px 16px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.95rem;
+            font-weight: 500;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            text-decoration: none;
+        }
+        .btn-primary { background: var(--primary); color: white; }
+        .btn-primary:hover { background: #0770c7; }
+        .btn-danger { background: var(--danger); color: white; }
+        .btn-danger:hover { background: #c0392b; }
+        .btn-success { background: var(--accent); color: white; }
+        .btn-success:hover { background: #00a383; }
+        
+        /* Filters */
+        .filters {
+            background: var(--card);
+            border-radius: var(--radius);
+            padding: 20px;
+            margin-bottom: 24px;
+            box-shadow: var(--shadow);
+            border: 1px solid var(--border);
+        }
+        .filter-row {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+            align-items: flex-end;
+        }
+        .filter-group {
+            flex: 1;
+            min-width: 150px;
+        }
+        .filter-group label {
+            display: block;
+            margin-bottom: 6px;
+            font-weight: 500;
+            font-size: 0.9rem;
+            color: var(--text-muted);
+        }
+        .filter-group select,
+        .filter-group input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 0.95rem;
+            font-family: inherit;
+        }
+        
+        /* Summary Cards */
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+        .summary-card {
+            background: var(--card);
+            border-radius: var(--radius);
+            padding: 20px;
+            box-shadow: var(--shadow);
+            border: 1px solid var(--border);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .summary-card:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-hover);
+        }
+        .summary-card .label {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+        }
+        .summary-card .value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--text);
+        }
+        .summary-card .subtext {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+        .summary-card.profit .value { color: var(--accent); }
+        .summary-card.revenue .value { color: var(--primary); }
+        .summary-card.cost .value { color: var(--warning); }
+        .summary-card.fees .value { color: var(--danger); }
+        
+        /* Charts Section */
+        .charts-section {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+        .chart-card {
+            background: var(--card);
+            border-radius: var(--radius);
+            padding: 20px;
+            box-shadow: var(--shadow);
+            border: 1px solid var(--border);
+        }
+        .chart-card h3 {
+            margin: 0 0 16px 0;
+            font-size: 1.1rem;
+        }
+        .chart-placeholder {
+            height: 250px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #f5f5f5;
+            border-radius: 8px;
+            color: var(--text-muted);
+        }
+        
+        /* Table */
+        .table-card {
+            background: var(--card);
+            border-radius: var(--radius);
+            padding: 20px;
+            box-shadow: var(--shadow);
+            border: 1px solid var(--border);
+            overflow: hidden;
+        }
+        .table-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+        .table-header h3 {
+            margin: 0;
+            font-size: 1.1rem;
+        }
+        .search-box {
+            padding: 8px 12px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 0.9rem;
+            width: 250px;
+        }
+        .table-wrapper {
+            overflow-x: auto;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+        }
+        thead {
+            background: #f8f9fa;
+            position: sticky;
+            top: 0;
+        }
+        th {
+            padding: 12px 8px;
+            text-align: left;
+            font-weight: 600;
+            border-bottom: 2px solid var(--border);
+            cursor: pointer;
+            user-select: none;
+        }
+        th:hover { background: #e9ecef; }
+        th .sort-icon {
+            margin-left: 4px;
+            opacity: 0.3;
+        }
+        th.sorted .sort-icon { opacity: 1; }
+        td {
+            padding: 12px 8px;
+            border-bottom: 1px solid var(--border);
+        }
+        tr:hover { background: #f8f9fa; }
+        .store-badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        .store-badge.ebay {
+            background: #e6f3ff;
+            color: #0064d2;
+        }
+        .store-badge.amazon {
+            background: #fff3e0;
+            color: #ff9800;
+        }
+        .profit-positive { color: var(--accent); font-weight: 600; }
+        .profit-negative { color: var(--danger); font-weight: 600; }
+        .no-data { color: var(--text-muted); font-style: italic; }
+        
+        /* Loading */
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 40px;
+            color: var(--text-muted);
+        }
+        .loading.active { display: block; }
+        
+        /* Pagination */
+        .pagination {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid var(--border);
+        }
+        .pagination-info {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }
+        .pagination-controls {
+            display: flex;
+            gap: 8px;
+        }
+        .page-btn {
+            padding: 6px 12px;
+            border: 1px solid var(--border);
+            background: white;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.9rem;
+        }
+        .page-btn:hover { background: #f8f9fa; }
+        .page-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        @media (max-width: 768px) {
+            .summary-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            .charts-section {
+                grid-template-columns: 1fr;
+            }
+            .filter-row {
+                flex-direction: column;
+            }
+            .filter-group {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div style="display:flex;align-items:center;gap:12px;">
+                <a href="/tools" class="btn btn-danger">
+                    ← Back
+                </a>
+                <h1>💰 Financial Analytics</h1>
+            </div>
+            <button id="refreshBtn" class="btn btn-success">
+                🔄 Refresh Data
+            </button>
+        </div>
+        
+        <!-- Filters -->
+        <div class="filters">
+            <div class="filter-row">
+                <div class="filter-group">
+                    <label>Date Range</label>
+                    <select id="dateRange">
+                        <option value="7">Last 7 Days</option>
+                        <option value="30" selected>Last 30 Days</option>
+                        <option value="90">Last 90 Days</option>
+                        <option value="180">Last 6 Months</option>
+                        <option value="365">Last Year</option>
+                        <option value="all">All Time</option>
+                        <option value="custom">Custom Range</option>
+                    </select>
+                </div>
+                <div class="filter-group" id="customDateFrom" style="display:none;">
+                    <label>From Date</label>
+                    <input type="date" id="dateFrom">
+                </div>
+                <div class="filter-group" id="customDateTo" style="display:none;">
+                    <label>To Date</label>
+                    <input type="date" id="dateTo">
+                </div>
+                <div class="filter-group">
+                    <label>Store</label>
+                    <select id="storeFilter">
+                        <option value="all">All Stores</option>
+                        <option value="ebay">eBay</option>
+                        <option value="amazon">Amazon</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label>Cost Data</label>
+                    <select id="costFilter">
+                        <option value="all">All Items</option>
+                        <option value="with-cost">With Cost Data</option>
+                        <option value="no-cost">Missing Cost Data</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <button id="applyFilters" class="btn btn-primary" style="width:100%;">Apply Filters</button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Loading State -->
+        <div id="loading" class="loading">
+            <p>Loading financial data...</p>
+        </div>
+        
+        <!-- Summary Cards -->
+        <div id="summarySection" style="display:none;">
+            <div class="summary-grid">
+                <div class="summary-card revenue">
+                    <div class="label">Total Revenue</div>
+                    <div class="value" id="totalRevenue">$0.00</div>
+                    <div class="subtext" id="itemsSold">0 items sold</div>
+                </div>
+                <div class="summary-card cost">
+                    <div class="label">Total Costs</div>
+                    <div class="value" id="totalCosts">$0.00</div>
+                    <div class="subtext" id="avgCost">Avg: $0.00/item</div>
+                </div>
+                <div class="summary-card fees">
+                    <div class="label">Total Fees</div>
+                    <div class="value" id="totalFees">$0.00</div>
+                    <div class="subtext" id="feeBreakdown">Seller + Taxes</div>
+                </div>
+                <div class="summary-card profit">
+                    <div class="label">Net Profit</div>
+                    <div class="value" id="netProfit">$0.00</div>
+                    <div class="subtext" id="profitMargin">0% margin</div>
+                </div>
+            </div>
+            
+            <!-- Charts -->
+            <div class="charts-section">
+                <div class="chart-card">
+                    <h3>📊 Revenue vs Costs</h3>
+                    <canvas id="revenueChart"></canvas>
+                </div>
+                <div class="chart-card">
+                    <h3>🏪 Sales by Store</h3>
+                    <canvas id="storeChart"></canvas>
+                </div>
+            </div>
+            
+            <!-- Data Table -->
+            <div class="table-card">
+                <div class="table-header">
+                    <h3>Transaction Details</h3>
+                    <input type="text" id="searchTable" class="search-box" placeholder="Search by title or UPC...">
+                </div>
+                <div class="table-wrapper">
+                    <table id="dataTable">
+                        <thead>
+                            <tr>
+                                <th data-sort="date">Date <span class="sort-icon">↕</span></th>
+                                <th data-sort="store">Store <span class="sort-icon">↕</span></th>
+                                <th data-sort="title">Item <span class="sort-icon">↕</span></th>
+                                <th data-sort="upc">UPC <span class="sort-icon">↕</span></th>
+                                <th data-sort="qty">Qty <span class="sort-icon">↕</span></th>
+                                <th data-sort="price">Sale Price <span class="sort-icon">↕</span></th>
+                                <th data-sort="cost">Cost <span class="sort-icon">↕</span></th>
+                                <th data-sort="fees">Fees <span class="sort-icon">↕</span></th>
+                                <th data-sort="profit">Net Profit <span class="sort-icon">↕</span></th>
+                                <th data-sort="margin">Margin % <span class="sort-icon">↕</span></th>
+                            </tr>
+                        </thead>
+                        <tbody id="tableBody">
+                            <!-- Data populated by JavaScript -->
+                        </tbody>
+                    </table>
+                </div>
+                <div class="pagination">
+                    <div class="pagination-info" id="paginationInfo">Showing 0-0 of 0</div>
+                    <div class="pagination-controls">
+                        <button class="page-btn" id="prevPage">← Prev</button>
+                        <button class="page-btn" id="nextPage">Next →</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script>
+        let allData = [];
+        let filteredData = [];
+        let currentPage = 1;
+        const itemsPerPage = 50;
+        let sortColumn = 'date';
+        let sortDirection = 'desc';
+        let revenueChart = null;
+        let storeChart = null;
+        
+        // Load data on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            loadData();
+            setupEventListeners();
+        });
+        
+        function setupEventListeners() {
+            document.getElementById('refreshBtn').addEventListener('click', loadData);
+            document.getElementById('applyFilters').addEventListener('click', applyFilters);
+            document.getElementById('dateRange').addEventListener('change', toggleCustomDates);
+            document.getElementById('searchTable').addEventListener('input', handleSearch);
+            document.getElementById('prevPage').addEventListener('click', () => changePage(-1));
+            document.getElementById('nextPage').addEventListener('click', () => changePage(1));
+            
+            // Table sorting
+            document.querySelectorAll('th[data-sort]').forEach(th => {
+                th.addEventListener('click', () => handleSort(th.dataset.sort));
+            });
+        }
+        
+        function toggleCustomDates() {
+            const range = document.getElementById('dateRange').value;
+            const customFrom = document.getElementById('customDateFrom');
+            const customTo = document.getElementById('customDateTo');
+            
+            if (range === 'custom') {
+                customFrom.style.display = 'block';
+                customTo.style.display = 'block';
+            } else {
+                customFrom.style.display = 'none';
+                customTo.style.display = 'none';
+            }
+        }
+        
+        async function loadData() {
+            document.getElementById('loading').classList.add('active');
+            document.getElementById('summarySection').style.display = 'none';
+            
+            try {
+                const response = await fetch('/api/financial-analytics');
+                const data = await response.json();
+                
+                if (data.success) {
+                    allData = data.transactions;
+                    applyFilters();
+                } else {
+                    alert('Error loading data: ' + (data.error || 'Unknown error'));
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Failed to load financial data');
+            } finally {
+                document.getElementById('loading').classList.remove('active');
+            }
+        }
+        
+        function applyFilters() {
+            const dateRange = document.getElementById('dateRange').value;
+            const storeFilter = document.getElementById('storeFilter').value;
+            const costFilter = document.getElementById('costFilter').value;
+            
+            filteredData = allData.filter(item => {
+                // Date filter
+                if (dateRange !== 'all') {
+                    const itemDate = new Date(item.paid_time);
+                    const now = new Date();
+                    
+                    if (dateRange === 'custom') {
+                        const fromDate = new Date(document.getElementById('dateFrom').value);
+                        const toDate = new Date(document.getElementById('dateTo').value);
+                        if (itemDate < fromDate || itemDate > toDate) return false;
+                    } else {
+                        const daysAgo = parseInt(dateRange);
+                        const cutoffDate = new Date(now - daysAgo * 24 * 60 * 60 * 1000);
+                        if (itemDate < cutoffDate) return false;
+                    }
+                }
+                
+                // Store filter
+                if (storeFilter !== 'all' && item.store !== storeFilter) return false;
+                
+                // Cost filter
+                if (costFilter === 'with-cost' && !item.cost) return false;
+                if (costFilter === 'no-cost' && item.cost) return false;
+                
+                return true;
+            });
+            
+            currentPage = 1;
+            updateSummary();
+            updateCharts();
+            renderTable();
+        }
+        
+        function updateSummary() {
+            const totalRevenue = filteredData.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+            const totalCosts = filteredData.reduce((sum, item) => sum + (item.cost ? item.cost * item.quantity : 0), 0);
+            const totalFees = filteredData.reduce((sum, item) => sum + (item.seller_fee || 0) + (item.taxes || 0), 0);
+            const netProfit = totalRevenue - totalCosts - totalFees;
+            const profitMargin = totalRevenue > 0 ? (netProfit / totalRevenue * 100) : 0;
+            const avgCost = filteredData.filter(i => i.cost).length > 0 
+                ? totalCosts / filteredData.filter(i => i.cost).reduce((sum, i) => sum + i.quantity, 0) 
+                : 0;
+            
+            document.getElementById('totalRevenue').textContent = '$' + totalRevenue.toFixed(2);
+            document.getElementById('itemsSold').textContent = filteredData.reduce((sum, i) => sum + i.quantity, 0) + ' items sold';
+            document.getElementById('totalCosts').textContent = '$' + totalCosts.toFixed(2);
+            document.getElementById('avgCost').textContent = 'Avg: $' + avgCost.toFixed(2) + '/item';
+            document.getElementById('totalFees').textContent = '$' + totalFees.toFixed(2);
+            document.getElementById('feeBreakdown').textContent = 'Seller + Taxes';
+            document.getElementById('netProfit').textContent = '$' + netProfit.toFixed(2);
+            document.getElementById('profitMargin').textContent = profitMargin.toFixed(1) + '% margin';
+            
+            // Color code profit
+            const profitEl = document.getElementById('netProfit');
+            profitEl.style.color = netProfit >= 0 ? 'var(--accent)' : 'var(--danger)';
+            
+            document.getElementById('summarySection').style.display = 'block';
+        }
+        
+        function updateCharts() {
+            // Revenue vs Costs Chart
+            const revenueByDay = {};
+            const costsByDay = {};
+            
+            filteredData.forEach(item => {
+                const date = item.paid_time.split('T')[0];
+                const revenue = item.price * item.quantity;
+                const cost = (item.cost || 0) * item.quantity;
+                
+                revenueByDay[date] = (revenueByDay[date] || 0) + revenue;
+                costsByDay[date] = (costsByDay[date] || 0) + cost;
+            });
+            
+            const dates = Object.keys(revenueByDay).sort();
+            const revenueData = dates.map(d => revenueByDay[d]);
+            const costsData = dates.map(d => costsByDay[d]);
+            
+            const revenueCtx = document.getElementById('revenueChart');
+            if (revenueChart) revenueChart.destroy();
+            revenueChart = new Chart(revenueCtx, {
+                type: 'line',
+                data: {
+                    labels: dates,
+                    datasets: [{
+                        label: 'Revenue',
+                        data: revenueData,
+                        borderColor: '#0984e3',
+                        backgroundColor: 'rgba(9, 132, 227, 0.1)',
+                        tension: 0.3
+                    }, {
+                        label: 'Costs',
+                        data: costsData,
+                        borderColor: '#f39c12',
+                        backgroundColor: 'rgba(243, 156, 18, 0.1)',
+                        tension: 0.3
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    aspectRatio: 2,
+                    plugins: {
+                        legend: { position: 'bottom' }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                callback: (value) => '$' + value.toFixed(0)
+                            }
+                        }
+                    }
+                }
+            });
+            
+            // Store Distribution Chart
+            const storeData = {
+                ebay: 0,
+                amazon: 0
+            };
+            
+            filteredData.forEach(item => {
+                storeData[item.store] = (storeData[item.store] || 0) + (item.price * item.quantity);
+            });
+            
+            const storeCtx = document.getElementById('storeChart');
+            if (storeChart) storeChart.destroy();
+            storeChart = new Chart(storeCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['eBay', 'Amazon'],
+                    datasets: [{
+                        data: [storeData.ebay, storeData.amazon],
+                        backgroundColor: ['#0064d2', '#ff9800']
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    aspectRatio: 2,
+                    plugins: {
+                        legend: { position: 'bottom' },
+                        tooltip: {
+                            callbacks: {
+                                label: (context) => {
+                                    const label = context.label || '';
+                                    const value = context.parsed || 0;
+                                    const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                    const percentage = total > 0 ? (value / total * 100).toFixed(1) : 0;
+                                    return label + ': $' + value.toFixed(2) + ' (' + percentage + '%)';
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        function renderTable() {
+            // Apply search filter
+            const searchTerm = document.getElementById('searchTable').value.toLowerCase();
+            let displayData = filteredData.filter(item => 
+                item.title.toLowerCase().includes(searchTerm) ||
+                (item.item_id && item.item_id.toLowerCase().includes(searchTerm))
+            );
+            
+            // Apply sorting
+            displayData.sort((a, b) => {
+                let valA, valB;
+                
+                switch(sortColumn) {
+                    case 'date':
+                        valA = new Date(a.paid_time);
+                        valB = new Date(b.paid_time);
+                        break;
+                    case 'profit':
+                        valA = (a.price * a.quantity) - ((a.cost || 0) * a.quantity) - (a.seller_fee || 0) - (a.taxes || 0);
+                        valB = (b.price * b.quantity) - ((b.cost || 0) * b.quantity) - (b.seller_fee || 0) - (b.taxes || 0);
+                        break;
+                    case 'margin':
+                        const revenueA = a.price * a.quantity;
+                        const revenueB = b.price * b.quantity;
+                        valA = revenueA > 0 ? ((revenueA - ((a.cost || 0) * a.quantity) - (a.seller_fee || 0) - (a.taxes || 0)) / revenueA * 100) : 0;
+                        valB = revenueB > 0 ? ((revenueB - ((b.cost || 0) * b.quantity) - (b.seller_fee || 0) - (b.taxes || 0)) / revenueB * 100) : 0;
+                        break;
+                    default:
+                        valA = a[sortColumn];
+                        valB = b[sortColumn];
+                }
+                
+                if (valA < valB) return sortDirection === 'asc' ? -1 : 1;
+                if (valA > valB) return sortDirection === 'asc' ? 1 : -1;
+                return 0;
+            });
+            
+            // Pagination
+            const start = (currentPage - 1) * itemsPerPage;
+            const end = start + itemsPerPage;
+            const pageData = displayData.slice(start, end);
+            
+            // Render table rows
+            const tbody = document.getElementById('tableBody');
+            tbody.innerHTML = pageData.map(item => {
+                const revenue = item.price * item.quantity;
+                const cost = (item.cost || 0) * item.quantity;
+                const fees = (item.seller_fee || 0) + (item.taxes || 0);
+                const profit = revenue - cost - fees;
+                const margin = revenue > 0 ? (profit / revenue * 100) : 0;
+                
+                return `
+                    <tr>
+                        <td>${new Date(item.paid_time).toLocaleDateString()}</td>
+                        <td><span class="store-badge ${item.store}">${item.store}</span></td>
+                        <td>${item.title}</td>
+                        <td>${item.item_id || '<span class="no-data">N/A</span>'}</td>
+                        <td>${item.quantity}</td>
+                        <td>$${revenue.toFixed(2)}</td>
+                        <td>${item.cost ? '$' + cost.toFixed(2) : '<span class="no-data">No data</span>'}</td>
+                        <td>$${fees.toFixed(2)}</td>
+                        <td class="${profit >= 0 ? 'profit-positive' : 'profit-negative'}">$${profit.toFixed(2)}</td>
+                        <td class="${margin >= 0 ? 'profit-positive' : 'profit-negative'}">${margin.toFixed(1)}%</td>
+                    </tr>
+                `;
+            }).join('');
+            
+            // Update pagination info
+            document.getElementById('paginationInfo').textContent = 
+                `Showing ${start + 1}-${Math.min(end, displayData.length)} of ${displayData.length}`;
+            document.getElementById('prevPage').disabled = currentPage === 1;
+            document.getElementById('nextPage').disabled = end >= displayData.length;
+        }
+        
+        function handleSort(column) {
+            if (sortColumn === column) {
+                sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+            } else {
+                sortColumn = column;
+                sortDirection = 'desc';
+            }
+            
+            // Update sort indicators
+            document.querySelectorAll('th').forEach(th => th.classList.remove('sorted'));
+            document.querySelector(`th[data-sort="${column}"]`).classList.add('sorted');
+            
+            renderTable();
+        }
+        
+        function handleSearch() {
+            currentPage = 1;
+            renderTable();
+        }
+        
+        function changePage(delta) {
+            currentPage += delta;
+            renderTable();
+        }
+    </script>
+</body>
+</html>

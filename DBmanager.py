@@ -667,59 +667,60 @@ def enrich_searchrack_db(batch_size=500, do_backup=True):
         for i in range(0, len(lst), n):
             yield lst[i:i+n]
 
-    # Build enrichment map from ebayStore first, then bol for misses
+    # Build enrichment map from bol.db FIRST (prioritized), then ebayStore, then Amazon for misses
     enrichment = {}
+    norm_barcodes = [str(b).strip() for b in barcodes]
+    
+    # PRIORITY 1: Check bol.db first
     try:
-        es_conn = sqlite3.connect('ebayStore.db')
-        es_conn.row_factory = sqlite3.Row
-        es_cur = es_conn.cursor()
+        bol_conn = sqlite3.connect('bol.db')
+        bol_conn.row_factory = sqlite3.Row
+        bol_cur = bol_conn.cursor()
         for batch in chunks(barcodes, batch_size):
             placeholders = ','.join(['?'] * len(batch))
-            # Query by UPC or ItemID
-            sql = f"SELECT UPC, Title, ItemID, Quantity, Image FROM INVENTORY WHERE (UPC IN ({placeholders}) OR ItemID IN ({placeholders}))"
-            params = batch + batch
-            es_cur.execute(sql, params)
-            for r in es_cur.fetchall():
-                upc = (r['UPC'] or '')
-                itemid = (r['ItemID'] or '')
-                # normalize keys for matching
-                keys = set()
-                if upc:
-                    keys.add(str(upc).strip())
-                    keys.add(str(upc).strip().lower())
-                if itemid:
-                    keys.add(str(itemid).strip())
-                    keys.add(str(itemid).strip().lower())
+            bol_cur.execute(f"SELECT upc, item_description, image_url FROM bol_items WHERE upc IN ({placeholders})", batch)
+            for r in bol_cur.fetchall():
+                upc = (r['upc'] or '')
+                if not upc:
+                    continue
+                keys = {str(upc).strip(), str(upc).strip().lower()}
                 for key in keys:
-                    enrichment[key] = {'title': r['Title'], 'itemid': r['ItemID'], 'quantity': r['Quantity'], 'image': r['Image'], 'source': 'ebayStore'}
-        es_conn.close()
-    except Exception as e:
-        print('Warning: ebayStore lookup failed:', e)
-
-    # For barcodes not found, query bol.db
-    # normalize barcodes list for matching
-    norm_barcodes = [str(b).strip() for b in barcodes]
-    remaining = [b for b in norm_barcodes if b not in enrichment and b.lower() not in enrichment]
-    try:
-        if remaining:
-            bol_conn = sqlite3.connect('bol.db')
-            bol_conn.row_factory = sqlite3.Row
-            bol_cur = bol_conn.cursor()
-            for batch in chunks(remaining, batch_size):
-                placeholders = ','.join(['?'] * len(batch))
-                bol_cur.execute(f"SELECT upc, item_description, image_url FROM bol_items WHERE upc IN ({placeholders})", batch)
-                for r in bol_cur.fetchall():
-                    upc = (r['upc'] or '')
-                    if not upc:
-                        continue
-                    keys = {str(upc).strip(), str(upc).strip().lower()}
-                    for key in keys:
-                        enrichment[key] = {'title': r['item_description'], 'itemid': upc, 'quantity': None, 'image': r['image_url'], 'source': 'bol'}
-            bol_conn.close()
+                    enrichment[key] = {'title': r['item_description'], 'itemid': upc, 'quantity': None, 'image': r['image_url'], 'source': 'bol'}
+        bol_conn.close()
     except Exception as e:
         print('Warning: bol lookup failed:', e)
 
-    # For remaining barcodes not found in eBay or BOL, query Amazon (amazonStore.db + rawbol.db for images)
+    # PRIORITY 2: For barcodes not found in bol, query ebayStore
+    remaining = [b for b in norm_barcodes if b not in enrichment and b.lower() not in enrichment]
+    try:
+        if remaining:
+            es_conn = sqlite3.connect('ebayStore.db')
+            es_conn.row_factory = sqlite3.Row
+            es_cur = es_conn.cursor()
+            for batch in chunks(remaining, batch_size):
+                placeholders = ','.join(['?'] * len(batch))
+                # Query by UPC or ItemID
+                sql = f"SELECT UPC, Title, ItemID, Quantity, Image FROM INVENTORY WHERE (UPC IN ({placeholders}) OR ItemID IN ({placeholders}))"
+                params = batch + batch
+                es_cur.execute(sql, params)
+                for r in es_cur.fetchall():
+                    upc = (r['UPC'] or '')
+                    itemid = (r['ItemID'] or '')
+                    # normalize keys for matching
+                    keys = set()
+                    if upc:
+                        keys.add(str(upc).strip())
+                        keys.add(str(upc).strip().lower())
+                    if itemid:
+                        keys.add(str(itemid).strip())
+                        keys.add(str(itemid).strip().lower())
+                    for key in keys:
+                        enrichment[key] = {'title': r['Title'], 'itemid': r['ItemID'], 'quantity': r['Quantity'], 'image': r['Image'], 'source': 'ebayStore'}
+            es_conn.close()
+    except Exception as e:
+        print('Warning: ebayStore lookup failed:', e)
+
+    # PRIORITY 3: For remaining barcodes not found in BOL or eBay, query Amazon (amazonStore.db + rawbol.db for images)
     still_remaining = [b for b in norm_barcodes if b not in enrichment and b.lower() not in enrichment]
     try:
         if still_remaining:

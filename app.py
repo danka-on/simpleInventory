@@ -119,6 +119,117 @@ def sync():
 def misc():
     return render_template('misc.html')
 
+# Financial Analytics page
+@app.route('/financial-analytics')
+def financial_analytics():
+    return render_template('financial_analytics.html')
+
+# API endpoint for financial analytics data
+@app.route('/api/financial-analytics')
+def api_financial_analytics():
+    """
+    Fetch all sold orders with cost data from BOL and calculate profits.
+    Returns financial metrics for the dashboard.
+    """
+    try:
+        # Connect to sold.db
+        sold_conn = sqlite3.connect('sold.db')
+        sold_conn.row_factory = sqlite3.Row
+        sold_cur = sold_conn.cursor()
+        
+        # Get all sold orders
+        sold_cur.execute('''
+            SELECT 
+                order_id,
+                item_id,
+                title,
+                quantity,
+                price,
+                seller_fee,
+                taxes,
+                paid_time,
+                shipped_time,
+                barcode,
+                store,
+                location
+            FROM orders
+            WHERE paid_time IS NOT NULL
+            ORDER BY paid_time DESC
+        ''')
+        orders = sold_cur.fetchall()
+        sold_conn.close()
+        
+        # Connect to bol.db to get cost data
+        bol_conn = sqlite3.connect('bol.db')
+        bol_conn.row_factory = sqlite3.Row
+        bol_cur = bol_conn.cursor()
+        
+        # Also connect to ebayStore and amazonStore for fallback cost data
+        ebay_conn = sqlite3.connect('ebayStore.db')
+        ebay_conn.row_factory = sqlite3.Row
+        ebay_cur = ebay_conn.cursor()
+        
+        amazon_conn = sqlite3.connect('amazonStore.db')
+        amazon_conn.row_factory = sqlite3.Row
+        amazon_cur = amazon_conn.cursor()
+        
+        transactions = []
+        
+        for order in orders:
+            item_data = dict(order)
+            
+            # Try to get cost from BOL first (priority 1)
+            upc = order['barcode'] or order['item_id']
+            cost = None
+            cost_source = None
+            
+            if upc:
+                # Check BOL
+                bol_cur.execute('SELECT client_cost FROM bol_items WHERE upc = ? COLLATE NOCASE', (upc,))
+                bol_row = bol_cur.fetchone()
+                if bol_row and bol_row['client_cost']:
+                    cost = float(bol_row['client_cost'])
+                    cost_source = 'bol'
+                
+                # Fallback to eBay store data (could have cost in some cases)
+                if not cost:
+                    ebay_cur.execute('SELECT UPC FROM INVENTORY WHERE UPC = ? OR ItemID = ? COLLATE NOCASE LIMIT 1', (upc, upc))
+                    if ebay_cur.fetchone():
+                        cost_source = 'ebay'
+                        # Note: ebayStore.db doesn't have cost data, just marking source
+                
+                # Fallback to Amazon store data
+                if not cost:
+                    amazon_cur.execute('SELECT UPC FROM ITEMS WHERE UPC = ? OR ASIN = ? COLLATE NOCASE LIMIT 1', (upc, upc))
+                    if amazon_cur.fetchone():
+                        cost_source = 'amazon'
+                        # Note: amazonStore.db doesn't have cost data, just marking source
+            
+            item_data['cost'] = cost
+            item_data['cost_source'] = cost_source
+            item_data['upc'] = upc
+            
+            transactions.append(item_data)
+        
+        bol_conn.close()
+        ebay_conn.close()
+        amazon_conn.close()
+        
+        return jsonify({
+            'success': True,
+            'transactions': transactions,
+            'count': len(transactions)
+        })
+        
+    except Exception as e:
+        print(f"Error in financial analytics API: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 # =========== Item Preparation Helpers and Routes ===========
 def _normalize_upc(upc):
     try:
