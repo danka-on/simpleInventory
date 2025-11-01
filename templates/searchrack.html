@@ -681,15 +681,42 @@ function onEdit(db, id){
     const barcode = tr.children[1].textContent;
     const itemid = tr.children[2].textContent;
     const qty = tr.children[4].textContent;
-    const content = `<div class=\"form-row\"><label>Title</label><input id=\"edit_title\" value=\"${esc(title)}\"></div>`+
+    
+    // Different fields for different databases
+    let content = '';
+    if(db === 'sold'){
+        // For sold items: title, barcode, quantity (item_id is read-only)
+        content = `<div class=\"form-row\"><label>Title</label><input id=\"edit_title\" value=\"${esc(title)}\"></div>`+
+                  `<div class=\"form-row\"><label>Barcode</label><input id=\"edit_barcode\" value=\"${esc(barcode)}\"></div>`+
+                  `<div class=\"form-row\"><label>Item ID</label><input id=\"edit_itemid\" value=\"${esc(itemid)}\" readonly style=\"background:#f0f0f0\" title=\"Read-only: eBay/Amazon listing ID\"></div>`+
+                  `<div class=\"form-row\"><label>Quantity</label><input id=\"edit_qty\" type=\"number\" min=\"1\" value=\"${esc(qty)}\"></div>`;
+    } else {
+        // For other databases: title, barcode, itemid, qty
+        content = `<div class=\"form-row\"><label>Title</label><input id=\"edit_title\" value=\"${esc(title)}\"></div>`+
                   `<div class=\"form-row\"><label>Barcode</label><input id=\"edit_barcode\" value=\"${esc(barcode)}\"></div>`+
                   `<div class=\"form-row\"><label>Item ID</label><input id=\"edit_itemid\" value=\"${esc(itemid)}\"></div>`+
-                  `<div class=\"form-row\"><label>Qty</label><input id=\"edit_qty\" value=\"${esc(qty)}\"></div>`+
-                  `<div class=\"form-row\"><label>Notes</label><textarea id=\"edit_notes\"></textarea></div>`;
+                  `<div class=\"form-row\"><label>Qty</label><input id=\"edit_qty\" type=\"number\" min=\"1\" value=\"${esc(qty)}\"></div>`;
+    }
+    
     document.getElementById('editContent').innerHTML = content;
     document.getElementById('editModal').style.display='flex';
     document.getElementById('saveEdit').onclick = async ()=>{
-        const payload = { Title: document.getElementById('edit_title').value, BARCODE: document.getElementById('edit_barcode').value, ItemID: document.getElementById('edit_itemid').value, Quantity: document.getElementById('edit_qty').value };
+        // Build payload based on database
+        let payload = {};
+        if(db === 'sold'){
+            payload = { 
+                title: document.getElementById('edit_title').value, 
+                barcode: document.getElementById('edit_barcode').value, 
+                quantity: parseInt(document.getElementById('edit_qty').value) || 1
+            };
+        } else {
+            payload = { 
+                Title: document.getElementById('edit_title').value, 
+                BARCODE: document.getElementById('edit_barcode').value, 
+                ItemID: document.getElementById('edit_itemid').value, 
+                Quantity: parseInt(document.getElementById('edit_qty').value) || 1
+            };
+        }
         const resp = await fetch(`/api/update/${db}/${id}`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
         const j = await resp.json();
         if(j.success || j.ok){ alert('Saved'); document.getElementById('editModal').style.display='none'; doSearch(); } else alert('Save failed: '+(j.error||JSON.stringify(j)));

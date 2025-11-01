@@ -60,6 +60,24 @@
         .toggle-btn.active {
             background: #00b894;
         }
+        .btn-refresh {
+            padding: 10px 18px;
+            background: #28a745;
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.2s;
+            margin-left: auto;
+        }
+        .btn-refresh:hover {
+            background: #218838;
+        }
+        .btn-refresh:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+        }
         select {
             padding: 8px 12px;
             border: 1px solid #ccc;
@@ -139,6 +157,9 @@
                 <option value="">Select a LOT...</option>
             </select>
         </div>
+        <button class="btn-refresh" id="btn-refresh" title="Re-enrich sold data with latest barcodes and LOT numbers">
+            🔄 Refresh Data
+        </button>
     </div>
 
     <div id="stats-content">
@@ -185,6 +206,44 @@
             selectedLot = e.target.value;
             if (selectedLot && currentView === 'individual') {
                 renderView();
+            }
+        });
+
+        // Refresh data button
+        document.getElementById('btn-refresh').addEventListener('click', async () => {
+            const btn = document.getElementById('btn-refresh');
+            btn.disabled = true;
+            btn.textContent = '🔄 Refreshing...';
+            
+            try {
+                console.log('Refreshing sold data...');
+                const response = await fetch('/api/refresh-sold-data', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`Refresh failed: ${response.status}`);
+                }
+                
+                const result = await response.json();
+                console.log('Refresh result:', result);
+                
+                if (result.success) {
+                    alert(`✅ Data refreshed!\n\nUpdated ${result.updated_barcodes} barcodes and ${result.updated_lot_numbers} LOT numbers.\n\nReloading statistics...`);
+                    // Reload the data
+                    await loadData();
+                } else {
+                    alert(`❌ Refresh failed: ${result.error}`);
+                }
+            } catch (err) {
+                console.error('Error refreshing data:', err);
+                alert(`❌ Error refreshing data: ${err.message}`);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '🔄 Refresh Data';
             }
         });
 

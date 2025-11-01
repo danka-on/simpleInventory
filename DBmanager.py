@@ -1124,5 +1124,65 @@ def process_sold_orders_inventory_reduction():
         import traceback
         traceback.print_exc()
 
+def enrich_amazon_sold_images():
+    """Enrich Amazon sold orders with images from amazonStore.db"""
+    try:
+        # Connect to both databases
+        sold_conn = sqlite3.connect('sold.db')
+        sold_cur = sold_conn.cursor()
+        
+        amazon_conn = sqlite3.connect('amazonStore.db')
+        amazon_conn.row_factory = sqlite3.Row
+        amazon_cur = amazon_conn.cursor()
+        
+        # Find Amazon orders without images
+        sold_cur.execute('''
+            SELECT id, item_id, barcode 
+            FROM orders 
+            WHERE store = 'amazon' 
+            AND (image IS NULL OR image = '')
+        ''')
+        
+        orders_without_images = sold_cur.fetchall()
+        updated = 0
+        
+        print(f"📸 Found {len(orders_without_images)} Amazon sold orders without images")
+        
+        for order_id, item_id, barcode in orders_without_images:
+            image = None
+            
+            # Try to get image by ASIN (item_id)
+            if item_id:
+                amazon_cur.execute('SELECT IMAGE FROM ITEMS WHERE ASIN = ? LIMIT 1', (item_id,))
+                row = amazon_cur.fetchone()
+                if row and row['IMAGE']:
+                    image = row['IMAGE']
+            
+            # Fallback: try by UPC (barcode)
+            if not image and barcode:
+                amazon_cur.execute('SELECT IMAGE FROM ITEMS WHERE UPC = ? LIMIT 1', (barcode,))
+                row = amazon_cur.fetchone()
+                if row and row['IMAGE']:
+                    image = row['IMAGE']
+            
+            # Update sold order with image
+            if image:
+                sold_cur.execute('UPDATE orders SET image = ? WHERE id = ?', (image, order_id))
+                updated += 1
+                print(f"✅ Updated image for Amazon order {order_id} (ASIN: {item_id})")
+        
+        sold_conn.commit()
+        sold_conn.close()
+        amazon_conn.close()
+        
+        print(f"✅ Enriched {updated}/{len(orders_without_images)} Amazon sold orders with images")
+        return updated
+        
+    except Exception as e:
+        print(f"❌ Error enriching Amazon images: {e}")
+        import traceback
+        traceback.print_exc()
+        return 0
+
 # No top-level code or __main__ block
 

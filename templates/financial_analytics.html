@@ -753,6 +753,7 @@
             const searchTerm = document.getElementById('searchTable').value.toLowerCase();
             let displayData = filteredData.filter(item => 
                 item.title.toLowerCase().includes(searchTerm) ||
+                (item.upc && item.upc.toLowerCase().includes(searchTerm)) ||
                 (item.item_id && item.item_id.toLowerCase().includes(searchTerm))
             );
             
@@ -813,7 +814,7 @@
                         <td>${new Date(item.paid_time).toLocaleDateString()}</td>
                         <td><span class="store-badge ${item.store}">${item.store}</span></td>
                         <td>${item.title}</td>
-                        <td>${item.item_id || '<span class="no-data">N/A</span>'}</td>
+                        <td>${item.upc || '<span class="no-data">N/A</span>'}</td>
                         <td>${item.bol_number || '<span class="no-data">—</span>'}</td>
                         <td>${item.quantity}</td>
                         <td>$${revenue.toFixed(2)}</td>

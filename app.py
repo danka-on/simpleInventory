@@ -195,12 +195,31 @@ def api_financial_analytics():
             bol_number = order['lot_number'] if order['lot_number'] and str(order['lot_number']).lower() not in ['', 'nan', 'none', 'null'] else None
             
             if upc:
-                # Check rawbol for avg_cost
-                rawbol_cur.execute('SELECT avg_cost FROM raw_bol_items WHERE upc = ? COLLATE NOCASE ORDER BY created_at DESC LIMIT 1', (upc,))
+                # Check rawbol for avg_cost - try direct UPC match first
+                rawbol_cur.execute('SELECT avg_cost, lot_number FROM raw_bol_items WHERE upc = ? COLLATE NOCASE ORDER BY created_at DESC LIMIT 1', (upc,))
                 rawbol_row = rawbol_cur.fetchone()
                 if rawbol_row and rawbol_row['avg_cost']:
                     cost = float(rawbol_row['avg_cost'])
                     cost_source = 'rawbol'
+                    # Update bol_number if we found it in rawbol and it wasn't set
+                    if not bol_number and rawbol_row['lot_number']:
+                        bol_number = rawbol_row['lot_number']
+                
+                # For Amazon items, if barcode looks like ASIN, try to get UPC from amazonStore
+                # and re-lookup in rawbol (handles old items that had ASIN as barcode)
+                if not cost and order['store'] == 'amazon' and upc and (upc.startswith('B0') or len(upc) == 10):
+                    amazon_cur.execute('SELECT UPC FROM ITEMS WHERE ASIN = ? COLLATE NOCASE', (upc,))
+                    amazon_row = amazon_cur.fetchone()
+                    if amazon_row and amazon_row['UPC']:
+                        actual_upc = amazon_row['UPC']
+                        # Try rawbol again with the actual UPC
+                        rawbol_cur.execute('SELECT avg_cost, lot_number FROM raw_bol_items WHERE upc = ? COLLATE NOCASE ORDER BY created_at DESC LIMIT 1', (actual_upc,))
+                        rawbol_row = rawbol_cur.fetchone()
+                        if rawbol_row and rawbol_row['avg_cost']:
+                            cost = float(rawbol_row['avg_cost'])
+                            cost_source = 'rawbol_via_asin'
+                            if not bol_number and rawbol_row['lot_number']:
+                                bol_number = rawbol_row['lot_number']
                 
                 # Fallback to eBay store data (could have cost in some cases)
                 if not cost:
@@ -278,6 +297,94 @@ def api_financial_analytics():
         
     except Exception as e:
         print(f"Error in financial analytics API: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/refresh-sold-data', methods=['POST'])
+def api_refresh_sold_data():
+    """
+    Re-enrich sold.db orders with latest barcode and LOT number data.
+    This updates old Amazon items that may have ASIN as barcode to use proper UPC.
+    """
+    try:
+        print("DEBUG: Refreshing sold data...")
+        
+        # Connect to databases
+        sold_conn = sqlite3.connect('sold.db')
+        sold_conn.row_factory = sqlite3.Row
+        sold_cur = sold_conn.cursor()
+        
+        amazon_conn = sqlite3.connect('amazonStore.db')
+        amazon_conn.row_factory = sqlite3.Row
+        amazon_cur = amazon_conn.cursor()
+        
+        rawbol_conn = sqlite3.connect('rawbol.db')
+        rawbol_conn.row_factory = sqlite3.Row
+        rawbol_cur = rawbol_conn.cursor()
+        
+        # Get Amazon orders that might need updating
+        sold_cur.execute('''
+            SELECT id, order_id, item_id, barcode, lot_number
+            FROM orders
+            WHERE store = 'amazon' AND barcode IS NOT NULL
+        ''')
+        amazon_orders = sold_cur.fetchall()
+        
+        updated_barcodes = 0
+        updated_lot_numbers = 0
+        
+        for order in amazon_orders:
+            order_id = order['order_id']
+            current_barcode = order['barcode']
+            current_lot = order['lot_number']
+            needs_update = False
+            new_barcode = current_barcode
+            new_lot = current_lot
+            
+            # Check if barcode looks like ASIN (old format)
+            if current_barcode and (current_barcode.startswith('B0') or len(current_barcode) == 10):
+                # Try to get UPC from amazonStore
+                amazon_cur.execute('SELECT UPC FROM ITEMS WHERE ASIN = ? COLLATE NOCASE', (current_barcode,))
+                amazon_row = amazon_cur.fetchone()
+                if amazon_row and amazon_row['UPC'] and amazon_row['UPC'] != current_barcode:
+                    new_barcode = amazon_row['UPC']
+                    needs_update = True
+                    updated_barcodes += 1
+            
+            # Check if we can enrich lot_number from rawbol using the (possibly new) barcode
+            if not current_lot or str(current_lot).lower() in ['', 'nan', 'none', 'null']:
+                rawbol_cur.execute('SELECT lot_number FROM raw_bol_items WHERE upc = ? COLLATE NOCASE ORDER BY created_at DESC LIMIT 1', (new_barcode,))
+                rawbol_row = rawbol_cur.fetchone()
+                if rawbol_row and rawbol_row['lot_number']:
+                    new_lot = rawbol_row['lot_number']
+                    needs_update = True
+                    updated_lot_numbers += 1
+            
+            # Update if changes were made
+            if needs_update:
+                sold_cur.execute('UPDATE orders SET barcode = ?, lot_number = ? WHERE id = ?', 
+                               (new_barcode, new_lot, order['id']))
+                print(f"✅ Updated {order_id}: barcode={new_barcode}, lot={new_lot}")
+        
+        sold_conn.commit()
+        
+        sold_conn.close()
+        amazon_conn.close()
+        rawbol_conn.close()
+        
+        return jsonify({
+            'success': True,
+            'updated_barcodes': updated_barcodes,
+            'updated_lot_numbers': updated_lot_numbers,
+            'message': f'Updated {updated_barcodes} barcodes and {updated_lot_numbers} LOT numbers'
+        })
+        
+    except Exception as e:
+        print(f"Error refreshing sold data: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({
@@ -4557,6 +4664,7 @@ def api_update_row(db_key, item_id):
     data = request.get_json() or {}
     mapping = {
         'ebayStore': 'ebayStore.db',
+        'amazonStore': 'amazonStore.db',
         'sold': 'sold.db',
         'searchRack': 'searchRack.db',
         'found': 'found.db',
@@ -4573,21 +4681,50 @@ def api_update_row(db_key, item_id):
         cur = conn.cursor()
         cur.execute(f"PRAGMA table_info('{table}')")
         cols = [r[1] for r in cur.fetchall()]
+        
+        # Debug logging
+        print(f"DEBUG UPDATE: db_key={db_key}, table={table}, columns={cols}")
+        print(f"DEBUG UPDATE: incoming data={data}")
+        
         set_parts = []
         params = []
+        
+        # Create case-insensitive column mapping
+        cols_lower = {c.lower(): c for c in cols}
+        
         for k, v in data.items():
-            if k in cols:
-                set_parts.append(f"{k} = ?")
+            k_lower = k.lower()
+            # Find matching column name (case-insensitive)
+            if k_lower in cols_lower:
+                actual_col = cols_lower[k_lower]
+                set_parts.append(f"{actual_col} = ?")
                 params.append(v)
+            else:
+                print(f"DEBUG UPDATE: Field '{k}' not found in columns (tried lowercase '{k_lower}')")
+        
         if not set_parts:
-            return jsonify({'error': 'No updatable fields provided'}), 400
+            print(f"ERROR UPDATE: No updatable fields. Data keys: {list(data.keys())}, Table cols: {cols}")
+            return jsonify({
+                'error': 'No updatable fields provided',
+                'data_keys': list(data.keys()),
+                'table_columns': cols
+            }), 400
+        
         params.append(item_id)
         sql = f"UPDATE {table} SET {', '.join(set_parts)} WHERE {pk} = ?"
+        print(f"DEBUG UPDATE: SQL={sql}, params={params}")
+        
         cur.execute(sql, params)
         conn.commit()
+        updated = cur.rowcount
         conn.close()
-        return jsonify({'success': True})
+        
+        print(f"DEBUG UPDATE: Updated {updated} rows")
+        return jsonify({'success': True, 'updated': updated})
     except Exception as e:
+        import traceback
+        print(f"ERROR UPDATE: {e}")
+        print(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
 
 
@@ -5357,6 +5494,11 @@ def sync_all():
             try:
                 amazon = AmazonManager()
                 amazon.sync_orders_to_db(days_back=30)
+                
+                # Enrich with images from amazonStore.db
+                from DBmanager import enrich_amazon_sold_images
+                enrich_amazon_sold_images()
+                
                 from DBmanager import process_sold_orders_inventory_reduction
                 process_sold_orders_inventory_reduction()
                 update_sync_timestamp('amazon_orders')
@@ -5426,6 +5568,11 @@ def sync_amazon_orders_api():
     try:
         amazon = AmazonManager()
         amazon.sync_orders_to_db(days_back=30)
+        
+        # Enrich with images from amazonStore.db
+        from DBmanager import enrich_amazon_sold_images
+        enrich_amazon_sold_images()
+        
         from DBmanager import process_sold_orders_inventory_reduction
         process_sold_orders_inventory_reduction()
         update_sync_timestamp('amazon_orders')
