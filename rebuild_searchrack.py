@@ -1,27 +1,24 @@
 """
-Rebuild searchRack.db properly from rack.db
+Rebuild/refresh searchRack.db enrichment from store databases
+Note: searchRack.db is now the primary database. This script only refreshes enrichment data.
 """
 import sys
 sys.path.insert(0, '.')
 
-from DBmanager import createSearchRackDB, updateSearchRackDB, enrich_searchrack_db
+from DBmanager import createSearchRackDB, enrich_searchrack_db
 
-print("🔄 Rebuilding searchRack.db...")
+print("🔄 Refreshing searchRack.db enrichment...")
 print("=" * 60)
 
-# Step 1: Create/recreate the schema
-print("\n1️⃣ Creating searchRack.db schema...")
+# Step 1: Ensure schema exists
+print("\n1️⃣ Verifying searchRack.db schema...")
 createSearchRackDB()
 
-# Step 2: Populate from rack.db
-print("\n2️⃣ Populating from rack.db...")
-updateSearchRackDB()
-
-# Step 3: Enrich with titles/images
-print("\n3️⃣ Enriching with titles and images...")
+# Step 2: Enrich with titles/images from eBay, BOL, Amazon
+print("\n2️⃣ Enriching with titles and images from store databases...")
 enrich_searchrack_db(batch_size=500, do_backup=False)
 
-print("\n✅ SearchRack rebuild complete!")
+print("\n✅ SearchRack enrichment complete!")
 
 # Verify
 import sqlite3

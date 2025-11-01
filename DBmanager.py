@@ -58,59 +58,6 @@ def createEbayStoreDB():
         print("something went wrong with table ",e)
         conn.close()
 
-def addToRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITION=None):
-    conn = sqlite3.connect('rack.db')
-    cursor = conn.cursor()
-    try:
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS INVENTORY (
-                ID INTEGER PRIMARY KEY AUTOINCREMENT,
-                ITEM_POSITION TEXT,
-                BARCODE TEXT,
-                IMAGES TEXT,
-                PICTUREPOSITION TEXT
-            )
-        ''')
-        # Ensure CREATED_AT exists for older databases
-        try:
-            cursor.execute('PRAGMA table_info(INVENTORY)')
-            cols = [r[1] for r in cursor.fetchall()]
-            if 'CREATED_AT' not in cols:
-                cursor.execute('ALTER TABLE INVENTORY ADD COLUMN CREATED_AT TEXT')
-                conn.commit()
-        except Exception:
-            pass
-        
-        # Check if barcode already exists
-        cursor.execute("SELECT ID FROM INVENTORY WHERE BARCODE = ?", (BARCODE,))
-        existing = cursor.fetchone()
-        
-        if existing:
-            # Update existing record
-            cursor.execute("""
-                UPDATE INVENTORY 
-                SET ITEM_POSITION = COALESCE(?, ITEM_POSITION),
-                    IMAGES = COALESCE(?, IMAGES),
-                    PICTUREPOSITION = COALESCE(?, PICTUREPOSITION)
-                WHERE BARCODE = ?
-            """, (ITEM_POSITION, IMAGES, PICTUREPOSITION, BARCODE))
-            action = "updated"
-        else:
-            # Insert new record
-            now_iso = datetime.datetime.utcnow().isoformat()
-            cursor.execute("""
-                INSERT INTO INVENTORY (ITEM_POSITION, BARCODE, IMAGES, PICTUREPOSITION, CREATED_AT) 
-                VALUES (?, ?, ?, ?, ?)
-            """, (ITEM_POSITION, BARCODE, IMAGES, PICTUREPOSITION, now_iso))
-            action = "added"
-            
-        conn.commit()
-        print(f"{action} position: {ITEM_POSITION}, barcode: {BARCODE}, images: {IMAGES}, pictureposition: {PICTUREPOSITION}")
-    except sqlite3.Error as e:
-        print("Error in addToRack:", e)
-    finally:
-        conn.close()
-
 def addToSearchRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITION=None):
     """Add item directly to searchRack.db with enrichment from ebayStore.db and bol.db"""
     conn = sqlite3.connect('searchRack.db')
@@ -511,13 +458,13 @@ def store_ebay_order(order):
     if cur.fetchone():
         conn.close()
         return
-    # Prepare location: if order doesn't include location, try to fetch from rack.db by barcode==item_id
+    # Prepare location: if order doesn't include location, try to fetch from searchRack.db by barcode==item_id
     location_val = order.get('location')
     if not location_val and order.get('item_id'):
         try:
-            rack_conn = sqlite3.connect('rack.db')
+            rack_conn = sqlite3.connect('searchRack.db')
             rack_cur = rack_conn.cursor()
-            rack_cur.execute('SELECT ITEM_POSITION, PICTUREPOSITION FROM INVENTORY WHERE BARCODE = ?', (order.get('item_id'),))
+            rack_cur.execute('SELECT ITEM_POSITION, PICTUREPOSITION FROM SEARCHRACK WHERE BARCODE = ?', (order.get('item_id'),))
             r = rack_cur.fetchone()
             if r:
                 item_pos = r[0]
@@ -563,12 +510,8 @@ def store_ebay_order(order):
     conn.close()
 
 def createSearchRackDB():
-    # Connect to all databases
-    rack_conn = sqlite3.connect('rack.db')
-    bol_conn = sqlite3.connect('bol.db')
+    """Create SEARCHRACK table structure if it doesn't exist"""
     search_conn = sqlite3.connect('searchRack.db')
-    rack_cur = rack_conn.cursor()
-    bol_cur = bol_conn.cursor()
     search_cur = search_conn.cursor()
     # Create table
     search_cur.execute('''
@@ -590,99 +533,8 @@ def createSearchRackDB():
             search_conn.commit()
     except Exception:
         pass
-    # Get all rack items
-        rack_cur.execute('SELECT BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION FROM INVENTORY')
-        rack_items = rack_cur.fetchall()
-        now_iso = datetime.datetime.utcnow().isoformat()
-        for barcode, item_position, images, pictureposition in rack_items:
-            # Get item_description from bol.db by upc (barcode)
-            bol_cur.execute('SELECT item_description FROM bol_items WHERE upc=? COLLATE NOCASE', (barcode,))
-            bol_row = bol_cur.fetchone()
-            title = bol_row[0] if bol_row else None
-            search_cur.execute('INSERT INTO SEARCHRACK (TITLE, BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION, CREATED_AT) VALUES (?,?,?,?,?,?)',
-                (title, barcode, item_position, images, pictureposition, now_iso))
-        search_conn.commit()
-        rack_conn.close()
-        bol_conn.close()
-        search_conn.close()
-    rack_items = rack_cur.fetchall()
-    now_iso = datetime.datetime.utcnow().isoformat()
-    for barcode, item_position, images, pictureposition in rack_items:
-        # Get item_description from bol.db by upc (barcode)
-        bol_cur.execute('SELECT item_description FROM bol_items WHERE upc=? COLLATE NOCASE', (barcode,))
-        bol_row = bol_cur.fetchone()
-        title = bol_row[0] if bol_row else None
-        search_cur.execute('INSERT INTO SEARCHRACK (TITLE, BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION, CREATED_AT) VALUES (?,?,?,?,?,?)',
-            (title, barcode, item_position, images, pictureposition, now_iso))
     search_conn.commit()
-    rack_conn.close()
-    bol_conn.close()
     search_conn.close()
-
-def updateSearchRackDB():
-    rack_conn = sqlite3.connect('rack.db')
-    bol_conn = sqlite3.connect('bol.db')
-    search_conn = sqlite3.connect('searchRack.db')
-    rack_cur = rack_conn.cursor()
-    bol_cur = bol_conn.cursor()
-    search_cur = search_conn.cursor()
-    # Ensure CREATED_AT column exists
-    try:
-        search_cur.execute('PRAGMA table_info(SEARCHRACK)')
-        cols = [r[1] for r in search_cur.fetchall()]
-        if 'CREATED_AT' not in cols:
-            search_cur.execute('ALTER TABLE SEARCHRACK ADD COLUMN CREATED_AT TEXT')
-            search_conn.commit()
-    except Exception:
-        pass
-
-    # Preserve created_at per (BARCODE, ITEM_POSITION) before clearing
-    created_map = {}
-    try:
-        search_cur.execute('SELECT BARCODE, ITEM_POSITION, CREATED_AT FROM SEARCHRACK')
-        for b, pos, ca in search_cur.fetchall():
-            key = (str(b or '').strip().lower(), str(pos or '').strip().lower())
-            if key not in created_map and ca:
-                created_map[key] = ca
-    except Exception:
-        created_map = {}
-
-    # Verify DELETE actually cleared the table
-    search_cur.execute('DELETE FROM SEARCHRACK')
-    search_conn.commit()  # Commit the DELETE immediately
-    
-    # Verify the table is empty
-    search_cur.execute('SELECT COUNT(*) FROM SEARCHRACK')
-    remaining = search_cur.fetchone()[0]
-    if remaining > 0:
-        print(f"⚠️ Warning: SEARCHRACK still has {remaining} rows after DELETE. Forcing cleanup...")
-        search_cur.execute('DROP TABLE IF EXISTS SEARCHRACK')
-        from DBmanager import createSearchRackDB
-        createSearchRackDB()
-        search_cur.execute('PRAGMA table_info(SEARCHRACK)')
-        cols = [r[1] for r in search_cur.fetchall()]
-        if 'CREATED_AT' not in cols:
-            search_cur.execute('ALTER TABLE SEARCHRACK ADD COLUMN CREATED_AT TEXT')
-            search_conn.commit()
-    
-    # Get all rack items
-    rack_cur.execute('SELECT BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION FROM INVENTORY')
-    rack_items = rack_cur.fetchall()
-    now_iso = datetime.datetime.utcnow().isoformat()
-    for barcode, item_position, images, pictureposition in rack_items:
-        # Get item_description from bol.db by upc (barcode)
-        bol_cur.execute('SELECT item_description FROM bol_items WHERE upc=? COLLATE NOCASE', (barcode,))
-        bol_row = bol_cur.fetchone()
-        title = bol_row[0] if bol_row else None
-        key = (str(barcode or '').strip().lower(), str(item_position or '').strip().lower())
-        created_val = created_map.get(key) or now_iso
-        search_cur.execute('INSERT INTO SEARCHRACK (TITLE, BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION, CREATED_AT) VALUES (?,?,?,?,?,?)',
-            (title, barcode, item_position, images, pictureposition, created_val))
-    search_conn.commit()
-    rack_conn.close()
-    bol_conn.close()
-    search_conn.close()
-
 
 def enrich_searchrack_db(batch_size=500, do_backup=True):
     """Enrich SEARCHRACK rows by looking up BARCODE/UPC in ebayStore.db (preferred) then bol.db.

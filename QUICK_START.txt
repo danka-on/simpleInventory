@@ -1,0 +1,69 @@
+QUICK START: Migrate to Single Database
+========================================
+
+You're ready to migrate! Here's what to do:
+
+STEP 1: Run Migration (5 minutes)
+----------------------------------
+python migrate_to_single_db.py
+
+This will:
+✅ Create safety backups
+✅ Merge rack.db into searchRack.db (no data loss)
+✅ Archive old rack.db file
+✅ Verify everything worked
+
+STEP 2: Set Up Daily Backups (2 minutes)
+-----------------------------------------
+Open PowerShell as Administrator and run:
+.\setup_daily_backup.ps1
+
+This creates a scheduled task to backup searchRack.db daily at 2 AM.
+Keeps 10 days of history that auto-rotates.
+
+STEP 3: Test (5 minutes)
+-------------------------
+Test these operations to make sure everything works:
+
+1. Scan a barcode → position
+2. Search for the item in /searchrack
+3. Create a manual backup: python rotating_backup.py backup
+4. List backups: python rotating_backup.py list
+
+STEP 4: Code Updates (Manual - 15 minutes)
+-------------------------------------------
+You'll need to update the application code to remove rack.db references.
+
+Key files to update:
+- app.py: Remove addToRack() calls
+- app.py: Remove updateSearchRackDB() calls  
+- app.py: Update /refresh_searchrack
+- DBmanager.py: Remove updateSearchRackDB() function
+
+See MIGRATION_GUIDE.txt for detailed instructions.
+
+STEP 5: Cleanup (After Testing)
+--------------------------------
+After a few days of successful operation:
+1. Delete rack.db.archived-* file
+2. Delete .pre-migration-* backup files
+
+ROLLBACK (If Needed)
+--------------------
+If something goes wrong:
+1. Stop the app
+2. Restore from .pre-migration-* files
+3. Rename them back to rack.db and searchRack.db
+
+HELP
+----
+Check status anytime:
+  python check_migration_status.py
+
+List backups:
+  python rotating_backup.py list
+
+Restore from backup:
+  python rotating_backup.py restore <1-10>
+
+Questions? See MIGRATION_GUIDE.txt for full documentation.

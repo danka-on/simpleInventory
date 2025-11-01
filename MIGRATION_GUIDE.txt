@@ -1,0 +1,205 @@
+MIGRATION GUIDE: Single Database Architecture
+==============================================
+
+This guide will help you migrate from the dual-database system (rack.db + searchRack.db)
+to a single database system (searchRack.db only) with automated rotating backups.
+
+OVERVIEW:
+---------
+Before: rack.db (master) → searchRack.db (enriched copy)
+After:  searchRack.db (single source of truth) + 10-day rotating backups
+
+BENEFITS:
+---------
+✅ No more sync issues
+✅ Simpler code and maintenance
+✅ Better security with real backups
+✅ Faster operations (no duplicate writes)
+✅ Better data integrity
+
+MIGRATION STEPS:
+----------------
+
+STEP 1: TEST THE BACKUP SYSTEM
+-------------------------------
+Before migrating, make sure the backup system works:
+
+  python rotating_backup.py backup
+
+This creates your first backup in backups/searchRack-day1.db
+
+Verify it worked:
+  python rotating_backup.py list
+
+
+STEP 2: MIGRATE rack.db TO searchRack.db
+-----------------------------------------
+This will merge all data from rack.db into searchRack.db:
+
+  python migrate_to_single_db.py
+
+What it does:
+- Creates safety backups of both databases
+- Ensures searchRack.db has complete schema
+- Merges rack.db data into searchRack.db (no data loss)
+- Archives the old rack.db file
+- Verifies the migration
+
+After this step, searchRack.db contains ALL your data.
+
+
+STEP 3: SET UP AUTOMATED DAILY BACKUPS
+---------------------------------------
+Run the PowerShell script as Administrator:
+
+  .\setup_daily_backup.ps1
+
+This creates a Windows Task Scheduler task that:
+- Runs every day at 2:00 AM
+- Creates rotating backups (10-day history)
+- Keeps backups in backups/ folder
+- Automatically overwrites oldest backup when full
+
+Backup files: searchRack-day1.db through searchRack-day10.db
+
+
+STEP 4: UPDATE APPLICATION CODE
+--------------------------------
+Now we need to remove rack.db references from the code.
+
+Key changes needed:
+
+A) In app.py:
+   - Remove addToRack() calls (keep addToSearchRack only)
+   - Remove updateSearchRackDB() calls
+   - Update /refresh_searchrack to only run enrichment
+   - Remove rack.db from clear_shelf operations
+   - Remove 'rack' from database mappings
+
+B) In DBmanager.py:
+   - Remove updateSearchRackDB() function
+   - Remove addToRack() function
+   - Keep addToSearchRack() as main function
+
+⚠️  IMPORTANT: Test thoroughly after code changes!
+
+
+STEP 5: TEST YOUR WORKFLOW
+---------------------------
+After migration, test these operations:
+
+1. Barcode Scanning:
+   - Scan a barcode → position
+   - Verify it appears in searchRack inventory
+   - Check that only searchRack.db is updated
+
+2. Search Functionality:
+   - Search for items in /searchrack
+   - Verify all your items are found
+   - Check that enrichment data (titles, images) is present
+
+3. Shelf Operations:
+   - Create/update/delete shelf locations
+   - Verify changes reflect immediately
+
+4. Backup/Restore:
+   - Create a manual backup: python rotating_backup.py backup
+   - List backups: python rotating_backup.py list
+   - Test restore: python rotating_backup.py restore 1
+
+
+STEP 6: CLEANUP
+---------------
+After verifying everything works (wait a few days):
+
+1. Delete the archived rack.db file:
+   - Look for rack.db.archived-YYYYMMDD_HHMMSS
+   - Delete it to save space
+
+2. Delete pre-migration backups:
+   - rack.db.pre-migration-YYYYMMDD_HHMMSS
+   - searchRack.db.pre-migration-YYYYMMDD_HHMMSS
+
+3. (Optional) Delete old test scripts that reference rack.db
+
+
+BACKUP SYSTEM USAGE:
+--------------------
+
+Create Backup:
+  python rotating_backup.py backup
+
+List All Backups:
+  python rotating_backup.py list
+
+Restore from Backup:
+  python rotating_backup.py restore <1-10>
+  
+Example: Restore from day 5:
+  python rotating_backup.py restore 5
+
+The backup system automatically:
+- Keeps 10 days of history
+- Overwrites oldest backup when full
+- Uses day-of-month to determine slot (day 1→slot 1, day 11→slot 1, etc.)
+
+
+TROUBLESHOOTING:
+----------------
+
+Q: What if the migration fails?
+A: Safety backups are created before migration. You can restore from:
+   - rack.db.pre-migration-YYYYMMDD_HHMMSS
+   - searchRack.db.pre-migration-YYYYMMDD_HHMMSS
+
+Q: How do I verify data wasn't lost?
+A: Check the migration output - it shows counts of migrated/updated items.
+   Also compare row counts before and after.
+
+Q: What if I need to go back to the old system?
+A: You can restore the archived rack.db file, but you'll need to revert
+   the code changes in app.py and DBmanager.py.
+
+Q: The scheduled task isn't running?
+A: Check Task Scheduler (taskschd.msc) → look for "SimpleInventory-DailyBackup"
+   Verify it's enabled and check the "History" tab for errors.
+
+
+ROLLBACK PLAN:
+--------------
+If you need to rollback:
+
+1. Stop the application
+2. Restore from pre-migration backups:
+   - Copy rack.db.pre-migration-* back to rack.db
+   - Copy searchRack.db.pre-migration-* back to searchRack.db
+3. Revert code changes (git revert if using version control)
+4. Restart application
+
+
+MONITORING:
+-----------
+After migration, monitor:
+- Disk space in backups/ folder (grows with each backup)
+- Application logs for errors
+- Backup task success (check Task Scheduler history)
+- Data integrity (spot-check items in searchRack)
+
+
+SUPPORT:
+--------
+If you encounter issues:
+1. Check the migration script output for error messages
+2. Verify file permissions on databases and backups folder
+3. Check Windows Event Log for Task Scheduler errors
+4. Review application logs for database errors
+
+
+NEXT STEPS:
+-----------
+After successful migration:
+1. Re-upload your BOL files to rawbol.db
+2. Run enrichment to update titles/images
+3. Set up monitoring for backup task
+4. Document your new simpler workflow
+5. Enjoy faster, more reliable operations!

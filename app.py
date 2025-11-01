@@ -11,7 +11,7 @@ import xml.dom.minidom as minidom
 
 
 from inventory import find_item  # adjust this to match your actual import
-from DBmanager import ebayStoreDB, amazonStoreDB, addToRack, store_ebay_order, createSearchRackDB, updateSearchRackDB, addToSearchRack
+from DBmanager import ebayStoreDB, amazonStoreDB, store_ebay_order, createSearchRackDB, addToSearchRack
 from DBmanager import enrich_searchrack_db
 try:
     from amazon_manager import AmazonManager
@@ -2227,13 +2227,9 @@ def additemtrue():
                 img.save(abs_path, optimize=True, quality=40)
             except Exception as e:
                 print(f"Image processing failed: {e}")
-        print("Flow Complete, adding to Rack....")
+        print("Flow Complete, adding to SearchRack....")
         # If picture position is set, store 'picture' in ITEM_POSITION
         item_position_to_store = 'picture' if final_pictureposition else final_position
-        addToRack(item_position_to_store, final_barcode, None, final_pictureposition)
-        print(f"Added to rack: position={item_position_to_store}, barcode={final_barcode}, pictureposition={final_pictureposition}")
-        
-        # Also add to searchRack.db
         addToSearchRack(item_position_to_store, final_barcode, None, final_pictureposition)
         print(f"Added to searchRack: position={item_position_to_store}, barcode={final_barcode}, pictureposition={final_pictureposition}")
         
@@ -3797,7 +3793,6 @@ def api_search_db(db_key):
         limit = 50
     try:
         mapping = {
-            'rack': 'rack.db',
             'ebayStore': 'ebayStore.db',
             'amazonStore': 'amazonStore.db',
             'sold': 'sold.db',
@@ -4098,15 +4093,15 @@ def api_lookup_location():
     barcode = data.get('barcode')
     item_id = data.get('item_id')
     try:
-        conn = sqlite3.connect('rack.db')
+        conn = sqlite3.connect('searchRack.db')
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         row = None
         if barcode:
-            cur.execute("SELECT * FROM INVENTORY WHERE BARCODE = ? COLLATE NOCASE LIMIT 1", (barcode,))
+            cur.execute("SELECT * FROM SEARCHRACK WHERE BARCODE = ? COLLATE NOCASE LIMIT 1", (barcode,))
             row = cur.fetchone()
         if not row and item_id:
-            cur.execute("SELECT * FROM INVENTORY WHERE BARCODE = ? COLLATE NOCASE LIMIT 1", (item_id,))
+            cur.execute("SELECT * FROM SEARCHRACK WHERE BARCODE = ? COLLATE NOCASE LIMIT 1", (item_id,))
             row = cur.fetchone()
         if not row:
             conn.close()
@@ -4334,7 +4329,6 @@ def _get_table_and_pk(db_path, table_hint=None):
 def api_update_row(db_key, item_id):
     data = request.get_json() or {}
     mapping = {
-        'rack': 'rack.db',
         'ebayStore': 'ebayStore.db',
         'sold': 'sold.db',
         'searchRack': 'searchRack.db',
@@ -4446,7 +4440,7 @@ def api_update_shelf():
             if not os.path.exists(new_path) and os.path.exists(old_path):
                 os.rename(old_path, new_path)
 
-            # Cascade rename into searchRack.db (SEARCHRACK.ITEM_POSITION) and rack.db (INVENTORY.ITEM_POSITION)
+            # Cascade rename into searchRack.db (SEARCHRACK.ITEM_POSITION)
             try:
                 # Update searchRack.db
                 sconn = sqlite3.connect('searchRack.db')
@@ -4458,21 +4452,10 @@ def api_update_shelf():
             except Exception:
                 s_updated = None
 
-            try:
-                # Update rack.db (INVENTORY table)
-                rconn = sqlite3.connect('rack.db')
-                rcur = rconn.cursor()
-                rcur.execute("UPDATE INVENTORY SET ITEM_POSITION = ? WHERE LOWER(TRIM(ITEM_POSITION)) = LOWER(TRIM(?))", (new_code, old_code))
-                r_updated = rcur.rowcount
-                rconn.commit()
-                rconn.close()
-            except Exception:
-                r_updated = None
-
             # Log rename cascade results
             try:
                 with open('clear_shelf.log', 'a', encoding='utf-8') as lf:
-                    lf.write(f"SHELF_RENAME: {time.strftime('%Y-%m-%d %H:%M:%S')} {old_code} -> {new_code} searchRack_updated={s_updated} rack_updated={r_updated}\n")
+                    lf.write(f"SHELF_RENAME: {time.strftime('%Y-%m-%d %H:%M:%S')} {old_code} -> {new_code} searchRack_updated={s_updated}\n")
             except Exception:
                 pass
 
@@ -4692,7 +4675,6 @@ def api_shelf_counts():
 @app.route('/api/delete/<db_key>/<int:item_id>', methods=['POST'])
 def api_delete_row(db_key, item_id):
     mapping = {
-        'rack': 'rack.db',
         'ebayStore': 'ebayStore.db',
         'sold': 'sold.db',
         'searchRack': 'searchRack.db',
@@ -4761,7 +4743,6 @@ def api_undelete(archive_id):
         data = json.loads(rec['data_json'])
         src_db_key = rec['source_db']
         mapping = {
-            'rack': 'rack.db',
             'ebayStore': 'ebayStore.db',
             'sold': 'sold.db',
             'searchRack': 'searchRack.db',
@@ -5012,7 +4993,6 @@ def api_delete_archive(archive_id):
 def refresh_searchrack():
     from DBmanager import enrich_searchrack_db
     createSearchRackDB()
-    updateSearchRackDB()
     enrich_searchrack_db(batch_size=500, do_backup=False)  # Enrich with all sources including Amazon
     return 'SearchRack database updated and enriched! <a href="/searchrack">Back to Search</a>'
 
@@ -5137,8 +5117,7 @@ def sync_all():
         
         # Sync eBay listings (searchRack)
         try:
-            from DBmanager import updateSearchRackDB, enrich_searchrack_db
-            updateSearchRackDB()
+            from DBmanager import enrich_searchrack_db
             enrich_searchrack_db(batch_size=500, do_backup=False)  # Enrich with eBay, BOL, and Amazon
             update_sync_timestamp('ebay_listings')
             results['ebay_listings'] = 'success'
@@ -5205,8 +5184,7 @@ def sync_ebay_orders_api():
 def sync_ebay_listings_api():
     """Sync eBay listings and enrich with Amazon data"""
     try:
-        from DBmanager import updateSearchRackDB, enrich_searchrack_db
-        updateSearchRackDB()
+        from DBmanager import enrich_searchrack_db
         enrich_searchrack_db(batch_size=500, do_backup=False)  # Enrich with eBay, BOL, and Amazon data
         update_sync_timestamp('ebay_listings')
         return jsonify({'success': True, 'message': 'eBay listings synced and enriched successfully'})
