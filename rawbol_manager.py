@@ -88,6 +88,23 @@ def insert_raw_bol_items(df, lot_number, import_date):
                 except:
                     qty = 1
             
+            # Extract image URL from Excel HYPERLINK formula if present
+            image_raw = str(row.get('IMAGE', '')).strip()
+            image_url = image_raw
+            
+            # Check if it's an Excel HYPERLINK formula: =HYPERLINK("url")
+            if image_raw.startswith('=HYPERLINK('):
+                import re
+                # Extract URL from =HYPERLINK("url") or =HYPERLINK("url", "text")
+                match = re.search(r'=HYPERLINK\("([^"]+)"', image_raw)
+                if match:
+                    image_url = match.group(1).strip()
+            
+            # Extract BOL # from the row
+            bol_num = str(row.get('BOL #', '')).strip()
+            if not bol_num or bol_num.lower() == 'nan':
+                bol_num = ''
+            
             cur.execute('''INSERT INTO raw_bol_items 
                 (upc, item_description, client_cost, total_client_cost, image_url, quantity, lot_number, bol_number, import_date, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
@@ -95,10 +112,10 @@ def insert_raw_bol_items(df, lot_number, import_date):
                  str(row.get('ITEM DESCRIPTION', '')).strip(),
                  float(row['CLIENT COST']) if 'CLIENT COST' in row and str(row['CLIENT COST']).strip() and str(row['CLIENT COST']).lower() != 'nan' else None,
                  float(row['TOTAL CLIENT COST']) if 'TOTAL CLIENT COST' in row and str(row['TOTAL CLIENT COST']).strip() and str(row['TOTAL CLIENT COST']).lower() != 'nan' else None,
-                 str(row.get('IMAGE', '')).strip(),
+                 image_url,
                  qty,
                  lot_number,
-                 str(row.get('BOL #', '')).strip(),
+                 bol_num,
                  import_date,
                  created_at))
             inserted += 1
