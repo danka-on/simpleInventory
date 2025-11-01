@@ -310,7 +310,7 @@ def get_upload_logs():
         return {'success': False, 'error': str(e)}
 
 def get_rawbol_stats():
-    """Get statistics from rawbol.db - total unique items and total quantity."""
+    """Get statistics from rawbol.db - total unique items, total quantity, and total cost."""
     try:
         ensure_rawbol_db()
         conn = sqlite3.connect('rawbol.db')
@@ -324,8 +324,12 @@ def get_rawbol_stats():
         cur.execute('SELECT SUM(quantity) FROM raw_bol_items')
         total_quantity = cur.fetchone()[0] or 0
         
+        # Get total cost from all BOLs (sum from upload_logs)
+        cur.execute('SELECT SUM(total_client_cost) FROM upload_logs WHERE total_client_cost IS NOT NULL')
+        total_cost = cur.fetchone()[0] or 0
+        
         conn.close()
-        return {'success': True, 'unique_items': unique_items, 'total_quantity': total_quantity}
+        return {'success': True, 'unique_items': unique_items, 'total_quantity': total_quantity, 'total_cost': total_cost}
     except Exception as e:
         return {'success': False, 'error': str(e)}
 

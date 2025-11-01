@@ -60,6 +60,9 @@
         // Load upload logs and stats on page load
         loadUploadLogs();
         loadStats();
+        
+        // Store global total cost for stats display
+        let globalTotalCost = 0;
 
         // Form submission
         document.getElementById('extractor-form').addEventListener('submit', async function(e) {
@@ -144,6 +147,9 @@
                 
                 if (data.success && data.logs && data.logs.length > 0) {
                     let html = '<table><tr><th>Location</th><th>Filename</th><th>LOT #</th><th>Items</th><th>Cost</th><th>Date</th><th>Uploaded At</th></tr>';
+                    let totalCostSum = 0;
+                    let totalItemsSum = 0;
+                    
                     data.logs.forEach(log => {
                         // Convert to EST (UTC - 4 hours for EDT, UTC - 5 hours for EST)
                         const uploadedDate = new Date(log.uploaded_at);
@@ -154,10 +160,14 @@
                         } else if (log.rows_imported !== undefined && log.rows_imported !== null) {
                             totalQty = parseInt(log.rows_imported) || 0;
                         }
+                        totalItemsSum += totalQty;
+                        
                         // Format total_client_cost
                         let totalCost = '—';
                         if (log.total_client_cost !== undefined && log.total_client_cost !== null) {
-                            totalCost = '$' + parseFloat(log.total_client_cost).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                            const costValue = parseFloat(log.total_client_cost);
+                            totalCostSum += costValue;
+                            totalCost = '$' + costValue.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
                         }
                         // Show lot_number (which now contains the extracted LOT #)
                         const lotNumber = log.lot_number || '—';
@@ -173,10 +183,26 @@
                             <td>${uploadedAt}</td>
                         </tr>`;
                     });
+                    
+                    // Add summary row
+                    const formattedTotal = '$' + totalCostSum.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                    html += `<tr style="background:#e8f4f8;font-weight:bold;border-top:2px solid #007bff">
+                        <td colspan="3" style="text-align:right">TOTAL:</td>
+                        <td>${totalItemsSum.toLocaleString()}</td>
+                        <td>${formattedTotal}</td>
+                        <td colspan="2"></td>
+                    </tr>`;
+                    
                     html += '</table>';
                     logsEl.innerHTML = html;
+                    
+                    // Update global total cost and refresh stats
+                    globalTotalCost = totalCostSum;
+                    loadStats();
                 } else {
                     logsEl.innerHTML = '<p>No uploads yet.</p>';
+                    globalTotalCost = 0;
+                    loadStats();
                 }
             } catch (err) {
                 console.error('Error loading logs:', err); // Debug logging
@@ -191,9 +217,13 @@
                 const statsEl = document.getElementById('stats-display');
                 
                 if (data.success) {
+                    // Use the global total cost from upload history instead of API value
+                    const totalCost = '$' + globalTotalCost.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                    
                     statsEl.innerHTML = `
                         <p><strong>Total Unique Items:</strong> ${data.unique_items.toLocaleString()}</p>
                         <p><strong>Total Quantity:</strong> ${data.total_quantity.toLocaleString()}</p>
+                        <p><strong>Total Cost:</strong> ${totalCost}</p>
                     `;
                 } else {
                     statsEl.innerHTML = `<p>Error loading stats: ${data.error}</p>`;
