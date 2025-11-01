@@ -381,7 +381,7 @@ def _ensure_items_prep_tables():
 
 def _now_iso():
     import datetime as _dt
-    return _dt.datetime.utcnow().isoformat()
+    return _dt.datetime.now(_dt.UTC).isoformat()
 
 def _trash_retention_days():
     # Prefer app_settings table value; fallback to env var; then default 7
@@ -431,7 +431,7 @@ def _set_trash_retention_days(days: int):
             try:
                 base = _dt.datetime.fromisoformat(del_at)
             except Exception:
-                base = _dt.datetime.utcnow()
+                base = _dt.datetime.now(_dt.UTC)
             new_exp = (base + _dt.timedelta(days=days)).isoformat()
             cur.execute('UPDATE items_prep_images SET expires_at=? WHERE id=?', (new_exp, rid))
         conn.commit()
@@ -446,7 +446,7 @@ def _move_to_trash(abs_path, upc):
         # Build trash path under static/items_prep_trash/YYYY/MM/UPC
         import datetime as _dt
         base = os.path.join(app.root_path, 'static', 'items_prep_trash')
-        now = _dt.datetime.utcnow()
+        now = _dt.datetime.now(_dt.UTC)
         year = str(now.year)
         month = f"{now.month:02d}"
         target_dir = os.path.join(base, year, month, str(upc))
@@ -1173,7 +1173,7 @@ def api_items_prep_status():
             if temp_row:
                 # Move to bol_items permanently
                 import datetime
-                import_date = datetime.datetime.utcnow().isoformat()
+                import_date = datetime.datetime.now(datetime.UTC).isoformat()
                 
                 cur.execute('''
                     INSERT OR REPLACE INTO bol_items (upc, item_description, image_url, lot_number, bol_number, import_date, temporary)
@@ -1191,7 +1191,7 @@ def api_items_prep_status():
         
         _ensure_items_prep_tables()
         import datetime
-        ts = datetime.datetime.utcnow().isoformat()
+        ts = datetime.datetime.now(datetime.UTC).isoformat()
         # upsert
         cur.execute('SELECT upc FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (upc,))
         if cur.fetchone():
@@ -1292,7 +1292,7 @@ def api_items_prep_diagnostic():
         # optional per-file rotations can be provided as rotations[] in the same form-data (one per file, same order)
         rotations = request.form.getlist('rotations[]') or request.form.getlist('rotations') or []
         import datetime
-        ts = datetime.datetime.utcnow().isoformat()
+        ts = datetime.datetime.now(datetime.UTC).isoformat()
         if files:
             conn_i = sqlite3.connect('bol.db')
             cur_i = conn_i.cursor()
@@ -1406,7 +1406,7 @@ def api_items_prep_diagnostic_delete_photos(upc):
                 # mark as deleted with expiry
                 del_at = _now_iso()
                 import datetime as _dt
-                exp = ( _dt.datetime.utcnow() + _dt.timedelta(days=_trash_retention_days()) ).isoformat()
+                exp = ( _dt.datetime.now(_dt.UTC) + _dt.timedelta(days=_trash_retention_days()) ).isoformat()
                 cur.execute('UPDATE items_prep_images SET deleted_at=?, expires_at=?, trash_path=? WHERE id=?', (del_at, exp, new_rel or rel, r['id']))
                 deleted += 1
             conn.commit()
@@ -1435,7 +1435,7 @@ def api_items_prep_diagnostic_add_photos(upc):
         if not files:
             return jsonify({'success': False, 'error': 'No files uploaded'}), 400
         import datetime
-        ts = datetime.datetime.utcnow().isoformat()
+        ts = datetime.datetime.now(datetime.UTC).isoformat()
         conn = sqlite3.connect('bol.db')
         cur = conn.cursor()
         out = []
@@ -1510,7 +1510,7 @@ def api_items_prep_delete_photo(photo_id):
                 new_rel = _move_to_trash(abs_path, r['upc'])
             del_at = _now_iso()
             import datetime as _dt
-            exp = (_dt.datetime.utcnow() + _dt.timedelta(days=_trash_retention_days())).isoformat()
+            exp = (_dt.datetime.now(_dt.UTC) + _dt.timedelta(days=_trash_retention_days())).isoformat()
             cur.execute('UPDATE items_prep_images SET deleted_at=?, expires_at=?, trash_path=? WHERE id=?', (del_at, exp, new_rel or rel, photo_id))
             conn.commit()
             conn.close()
@@ -1612,7 +1612,7 @@ def api_items_prep_notes_add():
             return jsonify({'success': False, 'error': 'Missing upc or note'}), 400
         _ensure_items_prep_tables()
         import datetime
-        ts = datetime.datetime.utcnow().isoformat()
+        ts = datetime.datetime.now(datetime.UTC).isoformat()
         conn = sqlite3.connect('bol.db')
         cur = conn.cursor()
         cur.execute('INSERT INTO items_prep_notes (upc, note, created_at) VALUES (?,?,?)', (upc, note, ts))
@@ -1670,7 +1670,7 @@ def api_items_prep_location_set():
             return jsonify({'success': False, 'error': 'Missing upc'}), 400
         _ensure_items_prep_tables()
         import datetime
-        ts = datetime.datetime.utcnow().isoformat()
+        ts = datetime.datetime.now(datetime.UTC).isoformat()
         conn = sqlite3.connect('bol.db')
         cur = conn.cursor()
         # Check if status exists
@@ -2463,7 +2463,7 @@ def position_diagnostic():
         _ensure_items_prep_tables()
         
         import datetime
-        ts = datetime.datetime.utcnow().isoformat()
+        ts = datetime.datetime.now(datetime.UTC).isoformat()
         conn = sqlite3.connect('bol.db')
         cur = conn.cursor()
         
@@ -3454,7 +3454,7 @@ def get_pending_removals():
         
         # Calculate time remaining for each order
         import datetime
-        now = datetime.datetime.utcnow()
+        now = datetime.datetime.now(datetime.UTC)
         
         result = []
         for order in orders:
@@ -3686,7 +3686,7 @@ def api_removed_undo(rem_id: int):
 
         # Mark removed row undone
         import datetime as _dt
-        rem_cur.execute('UPDATE removed SET undone_at = ? WHERE id = ?', (_dt.datetime.utcnow().isoformat() + 'Z', rem_id))
+        rem_cur.execute('UPDATE removed SET undone_at = ? WHERE id = ?', (_dt.datetime.now(_dt.UTC).isoformat() + 'Z', rem_id))
         rem_conn.commit()
         rem_conn.close()
 
@@ -3751,7 +3751,7 @@ def api_sold_remove_now(order_id: int):
         import datetime as _dt
         rem_cur.execute(
             'INSERT INTO removed (name, barcode, qty, time_removed) VALUES (?,?,?,?)',
-            (order['title'] or '', barcode, sold_qty, _dt.datetime.utcnow().isoformat() + 'Z')
+            (order['title'] or '', barcode, sold_qty, _dt.datetime.now(_dt.UTC).isoformat() + 'Z')
         )
         rem_conn.commit()
         rem_conn.close()
@@ -4041,7 +4041,7 @@ def api_search_db(db_key):
                     cur_m.execute('ALTER TABLE SEARCHRACK ADD COLUMN CREATED_AT TEXT')
                 # Set CREATED_AT for any missing rows to current UTC so timestamps appear
                 import datetime as _dt
-                now_iso = _dt.datetime.utcnow().isoformat()
+                now_iso = _dt.datetime.now(_dt.UTC).isoformat()
                 cur_m.execute("UPDATE SEARCHRACK SET CREATED_AT = ? WHERE CREATED_AT IS NULL OR TRIM(COALESCE(CREATED_AT,'')) = ''", (now_iso,))
                 conn_m.commit()
                 conn_m.close()
@@ -4938,7 +4938,7 @@ def api_delete_row(db_key, item_id):
         )''')
         import datetime, json
         # Store deletion time in ISO8601 UTC
-        deleted_at = datetime.datetime.utcnow().isoformat()
+        deleted_at = datetime.datetime.now(datetime.UTC).isoformat()
         dcur.execute('INSERT INTO deleted_items (source_db, source_table, source_pk, source_id, deleted_at, data_json) VALUES (?,?,?,?,?,?)',
                      (db_key, table, pk, str(item_id), deleted_at, json.dumps(rowdict)))
         dconn.commit()
@@ -5449,13 +5449,26 @@ def sync_amazon_listings_api():
 def sync_missing_upcs():
     """Sync UPCs for Amazon items that don't have them (where UPC = ASIN)"""
     import time
+    from datetime import datetime, timedelta
     
     try:
         conn = sqlite3.connect('amazonStore.db')
         cur = conn.cursor()
         
-        # Find items without UPCs (where UPC equals ASIN, meaning no UPC was set)
-        cur.execute('SELECT ASIN FROM ITEMS WHERE UPC = ASIN OR UPC IS NULL')
+        # Find items that need UPC fetching using smart tracking:
+        # - upc_fetch_attempted = 0 (never tried) OR
+        # - upc_fetch_attempted = 2 AND last fetch > 7 days ago (retry after error)
+        # - EXCLUDE upc_fetch_attempted = 1 (no UPC exists, skip forever)
+        seven_days_ago = (datetime.now() - timedelta(days=7)).isoformat()
+        
+        cur.execute('''
+            SELECT ASIN FROM ITEMS 
+            WHERE (UPC = ASIN OR UPC IS NULL)
+            AND (
+                upc_fetch_attempted = 0 
+                OR (upc_fetch_attempted = 2 AND upc_last_fetch_date < ?)
+            )
+        ''', (seven_days_ago,))
         items_without_upcs = [row[0] for row in cur.fetchall()]
     except Exception as e:
         print(f"❌ Database error in sync_missing_upcs: {e}")
@@ -5463,7 +5476,7 @@ def sync_missing_upcs():
     
     if not items_without_upcs:
         conn.close()
-        print("✅ No items need UPC fetching")
+        print("✅ No items need UPC fetching (using smart tracking)")
         return 0
     
     print(f"🔍 Found {len(items_without_upcs)} items without UPCs. Fetching...")
@@ -5509,17 +5522,38 @@ def sync_missing_upcs():
                                     break
             
             if upc:
-                cur.execute('UPDATE ITEMS SET UPC = ? WHERE ASIN = ?', (upc, asin))
+                # UPC found - mark as successfully fetched (status 3)
+                cur.execute('''
+                    UPDATE ITEMS 
+                    SET UPC = ?, 
+                        upc_fetch_attempted = 3, 
+                        upc_last_fetch_date = ? 
+                    WHERE ASIN = ?
+                ''', (upc, datetime.now().isoformat(), asin))
                 upcs_found += 1
                 print(f"✅ [{i}/{len(items_without_upcs)}] {asin}: {upc}")
             else:
-                print(f"⚠️ [{i}/{len(items_without_upcs)}] {asin}: No UPC found")
+                # No UPC exists in catalog - mark to skip forever (status 1)
+                cur.execute('''
+                    UPDATE ITEMS 
+                    SET upc_fetch_attempted = 1, 
+                        upc_last_fetch_date = ? 
+                    WHERE ASIN = ?
+                ''', (datetime.now().isoformat(), asin))
+                print(f"⚠️ [{i}/{len(items_without_upcs)}] {asin}: No UPC found (marked to skip)")
             
             # Rate limiting: 2 requests per second max
             time.sleep(0.5)
             
         except Exception as e:
-            print(f"❌ [{i}/{len(items_without_upcs)}] {asin}: Error - {e}")
+            # API error - mark for retry after 7 days (status 2)
+            cur.execute('''
+                UPDATE ITEMS 
+                SET upc_fetch_attempted = 2, 
+                    upc_last_fetch_date = ? 
+                WHERE ASIN = ?
+            ''', (datetime.now().isoformat(), asin))
+            print(f"❌ [{i}/{len(items_without_upcs)}] {asin}: Error - {e} (will retry in 7 days)")
             time.sleep(0.5)
     
     conn.commit()
