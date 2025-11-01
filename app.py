@@ -105,6 +105,11 @@ def _run_enrich_in_background():
 def tools():
     return render_template('tools.html')
 
+# BOL Statistics page
+@app.route('/bol-statistics')
+def bol_statistics():
+    return render_template('bol_statistics.html')
+
 # Barcode Print Que page
 @app.route('/barcode-print-que')
 def barcode_print_que():
@@ -5465,20 +5470,32 @@ def sync_missing_upcs():
     """Sync UPCs for Amazon items that don't have them (where UPC = ASIN)"""
     import time
     
-    conn = sqlite3.connect('amazonStore.db')
-    cur = conn.cursor()
-    
-    # Find items without UPCs (where UPC equals ASIN, meaning no UPC was set)
-    cur.execute('SELECT ASIN FROM ITEMS WHERE UPC = ASIN OR UPC IS NULL')
-    items_without_upcs = [row[0] for row in cur.fetchall()]
+    try:
+        conn = sqlite3.connect('amazonStore.db')
+        cur = conn.cursor()
+        
+        # Find items without UPCs (where UPC equals ASIN, meaning no UPC was set)
+        cur.execute('SELECT ASIN FROM ITEMS WHERE UPC = ASIN OR UPC IS NULL')
+        items_without_upcs = [row[0] for row in cur.fetchall()]
+    except Exception as e:
+        print(f"❌ Database error in sync_missing_upcs: {e}")
+        raise
     
     if not items_without_upcs:
         conn.close()
+        print("✅ No items need UPC fetching")
         return 0
     
     print(f"🔍 Found {len(items_without_upcs)} items without UPCs. Fetching...")
     
-    amazon = AmazonManager()
+    try:
+        amazon = AmazonManager()
+        print("✅ AmazonManager initialized")
+    except Exception as e:
+        print(f"❌ Failed to initialize AmazonManager: {e}")
+        conn.close()
+        raise
+    
     upcs_found = 0
     
     for i, asin in enumerate(items_without_upcs, 1):
@@ -5537,11 +5554,23 @@ def sync_amazon_upcs_api():
     if not AMAZON_AVAILABLE:
         return jsonify({'success': False, 'message': 'Amazon integration not available'}), 500
     try:
+        print("🔄 Starting Amazon UPC sync...")
         count = sync_missing_upcs()
+        print(f"✅ Amazon UPC sync completed: {count} UPCs fetched")
         update_sync_timestamp('amazon_upcs')
-        return jsonify({'success': True, 'message': f'Fetched {count} UPCs for items without barcodes'})
+        
+        if count == 0:
+            message = 'No items need UPC fetching - all items already have UPCs'
+        else:
+            message = f'Fetched {count} UPCs for items without barcodes'
+        
+        return jsonify({'success': True, 'message': message, 'count': count})
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"❌ Amazon UPC sync error: {e}")
+        print(error_details)
+        return jsonify({'success': False, 'message': str(e), 'error': error_details}), 500
 
 @app.route('/api/sync/debug', methods=['GET'])
 def sync_debug():

@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>BOL Statistics</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background: #f7f7f8;
+            margin: 0;
+            padding: 18px;
+        }
+        .top {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .btn-back {
+            padding: 8px 14px;
+            background: #e74c3c;
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+        }
+        .btn-back:hover {
+            background: #c0392b;
+        }
+        h2 {
+            color: #333;
+            margin: 0;
+            flex: 1;
+            text-align: center;
+        }
+        .controls {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        .toggle-btn {
+            padding: 10px 18px;
+            background: #007bff;
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.2s;
+        }
+        .toggle-btn:hover {
+            background: #0056b3;
+        }
+        .toggle-btn.active {
+            background: #00b894;
+        }
+        select {
+            padding: 8px 12px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 30px;
+        }
+        .stat-card {
+            background: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            border: 1px solid #e0e0e0;
+        }
+        .stat-card h3 {
+            margin: 0 0 8px 0;
+            font-size: 0.9rem;
+            color: #666;
+            text-transform: uppercase;
+        }
+        .stat-card .value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #2c3e50;
+            margin: 0;
+        }
+        .stat-card .subtext {
+            font-size: 0.85rem;
+            color: #999;
+            margin-top: 8px;
+        }
+        .chart-container {
+            background: #fff;
+            padding: 24px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            border: 1px solid #e0e0e0;
+            margin-bottom: 20px;
+        }
+        .chart-wrapper {
+            position: relative;
+            height: 400px;
+        }
+        #lot-selector-container {
+            display: none;
+        }
+        .profit-positive {
+            color: #00b894;
+        }
+        .profit-negative {
+            color: #e74c3c;
+        }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="top">
+        <a href="/tools" class="btn-back">Back</a>
+        <h2>BOL Statistics</h2>
+        <div style="width: 84px;"></div>
+    </div>
+
+    <div class="controls">
+        <button class="toggle-btn active" id="btn-all-lots">All LOTs</button>
+        <button class="toggle-btn" id="btn-individual-lot">Individual LOT</button>
+        <div id="lot-selector-container">
+            <select id="lot-selector">
+                <option value="">Select a LOT...</option>
+            </select>
+        </div>
+    </div>
+
+    <div id="stats-content">
+        <div class="loading">Loading statistics...</div>
+    </div>
+
+    <script>
+        console.log('BOL Statistics page loaded successfully');
+        
+        // Global error handler
+        window.onerror = function(msg, url, lineNo, columnNo, error) {
+            console.error('JavaScript Error:', msg, 'at line', lineNo);
+            document.getElementById('stats-content').innerHTML = `<div class="loading" style="color:red">JavaScript Error: ${msg}<br>Line: ${lineNo}</div>`;
+            return false;
+        };
+        
+        let currentView = 'all'; // 'all' or 'individual'
+        let selectedLot = null;
+        let lotsData = [];
+        let soldData = [];
+
+        // Toggle between All LOTs and Individual LOT views
+        document.getElementById('btn-all-lots').addEventListener('click', () => {
+            currentView = 'all';
+            document.getElementById('btn-all-lots').classList.add('active');
+            document.getElementById('btn-individual-lot').classList.remove('active');
+            document.getElementById('lot-selector-container').style.display = 'none';
+            renderView();
+        });
+
+        document.getElementById('btn-individual-lot').addEventListener('click', () => {
+            currentView = 'individual';
+            document.getElementById('btn-all-lots').classList.remove('active');
+            document.getElementById('btn-individual-lot').classList.add('active');
+            document.getElementById('lot-selector-container').style.display = 'block';
+            if (selectedLot) {
+                renderView();
+            } else {
+                document.getElementById('stats-content').innerHTML = '<div class="loading">Please select a LOT</div>';
+            }
+        });
+
+        document.getElementById('lot-selector').addEventListener('change', (e) => {
+            selectedLot = e.target.value;
+            if (selectedLot && currentView === 'individual') {
+                renderView();
+            }
+        });
+
+        // Load data on page load
+        async function loadData() {
+            console.log('Loading BOL statistics data...');
+            try {
+                // Load LOT data from rawbol
+                console.log('Fetching /api/rawbol/logs...');
+                const lotsResponse = await fetch('/api/rawbol/logs');
+                if (!lotsResponse.ok) {
+                    throw new Error(`LOTs API failed: ${lotsResponse.status}`);
+                }
+                const lotsJson = await lotsResponse.json();
+                lotsData = lotsJson.logs || [];
+                console.log(`Loaded ${lotsData.length} LOTs`);
+
+                // Load sold orders data
+                console.log('Fetching /api/financial-analytics...');
+                const soldResponse = await fetch('/api/financial-analytics');
+                if (!soldResponse.ok) {
+                    throw new Error(`Financial analytics API failed: ${soldResponse.status}`);
+                }
+                const soldJson = await soldResponse.json();
+                soldData = soldJson.transactions || [];
+                console.log(`Loaded ${soldData.length} sold transactions`);
+
+                // Populate LOT selector
+                const selector = document.getElementById('lot-selector');
+                selector.innerHTML = '<option value="">Select a LOT...</option>';
+                lotsData.forEach(lot => {
+                    const option = document.createElement('option');
+                    option.value = lot.lot_number;
+                    option.textContent = `${lot.lot_number} (${lot.import_date}) - $${parseFloat(lot.total_client_cost || 0).toLocaleString('en-US', {minimumFractionDigits: 2})}`;
+                    selector.appendChild(option);
+                });
+
+                console.log('Rendering view...');
+                renderView();
+            } catch (err) {
+                console.error('Error loading data:', err);
+                document.getElementById('stats-content').innerHTML = `<div class="loading">Error loading data: ${err.message}</div>`;
+            }
+        }
+
+        function renderView() {
+            console.log(`Rendering view: ${currentView}`);
+            if (currentView === 'all') {
+                renderAllLotsView();
+            } else {
+                renderIndividualLotView();
+            }
+        }
+
+        function renderAllLotsView() {
+            console.log('Rendering All LOTs view...');
+            // Calculate aggregate stats
+            const totalCost = lotsData.reduce((sum, lot) => sum + parseFloat(lot.total_client_cost || 0), 0);
+            const totalItems = lotsData.reduce((sum, lot) => sum + parseInt(lot.rows_imported || 0), 0);
+            
+            // Get items sold from ALL LOTs
+            const itemsSoldFromLots = soldData.filter(order => order.bol_number && order.cost);
+            const totalRevenue = itemsSoldFromLots.reduce((sum, order) => sum + (parseFloat(order.price || 0) * parseInt(order.quantity || 1)), 0);
+            const totalCostOfSold = itemsSoldFromLots.reduce((sum, order) => sum + parseFloat(order.cost || 0), 0);
+            const totalProfit = totalRevenue - totalCostOfSold;
+            const profitMargin = totalRevenue > 0 ? ((totalProfit / totalRevenue) * 100) : 0;
+            
+            // Calculate % sold
+            const uniqueItemsSold = new Set(itemsSoldFromLots.map(order => order.upc || order.item_id)).size;
+            const percentSold = totalItems > 0 ? ((uniqueItemsSold / totalItems) * 100) : 0;
+
+            const html = `
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <h3>Total LOTs</h3>
+                        <p class="value">${lotsData.length}</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Total Cost</h3>
+                        <p class="value">$${totalCost.toLocaleString('en-US', {minimumFractionDigits: 2})}</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Total Items</h3>
+                        <p class="value">${totalItems.toLocaleString()}</p>
+                        <p class="subtext">${uniqueItemsSold} unique items sold</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3>% Items Sold</h3>
+                        <p class="value">${percentSold.toFixed(1)}%</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Total Revenue</h3>
+                        <p class="value">$${totalRevenue.toLocaleString('en-US', {minimumFractionDigits: 2})}</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Total Profit</h3>
+                        <p class="value ${totalProfit >= 0 ? 'profit-positive' : 'profit-negative'}">$${totalProfit.toLocaleString('en-US', {minimumFractionDigits: 2})}</p>
+                        <p class="subtext">Margin: ${profitMargin.toFixed(1)}%</p>
+                    </div>
+                </div>
+
+                <div class="chart-container">
+                    <h3 style="margin-top:0">LOT Cost Distribution</h3>
+                    <div class="chart-wrapper">
+                        <canvas id="cost-chart"></canvas>
+                    </div>
+                </div>
+
+                <div class="chart-container">
+                    <h3 style="margin-top:0">Sales by LOT</h3>
+                    <div class="chart-wrapper">
+                        <canvas id="sales-chart"></canvas>
+                    </div>
+                </div>
+            `;
+
+            document.getElementById('stats-content').innerHTML = html;
+
+            // Render cost distribution chart
+            renderCostChart();
+            
+            // Render sales by LOT chart
+            renderSalesByLotChart();
+        }
+
+        function renderIndividualLotView() {
+            if (!selectedLot) {
+                document.getElementById('stats-content').innerHTML = '<div class="loading">Please select a LOT</div>';
+                return;
+            }
+
+            const lot = lotsData.find(l => l.lot_number === selectedLot);
+            if (!lot) {
+                document.getElementById('stats-content').innerHTML = '<div class="loading">LOT not found</div>';
+                return;
+            }
+
+            // Get sold items for this specific LOT
+            const soldFromThisLot = soldData.filter(order => order.bol_number === selectedLot && order.cost);
+            const totalRevenue = soldFromThisLot.reduce((sum, order) => sum + (parseFloat(order.price || 0) * parseInt(order.quantity || 1)), 0);
+            const totalCostOfSold = soldFromThisLot.reduce((sum, order) => sum + parseFloat(order.cost || 0), 0);
+            const totalProfit = totalRevenue - totalCostOfSold;
+            const profitMargin = totalRevenue > 0 ? ((totalProfit / totalRevenue) * 100) : 0;
+            
+            const lotCost = parseFloat(lot.total_client_cost || 0);
+            const totalItems = parseInt(lot.rows_imported || 0);
+            const uniqueItemsSold = new Set(soldFromThisLot.map(order => order.upc || order.item_id)).size;
+            const percentSold = totalItems > 0 ? ((uniqueItemsSold / totalItems) * 100) : 0;
+            const avgCostPerItem = totalItems > 0 ? (lotCost / totalItems) : 0;
+
+            const html = `
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <h3>LOT Number</h3>
+                        <p class="value" style="font-size:1.5rem">${lot.lot_number}</p>
+                        <p class="subtext">${lot.import_date}</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3>LOT Cost</h3>
+                        <p class="value">$${lotCost.toLocaleString('en-US', {minimumFractionDigits: 2})}</p>
+                        <p class="subtext">Avg: $${avgCostPerItem.toFixed(2)}/item</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Total Items</h3>
+                        <p class="value">${totalItems}</p>
+                        <p class="subtext">${uniqueItemsSold} sold</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3>% Sold</h3>
+                        <p class="value">${percentSold.toFixed(1)}%</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Revenue</h3>
+                        <p class="value">$${totalRevenue.toLocaleString('en-US', {minimumFractionDigits: 2})}</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Profit</h3>
+                        <p class="value ${totalProfit >= 0 ? 'profit-positive' : 'profit-negative'}">$${totalProfit.toLocaleString('en-US', {minimumFractionDigits: 2})}</p>
+                        <p class="subtext">Margin: ${profitMargin.toFixed(1)}%</p>
+                    </div>
+                </div>
+
+                <div class="chart-container">
+                    <h3 style="margin-top:0">Sales Performance</h3>
+                    <div class="chart-wrapper">
+                        <canvas id="individual-chart"></canvas>
+                    </div>
+                </div>
+            `;
+
+            document.getElementById('stats-content').innerHTML = html;
+
+            // Render individual LOT chart
+            renderIndividualLotChart(soldFromThisLot, totalItems);
+        }
+
+        function renderCostChart() {
+            const ctx = document.getElementById('cost-chart');
+            if (!ctx) return;
+
+            const labels = lotsData.map(lot => `${lot.lot_number}`);
+            const data = lotsData.map(lot => parseFloat(lot.total_client_cost || 0));
+
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'LOT Cost ($)',
+                        data: data,
+                        backgroundColor: 'rgba(9, 132, 227, 0.7)',
+                        borderColor: 'rgba(9, 132, 227, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                callback: function(value) {
+                                    return '$' + value.toLocaleString();
+                                }
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return '$' + context.parsed.y.toLocaleString('en-US', {minimumFractionDigits: 2});
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function renderSalesByLotChart() {
+            const ctx = document.getElementById('sales-chart');
+            if (!ctx) return;
+
+            // Calculate sales per LOT
+            const salesByLot = {};
+            lotsData.forEach(lot => {
+                salesByLot[lot.lot_number] = {
+                    revenue: 0,
+                    profit: 0,
+                    cost: parseFloat(lot.total_client_cost || 0)
+                };
+            });
+
+            soldData.forEach(order => {
+                if (order.bol_number && salesByLot[order.bol_number]) {
+                    const revenue = parseFloat(order.price || 0) * parseInt(order.quantity || 1);
+                    const cost = parseFloat(order.cost || 0);
+                    salesByLot[order.bol_number].revenue += revenue;
+                    salesByLot[order.bol_number].profit += (revenue - cost);
+                }
+            });
+
+            const labels = Object.keys(salesByLot);
+            const revenueData = labels.map(lot => salesByLot[lot].revenue);
+            const profitData = labels.map(lot => salesByLot[lot].profit);
+
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Revenue ($)',
+                        data: revenueData,
+                        backgroundColor: 'rgba(0, 184, 148, 0.7)',
+                        borderColor: 'rgba(0, 184, 148, 1)',
+                        borderWidth: 1
+                    }, {
+                        label: 'Profit ($)',
+                        data: profitData,
+                        backgroundColor: 'rgba(255, 159, 64, 0.7)',
+                        borderColor: 'rgba(255, 159, 64, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                callback: function(value) {
+                                    return '$' + value.toLocaleString();
+                                }
+                            }
+                        }
+                    },
+                    plugins: {
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return context.dataset.label + ': $' + context.parsed.y.toLocaleString('en-US', {minimumFractionDigits: 2});
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function renderIndividualLotChart(soldItems, totalItems) {
+            const ctx = document.getElementById('individual-chart');
+            if (!ctx) return;
+
+            const uniqueSold = new Set(soldItems.map(order => order.upc || order.item_id)).size;
+            const remaining = totalItems - uniqueSold;
+
+            new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Sold', 'Remaining'],
+                    datasets: [{
+                        data: [uniqueSold, remaining],
+                        backgroundColor: [
+                            'rgba(0, 184, 148, 0.8)',
+                            'rgba(231, 76, 60, 0.8)'
+                        ],
+                        borderColor: [
+                            'rgba(0, 184, 148, 1)',
+                            'rgba(231, 76, 60, 1)'
+                        ],
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom'
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const label = context.label || '';
+                                    const value = context.parsed || 0;
+                                    const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                    const percentage = ((value / total) * 100).toFixed(1);
+                                    return `${label}: ${value} (${percentage}%)`;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Load data on page load
+        loadData();
+    </script>
+</body>
+</html>
