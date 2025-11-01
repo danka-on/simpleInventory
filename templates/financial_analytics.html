@@ -318,6 +318,18 @@
             </button>
         </div>
         
+        <!-- Fee Notice -->
+        <div style="background: #d1ecf1; border: 1px solid #17a2b8; border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; display: flex; align-items: center; gap: 12px;">
+            <span style="font-size: 1.5rem;">ℹ️</span>
+            <div>
+                <strong>Estimated Seller Fees:</strong> 
+                <span style="font-size: 0.9rem; color: #0c5460;">
+                    Platform APIs don't provide actual seller fees. Using estimates: <strong>12.9%</strong> for eBay (on item + shipping), 
+                    <strong>15%</strong> for Amazon (on item price only). Actual fees may vary by category and seller level.
+                </span>
+            </div>
+        </div>
+        
         <!-- Filters -->
         <div class="filters">
             <div class="filter-row">
@@ -691,6 +703,14 @@
                     case 'date':
                         valA = new Date(a.paid_time);
                         valB = new Date(b.paid_time);
+                        break;
+                    case 'fees':
+                        valA = (a.seller_fee || 0) + (a.taxes || 0);
+                        valB = (b.seller_fee || 0) + (b.taxes || 0);
+                        break;
+                    case 'shipping':
+                        valA = a.shipping_cost || 0;
+                        valB = b.shipping_cost || 0;
                         break;
                     case 'profit':
                         valA = (a.price * a.quantity) - ((a.cost || 0) * a.quantity) - (a.seller_fee || 0) - (a.taxes || 0) - (a.shipping_cost || 0);

@@ -2924,6 +2924,12 @@ def get_ebay_orders(days=90):
                 # Extract actual cost of shipping from transaction
                 shipping_cost = transaction.find('.//ebay:ActualShippingCost', ns)
                 
+                # Calculate estimated eBay seller fees (12.9% average: 12% FV fee + ~0.9% payment processing)
+                # eBay charges fees on total amount (item price + shipping)
+                item_price = float(price.text) if price is not None and price.text.replace('.', '', 1).isdigit() else 0
+                shipping_amount = float(shipping_cost.text) if shipping_cost is not None and shipping_cost.text.replace('.', '', 1).isdigit() else 0
+                estimated_seller_fee = (item_price + shipping_amount) * 0.129
+                
                 # Extract image URL from item and convert to high-res string
                 picture_url = item.find('.//ebay:PictureDetails/ebay:GalleryURL', ns) if item is not None else None
                 high_res_url = get_high_res_image_url(picture_url.text) if (picture_url is not None and picture_url.text) else None
@@ -2943,10 +2949,10 @@ def get_ebay_orders(days=90):
                     'shipping_country': shipping_country.text if shipping_country is not None else None,
                     'paid_time': paid_time.text if paid_time is not None else None,
                     'shipped_time': shipped_time.text if shipped_time is not None else None,
-                    'seller_fee': float(seller_fee.text) if seller_fee is not None and seller_fee.text.replace('.', '', 1).isdigit() else None,
+                    'seller_fee': estimated_seller_fee,
                     'taxes': float(taxes.text) if taxes is not None and taxes.text.replace('.', '', 1).isdigit() else None,
                     'fees': fees.text if fees is not None else None,
-                    'shipping_cost': float(shipping_cost.text) if shipping_cost is not None and shipping_cost.text.replace('.', '', 1).isdigit() else None,
+                    'shipping_cost': shipping_amount if shipping_amount > 0 else None,
                     'image': high_res_url,
                     'isHandled': '',
                     'isHandledDate': ''

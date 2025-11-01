@@ -186,8 +186,10 @@ class AmazonManager:
                     shipping_price = item.get('ShippingPrice', {})
                     shipping_cost = float(shipping_price.get('Amount', 0)) if shipping_price else 0
                     
-                    # Also get seller fees if available
-                    seller_fee = 0
+                    # Calculate estimated Amazon seller fees
+                    # Amazon referral fee averages 15% (varies by category: 8-15%)
+                    # Calculated on item price only (not including shipping)
+                    seller_fee = price * 0.15
                     taxes = 0
                     
                     # Amazon provides ItemTax
