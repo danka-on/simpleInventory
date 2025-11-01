@@ -409,9 +409,10 @@ def store_ebay_order(order):
         except Exception:
             pass
     
-    # Enrich title and image from ebayStore.db and rawbol.db using barcode
+    # Enrich title, image, and lot_number from ebayStore.db, rawbol.db, and bol.db using barcode
     title_val = order.get('title')
     image_val = order.get('image')
+    lot_number_val = None
     
     # First try to get image from ebayStore.db using item_id
     if not image_val and order.get('item_id'):
@@ -455,6 +456,22 @@ def store_ebay_order(order):
             bol_conn.close()
         except Exception:
             pass
+    
+    # Get lot_number from rawbol.db using barcode (this is the source of truth for LOT #)
+    if barcode_val and not lot_number_val:
+        try:
+            rawbol_conn = sqlite3.connect('rawbol.db')
+            rawbol_conn.row_factory = sqlite3.Row
+            rawbol_cur = rawbol_conn.cursor()
+            rawbol_cur.execute('SELECT lot_number FROM raw_bol_items WHERE upc = ? COLLATE NOCASE LIMIT 1', (barcode_val,))
+            row_rawbol = rawbol_cur.fetchone()
+            if row_rawbol and row_rawbol['lot_number']:
+                lot_num = row_rawbol['lot_number']
+                if str(lot_num).lower() not in ['', 'nan', 'none', 'null']:
+                    lot_number_val = lot_num
+            rawbol_conn.close()
+        except Exception:
+            pass
 
     # Prepare location: if order doesn't include location, try to fetch from searchRack.db by barcode==item_id
     location_val = order.get('location')
@@ -489,7 +506,8 @@ def store_ebay_order(order):
             image = COALESCE(?, image),
             barcode = COALESCE(?, barcode),
             location = COALESCE(?, location),
-            shipping_cost = COALESCE(?, shipping_cost)
+            shipping_cost = COALESCE(?, shipping_cost),
+            lot_number = COALESCE(?, lot_number)
             WHERE id = ?''',
             (
                 title_val,
@@ -501,6 +519,7 @@ def store_ebay_order(order):
                 barcode_val,
                 location_val,
                 order.get('shipping_cost'),
+                lot_number_val,
                 existing[0]
             )
         )
@@ -510,8 +529,8 @@ def store_ebay_order(order):
     
     # If not a duplicate, proceed with INSERT
     cur.execute('''INSERT INTO orders (
-        order_id, item_id, title, quantity, price, checkout_status, shipping_name, shipping_street1, shipping_street2, shipping_city, shipping_state, shipping_postal_code, shipping_country, paid_time, shipped_time, seller_fee, taxes, fees, image, isHandled, isHandledDate, location, barcode, store, shipping_cost
-    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+        order_id, item_id, title, quantity, price, checkout_status, shipping_name, shipping_street1, shipping_street2, shipping_city, shipping_state, shipping_postal_code, shipping_country, paid_time, shipped_time, seller_fee, taxes, fees, image, isHandled, isHandledDate, location, barcode, store, shipping_cost, lot_number
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
         (
             order.get('order_id'),
             order.get('item_id'),

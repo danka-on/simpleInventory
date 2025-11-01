@@ -370,9 +370,9 @@
                     </select>
                 </div>
                 <div class="filter-group">
-                    <label>BOL Number</label>
+                    <label>LOT #</label>
                     <select id="bolFilter">
-                        <option value="all">All BOLs</option>
+                        <option value="all">All LOTs</option>
                         <!-- Populated dynamically -->
                     </select>
                 </div>
@@ -438,7 +438,7 @@
                                 <th data-sort="store">Store <span class="sort-icon">↕</span></th>
                                 <th data-sort="title">Item <span class="sort-icon">↕</span></th>
                                 <th data-sort="upc">UPC <span class="sort-icon">↕</span></th>
-                                <th data-sort="bol">BOL # <span class="sort-icon">↕</span></th>
+                                <th data-sort="bol">LOT # <span class="sort-icon">↕</span></th>
                                 <th data-sort="qty">Qty <span class="sort-icon">↕</span></th>
                                 <th data-sort="price">Sale Price <span class="sort-icon">↕</span></th>
                                 <th data-sort="cost">Cost <span class="sort-icon">↕</span></th>
@@ -520,6 +520,7 @@
                 if (data.success) {
                     allData = data.transactions;
                     window.bolStats = data.bol_stats || {};
+                    window.lotOptions = data.lot_options || [];
                     populateBOLFilter();
                     applyFilters();
                 } else {
@@ -535,24 +536,35 @@
         
         function populateBOLFilter() {
             const bolFilter = document.getElementById('bolFilter');
-            const bols = [...new Set(allData.map(item => item.bol_number).filter(bol => bol))];
-            bols.sort();
             
-            // Clear existing options except "All BOLs"
-            bolFilter.innerHTML = '<option value="all">All BOLs</option>';
+            // Clear existing options except "All LOTs"
+            bolFilter.innerHTML = '<option value="all">All LOTs</option>';
             
-            // Add BOL options with stats
-            bols.forEach(bol => {
-                const stats = window.bolStats[bol];
-                let label = `BOL ${bol}`;
-                if (stats) {
-                    label += ` ($${stats.total_cost.toFixed(2)})`;
-                }
-                const option = document.createElement('option');
-                option.value = bol;
-                option.textContent = label;
-                bolFilter.appendChild(option);
-            });
+            // Use lot_options from rawbol.db if available, otherwise fall back to bol.db data
+            if (window.lotOptions && window.lotOptions.length > 0) {
+                window.lotOptions.forEach(lot => {
+                    const option = document.createElement('option');
+                    option.value = lot.value;
+                    option.textContent = `${lot.label} ($${lot.cost.toFixed(2)})`;
+                    bolFilter.appendChild(option);
+                });
+            } else {
+                // Fallback to old BOL data from bol.db
+                const bols = [...new Set(allData.map(item => item.bol_number).filter(bol => bol))];
+                bols.sort();
+                
+                bols.forEach(bol => {
+                    const stats = window.bolStats[bol];
+                    let label = `BOL ${bol}`;
+                    if (stats) {
+                        label += ` ($${stats.total_cost.toFixed(2)})`;
+                    }
+                    const option = document.createElement('option');
+                    option.value = bol;
+                    option.textContent = label;
+                    bolFilter.appendChild(option);
+                });
+            }
         }
         
         function applyFilters() {

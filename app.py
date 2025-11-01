@@ -122,6 +122,7 @@ def misc():
 # Financial Analytics page
 @app.route('/financial-analytics')
 def financial_analytics():
+    print("DEBUG: Financial analytics page accessed")
     return render_template('financial_analytics.html')
 
 # API endpoint for financial analytics data
@@ -131,13 +132,14 @@ def api_financial_analytics():
     Fetch all sold orders with cost data from BOL and calculate profits.
     Returns financial metrics for the dashboard.
     """
+    print("DEBUG: Financial analytics API called")
     try:
         # Connect to sold.db
         sold_conn = sqlite3.connect('sold.db')
         sold_conn.row_factory = sqlite3.Row
         sold_cur = sold_conn.cursor()
         
-        # Get all sold orders
+        # Get all sold orders with lot_number
         sold_cur.execute('''
             SELECT 
                 order_id,
@@ -152,7 +154,8 @@ def api_financial_analytics():
                 barcode,
                 store,
                 location,
-                shipping_cost
+                shipping_cost,
+                lot_number
             FROM orders
             WHERE paid_time IS NOT NULL
             ORDER BY paid_time DESC
@@ -179,20 +182,20 @@ def api_financial_analytics():
         for order in orders:
             item_data = dict(order)
             
-            # Try to get cost and BOL number from BOL first (priority 1)
+            # Try to get cost from BOL first (priority 1)
             upc = order['barcode'] or order['item_id']
             cost = None
             cost_source = None
-            bol_number = None
+            # LOT number comes directly from sold.db (already enriched from rawbol.db)
+            bol_number = order['lot_number'] if order['lot_number'] and str(order['lot_number']).lower() not in ['', 'nan', 'none', 'null'] else None
             
             if upc:
-                # Check BOL - get cost and BOL number
-                bol_cur.execute('SELECT client_cost, bol_number FROM bol_items WHERE upc = ? COLLATE NOCASE', (upc,))
+                # Check BOL - get cost only
+                bol_cur.execute('SELECT client_cost FROM bol_items WHERE upc = ? COLLATE NOCASE', (upc,))
                 bol_row = bol_cur.fetchone()
                 if bol_row and bol_row['client_cost']:
                     cost = float(bol_row['client_cost'])
                     cost_source = 'bol'
-                    bol_number = bol_row['bol_number'] if bol_row['bol_number'] and str(bol_row['bol_number']).lower() not in ['', 'nan', 'none', 'null'] else None
                 
                 # Fallback to eBay store data (could have cost in some cases)
                 if not cost:
@@ -238,11 +241,54 @@ def api_financial_analytics():
         ebay_conn.close()
         amazon_conn.close()
         
+        # Get LOT # data from rawbol.db upload_logs
+        lot_options = []
+        try:
+            rawbol_conn = sqlite3.connect('rawbol.db')
+            rawbol_conn.row_factory = sqlite3.Row
+            rawbol_cur = rawbol_conn.cursor()
+            
+            rawbol_cur.execute('''
+                SELECT 
+                    lot_number,
+                    import_date,
+                    total_client_cost
+                FROM upload_logs
+                WHERE lot_number IS NOT NULL 
+                    AND lot_number != ''
+                ORDER BY import_date DESC
+            ''')
+            
+            rows = rawbol_cur.fetchall()
+            print(f"DEBUG: Found {len(rows)} LOT entries in rawbol.db")
+            
+            for row in rows:
+                lot_num = row['lot_number']
+                import_date = row['import_date']
+                total_cost = row['total_client_cost']
+                
+                # Format as "Date + LOT #"
+                display_name = f"{import_date} + {lot_num}"
+                lot_options.append({
+                    'value': lot_num,
+                    'label': display_name,
+                    'date': import_date,
+                    'cost': float(total_cost) if total_cost else 0
+                })
+                print(f"DEBUG: Added LOT option: {display_name} (${float(total_cost) if total_cost else 0:.2f})")
+            
+            rawbol_conn.close()
+        except Exception as e:
+            print(f"Warning: Could not fetch LOT # data from rawbol.db: {e}")
+            import traceback
+            traceback.print_exc()
+        
         return jsonify({
             'success': True,
             'transactions': transactions,
             'count': len(transactions),
-            'bol_stats': bol_stats
+            'bol_stats': bol_stats,
+            'lot_options': lot_options
         })
         
     except Exception as e:

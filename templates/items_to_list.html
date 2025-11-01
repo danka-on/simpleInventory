@@ -214,9 +214,9 @@ function render(results){
     // Pics count button — initially unknown, render placeholder and update later
     const picsCount = (r.pics_count || 0);
     const picsBtn = `<button type="button" class="btn btn-sm pics-count" data-upc="${upc}" title="View photos">${picsCount}</button>`;
-    // QTY display - make red if > 1
+    // QTY display - make red if > 1 AND status is NOT "unchecked"
     const qty = r.quantity || 1;
-    const qtyStyle = qty > 1 ? 'color:#e74c3c;font-weight:700;font-size:1.1rem' : '';
+    const qtyStyle = (qty > 1 && status !== 'unchecked') ? 'color:#e74c3c;font-weight:700;font-size:1.1rem' : '';
     const qtyCell = `<td style="text-align:center"><span style="${qtyStyle}">${qty}</span></td>`;
     html += `<tr>`;
     if (selectMode) {
