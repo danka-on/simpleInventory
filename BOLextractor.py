@@ -199,14 +199,39 @@ def process_bol_excel(file, lot_number, import_date):
                                     print(f"DEBUG: Found LOCATION row in HTML table")
                                     location_row_found = True
                                     
-                                    # Find TOTAL CLIENT COST column index
+                                    # Find TOTAL CLIENT COST and LOT # column indices
                                     total_cost_col_idx = None
+                                    lot_number_col_idx = None
+                                    
                                     for col_idx, cell in enumerate(cells):
                                         cell_text = cell.get_text(strip=True).upper()
+                                        print(f"DEBUG: HTML Column {col_idx} = '{cell_text}'")
                                         if 'TOTAL' in cell_text and 'CLIENT' in cell_text and 'COST' in cell_text:
                                             total_cost_col_idx = col_idx
                                             print(f"DEBUG: Found TOTAL CLIENT COST at column {col_idx}")
-                                            break
+                                        # Look for LOT # column (flexible matching)
+                                        if 'LOT' in cell_text and ('#' in cell_text or 'NUMBER' in cell_text or cell_text.endswith('NO') or cell_text.endswith('NO.')):
+                                            lot_number_col_idx = col_idx
+                                            print(f"DEBUG: Found LOT # column at index {col_idx} in HTML LOCATION row (matched: '{cell_text}')")
+                                    
+                                    # Extract from first data row after LOCATION header
+                                    if row_idx + 1 < len(rows):
+                                        first_data_row = rows[row_idx + 1]
+                                        first_data_cells = first_data_row.find_all(['td', 'th'])
+                                        
+                                        # Extract location from first column (LOCATION column)
+                                        if len(first_data_cells) > 0 and bol_location is None:
+                                            location_value = first_data_cells[0].get_text(strip=True)
+                                            if location_value and location_value.lower() != 'nan' and location_value.upper() != 'TOTAL' and location_value.upper() != 'UPC':
+                                                bol_location = location_value
+                                                print(f"DEBUG: Found BOL location from HTML: '{bol_location}'")
+                                        
+                                        # Extract LOT # from LOT # column
+                                        if lot_number_col_idx is not None and len(first_data_cells) > lot_number_col_idx and extracted_lot_number is None:
+                                            lot_value = first_data_cells[lot_number_col_idx].get_text(strip=True)
+                                            if lot_value and lot_value.lower() != 'nan' and len(lot_value) < 50:
+                                                extracted_lot_number = lot_value
+                                                print(f"DEBUG: Found LOT # from HTML LOCATION row: '{extracted_lot_number}'")
                                     
                                     # Go down in subsequent rows to find the last value in that column
                                     if total_cost_col_idx is not None:
@@ -345,31 +370,47 @@ def process_bol_excel(file, lot_number, import_date):
                     print(f"DEBUG: Found LOCATION header row at index {idx}")
                     break
             
-            # Extract TOTAL CLIENT COST and LOCATION from LOCATION row
+            # Extract TOTAL CLIENT COST, LOT #, and LOCATION from LOCATION row
             if location_row_index is not None:
                 location_row = df_raw.iloc[location_row_index]
                 total_cost_col_idx = None
+                lot_number_col_idx = None
                 
-                # Find TOTAL CLIENT COST column in LOCATION row
+                print(f"DEBUG: LOCATION row contents: {list(location_row)}")
+                
+                # Find TOTAL CLIENT COST and LOT # columns in LOCATION row
                 for col_idx, cell in enumerate(location_row):
                     cell_str = str(cell).strip().upper()
+                    print(f"DEBUG: Column {col_idx} = '{cell_str}'")
                     if 'TOTAL' in cell_str and 'CLIENT' in cell_str and 'COST' in cell_str:
                         total_cost_col_idx = col_idx
                         print(f"DEBUG: Found TOTAL CLIENT COST column at index {col_idx} in LOCATION row")
-                        break
+                    # Look for LOT # column (flexible matching - contains "LOT" and either "#" or "NUMBER" or "NO")
+                    if 'LOT' in cell_str and ('#' in cell_str or 'NUMBER' in cell_str or cell_str.endswith('NO') or cell_str.endswith('NO.')):
+                        lot_number_col_idx = col_idx
+                        print(f"DEBUG: Found LOT # column at index {col_idx} in LOCATION row (matched: '{cell_str}')")
                 
-                # Go down in that column to find the last non-empty value
-                # Also extract the location from the first data row after LOCATION header
+                # Extract from first data row after LOCATION header (row + 1)
+                if location_row_index + 1 < upc_row_index:
+                    first_data_row = df_raw.iloc[location_row_index + 1]
+                    
+                    # Extract location from first column (LOCATION column)
+                    if bol_location is None:
+                        location_value = str(first_data_row.iloc[0]).strip()
+                        if location_value and location_value.lower() != 'nan' and location_value.upper() != 'TOTAL':
+                            bol_location = location_value
+                            print(f"DEBUG: Found BOL location: '{bol_location}'")
+                    
+                    # Extract LOT # from LOT # column
+                    if lot_number_col_idx is not None and extracted_lot_number is None:
+                        lot_value = str(first_data_row.iloc[lot_number_col_idx]).strip()
+                        if lot_value and lot_value.lower() != 'nan' and len(lot_value) < 50:
+                            extracted_lot_number = lot_value
+                            print(f"DEBUG: Found LOT # in LOCATION row: '{extracted_lot_number}'")
+                
+                # Scan down TOTAL CLIENT COST column to find the last non-empty value
                 if total_cost_col_idx is not None:
                     for idx in range(location_row_index + 1, upc_row_index):
-                        # Extract location from first column (first data row after LOCATION header)
-                        if bol_location is None and idx == location_row_index + 1:
-                            location_value = str(df_raw.iloc[idx, 0]).strip()
-                            if location_value and location_value.lower() != 'nan' and location_value.upper() != 'TOTAL':
-                                bol_location = location_value
-                                print(f"DEBUG: Found BOL location at row {idx}: '{bol_location}'")
-                        
-                        # Extract total cost
                         cell_value = df_raw.iloc[idx, total_cost_col_idx]
                         cell_str = str(cell_value).strip()
                         if cell_str and cell_str.lower() != 'nan':
@@ -380,22 +421,6 @@ def process_bol_excel(file, lot_number, import_date):
                                 print(f"DEBUG: Found TOTAL CLIENT COST value at row {idx}: ${total_client_cost_header}")
                             except ValueError:
                                 print(f"DEBUG: Could not convert value '{cell_str}' to float")
-            
-            # Extract LOT # from any row before UPC table
-            for idx in range(upc_row_index):
-                row = df_raw.iloc[idx]
-                for col_idx, cell in enumerate(row):
-                    cell_str = str(cell).strip().upper()
-                    
-                    # Look for LOT # or LOT NUMBER (must match exactly or be at start of cell)
-                    # Avoid matching "LOT" within other words like "RALPH LAUREN"
-                    if cell_str in ['LOT #', 'LOT#', 'LOT NUMBER', 'LOT NO', 'LOT NO.', 'LOT']:
-                        # Check next column for the value
-                        if col_idx + 1 < len(row):
-                            lot_value = str(row.iloc[col_idx + 1]).strip()
-                            if lot_value and lot_value.lower() != 'nan' and len(lot_value) < 50:  # Reasonable length check
-                                extracted_lot_number = lot_value
-                                print(f"DEBUG: Found LOT # at row {idx}, col {col_idx}: '{extracted_lot_number}'")
             
             # Re-read the file using the UPC row as header and skip everything above it
             in_memory_file.seek(0)
@@ -440,14 +465,41 @@ def process_bol_excel(file, lot_number, import_date):
                 avg_cost = total_client_cost_header / total_qty
                 print(f"DEBUG: Calculated avg_cost = ${avg_cost:.2f} (total: ${total_client_cost_header} / qty: {total_qty})")
         
+        # Use extracted LOT # as the lot_number for storage
+        final_lot_number = extracted_lot_number if extracted_lot_number else lot_number
+        
+        print(f"DEBUG: FINAL VALUES BEFORE INSERT:")
+        print(f"  - extracted_lot_number: '{extracted_lot_number}'")
+        print(f"  - lot_number (fallback): '{lot_number}'")
+        print(f"  - final_lot_number: '{final_lot_number}'")
+        print(f"  - bol_location: '{bol_location}'")
+        print(f"  - total_client_cost_header: {total_client_cost_header}")
+        
+        # Check if this lot already exists
+        from rawbol_manager import check_lot_exists
+        lot_check = check_lot_exists(final_lot_number)
+        
+        if lot_check.get('exists'):
+            status_msg = []
+            if lot_check.get('synced'):
+                status_msg.append('already synced to bol.db')
+            if lot_check.get('in_rawbol'):
+                status_msg.append('already in rawbol.db')
+            return {
+                'success': False, 
+                'error': f'LOT # "{final_lot_number}" has already been uploaded ({", ".join(status_msg)}). Please delete it first if you want to re-upload.',
+                'lot_number': final_lot_number,
+                'duplicate': True
+            }
+        
         # Insert into rawbol.db
-        result = insert_raw_bol_items(df, lot_number, import_date, avg_cost, extracted_lot_number, bol_location)
+        result = insert_raw_bol_items(df, final_lot_number, import_date, avg_cost, bol_location)
         
         if result.get('success'):
             # Log the upload with extracted header data
-            log_upload(filename, lot_number, import_date, result.get('inserted', 0), total_client_cost_header, extracted_lot_number, bol_location)
+            log_upload(filename, final_lot_number, import_date, result.get('inserted', 0), total_client_cost_header, bol_location)
             # Include extracted data in response
-            result['lot_number'] = lot_number
+            result['lot_number'] = final_lot_number
             result['extracted_lot_number'] = extracted_lot_number
             result['bol_location'] = bol_location
             result['total_client_cost'] = total_client_cost_header

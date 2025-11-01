@@ -3110,8 +3110,8 @@ def api_rawbol_upload():
     # If upload successful, auto-sync ONLY THIS LOT to bol.db
     if result.get('success'):
         from rawbol_manager import sync_rawbol_to_bol
-        # Use extracted lot number if available, otherwise use temp lot number
-        lot_to_sync = result.get('extracted_lot_number') or temp_lot_number
+        # Use the lot_number from result (which is the extracted LOT #)
+        lot_to_sync = result.get('lot_number')
         sync_result = sync_rawbol_to_bol(specific_lot=lot_to_sync)
         
         if sync_result.get('success'):

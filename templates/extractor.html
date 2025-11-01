@@ -122,7 +122,12 @@
                     loadUploadLogs();
                     loadStats();
                 } else {
-                    msgEl.innerHTML = `<div class="message error">Error: ${data.error}</div>`;
+                    // Check if it's a duplicate error
+                    if (data.duplicate) {
+                        msgEl.innerHTML = `<div class="message error"><strong>Duplicate Upload Detected!</strong><br>${data.error}</div>`;
+                    } else {
+                        msgEl.innerHTML = `<div class="message error">Error: ${data.error}</div>`;
+                    }
                 }
             } catch (err) {
                 msgEl.innerHTML = `<div class="message error">Error: ${err}</div>`;
@@ -138,9 +143,11 @@
                 console.log('API Response:', data); // Debug logging
                 
                 if (data.success && data.logs && data.logs.length > 0) {
-                    let html = '<table><tr><th>Filename</th><th>BOL #</th><th>Location</th><th>Date</th><th>Items</th><th>Total Client Cost</th><th>Uploaded At</th></tr>';
+                    let html = '<table><tr><th>Location</th><th>Filename</th><th>LOT #</th><th>Items</th><th>Cost</th><th>Date</th><th>Uploaded At</th></tr>';
                     data.logs.forEach(log => {
-                        const uploadedAt = new Date(log.uploaded_at).toLocaleString();
+                        // Convert to EST (UTC - 4 hours for EDT, UTC - 5 hours for EST)
+                        const uploadedDate = new Date(log.uploaded_at);
+                        const uploadedAt = uploadedDate.toLocaleString('en-US', { timeZone: 'America/New_York' });
                         let totalQty = 0;
                         if (log.total_quantity !== undefined && log.total_quantity !== null) {
                             totalQty = parseInt(log.total_quantity) || 0;
@@ -152,17 +159,17 @@
                         if (log.total_client_cost !== undefined && log.total_client_cost !== null) {
                             totalCost = '$' + parseFloat(log.total_client_cost).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
                         }
-                        // Show extracted BOL # instead of lot_number
-                        const bolNumber = log.bol_number || '—';
+                        // Show lot_number (which now contains the extracted LOT #)
+                        const lotNumber = log.lot_number || '—';
                         const bolLocation = log.bol_location || '—';
                         console.log('Log data:', log, 'totalQty:', totalQty); // Debug logging
                         html += `<tr>
-                            <td>${log.filename}</td>
-                            <td>${bolNumber}</td>
                             <td>${bolLocation}</td>
-                            <td>${log.import_date}</td>
+                            <td>${log.filename}</td>
+                            <td>${lotNumber}</td>
                             <td>${totalQty}</td>
                             <td>${totalCost}</td>
+                            <td>${log.import_date}</td>
                             <td>${uploadedAt}</td>
                         </tr>`;
                     });

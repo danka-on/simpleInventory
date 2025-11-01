@@ -16,7 +16,6 @@ def ensure_rawbol_db():
         image_url TEXT,
         quantity INTEGER DEFAULT 1,
         lot_number TEXT,
-        bol_number TEXT,
         bol_location TEXT,
         import_date TEXT,
         created_at TEXT
@@ -27,7 +26,6 @@ def ensure_rawbol_db():
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         filename TEXT,
         lot_number TEXT,
-        bol_number TEXT,
         bol_location TEXT,
         import_date TEXT,
         rows_imported INTEGER,
@@ -101,37 +99,93 @@ def ensure_rawbol_db():
         conn.commit()
         print("Column added successfully!")
     
-    # Migration: Add bol_location column if it doesn't exist
-    if 'bol_location' not in columns:
-        print("Adding bol_location column to raw_bol_items table...")
-        cur.execute("ALTER TABLE raw_bol_items ADD COLUMN bol_location TEXT")
+    # Migration: Remove bol_number column from raw_bol_items if it exists
+    if 'bol_number' in columns:
+        print("Removing bol_number column from raw_bol_items table...")
+        # Create new table without bol_number
+        cur.execute('''CREATE TABLE IF NOT EXISTS raw_bol_items_temp (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            upc TEXT,
+            item_description TEXT,
+            avg_cost REAL,
+            image_url TEXT,
+            quantity INTEGER DEFAULT 1,
+            lot_number TEXT,
+            bol_location TEXT,
+            import_date TEXT,
+            created_at TEXT
+        )''')
+        
+        # Copy data
+        cur.execute('''INSERT INTO raw_bol_items_temp 
+            (id, upc, item_description, avg_cost, image_url, quantity, lot_number, bol_location, import_date, created_at)
+            SELECT id, upc, item_description, avg_cost, image_url, quantity, lot_number, bol_location, import_date, created_at
+            FROM raw_bol_items''')
+        
+        # Drop old and rename
+        cur.execute("DROP TABLE raw_bol_items")
+        cur.execute("ALTER TABLE raw_bol_items_temp RENAME TO raw_bol_items")
         conn.commit()
-        print("Column added successfully!")
+        print("Column removed successfully!")
     
-    # Migration: Add bol_number and bol_location to upload_logs if needed
+    # Migration: Add bol_location column if it doesn't exist
+    if 'bol_location' not in columns and 'bol_number' not in columns:
+        cur.execute("PRAGMA table_info(raw_bol_items)")
+        columns = [col[1] for col in cur.fetchall()]
+        if 'bol_location' not in columns:
+            print("Adding bol_location column to raw_bol_items table...")
+            cur.execute("ALTER TABLE raw_bol_items ADD COLUMN bol_location TEXT")
+            conn.commit()
+            print("Column added successfully!")
+    
+    # Migration: Remove bol_number and ensure bol_location in upload_logs
     cur.execute("PRAGMA table_info(upload_logs)")
     log_columns = [col[1] for col in cur.fetchall()]
     
-    if 'bol_number' not in log_columns:
-        print("Adding bol_number column to upload_logs table...")
-        cur.execute("ALTER TABLE upload_logs ADD COLUMN bol_number TEXT")
+    if 'bol_number' in log_columns:
+        print("Removing bol_number column from upload_logs table...")
+        # Create new table without bol_number
+        cur.execute('''CREATE TABLE IF NOT EXISTS upload_logs_temp (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            filename TEXT,
+            lot_number TEXT,
+            bol_location TEXT,
+            import_date TEXT,
+            rows_imported INTEGER,
+            uploaded_at TEXT,
+            total_client_cost REAL
+        )''')
+        
+        # Copy data
+        cur.execute('''INSERT INTO upload_logs_temp 
+            (id, filename, lot_number, bol_location, import_date, rows_imported, uploaded_at, total_client_cost)
+            SELECT id, filename, lot_number, bol_location, import_date, rows_imported, uploaded_at, total_client_cost
+            FROM upload_logs''')
+        
+        # Drop old and rename
+        cur.execute("DROP TABLE upload_logs")
+        cur.execute("ALTER TABLE upload_logs_temp RENAME TO upload_logs")
         conn.commit()
-        print("Column added successfully!")
+        print("Column removed successfully!")
     
-    if 'bol_location' not in log_columns:
-        print("Adding bol_location column to upload_logs table...")
-        cur.execute("ALTER TABLE upload_logs ADD COLUMN bol_location TEXT")
-        conn.commit()
-        print("Column added successfully!")
+    if 'bol_location' not in log_columns and 'bol_number' not in log_columns:
+        cur.execute("PRAGMA table_info(upload_logs)")
+        log_columns = [col[1] for col in cur.fetchall()]
+        if 'bol_location' not in log_columns:
+            print("Adding bol_location column to upload_logs table...")
+            cur.execute("ALTER TABLE upload_logs ADD COLUMN bol_location TEXT")
+            conn.commit()
+            print("Column added successfully!")
     
     conn.commit()
     conn.close()
 
-def insert_raw_bol_items(df, lot_number, import_date, avg_cost=None, extracted_bol_number=None, bol_location=None):
+def insert_raw_bol_items(df, lot_number, import_date, avg_cost=None, bol_location=None):
     """
     Insert raw BOL items from DataFrame into rawbol.db.
     Only extracts: UPC, ITEM DESCRIPTION, ORIGINAL QTY, IMAGE
     avg_cost is calculated as total_bol_cost / total_bol_qty and applied to all items
+    lot_number is the extracted LOT # from the file
     Does NOT check for duplicates - allows re-imports.
     Returns: {'success': True, 'inserted': n} or error dict.
     """
@@ -178,19 +232,15 @@ def insert_raw_bol_items(df, lot_number, import_date, avg_cost=None, extracted_b
                 if match:
                     image_url = match.group(1).strip()
             
-            # Use extracted BOL # from header, not from row
-            bol_num = extracted_bol_number if extracted_bol_number else ''
-            
             cur.execute('''INSERT INTO raw_bol_items 
-                (upc, item_description, avg_cost, image_url, quantity, lot_number, bol_number, bol_location, import_date, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                (upc, item_description, avg_cost, image_url, quantity, lot_number, bol_location, import_date, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                 (upc,
                  str(row.get('ITEM DESCRIPTION', '')).strip(),
                  avg_cost,
                  image_url,
                  qty,
                  lot_number,
-                 bol_num,
                  bol_location,
                  import_date,
                  created_at))
@@ -202,17 +252,17 @@ def insert_raw_bol_items(df, lot_number, import_date, avg_cost=None, extracted_b
     except Exception as e:
         return {'success': False, 'error': str(e)}
 
-def log_upload(filename, lot_number, import_date, rows_imported, total_client_cost=None, bol_number=None, bol_location=None):
-    """Log an upload to upload_logs table."""
+def log_upload(filename, lot_number, import_date, rows_imported, total_client_cost=None, bol_location=None):
+    """Log an upload to upload_logs table. lot_number is the extracted LOT # from file."""
     try:
         ensure_rawbol_db()
         conn = sqlite3.connect('rawbol.db')
         cur = conn.cursor()
         uploaded_at = datetime.datetime.utcnow().isoformat()
         cur.execute('''INSERT INTO upload_logs 
-            (filename, lot_number, bol_number, bol_location, import_date, rows_imported, uploaded_at, total_client_cost)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
-            (filename, lot_number, bol_number, bol_location, import_date, rows_imported, uploaded_at, total_client_cost))
+            (filename, lot_number, bol_location, import_date, rows_imported, uploaded_at, total_client_cost)
+            VALUES (?, ?, ?, ?, ?, ?, ?)''',
+            (filename, lot_number, bol_location, import_date, rows_imported, uploaded_at, total_client_cost))
         conn.commit()
         conn.close()
         return True
@@ -524,3 +574,31 @@ def desync_all_rawbol():
         return {'success': True, 'updated': updated, 'removed': removed}
     except Exception as e:
         return {'success': False, 'error': str(e)}
+
+def check_lot_exists(lot_number):
+    """
+    Check if a lot has already been uploaded/synced
+    Returns: {'exists': True/False, 'in_rawbol': True/False, 'synced': True/False}
+    """
+    try:
+        ensure_rawbol_db()
+        conn = sqlite3.connect('rawbol.db')
+        cur = conn.cursor()
+        
+        # Check if lot exists in raw_bol_items
+        cur.execute('SELECT COUNT(*) FROM raw_bol_items WHERE lot_number = ?', (lot_number,))
+        in_rawbol = cur.fetchone()[0] > 0
+        
+        # Check if lot has been synced
+        cur.execute('SELECT COUNT(*) FROM synced_lots WHERE lot_number = ?', (lot_number,))
+        synced = cur.fetchone()[0] > 0
+        
+        conn.close()
+        
+        return {
+            'exists': in_rawbol or synced,
+            'in_rawbol': in_rawbol,
+            'synced': synced
+        }
+    except Exception as e:
+        return {'exists': False, 'error': str(e)}
