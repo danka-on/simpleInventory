@@ -61,8 +61,8 @@
     
     <div id="noBarcodeBtn" style="margin-top:48px">
       <a href="/item-prep-no-barcode" style="text-decoration:none;display:block">
-        <button class="btn" style="padding:36px 64px;border-radius:12px;background:#e74c3c;border:none;color:#fff;font-size:1.2rem;width:100%;box-shadow:0 2px 8px rgba(231,76,60,0.3);transition:all 0.2s" onmouseover="this.style.background='#c0392b'" onmouseout="this.style.background='#e74c3c'">
-          <span style="font-size:1.4rem;margin-right:8px">|||</span> No Barcode
+        <button class="btn" style="padding:36px 64px;border-radius:12px;background:#3498db;border:none;color:#fff;font-size:1.2rem;width:100%;box-shadow:0 2px 8px rgba(52,152,219,0.3);transition:all 0.2s" onmouseover="this.style.background='#2980b9'" onmouseout="this.style.background='#3498db'">
+          <span style="font-size:1.4rem;margin-right:8px">✕</span> No Barcode
         </button>
       </a>
     </div>
@@ -263,9 +263,13 @@
 
     document.getElementById('badBtn').onclick = ()=>{
       if(!currentUpc) return;
+      // Store for undo before navigating to diagnostic
+      lastEntry = {upc: currentUpc, status: 'bad', qty: currentQty};
+      // Store in sessionStorage so we can restore after diagnostic
+      sessionStorage.setItem('lastEntry', JSON.stringify(lastEntry));
       updateQtyDisplay(-1); // Show -1 animation
       setTimeout(() => {
-        window.location.href = '/item-prep/diagnostic?upc='+encodeURIComponent(currentUpc)+'&from=bad&return='+encodeURIComponent('/item-prep?forceFocus=1');
+        window.location.href = '/item-prep/diagnostic?upc='+encodeURIComponent(currentUpc)+'&from=bad&qty='+currentQty+'&return='+encodeURIComponent('/item-prep?forceFocus=1&showUndo=1');
       }, 300);
     };
 
@@ -342,13 +346,27 @@
         const params = new URLSearchParams(window.location.search);
         const upc = (params.get('upc')||'').trim();
         const forceFocus = (params.get('forceFocus')||'') === '1';
+        const showUndo = (params.get('showUndo')||'') === '1';
+        
+        // Restore undo button if returning from diagnostic with showUndo flag
+        if(showUndo){
+          const stored = sessionStorage.getItem('lastEntry');
+          if(stored){
+            try{
+              lastEntry = JSON.parse(stored);
+              showUndoButton();
+              sessionStorage.removeItem('lastEntry'); // Clean up after restoring
+            }catch(e){ console.error('Failed to restore lastEntry:', e); }
+          }
+        }
+        
         if(forceFocus){
           // Force manual mode focus regardless of device; stop scanner and focus/select input
           try{ stopScanner(); }catch{}
           const scannerDiv = document.getElementById('scanner'); if(scannerDiv) scannerDiv.style.display = 'none';
           ensureUpcFocus();
           // Clean the URL so future reloads aren't affected
-          try{ const url = new URL(window.location.href); url.searchParams.delete('forceFocus'); window.history.replaceState({}, '', url.toString()); }catch{}
+          try{ const url = new URL(window.location.href); url.searchParams.delete('forceFocus'); url.searchParams.delete('showUndo'); window.history.replaceState({}, '', url.toString()); }catch{}
         } else if(!upc){
           ensureUpcFocus();
         }

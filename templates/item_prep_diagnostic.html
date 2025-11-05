@@ -418,7 +418,24 @@
             const statusVal = statusInput.value || '';
             if(statusVal && (statusVal === 'good' || statusVal === 'bad')){
               const reasonVal = (document.getElementById('reasonSelect') && document.getElementById('reasonSelect').value) || '';
-              await fetch('/api/items_prep/status', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ upc: '{{ upc }}', status: statusVal, reason: reasonVal, note: '' }) });
+              // Read qty from URL parameter if provided (from bad flow)
+              const urlParams = new URLSearchParams(window.location.search);
+              const qtyParam = urlParams.get('qty');
+              const qty = qtyParam ? parseInt(qtyParam, 10) : 1;
+              const statusRes = await fetch('/api/items_prep/status', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ upc: '{{ upc }}', status: statusVal, reason: reasonVal, note: '', qty: qty }) });
+              const statusData = await statusRes.json();
+              
+              // Update sessionStorage with the actual UPC that was created (important for bad status with suffixed UPCs)
+              if(statusData && statusData.success && statusData.upc){
+                const stored = sessionStorage.getItem('lastEntry');
+                if(stored){
+                  try{
+                    const lastEntry = JSON.parse(stored);
+                    lastEntry.upc = statusData.upc; // Update with actual UPC (suffixed for bad items)
+                    sessionStorage.setItem('lastEntry', JSON.stringify(lastEntry));
+                  }catch(e){ console.error('Failed to update lastEntry:', e); }
+                }
+              }
             }
           }catch(e){ /* ignore status save errors */ }
           diagnosticCompleted = true; // Mark as completed to prevent cleanup
@@ -526,6 +543,11 @@
       const upc = '{{ upc }}'.trim();
       if(!upc) return;
       
+      // Check if coming from "bad" flow - if so, don't load existing diagnostic data
+      const params = new URLSearchParams(window.location.search);
+      const from = params.get('from');
+      const isNewBadEntry = (from === 'bad');
+      
       // Load notes
       await loadNotes();
       
@@ -535,13 +557,14 @@
   const st = j && j.status ? j.status : null;
         const imgs = Array.isArray(j && j.images) ? j.images : [];
         
-        // Update status bubbles if a status exists
-        if(st && st.status){
+        // Update status bubbles if a status exists (but skip if new bad entry)
+        if(!isNewBadEntry && st && st.status){
           const statusVal = st.status;
           updateStatusBubbles(statusVal);
         }
         
-        if(st){
+        // Only restore reason if NOT a new bad entry
+        if(!isNewBadEntry && st){
           const val = (st.reason||'').trim();
           const valid = ['Missing pieces','Wrong item','Broken','Return','Replacement','Other'];
           reasonSelect.value = valid.includes(val) ? val : '';
