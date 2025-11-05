@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta charset="UTF-8">
+    <title>Add Item to Shelf</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        body {
+            font-family: sans-serif;
+            max-width: 600px;
+            margin: auto;
+            padding: 10px;
+            background: #f5f5f5;
+        }
+        
+        .success-banner {
+            background: linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);
+            color: white;
+            padding: 30px 20px;
+            border-radius: 12px;
+            text-align: center;
+            margin: 20px 0;
+            box-shadow: 0 4px 12px rgba(46, 204, 113, 0.3);
+            animation: slideIn 0.3s ease-out;
+        }
+        
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .success-banner .icon {
+            font-size: 3em;
+            margin-bottom: 10px;
+        }
+        
+        .success-banner h2 {
+            margin: 10px 0;
+            font-size: 1.8em;
+        }
+        
+        .success-banner .barcode-display {
+            font-size: 1.3em;
+            font-weight: bold;
+            background: rgba(255, 255, 255, 0.2);
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+            font-family: monospace;
+        }
+        
+        .success-banner .location-display {
+            font-size: 1.1em;
+            margin: 10px 0;
+            opacity: 0.95;
+        }
+        
+        .timer-display {
+            font-size: 1.5em;
+            margin: 20px 0;
+            color: #e74c3c;
+            font-weight: bold;
+        }
+        
+        .button-container {
+            display: flex;
+            gap: 15px;
+            margin: 20px 0;
+            flex-wrap: wrap;
+        }
+        
+        .action-button {
+            flex: 1;
+            min-width: 150px;
+            padding: 18px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1.2em;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+        }
+        
+        .action-button:active {
+            transform: scale(0.98);
+        }
+        
+        .scan-next-btn {
+            background: #3498db;
+            color: white;
+        }
+        
+        .scan-next-btn:hover {
+            background: #2980b9;
+        }
+        
+        .done-btn {
+            background: #95a5a6;
+            color: white;
+        }
+        
+        .done-btn:hover {
+            background: #7f8c8d;
+        }
+        
+        .info-box {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+        
+        .info-box h3 {
+            margin-top: 0;
+            color: #2c3e50;
+        }
+    </style>
+</head>
+<body>
+    <div class="success-banner">
+        <div class="icon">✓</div>
+        <h2>Item Added Successfully!</h2>
+        <div class="barcode-display" id="barcodeDisplay">
+            <!-- Barcode will be inserted here -->
+        </div>
+        <div class="location-display" id="locationDisplay">
+            <!-- Location will be inserted here -->
+        </div>
+    </div>
+    
+    <div class="timer-display" id="timerDisplay">
+        Returning to scan in <span id="countdown">3</span>s...
+    </div>
+    
+    <div class="button-container">
+        <button class="action-button scan-next-btn" onclick="scanNext()">
+            <i class="fas fa-barcode"></i> Scan Next Item
+        </button>
+        <button class="action-button done-btn" onclick="done()">
+            <i class="fas fa-check"></i> Done
+        </button>
+    </div>
+    
+    <div class="info-box">
+        <h3><i class="fas fa-lock"></i> Multi-Scan Mode Active</h3>
+        <p>Shelf is locked at: <strong id="shelfLocation"></strong></p>
+        <p>Click "Scan Next Item" to continue adding items to this location, or "Done" to unlock and return to position selection.</p>
+    </div>
+
+    <script>
+        // Get data from sessionStorage
+        const barcode = sessionStorage.getItem('barcode');
+        const itemPosition = sessionStorage.getItem('item_position');
+        const picturePosition = sessionStorage.getItem('pictureposition_path');
+        
+        // Display barcode
+        const barcodeDisplay = document.getElementById('barcodeDisplay');
+        if (barcode) {
+            barcodeDisplay.textContent = barcode;
+        } else {
+            barcodeDisplay.textContent = 'No barcode';
+        }
+        
+        // Display location
+        const locationDisplay = document.getElementById('locationDisplay');
+        const shelfLocation = document.getElementById('shelfLocation');
+        const location = itemPosition || picturePosition || 'Unknown';
+        
+        if (itemPosition) {
+            locationDisplay.innerHTML = `<i class="fas fa-map-marker-alt"></i> Shelf: ${itemPosition}`;
+            shelfLocation.textContent = itemPosition;
+        } else if (picturePosition) {
+            locationDisplay.innerHTML = `<i class="fas fa-camera"></i> Picture position`;
+            shelfLocation.textContent = 'Picture position';
+        } else {
+            locationDisplay.innerHTML = '<i class="fas fa-question-circle"></i> Location not set';
+            shelfLocation.textContent = 'Unknown';
+        }
+        
+        // Auto-countdown timer
+        let seconds = 3;
+        const countdownEl = document.getElementById('countdown');
+        const timerInterval = setInterval(() => {
+            seconds--;
+            if (seconds > 0) {
+                countdownEl.textContent = seconds;
+            } else {
+                clearInterval(timerInterval);
+                scanNext();
+            }
+        }, 1000);
+        
+        function scanNext() {
+            clearInterval(timerInterval);
+            // Clear barcode but keep position and lock
+            sessionStorage.removeItem('barcode');
+            window.location.href = '/barcode';
+        }
+        
+        function done() {
+            clearInterval(timerInterval);
+            // Unlock shelf and clear everything
+            sessionStorage.removeItem('positionLocked');
+            sessionStorage.removeItem('barcode');
+            sessionStorage.removeItem('item_position');
+            sessionStorage.removeItem('pictureposition_path');
+            
+            // Notify server to clear lock state
+            fetch('/toggle', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ checked: false })
+            }).then(() => {
+                window.location.href = '/position';
+            }).catch(err => {
+                console.error('Error clearing lock:', err);
+                window.location.href = '/position';
+            });
+        }
+    </script>
+</body>
+</html>

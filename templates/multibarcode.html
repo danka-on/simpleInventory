@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Multi-Barcode Scanner</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        body {
+            font-family: sans-serif;
+            max-width: 600px;
+            margin: auto;
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            background-color: #E0F7FA;
+        }
+        
+        .header {
+            width: 100%;
+            text-align: center;
+            padding: 20px 0;
+        }
+        
+        .header h2 {
+            margin: 0;
+            color: #2c3e50;
+            font-size: 1.5em;
+        }
+        
+        .lock-indicator {
+            display: inline-block;
+            background: #2ecc71;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            margin-top: 10px;
+            font-weight: bold;
+        }
+        
+        .scan-container {
+            width: 100%;
+            margin: 20px 0;
+        }
+        
+        #reader {
+            width: 100%;
+            max-width: 300px;
+            margin: 0 auto;
+            aspect-ratio: 1/1;
+            background: #222;
+            border-radius: 8px;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .scanning-line {
+            position: absolute;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, rgba(0, 255, 0, 0), rgba(0, 255, 0, 0.8), rgba(0, 255, 0, 0));
+            animation: scan 2s linear infinite;
+            z-index: 10;
+            box-shadow: 0 0 10px rgba(0, 255, 0, 0.5);
+            border-radius: 2px;
+        }
+        
+        @keyframes scan {
+            0% { top: 0; opacity: 0.8; }
+            50% { opacity: 1; }
+            100% { top: 100%; opacity: 0.8; }
+        }
+        
+        #reader video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        
+        #reader canvas {
+            display: none;
+        }
+        
+        .input-container {
+            width: 100%;
+            margin: 20px 0;
+            text-align: center;
+        }
+        
+        #barcodeInput {
+            width: 90%;
+            max-width: 400px;
+            padding: 18px;
+            font-size: 1.3em;
+            border: 3px solid #3498db;
+            border-radius: 8px;
+            text-align: center;
+            font-weight: bold;
+            background: white;
+        }
+        
+        #barcodeInput:focus {
+            outline: none;
+            border-color: #2ecc71;
+            box-shadow: 0 0 10px rgba(46, 204, 113, 0.3);
+        }
+        
+        .scan-icon {
+            font-size: 2em;
+            color: #3498db;
+            margin-bottom: 10px;
+        }
+        
+        .barcode-list {
+            width: 100%;
+            margin: 20px 0;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .barcode-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: #2ecc71;
+            color: white;
+            padding: 15px 20px;
+            margin: 10px 0;
+            border-radius: 8px;
+            font-size: 1.2em;
+            font-weight: bold;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+            animation: slideIn 0.3s ease-out;
+        }
+        
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateX(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+        
+        .barcode-item .barcode-text {
+            flex: 1;
+            font-family: monospace;
+        }
+        
+        .barcode-item .delete-btn {
+            background: rgba(255, 255, 255, 0.2);
+            border: none;
+            color: white;
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 1.2em;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+        
+        .barcode-item .delete-btn:hover {
+            background: rgba(231, 76, 60, 0.8);
+            transform: scale(1.1);
+        }
+        
+        .barcode-item .delete-btn:active {
+            transform: scale(0.95);
+        }
+        
+        .empty-state {
+            text-align: center;
+            color: #7f8c8d;
+            padding: 40px 20px;
+            font-size: 1.1em;
+        }
+        
+        .empty-state i {
+            font-size: 3em;
+            margin-bottom: 15px;
+            opacity: 0.5;
+        }
+        
+        .done-button {
+            width: 90%;
+            max-width: 400px;
+            padding: 20px;
+            background: #3498db;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 1.3em;
+            font-weight: bold;
+            cursor: pointer;
+            margin: 20px 0;
+            box-shadow: 0 4px 12px rgba(52, 152, 219, 0.3);
+            transition: all 0.2s;
+        }
+        
+        .done-button:hover {
+            background: #2980b9;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(52, 152, 219, 0.4);
+        }
+        
+        .done-button:active {
+            transform: translateY(0);
+        }
+        
+        .done-button:disabled {
+            background: #95a5a6;
+            cursor: not-allowed;
+            opacity: 0.6;
+        }
+        
+        .count-badge {
+            display: inline-block;
+            background: rgba(255, 255, 255, 0.3);
+            padding: 4px 12px;
+            border-radius: 12px;
+            margin-left: 8px;
+        }
+        
+        #loadingMessage {
+            color: white;
+            font-weight: bold;
+            padding: 10px;
+        }
+        
+        /* Hidden input for external scanner */
+        #scannerInput {
+            position: absolute;
+            left: -9999px;
+        }
+        
+        .flash-green {
+            animation: flashGreen 0.5s ease-out;
+        }
+        
+        @keyframes flashGreen {
+            0% { background: #2ecc71; }
+            50% { background: #27ae60; }
+            100% { background: #2ecc71; }
+        }
+        
+        /* Auto-submit timer */
+        .timer-display {
+            text-align: center;
+            font-size: 1.1em;
+            color: #e74c3c;
+            font-weight: bold;
+            margin: 15px 0;
+            min-height: 25px;
+        }
+        
+        /* Navigation buttons */
+        .nav-buttons {
+            display: flex;
+            gap: 15px;
+            padding: 20px 0;
+            width: 90%;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        
+        .nav-btn {
+            flex: 1;
+            padding: 12px 20px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 1.1em;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        
+        .nav-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        }
+        
+        .nav-btn:active {
+            transform: translateY(0);
+        }
+        
+        .back-btn {
+            background: #6c757d;
+            color: white;
+        }
+        
+        .skip-btn {
+            background: #ffc107;
+            color: #000;
+        }
+        
+        .exit-btn {
+            background: #ff4444;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h2>📦 Multi-Barcode Scanner</h2>
+        <div class="lock-indicator">
+            <i class="fas fa-lock"></i> Shelf Locked
+            <span class="count-badge" id="countBadge">0 items</span>
+        </div>
+    </div>
+    
+    <div class="scan-container">
+        <div class="input-container">
+            <input type="text" id="barcodeInput" placeholder="Scan barcode..." autofocus autocomplete="off">
+        </div>
+        <div id="reader">
+            <div class="scanning-line"></div>
+            <div id="loadingMessage">📷 Starting camera...</div>
+        </div>
+    </div>
+    
+    <div class="barcode-list" id="barcodeList">
+        <div class="empty-state">
+            <i class="fas fa-inbox"></i>
+            <p>Scan barcodes to add them to the list</p>
+        </div>
+    </div>
+    
+    <!-- Auto-submit timer -->
+    <div class="timer-display" id="timerDisplay"></div>
+    
+    <button class="done-button" id="doneButton" disabled>
+        <i class="fas fa-check-circle"></i> Done - Add Items to Shelf
+    </button>
+    
+    <!-- Navigation Buttons -->
+    <div class="nav-buttons">
+        <button class="nav-btn back-btn" id="backBtn">
+            <i class="fas fa-arrow-left"></i> Back
+        </button>
+        <button class="nav-btn skip-btn" id="skipBtn">
+            <i class="fas fa-forward"></i> Skip
+        </button>
+        <button class="nav-btn exit-btn" id="exitBtn">
+            <i class="fas fa-times"></i> Exit
+        </button>
+    </div>
+    
+    <!-- Hidden input for external scanner -->
+    <input type="text" id="scannerInput" autocomplete="off" />
+
+    <!-- ZXing Library -->
+    <script src="https://unpkg.com/@zxing/library@0.19.1/umd/index.min.js"></script>
+    
+    <script>
+        // Store barcodes as objects with code and quantity
+        let barcodeItems = [];
+        let codeReader = null;
+        let selectedDeviceId = null;
+        
+        const barcodeInput = document.getElementById('barcodeInput');
+        const barcodeListEl = document.getElementById('barcodeList');
+        const doneButton = document.getElementById('doneButton');
+        const countBadge = document.getElementById('countBadge');
+        const scannerInput = document.getElementById('scannerInput');
+        const readerDiv = document.getElementById('reader');
+        
+        // Check if shelf is still locked
+        function isShelfLocked() {
+            return sessionStorage.getItem('positionLocked') === 'true';
+        }
+        
+        // Device detection
+        function getDeviceType() {
+            const ua = navigator.userAgent;
+            if (/iPad|Macintosh/.test(ua) && 'ontouchend' in document) return 'iPad';
+            if (/Android/.test(ua) && !/Mobile/.test(ua)) return 'Android Tablet';
+            if (/iPhone|Android.*Mobile|Windows Phone|webOS|BlackBerry|Opera Mini|IEMobile|Mobile/.test(ua)) return 'Mobile';
+            return 'Desktop';
+        }
+        
+        // Setup device mode (hide camera for tablets/desktop)
+        function setupDeviceMode() {
+            const deviceType = getDeviceType();
+            
+            if (deviceType === 'iPad' || deviceType === 'Android Tablet' || deviceType === 'Desktop') {
+                // Hide camera for tablets and desktop
+                if (readerDiv) readerDiv.style.display = 'none';
+                // Focus on input
+                barcodeInput.focus();
+                // Prevent camera initialization
+                window.initializeCamera = function() {};
+            } else {
+                // Mobile: show camera
+                if (readerDiv) readerDiv.style.display = '';
+                // Initialize camera
+                setTimeout(initializeCamera, 100);
+            }
+        }
+        
+        // Auto-submit timer
+        let autoSubmitTimer = null;
+        let timerSeconds = 5;
+        let timerInterval = null;
+        const timerDisplay = document.getElementById('timerDisplay');
+        
+        function getAutoSubmitSeconds() {
+            // Get timer settings from localStorage (set in misc.html)
+            let seconds = 5;
+            const stored = localStorage.getItem('multibarcodeTimer');
+            if (stored && !isNaN(parseInt(stored))) {
+                seconds = Math.max(1, Math.min(60, parseInt(stored)));
+            }
+            return seconds;
+        }
+        
+        function startAutoSubmitTimer() {
+            // Clear any existing timer
+            clearAutoSubmitTimer();
+            
+            timerSeconds = getAutoSubmitSeconds();
+            timerDisplay.textContent = `Auto-submitting in ${timerSeconds}s...`;
+            timerDisplay.style.display = 'block';
+            
+            timerInterval = setInterval(() => {
+                timerSeconds--;
+                if (timerSeconds > 0) {
+                    timerDisplay.textContent = `Auto-submitting in ${timerSeconds}s...`;
+                } else {
+                    clearAutoSubmitTimer();
+                    timerDisplay.textContent = 'Submitting...';
+                    // Auto-submit if there are items
+                    if (barcodeItems.length > 0) {
+                        submitBarcodes();
+                    }
+                }
+            }, 1000);
+        }
+        
+        function clearAutoSubmitTimer() {
+            if (timerInterval) {
+                clearInterval(timerInterval);
+                timerInterval = null;
+            }
+            timerDisplay.textContent = '';
+            timerDisplay.style.display = 'none';
+        }
+        
+        function resetAutoSubmitTimer() {
+            if (barcodeItems.length > 0) {
+                startAutoSubmitTimer();
+            } else {
+                clearAutoSubmitTimer();
+            }
+        }
+        
+        // Play success beep
+        function playBeep() {
+            try {
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.value = 880;
+                gain.gain.value = 0.2;
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.start();
+                osc.stop(ctx.currentTime + 0.1);
+                osc.onended = function() {
+                    osc.disconnect();
+                    gain.disconnect();
+                };
+            } catch(e) {
+                console.error('Beep error:', e);
+            }
+        }
+        
+        // Play error beep
+        function playErrorBeep() {
+            try {
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.type = 'square';
+                osc.frequency.value = 220;
+                gain.gain.value = 0.15;
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.start();
+                osc.stop(ctx.currentTime + 0.25);
+                osc.onended = function() {
+                    osc.disconnect();
+                    gain.disconnect();
+                };
+            } catch(e) {
+                console.error('Error beep error:', e);
+            }
+        }
+        
+        // Add barcode to list
+        function addBarcode(code) {
+            // Validate barcode (no leading letters)
+            if (/^[a-zA-Z]/.test(code)) {
+                playErrorBeep();
+                barcodeInput.style.background = '#ffdddd';
+                barcodeInput.value = '❌ NOT A BARCODE';
+                setTimeout(() => {
+                    barcodeInput.style.background = 'white';
+                    barcodeInput.value = '';
+                    barcodeInput.focus();
+                }, 1000);
+                return;
+            }
+            
+            // Check if barcode already exists
+            const existingItem = barcodeItems.find(item => item.code === code);
+            if (existingItem) {
+                // Increment quantity
+                existingItem.quantity++;
+                playBeep();
+            } else {
+                // Add new barcode with quantity 1
+                barcodeItems.push({ code: code, quantity: 1 });
+                playBeep();
+            }
+            
+            // Flash green
+            barcodeInput.classList.add('flash-green');
+            setTimeout(() => barcodeInput.classList.remove('flash-green'), 500);
+            
+            // Clear input
+            barcodeInput.value = '';
+            barcodeInput.focus();
+            
+            // Update display and reset timer
+            updateList();
+            resetAutoSubmitTimer();
+        }
+        
+        // Remove one quantity of barcode from list
+        function removeBarcode(index) {
+            const item = barcodeItems[index];
+            if (item.quantity > 1) {
+                // Decrease quantity
+                item.quantity--;
+            } else {
+                // Remove item completely
+                barcodeItems.splice(index, 1);
+            }
+            updateList();
+            resetAutoSubmitTimer();
+        }
+        
+        // Update the barcode list display
+        function updateList() {
+            if (barcodeItems.length === 0) {
+                barcodeListEl.innerHTML = `
+                    <div class="empty-state">
+                        <i class="fas fa-inbox"></i>
+                        <p>Scan barcodes to add them to the list</p>
+                    </div>
+                `;
+                doneButton.disabled = true;
+            } else {
+                barcodeListEl.innerHTML = barcodeItems.map((item, index) => `
+                    <div class="barcode-item">
+                        <span class="barcode-text">
+                            ${item.code}
+                            ${item.quantity > 1 ? `<span style="margin-left: 10px; background: rgba(255,255,255,0.3); padding: 4px 10px; border-radius: 12px; font-size: 0.9em;">(${item.quantity}x)</span>` : ''}
+                        </span>
+                        <button class="delete-btn" onclick="removeBarcode(${index})" title="Remove one">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                `).join('');
+                doneButton.disabled = false;
+            }
+            
+            // Calculate total items including quantities
+            const totalItems = barcodeItems.reduce((sum, item) => sum + item.quantity, 0);
+            countBadge.textContent = totalItems === 1 ? '1 item' : `${totalItems} items`;
+        }
+        
+        // Manual input handler
+        barcodeInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                const code = this.value.trim();
+                if (code) {
+                    addBarcode(code);
+                }
+            }
+        });
+        
+        // External scanner input handler
+        scannerInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter' || e.keyCode === 13) {
+                e.preventDefault();
+                const code = this.value.trim();
+                if (code) {
+                    addBarcode(code);
+                    this.value = '';
+                }
+            }
+        });
+        
+        // Keep focus on scanner input for external scanners (only on desktop/tablet)
+        const deviceType = getDeviceType();
+        if (deviceType === 'Desktop' || deviceType === 'iPad' || deviceType === 'Android Tablet') {
+            setInterval(() => {
+                if (document.activeElement !== barcodeInput && document.activeElement !== scannerInput) {
+                    scannerInput.focus();
+                }
+            }, 100);
+        }
+        
+        // Camera scanner initialization
+        async function initializeCamera() {
+            try {
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const videoDevices = devices.filter(device => device.kind === 'videoinput');
+                
+                if (videoDevices.length === 0) {
+                    document.getElementById('loadingMessage').textContent = '📷 No camera found';
+                    return;
+                }
+                
+                // Prefer back camera
+                selectedDeviceId = videoDevices.find(device => 
+                    device.label.toLowerCase().includes('back') || 
+                    device.label.toLowerCase().includes('rear')
+                )?.deviceId || videoDevices[0].deviceId;
+                
+                codeReader = new ZXing.BrowserMultiFormatReader();
+                
+                await codeReader.decodeFromVideoDevice(selectedDeviceId, 'reader', (result, err) => {
+                    if (result) {
+                        const code = result.text.trim();
+                        addBarcode(code);
+                    }
+                });
+                
+                document.getElementById('loadingMessage').style.display = 'none';
+            } catch (error) {
+                console.error('Camera error:', error);
+                document.getElementById('loadingMessage').textContent = '❌ Camera error';
+            }
+        }
+        
+        // Setup device mode and conditionally initialize camera
+        setupDeviceMode();
+        
+        // Submit barcodes function (shared by Done button and auto-submit)
+        function submitBarcodes() {
+            if (barcodeItems.length === 0) return;
+            
+            clearAutoSubmitTimer();
+            
+            // Expand quantities into individual barcodes
+            const expandedBarcodes = [];
+            barcodeItems.forEach(item => {
+                for (let i = 0; i < item.quantity; i++) {
+                    expandedBarcodes.push(item.code);
+                }
+            });
+            
+            // Store barcodes as comma-separated string
+            const barcodesString = expandedBarcodes.join(',');
+            sessionStorage.setItem('barcode', barcodesString);
+            
+            // Submit to /submitbarcode via POST
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = '/submitbarcode';
+            
+            const input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = 'scanned_result';
+            input.value = barcodesString;
+            
+            form.appendChild(input);
+            document.body.appendChild(form);
+            form.submit();
+        }
+        
+        // Done button handler
+        doneButton.addEventListener('click', submitBarcodes);
+        
+        // Navigation button handlers
+        document.getElementById('backBtn').addEventListener('click', function() {
+            clearAutoSubmitTimer();
+            window.location.href = '/position';
+        });
+        
+        document.getElementById('skipBtn').addEventListener('click', function() {
+            clearAutoSubmitTimer();
+            // Skip directly to add item page (empty barcode)
+            window.location.href = '/additem';
+        });
+        
+        document.getElementById('exitBtn').addEventListener('click', function() {
+            clearAutoSubmitTimer();
+            // Clear all session storage and go home
+            sessionStorage.removeItem('barcode');
+            sessionStorage.removeItem('item_position');
+            sessionStorage.removeItem('pictureposition_path');
+            sessionStorage.removeItem('positionLocked');
+            
+            // Notify server to clear lock state
+            fetch('/toggle', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ checked: false })
+            }).catch(err => console.error('Error clearing lock:', err));
+            
+            window.location.href = '/';
+        });
+        
+        // Cleanup camera on unload
+        window.addEventListener('beforeunload', () => {
+            if (codeReader) {
+                codeReader.reset();
+            }
+        });
+    </script>
+</body>
+</html>

@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <title>Miscellaneous Settings</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <style>
         body { font-family: sans-serif; max-width: 500px; margin: auto; padding: 20px; }
         h1 { margin-bottom: 24px; }
@@ -24,14 +25,18 @@
         <h1 style="flex:1;text-align:center;margin:0;">Miscellaneous Settings</h1>
         <div style="width:84px"></div>
     </div>
-    <div class="desc">Configure auto-submit timer for Add Item screen.</div>
+    <h2 style="margin:18px 0 10px 0; font-size:1.1rem;">Auto-Submit Timer Settings</h2>
+    <div class="desc">Configure auto-submit timers for different pages.</div>
     <form id="miscSettingsForm">
-        <label for="autoSubmitTime">Auto-submit timer (seconds):</label>
-        <input type="number" id="autoSubmitTime" min="1" max="30" step="1">
+        <label for="multibarcodeTimer">Multi-Barcode Page Timer (seconds):</label>
+        <input type="number" id="multibarcodeTimer" min="1" max="60" step="1">
+        <span style="color:#666; font-size:0.9em; margin-left:10px;">Time before auto-submitting scanned barcodes</span>
+        <br><br>
+        <label for="addItemTimer">Add Item Page Timer (seconds):</label>
+        <input type="number" id="addItemTimer" min="1" max="30" step="1">
+        <span style="color:#666; font-size:0.9em; margin-left:10px;">Time before auto-adding item to inventory</span>
         <br>
-        <label><input type="checkbox" id="disableAutoSubmit"> Disable auto-submit timer</label>
-        <br>
-        <button type="submit">Save Settings</button>
+        <button type="submit">Save Timer Settings</button>
     </form>
     <div id="saveStatus" style="margin-top:18px;color:#388e3c;font-weight:bold;display:none;">Settings saved!</div>
     <hr style="margin:24px 0;">
@@ -46,18 +51,21 @@
     <script>
         // Load settings from localStorage
         function loadSettings() {
-            const t = localStorage.getItem('autoSubmitTime');
-            const d = localStorage.getItem('disableAutoSubmit');
-            document.getElementById('autoSubmitTime').value = t ? parseInt(t) : 3;
-            document.getElementById('disableAutoSubmit').checked = d === '1';
+            const multibarcode = localStorage.getItem('multibarcodeTimer');
+            const addItem = localStorage.getItem('addItemTimer');
+            
+            document.getElementById('multibarcodeTimer').value = multibarcode ? parseInt(multibarcode) : 5;
+            document.getElementById('addItemTimer').value = addItem ? parseInt(addItem) : 2;
         }
         // Save settings to localStorage
         document.getElementById('miscSettingsForm').addEventListener('submit', function(e) {
             e.preventDefault();
-            const t = document.getElementById('autoSubmitTime').value;
-            const d = document.getElementById('disableAutoSubmit').checked;
-            localStorage.setItem('autoSubmitTime', t);
-            localStorage.setItem('disableAutoSubmit', d ? '1' : '0');
+            const multibarcode = document.getElementById('multibarcodeTimer').value;
+            const addItem = document.getElementById('addItemTimer').value;
+            
+            localStorage.setItem('multibarcodeTimer', multibarcode);
+            localStorage.setItem('addItemTimer', addItem);
+            
             document.getElementById('saveStatus').style.display = '';
             setTimeout(()=>{document.getElementById('saveStatus').style.display='none';}, 1200);
         });

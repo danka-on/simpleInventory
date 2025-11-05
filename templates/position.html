@@ -126,16 +126,18 @@
 
     <!-- Notification for invalid QR code (hidden by default) -->
     <div id="flashMsg" style="color:#d32f2f; background:#ffdddd; display:none; font-size:0.9em; font-weight:bold; text-align:center; margin-bottom:8px; border-radius:6px; padding:8px;"></div>
-    <input type="text" id="qrTextInput" name="qrTextInput" placeholder="Scan or enter QR code" style="width:100%;font-size:1.2em;padding:10px;margin-top:20px;display:none;" autocomplete="off" />
+    
+    <!-- Input with camera button -->
+    <div style="display: flex; gap: 10px; align-items: center; margin-top: 20px;">
+        <input type="text" id="qrTextInput" name="qrTextInput" placeholder="Scan or enter QR code" style="flex: 1; font-size:1.2em; padding:10px; display:none;" autocomplete="off" />
+        <button id="picturePositionBtn" type="button" style="background-color: #2196F3; color: white; border: none; padding: 12px; cursor: pointer; font-size: 1.5em; display: flex; align-items: center; justify-content: center; width: 50px; height: 50px; border-radius: 6px; box-shadow: 0 4px 12px rgba(33,150,243,0.3);">
+            <i class="fas fa-camera"></i>
+        </button>
+    </div>
 
     <div style="margin: 20px 0; display: flex; flex-direction: column; gap: 15px; width: 100%; max-width: 300px;">
         <button id="restartScannerBtn" onclick="restartScanner()" style="background-color: #2196F3; color: white; border: none; padding: 12px; border-radius: 6px; cursor: pointer; font-size: 1.1em; display: flex; align-items: center; justify-content: center; gap: 8px;">
             <i class="fas fa-sync-alt"></i> Restart Scanner
-        </button>
-        <!-- Picture Position button (50% smaller) -->
-        <button id="picturePositionBtn" type="button" style="background-color: #2196F3; color: white; border: none; padding: 20px; border-radius: 8px; cursor: pointer; font-size: 1.1em; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; width: 100%; box-shadow: 0 4px 12px rgba(33,150,243,0.25); font-weight: bold;">
-            <i class="fas fa-camera" style="font-size: 1.8em;"></i>
-            <span>Picture Position</span>
         </button>
     </div>
     <form id="scan_form" action="/submitposition" method="POST" style="display: none;">
@@ -144,11 +146,11 @@
         <input name="return_url" type="hidden" id="return_url">
         <input name="upc" type="hidden" id="upc_field">
     </form>
-    <!-- Lock Position button (replaces checkbox) -->
+    <!-- Lock Shelf button (replaces checkbox) -->
     <div style="margin-top: 20px; text-align: center;">
         <button id="lockPositionBtn" type="button" style="background-color: #757575; color: white; border: none; padding: 16px 24px; border-radius: 8px; cursor: pointer; font-size: 1.2em; display: inline-flex; align-items: center; justify-content: center; gap: 10px; font-weight: bold; transition: background 0.3s;">
             <i class="fas fa-unlock" id="lockIcon"></i>
-            <span id="lockText">LOCK POSITION</span>
+            <span id="lockText">Lock Shelf - Multiple Barcode</span>
         </button>
     </div>
     <button id="flashBtn" type="button" style="display:none">Turn On Flashlight</button>
@@ -181,12 +183,22 @@
     if (positionLocked) {
       lockBtn.style.backgroundColor = '#43a047'; // Green when locked
       lockIcon.className = 'fas fa-lock';
-      lockText.textContent = 'LOCKED';
+      lockText.textContent = 'LOCKED - Multi Barcode';
       sessionStorage.setItem('positionLocked', 'true');
+      
+      // Auto-focus on input field for immediate scanning
+      const qrInput = document.getElementById('qrTextInput');
+      if (qrInput && qrInput.style.display !== 'none') {
+        setTimeout(() => {
+          qrInput.focus();
+          qrInput.click();
+          qrInput.select();
+        }, 100);
+      }
     } else {
       lockBtn.style.backgroundColor = '#757575'; // Gray when unlocked
       lockIcon.className = 'fas fa-unlock';
-      lockText.textContent = 'LOCK POSITION';
+      lockText.textContent = 'Lock Shelf - Multiple Barcode';
       sessionStorage.removeItem('positionLocked');
       // Clear position when unlocking
       sessionStorage.removeItem('item_position');
@@ -463,27 +475,26 @@
             window.startScanner = function(){};
             // Hide Restart Scanner button in tablet mode
             if (restartBtn) restartBtn.style.display = 'none';
-            // Change Picture Position button color and text for tablet mode
+            // Picture Position button: camera icon only
             if (pictureBtn) {
                 pictureBtn.style.backgroundColor = '#2196F3';
                 pictureBtn.textContent = '';
                 var icon = document.createElement('i');
                 icon.className = 'fas fa-camera';
                 pictureBtn.appendChild(icon);
-                pictureBtn.appendChild(document.createTextNode(' Picture Position'));
             }
         } else {
             // Mobile or desktop: keep camera, hide QR input
             if (readerDiv) readerDiv.style.display = '';
             if (qrInput) qrInput.style.display = 'none';
             if (restartBtn) restartBtn.style.display = '';
+            // Picture Position button: camera icon only
             if (pictureBtn) {
                 pictureBtn.style.backgroundColor = '#ff4444';
                 pictureBtn.textContent = '';
                 var icon = document.createElement('i');
                 icon.className = 'fas fa-camera';
                 pictureBtn.appendChild(icon);
-                pictureBtn.appendChild(document.createTextNode(' NO SHELF (take a picture)'));
             }
         }
     }
@@ -601,11 +612,9 @@
     
     <!-- Navigation Buttons at Bottom -->
     <div style="margin-top: 30px; width: 100%; display: flex; justify-content: center; gap: 15px; padding: 20px 0; border-top: 1px solid #eee;">
-        <a href="/barcode" style="text-decoration: none; flex: 1; max-width: 200px;">
-            <button style="background-color: #ffc107; color: #000; border: none; padding: 10px 24px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 1.1em; width: 100%;">
-                <i class="fas fa-forward"></i> Skip
-            </button>
-        </a>
+        <button id="skipBtn" type="button" style="background-color: #ffc107; color: #000; border: none; padding: 10px 24px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 1.1em; width: 100%; max-width: 200px;">
+            <i class="fas fa-forward"></i> Skip
+        </button>
         <button id="exitBtn" type="button" style="background-color: #ff4444; color: white; border: none; padding: 10px 24px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 1.1em; width: 100%; max-width: 200px;">
             <i class="fas fa-times"></i> Exit
         </button>
@@ -613,6 +622,16 @@
     <script>
     // Exit button clears sessionStorage and goes to index.html
     document.addEventListener('DOMContentLoaded', function() {
+        // Skip button - go to multibarcode if locked, otherwise barcode
+        var skipBtn = document.getElementById('skipBtn');
+        if (skipBtn) {
+            skipBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+                var isLocked = sessionStorage.getItem('positionLocked') === 'true';
+                window.location.href = isLocked ? '/multibarcode' : '/barcode';
+            });
+        }
+        
         var exitBtn = document.getElementById('exitBtn');
         if (exitBtn) {
             exitBtn.addEventListener('click', function(e) {

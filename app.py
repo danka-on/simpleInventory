@@ -2687,6 +2687,9 @@ def additemtrue():
         print("ERROR: No position provided!")
         return "Error: Position is required", 400
     
+    # Handle multiple barcodes (comma-separated)
+    barcodes = [b.strip() for b in final_barcode.split(',') if b.strip()]
+    
     try:
         # If a picture position was used, compress and convert to B&W
         if final_pictureposition:
@@ -2701,8 +2704,11 @@ def additemtrue():
         print("Flow Complete, adding to SearchRack....")
         # If picture position is set, store 'picture' in ITEM_POSITION
         item_position_to_store = 'picture' if final_pictureposition else final_position
-        addToSearchRack(item_position_to_store, final_barcode, None, final_pictureposition)
-        print(f"Added to searchRack: position={item_position_to_store}, barcode={final_barcode}, pictureposition={final_pictureposition}")
+        
+        # Add each barcode to SearchRack
+        for barcode_item in barcodes:
+            addToSearchRack(item_position_to_store, barcode_item, None, final_pictureposition)
+            print(f"Added to searchRack: position={item_position_to_store}, barcode={barcode_item}, pictureposition={final_pictureposition}")
         
         # Clear global variables (but keep position if locked)
         if not same_position:
@@ -2714,6 +2720,12 @@ def additemtrue():
         import traceback
         traceback.print_exc()
         return f"Error: {str(e)}", 500
+    # Check if this is a fetch request (multi-scan mode) or form submission
+    if request.headers.get('Accept') == '*/*' or request.is_json or 'fetch' in request.headers.get('Sec-Fetch-Mode', ''):
+        # Fetch request - return JSON success
+        return jsonify({'success': True, 'message': 'Item added successfully'})
+    
+    # Traditional form submission - return HTML
     # Add script to clear sessionStorage after successful add
     clear_script = '''<script>
         sessionStorage.removeItem('barcode');'''
@@ -2725,7 +2737,27 @@ def additemtrue():
     clear_script += '''
     </script>'''
     if same_position:
-        return render_template("barcode.html") + clear_script
+        # After successful add with locked shelf, unlock and restart from position page
+        same_position = False  # Unlock on server side
+        redirect_script = '''<script>
+        // Clear all session storage including lock state
+        sessionStorage.removeItem('barcode');
+        sessionStorage.removeItem('item_position');
+        sessionStorage.removeItem('pictureposition_path');
+        sessionStorage.removeItem('positionLocked');
+        // Notify server to clear lock state
+        fetch('/toggle', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ checked: false })
+        }).then(() => {
+            window.location.href = '/position';
+        }).catch(err => {
+            console.error('Error clearing lock:', err);
+            window.location.href = '/position';
+        });
+        </script>'''
+        return redirect_script
     else:
         return render_template("position.html") + clear_script
 
@@ -2847,11 +2879,22 @@ def position_diagnostic():
 def process_position():
     global position_code
     global pictureposition_path
+    global same_position
     position_code = request.form.get('scanned_result')
     pictureposition_path = request.form.get('pictureposition')
     print("Received scanned code:", position_code)
     print("Received picture position path:", pictureposition_path)
-    return render_template("barcode.html")
+    print(f"DEBUG: same_position (shelf locked) = {same_position}")
+    
+    # Check if shelf is locked (same_position indicates locked state)
+    if same_position:
+        # Shelf is locked - go to multibarcode page
+        print("DEBUG: Redirecting to multibarcode.html")
+        return render_template("multibarcode.html")
+    else:
+        # Normal flow - go to barcode page
+        print("DEBUG: Redirecting to barcode.html")
+        return render_template("barcode.html")
 
 
 #inventory flow #3
@@ -2870,6 +2913,18 @@ def additem_page():
     #return pictures
 
     return render_template("additem.html")
+
+
+@app.route('/additem-multi', methods=['GET'])
+def additem_multi_page():
+    """Page for multi-barcode adds when shelf is locked"""
+    return render_template("additem_multi.html")
+
+
+@app.route('/multibarcode', methods=['GET'])
+def multibarcode_page():
+    """Multi-barcode scanning page with list building"""
+    return render_template("multibarcode.html")
 
 
 @app.route('/toggle', methods=['POST'])
