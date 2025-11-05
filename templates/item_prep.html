@@ -219,11 +219,11 @@
     }
 
     async function setStatus(upc, status, qty){
-      // Update quantity first
-      await updateQuantity(upc, qty);
-      const r = await fetch('/api/items_prep/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({upc,status})});
+      // Note: Quantity is handled by the /api/items_prep/status endpoint
+      // Do not call updateQuantity here as it would interfere with the API's increment logic
+      const r = await fetch('/api/items_prep/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({upc,status,qty})});
       const j = await r.json();
-      return j && j.success;
+      return j;
     }
 
     document.getElementById('lookupBtn').onclick = ()=>{ const v=document.getElementById('manualUpc').value.trim(); if(v) lookup(v); };
@@ -236,11 +236,28 @@
       if(!confirm('Undo last entry for UPC: ' + lastEntry.upc + '?')) return;
       const statusMsg = document.getElementById('statusMsg');
       try {
-        // Delete the status
-        await fetch('/api/items_prep/status/' + encodeURIComponent(lastEntry.upc), {method: 'DELETE'});
-        // Reset quantity to 1
-        await updateQuantity(lastEntry.upc, 1);
-        statusMsg.innerHTML='<span class="ok">✓ Undone</span>';
+        if(lastEntry.status === 'good' && lastEntry.action === 'incremented'){
+          // This was an increment - just decrement the quantity, don't delete status
+          const newQty = lastEntry.previousQty;
+          if(newQty > 0){
+            await updateQuantity(lastEntry.upc, newQty);
+            statusMsg.innerHTML='<span class="ok">✓ Undone - Quantity reduced to ' + newQty + '</span>';
+          } else {
+            // Quantity would be 0 or less - delete the entry entirely
+            await fetch('/api/items_prep/status/' + encodeURIComponent(lastEntry.upc), {method: 'DELETE'});
+            await updateQuantity(lastEntry.upc, 1);
+            statusMsg.innerHTML='<span class="ok">✓ Undone - Entry removed</span>';
+          }
+        } else {
+          // This was a new entry (created or bad) - delete the status and reset/delete
+          await fetch('/api/items_prep/status/' + encodeURIComponent(lastEntry.upc), {method: 'DELETE'});
+          // For bad items (suffixed), quantity will be deleted with the entry
+          // For good items (new), reset to 1
+          if(lastEntry.status === 'good'){
+            await updateQuantity(lastEntry.upc, 1);
+          }
+          statusMsg.innerHTML='<span class="ok">✓ Undone</span>';
+        }
         lastEntry = null;
         hideUndoButton();
         setTimeout(()=>{ statusMsg.textContent=''; }, 2000);
@@ -252,12 +269,22 @@
     
     document.getElementById('goodBtn').onclick = async ()=>{
       if(!currentUpc) return;
-      // Store for undo
-      lastEntry = {upc: currentUpc, status: 'good', qty: currentQty};
-      showUndoButton();
-      const ok = await setStatus(currentUpc, 'good', currentQty);
+      const result = await setStatus(currentUpc, 'good', currentQty);
       const statusMsg = document.getElementById('statusMsg');
-      if(ok){ statusMsg.innerHTML='<span class="ok">Marked GOOD (Qty: '+currentQty+')</span>'; } else { statusMsg.innerHTML='<span class="bad">Failed to mark</span>'; }
+      if(result && result.success){ 
+        // Store for undo with action type
+        lastEntry = {
+          upc: result.upc || currentUpc, 
+          status: 'good', 
+          qty: currentQty,
+          action: result.action, // 'incremented' or 'created'
+          previousQty: result.action === 'incremented' ? (result.quantity - currentQty) : 0
+        };
+        showUndoButton();
+        statusMsg.innerHTML='<span class="ok">Marked GOOD (Qty: '+currentQty+')</span>'; 
+      } else { 
+        statusMsg.innerHTML='<span class="bad">Failed to mark</span>'; 
+      }
       setTimeout(()=>{ statusMsg.textContent=''; document.getElementById('result').classList.add('hidden'); document.getElementById('actions').classList.add('hidden'); document.getElementById('noBarcodeBtn').classList.remove('hidden'); document.getElementById('manualUpc').value=''; currentUpc = null; resetQtyDisplay(); setupDeviceMode(); }, 600);
     };
 

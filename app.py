@@ -1400,8 +1400,18 @@ def api_items_prep_status():
                 conn.commit()
                 print(f'Moved custom item {temp_row[0]} to {final_upc} in bol_items with qty {qty}')
             else:
-                # Not a temp item - check if we need to create a new bol_items entry for bad status
-                if status == 'bad':
+                # Not a temp item - handle existing BOL items
+                if status == 'good':
+                    # New good entry - update quantity in bol_items
+                    cur.execute('SELECT id FROM bol_items WHERE upc = ? COLLATE NOCASE', (final_upc,))
+                    if cur.fetchone():
+                        # Entry exists in bol_items - update quantity
+                        cur.execute('UPDATE bol_items SET quantity = ? WHERE upc = ? COLLATE NOCASE', (qty, final_upc))
+                        conn.commit()
+                        print(f'Updated new good entry {final_upc} with qty {qty}')
+                    else:
+                        print(f'Warning: Base barcode {final_upc} not found in bol_items for new good entry')
+                elif status == 'bad':
                     # Check if base_upc already exists in bol_items
                     cur.execute('SELECT item_description, image_url, lot_number, bol_number FROM bol_items WHERE upc = ? COLLATE NOCASE', (base_upc,))
                     base_item = cur.fetchone()
@@ -1452,8 +1462,14 @@ def api_items_prep_status():
             print(f'[DEBUG] Inserting new entry for {final_upc}')
             cur.execute('INSERT INTO items_prep_status (upc, status, reason, note, updated_at) VALUES (?,?,?,?,?)', (final_upc, status, reason, note, ts))
         conn.commit()
+        
+        # Get the final quantity to return
+        cur.execute('SELECT quantity FROM bol_items WHERE upc = ? COLLATE NOCASE', (final_upc,))
+        qty_row = cur.fetchone()
+        final_qty = qty_row[0] if qty_row and qty_row[0] else qty
+        
         conn.close()
-        return jsonify({'success': True, 'upc': final_upc, 'action': 'created' if final_upc != upc else 'updated'})
+        return jsonify({'success': True, 'upc': final_upc, 'action': 'created' if final_upc != upc else 'updated', 'quantity': final_qty})
     except Exception as e:
         import traceback
         traceback.print_exc()
