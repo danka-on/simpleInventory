@@ -35,8 +35,8 @@
     .qty-btn.minus{color:#e74c3c;border-color:#e74c3c}
     .qty-btn.minus:hover{background:#e74c3c;color:#fff}
     .qty-btn:active{transform:scale(0.95)}
-    .undo-btn{background:#f39c12;color:#fff;padding:10px 20px;border-radius:10px;margin-top:12px;font-size:1rem}
-    .undo-btn:hover{background:#e67e22}
+    .undo-btn{background:#e74c3c;color:#fff;padding:32px 64px;border-radius:12px;margin-top:16px;font-size:1.3rem;width:100%;box-shadow:0 2px 8px rgba(231,76,60,0.3);transition:all 0.2s;font-weight:600}
+    .undo-btn:hover{background:#c0392b}
   </style>
   <script src="https://unpkg.com/@zxing/library@0.19.1/umd/index.min.js"></script>
 </head>
@@ -45,7 +45,6 @@
   <a href="/"><button class="btn btn-danger">Back</button></a>
   <h2 style="margin:0 auto;text-align:center;flex:1">Preperation</h2>
   <a href="/barcode-print-que" style="text-decoration:none"><button class="btn btn-primary">🖨️ Print Que</button></a>
-  <button class="btn undo-btn hidden" id="undoBtn">↶ Undo Last Entry</button>
   </div>
 
   <div class="card">
@@ -65,6 +64,7 @@
           <span style="font-size:1.4rem;margin-right:8px">✕</span> No Barcode
         </button>
       </a>
+      <button class="btn undo-btn hidden" id="undoBtn">↶ Undo Last Entry</button>
     </div>
 
     <div id="result" class="hidden" style="margin-top:12px">
