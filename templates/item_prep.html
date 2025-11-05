@@ -198,15 +198,7 @@
       const hero = document.getElementById('hero'); hero.style.display=''; hero.src = it.image_url || '';
       document.getElementById('title').textContent = it.item_description || '';
       document.getElementById('upcTxt').textContent = it.upc || '';
-      // Show existing prep status summary
-      const prep = it.prep_status || null;
-      const sum = document.getElementById('prepSummary');
-      if(prep && prep.status){
-        const pill = `<span class="pill">${(prep.status||'').toUpperCase()}${prep.reason?': '+prep.reason:''}</span>`;
-        sum.innerHTML = pill + ` <a href="/item-prep/diagnostic?upc=${encodeURIComponent(it.upc||'')}">Edit diagnostic</a>`;
-      } else {
-        sum.textContent = '';
-      }
+      // No longer showing prep status summary - not applicable with new suffix architecture
       resEl.classList.remove('hidden'); actions.classList.remove('hidden');
       statusMsg.textContent='';
       // Hide No Barcode button when item is displayed
