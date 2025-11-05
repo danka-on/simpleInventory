@@ -1230,9 +1230,16 @@ def api_bol_lookup():
                 permanent_row = r
                 break
         
-        # If we found a permanent entry, this is a duplicate scan
-        # Create a temporary suffixed entry
+        # Check if this item has already been prepped (has a status)
+        has_prep_status = False
         if permanent_row:
+            _ensure_items_prep_tables()
+            cur.execute('SELECT status FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (upc,))
+            status_row = cur.fetchone()
+            has_prep_status = status_row is not None and status_row['status'] != 'unchecked'
+        
+        # Only create a suffixed entry if the item has already been prepped (has a status)
+        if permanent_row and has_prep_status:
             # Find the next available suffix
             suffix = 1
             while True:

@@ -67,7 +67,6 @@
         <div class="action-buttons">
           <button class="btn btn-primary" id="printBarcodeBtn" style="flex:1">🖨️ Print Barcode</button>
           <button class="btn btn-primary" id="addToQueBtn" style="flex:1">➕ Add to Print Que</button>
-          <button class="btn btn-primary" id="continueBtn" style="flex:1">✓ Continue to Prep</button>
         </div>
       </div>
       <div style="margin-top:144px; text-align:center">
@@ -100,8 +99,14 @@
 
     addToQueBtn.addEventListener('click', async () => {
       if (!selectedItem) return;
+      
+      // Immediate visual feedback
+      addToQueBtn.disabled = true;
+      addToQueBtn.style.opacity = '0.5';
+      addToQueBtn.textContent = '⏳ Adding...';
+      statusMsg.textContent = 'Adding to print queue...';
+      
       try {
-        statusMsg.textContent = 'Adding to print queue...';
         const response = await fetch('/api/print-queue', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -109,13 +114,26 @@
         });
         const data = await response.json();
         if (data.success) {
-          statusMsg.textContent = 'Added to print queue!';
+          addToQueBtn.textContent = '✓ Added!';
+          addToQueBtn.style.background = '#2ecc71';
+          statusMsg.textContent = 'Added to print queue! Loading item prep...';
+          // Store UPC and redirect to item prep page to continue workflow
+          sessionStorage.setItem('prepUpc', selectedItem.upc);
+          setTimeout(() => {
+            window.location.href = '/item-prep';
+          }, 300);
         } else {
           statusMsg.textContent = 'Failed to add to queue: ' + data.error;
+          addToQueBtn.disabled = false;
+          addToQueBtn.style.opacity = '1';
+          addToQueBtn.textContent = '➕ Add to Print Que';
         }
       } catch (error) {
         console.error('Error adding to queue:', error);
         statusMsg.textContent = 'Failed to add to queue: ' + error.message;
+        addToQueBtn.disabled = false;
+        addToQueBtn.style.opacity = '1';
+        addToQueBtn.textContent = '➕ Add to Print Que';
       }
     });
 
@@ -264,17 +282,32 @@
 
     printBarcodeBtn.addEventListener('click', async () => {
       if (!selectedItem) return;
+      
+      // Immediate visual feedback
+      printBarcodeBtn.disabled = true;
+      printBarcodeBtn.style.opacity = '0.5';
+      printBarcodeBtn.textContent = '⏳ Printing...';
+      
       try {
         statusMsg.textContent = 'Preparing to print...';
         const configResponse = await fetch('/api/printer/config');
         const configData = await configResponse.json();
         const printerConfig = configData.config || {};
+        
         if (printerConfig.print_method === 'browser') {
           statusMsg.textContent = 'Opening print dialog...';
           printBarcodeBrowser({ upc: selectedItem.upc, description: selectedItem.item_description });
-          statusMsg.textContent = 'Print dialog opened!';
+          printBarcodeBtn.textContent = '✓ Print Dialog Opened!';
+          printBarcodeBtn.style.background = '#2ecc71';
+          statusMsg.textContent = 'Print dialog opened! Loading item prep...';
+          // Store UPC and redirect to item prep page
+          sessionStorage.setItem('prepUpc', selectedItem.upc);
+          setTimeout(() => {
+            window.location.href = '/item-prep';
+          }, 800);
           return;
         }
+        
         statusMsg.textContent = 'Printing...';
         const response = await fetch('/api/printer/print-barcode', {
           method: 'POST',
@@ -283,23 +316,29 @@
         });
         const data = await response.json();
         if (data.success) {
-          statusMsg.textContent = 'Barcode printed successfully!';
-          alert('Barcode printed successfully!');
+          printBarcodeBtn.textContent = '✓ Printed!';
+          printBarcodeBtn.style.background = '#2ecc71';
+          statusMsg.textContent = 'Barcode printed successfully! Loading item prep...';
+          // Store UPC and redirect to item prep page
+          sessionStorage.setItem('prepUpc', selectedItem.upc);
+          setTimeout(() => {
+            window.location.href = '/item-prep';
+          }, 500);
         } else {
           statusMsg.textContent = 'Print failed: ' + data.error;
           alert('Print failed: ' + data.error + '\n\nMake sure the printer is configured in Printer Settings.');
+          printBarcodeBtn.disabled = false;
+          printBarcodeBtn.style.opacity = '1';
+          printBarcodeBtn.textContent = '🖨️ Print Barcode';
         }
       } catch (error) {
         console.error('Print error:', error);
         statusMsg.textContent = 'Print failed: ' + error.message;
         alert('Print failed: ' + error.message);
+        printBarcodeBtn.disabled = false;
+        printBarcodeBtn.style.opacity = '1';
+        printBarcodeBtn.textContent = '🖨️ Print Barcode';
       }
-    });
-
-    continueBtn.addEventListener('click', async () => {
-      if (!selectedItem) return;
-      sessionStorage.setItem('prepUpc', selectedItem.upc);
-      window.location.href = '/item-prep';
     });
   </script>
 </body>

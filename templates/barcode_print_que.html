@@ -29,11 +29,9 @@
 <body>
   <div class="container">
     <div style="margin-bottom:16px;">
-      <a href="/tools" style="text-decoration:none;">
-        <button style="background:#e74c3c;color:#fff;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;display:flex;align-items:center;gap:8px;">
-          <i class="fas fa-arrow-left"></i> Back
-        </button>
-      </a>
+      <button id="backBtn" style="background:#e74c3c;color:#fff;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;display:flex;align-items:center;gap:8px;">
+        <i class="fas fa-arrow-left"></i> Back
+      </button>
     </div>
     <h1>🖨️ Barcode Print Que</h1>
     <div id="cleanupNotice" class="cleanup-notice">
@@ -158,10 +156,24 @@
       document.querySelectorAll('.remove-btn').forEach(btn => {
         btn.onclick = async function() {
           const barcode = this.getAttribute('data-barcode');
+          // Immediate visual feedback - remove the item from UI
+          const queItem = this.closest('.que-item');
+          queItem.style.opacity = '0.5';
+          queItem.style.pointerEvents = 'none';
+          
           const success = await removeFromQue(barcode);
           if (success) {
             clearCleanupTimer(); // Cancel cleanup timer when items are manually removed
-            renderQue();
+            queItem.remove(); // Remove from DOM immediately
+            // Check if queue is empty
+            const remainingItems = document.querySelectorAll('.que-item');
+            if (remainingItems.length === 0) {
+              document.getElementById('emptyMsg').style.display = '';
+            }
+          } else {
+            // Restore if failed
+            queItem.style.opacity = '1';
+            queItem.style.pointerEvents = 'auto';
           }
         };
       });
@@ -169,8 +181,14 @@
     document.getElementById('resetBtn').onclick = async function() {
       if (confirm('Clear the entire print que?')) {
         clearCleanupTimer();
+        // Immediate visual feedback - clear the list
+        const queList = document.getElementById('queList');
+        queList.innerHTML = '';
+        document.getElementById('emptyMsg').style.display = '';
+        
         const success = await clearQue();
-        if (success) {
+        if (!success) {
+          // If failed, reload the queue
           renderQue();
         }
       }
@@ -230,6 +248,18 @@
       // Start cleanup timer instead of clearing immediately
       startCleanupTimer();
     };
+    // Smart back button - remember where user came from
+    document.getElementById('backBtn').onclick = function() {
+      const referrer = document.referrer;
+      if (referrer.includes('/item-prep-no-barcode')) {
+        window.location.href = '/item-prep-no-barcode';
+      } else if (referrer.includes('/item-prep')) {
+        window.location.href = '/item-prep';
+      } else {
+        window.location.href = '/tools';
+      }
+    };
+    
     // Initialize the page
     renderQue();
   </script>

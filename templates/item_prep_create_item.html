@@ -87,7 +87,6 @@
           </label>
           <button class="btn btn-primary" id="printBarcodeBtn" style="width:100%; padding:24px; font-size:1.1rem; display:block;">🖨️ Print Barcode Label</button>
           <button class="btn btn-primary" id="addToQueBtn" style="width:100%; padding:24px; font-size:1.1rem; display:block; margin-top:8px;">➕ Add to Print Que</button>
-          <a href="/barcode-print-que" style="text-decoration:none;"><button class="btn btn-primary" style="width:100%; padding:24px; font-size:1.1rem; display:block; margin-top:8px;">📋 View Print Que</button></a>
       </div>
       <script>
         // Add to Print Que logic
@@ -142,6 +141,15 @@
               showStatus('Added to print queue!', 'success');
               checkFormComplete();
               updateAddToQueBtn();
+              
+              // Auto-continue to prep if all fields are filled
+              const hasImage = !!capturedImageData;
+              if (title && currentBarcode && hasImage && isPrinted) {
+                showStatus('All fields complete! Continuing to prep...', 'success');
+                setTimeout(() => {
+                  completeAndContinue();
+                }, 800);
+              }
             } else {
               showStatus('Failed to add to queue: ' + data.error, 'error');
             }
@@ -402,6 +410,15 @@
             updatePrintStatus();
             showStatus('Print dialog opened! Complete printing to continue.', 'success');
             checkFormComplete();
+            
+            // Auto-continue to prep if all fields are filled
+            const hasImage = !!capturedImageData;
+            if (title && currentBarcode && hasImage && isPrinted) {
+              showStatus('All fields complete! Continuing to prep...', 'success');
+              setTimeout(() => {
+                completeAndContinue();
+              }, 1000);
+            }
           }, 1000);
           return;
         }
@@ -425,6 +442,15 @@
           updatePrintStatus();
           showStatus('Barcode printed successfully!', 'success');
           checkFormComplete();
+          
+          // Auto-continue to prep if all fields are filled
+          const hasImage = !!capturedImageData;
+          if (title && currentBarcode && hasImage && isPrinted) {
+            showStatus('All fields complete! Continuing to prep...', 'success');
+            setTimeout(() => {
+              completeAndContinue();
+            }, 800);
+          }
         } else {
           showStatus('Print failed: ' + data.error + '. Check printer settings.', 'error');
         }
