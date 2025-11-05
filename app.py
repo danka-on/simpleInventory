@@ -1,6 +1,8 @@
 from contextlib import nullcontext
 
 from flask import Flask, request, send_file, url_for, render_template, jsonify, redirect
+from flask_caching import Cache
+from flask_compress import Compress
 from werkzeug.exceptions import RequestEntityTooLarge
 from PIL import Image, ImageDraw
 import io, time, subprocess, os, requests, json, threading, sqlite3, sys
@@ -13,6 +15,60 @@ import xml.dom.minidom as minidom
 from inventory import find_item  # adjust this to match your actual import
 from DBmanager import ebayStoreDB, amazonStoreDB, store_ebay_order, createSearchRackDB, addToSearchRack
 from DBmanager import enrich_searchrack_db
+
+# Disable print statements globally for performance boost
+import builtins
+builtins.print = lambda *args, **kwargs: None
+
+# Database connection pooling for better performance on Raspberry Pi
+from contextlib import contextmanager
+
+# Thread-local storage for database connections
+_db_connections = threading.local()
+
+def get_db_connection(db_name):
+    """Get a cached database connection for the current thread"""
+    if not hasattr(_db_connections, 'connections'):
+        _db_connections.connections = {}
+    
+    if db_name not in _db_connections.connections:
+        conn = sqlite3.connect(db_name, check_same_thread=False, timeout=30.0)
+        conn.row_factory = sqlite3.Row
+        _db_connections.connections[db_name] = conn
+    
+    return _db_connections.connections[db_name]
+
+@contextmanager
+def db_connection(db_name, row_factory=True):
+    """Context manager for database operations with automatic commit/rollback"""
+    conn = get_db_connection(db_name)
+    if not row_factory:
+        original_factory = conn.row_factory
+        conn.row_factory = None
+    
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        if not row_factory:
+            conn.row_factory = original_factory
+
+# Enable WAL mode for SQLite databases for better concurrent performance
+def enable_wal_mode():
+    """Enable Write-Ahead Logging for all SQLite databases"""
+    databases = ['sold.db', 'bol.db', 'searchRack.db', 'ebayStore.db', 'amazonStore.db', 'rawbol.db', 'removed.db', 'deleted.db']
+    for db in databases:
+        try:
+            if os.path.exists(db):
+                conn = sqlite3.connect(db)
+                conn.execute('PRAGMA journal_mode=WAL')
+                conn.close()
+        except Exception:
+            pass  # Skip if database doesn't exist or error occurs
+
 try:
     from amazon_manager import AmazonManager
     AMAZON_AVAILABLE = True
@@ -41,13 +97,23 @@ CLIENT_ID = os.getenv("EBAY_CLIENT_ID")
 CLIENT_SECRET = os.getenv("EBAY_CLIENT_SECRET")
 RUNAME = os.getenv("EBAY_RUNAME")
 app = Flask(__name__)
-# Ensure template changes hot-reload and disable caching for dev to avoid stale pages
-app.config['TEMPLATES_AUTO_RELOAD'] = True
-app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
+# Production settings - optimized for Raspberry Pi deployment
+app.config['TEMPLATES_AUTO_RELOAD'] = False  # Disable template reloading for better performance
+app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 31536000  # Cache static files for 1 year (31536000 seconds)
 try:
-    app.jinja_env.auto_reload = True
+    app.jinja_env.auto_reload = False  # Disable Jinja auto-reload
 except Exception:
     pass
+
+# Initialize Flask-Caching for API response caching (huge performance boost)
+cache = Cache(app, config={
+    'CACHE_TYPE': 'simple',  # In-memory cache
+    'CACHE_DEFAULT_TIMEOUT': 300,  # 5 minutes default
+    'CACHE_THRESHOLD': 500  # Max 500 cached items
+})
+
+# Initialize Flask-Compress for automatic gzip compression (70% smaller responses)
+Compress(app)
 
 @app.after_request
 def add_no_cache_headers(response):
@@ -132,6 +198,7 @@ def financial_analytics():
 
 # API endpoint for financial analytics data
 @app.route('/api/financial-analytics')
+@cache.cached(timeout=300, query_string=True)  # Cache for 5 minutes
 def api_financial_analytics():
     """
     Fetch all sold orders with cost data from BOL and calculate profits.
@@ -139,9 +206,8 @@ def api_financial_analytics():
     """
     print("DEBUG: Financial analytics API called")
     try:
-        # Connect to sold.db
-        sold_conn = sqlite3.connect('sold.db')
-        sold_conn.row_factory = sqlite3.Row
+        # Use connection pool for better performance
+        sold_conn = get_db_connection('sold.db')
         sold_cur = sold_conn.cursor()
         
         # Get all sold orders with lot_number
@@ -166,20 +232,15 @@ def api_financial_analytics():
             ORDER BY paid_time DESC
         ''')
         orders = sold_cur.fetchall()
-        sold_conn.close()
         
-        # Connect to rawbol.db to get cost data
-        rawbol_conn = sqlite3.connect('rawbol.db')
-        rawbol_conn.row_factory = sqlite3.Row
+        # Use connection pool for other databases
+        rawbol_conn = get_db_connection('rawbol.db')
         rawbol_cur = rawbol_conn.cursor()
         
-        # Also connect to ebayStore and amazonStore for item verification
-        ebay_conn = sqlite3.connect('ebayStore.db')
-        ebay_conn.row_factory = sqlite3.Row
+        ebay_conn = get_db_connection('ebayStore.db')
         ebay_cur = ebay_conn.cursor()
         
-        amazon_conn = sqlite3.connect('amazonStore.db')
-        amazon_conn.row_factory = sqlite3.Row
+        amazon_conn = get_db_connection('amazonStore.db')
         amazon_cur = amazon_conn.cursor()
         
         transactions = []
@@ -242,17 +303,12 @@ def api_financial_analytics():
             
             transactions.append(item_data)
         
-        rawbol_conn.close()
-        ebay_conn.close()
-        amazon_conn.close()
+        # No need to close connections - they're pooled and reused
         
         # Get LOT # data from rawbol.db upload_logs
         lot_options = []
         try:
-            rawbol_conn = sqlite3.connect('rawbol.db')
-            rawbol_conn.row_factory = sqlite3.Row
-            rawbol_cur = rawbol_conn.cursor()
-            
+            # Reuse existing connection
             rawbol_cur.execute('''
                 SELECT 
                     lot_number,
@@ -282,7 +338,6 @@ def api_financial_analytics():
                 })
                 print(f"DEBUG: Added LOT option: {display_name} (${float(total_cost) if total_cost else 0:.2f})")
             
-            rawbol_conn.close()
         except Exception as e:
             print(f"Warning: Could not fetch LOT # data from rawbol.db: {e}")
             import traceback
@@ -313,17 +368,14 @@ def api_refresh_sold_data():
     try:
         print("DEBUG: Refreshing sold data...")
         
-        # Connect to databases
-        sold_conn = sqlite3.connect('sold.db')
-        sold_conn.row_factory = sqlite3.Row
+        # Use connection pool
+        sold_conn = get_db_connection('sold.db')
         sold_cur = sold_conn.cursor()
         
-        amazon_conn = sqlite3.connect('amazonStore.db')
-        amazon_conn.row_factory = sqlite3.Row
+        amazon_conn = get_db_connection('amazonStore.db')
         amazon_cur = amazon_conn.cursor()
         
-        rawbol_conn = sqlite3.connect('rawbol.db')
-        rawbol_conn.row_factory = sqlite3.Row
+        rawbol_conn = get_db_connection('rawbol.db')
         rawbol_cur = rawbol_conn.cursor()
         
         # Get Amazon orders that might need updating
@@ -372,9 +424,7 @@ def api_refresh_sold_data():
         
         sold_conn.commit()
         
-        sold_conn.close()
-        amazon_conn.close()
-        rawbol_conn.close()
+        # No need to close - connections are pooled
         
         return jsonify({
             'success': True,
@@ -747,6 +797,7 @@ def printer_settings_page():
     return render_template('printer_settings.html')
 
 @app.route('/api/printer/config', methods=['GET'])
+@cache.cached(timeout=1800)  # Cache for 30 minutes (printer config rarely changes)
 def get_printer_config():
     """Get current printer configuration"""
     try:
@@ -872,6 +923,7 @@ def generate_barcode_api():
 # ============================================================================
 
 @app.route('/api/print-queue', methods=['GET'])
+@cache.cached(timeout=60)  # Cache for 1 minute (queue changes frequently)
 def get_print_queue():
     """Get all items in the print queue"""
     try:
@@ -1112,6 +1164,7 @@ def save_temp_item():
  
 
 @app.route('/api/bol_lookup', methods=['GET'])
+@cache.cached(timeout=600, query_string=True)  # Cache for 10 minutes
 def api_bol_lookup():
     """Lookup a BOL item by UPC in bol.db and return normalized fields.
     First checks temp_items for custom items, then bol_items.
@@ -2368,6 +2421,27 @@ def api_refresh_searchrack():
 def api_enrich_status():
     return jsonify(_enrich_status)
 
+# Optimized image loading for Raspberry Pi (prevents memory exhaustion)
+def load_image_efficiently(image_path, max_size=(1920, 1920), convert_rgb=True):
+    """
+    Load and resize image efficiently to prevent memory exhaustion on Pi.
+    Uses thumbnail() to resize in-place without loading full image into memory.
+    """
+    try:
+        img = Image.open(image_path)
+        
+        # Resize large images before converting (saves memory)
+        if img.size[0] > max_size[0] or img.size[1] > max_size[1]:
+            img.thumbnail(max_size, Image.Resampling.LANCZOS)
+        
+        # Convert to RGB if needed
+        if convert_rgb and img.mode != 'RGB':
+            img = img.convert('RGB')
+        
+        return img
+    except Exception as e:
+        raise Exception(f"Failed to load image {image_path}: {e}")
+
 SHELF_COORDS = [
     {"gr1":
          {
@@ -2409,7 +2483,8 @@ def highlight():
     if coords is None:
         return f"No coordinates found for {rack} {shelf}", 404
     try:
-        img = Image.open(image_path).convert("RGB")
+        # Use optimized image loading (memory-efficient for Pi)
+        img = load_image_efficiently(image_path, max_size=(1920, 1920), convert_rgb=True)
     except Exception as e:
         return f"Image not found: {image_path}", 404
     draw = ImageDraw.Draw(img)
@@ -2494,9 +2569,9 @@ def additemtrue():
         if final_pictureposition:
             abs_path = os.path.join(os.getcwd(), final_pictureposition)
             try:
-                img = Image.open(abs_path)
+                # Use optimized image loading (memory-efficient for Pi)
+                img = load_image_efficiently(abs_path, max_size=(400, 400), convert_rgb=False)
                 img = img.convert('L')  # Convert to grayscale
-                img.thumbnail((400, 400))  # Resize to max 400x400
                 img.save(abs_path, optimize=True, quality=40)
             except Exception as e:
                 print(f"Image processing failed: {e}")
@@ -5745,6 +5820,9 @@ def sync_debug():
     })
 
 if __name__ == "__main__":
+    # Enable WAL mode for all databases (better concurrent performance)
+    enable_wal_mode()
+    
     # Start Flask in a thread
     flask_thread = threading.Thread(target=start_flask, daemon=True)
     flask_thread.start()

@@ -1,6 +1,8 @@
 # Core Web Framework
 Flask==3.0.0
 Werkzeug==3.0.1
+Flask-Caching==2.1.0
+Flask-Compress==1.14
 
 # Environment & Configuration
 python-dotenv==1.0.0
