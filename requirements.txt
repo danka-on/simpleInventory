@@ -1,37 +1,32 @@
-Flask
-zxing
-requests
-Pillow
-python-dotenv
-sqlite3
-python-amazon-sp-api
-python-barcode
-python-escpos
-pyserial
+# Core Web Framework
+Flask==3.0.0
+Werkzeug==3.0.1
 
-# Optional for Bluetooth scanning on Linux/Raspberry Pi:
-# pybluez
+# Environment & Configuration
+python-dotenv==1.0.0
 
-# Additional likely dependencies for your project:
-Werkzeug
-itsdangerous
-Jinja2
-MarkupSafe
-# If you use pandas for data manipulation:
-pandas
-# If you use xlrd for .xls Excel import:
-xlrd
-# If you use openpyxl for .xlsx Excel import/export:
-openpyxl
-# If you use lxml for HTML table parsing:
-lxml
-# If you use BeautifulSoup for HTML parsing:
-beautifulsoup4
-# If you use gunicorn for production server:
-gunicorn
-# If you use python-barcode for barcode generation:
-python-barcode
-# If you use pyzbar for barcode/QR decoding:
-pyzbar
-# If you use opencv for image processing:
-opencv-python
+# Image Processing
+Pillow==10.1.0
+
+# HTTP Requests
+requests==2.31.0
+
+# Amazon SP-API
+python-amazon-sp-api==0.22.0
+
+# Data Processing
+pandas==2.1.4
+openpyxl==3.1.2
+
+# Barcode Generation
+python-barcode==0.15.1
+
+# Printer Support (for Bluetooth/USB thermal printers)
+python-escpos==3.0
+pyserial==3.5
+
+# HTML/XML Parsing (used for eBay API responses)
+lxml==5.0.0
+
+# Production Server (optional but recommended for Raspberry Pi)
+gunicorn==21.2.0
