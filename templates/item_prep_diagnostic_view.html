@@ -75,8 +75,14 @@
         <h2 class="title">{{ bol.item_description if bol else 'Item' }}</h2>
         <div class="muted">UPC: {{ upc }}</div>
         {% set qty = bol.quantity if bol and bol.quantity else 1 %}
-        <div style="margin-top:8px">
-          <span style="font-weight:700;font-size:1.2rem;{% if qty > 1 %}color:#e74c3c{% else %}color:#555{% endif %}">QTY: {{ qty }}</span>
+        <div style="margin-top:8px;display:flex;align-items:center;gap:8px">
+          <span id="qtyDisplay" style="font-weight:700;font-size:1.2rem;{% if qty > 1 %}color:#e74c3c{% else %}color:#555{% endif %}">QTY: <span id="qtyValue">{{ qty }}</span></span>
+          <button type="button" id="btnEditQty" class="btn" style="background:#3498db;color:#fff;padding:4px 10px;font-size:0.85rem">Edit</button>
+          <div id="qtyEditPanel" style="display:none;align-items:center;gap:6px">
+            <input type="number" id="qtyInput" min="1" value="{{ qty }}" style="width:70px;padding:6px;border:1px solid #ddd;border-radius:4px">
+            <button type="button" id="btnSaveQty" class="btn" style="background:#00c853;color:#fff;padding:4px 10px;font-size:0.85rem">Save</button>
+            <button type="button" id="btnCancelQty" class="btn" style="background:#666;color:#fff;padding:4px 10px;font-size:0.85rem">Cancel</button>
+          </div>
         </div>
         <div style="margin-top:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
           <span style="color:#2980b9;text-decoration:underline;cursor:pointer;font-size:1rem" id="setPositionBtn">Set Position</span>
@@ -623,6 +629,83 @@
           if(ret){ window.location.href = ret; }
           else { window.location.href = '/item-prep?forceFocus=1'; }
         }catch(e){ window.location.href = '/item-prep?forceFocus=1'; }
+      });
+    })();
+
+    // Quantity editing functionality
+    (function(){
+      const btnEdit = document.getElementById('btnEditQty');
+      const btnSave = document.getElementById('btnSaveQty');
+      const btnCancel = document.getElementById('btnCancelQty');
+      const qtyDisplay = document.getElementById('qtyDisplay');
+      const qtyValue = document.getElementById('qtyValue');
+      const editPanel = document.getElementById('qtyEditPanel');
+      const qtyInput = document.getElementById('qtyInput');
+
+      if(!btnEdit || !btnSave || !btnCancel || !editPanel || !qtyInput) return;
+
+      // Show edit panel
+      btnEdit.addEventListener('click', ()=>{
+        btnEdit.style.display = 'none';
+        editPanel.style.display = 'flex';
+        qtyInput.focus();
+        qtyInput.select();
+      });
+
+      // Cancel edit
+      btnCancel.addEventListener('click', ()=>{
+        qtyInput.value = qtyValue.textContent;
+        editPanel.style.display = 'none';
+        btnEdit.style.display = 'inline-block';
+      });
+
+      // Save quantity
+      async function saveQuantity(){
+        const newQty = parseInt(qtyInput.value, 10);
+        if(isNaN(newQty) || newQty < 1){
+          alert('Please enter a valid quantity (1 or more)');
+          return;
+        }
+        try{
+          btnSave.disabled = true;
+          btnSave.textContent = 'Saving...';
+          const res = await fetch('/api/bol_items/quantity', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ upc: '{{ upc }}', quantity: newQty })
+          });
+          const j = await res.json();
+          if(j.success){
+            qtyValue.textContent = newQty;
+            // Update color based on quantity
+            if(newQty > 1){
+              qtyDisplay.style.color = '#e74c3c';
+            } else {
+              qtyDisplay.style.color = '#555';
+            }
+            editPanel.style.display = 'none';
+            btnEdit.style.display = 'inline-block';
+          } else {
+            alert('Failed to update quantity: ' + (j.error || 'unknown'));
+          }
+        }catch(e){
+          alert('Error updating quantity: ' + e);
+        } finally {
+          btnSave.disabled = false;
+          btnSave.textContent = 'Save';
+        }
+      }
+
+      btnSave.addEventListener('click', saveQuantity);
+      
+      // Allow Enter key to save
+      qtyInput.addEventListener('keydown', (e)=>{
+        if(e.key === 'Enter'){
+          e.preventDefault();
+          saveQuantity();
+        } else if(e.key === 'Escape'){
+          btnCancel.click();
+        }
       });
     })();
   </script>
