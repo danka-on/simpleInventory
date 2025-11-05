@@ -9,8 +9,10 @@
     .container { max-width: 800px; margin: 40px auto; background: #fff; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); padding: 24px; }
     h1 { color: #2c3e50; margin-bottom: 24px; }
     .que-list { margin-bottom: 24px; }
-    .que-item { display: flex; align-items: center; background: #f8f9fa; border-radius: 8px; padding: 12px; margin-bottom: 10px; box-shadow: 0 1px 2px rgba(0,0,0,0.03); }
+    .que-item { display: flex; align-items: center; background: #f8f9fa; border-radius: 8px; padding: 12px; margin-bottom: 10px; box-shadow: 0 1px 2px rgba(0,0,0,0.03); transition: opacity 0.3s ease, background-color 0.3s ease; }
+    .que-item.deleting { opacity: 0.3; background-color: #e0e0e0; pointer-events: none; }
     .que-title { flex: 1; font-weight: 600; color: #2c3e50; }
+    .que-timestamp { font-size: 0.85rem; color: #95a5a6; margin-left: 12px; white-space: nowrap; }
     .que-barcode { font-family: monospace; color: #636e72; margin-left: 16px; }
     .remove-btn { background: #e74c3c; color: #fff; border: none; border-radius: 6px; padding: 6px 12px; cursor: pointer; margin-left: 16px; }
     .remove-btn:hover { background: #c0392b; }
@@ -136,6 +138,46 @@
       const timeString = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
       document.getElementById('cleanupTimer').textContent = timeString;
     }
+    
+    function formatTimestamp(isoString) {
+      if (!isoString) return '';
+      try {
+        // Parse ISO string, handling both UTC and local formats
+        let dateStr = String(isoString).trim();
+        if (/\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(dateStr) && !(/[zZ]|[+-]\d{2}:?\d{2}$/.test(dateStr))) {
+          dateStr = dateStr.replace(' ', 'T');
+          if (!dateStr.endsWith('Z')) dateStr = dateStr + 'Z';
+        }
+        const date = new Date(dateStr);
+        if (isNaN(date.getTime())) return isoString;
+        
+        // Format to Eastern Time
+        const parts = new Intl.DateTimeFormat('en-US', {
+          timeZone: 'America/New_York',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: 'numeric',
+          minute: '2-digit',
+          hour12: true
+        }).formatToParts(date);
+        
+        const vals = {};
+        parts.forEach(p => vals[p.type] = p.value);
+        const year = vals.year;
+        const month = vals.month;
+        const day = vals.day;
+        let hour = vals.hour;
+        const minute = vals.minute;
+        const dayPeriod = (vals.dayPeriod || '').toLowerCase();
+        
+        hour = String(hour).replace(/^0/, '');
+        return `${year}-${month}-${day} ${hour}:${minute}${dayPeriod}`;
+      } catch (e) {
+        return isoString;
+      }
+    }
+    
     async function renderQue() {
       const que = await getQue();
       const queList = document.getElementById('queList');
@@ -149,31 +191,34 @@
       que.forEach((item, idx) => {
         const div = document.createElement('div');
         div.className = 'que-item';
-        div.innerHTML = `<span class="que-title">${item.title}</span><span class="que-barcode">${item.barcode}</span><button class="remove-btn" data-barcode="${item.barcode}">✖</button>`;
+        const timestamp = item.added_at ? `<span class="que-timestamp">${formatTimestamp(item.added_at)}</span>` : '';
+        div.innerHTML = `<span class="que-title">${item.title}</span>${timestamp}<span class="que-barcode">${item.barcode}</span><button class="remove-btn" data-barcode="${item.barcode}">✖</button>`;
         queList.appendChild(div);
       });
       // Attach remove handlers
       document.querySelectorAll('.remove-btn').forEach(btn => {
         btn.onclick = async function() {
           const barcode = this.getAttribute('data-barcode');
-          // Immediate visual feedback - remove the item from UI
+          // Immediate visual feedback - gray out the item
           const queItem = this.closest('.que-item');
-          queItem.style.opacity = '0.5';
-          queItem.style.pointerEvents = 'none';
+          queItem.classList.add('deleting');
           
           const success = await removeFromQue(barcode);
           if (success) {
             clearCleanupTimer(); // Cancel cleanup timer when items are manually removed
-            queItem.remove(); // Remove from DOM immediately
-            // Check if queue is empty
-            const remainingItems = document.querySelectorAll('.que-item');
-            if (remainingItems.length === 0) {
-              document.getElementById('emptyMsg').style.display = '';
-            }
+            // Fade out then remove
+            queItem.style.opacity = '0';
+            setTimeout(() => {
+              queItem.remove();
+              // Check if queue is empty
+              const remainingItems = document.querySelectorAll('.que-item');
+              if (remainingItems.length === 0) {
+                document.getElementById('emptyMsg').style.display = '';
+              }
+            }, 300);
           } else {
             // Restore if failed
-            queItem.style.opacity = '1';
-            queItem.style.pointerEvents = 'auto';
+            queItem.classList.remove('deleting');
           }
         };
       });

@@ -923,18 +923,17 @@ def generate_barcode_api():
 # ============================================================================
 
 @app.route('/api/print-queue', methods=['GET'])
-@cache.cached(timeout=60)  # Cache for 1 minute (queue changes frequently)
 def get_print_queue():
     """Get all items in the print queue"""
     try:
         _ensure_items_prep_tables()  # Ensure table exists
         conn = sqlite3.connect('bol.db')
         cur = conn.cursor()
-        cur.execute('SELECT title, barcode FROM print_queue ORDER BY added_at ASC')
+        cur.execute('SELECT title, barcode, added_at FROM print_queue ORDER BY added_at ASC')
         rows = cur.fetchall()
         conn.close()
         
-        queue = [{'title': row[0], 'barcode': row[1]} for row in rows]
+        queue = [{'title': row[0], 'barcode': row[1], 'added_at': row[2]} for row in rows]
         return jsonify({'success': True, 'queue': queue})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
@@ -1901,6 +1900,61 @@ def api_items_prep_location_set():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
+@app.route('/api/items_prep/reset', methods=['POST'])
+def api_items_prep_reset():
+    """Reset item back to rawbol.db default state. JSON: { upc }"""
+    try:
+        data = request.get_json() or {}
+        upc = _normalize_upc(data.get('upc'))
+        if not upc:
+            return jsonify({'success': False, 'error': 'Missing upc'}), 400
+        
+        _ensure_items_prep_tables()
+        
+        # Get original quantity from rawbol.db
+        rawbol_qty = None
+        try:
+            rawbol_conn = sqlite3.connect('rawbol.db')
+            rawbol_cur = rawbol_conn.cursor()
+            rawbol_cur.execute('SELECT QTY FROM rawbol WHERE UPC = ? COLLATE NOCASE LIMIT 1', (upc,))
+            rawbol_row = rawbol_cur.fetchone()
+            rawbol_qty = rawbol_row[0] if rawbol_row else 1
+            rawbol_conn.close()
+        except Exception as e:
+            print(f'Warning: Could not fetch from rawbol.db: {e}')
+            rawbol_qty = 1
+        
+        conn = sqlite3.connect('bol.db')
+        cur = conn.cursor()
+        
+        # 1. Delete from items_prep_status
+        cur.execute('DELETE FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (upc,))
+        
+        # 2. Delete from items_prep_images
+        cur.execute('DELETE FROM items_prep_images WHERE upc = ? COLLATE NOCASE', (upc,))
+        
+        # 3. Delete from items_prep_notes if it exists
+        try:
+            cur.execute('DELETE FROM items_prep_notes WHERE upc = ? COLLATE NOCASE', (upc,))
+        except:
+            pass  # Table may not exist
+        
+        # 4. Restore quantity in bol_items
+        cur.execute('UPDATE bol_items SET quantity = ? WHERE upc = ? COLLATE NOCASE', (rawbol_qty, upc))
+        
+        # 5. Clear list_status if it exists
+        try:
+            cur.execute('UPDATE bol_items SET list_status = NULL WHERE upc = ? COLLATE NOCASE', (upc,))
+        except:
+            pass  # Column may not exist
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True, 'quantity': rawbol_qty, 'message': 'Item reset to default state'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/items-to-list')
 def items_to_list_page():
     return render_template('items_to_list.html')
@@ -2185,41 +2239,103 @@ def api_bol_items():
 
 @app.route('/api/bulk_delete_bol_items', methods=['POST'])
 def api_bulk_delete_bol_items():
-    """Delete selected BOL items, only if they are temporary (duplicate) entries or custom 777 barcodes."""
+    """Delete or reset selected BOL items.
+    - Duplicates (UPC with -N suffix) or custom 777 barcodes: DELETE
+    - Base barcodes: RESET to rawbol.db default state
+    """
     try:
         data = request.get_json() or {}
-        ids = data.get('ids', [])
-        if not ids:
-            return jsonify({'success': False, 'error': 'No ids provided'}), 400
-        # Load UPCs for the requested ids and only allow deletion for UPCs that:
-        # 1. End with "-<number>" (e.g., 858557007115-1) - duplicate entries
-        # 2. Start with "777" - custom created items
-        # Base UPCs (no dash-number suffix and not starting with 777) are protected.
+        # Support both old format (ids array) and new format (items array with id+upc)
+        items = data.get('items', [])
+        if not items:
+            # Fallback to old format
+            ids = data.get('ids', [])
+            if not ids:
+                return jsonify({'success': False, 'error': 'No items provided'}), 400
+            # Fetch UPCs for the old format
+            conn = sqlite3.connect('bol.db')
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            placeholders = ','.join('?' for _ in ids)
+            cur.execute(f'SELECT id, upc FROM bol_items WHERE id IN ({placeholders})', tuple(ids))
+            rows = cur.fetchall()
+            items = [{'id': r['id'], 'upc': r['upc']} for r in rows]
+            conn.close()
+        
+        if not items:
+            return jsonify({'success': False, 'error': 'No items provided'}), 400
+        
         import re
-        conn = sqlite3.connect('bol.db')
-        conn.row_factory = sqlite3.Row
-        cur = conn.cursor()
-        placeholders = ','.join('?' for _ in ids)
-        cur.execute(f'SELECT id, upc FROM bol_items WHERE id IN ({placeholders})', tuple(ids))
-        rows = cur.fetchall()
+        _ensure_items_prep_tables()
+        
         deletable_ids = []
-        protected_ids = []
-        for r in rows:
-            upc_val = r['upc']
+        reset_upcs = []
+        
+        # Categorize items: duplicates/custom for deletion, base barcodes for reset
+        for item in items:
+            upc_val = item.get('upc', '')
             s = '' if upc_val is None else str(upc_val).strip()
-            # Allow delete if UPC ends with -[digits] OR starts with 777
+            # Delete if UPC ends with -[digits] OR starts with 777
             if re.search(r'-\d+$', s) or s.startswith('777'):
-                deletable_ids.append(r['id'])
+                deletable_ids.append(item['id'])
             else:
-                protected_ids.append(r['id'])
+                # Base barcode - reset instead of delete
+                reset_upcs.append(s)
+        
         deleted = 0
+        reset_count = 0
+        
+        # Handle deletions
         if deletable_ids:
-            ph2 = ','.join('?' for _ in deletable_ids)
-            cur.execute(f'DELETE FROM bol_items WHERE id IN ({ph2})', tuple(deletable_ids))
+            conn = sqlite3.connect('bol.db')
+            cur = conn.cursor()
+            ph = ','.join('?' for _ in deletable_ids)
+            cur.execute(f'DELETE FROM bol_items WHERE id IN ({ph})', tuple(deletable_ids))
             deleted = cur.rowcount
             conn.commit()
-        conn.close()
-        return jsonify({'success': True, 'deleted': deleted, 'protected': protected_ids, 'attempted': ids})
+            conn.close()
+        
+        # Handle resets for base barcodes
+        if reset_upcs:
+            for upc in reset_upcs:
+                try:
+                    # Get original quantity from rawbol.db
+                    rawbol_qty = 1
+                    try:
+                        rawbol_conn = sqlite3.connect('rawbol.db')
+                        rawbol_cur = rawbol_conn.cursor()
+                        rawbol_cur.execute('SELECT QTY FROM rawbol WHERE UPC = ? COLLATE NOCASE LIMIT 1', (upc,))
+                        rawbol_row = rawbol_cur.fetchone()
+                        rawbol_qty = rawbol_row[0] if rawbol_row else 1
+                        rawbol_conn.close()
+                    except:
+                        pass
+                    
+                    conn = sqlite3.connect('bol.db')
+                    cur = conn.cursor()
+                    
+                    # Delete prep status, images, and notes
+                    cur.execute('DELETE FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (upc,))
+                    cur.execute('DELETE FROM items_prep_images WHERE upc = ? COLLATE NOCASE', (upc,))
+                    try:
+                        cur.execute('DELETE FROM items_prep_notes WHERE upc = ? COLLATE NOCASE', (upc,))
+                    except:
+                        pass
+                    
+                    # Restore quantity and clear list_status
+                    cur.execute('UPDATE bol_items SET quantity = ? WHERE upc = ? COLLATE NOCASE', (rawbol_qty, upc))
+                    try:
+                        cur.execute('UPDATE bol_items SET list_status = NULL WHERE upc = ? COLLATE NOCASE', (upc,))
+                    except:
+                        pass
+                    
+                    conn.commit()
+                    conn.close()
+                    reset_count += 1
+                except Exception as e:
+                    print(f'Warning: Failed to reset UPC {upc}: {e}')
+        
+        return jsonify({'success': True, 'deleted': deleted, 'reset': reset_count})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
