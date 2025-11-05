@@ -25,7 +25,7 @@
   .cam-side-btn{position:absolute;top:10px;right:10px;background:rgba(0,0,0,0.36);color:#fff;border:none;padding:8px;border-radius:8px;z-index:6;font-size:1rem}
   .cam-full-btn{position:absolute;top:10px;left:10px;background:rgba(0,0,0,0.36);color:#fff;border:none;padding:8px;border-radius:8px;z-index:6;font-size:1rem}
   /* Complete button styling: full width, light green */
-  .complete-wrap{margin-top:12px}
+  .complete-wrap{margin-top:48px}
   .btn-complete{display:block;width:100%;padding:16px 18px;border-radius:10px;border:none;background:#00c853;color:#fff;font-weight:800;font-size:1.05rem;box-shadow:0 8px 18px rgba(0,200,83,0.18);cursor:pointer}
   .btn-complete:active{transform:translateY(1px)}
   .preview{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
@@ -88,16 +88,17 @@
       <div id="upcText">{{ upc }}</div>
     </div>
     
-    <!-- Status bubbles under UPC -->
-    <div class="status-bubbles">
-      <button type="button" class="status-bubble good" data-status="good">Good</button>
-      <button type="button" class="status-bubble bad" data-status="bad">Bad</button>
+    <!-- Status bubbles and Set Position button in one row -->
+    <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 12px;">
+      <div class="status-bubbles" style="margin: 0;">
+        <button type="button" class="status-bubble good" data-status="good">Good</button>
+        <button type="button" class="status-bubble bad" data-status="bad">Bad</button>
+      </div>
+      
+      <button type="button" class="set-position-btn" id="setPositionBtn" style="margin: 0; padding: 12px 18px; font-size: 1rem;">
+        <i class="fas fa-map-marker-alt"></i> Set Position
+      </button>
     </div>
-    
-    <!-- Set position under status -->
-    <button type="button" class="set-position-btn" id="setPositionBtn">
-      <i class="fas fa-map-marker-alt"></i> Set Position
-    </button>
     
     <!-- Location display -->
     <div id="locationRow" style="display:none;margin-top:8px">
@@ -121,19 +122,21 @@
       </div>
       <input type="hidden" name="reason" id="reasonSelect" required>
       
-      <label style="font-weight:600;font-size:1.05rem">Notes:</label>
+      <label style="font-weight:700;font-size:1.3rem;margin-top:16px">Notes:</label>
       <div id="notesContainer" style="display:flex;flex-direction:column;gap:8px;margin:8px 0;max-height:240px;overflow-y:auto"></div>
       <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
-        <input type="text" id="newNoteInput" placeholder="Add a note..." style="flex:1;padding:10px;border:1px solid #ddd;border-radius:8px">
-        <button type="button" id="addNoteBtn" class="btn btn-primary" style="padding:10px 18px">+ Add</button>
+        <input type="text" id="newNoteInput" placeholder="Add a note..." style="flex:1;padding:18px;border:1px solid #ddd;border-radius:8px;font-size:1.1rem;height:60px">
+        <button type="button" id="addNoteBtn" class="btn btn-primary" style="padding:18px 22px;font-size:1.1rem">+ Add</button>
       </div>
       
-      <label>Photos:
-        <input type="file" id="photos" accept="image/*" capture="environment" multiple>
-      </label>
+      <label style="font-weight:600;font-size:1.05rem">Photos:</label>
+      <button type="button" id="takePhotoBtn" class="btn" style="background:#2196F3;color:#fff;padding:16px 24px;font-size:1.2rem;font-weight:600;margin-top:8px;display:flex;align-items:center;justify-content:center;gap:10px;width:100%">
+        <i class="fas fa-camera" style="font-size:1.4rem"></i> TAKE PHOTO
+      </button>
+      <input type="file" id="photos" accept="image/*" capture="environment" style="display:none">
       <div style="margin-top:8px">
-        <div class="small-muted" style="display:flex;align-items:center;gap:10px;justify-content:space-between;flex-wrap:wrap">
-          <span>Or use camera</span>
+        <div class="small-muted" style="display:none;align-items:center;gap:10px;justify-content:space-between;flex-wrap:wrap" id="cameraControls">
+          <span>Camera mode</span>
           <div style="display:flex;align-items:center;gap:8px">
             <span>Quality:</span>
             <div id="qualityGroup" style="display:flex;gap:6px">
@@ -144,7 +147,7 @@
           </div>
         </div>
           <div id="preview" class="preview"></div>
-        <div class="cam-row">
+        <div class="cam-row" style="display:none" id="cameraView">
           <div class="cam-wrap">
             <video id="cam" playsinline muted style="width:100%;aspect-ratio:1/1;background:#222;border-radius:8px;display:block"></video>
             <canvas id="canvas" style="display:none"></canvas>
@@ -368,6 +371,9 @@
     function blobToImage(blob){ return new Promise((resolve)=>{ const url=URL.createObjectURL(blob); const img=new Image(); img.onload=()=>{ URL.revokeObjectURL(url); resolve(img); }; img.src=url; }); }
 
     document.getElementById('completeBtn').onclick = async ()=>{
+      // Check if button is disabled
+      if(document.getElementById('completeBtn').disabled) return;
+      
       const form = document.getElementById('diagForm');
       const fd = new FormData(form);
       // Append both pending and captured images, and include matching rotations[] values
@@ -435,7 +441,13 @@
       }
     };
 
-    window.addEventListener('DOMContentLoaded', startCam);
+    // Handle TAKE PHOTO button - opens camera app on mobile devices
+    document.getElementById('takePhotoBtn').addEventListener('click', ()=>{
+      document.getElementById('photos').click();
+    });
+
+    // Don't auto-start camera on page load anymore
+    // window.addEventListener('DOMContentLoaded', startCam);
     // If a return param was provided, set the back link to that URL
     window.addEventListener('DOMContentLoaded', ()=>{
       try{
@@ -464,6 +476,29 @@
     });
     window.addEventListener('beforeunload', stopCam);
 
+    // Function to update Done button state
+    function updateDoneButtonState(){
+      const doneBtn = document.getElementById('doneBtn');
+      const completeBtn = document.getElementById('completeBtn');
+      const hasReason = reasonSelect.value && reasonSelect.value.trim() !== '';
+      
+      if(hasReason){
+        doneBtn.disabled = false;
+        doneBtn.style.opacity = '1';
+        doneBtn.style.cursor = 'pointer';
+        completeBtn.disabled = false;
+        completeBtn.style.opacity = '1';
+        completeBtn.style.cursor = 'pointer';
+      } else {
+        doneBtn.disabled = true;
+        doneBtn.style.opacity = '0.4';
+        doneBtn.style.cursor = 'not-allowed';
+        completeBtn.disabled = true;
+        completeBtn.style.opacity = '0.4';
+        completeBtn.style.cursor = 'not-allowed';
+      }
+    }
+
     // Reason buttons sync with select and toggle when clicked again
     reasonBtns.forEach(btn=>{
       btn.addEventListener('click', ()=>{
@@ -477,7 +512,13 @@
           // toggle off
           reasonSelect.value = '';
         }
+        updateDoneButtonState();
       });
+    });
+    
+    // Initialize Done buttons as disabled on page load
+    window.addEventListener('DOMContentLoaded', ()=>{
+      updateDoneButtonState();
     });
 
     // Load existing diagnostic (reason/note and photos)
@@ -506,6 +547,8 @@
           reasonSelect.value = valid.includes(val) ? val : '';
           const targetBtn = reasonBtns.find(b=> b.dataset.val === reasonSelect.value);
           if(targetBtn){ reasonBtns.forEach(b=> b.classList.remove('active')); targetBtn.classList.add('active'); }
+          // Update Done button state after loading existing reason
+          updateDoneButtonState();
         }
         if(imgs.length){
           const card = document.getElementById('existingCard');
@@ -589,22 +632,8 @@
       }
     });
 
-    // Auto-select "bad" status and first defect reason if accessed via "Bad → Diagnostic" button
-    window.addEventListener('DOMContentLoaded', ()=>{
-      try{
-        const params = new URLSearchParams(window.location.search);
-        const from = params.get('from');
-        if(from === 'bad'){
-          updateStatusBubbles('bad');
-          // Auto-select the first defect reason button
-          if (reasonBtns.length > 0) {
-            reasonBtns.forEach(b=> b.classList.remove('active'));
-            reasonBtns[0].classList.add('active');
-            reasonSelect.value = reasonBtns[0].dataset.val;
-          }
-        }
-      }catch(e){ /* ignore */ }
-    });
+    // Auto-select "bad" status is now handled in loadExistingStatus function
+    // No default defect selection
 
     // Top-right Done button functionality (same as Complete button)
     document.getElementById('doneBtn').addEventListener('click', async ()=>{
@@ -795,6 +824,15 @@
     async function loadExistingStatus(){
       const upc = '{{ upc }}'.trim();
       if(!upc) return;
+      
+      // Check if coming from "bad" flow - if so, set to bad and don't load existing
+      const params = new URLSearchParams(window.location.search);
+      const from = params.get('from');
+      if(from === 'bad'){
+        updateStatusBubbles('bad');
+        return;
+      }
+      
       try{
         const res = await fetch(`/api/items_prep/status/${encodeURIComponent(upc)}`);
         const j = await res.json();
