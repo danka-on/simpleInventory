@@ -3,7 +3,9 @@
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.ico') }}">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <link rel="preconnect" href="https://cdnjs.cloudflare.com">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" media="print" onload="this.media='all'">
+    <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css"></noscript>
     <link rel="apple-touch-icon" href="{{ url_for('static', filename='apple-touch-icon.png') }}">
     <title>Sweet Shelves</title>
     <style>
@@ -110,13 +112,7 @@
             margin: 0;
             padding: 0;
             min-height: 100vh;
-        }
-        body.loading {
-            opacity: 0;
-        }
-        body.loaded {
             opacity: 1;
-            transition: opacity 0.2s ease-in;
         }
         .container {
             max-width: 480px;
@@ -249,7 +245,7 @@
         }
     </style>
 </head>
-<body class="loading">
+<body>
     <div class="container">
 
         <div class="main-actions" style="margin-bottom:12px;">
@@ -355,14 +351,19 @@
 
 <script>
 // ============================================================================
-// READY TO SHIP - MODERNIZED ORDER MANAGEMENT SYSTEM
+// READY TO SHIP - OPTIMIZED ORDER MANAGEMENT SYSTEM
 // ============================================================================
+(function() {
+'use strict';
 
-// Global state management
+// Global state management with localStorage caching
 const OrderManager = {
     orders: new Map(),
     isLoading: false,
     currentDays: 2,
+    cacheKey: 'soldOrders_cache',
+    cacheTimestampKey: 'soldOrders_timestamp',
+    cacheDuration: 5 * 60 * 1000, // 5 minutes in milliseconds
     
     // Add or update order in cache (normalize ID to string)
     setOrder(order) {
@@ -387,6 +388,58 @@ const OrderManager = {
         const order = this.orders.get(String(id));
         if (order) {
             order.isHandled = isHandled;
+            this.saveToLocalStorage(); // Persist changes
+        }
+    },
+    
+    // Save orders to localStorage
+    saveToLocalStorage() {
+        try {
+            const ordersArray = Array.from(this.orders.values());
+            localStorage.setItem(this.cacheKey, JSON.stringify(ordersArray));
+            localStorage.setItem(this.cacheTimestampKey, Date.now().toString());
+        } catch (e) {
+            console.warn('Failed to save to localStorage:', e);
+        }
+    },
+    
+    // Load orders from localStorage
+    loadFromLocalStorage() {
+        try {
+            const timestamp = parseInt(localStorage.getItem(this.cacheTimestampKey) || '0');
+            const age = Date.now() - timestamp;
+            
+            // Check if cache is still valid
+            if (age > this.cacheDuration) {
+                console.log('Cache expired, age:', age, 'ms');
+                return null;
+            }
+            
+            const cached = localStorage.getItem(this.cacheKey);
+            if (!cached) return null;
+            
+            const ordersArray = JSON.parse(cached);
+            console.log('Loaded', ordersArray.length, 'orders from cache');
+            
+            // Restore to Map
+            this.orders.clear();
+            ordersArray.forEach(order => this.setOrder(order));
+            
+            return ordersArray;
+        } catch (e) {
+            console.warn('Failed to load from localStorage:', e);
+            return null;
+        }
+    },
+    
+    // Clear cache
+    clearCache() {
+        try {
+            localStorage.removeItem(this.cacheKey);
+            localStorage.removeItem(this.cacheTimestampKey);
+            this.orders.clear();
+        } catch (e) {
+            console.warn('Failed to clear cache:', e);
         }
     }
 };
@@ -464,7 +517,7 @@ function updatePendingCount() {
 }
 
 // Render orders to tables with performance optimization
-function renderSoldOrders(orders) {
+function renderSoldOrders(orders, fromCache = false) {
     const pendingTbody = document.querySelector('#sold-orders-table tbody');
     const completedTbody = document.querySelector('#completed-orders-table tbody');
     
@@ -506,6 +559,11 @@ function renderSoldOrders(orders) {
     
     updatePendingCount();
     attachPopups();
+    
+    // Save to cache after rendering (unless already from cache)
+    if (!fromCache) {
+        OrderManager.saveToLocalStorage();
+    }
 }
 
 // ============================================================================
@@ -657,37 +715,72 @@ function showToast(message, type = 'info') {
     }, 3000);
 }
 // ============================================================================
-// DATA FETCHING - With loading states and error handling
+// DATA FETCHING - With localStorage caching for instant loads
+// ============================================================================
+// Caching Strategy:
+// 1. First load: Check localStorage cache (5 min expiry)
+// 2. If cached and valid: Show instantly, then fetch fresh data in background
+// 3. If no cache/expired: Fetch from server and cache result
+// 4. Manual refresh: Force fetch and update cache
+// 5. Days change: Clear cache and fetch fresh
+// This provides near-instant subsequent loads while keeping data fresh
 // ============================================================================
 
-async function fetchAndShowSoldOrders(days) {
+async function fetchAndShowSoldOrders(days, forceRefresh = false) {
     if (OrderManager.isLoading) return;
     
     OrderManager.isLoading = true;
     OrderManager.currentDays = days;
     
+    // Try to load from cache first (unless forced refresh)
+    if (!forceRefresh) {
+        const cachedOrders = OrderManager.loadFromLocalStorage();
+        if (cachedOrders && cachedOrders.length > 0) {
+            console.log('Using cached orders - instant load!');
+            renderSoldOrders(cachedOrders, true);
+            OrderManager.isLoading = false;
+            
+            // Show brief indicator that we're using cached data
+            const badge = document.getElementById('pending-count');
+            if (badge) {
+                const originalBg = badge.style.background;
+                badge.style.background = '#2196F3';
+                badge.title = 'Loaded from cache';
+                setTimeout(() => {
+                    badge.style.background = originalBg;
+                    badge.title = '';
+                }, 2000);
+            }
+            
+            // Fetch fresh data in background to update cache (silent update)
+            setTimeout(() => {
+                fetchAndShowSoldOrders(days, true);
+            }, 100);
+            return;
+        }
+    }
+    
     try {
-        // Show loading state
-        const pendingTbody = document.querySelector('#sold-orders-table tbody');
-        const completedTbody = document.querySelector('#completed-orders-table tbody');
-        pendingTbody.innerHTML = '<tr class="loading-row"><td colspan="5" style="text-align: center; padding: 20px; color: #666;"><i class="fas fa-spinner fa-spin"></i> Loading orders...</td></tr>';
-        completedTbody.innerHTML = '<tr class="loading-row"><td colspan="5" style="text-align: center; padding: 20px; color: #666;"><i class="fas fa-spinner fa-spin"></i> Loading orders...</td></tr>';
+        // Parallel fetch for better performance
+        const [fetchResponse, ordersResponse] = await Promise.all([
+            fetch('/get-sold-orders', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ days })
+            }),
+            fetch(`/sold-orders?days=${days}`)
+        ]);
         
-        // Fetch new orders from API
-        const fetchResponse = await fetch('/get-sold-orders', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ days })
-        });
-        
-        const fetchData = await fetchResponse.json();
+        const [fetchData, orders] = await Promise.all([
+            fetchResponse.json(),
+            ordersResponse.json()
+        ]);
         
         if (!fetchData.success) {
             throw new Error(fetchData.error || 'Failed to fetch orders');
         }
         
-        // Now load and display the orders
-        await loadSoldOrders(days, true);
+        renderSoldOrders(orders, false);
         
     } catch (error) {
         console.error('Error fetching orders:', error);
@@ -696,7 +789,7 @@ async function fetchAndShowSoldOrders(days) {
         // Show error state
         const pendingTbody = document.querySelector('#sold-orders-table tbody');
         const completedTbody = document.querySelector('#completed-orders-table tbody');
-        pendingTbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 20px; color: #e53935;">Failed to load orders. <a href="#" onclick="fetchAndShowSoldOrders(' + days + '); return false;">Retry</a></td></tr>';
+        pendingTbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 20px; color: #e53935;">Failed to load orders. <a href="#" onclick="window.fetchAndShowSoldOrders(' + days + ', true); return false;">Retry</a></td></tr>';
         completedTbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 20px; color: #666;">No completed orders yet</td></tr>';
     } finally {
         OrderManager.isLoading = false;
@@ -706,10 +799,13 @@ async function fetchAndShowSoldOrders(days) {
 async function loadSoldOrders(days, force = false) {
     if (!isSoldOrdersTabActive && !force) return;
     
-    days = days || parseInt(document.getElementById('sold-orders-days').value) || 2;
+    days = days || parseInt(document.getElementById('sold-orders-days')?.value) || 2;
     
     try {
-        const response = await fetch(`/sold-orders?days=${days}`);
+        const response = await fetch(`/sold-orders?days=${days}`, {
+            cache: 'default',
+            priority: 'high'
+        });
         const orders = await response.json();
         renderSoldOrders(orders);
     } catch (error) {
@@ -813,37 +909,34 @@ window.addEventListener('DOMContentLoaded', async function() {
     
     setupTabs();
     
-    // Set up refresh button
+    // Set up refresh button - force refresh to get latest data
     const refreshBtn = document.getElementById('refresh-orders-btn');
     if (refreshBtn) {
         refreshBtn.addEventListener('click', async function() {
             const icon = this.querySelector('i');
             icon.classList.add('fa-spin');
             const days = parseInt(document.getElementById('sold-orders-days').value) || 2;
-            await fetchAndShowSoldOrders(days);
+            await fetchAndShowSoldOrders(days, true); // Force refresh
             icon.classList.remove('fa-spin');
         });
     }
     
-    // Set up days input change handler
+    // Set up days input change handler - force refresh when days change
     const soldOrdersDays = document.getElementById('sold-orders-days');
     if (soldOrdersDays) {
         soldOrdersDays.addEventListener('change', function() {
             const days = parseInt(this.value) || 2;
-            fetchAndShowSoldOrders(days);
+            OrderManager.clearCache(); // Clear cache when changing days
+            fetchAndShowSoldOrders(days, true);
         });
     }
     
-    // Initial load
-    try {
-        await fetchAndShowSoldOrders(2);
-        console.log('Initial orders loaded');
-    } catch (error) {
-        console.error('Error during initial load:', error);
-    } finally {
-        document.body.classList.remove('loading');
-        document.body.classList.add('loaded');
-    }
+    // Initial load - non-blocking, page shows immediately
+    setTimeout(() => {
+        fetchAndShowSoldOrders(2).catch(error => {
+            console.error('Error during initial load:', error);
+        });
+    }, 0);
 });
 
 // ============================================================================
@@ -964,6 +1057,13 @@ function fmtET(ts){
         return `${year}-${month}-${day} ${hour}:${minute}${ampm}`;
     }catch(e){ return String(ts); }
 }
+
+// Make critical functions available globally
+window.OrderManager = OrderManager;
+window.showOrderPopup = showOrderPopup;
+window.fetchAndShowSoldOrders = fetchAndShowSoldOrders;
+
+})();
 </script>
 </body>
 </html>
