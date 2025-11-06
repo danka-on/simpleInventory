@@ -190,7 +190,7 @@ function formatLastEdited(raw){
 function render(results){
   let html = '<table><thead><tr>';
   if (selectMode) html += '<th>Select</th>';
-  html += '<th>Info</th><th>Status</th><th>Defect</th><th>Pics</th><th>Title</th><th>QTY</th><th>UPC</th><th>Listed</th><th>Action</th><th>Last Edited</th></tr></thead><tbody>';
+  html += '<th>Info</th><th>Status</th><th>Foto</th><th>Defect</th><th>QTY</th><th>Title</th><th>UPC</th><th>Listed</th><th>Action</th><th>Last Edited</th></tr></thead><tbody>';
   for (const r of results) {
     const title = esc(r.title||'');
     const img = esc(r.image||'');
@@ -199,6 +199,8 @@ function render(results){
     // Strip leading zeros from UPC display
     const upcStripped = upcRaw && /^\d+$/.test(String(upcRaw)) ? String(upcRaw).replace(/^0+/, '') : upcRaw;
     const upc = esc(upcStripped);
+    // Extract base UPC without suffix for copy button
+    const baseUpc = upc.includes('-') ? upc.split('-')[0] : upc;
     const last_edited = esc(r.last_edited||'');
     const status = (r.status||'').toLowerCase();
     let pill = '<span class="status-box" title="Unchecked">unchecked</span>';
@@ -212,9 +214,8 @@ function render(results){
       : `<button class="btn btn-primary btn-sm btn-list" data-upc="${upc}">Mark as Listed</button>`;
     // Diagnostic link moved into its own Info column (first column)
     const diagLink = `<button class="btn btn-sm diag-link" style="background:transparent;border:1px solid #0066cc;color:#0066cc;border-radius:6px;padding:6px 10px;cursor:pointer" data-upc="${upc}">Open</button>`;
-    // Pics count button — initially unknown, render placeholder and update later
-    const picsCount = (r.pics_count || 0);
-    const picsBtn = `<button type="button" class="btn btn-sm pics-count" data-upc="${upc}" title="View photos">${picsCount}</button>`;
+    // Pics count — will be updated after fetching actual count. Start with "..." as loading indicator
+    const picsBtn = `<span class="pics-count" data-upc="${upc}" style="color:#2196F3;font-weight:600;cursor:pointer;font-size:0.9rem">...</span>`;
     // QTY display - make red if > 1 AND status is NOT "unchecked"
     const qty = r.quantity || 1;
     const qtyStyle = (qty > 1 && status !== 'unchecked') ? 'color:#e74c3c;font-weight:700;font-size:1.1rem' : '';
@@ -228,11 +229,11 @@ function render(results){
       `<td><div style="display:flex;flex-direction:column;gap:4px;align-items:flex-start">`+
             `<div>${pill}</div>`+
           `</div></td>`+
-            `<td>${esc(r.defect||'')}</td>`+
             `<td style="text-align:center">${picsBtn}</td>`+
-            `<td><div class="title-cell"><img class="thumb" src="${thumb}" onerror="this.src='${missingThumb(48,48,'No Img')}'"><a href="#" class="img-link" data-img="${img}" data-title="${title}">${title}</a></div></td>`+
+            `<td>${esc(r.defect||'')}</td>`+
             qtyCell+
-            `<td><div style=\"display:flex;gap:6px;align-items:center\"><span>${upc}</span><button type=\"button\" class=\"btn btn-sm btn-copy\" data-upc=\"${upc}\" title=\"Copy UPC\">Copy</button></div></td>`+
+            `<td><div class="title-cell"><img class="thumb" src="${thumb}" onerror="this.src='${missingThumb(48,48,'No Img')}'"><a href="#" class="img-link" data-img="${img}" data-title="${title}">${title}</a></div></td>`+
+            `<td><div style=\"display:flex;gap:6px;align-items:center\"><span>${upc}</span><button type=\"button\" class=\"btn btn-sm btn-copy\" data-upc=\"${baseUpc}\" title=\"Copy UPC\">Copy</button></div></td>`+
           `<td>${lpill}</td>`+
             `<td>${actionBtn}</td>`+
             `<td class="last-edited-cell" data-raw="${last_edited}">${formatLastEdited(last_edited)}</td>`+
@@ -254,21 +255,27 @@ function render(results){
   document.querySelectorAll('.btn-list').forEach(el=> el.addEventListener('click', onMarkListed));
   document.querySelectorAll('.btn-unlist').forEach(el=> el.addEventListener('click', onUnlist));
   document.querySelectorAll('.btn-copy').forEach(el=> el.addEventListener('click', onCopyUpc));
-  // Wire pics-count handlers
-  document.querySelectorAll('.pics-count').forEach(btn=> btn.addEventListener('click', onOpenPics));
-  // After rendering, for each displayed UPC, fetch the actual images count in the background and update the button
-  document.querySelectorAll('.pics-count').forEach(async (btn)=>{
-    const upc = btn.dataset.upc;
+  // Wire pics-count handlers (now spans instead of buttons)
+  document.querySelectorAll('.pics-count').forEach(el=> el.addEventListener('click', onOpenPics));
+  // After rendering, for each displayed UPC, fetch the actual images count in the background and update the number
+  document.querySelectorAll('.pics-count').forEach(async (el)=>{
+    const upc = el.dataset.upc;
     if(!upc) return;
     try{
       const res = await fetch('/api/items_prep/diagnostic/'+encodeURIComponent(upc));
       if(!res.ok) return;
       const j = await res.json();
       const n = (j.images || []).length;
-      btn.textContent = n;
-      // show disabled style when 0
-      btn.disabled = (n===0);
-    }catch(e){ /* ignore */ }
+      if(n > 0){
+        // Show camera icon instead of number
+        el.innerHTML = '📷';
+        el.style.display = 'inline-block';
+        el.style.visibility = 'visible';
+      } else {
+        // Keep hidden when no photos
+        el.style.display = 'none';
+      }
+    }catch(e){ }
   });
 }
 

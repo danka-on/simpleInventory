@@ -303,16 +303,29 @@
       setTimeout(()=>{ statusMsg.textContent=''; document.getElementById('result').classList.add('hidden'); document.getElementById('actions').classList.add('hidden'); document.getElementById('noBarcodeBtn').classList.remove('hidden'); document.getElementById('manualUpc').value=''; currentUpc = null; resetQtyDisplay(); setupDeviceMode(); }, 600);
     };
 
-    document.getElementById('badBtn').onclick = ()=>{
+    document.getElementById('badBtn').onclick = async ()=>{
       if(!currentUpc) return;
       // Store for undo before navigating to diagnostic
       lastEntry = {upc: currentUpc, status: 'bad', qty: currentQty};
       // Store in sessionStorage so we can restore after diagnostic
       sessionStorage.setItem('lastEntry', JSON.stringify(lastEntry));
       updateQtyDisplay(-1); // Show -1 animation
-      setTimeout(() => {
-        window.location.href = '/item-prep/diagnostic?upc='+encodeURIComponent(currentUpc)+'&from=bad&qty='+currentQty+'&return='+encodeURIComponent('/item-prep?forceFocus=1&showUndo=1');
-      }, 300);
+      
+      // Call bol_lookup to get the correct UPC (might be suffixed if item already exists)
+      try {
+        const r = await fetch('/api/bol_lookup?upc='+encodeURIComponent(currentUpc));
+        const j = await r.json();
+        const actualUpc = (j.found && j.item && j.item.upc) ? j.item.upc : currentUpc;
+        
+        setTimeout(() => {
+          window.location.href = '/item-prep/diagnostic?upc='+encodeURIComponent(actualUpc)+'&from=bad&qty='+currentQty+'&return='+encodeURIComponent('/item-prep?forceFocus=1&showUndo=1');
+        }, 300);
+      } catch(e) {
+        // Fallback to original UPC if lookup fails
+        setTimeout(() => {
+          window.location.href = '/item-prep/diagnostic?upc='+encodeURIComponent(currentUpc)+'&from=bad&qty='+currentQty+'&return='+encodeURIComponent('/item-prep?forceFocus=1&showUndo=1');
+        }, 300);
+      }
     };
 
     document.getElementById('skipBtn').onclick = async ()=>{ 

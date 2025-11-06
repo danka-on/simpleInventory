@@ -17,8 +17,9 @@ from DBmanager import ebayStoreDB, amazonStoreDB, store_ebay_order, createSearch
 from DBmanager import enrich_searchrack_db
 
 # Disable print statements globally for performance boost
+# TEMPORARILY DISABLED FOR DEBUGGING
 import builtins
-builtins.print = lambda *args, **kwargs: None
+# builtins.print = lambda *args, **kwargs: None
 
 # Database connection pooling for better performance on Raspberry Pi
 from contextlib import contextmanager
@@ -698,7 +699,17 @@ def item_prep_page():
 
 @app.route('/item-prep/diagnostic')
 def item_prep_diagnostic_page():
-    upc = (request.args.get('upc') or '').strip()
+    upc_raw = (request.args.get('upc') or '').strip()
+    # Strip leading zeros ONLY if it's all digits (preserve suffix like -24)
+    if upc_raw and '-' in upc_raw:
+        # Has suffix: strip zeros from base part only (e.g., '0719978859014-24' -> '719978859014-24')
+        parts = upc_raw.split('-', 1)
+        base = parts[0].lstrip('0') if parts[0].isdigit() else parts[0]
+        upc = f"{base}-{parts[1]}"
+    else:
+        # No suffix: strip zeros normally
+        upc = upc_raw.lstrip('0') if upc_raw.isdigit() else upc_raw
+    print(f'[DEBUG] Diagnostic page - URL param: {upc_raw} -> Rendered UPC: {upc}')
     return render_template('item_prep_diagnostic.html', upc=upc)
 
 @app.route('/item-prep/diagnostic/view')
@@ -1229,16 +1240,19 @@ def api_bol_lookup():
                 permanent_row = r
                 break
         
-        # Check if this item has already been prepped (has a status)
-        has_prep_status = False
+        # Check if this item has already been prepped (exists in items_prep_status table)
+        # Check for both exact match AND any suffixed versions (e.g., 719978859014, 719978859014-1, etc.)
+        has_prep_record = False
         if permanent_row:
             _ensure_items_prep_tables()
-            cur.execute('SELECT status FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (upc,))
+            # Check for exact match OR any entry starting with "upc-"
+            cur.execute('SELECT status FROM items_prep_status WHERE upc = ? OR upc LIKE ? COLLATE NOCASE LIMIT 1', (upc, f'{upc}-%'))
             status_row = cur.fetchone()
-            has_prep_status = status_row is not None and status_row['status'] != 'unchecked'
+            has_prep_record = status_row is not None
+            print(f'[DEBUG] BOL lookup for {upc}: has_prep_record={has_prep_record}, status={status_row["status"] if status_row else None}')
         
-        # Only create a suffixed entry if the item has already been prepped (has a status)
-        if permanent_row and has_prep_status:
+        # Only create a suffixed entry if the item already has a prep record
+        if permanent_row and has_prep_record:
             # Find the next available suffix
             suffix = 1
             while True:
@@ -1249,6 +1263,7 @@ def api_bol_lookup():
                 suffix += 1
             
             # Create temporary duplicate entry
+            print(f'[DEBUG] Creating suffixed entry: {suffixed_upc}')
             cur.execute("""
                 INSERT INTO bol_items (upc, item_description, image_url, lot_number, bol_number, import_date, temporary)
                 VALUES (?, ?, ?, ?, ?, ?, 1)
@@ -1297,7 +1312,9 @@ def api_bol_lookup():
 def api_items_prep_status_get(upc):
     """Get preparation status for a UPC."""
     try:
-        upc_n = _normalize_upc(upc)
+        upc_norm = _normalize_upc(upc)
+        # Strip leading zeros to match item manager behavior
+        upc_n = upc_norm.lstrip('0') if upc_norm and upc_norm.isdigit() else upc_norm
         _ensure_items_prep_tables()
         conn = sqlite3.connect('bol.db')
         conn.row_factory = sqlite3.Row
@@ -1323,7 +1340,12 @@ def api_items_prep_status():
     """
     try:
         data = request.get_json() or {}
-        upc = _normalize_upc(data.get('upc'))
+        upc_norm = _normalize_upc(data.get('upc'))
+        # Strip leading zeros to match item manager behavior (but preserve suffixes like -1)
+        if upc_norm and '-' not in upc_norm and upc_norm.isdigit():
+            upc = upc_norm.lstrip('0')
+        else:
+            upc = upc_norm
         status = (data.get('status') or '').strip().lower()
         reason = (data.get('reason') or '').strip()
         note = (data.get('note') or '').strip()
@@ -1336,6 +1358,9 @@ def api_items_prep_status():
         
         # Extract base barcode (remove -1, -2, etc suffix if present)
         base_upc = upc.split('-')[0] if '-' in upc else upc
+        # Strip leading zeros from base_upc as well
+        if base_upc and base_upc.isdigit():
+            base_upc = base_upc.lstrip('0')
         final_upc = upc
         
         # Handle GOOD status - check for existing entry and increment QTY
@@ -1524,7 +1549,12 @@ def api_items_prep_status_delete(upc):
     If UPC has a suffix (e.g., 110101-1), also delete the suffixed entry from bol_items.
     """
     try:
-        upc = _normalize_upc(upc)
+        upc_norm = _normalize_upc(upc)
+        # Strip leading zeros to match item manager behavior (but preserve suffixes like -1)
+        if upc_norm and '-' not in upc_norm and upc_norm.isdigit():
+            upc = upc_norm.lstrip('0')
+        else:
+            upc = upc_norm
         if not upc:
             return jsonify({'success': False, 'error': 'Missing upc'}), 400
         
@@ -1551,12 +1581,26 @@ def api_items_prep_diagnostic():
     """Save diagnostic info and photos for a UPC. form-data: upc, reason, note, files: photos[]"""
     try:
         _ensure_items_prep_tables()
-        upc = _normalize_upc(request.form.get('upc'))
+        upc_raw = _normalize_upc(request.form.get('upc'))
+        # Strip leading zeros ONLY if it's all digits (preserve suffix like -24)
+        if upc_raw and '-' in upc_raw:
+            # Has suffix: strip zeros from base part only (e.g., '0719978859014-24' -> '719978859014-24')
+            parts = upc_raw.split('-', 1)
+            base = parts[0].lstrip('0') if parts[0].isdigit() else parts[0]
+            upc = f"{base}-{parts[1]}"
+        else:
+            # No suffix: strip zeros normally
+            upc = upc_raw.lstrip('0') if upc_raw and upc_raw.isdigit() else upc_raw
         reason = (request.form.get('reason') or '').strip()
         note = (request.form.get('note') or '').strip()
         if not upc:
             return jsonify({'success': False, 'error': 'Missing upc'}), 400
 
+        # DEBUG: Log incoming request details
+        print(f'[DEBUG] Diagnostic upload for UPC: {upc_raw} -> {upc}')
+        print(f'[DEBUG] Form keys: {list(request.form.keys())}')
+        print(f'[DEBUG] Files keys: {list(request.files.keys())}')
+        
         # Mark temporary entry as permanent if it exists
         conn_temp = sqlite3.connect('bol.db')
         cur_temp = conn_temp.cursor()
@@ -1572,6 +1616,8 @@ def api_items_prep_diagnostic():
         files = request.files.getlist('photos[]') or request.files.getlist('photos') or ([] if 'photo' not in request.files else [request.files['photo']])
         # optional per-file rotations can be provided as rotations[] in the same form-data (one per file, same order)
         rotations = request.form.getlist('rotations[]') or request.form.getlist('rotations') or []
+        print(f'[DEBUG] Files received: {len(files)}')
+        print(f'[DEBUG] Rotations received: {len(rotations)}')
         import datetime
         ts = datetime.datetime.now(datetime.UTC).isoformat()
         if files:
@@ -1579,6 +1625,7 @@ def api_items_prep_diagnostic():
             cur_i = conn_i.cursor()
             for idx, f in enumerate(files):
                 if not f or not getattr(f, 'filename', ''):
+                    print(f'[DEBUG] Skipping invalid file at index {idx}')
                     continue
                 fn = secure_filename(f.filename)
                 name, ext = os.path.splitext(fn)
@@ -1596,10 +1643,12 @@ def api_items_prep_diagnostic():
                         rot = 0
                     cur_i.execute('INSERT INTO items_prep_images (upc, image_path, created_at, rotation) VALUES (?,?,?,?)', (upc, rel, ts, rot))
                     saved.append(rel)
+                    print(f'[DEBUG] Successfully saved photo {idx+1}: {rel}')
                 except Exception as se:
-                    print('Failed to save diagnostic image:', se)
+                    print(f'[DEBUG] Failed to save diagnostic image {idx}:', se)
             conn_i.commit()
             conn_i.close()
+            print(f'[DEBUG] Total photos saved to database: {len(saved)}')
         # Note: Status is now handled by /api/items_prep/status endpoint which properly handles suffixed UPCs
         # Do not update status here as it would overwrite base barcode status incorrectly
         return jsonify({'success': True, 'saved': saved})
@@ -1619,7 +1668,17 @@ def handle_file_too_large(e):
 @app.route('/api/items_prep/diagnostic/<upc>', methods=['GET'])
 def api_items_prep_diagnostic_get(upc):
     try:
-        upc_n = _normalize_upc(upc)
+        upc_norm = _normalize_upc(upc)
+        # Strip leading zeros ONLY if it's all digits (preserve suffix like -24)
+        if upc_norm and '-' in upc_norm:
+            # Has suffix: strip zeros from base part only (e.g., '0719978859014-24' -> '719978859014-24')
+            parts = upc_norm.split('-', 1)
+            base = parts[0].lstrip('0') if parts[0].isdigit() else parts[0]
+            upc_n = f"{base}-{parts[1]}"
+        else:
+            # No suffix: strip zeros normally
+            upc_n = upc_norm.lstrip('0') if upc_norm and upc_norm.isdigit() else upc_norm
+        print(f'[DEBUG] Getting diagnostic for UPC: {upc} -> {upc_norm} -> {upc_n}')
         _ensure_items_prep_tables()
         conn = sqlite3.connect('bol.db')
         conn.row_factory = sqlite3.Row
@@ -1628,6 +1687,7 @@ def api_items_prep_diagnostic_get(upc):
         srow = cur.fetchone()
         cur.execute("SELECT id, image_path, created_at, rotation FROM items_prep_images WHERE upc = ? COLLATE NOCASE AND (deleted_at IS NULL OR TRIM(COALESCE(deleted_at,'')) = '') ORDER BY created_at DESC, id DESC", (upc_n,))
         images = [dict(r) for r in cur.fetchall()]
+        print(f'[DEBUG] Found {len(images)} images for UPC {upc_n}')
         conn.close()
         return jsonify({'upc': upc_n, 'status': dict(srow) if srow else None, 'images': images})
     except Exception as e:
@@ -1639,7 +1699,9 @@ def api_items_prep_diagnostic_delete_photos(upc):
     Query param hard=1 to permanently delete files and rows.
     """
     try:
-        upc_n = _normalize_upc(upc)
+        upc_norm = _normalize_upc(upc)
+        # Strip leading zeros to match item manager behavior
+        upc_n = upc_norm.lstrip('0') if upc_norm and upc_norm.isdigit() else upc_norm
         hard = (request.args.get('hard') or '0') in ('1','true','yes')
         _ensure_items_prep_tables()
         conn = sqlite3.connect('bol.db')
@@ -1696,7 +1758,9 @@ def api_items_prep_diagnostic_add_photos(upc):
     Returns: { success, images: [{id, image_path, created_at, rotation}] }
     """
     try:
-        upc_n = _normalize_upc(upc)
+        upc_norm = _normalize_upc(upc)
+        # Strip leading zeros to match item manager behavior
+        upc_n = upc_norm.lstrip('0') if upc_norm and upc_norm.isdigit() else upc_norm
         if not upc_n:
             return jsonify({'success': False, 'error': 'Missing upc'}), 400
         _ensure_items_prep_tables()
@@ -1794,7 +1858,9 @@ def api_items_prep_delete_photo(photo_id):
 @app.route('/api/items_prep/diagnostic/<upc>/trash', methods=['GET'])
 def api_items_prep_trash_list(upc):
     try:
-        upc_n = _normalize_upc(upc)
+        upc_norm = _normalize_upc(upc)
+        # Strip leading zeros to match item manager behavior
+        upc_n = upc_norm.lstrip('0') if upc_norm and upc_norm.isdigit() else upc_norm
         _ensure_items_prep_tables()
         conn = sqlite3.connect('bol.db')
         conn.row_factory = sqlite3.Row
@@ -1862,7 +1928,9 @@ def extractor():
 def api_items_prep_notes_get(upc):
     """Get all notes for a UPC, ordered by created_at DESC."""
     try:
-        upc_n = _normalize_upc(upc)
+        upc_norm = _normalize_upc(upc)
+        # Strip leading zeros to match item manager behavior
+        upc_n = upc_norm.lstrip('0') if upc_norm and upc_norm.isdigit() else upc_norm
         _ensure_items_prep_tables()
         conn = sqlite3.connect('bol.db')
         conn.row_factory = sqlite3.Row
@@ -1879,7 +1947,9 @@ def api_items_prep_notes_add():
     """Add a new note for a UPC. JSON: { upc, note }"""
     try:
         data = request.get_json() or {}
-        upc = _normalize_upc(data.get('upc'))
+        upc_norm = _normalize_upc(data.get('upc'))
+        # Strip leading zeros to match item manager behavior
+        upc = upc_norm.lstrip('0') if upc_norm and upc_norm.isdigit() else upc_norm
         note = (data.get('note') or '').strip()
         if not upc or not note:
             return jsonify({'success': False, 'error': 'Missing upc or note'}), 400
@@ -1917,7 +1987,9 @@ def api_items_prep_notes_delete(note_id):
 def api_items_prep_location_get(upc):
     """Get location for a UPC."""
     try:
-        upc = _normalize_upc(upc)
+        upc_norm = _normalize_upc(upc)
+        # Strip leading zeros to match item manager behavior
+        upc = upc_norm.lstrip('0') if upc_norm and upc_norm.isdigit() else upc_norm
         _ensure_items_prep_tables()
         conn = sqlite3.connect('bol.db')
         cur = conn.cursor()
@@ -1936,7 +2008,9 @@ def api_items_prep_location_set():
     """Set location for a UPC. JSON: { upc, location, pictureposition }"""
     try:
         data = request.get_json() or {}
-        upc = _normalize_upc(data.get('upc'))
+        upc_norm = _normalize_upc(data.get('upc'))
+        # Strip leading zeros to match item manager behavior
+        upc = upc_norm.lstrip('0') if upc_norm and upc_norm.isdigit() else upc_norm
         location = (data.get('location') or '').strip()
         pictureposition = (data.get('pictureposition') or '').strip()
         if not upc:

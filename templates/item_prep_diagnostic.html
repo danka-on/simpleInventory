@@ -104,6 +104,34 @@
   </style>
 </head>
 <body>
+<script>
+// IMMEDIATE CHECK: Redirect if BOL lookup returns a different (suffixed) UPC
+// This must happen before any other page initialization
+(async function() {
+  const upc = '{{ upc }}'.trim();
+  if (!upc) return;
+  
+  try {
+    const r = await fetch(`/api/bol_lookup?upc=${encodeURIComponent(upc)}`);
+    const j = await r.json();
+    
+    // If BOL lookup returned a different UPC (suffixed), redirect to that UPC
+    if (j.found && j.item && j.item.upc && j.item.upc !== upc) {
+      const currentUrl = new URL(window.location.href);
+      currentUrl.searchParams.set('upc', j.item.upc);
+      window.location.replace(currentUrl.toString());
+      // Stop further execution
+      throw new Error('Redirecting to suffixed UPC');
+    }
+  } catch(e) {
+    // If we're redirecting, the error is expected
+    if (e.message === 'Redirecting to suffixed UPC') {
+      throw e;
+    }
+    // Otherwise ignore errors and continue loading page
+  }
+})();
+</script>
   <div class="top">
     <a id="back-link" href="/"><button class="btn btn-danger">Back</button></a>
     <h2>Diagnostic</h2>
@@ -166,10 +194,12 @@
       </div>
       
       <label style="font-weight:600;font-size:1.05rem">Photos:</label>
-      <button type="button" id="takePhotoBtn" class="btn" style="background:#2196F3;color:#fff;padding:16px 24px;font-size:1.2rem;font-weight:600;margin-top:8px;display:flex;align-items:center;justify-content:center;gap:10px;width:100%">
-        <i class="fas fa-camera" style="font-size:1.4rem"></i> TAKE PHOTO
+      <button type="button" id="startCameraBtn" class="btn" style="background:#2196F3;color:#fff;padding:16px 24px;font-size:1.2rem;font-weight:600;margin-top:8px;display:flex;align-items:center;justify-content:center;gap:10px;width:100%">
+        <i class="fas fa-camera" style="font-size:1.4rem"></i> START CAMERA
       </button>
-      <input type="file" id="photos" accept="image/*" capture="environment" style="display:none">
+      <button type="button" id="stopCameraBtn" class="btn" style="background:#e74c3c;color:#fff;padding:16px 24px;font-size:1.2rem;font-weight:600;margin-top:8px;display:none;align-items:center;justify-content:center;gap:10px;width:100%">
+        <i class="fas fa-times" style="font-size:1.4rem"></i> CLOSE CAMERA
+      </button>
       <div style="margin-top:8px">
         <div class="small-muted" style="display:none;align-items:center;gap:10px;justify-content:space-between;flex-wrap:wrap" id="cameraControls">
           <span>Camera mode</span>
@@ -221,15 +251,15 @@
 
   <script>
   console.log('=== Diagnostic Edit Script Starting ===');
-  const photos = document.getElementById('photos');
+  // const photos = document.getElementById('photos'); // Not using file input anymore
     const preview = document.getElementById('preview');
     const qualityGroup = document.getElementById('qualityGroup');
   const reasonSelect = document.getElementById('reasonSelect');
   const reasonBtns = Array.from(document.querySelectorAll('.reason-btn'));
-    let currentQuality = 'med'; // 'low' | 'med' | 'high'
+    let currentQuality = 'med'; // 'low' | 'med' | 'high' - default to medium
     function uid(){ return 'id_'+Math.random().toString(36).slice(2); }
-    const pendingFiles = []; // {id, file, quality}
-    const capturedFiles = []; // {id, file, quality}
+    const pendingFiles = []; // {id, file, quality} - not used anymore
+    const capturedFiles = []; // {id, file, quality} - stores camera captures
 
     function makeThumb(entry, source){
       const url = URL.createObjectURL(entry.file);
@@ -281,12 +311,13 @@
 
       // Fullscreen button removed per UI request - no-op
 
-    photos.addEventListener('change', ()=>{
-      const files = Array.from(photos.files||[]);
-      files.forEach(f=>{ const entry = {id: uid(), file: f, quality: 'med'}; pendingFiles.push(entry); makeThumb(entry,'pending'); annotateQualityFromImage(entry); });
-      // clear the input so we control the file list ourselves
-      photos.value = '';
-    });
+    // File input listener removed - using camera directly now
+    // photos.addEventListener('change', ()=>{
+    //   const files = Array.from(photos.files||[]);
+    //   files.forEach(f=>{ const entry = {id: uid(), file: f, quality: 'med'}; pendingFiles.push(entry); makeThumb(entry,'pending'); annotateQualityFromImage(entry); });
+    //   // clear the input so we control the file list ourselves
+    //   photos.value = '';
+    // });
 
     function annotateQualityFromImage(entry){
       try{
@@ -412,24 +443,8 @@
       
       const form = document.getElementById('diagForm');
       const fd = new FormData(form);
-      // Append both pending and captured images, and include matching rotations[] values
+      // Append only captured images from camera (not pendingFiles since we removed file input)
       const rotations = [];
-      pendingFiles.forEach(({file, id})=>{
-        fd.append('photos[]', file, file.name);
-        // find the corresponding thumbnail image rotation (if present in preview)
-        const thumbImg = document.querySelector(`#preview [data-badge="${id}"]`);
-        // fallback: look for the img element by walking preview items
-        let rotVal = 0;
-        try{
-          // try to find img by matching a sibling badge data attribute
-          const badge = document.querySelector(`[data-badge="${id}"]`);
-          if(badge){
-            const wrap = badge.closest('.thumb-wrap');
-            if(wrap){ const img = wrap.querySelector('img'); if(img && img.dataset && img.dataset.rot) rotVal = parseInt(img.dataset.rot) || 0; }
-          }
-        }catch(e){}
-        rotations.push(rotVal);
-      });
       capturedFiles.forEach(({file, id})=>{
         fd.append('photos[]', file, file.name);
         let rotVal = 0;
@@ -494,13 +509,22 @@
       }
     };
 
-    // Handle TAKE PHOTO button - opens camera app on mobile devices
-    document.getElementById('takePhotoBtn').addEventListener('click', ()=>{
-      document.getElementById('photos').click();
+    // Handle START CAMERA button
+    document.getElementById('startCameraBtn').addEventListener('click', ()=>{
+      startCam();
+      document.getElementById('cameraView').style.display = 'block';
+      document.getElementById('startCameraBtn').style.display = 'none';
+      document.getElementById('stopCameraBtn').style.display = 'flex';
     });
 
-    // Don't auto-start camera on page load anymore
-    // window.addEventListener('DOMContentLoaded', startCam);
+    // Handle STOP CAMERA button
+    document.getElementById('stopCameraBtn').addEventListener('click', ()=>{
+      stopCam();
+      document.getElementById('cameraView').style.display = 'none';
+      document.getElementById('stopCameraBtn').style.display = 'none';
+      document.getElementById('startCameraBtn').style.display = 'flex';
+    });
+
     // If a return param was provided, set the back link to that URL
     window.addEventListener('DOMContentLoaded', ()=>{
       try{
