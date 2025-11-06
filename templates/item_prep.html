@@ -37,6 +37,29 @@
     .qty-btn:active{transform:scale(0.95)}
     .undo-btn{background:#e74c3c;color:#fff;padding:32px 64px;border-radius:12px;margin-top:16px;font-size:1.3rem;width:100%;box-shadow:0 2px 8px rgba(231,76,60,0.3);transition:all 0.2s;font-weight:600}
     .undo-btn:hover{background:#c0392b}
+    
+    /* Mobile/Tablet Landscape Optimization */
+    @media (max-height: 600px) and (orientation: landscape) {
+      body{padding:10px}
+      .top{margin-bottom:8px}
+      .top h2{font-size:1.2rem;margin:0}
+      .btn{padding:8px 12px;font-size:0.9rem}
+      .card{padding:12px;margin-top:8px}
+      .hero{max-height:25vh}
+      .thumb{width:60px;height:60px}
+      .big-actions .btn{padding:14px 0;font-size:1rem}
+      .qty-display{margin:8px 0;padding:8px;gap:8px}
+      .qty-number{font-size:1.8rem}
+      .qty-btn{font-size:1.6rem;padding:10px 0;max-width:30vw}
+      .undo-btn{padding:20px 40px;font-size:1.1rem;margin-top:10px}
+      #scanner{max-width:280px;margin:0 auto}
+      video{max-height:200px}
+    }
+    
+    @media (max-width: 768px) and (orientation: portrait) {
+      .qty-btn{max-width:30vw}
+      .hero{max-height:28vh}
+    }
   </style>
   <script src="https://unpkg.com/@zxing/library@0.19.1/umd/index.min.js"></script>
 </head>

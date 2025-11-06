@@ -22,7 +22,10 @@
     .form-group { margin-bottom:20px; }
     label { display:block; margin-bottom:8px; font-weight:600; color:#2c3e50; font-size:14px; }
     input[type="text"] { width:100%; padding:12px; border:1px solid #ddd; border-radius:8px; font-size:14px; }
-    .barcode-display { background:#f8f9fa; padding:16px; border-radius:8px; border:2px solid #00b894; font-family:monospace; font-size:20px; text-align:center; margin-bottom:12px; }
+    .barcode-display { background:#f8f9fa; padding:16px; border-radius:8px; border:2px solid #00b894; font-family:monospace; font-size:20px; text-align:center; margin-bottom:12px; cursor:pointer; transition:all 0.2s; }
+    .barcode-display:hover { background:#e8f5f1; border-color:#00a383; }
+    .barcode-input { width:100%; padding:16px; border-radius:8px; border:2px solid #00b894; font-family:monospace; font-size:20px; text-align:center; margin-bottom:12px; }
+    .barcode-input:focus { outline:none; border-color:#00a383; background:#e8f5f1; }
     .camera-container { position:relative; background:#000; border-radius:8px; overflow:hidden; margin-bottom:12px; }
     video { width:100%; max-height:400px; display:block; }
     canvas { display:none; }
@@ -56,10 +59,11 @@
         
         <div class="form-group">
           <label>
-            Barcode (Auto-Generated)
+            Barcode (Auto-Generated) <span style="color:#666;font-size:0.85em;font-weight:400;">- Click to edit manually</span>
             <span class="field-status field-complete" id="barcodeStatus">✓ Generated</span>
           </label>
           <div class="barcode-display" id="barcodeDisplay">Loading...</div>
+          <input type="text" class="barcode-input hidden" id="barcodeInput" placeholder="Enter barcode manually...">
           <button class="btn btn-primary" id="regenerateBtn">🔄 Regenerate Barcode</button>
         </div>
         
@@ -547,6 +551,39 @@
         showStatus('Error: ' + error.message, 'error');
       }
     }
+    
+    // Manual barcode entry
+    const barcodeInput = document.getElementById('barcodeInput');
+    
+    barcodeDisplay.addEventListener('click', () => {
+      // Switch to manual entry mode
+      barcodeDisplay.classList.add('hidden');
+      barcodeInput.classList.remove('hidden');
+      barcodeInput.value = currentBarcode || '';
+      barcodeInput.focus();
+      barcodeInput.select();
+    });
+    
+    barcodeInput.addEventListener('blur', () => {
+      // Switch back to display mode
+      const manualBarcode = barcodeInput.value.trim();
+      if (manualBarcode) {
+        currentBarcode = manualBarcode;
+        barcodeDisplay.textContent = currentBarcode;
+        isPrinted = false; // Reset print status when barcode changes
+        updatePrintStatus();
+        checkFormComplete();
+        updateAddToQueBtn();
+      }
+      barcodeInput.classList.add('hidden');
+      barcodeDisplay.classList.remove('hidden');
+    });
+    
+    barcodeInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        barcodeInput.blur(); // Trigger blur to save
+      }
+    });
     
     // Event listeners
     regenerateBtn.addEventListener('click', () => {
