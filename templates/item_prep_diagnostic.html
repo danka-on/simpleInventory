@@ -528,6 +528,14 @@
       document.getElementById('cameraView').style.display = 'block';
       document.getElementById('startCameraBtn').style.display = 'none';
       document.getElementById('stopCameraBtn').style.display = 'flex';
+      
+      // Scroll to camera view after a brief delay to allow layout to update
+      setTimeout(()=>{
+        const cameraView = document.getElementById('cameraView');
+        if(cameraView){
+          cameraView.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 100);
     });
 
     // Handle STOP CAMERA button
