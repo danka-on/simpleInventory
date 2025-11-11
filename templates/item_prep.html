@@ -251,32 +251,32 @@
       if(!confirm('Undo last entry for UPC: ' + lastEntry.upc + '?')) return;
       const statusMsg = document.getElementById('statusMsg');
       try {
-        if(lastEntry.status === 'good' && lastEntry.action === 'incremented'){
-          // This was an increment - just decrement the quantity, don't delete status
-          const newQty = lastEntry.previousQty;
-          if(newQty > 0){
-            await updateQuantity(lastEntry.upc, newQty);
-            statusMsg.innerHTML='<span class="ok">✓ Undone - Quantity reduced to ' + newQty + '</span>';
-          } else {
-            // Quantity would be 0 or less - delete the entry entirely
-            await fetch('/api/items_prep/status/' + encodeURIComponent(lastEntry.upc), {method: 'DELETE'});
-            await updateQuantity(lastEntry.upc, 1);
-            statusMsg.innerHTML='<span class="ok">✓ Undone - Entry removed</span>';
-          }
-        } else {
-          // This was a new entry (created or bad) - delete the status and reset/delete
-          await fetch('/api/items_prep/status/' + encodeURIComponent(lastEntry.upc), {method: 'DELETE'});
-          // For bad items (suffixed), quantity will be deleted with the entry
-          // For good items (new), reset to 1
-          if(lastEntry.status === 'good'){
-            await updateQuantity(lastEntry.upc, 1);
-          }
+        // Call the unified undo endpoint
+        const res = await fetch('/api/items_prep/undo', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            upc: lastEntry.upc,
+            status: lastEntry.status,
+            action: lastEntry.action,
+            previousQty: lastEntry.previousQty,
+            base_upc: lastEntry.base_upc,
+            qty: lastEntry.qty
+          })
+        });
+        
+        const data = await res.json();
+        if (data.success) {
           statusMsg.innerHTML='<span class="ok">✓ Undone</span>';
+          lastEntry = null;
+          hideUndoButton();
+          setTimeout(()=>{ statusMsg.textContent=''; }, 2000);
+        } else {
+          statusMsg.innerHTML='<span class="bad">Failed to undo: ' + (data.error || 'Unknown error') + '</span>';
+          setTimeout(()=>{ statusMsg.textContent=''; }, 2000);
         }
-        lastEntry = null;
-        hideUndoButton();
-        setTimeout(()=>{ statusMsg.textContent=''; }, 2000);
       } catch(e) {
+        console.error('Undo error:', e);
         statusMsg.innerHTML='<span class="bad">Failed to undo</span>';
         setTimeout(()=>{ statusMsg.textContent=''; }, 2000);
       }
@@ -305,26 +305,32 @@
 
     document.getElementById('badBtn').onclick = async ()=>{
       if(!currentUpc) return;
-      // Store for undo before navigating to diagnostic
-      lastEntry = {upc: currentUpc, status: 'bad', qty: currentQty};
-      // Store in sessionStorage so we can restore after diagnostic
-      sessionStorage.setItem('lastEntry', JSON.stringify(lastEntry));
-      updateQtyDisplay(-1); // Show -1 animation
       
-      // Call bol_lookup to get the correct UPC (might be suffixed if item already exists)
+      // Call API to create temporary suffixed entry for Bad flow
       try {
-        const r = await fetch('/api/bol_lookup?upc='+encodeURIComponent(currentUpc));
-        const j = await r.json();
-        const actualUpc = (j.found && j.item && j.item.upc) ? j.item.upc : currentUpc;
+        const res = await fetch('/api/items_prep/create_bad_entry', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({upc: currentUpc, qty: currentQty})
+        });
+        const data = await res.json();
         
-        setTimeout(() => {
-          window.location.href = '/item-prep/diagnostic?upc='+encodeURIComponent(actualUpc)+'&from=bad&qty='+currentQty+'&return='+encodeURIComponent('/item-prep?forceFocus=1&showUndo=1');
-        }, 300);
+        if (data.success && data.suffixed_upc) {
+          // Store for undo
+          lastEntry = {upc: data.suffixed_upc, status: 'bad', qty: currentQty, base_upc: currentUpc};
+          sessionStorage.setItem('lastEntry', JSON.stringify(lastEntry));
+          
+          updateQtyDisplay(-1); // Show -1 animation
+          
+          setTimeout(() => {
+            window.location.href = '/item-prep/diagnostic?upc='+encodeURIComponent(data.suffixed_upc)+'&from=bad&qty='+currentQty+'&return='+encodeURIComponent('/item-prep?forceFocus=1&showUndo=1');
+          }, 300);
+        } else {
+          alert('Error creating bad entry: ' + (data.error || 'Unknown error'));
+        }
       } catch(e) {
-        // Fallback to original UPC if lookup fails
-        setTimeout(() => {
-          window.location.href = '/item-prep/diagnostic?upc='+encodeURIComponent(currentUpc)+'&from=bad&qty='+currentQty+'&return='+encodeURIComponent('/item-prep?forceFocus=1&showUndo=1');
-        }, 300);
+        console.error('Bad button error:', e);
+        alert('Error creating bad entry');
       }
     };
 
