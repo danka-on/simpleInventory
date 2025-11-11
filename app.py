@@ -5,7 +5,7 @@ from flask_caching import Cache
 from flask_compress import Compress
 from werkzeug.exceptions import RequestEntityTooLarge
 from PIL import Image, ImageDraw
-import io, time, subprocess, os, requests, json, threading, sqlite3, sys
+import io, time, subprocess, os, requests, json, threading, sqlite3, sys, datetime
 import xml.etree.ElementTree as ET
 from dotenv import load_dotenv
 import xml.dom.minidom as minidom
@@ -4214,7 +4214,7 @@ def get_pending_removals():
         
         # Calculate time remaining for each order
         import datetime
-        now = datetime.datetime.now(datetime.UTC)
+        now = datetime.datetime.now()
         
         result = []
         for order in orders:
@@ -4230,6 +4230,7 @@ def get_pending_removals():
                 else:
                     shipped_dt = datetime.datetime.fromisoformat(shipped_str)
                 
+                # Always convert to naive datetime for comparison
                 if shipped_dt.tzinfo:
                     shipped_dt = shipped_dt.replace(tzinfo=None)
                 
@@ -6648,6 +6649,209 @@ def sync_debug():
         'python_version': sys.version,
         'working_directory': os.getcwd()
     })
+
+# ============================================================================
+# MARKETPLACE SALES ENDPOINTS
+# ============================================================================
+
+@app.route('/marketplace-sale')
+def marketplace_sale():
+    """Marketplace sale entry page."""
+    return render_template('marketplace_sale.html')
+
+@app.route('/marketplace-stats')
+def marketplace_stats():
+    """Marketplace sales statistics page."""
+    return render_template('marketplace_stats.html')
+
+@app.route('/api/marketplace/lookup', methods=['GET'])
+def api_marketplace_lookup():
+    """Lookup item details from rawbol.db by barcode."""
+    try:
+        barcode = request.args.get('barcode', '').strip()
+        if not barcode:
+            return jsonify({'success': False, 'error': 'Missing barcode'}), 400
+        
+        # Try to find in rawbol.db
+        rawbol_conn = sqlite3.connect('rawbol.db')
+        rawbol_conn.row_factory = sqlite3.Row
+        rawbol_cur = rawbol_conn.cursor()
+        
+        rawbol_cur.execute('SELECT item_description FROM raw_bol_items WHERE upc = ? COLLATE NOCASE LIMIT 1', (barcode,))
+        row = rawbol_cur.fetchone()
+        rawbol_conn.close()
+        
+        if row:
+            return jsonify({'success': True, 'found': True, 'title': row['item_description']})
+        else:
+            return jsonify({'success': True, 'found': False, 'title': ''})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/marketplace/sale', methods=['POST'])
+def api_marketplace_sale():
+    """Create a new marketplace sale and add to sold.db."""
+    try:
+        from marketplace_manager import add_marketplace_sale
+        
+        data = request.get_json() or {}
+        barcode = data.get('barcode', '').strip()
+        title = data.get('title', '').strip()
+        quantity = int(data.get('quantity', 1))
+        price = float(data.get('price', 0))
+        
+        if not barcode:
+            return jsonify({'success': False, 'error': 'Missing barcode'}), 400
+        
+        # Add to marketplace.db
+        result = add_marketplace_sale(barcode, title, quantity, price)
+        if not result['success']:
+            return jsonify(result), 500
+        
+        # Add to sold.db (orders table) with store="marketplace"
+        try:
+            sold_conn = sqlite3.connect('sold.db')
+            sold_cur = sold_conn.cursor()
+            
+            sale_date = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            
+            for _ in range(quantity):
+                sold_cur.execute('''INSERT INTO orders 
+                    (barcode, title, price, paid_time, store)
+                    VALUES (?, ?, ?, ?, ?)''',
+                    (barcode, title, price, sale_date, 'marketplace'))
+            
+            sold_conn.commit()
+            sold_conn.close()
+        except Exception as e:
+            print(f'Warning: Failed to add to sold.db: {e}')
+        
+        # Check if item exists in searchRack.db and needs decrementing
+        try:
+            rack_conn = sqlite3.connect('searchRack.db')
+            rack_conn.row_factory = sqlite3.Row
+            rack_cur = rack_conn.cursor()
+            
+            rack_cur.execute('SELECT area_code, quantity FROM rack WHERE barcode = ? COLLATE NOCASE', (barcode,))
+            locations = rack_cur.fetchall()
+            
+            if len(locations) > 1:
+                # Multiple locations - return them for user to choose
+                rack_conn.close()
+                return jsonify({
+                    'success': True,
+                    'sale_id': result['id'],
+                    'needs_location_choice': True,
+                    'locations': [{'area_code': loc['area_code'], 'quantity': loc['quantity']} for loc in locations]
+                })
+            elif len(locations) == 1:
+                # Single location - auto-decrement
+                area_code = locations[0]['area_code']
+                current_qty = locations[0]['quantity']
+                new_qty = max(0, current_qty - quantity)
+                
+                rack_cur.execute('UPDATE rack SET quantity = ? WHERE barcode = ? COLLATE NOCASE AND area_code = ?',
+                               (new_qty, barcode, area_code))
+                rack_conn.commit()
+                rack_conn.close()
+                
+                return jsonify({
+                    'success': True,
+                    'sale_id': result['id'],
+                    'decremented': True,
+                    'area_code': area_code,
+                    'new_quantity': new_qty
+                })
+            else:
+                # Not in rack
+                rack_conn.close()
+                return jsonify({'success': True, 'sale_id': result['id'], 'decremented': False})
+        except Exception as e:
+            print(f'Warning: Failed to check/decrement searchRack.db: {e}')
+            return jsonify({'success': True, 'sale_id': result['id'], 'decremented': False})
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/marketplace/decrement', methods=['POST'])
+def api_marketplace_decrement():
+    """Decrement inventory in searchRack.db for a specific location."""
+    try:
+        data = request.get_json() or {}
+        barcode = data.get('barcode', '').strip()
+        area_code = data.get('area_code', '').strip()
+        quantity = int(data.get('quantity', 1))
+        
+        if not barcode or not area_code:
+            return jsonify({'success': False, 'error': 'Missing barcode or area_code'}), 400
+        
+        rack_conn = sqlite3.connect('searchRack.db')
+        rack_cur = rack_conn.cursor()
+        
+        rack_cur.execute('SELECT quantity FROM rack WHERE barcode = ? COLLATE NOCASE AND area_code = ?',
+                        (barcode, area_code))
+        row = rack_cur.fetchone()
+        
+        if not row:
+            rack_conn.close()
+            return jsonify({'success': False, 'error': 'Item not found in this location'}), 404
+        
+        current_qty = row[0]
+        new_qty = max(0, current_qty - quantity)
+        
+        rack_cur.execute('UPDATE rack SET quantity = ? WHERE barcode = ? COLLATE NOCASE AND area_code = ?',
+                        (new_qty, barcode, area_code))
+        rack_conn.commit()
+        rack_conn.close()
+        
+        return jsonify({'success': True, 'new_quantity': new_qty})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/marketplace/sales', methods=['GET'])
+def api_marketplace_sales():
+    """Get all marketplace sales."""
+    try:
+        from marketplace_manager import get_marketplace_sales
+        
+        limit = request.args.get('limit', type=int)
+        offset = request.args.get('offset', type=int)
+        
+        result = get_marketplace_sales(limit=limit, offset=offset)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/marketplace/sale/<int:sale_id>', methods=['DELETE'])
+def api_marketplace_sale_delete(sale_id):
+    """Delete a marketplace sale."""
+    try:
+        from marketplace_manager import delete_marketplace_sale
+        
+        result = delete_marketplace_sale(sale_id)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/marketplace/sale/<int:sale_id>', methods=['PUT'])
+def api_marketplace_sale_update(sale_id):
+    """Update a marketplace sale."""
+    try:
+        from marketplace_manager import update_marketplace_sale
+        
+        data = request.get_json() or {}
+        result = update_marketplace_sale(
+            sale_id,
+            barcode=data.get('barcode'),
+            title=data.get('title'),
+            quantity=data.get('quantity'),
+            price=data.get('price')
+        )
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 if __name__ == "__main__":
     # Enable WAL mode for all databases (better concurrent performance)

@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Marketplace Sale</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: #f5f7fa;
+      margin: 0;
+      padding: 20px;
+    }
+    .container {
+      max-width: 600px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 12px;
+      padding: 30px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    h1 {
+      color: #2c3e50;
+      margin: 0 0 20px 0;
+      font-size: 2rem;
+    }
+    .header-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 30px;
+    }
+    .btn {
+      padding: 12px 24px;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      text-decoration: none;
+      display: inline-block;
+    }
+    .btn-primary {
+      background: #3498db;
+      color: white;
+    }
+    .btn-primary:hover {
+      background: #2980b9;
+    }
+    .btn-secondary {
+      background: #95a5a6;
+      color: white;
+    }
+    .btn-secondary:hover {
+      background: #7f8c8d;
+    }
+    .btn-success {
+      background: #27ae60;
+      color: white;
+      width: 100%;
+      font-size: 1.2rem;
+      padding: 16px;
+    }
+    .btn-success:hover {
+      background: #229954;
+    }
+    .btn-success:disabled {
+      background: #bdc3c7;
+      cursor: not-allowed;
+    }
+    .form-group {
+      margin-bottom: 20px;
+    }
+    .input-with-button {
+      display: flex;
+      gap: 12px;
+      align-items: stretch;
+    }
+    .input-with-button input {
+      flex: 1;
+    }
+    .camera-btn {
+      background: #27ae60;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      padding: 0 16px;
+      cursor: pointer;
+      transition: background 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .camera-btn:hover {
+      background: #229954;
+    }
+    .camera-btn i {
+      font-size: 1.5rem;
+    }
+    label {
+      display: block;
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: #2c3e50;
+    }
+    input[type="text"], input[type="number"] {
+      width: 100%;
+      padding: 12px;
+      border: 2px solid #e0e4e8;
+      border-radius: 8px;
+      font-size: 1rem;
+      box-sizing: border-box;
+      transition: border-color 0.2s;
+    }
+    input[type="text"]:focus, input[type="number"]:focus {
+      outline: none;
+      border-color: #3498db;
+    }
+    .quantity-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .quantity-btn {
+      width: 50px;
+      height: 50px;
+      border: 2px solid #3498db;
+      background: white;
+      color: #3498db;
+      border-radius: 8px;
+      font-size: 1.5rem;
+      font-weight: bold;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .quantity-btn:hover {
+      background: #3498db;
+      color: white;
+    }
+    .quantity-btn:active {
+      transform: scale(0.95);
+    }
+    #quantityInput {
+      flex: 1;
+      text-align: center;
+      font-size: 1.2rem;
+      font-weight: 600;
+    }
+    .message {
+      padding: 12px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+      display: none;
+    }
+    .message.success {
+      background: #d4edda;
+      color: #155724;
+      border: 1px solid #c3e6cb;
+    }
+    .message.error {
+      background: #f8d7da;
+      color: #721c24;
+      border: 1px solid #f5c6cb;
+    }
+    .modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.5);
+      justify-content: center;
+      align-items: center;
+      z-index: 1000;
+    }
+    .modal-content {
+      background: white;
+      padding: 30px;
+      border-radius: 12px;
+      max-width: 500px;
+      width: 90%;
+    }
+    .modal h2 {
+      margin-top: 0;
+      color: #2c3e50;
+    }
+    .location-item {
+      padding: 12px;
+      margin: 8px 0;
+      border: 2px solid #e0e4e8;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .location-item:hover {
+      border-color: #3498db;
+      background: #ecf0f1;
+    }
+    .location-item strong {
+      color: #2c3e50;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header-row">
+      <h1>Marketplace Sale</h1>
+      <div>
+        <a href="/marketplace-stats" class="btn btn-primary">Stats</a>
+        <a href="/tools" class="btn btn-secondary">Back</a>
+      </div>
+    </div>
+
+    <div id="message" class="message"></div>
+
+    <form id="saleForm">
+      <div class="form-group">
+        <label for="barcodeInput">Barcode *</label>
+        <input type="text" id="barcodeInput" placeholder="Scan or enter barcode" required autofocus>
+      </div>
+
+      <div class="form-group">
+        <label for="titleInput">Title</label>
+        <input type="text" id="titleInput" placeholder="Item title (auto-filled if found)">
+      </div>
+
+      <div class="form-group">
+        <label for="quantityInput">Quantity</label>
+        <div class="quantity-row">
+          <button type="button" class="quantity-btn" id="decreaseQty">−</button>
+          <input type="number" id="quantityInput" value="1" min="1" required>
+          <button type="button" class="quantity-btn" id="increaseQty">+</button>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="priceInput">Price *</label>
+        <input type="number" id="priceInput" placeholder="0.00" step="0.01" min="0" required>
+      </div>
+
+      <div style="display: flex; gap: 12px;">
+        <button type="button" class="btn btn-secondary" id="resetBtn" style="flex: 1;">Reset</button>
+        <button type="submit" class="btn btn-success" id="completeBtn" style="flex: 2;">Complete</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Location selection modal -->
+  <div id="locationModal" class="modal">
+    <div class="modal-content">
+      <h2>Select Location to Decrement</h2>
+      <p>This item exists in multiple locations. Choose which one to decrement:</p>
+      <div id="locationList"></div>
+      <button type="button" class="btn btn-secondary" onclick="closeLocationModal()" style="width: 100%; margin-top: 16px;">Cancel</button>
+    </div>
+  </div>
+
+  <script>
+    const barcodeInput = document.getElementById('barcodeInput');
+    const titleInput = document.getElementById('titleInput');
+    const quantityInput = document.getElementById('quantityInput');
+    const priceInput = document.getElementById('priceInput');
+    const messageDiv = document.getElementById('message');
+    const saleForm = document.getElementById('saleForm');
+    const locationModal = document.getElementById('locationModal');
+    const locationList = document.getElementById('locationList');
+
+    let currentSaleData = null;
+
+    // Quantity buttons
+    document.getElementById('increaseQty').addEventListener('click', () => {
+      quantityInput.value = parseInt(quantityInput.value) + 1;
+    });
+
+    document.getElementById('decreaseQty').addEventListener('click', () => {
+      const current = parseInt(quantityInput.value);
+      if (current > 1) {
+        quantityInput.value = current - 1;
+      }
+    });
+
+    // Reset button
+    document.getElementById('resetBtn').addEventListener('click', () => {
+      resetForm();
+    });
+
+    // Barcode lookup on blur
+    barcodeInput.addEventListener('blur', async () => {
+      const barcode = barcodeInput.value.trim();
+      if (!barcode) return;
+
+      try {
+        const response = await fetch(`/api/marketplace/lookup?barcode=${encodeURIComponent(barcode)}`);
+        const data = await response.json();
+
+        if (data.success && data.found) {
+          titleInput.value = data.title;
+        }
+      } catch (error) {
+        console.error('Lookup error:', error);
+      }
+    });
+
+    // Form submission
+    saleForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const barcode = barcodeInput.value.trim();
+      const title = titleInput.value.trim();
+      const quantity = parseInt(quantityInput.value);
+      const price = parseFloat(priceInput.value);
+
+      if (!barcode || quantity < 1 || price < 0) {
+        showMessage('Please fill in all required fields', 'error');
+        return;
+      }
+
+      try {
+        document.getElementById('completeBtn').disabled = true;
+        
+        const response = await fetch('/api/marketplace/sale', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ barcode, title, quantity, price })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+          if (data.needs_location_choice) {
+            // Show location selection modal
+            currentSaleData = { barcode, quantity };
+            showLocationModal(data.locations);
+          } else {
+            // Sale completed
+            let msg = 'Sale completed successfully!';
+            if (data.decremented) {
+              msg += ` (Decremented ${quantity} from ${data.area_code})`;
+            }
+            showMessage(msg, 'success');
+            resetForm();
+          }
+        } else {
+          showMessage('Error: ' + data.error, 'error');
+        }
+      } catch (error) {
+        showMessage('Error: ' + error.message, 'error');
+      } finally {
+        document.getElementById('completeBtn').disabled = false;
+      }
+    });
+
+    function showLocationModal(locations) {
+      locationList.innerHTML = '';
+      
+      locations.forEach(loc => {
+        const div = document.createElement('div');
+        div.className = 'location-item';
+        div.innerHTML = `<strong>${loc.area_code}</strong> - Current qty: ${loc.quantity}`;
+        div.onclick = () => selectLocation(loc.area_code);
+        locationList.appendChild(div);
+      });
+
+      locationModal.style.display = 'flex';
+    }
+
+    function closeLocationModal() {
+      locationModal.style.display = 'none';
+      currentSaleData = null;
+      resetForm();
+    }
+
+    async function selectLocation(areaCode) {
+      try {
+        const response = await fetch('/api/marketplace/decrement', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            barcode: currentSaleData.barcode,
+            area_code: areaCode,
+            quantity: currentSaleData.quantity
+          })
+        });
+
+        const data = await response.json();
+        
+        if (data.success) {
+          showMessage(`Sale completed! Decremented ${currentSaleData.quantity} from ${areaCode}`, 'success');
+        } else {
+          showMessage('Error decrementing inventory: ' + data.error, 'error');
+        }
+      } catch (error) {
+        showMessage('Error: ' + error.message, 'error');
+      }
+
+      closeLocationModal();
+    }
+
+    function resetForm() {
+      saleForm.reset();
+      quantityInput.value = 1;
+      barcodeInput.focus();
+    }
+
+    function showMessage(text, type) {
+      messageDiv.textContent = text;
+      messageDiv.className = `message ${type}`;
+      messageDiv.style.display = 'block';
+      
+      setTimeout(() => {
+        messageDiv.style.display = 'none';
+      }, 5000);
+    }
+  </script>
+</body>
+</html>

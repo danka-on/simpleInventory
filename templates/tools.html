@@ -64,6 +64,12 @@
         .tool-card.bol-purple i {
             color: #9b59b6; /* purple for BOL extract */
         }
+        .tool-card.marketplace-green i {
+            color: #27ae60; /* green for marketplace */
+        }
+        .tool-card.wide {
+            grid-column: span 2; /* Take up 2 columns */
+        }
         .tool-card h3 {
             margin: 0 0 8px 0;
             color: #2c3e50;
@@ -149,6 +155,13 @@
         </div>
 
         <div class="tools-grid">
+            <!-- Marketplace Sale - Top, wide button -->
+            <a href="/marketplace-sale" class="tool-card wide marketplace-green">
+                <i class="fas fa-cash-register"></i>
+                <h3>Marketplace Sale</h3>
+                <p>Record in-person sales</p>
+            </a>
+
             <!-- Barcode Print Que -->
             <a href="/barcode-print-que" class="tool-card important">
                 <i class="fas fa-print"></i>
@@ -206,6 +219,12 @@
                 <i class="fas fa-cogs"></i>
                 <h3>Misc</h3>
                 <p>Timer & workflow settings</p>
+            </a>
+
+            <a href="/marketplace-stats" class="tool-card">
+                <i class="fas fa-chart-line"></i>
+                <h3>Marketplace Stats</h3>
+                <p>View sales history</p>
             </a>
         </div>
 

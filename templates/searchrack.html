@@ -505,7 +505,13 @@ function renderResults(results){
     
     // Store badge for sold items
     const storeCell = hasSold ? (dbRaw === 'sold' && r.raw && r.raw.store ? 
-        `<td><span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:0.85rem;font-weight:500;background:${r.raw.store === 'amazon' ? '#FF9900' : '#0064D2'};color:white;">${r.raw.store === 'amazon' ? '🟠 Amazon' : '🔵 eBay'}</span></td>` : 
+        (() => {
+            const store = r.raw.store.toLowerCase();
+            if (store === 'amazon') return `<td><span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:0.85rem;font-weight:500;background:#FF9900;color:white;">🟠 Amazon</span></td>`;
+            if (store === 'ebay') return `<td><span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:0.85rem;font-weight:500;background:#0064D2;color:white;">🔵 eBay</span></td>`;
+            if (store === 'marketplace') return `<td><span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:0.85rem;font-weight:500;background:#27ae60;color:white;">💵 Marketplace</span></td>`;
+            return `<td><span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:0.85rem;font-weight:500;background:#95a5a6;color:white;">${esc(store)}</span></td>`;
+        })() : 
         '<td></td>') : '';
     
     html += `<tr data-src="${db}" data-id="${r.id}" data-qty="${qty}">`+
