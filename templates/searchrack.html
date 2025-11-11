@@ -27,6 +27,7 @@
         .thumb{width:48px;height:48px;object-fit:cover;border-radius:6px;margin-right:8px}
         .title-cell{display:flex;align-items:center}
         .location-link{color:#3498db;text-decoration:underline;cursor:pointer}
+        .lot-link{color:#3498db;text-decoration:underline;cursor:pointer}
         .small-muted{color:#777;font-size:0.9rem}
         .modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;align-items:center;justify-content:center}
         .modal .card{background:#fff;padding:18px;border-radius:8px;max-width:720px;max-height:80vh;overflow:auto}
@@ -302,16 +303,18 @@ function renderResults(results){
     const hasEbayStore = results.some(r => r.source_db === 'ebayStore');
     const hasAmazonStore = results.some(r => r.source_db === 'amazonStore');
     const hasSold = results.some(r => r.source_db === 'sold');
+    const hasBol = results.some(r => r.source_db === 'bol');
     
     // Build dynamic headers based on which databases are present
     const dateAddedHeader = hasSearchRack ? '<th>Date Added</th>' : '';
     const itemIdHeader = (hasEbayStore || hasAmazonStore) ? '<th>Item ID</th>' : '';
-    const locationHeader = (!hasEbayStore && !hasAmazonStore && !hasSold) ? '<th>Location</th>' : ''; // Hide location for ebay/amazon live and sold
+    const lotHeader = hasBol ? '<th>LOT #</th>' : '';
+    const locationHeader = (!hasEbayStore && !hasAmazonStore && !hasSold && !hasBol) ? '<th>Location</th>' : ''; // Hide location for ebay/amazon live, sold, and bol
     const dateSoldHeader = hasSold ? '<th>Date Sold</th>' : '';
     const dateShippedHeader = hasSold ? '<th>Date Shipped</th>' : '';
     const storeHeader = hasSold ? '<th>Store</th>' : '';
     
-    let html = `<table><thead><tr><th>Title</th><th>Barcode</th>${itemIdHeader}${locationHeader}<th>Qty</th>${dateAddedHeader}${dateSoldHeader}${dateShippedHeader}${storeHeader}<th>DB</th><th>Actions</th></tr></thead><tbody>`;
+    let html = `<table><thead><tr><th>Title</th><th>Barcode</th>${itemIdHeader}${lotHeader}${locationHeader}<th>Qty</th>${dateAddedHeader}${dateSoldHeader}${dateShippedHeader}${storeHeader}<th>DB</th><th>Actions</th></tr></thead><tbody>`;
     results.forEach(r=>{
     const dbRaw = r.source_db || '';
     const isArchived = !!(r.archived || dbRaw === 'archived');
@@ -413,7 +416,25 @@ function renderResults(results){
     // Dynamic column cells based on which databases are shown
     const dateCell = hasSearchRack ? (dbRaw === 'searchRack' && r.created_at ? `<td>${fmtLocal(r.created_at)}</td>` : '<td></td>') : '';
     const itemIdCell = (hasEbayStore || hasAmazonStore) ? `<td>${itemid}</td>` : '';
-    const locationCell = (!hasEbayStore && !hasAmazonStore && !hasSold) ? `<td>${ locDisplay ? `<a href="#" class=\"location-link\" data-src=\"${db}\" data-id=\"${r.id}\" data-barcode=\"${barcode}\" data-picture=\"${esc(r.pictureposition||'')}\" data-item_position=\"${esc((r.item_position||'').toLowerCase())}\">${esc(locDisplay)}</a>` : '' }</td>` : '';
+    
+    // LOT # cell for BOL items
+    let lotCell = '';
+    if (hasBol) {
+        if (dbRaw === 'bol') {
+            const lotNum = r.lot_number || '(No LOT)';
+            if (r.has_multiple_lots) {
+                // Clickable "multiple LOTS" link
+                lotCell = `<td><a href="#" class="lot-link" data-lot-info='${JSON.stringify(r.lot_data || []).replace(/'/g, "&apos;")}'>${esc(lotNum)}</a></td>`;
+            } else {
+                // Just display the lot number
+                lotCell = `<td>${esc(lotNum)}</td>`;
+            }
+        } else {
+            lotCell = '<td></td>';
+        }
+    }
+    
+    const locationCell = (!hasEbayStore && !hasAmazonStore && !hasSold && !hasBol) ? `<td>${ locDisplay ? `<a href="#" class=\"location-link\" data-src=\"${db}\" data-id=\"${r.id}\" data-barcode=\"${barcode}\" data-picture=\"${esc(r.pictureposition||'')}\" data-item_position=\"${esc((r.item_position||'').toLowerCase())}\">${esc(locDisplay)}</a>` : '' }</td>` : '';
     
     // Date sold and date shipped cells (only for sold items)
     const dateSoldCell = hasSold ? (dbRaw === 'sold' && r.raw && r.raw.paid_time ? `<td>${fmtLocal(r.raw.paid_time)}</td>` : '<td></td>') : '';
@@ -428,6 +449,7 @@ function renderResults(results){
         `<td><div class="title-cell"><img class="thumb" src="${thumb}" onerror="this.src='${missingThumb(48,48,'No Img')}'"><div><a href="#" class="title-link" data-src="${db}" data-id="${r.id}" data-image="${img}" data-title="${title}">${title}</a>${deletedInfo}${createdInfo}</div></div></td>`+
                 `<td>${barcode}</td>`+
                 itemIdCell +
+                lotCell +
                 locationCell +
                 `<td>${qty}</td>`+
                 dateCell +
@@ -442,6 +464,7 @@ function renderResults(results){
     container.innerHTML = html;
     document.querySelectorAll('.title-link').forEach(el=> el.addEventListener('click', onViewTitle));
     document.querySelectorAll('.location-link').forEach(el=> el.addEventListener('click', onViewLocation));
+    document.querySelectorAll('.lot-link').forEach(el=> el.addEventListener('click', onViewLotDetails));
     // double-click to open archive action when in archived list
     document.querySelectorAll('tbody tr').forEach(tr=>{
         tr.addEventListener('dblclick', async (e)=>{
@@ -669,6 +692,71 @@ async function onViewLocation(e){
             showViewModal('<div class="small-muted">No rack record found</div>');
         }
     }catch(err){ console.error(err); showViewModal('<div class="small-muted">Lookup failed</div>') }
+}
+
+function onViewLotDetails(e){
+    e.preventDefault();
+    const el = e.currentTarget;
+    const lotDataJson = el.dataset.lotInfo;
+    
+    try {
+        const lotData = JSON.parse(lotDataJson);
+        
+        if (!lotData || lotData.length === 0) {
+            showViewModal('<div class="small-muted">No LOT information available</div>');
+            return;
+        }
+        
+        // Build modal content with LOT details
+        let html = '<div><h3>Multiple LOTs for this UPC</h3>';
+        html += '<table style="width:100%; margin-top:12px; border-collapse:collapse;">';
+        html += '<thead><tr style="background:#f0f0f0;"><th style="padding:8px; text-align:left; border:1px solid #ddd;">LOT #</th><th style="padding:8px; text-align:left; border:1px solid #ddd;">Qty</th><th style="padding:8px; text-align:left; border:1px solid #ddd;">Import Date</th></tr></thead>';
+        html += '<tbody>';
+        
+        lotData.forEach(lot => {
+            const lotNum = esc(lot.lot_number || '(No LOT)');
+            const qty = esc(String(lot.qty || 0));
+            
+            // Format the date
+            let dateDisplay = lot.import_date || '(No Date)';
+            if (dateDisplay !== '(No Date)') {
+                try {
+                    const d = new Date(dateDisplay);
+                    if (!isNaN(d.getTime())) {
+                        const parts = new Intl.DateTimeFormat('en-US', { 
+                            timeZone: 'America/New_York', 
+                            year:'numeric', 
+                            month:'2-digit', 
+                            day:'2-digit', 
+                            hour:'numeric', 
+                            minute:'2-digit', 
+                            hour12:true 
+                        }).formatToParts(d);
+                        const vals = {};
+                        parts.forEach(p=> vals[p.type] = p.value);
+                        const year = vals.year || d.getFullYear();
+                        const month = vals.month || String(d.getMonth()+1).padStart(2,'0');
+                        const day = vals.day || String(d.getDate()).padStart(2,'0');
+                        let hour = vals.hour || String(d.getHours()).padStart(2,'0');
+                        let minute = vals.minute || String(d.getMinutes()).padStart(2,'0');
+                        const ampm = (vals.dayPeriod || '').toLowerCase();
+                        hour = String(hour).replace(/^0/, '');
+                        dateDisplay = `${year}-${month}-${day} ${hour}:${minute}${ampm}`;
+                    }
+                } catch(_) {
+                    // Keep original date string if parsing fails
+                }
+            }
+            
+            html += `<tr><td style="padding:8px; border:1px solid #ddd;">${lotNum}</td><td style="padding:8px; border:1px solid #ddd;">${qty}</td><td style="padding:8px; border:1px solid #ddd;">${esc(dateDisplay)}</td></tr>`;
+        });
+        
+        html += '</tbody></table></div>';
+        showViewModal(html);
+    } catch(err) {
+        console.error('Error parsing LOT data:', err);
+        showViewModal('<div class="small-muted">Error displaying LOT information</div>');
+    }
 }
 
 function showViewModal(html){ document.getElementById('viewContent').innerHTML = html; const m=document.getElementById('viewModal'); m.style.display='flex'; }

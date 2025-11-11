@@ -4929,6 +4929,103 @@ def api_search_db(db_key):
                 pass
             results.append(item_out)
         conn.close()
+        
+        # If searching bol (rawbol.db), aggregate by UPC and handle multiple LOTs
+        if db_key == 'bol' and results:
+            from collections import defaultdict
+            import datetime as _dt
+            
+            # Group by UPC
+            upc_groups = defaultdict(list)
+            for r in results:
+                upc = (r.get('barcode') or '').strip()
+                if upc:
+                    upc_groups[upc].append(r)
+            
+            aggregated = []
+            for upc, items in upc_groups.items():
+                # Extract LOT information from all items with this UPC
+                lot_data = []
+                total_qty = 0
+                
+                # Use first item as base for title, image, etc.
+                base_item = items[0].copy()
+                
+                for item in items:
+                    qty = item.get('quantity') or item.get('raw', {}).get('quantity') or 1
+                    try:
+                        qty = int(qty)
+                    except (ValueError, TypeError):
+                        qty = 1
+                    
+                    total_qty += qty
+                    
+                    lot_num = item.get('raw', {}).get('lot_number') or ''
+                    lot_num = str(lot_num).strip() if lot_num else ''
+                    if not lot_num or lot_num.lower() in ['nan', 'none', 'null', '']:
+                        lot_num = '(No LOT)'
+                    
+                    import_date = item.get('raw', {}).get('import_date') or ''
+                    if not import_date or str(import_date).strip().lower() in ['nan', 'none', 'null', '']:
+                        import_date = '(No Date)'
+                    
+                    lot_data.append({
+                        'lot_number': lot_num,
+                        'qty': qty,
+                        'import_date': import_date
+                    })
+                
+                # Sort lots by import_date (newest first), handling "(No Date)" specially
+                def parse_date(date_str):
+                    if date_str == '(No Date)':
+                        return _dt.datetime.min
+                    try:
+                        # Try parsing YYYY-MM-DD format
+                        return _dt.datetime.strptime(str(date_str).split()[0], '%Y-%m-%d')
+                    except:
+                        try:
+                            # Try ISO format
+                            return _dt.datetime.fromisoformat(str(date_str).replace('Z', '+00:00'))
+                        except:
+                            return _dt.datetime.min
+                
+                lot_data.sort(key=lambda x: parse_date(x['import_date']), reverse=True)
+                
+                # Determine LOT display
+                unique_lots = list(set([ld['lot_number'] for ld in lot_data]))
+                unique_lots = [lot for lot in unique_lots if lot != '(No LOT)']
+                
+                if len(unique_lots) == 0:
+                    lot_display = '(No LOT)'
+                    has_multiple = False
+                elif len(unique_lots) == 1:
+                    lot_display = unique_lots[0]
+                    has_multiple = False
+                else:
+                    lot_display = 'multiple LOTS'
+                    has_multiple = True
+                
+                # Build aggregated item
+                aggregated_item = {
+                    'source_db': 'bol',
+                    'source_table': base_item.get('source_table'),
+                    'id': base_item.get('id'),
+                    'title': base_item.get('title'),
+                    'image': base_item.get('image'),
+                    'barcode': upc,
+                    'item_id': base_item.get('item_id'),
+                    'quantity': total_qty,
+                    'lot_number': lot_display,
+                    'has_multiple_lots': has_multiple,
+                    'lot_data': lot_data,  # Array of {lot_number, qty, import_date}
+                    'raw': base_item.get('raw')
+                }
+                
+                aggregated.append(aggregated_item)
+            
+            results = aggregated
+            total_count = len(results)
+        
         # If searching the searchRack snapshot, merge rows with same barcode+item_position and sum quantities
         if db_key == 'searchRack' and results:
             merged = {}
