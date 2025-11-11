@@ -4724,12 +4724,25 @@ def api_search_db(db_key):
         params = []
         # Accept optional location filter (from client UI) to search Item_Position specifically
         location = (data.get('location') or '').strip()
+        # Accept optional LOT filter for BOL database
+        lot_filter = (data.get('lot_filter') or '').strip() if db_key == 'bol' else ''
+        
         if q_stripped:
             likes = []
             for c in cols:
                 likes.append(f"LOWER(COALESCE({c},'')) LIKE ?")
                 params.append(f"%{q_stripped.lower()}%")
             where_clause = ' WHERE ' + ' OR '.join(likes)
+        
+        # If a specific LOT was provided (BOL database only), add filter
+        if db_key == 'bol' and lot_filter:
+            lot_condition = "lot_number = ?"
+            params.append(lot_filter)
+            if where_clause:
+                where_clause += f' AND {lot_condition}'
+            else:
+                where_clause = f' WHERE {lot_condition}'
+        
         # If a specific location was provided, add an AND clause to filter by item position columns
         if location:
             # try common column names for location
@@ -5062,9 +5075,54 @@ def api_search_db(db_key):
                 'total': total_count
             })
 
-        return jsonify({'results': results, 'total': total_count})
+        # Calculate total quantity for all results
+        total_quantity = 0
+        for r in results:
+            try:
+                qty = r.get('quantity', 0)
+                if isinstance(qty, (int, float)):
+                    total_quantity += int(qty)
+                elif isinstance(qty, str) and qty.isdigit():
+                    total_quantity += int(qty)
+                else:
+                    total_quantity += 1
+            except:
+                total_quantity += 1
+
+        return jsonify({'results': results, 'total': total_count, 'total_quantity': total_quantity})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/get_lot_numbers', methods=['GET'])
+def api_get_lot_numbers():
+    """Get all distinct LOT numbers from rawbol.db with item counts, sorted by most recent import_date."""
+    try:
+        conn = sqlite3.connect('rawbol.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        
+        # Get unique LOT numbers with counts and latest import date
+        cur.execute('''
+            SELECT 
+                lot_number,
+                COUNT(*) as item_count,
+                MAX(import_date) as latest_date
+            FROM raw_bol_items
+            WHERE lot_number IS NOT NULL 
+                AND TRIM(COALESCE(lot_number, '')) != ''
+                AND LOWER(lot_number) NOT IN ('nan', 'none', 'null')
+            GROUP BY lot_number
+            ORDER BY latest_date DESC
+        ''')
+        
+        rows = cur.fetchall()
+        lots = [{'lot_number': r['lot_number'], 'item_count': r['item_count'], 'latest_date': r['latest_date']} for r in rows]
+        
+        conn.close()
+        return jsonify({'success': True, 'lots': lots})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @app.route('/api/lookup_location', methods=['POST'])

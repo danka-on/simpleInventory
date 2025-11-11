@@ -63,6 +63,14 @@
     <div class="search-row">
         <input type="text" id="search-input" placeholder="Search by title, barcode, item id, ...">
         <button class="btn btn-primary" id="search-btn">Search</button>
+        <!-- LOT # filter (only visible when Macy BOL is selected) -->
+        <div id="lot-filter-container" style="display:none; margin-left:8px;">
+            <label style="font-size:0.95rem; color:#444">LOT #:
+                <select id="lot-filter" style="margin-left:6px;padding:6px;border-radius:6px;border:1px solid #ddd; min-width:150px;">
+                    <option value="">All LOTs</option>
+                </select>
+            </label>
+        </div>
         <div style="margin-left:auto; display:flex; gap:8px; align-items:center">
             <label>Sort:
                 <select id="sort-select" style="margin-left:6px;padding:6px;border-radius:6px;border:1px solid #ddd">
@@ -150,12 +158,49 @@ function attachDBChangeHandlers(){
     document.getElementById('db-filters').addEventListener('change', (e)=>{
         const tgt = e.target;
         if(tgt && tgt.name === 'db_select'){
+            const selectedDb = tgt.value;
+            
+            // Show/hide LOT filter based on selected database
+            const lotFilterContainer = document.getElementById('lot-filter-container');
+            if(selectedDb === 'bol'){
+                lotFilterContainer.style.display = 'block';
+                // Populate LOT dropdown
+                populateLotFilter();
+            } else {
+                lotFilterContainer.style.display = 'none';
+            }
+            
             // run search when user explicitly changes selection
             doSearch();
         }
     });
 }
 attachDBChangeHandlers();
+
+// Populate LOT # filter dropdown from rawbol.db
+async function populateLotFilter(){
+    try {
+        const resp = await fetch('/api/get_lot_numbers');
+        const data = await resp.json();
+        
+        const select = document.getElementById('lot-filter');
+        select.innerHTML = '<option value="">All LOTs</option>';
+        
+        if(data.success && data.lots){
+            data.lots.forEach(lot => {
+                const option = document.createElement('option');
+                option.value = lot.lot_number;
+                option.textContent = `${lot.lot_number} (${lot.item_count} items)`;
+                select.appendChild(option);
+            });
+        }
+    } catch(err) {
+        console.error('Error loading LOT numbers:', err);
+    }
+}
+
+// Attach LOT filter change handler
+document.getElementById('lot-filter').addEventListener('change', doSearch);
 
 function getActiveDBs(){
     // radios ensure at most one DB is selected; return as an array for compatibility
@@ -170,9 +215,14 @@ async function doSearch(){
     const q = document.getElementById('search-input').value.trim();
     const dbs = getActiveDBs();
     _allResults = [];
+    let totalQty = 0;
     // If user requested fetch-all, send limit=0 to tell server to return all matches
     // default: fetch all results from server for each selected DB
     const wantAll = true;
+    
+    // Get LOT filter value (only relevant for BOL database)
+    const selectedLot = document.getElementById('lot-filter').value.trim();
+    
     for(const db of dbs){
         try{
             let j = null;
@@ -180,19 +230,32 @@ async function doSearch(){
                 const resp = await fetch('/api/archived');
                 j = await resp.json();
             } else {
-                const resp = await fetch('/api/search/'+db, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({q:q, limit: wantAll ? 0 : 50})});
+                // Include lot_filter in request body for BOL database
+                const payload = {q: q, limit: wantAll ? 0 : 50};
+                if(db === 'bol' && selectedLot){
+                    payload.lot_filter = selectedLot;
+                }
+                const resp = await fetch('/api/search/'+db, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
                 j = await resp.json();
             }
             if(j && j.results) {
                 j.results.forEach(r=> _allResults.push(r));
+                // Accumulate total quantity if provided by backend
+                if(j.total_quantity !== undefined){
+                    totalQty += j.total_quantity;
+                }
             }
         }catch(err){console.error('search err',err)}
     }
     _currentPage = 1;
     _pageSize = parseInt(document.getElementById('page-size').value || '10', 10);
-    // Update the 'Showing' label to include total result count
+    // Update the 'Showing' label to include total result count and quantity
     const activeLabel = dbs.map(d=>DB_LABELS[d]).join(', ');
-    document.getElementById('active-dbs').textContent = `${activeLabel} — ${_allResults.length} results`;
+    let displayText = `${activeLabel} — ${_allResults.length} results`;
+    if(totalQty > 0){
+        displayText += ` — ${totalQty} total quantity`;
+    }
+    document.getElementById('active-dbs').textContent = displayText;
     renderPagedResults();
     // Auto-clear the search input after search completes
     document.getElementById('search-input').value = '';
@@ -717,31 +780,17 @@ function onViewLotDetails(e){
             const lotNum = esc(lot.lot_number || '(No LOT)');
             const qty = esc(String(lot.qty || 0));
             
-            // Format the date
+            // Format the date (date only, no time)
             let dateDisplay = lot.import_date || '(No Date)';
             if (dateDisplay !== '(No Date)') {
                 try {
                     const d = new Date(dateDisplay);
                     if (!isNaN(d.getTime())) {
-                        const parts = new Intl.DateTimeFormat('en-US', { 
-                            timeZone: 'America/New_York', 
-                            year:'numeric', 
-                            month:'2-digit', 
-                            day:'2-digit', 
-                            hour:'numeric', 
-                            minute:'2-digit', 
-                            hour12:true 
-                        }).formatToParts(d);
-                        const vals = {};
-                        parts.forEach(p=> vals[p.type] = p.value);
-                        const year = vals.year || d.getFullYear();
-                        const month = vals.month || String(d.getMonth()+1).padStart(2,'0');
-                        const day = vals.day || String(d.getDate()).padStart(2,'0');
-                        let hour = vals.hour || String(d.getHours()).padStart(2,'0');
-                        let minute = vals.minute || String(d.getMinutes()).padStart(2,'0');
-                        const ampm = (vals.dayPeriod || '').toLowerCase();
-                        hour = String(hour).replace(/^0/, '');
-                        dateDisplay = `${year}-${month}-${day} ${hour}:${minute}${ampm}`;
+                        // Format as YYYY-MM-DD only (no time)
+                        const year = d.getFullYear();
+                        const month = String(d.getMonth()+1).padStart(2,'0');
+                        const day = String(d.getDate()).padStart(2,'0');
+                        dateDisplay = `${year}-${month}-${day}`;
                     }
                 } catch(_) {
                     // Keep original date string if parsing fails
