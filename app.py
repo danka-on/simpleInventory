@@ -173,9 +173,9 @@ def tools():
     return render_template('tools.html')
 
 # BOL Statistics page
-@app.route('/bol-statistics')
-def bol_statistics():
-    return render_template('bol_statistics.html')
+@app.route('/bol-stats')
+def bol_stats_page():
+    return render_template('bol_stats.html')
 
 # Barcode Print Que page
 @app.route('/barcode-print-que')
@@ -5121,6 +5121,104 @@ def api_get_lot_numbers():
         
         conn.close()
         return jsonify({'success': True, 'lots': lots})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/bol_stats', methods=['GET'])
+def api_bol_stats():
+    """Calculate BOL statistics for each LOT number."""
+    try:
+        # Connect to both databases
+        rawbol_conn = sqlite3.connect('rawbol.db')
+        rawbol_conn.row_factory = sqlite3.Row
+        rawbol_cur = rawbol_conn.cursor()
+        
+        bol_conn = sqlite3.connect('bol.db')
+        bol_conn.row_factory = sqlite3.Row
+        bol_cur = bol_conn.cursor()
+        
+        # Get all LOT numbers ordered by date (newest first)
+        rawbol_cur.execute('''
+            SELECT 
+                lot_number,
+                MAX(import_date) as latest_date
+            FROM raw_bol_items
+            WHERE lot_number IS NOT NULL 
+                AND TRIM(COALESCE(lot_number, '')) != ''
+                AND LOWER(lot_number) NOT IN ('nan', 'none', 'null')
+            GROUP BY lot_number
+            ORDER BY latest_date DESC
+        ''')
+        
+        lots = rawbol_cur.fetchall()
+        stats = []
+        
+        for lot_row in lots:
+            lot_number = lot_row['lot_number']
+            import_date = lot_row['latest_date']
+            
+            # Get unique items and total quantity from rawbol (original data)
+            rawbol_cur.execute('''
+                SELECT 
+                    COUNT(DISTINCT upc) as unique_items,
+                    SUM(COALESCE(quantity, 1)) as total_quantity
+                FROM raw_bol_items
+                WHERE lot_number = ?
+            ''', (lot_number,))
+            
+            rawbol_data = rawbol_cur.fetchone()
+            unique_items = rawbol_data['unique_items'] or 0
+            original_total_qty = rawbol_data['total_quantity'] or 0
+            
+            # Get list of base UPCs from rawbol for this LOT
+            rawbol_cur.execute('''
+                SELECT DISTINCT upc FROM raw_bol_items WHERE lot_number = ?
+            ''', (lot_number,))
+            rawbol_upcs = [row['upc'] for row in rawbol_cur.fetchall()]
+            
+            # Get current unchecked quantity from bol.db (remaining items)
+            # Only count BASE UPCs (no suffix) that exist in the original rawbol import
+            # Suffixed items (e.g., "12345-001") are already-processed Bad items, not unchecked inventory
+            if rawbol_upcs:
+                placeholders = ','.join('?' * len(rawbol_upcs))
+                bol_cur.execute(f'''
+                    SELECT SUM(COALESCE(quantity, 0)) as unchecked_qty
+                    FROM bol_items
+                    WHERE lot_number = ? 
+                        AND (temporary IS NULL OR temporary = 0)
+                        AND upc NOT LIKE '%-%'
+                        AND upc IN ({placeholders})
+                ''', [lot_number] + rawbol_upcs)
+                bol_data = bol_cur.fetchone()
+                unchecked_qty = bol_data['unchecked_qty'] or 0
+            else:
+                unchecked_qty = 0
+            
+            # Calculate prepped items (original - current unchecked)
+            # Clamp to 0 if negative (data integrity issue where bol.db has more than rawbol.db)
+            prepped_qty = max(0, original_total_qty - unchecked_qty)
+            
+            # Calculate percentage done
+            if original_total_qty > 0:
+                percent_done = round((prepped_qty / original_total_qty) * 100, 1)
+            else:
+                percent_done = 0.0
+            
+            stats.append({
+                'lot_number': lot_number,
+                'import_date': import_date,
+                'unique_items': unique_items,
+                'total_quantity': original_total_qty,
+                'unchecked_items': unchecked_qty,
+                'prepped_items': prepped_qty,
+                'percent_done': percent_done
+            })
+        
+        rawbol_conn.close()
+        bol_conn.close()
+        
+        return jsonify({'success': True, 'stats': stats})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 

@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>BOL Statistics</title>
+    <style>
+        body{font-family:Segoe UI,Arial,sans-serif;background:#f7f7f8;margin:0;padding:18px}
+        .container{max-width:1200px;margin:0 auto}
+        .header{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}
+        .header h1{margin:0;font-size:1.8rem;color:#2c3e50}
+        .back-btn{background:#e74c3c;color:#fff;border:none;padding:10px 18px;border-radius:6px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:8px}
+        .back-btn:hover{background:#c0392b}
+        .stats-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:20px;margin-top:20px}
+        .stat-card{background:#fff;border-radius:12px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,0.08);border:1px solid #e6e6e6}
+        .stat-card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;padding-bottom:12px;border-bottom:2px solid #f0f0f0}
+        .lot-number{font-size:1.3rem;font-weight:600;color:#2c3e50}
+        .import-date{font-size:0.85rem;color:#7f8c8d;font-weight:normal}
+        .stat-row{display:flex;justify-content:space-between;margin-bottom:10px;padding:6px 0}
+        .stat-label{color:#555;font-size:0.95rem}
+        .stat-value{font-weight:600;color:#2c3e50;font-size:1rem}
+        .progress-container{margin-top:16px;padding-top:12px;border-top:1px solid #f0f0f0}
+        .progress-label{display:flex;justify-content:space-between;margin-bottom:8px}
+        .progress-percent{font-weight:600;font-size:1.1rem}
+        .progress-bar-bg{height:24px;background:#e0e0e0;border-radius:12px;overflow:hidden;position:relative}
+        .progress-bar-fill{height:100%;transition:width 0.5s ease,background 0.3s ease;border-radius:12px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:600;font-size:0.85rem}
+        .progress-low{background:linear-gradient(90deg,#e74c3c,#c0392b)}
+        .progress-medium{background:linear-gradient(90deg,#f39c12,#e67e22)}
+        .progress-high{background:linear-gradient(90deg,#27ae60,#229954)}
+        .loading{text-align:center;padding:40px;color:#7f8c8d}
+        .error{background:#fee;border:1px solid #fcc;color:#c00;padding:16px;border-radius:8px;margin:20px 0}
+        @media(max-width:768px){
+            .stats-grid{grid-template-columns:1fr}
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📊 BOL Statistics</h1>
+            <a href="/tools" class="back-btn">
+                ← Back to Tools
+            </a>
+        </div>
+        
+        <div id="loading" class="loading">Loading statistics...</div>
+        <div id="error" class="error" style="display:none"></div>
+        <div id="stats-container" class="stats-grid" style="display:none"></div>
+    </div>
+
+    <script>
+    async function loadStats(){
+        try {
+            const resp = await fetch('/api/bol_stats');
+            const data = await resp.json();
+            
+            if(!data.success){
+                document.getElementById('error').textContent = 'Error: ' + (data.error || 'Unknown error');
+                document.getElementById('error').style.display = 'block';
+                document.getElementById('loading').style.display = 'none';
+                return;
+            }
+            
+            const container = document.getElementById('stats-container');
+            const stats = data.stats || [];
+            
+            if(stats.length === 0){
+                document.getElementById('loading').textContent = 'No LOT data available';
+                return;
+            }
+            
+            let html = '';
+            stats.forEach(stat => {
+                // Format date
+                let dateDisplay = stat.import_date || 'N/A';
+                try {
+                    const d = new Date(dateDisplay);
+                    if(!isNaN(d.getTime())){
+                        const year = d.getFullYear();
+                        const month = String(d.getMonth()+1).padStart(2,'0');
+                        const day = String(d.getDate()).padStart(2,'0');
+                        dateDisplay = `${year}-${month}-${day}`;
+                    }
+                } catch(_){}
+                
+                // Determine progress bar color
+                const percent = stat.percent_done || 0;
+                let progressClass = 'progress-low';
+                if(percent >= 70) progressClass = 'progress-high';
+                else if(percent >= 30) progressClass = 'progress-medium';
+                
+                html += `
+                <div class="stat-card">
+                    <div class="stat-card-header">
+                        <div>
+                            <div class="lot-number">LOT# ${esc(stat.lot_number)}</div>
+                            <div class="import-date">${esc(dateDisplay)}</div>
+                        </div>
+                    </div>
+                    
+                    <div class="stat-row">
+                        <span class="stat-label">Unique Items:</span>
+                        <span class="stat-value">${stat.unique_items}</span>
+                    </div>
+                    
+                    <div class="stat-row">
+                        <span class="stat-label">Total Quantity:</span>
+                        <span class="stat-value">${stat.total_quantity}</span>
+                    </div>
+                    
+                    <div class="stat-row">
+                        <span class="stat-label">Unchecked Items:</span>
+                        <span class="stat-value">${stat.unchecked_items}</span>
+                    </div>
+                    
+                    <div class="stat-row">
+                        <span class="stat-label">Prepped Items:</span>
+                        <span class="stat-value">${stat.prepped_items}</span>
+                    </div>
+                    
+                    <div class="progress-container">
+                        <div class="progress-label">
+                            <span class="stat-label">Progress:</span>
+                            <span class="progress-percent">${percent.toFixed(1)}%</span>
+                        </div>
+                        <div class="progress-bar-bg">
+                            <div class="progress-bar-fill ${progressClass}" style="width:${Math.min(percent,100)}%">
+                                ${percent >= 10 ? percent.toFixed(0) + '%' : ''}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                `;
+            });
+            
+            container.innerHTML = html;
+            container.style.display = 'grid';
+            document.getElementById('loading').style.display = 'none';
+            
+        } catch(err) {
+            console.error('Error loading stats:', err);
+            document.getElementById('error').textContent = 'Error loading statistics: ' + err.message;
+            document.getElementById('error').style.display = 'block';
+            document.getElementById('loading').style.display = 'none';
+        }
+    }
+    
+    function esc(s){
+        return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+    
+    // Load stats on page load
+    loadStats();
+    </script>
+</body>
+</html>
