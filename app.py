@@ -1253,14 +1253,38 @@ def api_bol_lookup():
         
         # Only create a suffixed entry if the item already has a prep record
         if permanent_row and has_prep_record:
-            # Find the next available suffix
+            # Find the next available suffix - check both bol_items and prep tables to avoid reusing deleted suffixes
             suffix = 1
             while True:
                 suffixed_upc = f"{upc}-{suffix}"
+                
+                # Check bol_items
                 cur.execute("SELECT upc FROM bol_items WHERE upc = ? COLLATE NOCASE", (suffixed_upc,))
-                if not cur.fetchone():
-                    break
-                suffix += 1
+                if cur.fetchone():
+                    suffix += 1
+                    continue
+                
+                # Check prep data to avoid reusing deleted suffixes with orphaned data
+                cur.execute('SELECT upc FROM items_prep_images WHERE upc = ? COLLATE NOCASE LIMIT 1', (suffixed_upc,))
+                if cur.fetchone():
+                    suffix += 1
+                    continue
+                
+                cur.execute('SELECT upc FROM items_prep_status WHERE upc = ? COLLATE NOCASE LIMIT 1', (suffixed_upc,))
+                if cur.fetchone():
+                    suffix += 1
+                    continue
+                
+                try:
+                    cur.execute('SELECT upc FROM items_prep_notes WHERE upc = ? COLLATE NOCASE LIMIT 1', (suffixed_upc,))
+                    if cur.fetchone():
+                        suffix += 1
+                        continue
+                except:
+                    pass
+                
+                # Suffix is clean
+                break
             
             # Create temporary duplicate entry
             print(f'[DEBUG] Creating suffixed entry: {suffixed_upc}')
@@ -1460,13 +1484,38 @@ def api_items_prep_create_bad_entry():
         cur = conn.cursor()
         
         # Find next available suffix for bad items
+        # Check BOTH bol_items AND prep tables to avoid reusing deleted suffixes with orphaned data
         suffix_num = 1
         while True:
             suffixed_upc = f"{base_upc}-{suffix_num}"
+            
+            # Check if exists in bol_items
             cur.execute('SELECT upc FROM bol_items WHERE upc = ? COLLATE NOCASE', (suffixed_upc,))
-            if not cur.fetchone():
-                break
-            suffix_num += 1
+            if cur.fetchone():
+                suffix_num += 1
+                continue
+            
+            # Also check if prep data exists (images, status, notes) to avoid reusing old suffixes
+            cur.execute('SELECT upc FROM items_prep_images WHERE upc = ? COLLATE NOCASE LIMIT 1', (suffixed_upc,))
+            if cur.fetchone():
+                suffix_num += 1
+                continue
+            
+            cur.execute('SELECT upc FROM items_prep_status WHERE upc = ? COLLATE NOCASE LIMIT 1', (suffixed_upc,))
+            if cur.fetchone():
+                suffix_num += 1
+                continue
+            
+            try:
+                cur.execute('SELECT upc FROM items_prep_notes WHERE upc = ? COLLATE NOCASE LIMIT 1', (suffixed_upc,))
+                if cur.fetchone():
+                    suffix_num += 1
+                    continue
+            except:
+                pass
+            
+            # Suffix is clean - no bol_items entry and no orphaned prep data
+            break
         
         # Get base item details to copy
         cur.execute('SELECT item_description, image_url, lot_number, bol_number FROM bol_items WHERE upc = ? COLLATE NOCASE', (base_upc,))
@@ -2591,10 +2640,37 @@ def api_bulk_delete_bol_items():
         # Handle deletions
         if deletable_ids:
             conn = sqlite3.connect('bol.db')
+            conn.row_factory = sqlite3.Row
             cur = conn.cursor()
+            
+            # First, get the UPCs for these IDs so we can delete their prep data
             ph = ','.join('?' for _ in deletable_ids)
+            cur.execute(f'SELECT id, upc FROM bol_items WHERE id IN ({ph})', tuple(deletable_ids))
+            items_to_delete = cur.fetchall()
+            upcs_to_clean = [row['upc'] for row in items_to_delete]
+            
+            print(f'[BULK DELETE] Deleting {len(items_to_delete)} suffixed entries:')
+            for item in items_to_delete:
+                print(f'  - ID: {item["id"]}, UPC: {item["upc"]}')
+            
+            # Delete the bol_items entries
             cur.execute(f'DELETE FROM bol_items WHERE id IN ({ph})', tuple(deletable_ids))
             deleted = cur.rowcount
+            
+            # Also delete associated prep data (status, images, notes) for these suffixed UPCs
+            for upc in upcs_to_clean:
+                print(f'[BULK DELETE] Cleaning prep data for UPC: {upc}')
+                cur.execute('DELETE FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (upc,))
+                status_deleted = cur.rowcount
+                cur.execute('DELETE FROM items_prep_images WHERE upc = ? COLLATE NOCASE', (upc,))
+                images_deleted = cur.rowcount
+                try:
+                    cur.execute('DELETE FROM items_prep_notes WHERE upc = ? COLLATE NOCASE', (upc,))
+                    notes_deleted = cur.rowcount
+                except:
+                    notes_deleted = 0
+                print(f'[BULK DELETE]   - Deleted: {status_deleted} status, {images_deleted} images, {notes_deleted} notes')
+            
             conn.commit()
             conn.close()
         
@@ -2720,10 +2796,22 @@ def api_bol_items_set_list_status():
 def api_cleanup_temporary_entry():
     """Delete a temporary bol_items entry that was created but not completed."""
     try:
-        data = request.get_json() or {}
+        # Handle both JSON and form data (sendBeacon can send either)
+        if request.is_json:
+            data = request.get_json() or {}
+        else:
+            # Try to parse as JSON from raw data
+            try:
+                data = json.loads(request.data.decode('utf-8'))
+            except:
+                data = {}
+        
         upc = _normalize_upc(data.get('upc'))
         if not upc:
+            print('[CLEANUP] No UPC provided')
             return jsonify({'success': False, 'error': 'Missing upc'}), 400
+        
+        print(f'[CLEANUP] Attempting to delete temporary entry: {upc}')
         
         conn = sqlite3.connect('bol.db')
         cur = conn.cursor()
@@ -2733,8 +2821,10 @@ def api_cleanup_temporary_entry():
         conn.commit()
         conn.close()
         
+        print(f'[CLEANUP] Deleted {deleted} temporary entries for UPC: {upc}')
         return jsonify({'success': True, 'deleted': deleted})
     except Exception as e:
+        print(f'[CLEANUP] Error: {e}')
         return jsonify({'success': False, 'error': str(e)}), 500
 def api_items_prep_diagnostic_photos_zip(upc):
     """Bundle all diagnostic photos for a UPC into a zip and return as attachment."""

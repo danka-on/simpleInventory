@@ -441,6 +441,19 @@
       // Check if button is disabled
       if(document.getElementById('completeBtn').disabled) return;
       
+      // Auto-save note if there's text in the note input field (simulate clicking +Add)
+      const noteInput = document.getElementById('newNoteInput');
+      const noteText = (noteInput.value || '').trim();
+      if(noteText){
+        try{
+          await addNote();
+          // Wait a bit for the note to be saved before continuing
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }catch(e){
+          console.error('Failed to auto-save note:', e);
+        }
+      }
+      
       const form = document.getElementById('diagForm');
       const fd = new FormData(form);
       // Append only captured images from camera (not pendingFiles since we removed file input)
@@ -705,15 +718,50 @@
     });
 
     // Clean up temporary entry if user exits without completing
-    window.addEventListener('beforeunload', ()=>{
+    window.addEventListener('beforeunload', (e)=>{
+      console.log('[CLEANUP] beforeunload triggered, isTemporaryEntry:', isTemporaryEntry, 'diagnosticCompleted:', diagnosticCompleted);
       if(isTemporaryEntry && !diagnosticCompleted){
         // Use sendBeacon for reliable cleanup on page unload
         const upc = '{{ upc }}'.trim();
+        console.log('[CLEANUP] Sending cleanup beacon for UPC:', upc);
         if(upc){
-          navigator.sendBeacon('/api/cleanup_temporary_entry', JSON.stringify({upc: upc}));
+          // sendBeacon requires Blob with proper content type for JSON
+          const blob = new Blob([JSON.stringify({upc: upc})], {type: 'application/json'});
+          const sent = navigator.sendBeacon('/api/cleanup_temporary_entry', blob);
+          console.log('[CLEANUP] Beacon sent:', sent);
+          
+          // Show a brief message (may not always be visible due to browser behavior)
+          e.returnValue = 'Cleaning up temporary entry...';
         }
       }
     });
+    
+    // Also cleanup when back button is clicked directly
+    const backLink = document.getElementById('back-link');
+    if(backLink){
+      backLink.addEventListener('click', async (e)=>{
+        if(isTemporaryEntry && !diagnosticCompleted){
+          const upc = '{{ upc }}'.trim();
+          if(upc){
+            // Try to delete synchronously before navigating
+            try{
+              e.preventDefault();
+              const response = await fetch('/api/cleanup_temporary_entry', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({upc: upc})
+              });
+              const result = await response.json();
+              console.log('[CLEANUP] Back button cleanup result:', result);
+            }catch(err){
+              console.error('[CLEANUP] Back button cleanup error:', err);
+            }
+            // Navigate after cleanup attempt
+            window.location.href = backLink.href;
+          }
+        }
+      });
+    }
 
     // Auto-select "bad" status is now handled in loadExistingStatus function
     // No default defect selection
