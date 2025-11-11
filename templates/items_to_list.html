@@ -107,6 +107,7 @@
     </div>
   </div>
 
+  <div id="results-summary" style="margin:10px 0;padding:8px;background:#f0f0f0;border-radius:6px;font-size:0.95rem;color:#333"></div>
   <div id="results"></div>
 
   <div id="imgModal" class="modal"><div class="card"><div style="text-align:right"><button id="closeImg">Close</button></div><div id="imgContent"></div></div></div>
@@ -584,11 +585,37 @@ async function loadItems(){
   if(q) params.set('q', q);
   if(sort) params.set('sort', sort); else params.set('sort', 'last_edited');
   if(status) params.set('status', status);
-  params.set('page', currentPage);
-  params.set('limit', currentLimit);
   // Radio value logic: '' = all, 'listed' or 'not_listed'
   if(listedVal === 'listed') params.set('status', 'listed');
   else if(listedVal === 'not_listed') params.set('status', 'not_listed');
+  
+  // First, fetch ALL results for stats calculation (without pagination)
+  let allResults = [];
+  try {
+    const allParams = new URLSearchParams(params);
+    allParams.set('page', '1');
+    allParams.set('limit', '10000'); // Get all items
+    console.log('[loadItems] Fetching all results with params:', allParams.toString());
+    const allResp = await fetch('/api/bol_items?'+allParams.toString());
+    if(allResp.ok) {
+      const allJson = await allResp.json();
+      allResults = allJson.results || [];
+      console.log('[loadItems] Fetched all results:', allResults.length, 'items');
+      // Apply same defect filter
+      if(defectFilter){
+        const df = defectFilter.toLowerCase();
+        allResults = allResults.filter(r => (r.defect||'').toString().toLowerCase() === df);
+        console.log('[loadItems] After defect filter:', allResults.length, 'items');
+      }
+    }
+  } catch(err) {
+    console.error('Error fetching all items for stats:', err);
+  }
+  
+  // Now fetch paginated results for display
+  params.set('page', currentPage);
+  params.set('limit', currentLimit);
+  console.log('[loadItems] Fetching paginated results with params:', params.toString());
   let j = {results:[], total:0, page:1, limit:currentLimit};
   try{
     const resp = await fetch('/api/bol_items?'+params.toString());
@@ -601,14 +628,30 @@ async function loadItems(){
   currentPage = page;
   const limit = j.limit || 25;
   currentLimit = limit;
+  
   // Sync per-page dropdown with the actual limit
   const perPageEl = document.getElementById('per-page-select');
   if (perPageEl) perPageEl.value = String(currentLimit);
+  
   // Client-side defect filtering (server does not yet support defect filter)
   if(defectFilter){
     const df = defectFilter.toLowerCase();
     results = results.filter(r => (r.defect||'').toString().toLowerCase() === df);
   }
+  
+  // Calculate stats for ALL filtered results (already fetched earlier)
+  console.log('[loadItems] Calculating stats from allResults.length:', allResults.length);
+  const filtered_count = allResults.length;
+  const filtered_unique_upcs = new Set(allResults.map(r => r.upc)).size;
+  const filtered_total_quantity = allResults.reduce((sum, r) => sum + (r.quantity || 1), 0);
+  console.log('[loadItems] Stats - count:', filtered_count, 'unique:', filtered_unique_upcs, 'total qty:', filtered_total_quantity);
+  
+  // Update results summary with filtered stats
+  const summaryEl = document.getElementById('results-summary');
+  if (summaryEl) {
+    summaryEl.textContent = `Results: ${filtered_count} items — ${filtered_unique_upcs} unique items — ${filtered_total_quantity} total quantity`;
+  }
+  
   render(results);
   renderPagination(total, page, limit);
   // Auto-clear the search input after loading items

@@ -2397,7 +2397,11 @@ def api_bol_items():
         page = int(request.args.get('page', 1))
         limit = int(request.args.get('limit', 25))
         if page < 1: page = 1
-        if limit < 1 or limit > 100: limit = 25
+        # Allow large limits for stats calculation (up to 50000), otherwise cap at 100
+        if limit < 1: limit = 25
+        elif limit > 50000: limit = 50000
+        elif limit <= 100: pass  # Normal range
+        # else: allow limits between 100 and 50000 for stats
         offset = (page - 1) * limit
         print(f"[api_bol_items] Filters - lot: '{lot}', import_date: '{import_date}', q: '{q_stripped}', status_filter: '{status_filter}'")
         conn = sqlite3.connect('bol.db')
@@ -2444,10 +2448,13 @@ def api_bol_items():
             order_sql += "b.import_date DESC, b.id DESC"
         # Left join items_prep_status to include status
         # Use the computed where_sql which may be empty
-        # Get total count
-        count_sql = 'SELECT COUNT(*) FROM bol_items b LEFT JOIN items_prep_status s ON s.upc = b.upc ' + where_sql
+        # Get total count, unique items count, and total quantity
+        count_sql = 'SELECT COUNT(*), COUNT(DISTINCT b.upc), SUM(COALESCE(b.quantity, 1)) FROM bol_items b LEFT JOIN items_prep_status s ON s.upc = b.upc ' + where_sql
         cur.execute(count_sql, params)
-        total = cur.fetchone()[0]
+        count_row = cur.fetchone()
+        total = count_row[0]
+        unique_items = count_row[1] or 0
+        total_quantity = count_row[2] or 0
         
         sql = (
             'SELECT b.id, b.upc, b.item_description, b.image_url, b.lot_number, b.bol_number, b.import_date, b.list_status, b.quantity, ' +
@@ -2529,7 +2536,7 @@ def api_bol_items():
                 'temporary': r.get('temporary'),
                 'quantity': r.get('quantity') or 1
             })
-        return jsonify({'results': results, 'total': total, 'page': page, 'limit': limit})
+        return jsonify({'results': results, 'total': total, 'unique_items': unique_items, 'total_quantity': total_quantity, 'page': page, 'limit': limit})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -2637,41 +2644,48 @@ def api_bulk_delete_bol_items():
 
 @app.route('/api/bol_lots', methods=['GET'])
 def api_bol_lots():
-    """Return list of available lots with most recent import_date. Sorted newest first."""
+    """Return list of available lots with most recent import_date from rawbol.db. Sorted newest first."""
     try:
-        conn = sqlite3.connect('bol.db')
+        conn = sqlite3.connect('rawbol.db')
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
-        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='bol_items'")
+        
+        # Check if raw_bol_items table exists
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='raw_bol_items'")
         if not cur.fetchone():
             conn.close()
             return jsonify({'lots': []})
-        cur.execute("PRAGMA table_info(bol_items)")
-        cols = [r[1] for r in cur.fetchall()]
-        has_temporary = any(c.lower() == 'temporary' for c in cols)
-        if has_temporary:
-            sql = (
-                "SELECT lot_number, MAX(import_date) AS import_date "
-                "FROM bol_items "
-                "WHERE (temporary IS NULL OR temporary = 0) AND TRIM(COALESCE(lot_number,'')) <> '' "
-                "GROUP BY lot_number "
-                "ORDER BY import_date DESC"
-            )
-        else:
-            sql = (
-                "SELECT lot_number, MAX(import_date) AS import_date "
-                "FROM bol_items "
-                "WHERE TRIM(COALESCE(lot_number,'')) <> '' "
-                "GROUP BY lot_number "
-                "ORDER BY import_date DESC"
-            )
-        cur.execute(sql)
+        
+        # Get distinct LOT numbers with their import dates, filtered and sorted
+        cur.execute('''
+            SELECT 
+                lot_number,
+                MAX(import_date) as import_date
+            FROM raw_bol_items
+            WHERE lot_number IS NOT NULL 
+                AND TRIM(COALESCE(lot_number, '')) != ''
+                AND LOWER(lot_number) NOT IN ('nan', 'none', 'null')
+            GROUP BY lot_number
+            ORDER BY MAX(import_date) DESC
+        ''')
+        
         lots = []
         for r in cur.fetchall():
+            # Format date as YYYY-MM-DD
+            date_str = r['import_date'] or ''
+            if date_str:
+                try:
+                    from datetime import datetime
+                    dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                    date_str = dt.strftime('%Y-%m-%d')
+                except:
+                    pass
+            
             lots.append({
                 'lot_number': r['lot_number'],
-                'import_date': r['import_date'] or ''
+                'import_date': date_str
             })
+        
         conn.close()
         return jsonify({'lots': lots})
     except Exception as e:
@@ -5177,31 +5191,30 @@ def api_bol_stats():
             ''', (lot_number,))
             rawbol_upcs = [row['upc'] for row in rawbol_cur.fetchall()]
             
-            # Get current unchecked quantity from bol.db (remaining items)
-            # Only count BASE UPCs (no suffix) that exist in the original rawbol import
-            # Suffixed items (e.g., "12345-001") are already-processed Bad items, not unchecked inventory
+            # Count how many of these UPCs still exist as base items (not suffixed) in bol.db
+            # This gives us an indicator of prep progress (items that haven't been processed yet)
+            # NOTE: We check ANY lot_number in bol.db since lot numbers may have changed
             if rawbol_upcs:
                 placeholders = ','.join('?' * len(rawbol_upcs))
                 bol_cur.execute(f'''
-                    SELECT SUM(COALESCE(quantity, 0)) as unchecked_qty
+                    SELECT COUNT(DISTINCT upc) as unchecked_count
                     FROM bol_items
-                    WHERE lot_number = ? 
-                        AND (temporary IS NULL OR temporary = 0)
+                    WHERE (temporary IS NULL OR temporary = 0)
                         AND upc NOT LIKE '%-%'
                         AND upc IN ({placeholders})
-                ''', [lot_number] + rawbol_upcs)
+                ''', rawbol_upcs)
                 bol_data = bol_cur.fetchone()
-                unchecked_qty = bol_data['unchecked_qty'] or 0
+                unchecked_count = bol_data['unchecked_count'] or 0
             else:
-                unchecked_qty = 0
+                unchecked_count = 0
             
-            # Calculate prepped items (original - current unchecked)
-            # Clamp to 0 if negative (data integrity issue where bol.db has more than rawbol.db)
-            prepped_qty = max(0, original_total_qty - unchecked_qty)
+            # Calculate prepped items (items that no longer exist as base UPCs in bol.db)
+            # This could be because they were: marked as good, bad, listed, or deleted
+            prepped_count = unique_items - unchecked_count
             
-            # Calculate percentage done
-            if original_total_qty > 0:
-                percent_done = round((prepped_qty / original_total_qty) * 100, 1)
+            # Calculate percentage done based on unique items (not quantity)
+            if unique_items > 0:
+                percent_done = round((prepped_count / unique_items) * 100, 1)
             else:
                 percent_done = 0.0
             
@@ -5210,8 +5223,8 @@ def api_bol_stats():
                 'import_date': import_date,
                 'unique_items': unique_items,
                 'total_quantity': original_total_qty,
-                'unchecked_items': unchecked_qty,
-                'prepped_items': prepped_qty,
+                'unchecked_items': unchecked_count,
+                'prepped_items': prepped_count,
                 'percent_done': percent_done
             })
         
