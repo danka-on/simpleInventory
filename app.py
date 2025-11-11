@@ -1712,13 +1712,13 @@ def api_items_prep_diagnostic():
             # Decrement base UPC quantity (processing units from original inventory)
             cur_temp.execute('UPDATE bol_items SET quantity = quantity - ? WHERE upc = ? COLLATE NOCASE', (qty_to_decrement, base_upc))
             
-            cur_temp.commit()
+            conn_temp.commit()
             print(f'[DIAGNOSTIC COMPLETE] Set {upc} to permanent (temporary=0)')
             print(f'[DIAGNOSTIC COMPLETE] Decremented base {base_upc} qty by {qty_to_decrement}')
         else:
             # Not temporary, just ensure it's marked as permanent
             cur_temp.execute('UPDATE bol_items SET temporary = 0 WHERE upc = ? COLLATE NOCASE AND temporary = 1', (upc,))
-            cur_temp.commit()
+            conn_temp.commit()
         
         cur_temp.close()
         conn_temp.close()

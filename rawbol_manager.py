@@ -402,34 +402,42 @@ def sync_rawbol_to_bol(specific_lot=None):
         for item in raw_items:
             upc = item['upc']
             qty = item['quantity'] or 1
+            lot_num = item['lot_number']
             
             # Check if exists in bol.db
-            bol_cur.execute('SELECT id, quantity FROM bol_items WHERE upc = ? COLLATE NOCASE', (upc,))
+            bol_cur.execute('SELECT id, quantity, lot_number FROM bol_items WHERE upc = ? COLLATE NOCASE', (upc,))
             existing = bol_cur.fetchone()
             
             if existing:
-                # Update: add quantity
+                existing_id = existing[0]
                 existing_qty = existing[1] or 0
-                new_qty = existing_qty + qty
-                bol_cur.execute('UPDATE bol_items SET quantity = ? WHERE upc = ? COLLATE NOCASE', (new_qty, upc))
-                updated += 1
-                changes.append({'upc': upc, 'action': 'updated', 'old_qty': existing_qty, 'added_qty': qty, 'new_qty': new_qty})
+                existing_lot = existing[2]
+                
+                # Check if this item is from the same LOT or different LOT
+                if existing_lot == lot_num:
+                    # Same LOT - this shouldn't happen if synced_lots tracking works
+                    # Skip to avoid double-counting
+                    print(f"WARNING: UPC {upc} from LOT {lot_num} already exists in bol.db - skipping to prevent duplicate")
+                    continue
+                else:
+                    # Different LOT - add quantity (items can appear in multiple LOTs)
+                    new_qty = existing_qty + qty
+                    bol_cur.execute('UPDATE bol_items SET quantity = ? WHERE upc = ? COLLATE NOCASE', (new_qty, upc))
+                    updated += 1
+                    changes.append({'upc': upc, 'action': 'updated', 'old_qty': existing_qty, 'added_qty': qty, 'new_qty': new_qty, 'old_lot': existing_lot, 'new_lot': lot_num})
             else:
-                # Insert new item
+                # Insert new item - use columns that actually exist in bol.db
                 bol_cur.execute('''INSERT INTO bol_items 
-                    (upc, item_description, client_cost, total_client_cost, image_url, quantity, lot_number, bol_number, import_date)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                    (upc, item_description, image_url, quantity, lot_number, import_date)
+                    VALUES (?, ?, ?, ?, ?, ?)''',
                     (upc,
                      item['item_description'],
-                     item['client_cost'],
-                     item['total_client_cost'],
                      item['image_url'],
                      qty,
-                     item['lot_number'],
-                     item['bol_number'],
+                     lot_num,
                      item['import_date']))
                 inserted += 1
-                changes.append({'upc': upc, 'action': 'inserted', 'qty': qty})
+                changes.append({'upc': upc, 'action': 'inserted', 'qty': qty, 'lot': lot_num})
         
         # Record synced lots
         sync_date = datetime.datetime.utcnow().isoformat()
