@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Marketplace Sale</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   <style>
     body {
@@ -239,11 +240,14 @@
         font-size: 1.3rem;
       }
       .input-with-button {
-        flex-direction: column;
+        flex-direction: row; /* Keep row layout on mobile */
       }
       .camera-btn {
-        width: 100%;
-        padding: 12px !important;
+        min-width: 60px; /* Ensure button is visible */
+        padding: 12px 16px !important;
+      }
+      .camera-btn i {
+        font-size: 1.5rem;
       }
       .quantity-btn {
         width: 45px !important;
@@ -321,21 +325,6 @@
       <button type="button" class="btn btn-secondary" onclick="closeLocationModal()" style="width: 100%; margin-top: 16px;">Cancel</button>
     </div>
   </div>
-
-  <!-- Camera scanner modal -->
-  <div id="cameraModal" class="modal">
-    <div class="modal-content" style="max-width: 600px;">
-      <h2>Scan Barcode</h2>
-      <div id="cameraReader" style="width: 100%; max-width: 400px; margin: 20px auto; aspect-ratio: 1/1; background: #222; border-radius: 8px; position: relative; overflow: hidden;">
-        <video id="cameraVideo" playsinline="true" style="width: 100%; height: 100%; object-fit: cover;"></video>
-        <div id="cameraLoading" style="color: white; text-align: center; padding: 20px; position: absolute; top: 50%; left: 0; right: 0; transform: translateY(-50%);">⌛ Loading camera...</div>
-      </div>
-      <button type="button" class="btn btn-secondary" onclick="closeCameraModal()" style="width: 100%; margin-top: 16px;">Close</button>
-    </div>
-  </div>
-
-  <!-- ZXing Library -->
-  <script src="https://unpkg.com/@zxing/library@0.19.1/umd/index.min.js"></script>
 
   <script>
     const barcodeInput = document.getElementById('barcodeInput');
@@ -494,92 +483,55 @@
       }, 5000);
     }
 
-    // Camera scanner functionality
-    let codeReader = null;
-    const cameraModal = document.getElementById('cameraModal');
-    const cameraVideo = document.getElementById('cameraVideo');
-    const cameraLoading = document.getElementById('cameraLoading');
+    // Camera button - redirect to barcode scanner
     const cameraBtn = document.getElementById('cameraBtn');
-
+    
     cameraBtn.addEventListener('click', () => {
-      openCameraModal();
+      // Save current form state
+      sessionStorage.setItem('marketplace_return', 'true');
+      sessionStorage.setItem('marketplace_quantity', quantityInput.value);
+      sessionStorage.setItem('marketplace_price', priceInput.value);
+      
+      // Redirect to barcode scanner
+      window.location.href = '/barcode?return=marketplace';
     });
 
-    async function openCameraModal() {
-      cameraModal.style.display = 'flex';
-      cameraLoading.style.display = 'block';
+    // Check if returning from barcode scanner
+    window.addEventListener('DOMContentLoaded', () => {
+      const urlParams = new URLSearchParams(window.location.search);
+      const fromBarcode = urlParams.get('scanned');
       
-      try {
-        codeReader = new ZXing.BrowserMultiFormatReader();
+      if (fromBarcode && sessionStorage.getItem('marketplace_return') === 'true') {
+        // Get the scanned barcode
+        const scannedCode = sessionStorage.getItem('barcode');
         
-        const hints = new Map();
-        hints.set(ZXing.DecodeHintType.TRY_HARDER, false);
-        hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
-          ZXing.BarcodeFormat.EAN_13,
-          ZXing.BarcodeFormat.UPC_A,
-          ZXing.BarcodeFormat.UPC_E
-        ]);
-        codeReader.hints = hints;
-        
-        await codeReader.decodeFromVideoDevice(
-          undefined,
-          'cameraVideo',
-          (result, error) => {
-            if (result) {
-              const code = result.getText().trim();
-              const allowedFormats = [
-                ZXing.BarcodeFormat.EAN_13,
-                ZXing.BarcodeFormat.UPC_A,
-                ZXing.BarcodeFormat.UPC_E
-              ];
-              if (allowedFormats.includes(result.getBarcodeFormat())) {
-                handleCameraScan(code);
-              }
+        if (scannedCode) {
+          barcodeInput.value = scannedCode;
+          
+          // Restore form state
+          const savedQty = sessionStorage.getItem('marketplace_quantity');
+          const savedPrice = sessionStorage.getItem('marketplace_price');
+          
+          if (savedQty) quantityInput.value = savedQty;
+          if (savedPrice) priceInput.value = savedPrice;
+          
+          // Trigger barcode lookup
+          barcodeInput.dispatchEvent(new Event('blur'));
+          
+          // Clear session storage
+          sessionStorage.removeItem('marketplace_return');
+          sessionStorage.removeItem('marketplace_quantity');
+          sessionStorage.removeItem('marketplace_price');
+          
+          // Focus price field after lookup completes
+          setTimeout(() => {
+            if (titleInput.value) {
+              priceInput.focus();
             }
-          },
-          {
-            delayBetweenScanAttempts: 100,
-            delayBetweenScanSuccess: 100,
-            tryPlayVideoTimeout: 2000,
-            formats: [
-              ZXing.BarcodeFormat.EAN_13,
-              ZXing.BarcodeFormat.UPC_A,
-              ZXing.BarcodeFormat.UPC_E
-            ]
-          }
-        );
-        
-        cameraLoading.style.display = 'none';
-      } catch (error) {
-        console.error('Error starting camera:', error);
-        showMessage('Error starting camera: ' + error.message, 'error');
-        closeCameraModal();
-      }
-    }
-
-    function closeCameraModal() {
-      if (codeReader) {
-        codeReader.reset();
-        codeReader = null;
-      }
-      cameraModal.style.display = 'none';
-      cameraVideo.srcObject = null;
-    }
-
-    function handleCameraScan(code) {
-      barcodeInput.value = code;
-      closeCameraModal();
-      
-      // Trigger barcode lookup
-      barcodeInput.dispatchEvent(new Event('blur'));
-      
-      // Focus on price if title was auto-filled
-      setTimeout(() => {
-        if (titleInput.value) {
-          priceInput.focus();
+          }, 500);
         }
-      }, 500);
-    }
+      }
+    });
   </script>
 </body>
 </html>

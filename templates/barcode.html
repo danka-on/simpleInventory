@@ -322,7 +322,7 @@
             loadingMessage.style.display = '';
             loadingMessage.textContent = 'Restarting camera...';
             setTimeout(() => {
-                initializeCamera();
+                initScanner();
             }, 300);
         }
         
@@ -408,8 +408,8 @@
                         barcodeInput.focus();
                     });
                 }
-                // Prevent scanner from starting
-                window.initializeCamera = function(){};
+                // Prevent scanner from starting on tablets
+                window.initScanner = function(){};
             } else {
                 // Mobile or desktop: keep camera, hide barcode input
                 if (readerDiv) readerDiv.style.display = '';
@@ -527,7 +527,7 @@
             // Add a small delay to ensure the DOM is fully loaded
             var deviceType = getDeviceType();
             if (deviceType !== 'iPad' && deviceType !== 'Android Tablet') {
-                setTimeout(initializeCamera, 100);
+                setTimeout(initScanner, 100);
             }
             // Fetch allowed UPCs
             fetchAllowedUPCs();
@@ -749,14 +749,24 @@
                 return; // Don't submit
             }
             
-            // Valid barcode - submit form
+            // Valid barcode - save and handle return
             document.getElementById('scanned_result').value = code;
             sessionStorage.setItem('barcode', code);
             playBeep();
-            // Immediately submit the form after scan
-            const form = document.getElementById('scan_form');
-            if (form) {
-                form.submit();
+            
+            // Check if we came from marketplace
+            const urlParams = new URLSearchParams(window.location.search);
+            const returnTo = urlParams.get('return');
+            
+            if (returnTo === 'marketplace') {
+                // Return to marketplace with scanned code
+                window.location.href = '/marketplace-sale?scanned=true';
+            } else {
+                // Normal flow - submit the form
+                const form = document.getElementById('scan_form');
+                if (form) {
+                    form.submit();
+                }
             }
         }
     </script>
