@@ -134,9 +134,44 @@
         .btn:hover {
             background: var(--accent);
         }
-        @media (max-width: 400px) {
+        @media (max-width: 768px) {
+            .container {
+                padding: 16px 12px 80px 12px;
+            }
+            h1 {
+                font-size: 1.3rem !important;
+            }
+            .tools-grid {
+                gap: 12px;
+            }
+            .tool-card {
+                padding: 16px;
+            }
+            .tool-card i {
+                font-size: 2rem;
+                margin-bottom: 8px;
+            }
+            .tool-card h3 {
+                font-size: 1rem;
+                margin-bottom: 6px;
+            }
+            .tool-card p {
+                font-size: 0.85rem;
+            }
+        }
+        @media (max-width: 480px) {
             .tools-grid {
                 grid-template-columns: 1fr;
+                gap: 10px;
+            }
+            .tool-card.wide {
+                grid-column: span 1;
+            }
+            .tool-card {
+                padding: 18px;
+            }
+            h1 {
+                font-size: 1.2rem !important;
             }
         }
     </style>

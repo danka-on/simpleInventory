@@ -205,7 +205,11 @@ class AmazonManager:
                         store_cur.execute('SELECT UPC, IMAGE FROM ITEMS WHERE ASIN = ? OR SKU = ?', (asin, sku))
                         result = store_cur.fetchone()
                         if result:
-                            barcode = result[0]
+                            potential_barcode = result[0]
+                            # Only use this barcode if it's NOT an ASIN format
+                            # ASIN format: starts with B0 and is 10 characters (e.g., B0XXXXXXXXX)
+                            if potential_barcode and not (str(potential_barcode).startswith('B0') and len(str(potential_barcode)) == 10):
+                                barcode = potential_barcode
                             # Get image from amazonStore if available
                             if result[1] and str(result[1]).lower() not in ['none', 'null', '']:
                                 image = result[1]
@@ -245,10 +249,18 @@ class AmazonManager:
                         shipped_time = last_update_date
                     
                     # Check if order already exists
-                    cur.execute('SELECT id FROM orders WHERE order_id = ?', (amazon_order_id,))
+                    cur.execute('SELECT id, barcode FROM orders WHERE order_id = ?', (amazon_order_id,))
                     existing = cur.fetchone()
                     
                     if existing:
+                        existing_barcode = existing[1]
+                        
+                        # Determine which barcode to use:
+                        # - If we found a new valid barcode (UPC), use it
+                        # - If no new barcode found but existing has one, keep existing
+                        # - If existing is an ASIN and we have nothing better, keep existing
+                        final_barcode = barcode if barcode else existing_barcode
+                        
                         # Update existing order
                         cur.execute('''
                             UPDATE orders 
@@ -258,7 +270,7 @@ class AmazonManager:
                                 shipping_postal_code = ?, shipping_country = ?, 
                                 shipping_cost = ?, seller_fee = ?, taxes = ?
                             WHERE order_id = ?
-                        ''', (barcode, title, quantity, price, shipped_time, purchase_date, image,
+                        ''', (final_barcode, title, quantity, price, shipped_time, purchase_date, image,
                               shipping_name, shipping_city, shipping_state, shipping_postal, shipping_country,
                               shipping_cost, seller_fee, taxes,
                               amazon_order_id))

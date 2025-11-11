@@ -201,6 +201,66 @@
     .location-item strong {
       color: #2c3e50;
     }
+    @media (max-width: 768px) {
+      body {
+        padding: 10px;
+      }
+      .container {
+        padding: 20px;
+      }
+      h1 {
+        font-size: 1.5rem;
+      }
+      .header-row {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 12px;
+      }
+      .header-row > div {
+        display: flex;
+        gap: 8px;
+        width: 100%;
+      }
+      .header-row > div a {
+        flex: 1;
+        text-align: center;
+      }
+      .btn {
+        padding: 12px 16px;
+        font-size: 0.95rem;
+      }
+    }
+    @media (max-width: 480px) {
+      .container {
+        padding: 16px;
+        border-radius: 8px;
+      }
+      h1 {
+        font-size: 1.3rem;
+      }
+      .input-with-button {
+        flex-direction: column;
+      }
+      .camera-btn {
+        width: 100%;
+        padding: 12px !important;
+      }
+      .quantity-btn {
+        width: 45px !important;
+        height: 45px !important;
+        font-size: 1.3rem !important;
+      }
+      #quantityInput {
+        font-size: 1.1rem;
+      }
+      .modal-content {
+        padding: 20px;
+      }
+      .btn {
+        padding: 14px;
+        font-size: 1rem;
+      }
+    }
   </style>
 </head>
 <body>
@@ -218,7 +278,12 @@
     <form id="saleForm">
       <div class="form-group">
         <label for="barcodeInput">Barcode *</label>
-        <input type="text" id="barcodeInput" placeholder="Scan or enter barcode" required autofocus>
+        <div class="input-with-button">
+          <input type="text" id="barcodeInput" placeholder="Scan or enter barcode" required autofocus>
+          <button type="button" class="camera-btn" id="cameraBtn" title="Scan with camera">
+            <i class="fas fa-camera"></i>
+          </button>
+        </div>
       </div>
 
       <div class="form-group">
@@ -256,6 +321,21 @@
       <button type="button" class="btn btn-secondary" onclick="closeLocationModal()" style="width: 100%; margin-top: 16px;">Cancel</button>
     </div>
   </div>
+
+  <!-- Camera scanner modal -->
+  <div id="cameraModal" class="modal">
+    <div class="modal-content" style="max-width: 600px;">
+      <h2>Scan Barcode</h2>
+      <div id="cameraReader" style="width: 100%; max-width: 400px; margin: 20px auto; aspect-ratio: 1/1; background: #222; border-radius: 8px; position: relative; overflow: hidden;">
+        <video id="cameraVideo" playsinline="true" style="width: 100%; height: 100%; object-fit: cover;"></video>
+        <div id="cameraLoading" style="color: white; text-align: center; padding: 20px; position: absolute; top: 50%; left: 0; right: 0; transform: translateY(-50%);">⌛ Loading camera...</div>
+      </div>
+      <button type="button" class="btn btn-secondary" onclick="closeCameraModal()" style="width: 100%; margin-top: 16px;">Close</button>
+    </div>
+  </div>
+
+  <!-- ZXing Library -->
+  <script src="https://unpkg.com/@zxing/library@0.19.1/umd/index.min.js"></script>
 
   <script>
     const barcodeInput = document.getElementById('barcodeInput');
@@ -412,6 +492,93 @@
       setTimeout(() => {
         messageDiv.style.display = 'none';
       }, 5000);
+    }
+
+    // Camera scanner functionality
+    let codeReader = null;
+    const cameraModal = document.getElementById('cameraModal');
+    const cameraVideo = document.getElementById('cameraVideo');
+    const cameraLoading = document.getElementById('cameraLoading');
+    const cameraBtn = document.getElementById('cameraBtn');
+
+    cameraBtn.addEventListener('click', () => {
+      openCameraModal();
+    });
+
+    async function openCameraModal() {
+      cameraModal.style.display = 'flex';
+      cameraLoading.style.display = 'block';
+      
+      try {
+        codeReader = new ZXing.BrowserMultiFormatReader();
+        
+        const hints = new Map();
+        hints.set(ZXing.DecodeHintType.TRY_HARDER, false);
+        hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+          ZXing.BarcodeFormat.EAN_13,
+          ZXing.BarcodeFormat.UPC_A,
+          ZXing.BarcodeFormat.UPC_E
+        ]);
+        codeReader.hints = hints;
+        
+        await codeReader.decodeFromVideoDevice(
+          undefined,
+          'cameraVideo',
+          (result, error) => {
+            if (result) {
+              const code = result.getText().trim();
+              const allowedFormats = [
+                ZXing.BarcodeFormat.EAN_13,
+                ZXing.BarcodeFormat.UPC_A,
+                ZXing.BarcodeFormat.UPC_E
+              ];
+              if (allowedFormats.includes(result.getBarcodeFormat())) {
+                handleCameraScan(code);
+              }
+            }
+          },
+          {
+            delayBetweenScanAttempts: 100,
+            delayBetweenScanSuccess: 100,
+            tryPlayVideoTimeout: 2000,
+            formats: [
+              ZXing.BarcodeFormat.EAN_13,
+              ZXing.BarcodeFormat.UPC_A,
+              ZXing.BarcodeFormat.UPC_E
+            ]
+          }
+        );
+        
+        cameraLoading.style.display = 'none';
+      } catch (error) {
+        console.error('Error starting camera:', error);
+        showMessage('Error starting camera: ' + error.message, 'error');
+        closeCameraModal();
+      }
+    }
+
+    function closeCameraModal() {
+      if (codeReader) {
+        codeReader.reset();
+        codeReader = null;
+      }
+      cameraModal.style.display = 'none';
+      cameraVideo.srcObject = null;
+    }
+
+    function handleCameraScan(code) {
+      barcodeInput.value = code;
+      closeCameraModal();
+      
+      // Trigger barcode lookup
+      barcodeInput.dispatchEvent(new Event('blur'));
+      
+      // Focus on price if title was auto-filled
+      setTimeout(() => {
+        if (titleInput.value) {
+          priceInput.focus();
+        }
+      }, 500);
     }
   </script>
 </body>
