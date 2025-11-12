@@ -5197,16 +5197,25 @@ def api_search_db(db_key):
             total_count = len(results)
         
         # If searching the searchRack snapshot, merge rows with same barcode+item_position and sum quantities
+        # BUT: picture position items should NEVER be merged (each picture is unique)
         if db_key == 'searchRack' and results:
             merged = {}
             for r in results:
                 bc = (r.get('barcode') or '').strip()
-                # Use item_position, or if empty, fallback to pictureposition
-                pos = (r.get('item_position') or r.get('pictureposition') or '').strip()
-                if not bc:
-                    key = f"__{id(r)}_{len(merged)}"
+                pic = (r.get('pictureposition') or '').strip()
+                
+                # Picture position items are ALWAYS unique - use pictureposition + row ID for key
+                if pic:
+                    # Each picture position gets unique key (never merge)
+                    key = f"{bc.lower()}||pic||{pic.lower()}||{r.get('id')}"
                 else:
-                    key = f"{bc.lower()}||{pos.lower()}"
+                    # Shelf code items: merge by barcode + item_position
+                    pos = (r.get('item_position') or '').strip()
+                    if not bc:
+                        key = f"__{id(r)}_{len(merged)}"
+                    else:
+                        key = f"{bc.lower()}||shelf||{pos.lower()}"
+                
                 if key not in merged:
                     merged[key] = r.copy()
                     # normalize quantity
