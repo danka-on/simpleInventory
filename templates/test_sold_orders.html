@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.ico') }}">
+    <title>Test Sold Orders - Sweet Shelves</title>
+    <style>
+        :root {
+            --primary: #0984e3;
+            --accent: #00b894;
+            --bg: #f9f9f9;
+            --card: #fff;
+            --border: #e0e0e0;
+            --radius: 14px;
+        }
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background: var(--bg);
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px 16px 80px 16px;
+        }
+        h1 {
+            margin: 0 0 18px 0;
+            font-weight: 600;
+            color: #2c3e50;
+            text-align: center;
+        }
+        .form-card {
+            background: var(--card);
+            border-radius: var(--radius);
+            padding: 24px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+            border: 1px solid var(--border);
+            margin-top: 20px;
+        }
+        .form-group {
+            margin-bottom: 16px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 6px;
+            color: #555;
+            font-weight: 500;
+            font-size: 0.9rem;
+        }
+        .form-group input,
+        .form-group select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 1rem;
+            box-sizing: border-box;
+        }
+        .form-group input:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+        .form-group small {
+            display: block;
+            margin-top: 4px;
+            color: #888;
+            font-size: 0.8rem;
+        }
+        .btn-submit {
+            background: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 14px 24px;
+            font-size: 1rem;
+            font-weight: 500;
+            cursor: pointer;
+            width: 100%;
+            transition: background 0.2s;
+        }
+        .btn-submit:hover {
+            background: var(--accent);
+        }
+        .btn-submit:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .message {
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            display: none;
+        }
+        .message.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+            display: block;
+        }
+        .message.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+            display: block;
+        }
+        @media (max-width: 480px) {
+            .container {
+                padding: 16px 12px 80px 12px;
+            }
+            .form-card {
+                padding: 18px;
+            }
+        }
+    </style>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+</head>
+<body>
+    <div class="container">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
+            <a href="/tools" style="text-decoration:none;">
+                <button style="background:#e74c3c;color:#fff;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;display:flex;align-items:center;gap:8px;">
+                    <i class="fas fa-arrow-left"></i> Back
+                </button>
+            </a>
+            <h1 style="flex:1;text-align:center;margin:0;">Test Sold Orders</h1>
+            <div style="width:84px"></div>
+        </div>
+
+        <div id="message" class="message"></div>
+
+        <div class="form-card">
+            <form id="testOrderForm">
+                <div class="form-group">
+                    <label for="barcode">Barcode / UPC *</label>
+                    <input type="text" id="barcode" name="barcode" required>
+                    <small>Item barcode - must exist in searchRack.db for location lookup</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="title">Title *</label>
+                    <input type="text" id="title" name="title" required>
+                    <small>Item description/title</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="quantity">Quantity</label>
+                    <input type="number" id="quantity" name="quantity" value="1" min="1">
+                </div>
+
+                <div class="form-group">
+                    <label for="price">Price</label>
+                    <input type="number" id="price" name="price" value="10.00" step="0.01" min="0">
+                </div>
+
+                <div class="form-group">
+                    <label for="store">Store *</label>
+                    <select id="store" name="store" required>
+                        <option value="test">Test</option>
+                        <option value="amazon">Amazon</option>
+                        <option value="ebay">eBay</option>
+                        <option value="marketplace">Marketplace</option>
+                    </select>
+                    <small>Source marketplace (use "test" for testing)</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="shipping_name">Shipping Name *</label>
+                    <input type="text" id="shipping_name" name="shipping_name" value="Test Customer" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="shipping_street1">Street Address</label>
+                    <input type="text" id="shipping_street1" name="shipping_street1" value="123 Test St">
+                </div>
+
+                <div class="form-group">
+                    <label for="shipping_city">City</label>
+                    <input type="text" id="shipping_city" name="shipping_city" value="Test City">
+                </div>
+
+                <div class="form-group">
+                    <label for="shipping_state">State</label>
+                    <input type="text" id="shipping_state" name="shipping_state" value="CA">
+                </div>
+
+                <div class="form-group">
+                    <label for="shipping_postal_code">Postal Code</label>
+                    <input type="text" id="shipping_postal_code" name="shipping_postal_code" value="12345">
+                </div>
+
+                <button type="submit" class="btn-submit">
+                    <i class="fas fa-plus-circle"></i> Create Test Order
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        const form = document.getElementById('testOrderForm');
+        const messageDiv = document.getElementById('message');
+        const submitBtn = form.querySelector('button[type="submit"]');
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            // Disable submit button
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creating...';
+            
+            // Hide previous messages
+            messageDiv.style.display = 'none';
+            messageDiv.className = 'message';
+            
+            // Gather form data
+            const formData = new FormData(form);
+            const data = Object.fromEntries(formData.entries());
+            
+            try {
+                const response = await fetch('/api/test-sold-order', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(data)
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    messageDiv.className = 'message success';
+                    messageDiv.textContent = `✓ Test order created successfully! Order ID: ${result.order_id}. Check your Ready to Ship window.`;
+                    messageDiv.style.display = 'block';
+                    
+                    // Reset form after 2 seconds
+                    setTimeout(() => {
+                        form.reset();
+                        messageDiv.style.display = 'none';
+                    }, 3000);
+                } else {
+                    throw new Error(result.error || 'Unknown error');
+                }
+            } catch (error) {
+                messageDiv.className = 'message error';
+                messageDiv.textContent = `✗ Error: ${error.message}`;
+                messageDiv.style.display = 'block';
+            } finally {
+                // Re-enable submit button
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = '<i class="fas fa-plus-circle"></i> Create Test Order';
+            }
+        });
+    </script>
+</body>
+</html>

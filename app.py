@@ -4114,14 +4114,37 @@ def get_amazon_orders():
 @app.route('/sold-orders', methods=['GET'])
 def sold_orders():
     days = int(request.args.get('days', 1))
-    conn = sqlite3.connect('sold.db')
-    conn.row_factory = sqlite3.Row
-    cur = conn.cursor()
+    
+    # Get orders from sold.db
+    sold_conn = sqlite3.connect('sold.db')
+    sold_conn.row_factory = sqlite3.Row
+    sold_cur = sold_conn.cursor()
     # Only show orders from the last N days
-    cur.execute('''SELECT * FROM orders WHERE paid_time >= date('now', '-' || ? || ' days') ORDER BY paid_time DESC''', (days,))
-    orders = cur.fetchall()
-    conn.close()
-    return jsonify([dict(order) for order in orders])
+    sold_cur.execute('''SELECT * FROM orders WHERE paid_time >= date('now', '-' || ? || ' days') ORDER BY paid_time DESC''', (days,))
+    orders = sold_cur.fetchall()
+    sold_conn.close()
+    
+    # Enrich with location from searchRack.db
+    rack_conn = sqlite3.connect('searchRack.db')
+    rack_conn.row_factory = sqlite3.Row
+    rack_cur = rack_conn.cursor()
+    
+    result = []
+    for order in orders:
+        order_dict = dict(order)
+        
+        # If location is empty and barcode exists, look it up in searchRack
+        if (not order_dict.get('location') or order_dict.get('location', '').strip() == '') and order_dict.get('barcode'):
+            rack_cur.execute('SELECT ITEM_POSITION, PICTUREPOSITION FROM SEARCHRACK WHERE BARCODE = ? COLLATE NOCASE', (order_dict['barcode'],))
+            rack_row = rack_cur.fetchone()
+            if rack_row:
+                # Use ITEM_POSITION as location (area code), fallback to PICTUREPOSITION
+                order_dict['location'] = rack_row['ITEM_POSITION'] or rack_row['PICTUREPOSITION']
+        
+        result.append(order_dict)
+    
+    rack_conn.close()
+    return jsonify(result)
 
 
 @app.route('/get-order', methods=['GET'])
@@ -6850,6 +6873,78 @@ def api_marketplace_sale_update(sale_id):
             price=data.get('price')
         )
         return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# ============================================================================
+# TEST SOLD ORDERS
+# ============================================================================
+@app.route('/test-sold-orders')
+def test_sold_orders_page():
+    """Test sold orders page for creating test orders."""
+    return render_template('test_sold_orders.html')
+
+@app.route('/api/test-sold-order', methods=['POST'])
+def api_create_test_sold_order():
+    """Create a test order in sold.db for testing purposes."""
+    try:
+        data = request.get_json() or {}
+        
+        # Validate required fields
+        required_fields = ['barcode', 'title', 'shipping_name']
+        for field in required_fields:
+            if not data.get(field):
+                return jsonify({'success': False, 'error': f'Missing required field: {field}'}), 400
+        
+        # Build order data
+        barcode = data.get('barcode', '').strip()
+        title = data.get('title', '').strip()
+        quantity = int(data.get('quantity', 1))
+        price = float(data.get('price', 10.0))
+        store = data.get('store', 'test').strip()
+        shipping_name = data.get('shipping_name', '').strip()
+        shipping_street1 = data.get('shipping_street1', '').strip()
+        shipping_city = data.get('shipping_city', '').strip()
+        shipping_state = data.get('shipping_state', '').strip()
+        shipping_postal_code = data.get('shipping_postal_code', '').strip()
+        
+        # Generate test order_id
+        import random
+        import time
+        order_id = f"TEST-{int(time.time())}-{random.randint(1000, 9999)}"
+        
+        # Insert into sold.db
+        import datetime
+        paid_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        
+        conn = sqlite3.connect('sold.db')
+        cur = conn.cursor()
+        
+        cur.execute('''
+            INSERT INTO orders (
+                order_id, item_id, title, quantity, price, 
+                shipping_name, shipping_street1, shipping_city, 
+                shipping_state, shipping_postal_code, shipping_country,
+                paid_time, barcode, store, isHandled, rackupdated
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', 0)
+        ''', (
+            order_id, order_id, title, quantity, price,
+            shipping_name, shipping_street1, shipping_city,
+            shipping_state, shipping_postal_code, 'US',
+            paid_time, barcode, store
+        ))
+        
+        conn.commit()
+        inserted_id = cur.lastrowid
+        conn.close()
+        
+        return jsonify({
+            'success': True, 
+            'order_id': order_id,
+            'id': inserted_id,
+            'message': 'Test order created successfully'
+        })
+        
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
