@@ -6561,12 +6561,26 @@ def sync_missing_upcs(max_items=50):
         except:
             pass
         
+        # Get retry interval from sync settings (use sync_interval in minutes)
+        # Default to 60 minutes if not set
+        retry_minutes = 60
+        try:
+            settings_conn = sqlite3.connect('sync_settings.db')
+            settings_cur = settings_conn.cursor()
+            settings_cur.execute('SELECT value FROM sync_status WHERE key = ?', ('sync_interval',))
+            row = settings_cur.fetchone()
+            if row:
+                retry_minutes = int(row[0])
+            settings_conn.close()
+        except:
+            pass  # Use default if settings not available
+        
         # Find items that need UPC fetching using smart tracking:
         # - upc_fetch_attempted = 0 (never tried) OR
-        # - upc_fetch_attempted = 2 AND last fetch > 7 days ago (retry after error)
+        # - upc_fetch_attempted = 2 AND last fetch > retry_interval ago (retry after error)
         # - EXCLUDE upc_fetch_attempted = 1 (no UPC exists, skip forever)
         # - EXCLUDE upc_fetch_attempted = 3 (successfully fetched)
-        seven_days_ago = (datetime.now() - timedelta(days=7)).isoformat()
+        retry_threshold = (datetime.now() - timedelta(minutes=retry_minutes)).isoformat()
         
         cur.execute('''
             SELECT ASIN FROM ITEMS 
@@ -6578,7 +6592,7 @@ def sync_missing_upcs(max_items=50):
             )
             ORDER BY upc_last_fetch_date ASC NULLS FIRST
             LIMIT ?
-        ''', (seven_days_ago, max_items))
+        ''', (retry_threshold, max_items))
         items_without_upcs = [row[0] for row in cur.fetchall()]
     except Exception as e:
         print(f"❌ Database error in sync_missing_upcs: {e}")
@@ -6611,14 +6625,15 @@ def sync_missing_upcs(max_items=50):
             items_processed += 1
             
             if not catalog_data:
-                # API error - mark for retry after 7 days (status 2)
+                # API error - mark for retry based on sync interval (status 2)
                 cur.execute('''
                     UPDATE ITEMS 
                     SET upc_fetch_attempted = 2, 
                         upc_last_fetch_date = ? 
                     WHERE ASIN = ?
                 ''', (datetime.now().isoformat(), asin))
-                print(f"⚠️ [{i}/{len(items_without_upcs)}] {asin}: No catalog data (will retry in 7 days)")
+                retry_text = f"{retry_minutes} minutes" if retry_minutes < 60 else f"{retry_minutes // 60} hours"
+                print(f"⚠️ [{i}/{len(items_without_upcs)}] {asin}: No catalog data (will retry in {retry_text})")
                 conn.commit()
                 time.sleep(0.5)
                 continue
@@ -6674,7 +6689,7 @@ def sync_missing_upcs(max_items=50):
             time.sleep(0.5)
             
         except Exception as e:
-            # API error - mark for retry after 7 days (status 2)
+            # API error - mark for retry based on sync interval (status 2)
             cur.execute('''
                 UPDATE ITEMS 
                 SET upc_fetch_attempted = 2, 
@@ -6682,7 +6697,8 @@ def sync_missing_upcs(max_items=50):
                 WHERE ASIN = ?
             ''', (datetime.now().isoformat(), asin))
             conn.commit()
-            print(f"❌ [{i}/{len(items_without_upcs)}] {asin}: Error - {e} (will retry in 7 days)")
+            retry_text = f"{retry_minutes} minutes" if retry_minutes < 60 else f"{retry_minutes // 60} hours"
+            print(f"❌ [{i}/{len(items_without_upcs)}] {asin}: Error - {e} (will retry in {retry_text})")
             time.sleep(0.5)
     
     conn.close()
