@@ -34,11 +34,11 @@ class AmazonManager:
     
     def get_orders(self, days_back=30, max_results=100):
         """
-        Fetch recent orders from Amazon
+        Fetch recent orders from Amazon with pagination support
         
         Args:
             days_back: Number of days to look back for orders
-            max_results: Maximum number of orders to retrieve
+            max_results: Maximum number of orders to retrieve PER PAGE (Amazon max: 100)
             
         Returns:
             List of order dictionaries
@@ -51,20 +51,43 @@ class AmazonManager:
             
             print(f"🔄 Fetching Amazon orders from last {days_back} days...")
             
-            # Fetch orders
-            response = orders_api.get_orders(
-                CreatedAfter=created_after,
-                MaxResultsPerPage=max_results
-            )
+            all_orders = []
+            next_token = None
+            page = 1
             
-            if response.errors:
-                print(f"❌ Error fetching orders: {response.errors}")
-                return []
+            # Paginate through all orders
+            while True:
+                # Fetch orders page
+                if next_token:
+                    response = orders_api.get_orders(NextToken=next_token)
+                else:
+                    response = orders_api.get_orders(
+                        CreatedAfter=created_after,
+                        MaxResultsPerPage=max_results
+                    )
+                
+                if response.errors:
+                    print(f"❌ Error fetching orders (page {page}): {response.errors}")
+                    break
+                
+                orders = response.payload.get('Orders', [])
+                all_orders.extend(orders)
+                print(f"  📄 Page {page}: Retrieved {len(orders)} orders (total: {len(all_orders)})")
+                
+                # Check for next page
+                next_token = response.payload.get('NextToken')
+                if not next_token:
+                    break  # No more pages
+                
+                page += 1
+                
+                # Rate limiting: Amazon allows 0.0167 requests/second (1 per minute) for Orders API
+                # Wait 2 seconds between pagination calls to be safe
+                import time
+                time.sleep(2)
             
-            orders = response.payload.get('Orders', [])
-            print(f"✅ Retrieved {len(orders)} orders from Amazon")
-            
-            return orders
+            print(f"✅ Retrieved {len(all_orders)} total orders from Amazon")
+            return all_orders
             
         except SellingApiException as e:
             print(f"❌ Amazon API Error: {e}")

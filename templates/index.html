@@ -473,6 +473,12 @@ function tdLocation(order) {
         const thumb = `/static/pictureposition/${locationText}`;
         return `<td class='sold-td-small'><a href="#" class="order-loc-link" data-order-id="${order.id}"><img src="${thumb}" style="max-width:60px;max-height:60px;border-radius:6px;" onerror="this.src='${missingDataUrl}'" loading="lazy"></a></td>`;
     }
+    
+    // If no location, show placeholder
+    if (!locationText) {
+        return `<td class='sold-td-small' style="color:#999;font-style:italic;">—</td>`;
+    }
+    
     return `<td class='sold-td-small'><a href="#" class="order-loc-link" data-order-id="${order.id}">${locationText}</a></td>`;
 }
 

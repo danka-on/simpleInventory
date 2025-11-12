@@ -4125,25 +4125,35 @@ def sold_orders():
     sold_conn.close()
     
     # Enrich with location from searchRack.db
-    rack_conn = sqlite3.connect('searchRack.db')
-    rack_conn.row_factory = sqlite3.Row
-    rack_cur = rack_conn.cursor()
-    
     result = []
-    for order in orders:
-        order_dict = dict(order)
+    try:
+        rack_conn = sqlite3.connect('searchRack.db')
+        rack_conn.row_factory = sqlite3.Row
+        rack_cur = rack_conn.cursor()
         
-        # If location is empty and barcode exists, look it up in searchRack
-        if (not order_dict.get('location') or order_dict.get('location', '').strip() == '') and order_dict.get('barcode'):
-            rack_cur.execute('SELECT ITEM_POSITION, PICTUREPOSITION FROM SEARCHRACK WHERE BARCODE = ? COLLATE NOCASE', (order_dict['barcode'],))
-            rack_row = rack_cur.fetchone()
-            if rack_row:
-                # Use ITEM_POSITION as location (area code), fallback to PICTUREPOSITION
-                order_dict['location'] = rack_row['ITEM_POSITION'] or rack_row['PICTUREPOSITION']
+        for order in orders:
+            order_dict = dict(order)
+            
+            # If location is empty and barcode exists, look it up in searchRack
+            if (not order_dict.get('location') or order_dict.get('location', '').strip() == '') and order_dict.get('barcode'):
+                try:
+                    rack_cur.execute('SELECT ITEM_POSITION, PICTUREPOSITION FROM SEARCHRACK WHERE BARCODE = ? COLLATE NOCASE', (order_dict['barcode'],))
+                    rack_row = rack_cur.fetchone()
+                    if rack_row:
+                        # Use ITEM_POSITION as location (area code), fallback to PICTUREPOSITION
+                        order_dict['location'] = rack_row['ITEM_POSITION'] or rack_row['PICTUREPOSITION']
+                except sqlite3.Error as e:
+                    # If searchRack query fails, just skip location lookup for this order
+                    print(f"Warning: Failed to lookup location for barcode {order_dict['barcode']}: {e}")
+            
+            result.append(order_dict)
         
-        result.append(order_dict)
+        rack_conn.close()
+    except Exception as e:
+        # If searchRack.db is unavailable, return orders without location enrichment
+        print(f"Warning: searchRack.db unavailable, skipping location lookup: {e}")
+        result = [dict(order) for order in orders]
     
-    rack_conn.close()
     return jsonify(result)
 
 
@@ -6522,8 +6532,16 @@ def sync_amazon_listings_api():
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
 
-def sync_missing_upcs():
-    """Sync UPCs for Amazon items that don't have them (where UPC = ASIN)"""
+def sync_missing_upcs(max_items=50):
+    """
+    Sync UPCs for Amazon items that don't have them (where UPC = ASIN)
+    
+    Args:
+        max_items: Maximum number of items to process per run (default 50 to avoid quota issues)
+    
+    Returns:
+        Number of UPCs found
+    """
     import time
     from datetime import datetime, timedelta
     
@@ -6531,23 +6549,41 @@ def sync_missing_upcs():
         conn = sqlite3.connect('amazonStore.db')
         cur = conn.cursor()
         
+        # Ensure tracking columns exist
+        try:
+            cur.execute('ALTER TABLE ITEMS ADD COLUMN upc_fetch_attempted INTEGER DEFAULT 0')
+            conn.commit()
+        except:
+            pass
+        try:
+            cur.execute('ALTER TABLE ITEMS ADD COLUMN upc_last_fetch_date TEXT')
+            conn.commit()
+        except:
+            pass
+        
         # Find items that need UPC fetching using smart tracking:
         # - upc_fetch_attempted = 0 (never tried) OR
         # - upc_fetch_attempted = 2 AND last fetch > 7 days ago (retry after error)
         # - EXCLUDE upc_fetch_attempted = 1 (no UPC exists, skip forever)
+        # - EXCLUDE upc_fetch_attempted = 3 (successfully fetched)
         seven_days_ago = (datetime.now() - timedelta(days=7)).isoformat()
         
         cur.execute('''
             SELECT ASIN FROM ITEMS 
-            WHERE (UPC = ASIN OR UPC IS NULL)
+            WHERE (UPC = ASIN OR UPC IS NULL OR UPC = '')
             AND (
                 upc_fetch_attempted = 0 
-                OR (upc_fetch_attempted = 2 AND upc_last_fetch_date < ?)
+                OR upc_fetch_attempted IS NULL
+                OR (upc_fetch_attempted = 2 AND (upc_last_fetch_date IS NULL OR upc_last_fetch_date < ?))
             )
-        ''', (seven_days_ago,))
+            ORDER BY upc_last_fetch_date ASC NULLS FIRST
+            LIMIT ?
+        ''', (seven_days_ago, max_items))
         items_without_upcs = [row[0] for row in cur.fetchall()]
     except Exception as e:
         print(f"❌ Database error in sync_missing_upcs: {e}")
+        import traceback
+        traceback.print_exc()
         raise
     
     if not items_without_upcs:
@@ -6555,7 +6591,7 @@ def sync_missing_upcs():
         print("✅ No items need UPC fetching (using smart tracking)")
         return 0
     
-    print(f"🔍 Found {len(items_without_upcs)} items without UPCs. Fetching...")
+    print(f"🔍 Found {len(items_without_upcs)} items without UPCs (limited to {max_items}). Fetching...")
     
     try:
         amazon = AmazonManager()
@@ -6566,13 +6602,25 @@ def sync_missing_upcs():
         raise
     
     upcs_found = 0
+    items_processed = 0
     
     for i, asin in enumerate(items_without_upcs, 1):
         try:
             # Get catalog item
             catalog_data = amazon.get_catalog_item(asin)
+            items_processed += 1
             
             if not catalog_data:
+                # API error - mark for retry after 7 days (status 2)
+                cur.execute('''
+                    UPDATE ITEMS 
+                    SET upc_fetch_attempted = 2, 
+                        upc_last_fetch_date = ? 
+                    WHERE ASIN = ?
+                ''', (datetime.now().isoformat(), asin))
+                print(f"⚠️ [{i}/{len(items_without_upcs)}] {asin}: No catalog data (will retry in 7 days)")
+                conn.commit()
+                time.sleep(0.5)
                 continue
             
             upc = None
@@ -6618,7 +6666,11 @@ def sync_missing_upcs():
                 ''', (datetime.now().isoformat(), asin))
                 print(f"⚠️ [{i}/{len(items_without_upcs)}] {asin}: No UPC found (marked to skip)")
             
-            # Rate limiting: 2 requests per second max
+            # Commit after each item to preserve progress
+            conn.commit()
+            
+            # Rate limiting: Catalog Items API allows 2 requests per second
+            # Use 0.5 second delay to be safe (2 per second)
             time.sleep(0.5)
             
         except Exception as e:
@@ -6629,13 +6681,13 @@ def sync_missing_upcs():
                     upc_last_fetch_date = ? 
                 WHERE ASIN = ?
             ''', (datetime.now().isoformat(), asin))
+            conn.commit()
             print(f"❌ [{i}/{len(items_without_upcs)}] {asin}: Error - {e} (will retry in 7 days)")
             time.sleep(0.5)
     
-    conn.commit()
     conn.close()
     
-    print(f"\n✅ UPC sync complete: {upcs_found} UPCs found for {len(items_without_upcs)} items")
+    print(f"\n✅ UPC sync complete: {upcs_found} UPCs found from {items_processed} items checked")
     return upcs_found
 
 @app.route('/api/sync/amazon-upcs', methods=['POST'])
@@ -6897,10 +6949,24 @@ def api_create_test_sold_order():
                 return jsonify({'success': False, 'error': f'Missing required field: {field}'}), 400
         
         # Build order data
-        barcode = data.get('barcode', '').strip()
+        barcode = _normalize_upc(data.get('barcode', '').strip())
         title = data.get('title', '').strip()
-        quantity = int(data.get('quantity', 1))
-        price = float(data.get('price', 10.0))
+        
+        # Validate numeric fields
+        try:
+            quantity = int(data.get('quantity', 1))
+            if quantity < 1:
+                quantity = 1
+        except (ValueError, TypeError):
+            quantity = 1
+        
+        try:
+            price = float(data.get('price', 10.0))
+            if price < 0:
+                price = 0.0
+        except (ValueError, TypeError):
+            price = 10.0
+        
         store = data.get('store', 'test').strip()
         shipping_name = data.get('shipping_name', '').strip()
         shipping_street1 = data.get('shipping_street1', '').strip()
@@ -6948,6 +7014,154 @@ def api_create_test_sold_order():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
+# ============================================================================
+# AUTO-SYNC BACKGROUND THREAD
+# ============================================================================
+def auto_sync_worker():
+    """Background thread that runs auto-sync based on settings"""
+    print("🔄 Auto-sync worker started")
+    
+    while True:
+        try:
+            # Check if auto-sync is enabled
+            conn = sqlite3.connect('sync_settings.db')
+            cur = conn.cursor()
+            
+            # Create table if not exists
+            cur.execute('''CREATE TABLE IF NOT EXISTS sync_status (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )''')
+            
+            cur.execute('SELECT value FROM sync_status WHERE key = ?', ('auto_sync_enabled',))
+            row = cur.fetchone()
+            auto_sync_enabled = row and row[0] == 'true'
+            
+            if not auto_sync_enabled:
+                conn.close()
+                # Check every 60 seconds if auto-sync is enabled
+                time.sleep(60)
+                continue
+            
+            # Get sync interval (in minutes)
+            cur.execute('SELECT value FROM sync_status WHERE key = ?', ('sync_interval',))
+            row = cur.fetchone()
+            sync_interval = int(row[0]) if row else 60
+            
+            # Get last sync time
+            cur.execute('SELECT value FROM sync_status WHERE key = ?', ('last_auto_sync',))
+            row = cur.fetchone()
+            last_sync = row[0] if row else None
+            
+            conn.close()
+            
+            # Check if it's time to sync
+            from datetime import datetime, timedelta
+            now = datetime.now()
+            should_sync = False
+            
+            if not last_sync:
+                should_sync = True
+                print(f"🔄 Auto-sync: First sync (never synced before)")
+            else:
+                last_sync_dt = datetime.fromisoformat(last_sync)
+                time_since_sync = (now - last_sync_dt).total_seconds() / 60  # minutes
+                
+                if time_since_sync >= sync_interval:
+                    should_sync = True
+                    print(f"🔄 Auto-sync: {time_since_sync:.1f} minutes since last sync (interval: {sync_interval})")
+            
+            if should_sync:
+                print(f"🔄 Starting auto-sync at {now.strftime('%Y-%m-%d %H:%M:%S')}")
+                
+                # Sync eBay orders
+                try:
+                    print("  📦 Syncing eBay orders...")
+                    orders()
+                    update_sync_timestamp('ebay_orders')
+                    print("  ✅ eBay orders synced")
+                except Exception as e:
+                    print(f"  ⚠️ eBay orders sync failed: {e}")
+                
+                # Sync eBay listings (searchRack)
+                try:
+                    print("  📋 Syncing eBay listings...")
+                    from DBmanager import enrich_searchrack_db
+                    enrich_searchrack_db(batch_size=500, do_backup=False)
+                    update_sync_timestamp('ebay_listings')
+                    print("  ✅ eBay listings synced")
+                except Exception as e:
+                    print(f"  ⚠️ eBay listings sync failed: {e}")
+                
+                # Sync Amazon if available
+                if AMAZON_AVAILABLE:
+                    try:
+                        print("  📦 Syncing Amazon orders...")
+                        amazon = AmazonManager()
+                        amazon.sync_orders_to_db(days_back=30)
+                        
+                        from DBmanager import enrich_amazon_sold_images
+                        enrich_amazon_sold_images()
+                        
+                        from DBmanager import process_sold_orders_inventory_reduction
+                        process_sold_orders_inventory_reduction()
+                        update_sync_timestamp('amazon_orders')
+                        print("  ✅ Amazon orders synced")
+                    except Exception as e:
+                        print(f"  ⚠️ Amazon orders sync failed: {e}")
+                    
+                    try:
+                        print("  📋 Syncing Amazon listings...")
+                        amazon = AmazonManager()
+                        amazon.sync_listings_to_db()
+                        update_sync_timestamp('amazon_listings')
+                        print("  ✅ Amazon listings synced")
+                    except Exception as e:
+                        print(f"  ⚠️ Amazon listings sync failed: {e}")
+                    
+                    # Check if auto UPC is enabled
+                    conn = sqlite3.connect('sync_settings.db')
+                    cur = conn.cursor()
+                    cur.execute('SELECT value FROM sync_status WHERE key = ?', ('auto_upc_enabled',))
+                    row = cur.fetchone()
+                    auto_upc = row and row[0] == 'true'
+                    conn.close()
+                    
+                    if auto_upc:
+                        try:
+                            print("  🔍 Fetching Amazon UPCs...")
+                            # Call the correct function with max_items limit
+                            upcs_found = sync_missing_upcs(max_items=50)
+                            update_sync_timestamp('amazon_upcs')
+                            print(f"  ✅ Amazon UPCs fetched: {upcs_found} found")
+                        except Exception as e:
+                            print(f"  ⚠️ Amazon UPCs fetch failed: {e}")
+                
+                # Update last auto-sync timestamp
+                conn = sqlite3.connect('sync_settings.db')
+                cur = conn.cursor()
+                cur.execute('INSERT OR REPLACE INTO sync_status (key, value) VALUES (?, ?)', 
+                           ('last_auto_sync', now.isoformat()))
+                conn.commit()
+                conn.close()
+                
+                print(f"✅ Auto-sync completed at {now.strftime('%Y-%m-%d %H:%M:%S')}")
+            
+            # Sleep for 1 minute before checking again
+            time.sleep(60)
+            
+        except Exception as e:
+            print(f"❌ Auto-sync worker error: {e}")
+            import traceback
+            traceback.print_exc()
+            time.sleep(60)  # Wait before retrying
+
+def _start_auto_sync_thread():
+    """Start the auto-sync background thread"""
+    auto_sync_thread = threading.Thread(target=auto_sync_worker, daemon=True)
+    auto_sync_thread.start()
+    print("🚀 Auto-sync thread started")
+
 if __name__ == "__main__":
     # Enable WAL mode for all databases (better concurrent performance)
     enable_wal_mode()
@@ -6968,8 +7182,12 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Warning: orders() failed: {e}")
     # finalize_barcodes()  # Skip for testing
+    
     # Start trash purger daily
     _start_trash_purger_thread()
+    
+    # Start auto-sync background thread
+    _start_auto_sync_thread()
 
     # Keep main thread alive
     while True:

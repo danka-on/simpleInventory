@@ -227,6 +227,12 @@
                     body: JSON.stringify(data)
                 });
                 
+                // Check if response is OK (200-299)
+                if (!response.ok) {
+                    const result = await response.json().catch(() => ({ error: `Server error: ${response.status}` }));
+                    throw new Error(result.error || `HTTP ${response.status}`);
+                }
+                
                 const result = await response.json();
                 
                 if (result.success) {
