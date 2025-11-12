@@ -136,18 +136,25 @@ def addToSearchRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITI
         barcode_norm = str(BARCODE).strip()
         position_norm = str(ITEM_POSITION).strip()
         
-        # Check if same barcode at same location exists
-        cursor.execute("""
-            SELECT ID, QUANTITY FROM SEARCHRACK 
-            WHERE TRIM(BARCODE) = ? COLLATE NOCASE 
-            AND TRIM(ITEM_POSITION) = ? COLLATE NOCASE
-        """, (barcode_norm, position_norm))
-        existing_same_location = cursor.fetchone()
+        # Picture position items are ALWAYS unique - never increment quantity
+        # Only shelf code items with same barcode should increment quantity
+        has_picture = PICTUREPOSITION and str(PICTUREPOSITION).strip()
+        
+        existing_same_location = None
+        if not has_picture:
+            # Only check for existing entry if this is a shelf code item (not picture position)
+            cursor.execute("""
+                SELECT ID, QUANTITY FROM SEARCHRACK 
+                WHERE TRIM(BARCODE) = ? COLLATE NOCASE 
+                AND TRIM(ITEM_POSITION) = ? COLLATE NOCASE
+                AND (PICTUREPOSITION IS NULL OR TRIM(PICTUREPOSITION) = '')
+            """, (barcode_norm, position_norm))
+            existing_same_location = cursor.fetchone()
         
         now_iso = datetime.datetime.utcnow().isoformat()
         
         if existing_same_location:
-            # Same barcode at same location - increment quantity by 1
+            # Same barcode at same shelf location - increment quantity by 1
             existing_id, existing_qty = existing_same_location
             new_qty = (existing_qty or 0) + 1
             
@@ -164,12 +171,15 @@ def addToSearchRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITI
             """, (new_qty, title, itemid, image, now_iso, existing_id))
             action = f"incremented quantity to {new_qty} for barcode={barcode_norm}, position={position_norm}"
         else:
-            # Different location or new barcode - create new record
+            # Picture position item OR different location OR new barcode - always create new record
             cursor.execute("""
                 INSERT INTO SEARCHRACK (TITLE, BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION, ITEMID, QUANTITY, IMAGE, CREATED_AT) 
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (title, barcode_norm, position_norm, IMAGES, PICTUREPOSITION, itemid, 1, image, now_iso))
-            action = "added new entry"
+            if has_picture:
+                action = f"added new picture position entry (always unique): barcode={barcode_norm}, picture={PICTUREPOSITION}"
+            else:
+                action = f"added new shelf entry: barcode={barcode_norm}, position={position_norm}"
             
         conn.commit()
         print(f"{action} to searchRack: position={ITEM_POSITION}, barcode={BARCODE}, title={title}")

@@ -3242,23 +3242,42 @@ def position_diagnostic():
                         CREATED_AT TEXT
                     )
                 ''')
-                # Check if entry exists
-                search_cur.execute('SELECT ID FROM SEARCHRACK WHERE BARCODE = ? COLLATE NOCASE', (upc,))
-                existing_sr = search_cur.fetchone()
                 
-                if existing_sr:
-                    # Update existing
+                # Picture position items should ALWAYS be separate entries (never update existing)
+                # Shelf code items with same barcode should append QTY
+                has_picture = pictureposition and pictureposition.strip()
+                
+                if has_picture:
+                    # Picture position: ALWAYS insert new entry (never update existing)
                     search_cur.execute('''
-                        UPDATE SEARCHRACK 
-                        SET ITEM_POSITION = ?, PICTUREPOSITION = ?, TITLE = ?, CREATED_AT = ?
-                        WHERE BARCODE = ? COLLATE NOCASE
-                    ''', (location, pictureposition, title, ts, upc))
+                        INSERT INTO SEARCHRACK (TITLE, BARCODE, ITEM_POSITION, PICTUREPOSITION, CREATED_AT, QUANTITY)
+                        VALUES (?, ?, ?, ?, ?, 1)
+                    ''', (title, upc, location or 'picture', pictureposition, ts))
                 else:
-                    # Insert new
+                    # Shelf code: Check if entry exists with same barcode and location
                     search_cur.execute('''
-                        INSERT INTO SEARCHRACK (TITLE, BARCODE, ITEM_POSITION, PICTUREPOSITION, CREATED_AT)
-                        VALUES (?, ?, ?, ?, ?)
-                    ''', (title, upc, location, pictureposition, ts))
+                        SELECT ID, QUANTITY FROM SEARCHRACK 
+                        WHERE BARCODE = ? COLLATE NOCASE 
+                        AND ITEM_POSITION = ? COLLATE NOCASE
+                        AND (PICTUREPOSITION IS NULL OR TRIM(PICTUREPOSITION) = '')
+                    ''', (upc, location))
+                    existing_sr = search_cur.fetchone()
+                    
+                    if existing_sr:
+                        # Update existing shelf entry: increment quantity
+                        existing_id, existing_qty = existing_sr
+                        new_qty = (existing_qty or 0) + 1
+                        search_cur.execute('''
+                            UPDATE SEARCHRACK 
+                            SET QUANTITY = ?, TITLE = ?, CREATED_AT = ?
+                            WHERE ID = ?
+                        ''', (new_qty, title, ts, existing_id))
+                    else:
+                        # Insert new shelf entry
+                        search_cur.execute('''
+                            INSERT INTO SEARCHRACK (TITLE, BARCODE, ITEM_POSITION, PICTUREPOSITION, CREATED_AT, QUANTITY)
+                            VALUES (?, ?, ?, ?, ?, 1)
+                        ''', (title, upc, location, '', ts))
                 
                 search_conn.commit()
                 search_conn.close()
@@ -6532,12 +6551,12 @@ def sync_amazon_listings_api():
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
 
-def sync_missing_upcs(max_items=50):
+def sync_missing_upcs(max_items=25):
     """
     Sync UPCs for Amazon items that don't have them (where UPC = ASIN)
     
     Args:
-        max_items: Maximum number of items to process per run (default 50 to avoid quota issues)
+        max_items: Maximum number of items to process per run (default 25 to avoid quota issues)
     
     Returns:
         Number of UPCs found
@@ -6618,6 +6637,8 @@ def sync_missing_upcs(max_items=50):
     upcs_found = 0
     items_processed = 0
     
+    quota_exceeded_count = 0
+    
     for i, asin in enumerate(items_without_upcs, 1):
         try:
             # Get catalog item
@@ -6635,7 +6656,7 @@ def sync_missing_upcs(max_items=50):
                 retry_text = f"{retry_minutes} minutes" if retry_minutes < 60 else f"{retry_minutes // 60} hours"
                 print(f"⚠️ [{i}/{len(items_without_upcs)}] {asin}: No catalog data (will retry in {retry_text})")
                 conn.commit()
-                time.sleep(0.5)
+                time.sleep(1.0)  # Increased delay
                 continue
             
             upc = None
@@ -6685,10 +6706,18 @@ def sync_missing_upcs(max_items=50):
             conn.commit()
             
             # Rate limiting: Catalog Items API allows 2 requests per second
-            # Use 0.5 second delay to be safe (2 per second)
-            time.sleep(0.5)
+            # Use 1 second delay to avoid quota exhaustion (1 per second is safer)
+            time.sleep(1.0)
             
         except Exception as e:
+            # Check if quota exceeded
+            error_str = str(e)
+            if 'QuotaExceeded' in error_str or 'quota' in error_str.lower():
+                quota_exceeded_count += 1
+                print(f"⚠️ [{i}/{len(items_without_upcs)}] {asin}: Quota exceeded, stopping UPC sync")
+                print(f"💡 {upcs_found} UPCs fetched before hitting quota. Will retry remaining items in {retry_minutes} minutes.")
+                break  # Stop processing to avoid further quota violations
+            
             # API error - mark for retry based on sync interval (status 2)
             cur.execute('''
                 UPDATE ITEMS 
@@ -6699,11 +6728,17 @@ def sync_missing_upcs(max_items=50):
             conn.commit()
             retry_text = f"{retry_minutes} minutes" if retry_minutes < 60 else f"{retry_minutes // 60} hours"
             print(f"❌ [{i}/{len(items_without_upcs)}] {asin}: Error - {e} (will retry in {retry_text})")
-            time.sleep(0.5)
+            time.sleep(1.0)  # Increased delay
     
     conn.close()
     
-    print(f"\n✅ UPC sync complete: {upcs_found} UPCs found from {items_processed} items checked")
+    if quota_exceeded_count > 0:
+        print(f"\n⚠️ UPC sync stopped: Amazon API quota exceeded")
+        print(f"✅ Progress saved: {upcs_found} UPCs found from {items_processed} items checked")
+        print(f"💡 Remaining items will be retried in {retry_minutes} minutes")
+    else:
+        print(f"\n✅ UPC sync complete: {upcs_found} UPCs found from {items_processed} items checked")
+    
     return upcs_found
 
 @app.route('/api/sync/amazon-upcs', methods=['POST'])
@@ -7111,10 +7146,18 @@ def auto_sync_worker():
                 
                 # Sync Amazon if available
                 if AMAZON_AVAILABLE:
+                    # Get orders lookback setting
+                    conn = sqlite3.connect('sync_settings.db')
+                    cur = conn.cursor()
+                    cur.execute('SELECT value FROM sync_status WHERE key = ?', ('orders_lookback',))
+                    row = cur.fetchone()
+                    orders_lookback = int(row[0]) if row else 30
+                    conn.close()
+                    
                     try:
                         print("  📦 Syncing Amazon orders...")
                         amazon = AmazonManager()
-                        amazon.sync_orders_to_db(days_back=30)
+                        amazon.sync_orders_to_db(days_back=orders_lookback)
                         
                         from DBmanager import enrich_amazon_sold_images
                         enrich_amazon_sold_images()
@@ -7146,8 +7189,8 @@ def auto_sync_worker():
                     if auto_upc:
                         try:
                             print("  🔍 Fetching Amazon UPCs...")
-                            # Call the correct function with max_items limit
-                            upcs_found = sync_missing_upcs(max_items=50)
+                            # Call the correct function with max_items limit (reduced to 25 to avoid quota issues)
+                            upcs_found = sync_missing_upcs(max_items=25)
                             update_sync_timestamp('amazon_upcs')
                             print(f"  ✅ Amazon UPCs fetched: {upcs_found} found")
                         except Exception as e:
