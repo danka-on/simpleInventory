@@ -1284,20 +1284,30 @@ def api_bol_lookup():
             cur.execute('ALTER TABLE bol_items ADD COLUMN temporary INTEGER DEFAULT 0')
             conn.commit()
         
-        # Check if this UPC already exists and has been processed
-        cur.execute("SELECT id, upc, item_description, image_url, lot_number, bol_number, import_date, temporary FROM bol_items WHERE upc = ? COLLATE NOCASE", (upc,))
+        # Check if this UPC already exists - ORDER BY import_date DESC to get newest LOT first
+        cur.execute("""
+            SELECT id, upc, item_description, image_url, lot_number, bol_number, import_date, temporary 
+            FROM bol_items 
+            WHERE upc = ? COLLATE NOCASE 
+            ORDER BY import_date DESC, id DESC
+        """, (upc,))
         rows = cur.fetchall()
         
         if not rows:
             conn.close()
             return jsonify({'found': False})
         
-        # Find if there's already a permanent entry (temporary = 0 or NULL)
+        # Find the newest permanent entry (temporary = 0 or NULL)
+        # Since rows are sorted by import_date DESC, the first permanent row is the newest LOT
         permanent_row = None
         for r in rows:
             if not r['temporary']:
                 permanent_row = r
                 break
+        
+        if not permanent_row:
+            # All rows are temporary (shouldn't happen, but handle gracefully)
+            permanent_row = rows[0]
         
         # Check if this item has already been prepped (exists in items_prep_status table)
         # Check for both exact match AND any suffixed versions (e.g., 719978859014, 719978859014-1, etc.)
@@ -1309,6 +1319,7 @@ def api_bol_lookup():
             status_row = cur.fetchone()
             has_prep_record = status_row is not None
             print(f'[DEBUG] BOL lookup for {upc}: has_prep_record={has_prep_record}, status={status_row["status"] if status_row else None}')
+            print(f'[DEBUG] Using NEWEST LOT: lot_number={permanent_row["lot_number"]}, import_date={permanent_row["import_date"]}')
         
         # Only create a suffixed entry if the item already has a prep record
         if permanent_row and has_prep_record:
@@ -1345,8 +1356,8 @@ def api_bol_lookup():
                 # Suffix is clean
                 break
             
-            # Create temporary duplicate entry
-            print(f'[DEBUG] Creating suffixed entry: {suffixed_upc}')
+            # Create temporary duplicate entry using the NEWEST LOT data
+            print(f'[DEBUG] Creating suffixed entry: {suffixed_upc} from NEWEST LOT')
             cur.execute("""
                 INSERT INTO bol_items (upc, item_description, image_url, lot_number, bol_number, import_date, temporary)
                 VALUES (?, ?, ?, ?, ?, ?, 1)
@@ -1367,8 +1378,8 @@ def api_bol_lookup():
                 'is_duplicate': True
             }
         else:
-            # Return the existing row (could be temporary from a previous session)
-            item = dict(rows[0])
+            # Return the existing NEWEST LOT row (no suffix needed)
+            item = dict(permanent_row)
             item['is_duplicate'] = False
         
         conn.close()
@@ -1451,6 +1462,51 @@ def api_items_prep_status():
         
         # GOOD flow - always uses base UPC, tracks quantities explicitly
         if status == 'good':
+            # Check if multiple LOTs exist for this UPC
+            cur.execute('''
+                SELECT lot_number, unchecked_qty, import_date, id
+                FROM bol_items 
+                WHERE upc = ? COLLATE NOCASE 
+                AND (temporary IS NULL OR temporary = 0)
+                AND upc NOT LIKE '%-%'
+                ORDER BY import_date DESC, id DESC
+            ''', (base_upc,))
+            
+            available_lots = cur.fetchall()
+            
+            # Multi-LOT scenario: check if qty exceeds newest LOT's capacity
+            if len(available_lots) > 1:
+                newest_lot = available_lots[0]
+                newest_unchecked = newest_lot[1] or 0
+                
+                if qty > newest_unchecked:
+                    # Calculate default allocation (fill newest first, then older)
+                    allocations = []
+                    remaining = qty
+                    
+                    for lot_number, unchecked, import_date, lot_id in available_lots:
+                        unchecked_avail = unchecked or 0
+                        if unchecked_avail > 0 and remaining > 0:
+                            allocated = min(remaining, unchecked_avail)
+                            allocations.append({
+                                'lot_number': lot_number,
+                                'unchecked_qty': unchecked_avail,
+                                'import_date': import_date,
+                                'default_qty': allocated,
+                                'id': lot_id
+                            })
+                            remaining -= allocated
+                    
+                    conn.close()
+                    return jsonify({
+                        'success': False,
+                        'needs_lot_allocation': True,
+                        'lots': allocations,
+                        'qty_requested': qty,
+                        'message': f'Multiple LOTs available. Newest LOT only has {newest_unchecked} unchecked.'
+                    })
+            
+            # Single LOT or newest LOT has enough - continue with normal Good flow
             # Check base item exists and has enough unchecked
             cur.execute('SELECT good_qty, unchecked_qty, original_qty FROM bol_items WHERE upc = ? COLLATE NOCASE', (base_upc,))
             base_row = cur.fetchone()
@@ -1517,6 +1573,119 @@ def api_items_prep_status():
         print(f'[{status.upper()}] Updated status for {upc}')
         conn.close()
         return jsonify({'success': True, 'upc': upc, 'action': 'updated', 'quantity': qty})
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/items_prep/allocate_lots', methods=['POST'])
+def api_items_prep_allocate_lots():
+    """Handle multi-LOT good marking with qty distribution across LOTs.
+    JSON: { upc, allocations: [{lot_id, qty}], reason, note }
+    """
+    try:
+        data = request.get_json() or {}
+        upc = _normalize_upc(data.get('upc'))
+        allocations = data.get('allocations', [])  # [{lot_id, qty}, ...]
+        reason = (data.get('reason') or '').strip()
+        note = (data.get('note') or '').strip()
+        
+        if not upc or not allocations:
+            return jsonify({'success': False, 'error': 'Missing upc or allocations'}), 400
+        
+        # Strip leading zeros
+        base_upc = upc.lstrip('0') if upc and upc.isdigit() else upc
+        
+        conn = sqlite3.connect('bol.db')
+        cur = conn.cursor()
+        _ensure_items_prep_tables()
+        
+        import datetime
+        ts = datetime.datetime.now(datetime.UTC).isoformat()
+        
+        total_qty_allocated = 0
+        results = []
+        
+        # Process each LOT allocation
+        for alloc in allocations:
+            lot_id = alloc.get('id')
+            qty = int(alloc.get('qty', 0))
+            
+            if qty <= 0:
+                continue
+            
+            # Get LOT details and validate
+            cur.execute('''
+                SELECT lot_number, good_qty, unchecked_qty, original_qty 
+                FROM bol_items 
+                WHERE id = ? AND upc = ? COLLATE NOCASE
+            ''', (lot_id, base_upc))
+            
+            lot_row = cur.fetchone()
+            if not lot_row:
+                conn.close()
+                return jsonify({'success': False, 'error': f'LOT with id {lot_id} not found'}), 404
+            
+            lot_number, current_good, current_unchecked, original_qty = lot_row
+            current_good = current_good or 0
+            current_unchecked = current_unchecked or 0
+            original_qty = original_qty or 0
+            
+            # Validate sufficient unchecked qty
+            if qty > current_unchecked:
+                conn.close()
+                return jsonify({
+                    'success': False,
+                    'error': f'LOT {lot_number}: Cannot mark {qty} as good - only {current_unchecked} unchecked'
+                }), 400
+            
+            # Update quantities for this LOT
+            new_good = current_good + qty
+            new_unchecked = current_unchecked - qty
+            
+            cur.execute('''
+                UPDATE bol_items 
+                SET good_qty = ?, unchecked_qty = ?, quantity = ?
+                WHERE id = ?
+            ''', (new_good, new_unchecked, new_good, lot_id))
+            
+            total_qty_allocated += qty
+            results.append({
+                'lot_number': lot_number,
+                'qty': qty,
+                'good_qty': new_good,
+                'unchecked_qty': new_unchecked
+            })
+            
+            print(f'[GOOD-LOT] {base_upc} LOT {lot_number}: moved {qty} from unchecked to good (good: {current_good}→{new_good}, unchecked: {current_unchecked}→{new_unchecked})')
+        
+        # Update prep status with total quantity across all LOTs
+        cur.execute('''
+            SELECT SUM(good_qty) 
+            FROM bol_items 
+            WHERE upc = ? COLLATE NOCASE AND (temporary IS NULL OR temporary = 0)
+        ''', (base_upc,))
+        total_good = cur.fetchone()[0] or 0
+        
+        cur.execute('SELECT upc FROM items_prep_status WHERE upc = ? AND status = ? COLLATE NOCASE', (base_upc, 'good'))
+        if cur.fetchone():
+            cur.execute('UPDATE items_prep_status SET quantity = ?, updated_at = ? WHERE upc = ? AND status = ? COLLATE NOCASE',
+                       (total_good, ts, base_upc, 'good'))
+        else:
+            cur.execute('INSERT INTO items_prep_status (upc, status, reason, note, quantity, updated_at) VALUES (?,?,?,?,?,?)',
+                       (base_upc, 'good', reason, note, total_good, ts))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'upc': base_upc,
+            'total_qty': total_qty_allocated,
+            'total_good': total_good,
+            'lots_updated': results
+        })
         
     except Exception as e:
         import traceback
