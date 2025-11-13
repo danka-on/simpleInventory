@@ -676,7 +676,7 @@ def _start_trash_purger_thread():
     t.start()
 
 def _ensure_bol_list_status_column():
-    """Ensure bol_items has a list_status column for tracking if item is listed."""
+    """Ensure bol_items has list_status, temporary, and quantity tracking columns."""
     try:
         conn = sqlite3.connect('bol.db')
         cur = conn.cursor()
@@ -686,14 +686,71 @@ def _ensure_bol_list_status_column():
             return
         cur.execute("PRAGMA table_info(bol_items)")
         cols = [r[1] for r in cur.fetchall()]
+        
+        # Add list_status and temporary columns
         if 'list_status' not in cols:
             cur.execute("ALTER TABLE bol_items ADD COLUMN list_status TEXT")
         if 'temporary' not in cols:
             cur.execute("ALTER TABLE bol_items ADD COLUMN temporary INTEGER DEFAULT 0")
+        
+        # NEW: Add quantity tracking columns for robust prep workflow
+        if 'original_qty' not in cols:
+            print("📊 Adding original_qty column and backfilling from quantity...")
+            cur.execute("ALTER TABLE bol_items ADD COLUMN original_qty INTEGER")
+            # Backfill from quantity column
+            cur.execute("UPDATE bol_items SET original_qty = quantity WHERE original_qty IS NULL")
+            
+        if 'good_qty' not in cols:
+            print("✅ Adding good_qty column...")
+            cur.execute("ALTER TABLE bol_items ADD COLUMN good_qty INTEGER DEFAULT 0")
+            # Backfill from items_prep_status for items already marked good
+            cur.execute('''
+                UPDATE bol_items 
+                SET good_qty = (
+                    SELECT COALESCE(quantity, 0) 
+                    FROM items_prep_status 
+                    WHERE items_prep_status.upc = bol_items.upc 
+                    AND items_prep_status.status = 'good'
+                )
+                WHERE EXISTS (
+                    SELECT 1 FROM items_prep_status 
+                    WHERE items_prep_status.upc = bol_items.upc 
+                    AND items_prep_status.status = 'good'
+                )
+            ''')
+            
+        if 'bad_qty' not in cols:
+            print("❌ Adding bad_qty column...")
+            cur.execute("ALTER TABLE bol_items ADD COLUMN bad_qty INTEGER DEFAULT 0")
+            # Calculate bad_qty from suffixed entries
+            cur.execute('''
+                UPDATE bol_items 
+                SET bad_qty = (
+                    SELECT COALESCE(SUM(quantity), 0)
+                    FROM bol_items AS suffixed
+                    WHERE suffixed.upc LIKE bol_items.upc || '-%'
+                    AND suffixed.temporary = 1
+                )
+                WHERE upc NOT LIKE '%-%'
+            ''')
+            
+        if 'unchecked_qty' not in cols:
+            print("📦 Adding unchecked_qty column and calculating from original - good - bad...")
+            cur.execute("ALTER TABLE bol_items ADD COLUMN unchecked_qty INTEGER")
+            # Backfill: original - good - bad = unchecked
+            cur.execute('''
+                UPDATE bol_items 
+                SET unchecked_qty = COALESCE(original_qty, 0) - COALESCE(good_qty, 0) - COALESCE(bad_qty, 0)
+                WHERE unchecked_qty IS NULL
+            ''')
+        
         conn.commit()
         conn.close()
+        print("✅ Quantity tracking columns migrated successfully")
     except Exception as e:
-        print('Failed ensuring list_status and temporary columns in bol_items:', e)
+        print('Failed ensuring quantity columns in bol_items:', e)
+        import traceback
+        traceback.print_exc()
 
 @app.route('/item-prep')
 def item_prep_page():
@@ -1392,47 +1449,59 @@ def api_items_prep_status():
         import datetime
         ts = datetime.datetime.now(datetime.UTC).isoformat()
         
-        # GOOD flow - always uses base UPC
+        # GOOD flow - always uses base UPC, tracks quantities explicitly
         if status == 'good':
-            # Check if base_upc already has a 'good' status
-            cur.execute('SELECT quantity FROM items_prep_status WHERE upc = ? AND status = ? COLLATE NOCASE', (base_upc, 'good'))
-            existing_good = cur.fetchone()
+            # Check base item exists and has enough unchecked
+            cur.execute('SELECT good_qty, unchecked_qty, original_qty FROM bol_items WHERE upc = ? COLLATE NOCASE', (base_upc,))
+            base_row = cur.fetchone()
             
-            if existing_good:
-                # Increment good quantity in prep status (tracks accumulated good items)
-                current_good_qty = existing_good[0] if existing_good[0] is not None else 0
-                new_good_qty = current_good_qty + qty
-                
-                # Update prep status with new accumulated good quantity
+            if not base_row:
+                conn.close()
+                return jsonify({'success': False, 'error': f'Base UPC {base_upc} not found in bol_items'}), 404
+            
+            current_good = base_row[0] or 0
+            current_unchecked = base_row[1] or 0
+            original_qty = base_row[2] or 0
+            
+            # Validate we have enough unchecked items
+            if qty > current_unchecked:
+                conn.close()
+                return jsonify({
+                    'success': False, 
+                    'error': f'Cannot mark {qty} as good - only {current_unchecked} unchecked (original: {original_qty}, good: {current_good})'
+                }), 400
+            
+            # Update quantities: move from unchecked to good
+            new_good = current_good + qty
+            new_unchecked = current_unchecked - qty
+            
+            cur.execute('''
+                UPDATE bol_items 
+                SET good_qty = ?, unchecked_qty = ?, quantity = ?
+                WHERE upc = ? COLLATE NOCASE
+            ''', (new_good, new_unchecked, new_good, base_upc))
+            
+            # Update prep status
+            cur.execute('SELECT upc FROM items_prep_status WHERE upc = ? AND status = ? COLLATE NOCASE', (base_upc, 'good'))
+            if cur.fetchone():
                 cur.execute('UPDATE items_prep_status SET quantity = ?, updated_at = ? WHERE upc = ? AND status = ? COLLATE NOCASE',
-                           (new_good_qty, ts, base_upc, 'good'))
-                
-                # Update bol_items to match the good quantity (this is the "good pile")
-                cur.execute('UPDATE bol_items SET quantity = ? WHERE upc = ? COLLATE NOCASE', (new_good_qty, base_upc))
-                conn.commit()
-                
-                print(f'[GOOD] Incremented {base_upc}: {current_good_qty} + {qty} = {new_good_qty}')
-                conn.close()
-                return jsonify({'success': True, 'action': 'incremented', 'upc': base_upc, 'quantity': new_good_qty})
+                           (new_good, ts, base_upc, 'good'))
             else:
-                # Create new good entry
-                # Upsert into items_prep_status with initial quantity
-                cur.execute('SELECT upc FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (base_upc,))
-                if cur.fetchone():
-                    cur.execute('UPDATE items_prep_status SET status=?, reason=?, note=?, quantity=?, updated_at=? WHERE upc=? COLLATE NOCASE', 
-                              (status, reason, note, qty, ts, base_upc))
-                else:
-                    cur.execute('INSERT INTO items_prep_status (upc, status, reason, note, quantity, updated_at) VALUES (?,?,?,?,?,?)', 
-                              (base_upc, status, reason, note, qty, ts))
-                conn.commit()
-                
-                # Update bol_items quantity to qty (this is the "good" pile)
-                cur.execute('UPDATE bol_items SET quantity = ?, temporary = 0 WHERE upc = ? COLLATE NOCASE', (qty, base_upc))
-                conn.commit()
-                
-                print(f'[GOOD] Created new good entry {base_upc} with qty {qty}')
-                conn.close()
-                return jsonify({'success': True, 'action': 'created', 'upc': base_upc, 'quantity': qty})
+                cur.execute('INSERT INTO items_prep_status (upc, status, reason, note, quantity, updated_at) VALUES (?,?,?,?,?,?)',
+                           (base_upc, 'good', reason, note, new_good, ts))
+            
+            conn.commit()
+            conn.close()
+            
+            print(f'[GOOD] {base_upc}: moved {qty} from unchecked to good (good: {current_good}→{new_good}, unchecked: {current_unchecked}→{new_unchecked})')
+            return jsonify({
+                'success': True, 
+                'action': 'incremented',
+                'upc': base_upc,
+                'good_qty': new_good,
+                'unchecked_qty': new_unchecked,
+                'original_qty': original_qty
+            })
         
         # BAD/UNCHECKED flow - upc should already be suffixed if coming from Bad button
         # Just upsert the status (no qty changes here, that happens in diagnostic Complete)
@@ -1517,34 +1586,65 @@ def api_items_prep_create_bad_entry():
             # Suffix is clean - no bol_items entry and no orphaned prep data
             break
         
-        # Get base item details to copy
-        cur.execute('SELECT item_description, image_url, lot_number, bol_number FROM bol_items WHERE upc = ? COLLATE NOCASE', (base_upc,))
+        # Get base item details to copy and check unchecked quantity
+        cur.execute('''
+            SELECT item_description, image_url, lot_number, bol_number, unchecked_qty, bad_qty, original_qty 
+            FROM bol_items WHERE upc = ? COLLATE NOCASE
+        ''', (base_upc,))
         base_item = cur.fetchone()
         
         if not base_item:
             conn.close()
             return jsonify({'success': False, 'error': f'Base UPC {base_upc} not found in bol_items'}), 404
         
-        # Create temporary suffixed entry (temporary=1, quantity will be set on Complete)
+        unchecked = base_item[4] or 0
+        current_bad = base_item[5] or 0
+        original_qty = base_item[6] or 0
+        
+        # Validate we have enough unchecked items
+        if qty > unchecked:
+            conn.close()
+            return jsonify({
+                'success': False, 
+                'error': f'Cannot mark {qty} as bad - only {unchecked} unchecked (original: {original_qty}, bad: {current_bad})'
+            }), 400
+        
+        # Create temporary suffixed entry with new quantity columns
         import datetime
         import_date = datetime.datetime.now(datetime.UTC).isoformat()
         
         cur.execute('''
-            INSERT INTO bol_items (upc, item_description, image_url, lot_number, bol_number, import_date, temporary, quantity)
-            VALUES (?, ?, ?, ?, ?, ?, 1, ?)
-        ''', (suffixed_upc, base_item[0], base_item[1], base_item[2], base_item[3], import_date, qty))
-        conn.commit()
+            INSERT INTO bol_items (
+                upc, item_description, image_url, lot_number, bol_number, import_date, 
+                temporary, original_qty, unchecked_qty, bad_qty, good_qty, quantity
+            )
+            VALUES (?, ?, ?, ?, ?, ?, 1, ?, 0, ?, 0, ?)
+        ''', (suffixed_upc, base_item[0], base_item[1], base_item[2], base_item[3], import_date, 
+              qty, qty, qty))  # original_qty=qty, bad_qty=qty, quantity=qty for this suffixed entry
         
-        # IMMEDIATELY decrement base UPC quantity by qty (don't wait for Complete)
-        cur.execute('UPDATE bol_items SET quantity = quantity - ? WHERE upc = ? COLLATE NOCASE', (qty, base_upc))
-        affected = cur.rowcount
+        # Update base item: move qty from unchecked to bad
+        new_unchecked = unchecked - qty
+        new_bad = current_bad + qty
+        
+        cur.execute('''
+            UPDATE bol_items 
+            SET unchecked_qty = ?, bad_qty = ?
+            WHERE upc = ? COLLATE NOCASE
+        ''', (new_unchecked, new_bad, base_upc))
+        
         conn.commit()
         
         print(f'[BAD] Created temporary suffixed entry: {suffixed_upc} (temporary=1, qty={qty})')
-        print(f'[BAD] Decremented base UPC {base_upc} quantity by {qty} (affected rows: {affected})')
+        print(f'[BAD] {base_upc}: moved {qty} from unchecked to bad (bad: {current_bad}→{new_bad}, unchecked: {unchecked}→{new_unchecked})')
         
         conn.close()
-        return jsonify({'success': True, 'suffixed_upc': suffixed_upc, 'base_upc': base_upc})
+        return jsonify({
+            'success': True, 
+            'suffixed_upc': suffixed_upc, 
+            'base_upc': base_upc,
+            'unchecked_qty': new_unchecked,
+            'bad_qty': new_bad
+        })
         
     except Exception as e:
         import traceback
@@ -1587,7 +1687,24 @@ def api_bol_items_update_quantity():
         
         conn = sqlite3.connect('bol.db')
         cur = conn.cursor()
-        cur.execute('UPDATE bol_items SET quantity = ? WHERE upc = ? COLLATE NOCASE', (quantity, upc))
+        
+        # Check if new quantity columns exist
+        cur.execute('PRAGMA table_info(bol_items)')
+        cols = [col[1].lower() for col in cur.fetchall()]
+        has_new_cols = 'original_qty' in cols and 'unchecked_qty' in cols
+        
+        if has_new_cols:
+            # Update both old quantity and unchecked_qty (assuming manual edits change unchecked items)
+            cur.execute('''UPDATE bol_items 
+                          SET quantity = ?, 
+                              original_qty = ?,
+                              unchecked_qty = ? - COALESCE(good_qty, 0) - COALESCE(bad_qty, 0)
+                          WHERE upc = ? COLLATE NOCASE''', 
+                       (quantity, quantity, quantity, upc))
+        else:
+            # Old behavior
+            cur.execute('UPDATE bol_items SET quantity = ? WHERE upc = ? COLLATE NOCASE', (quantity, upc))
+        
         conn.commit()
         conn.close()
         return jsonify({'success': True})
@@ -1667,54 +1784,85 @@ def api_items_prep_undo():
         cur = conn.cursor()
         
         if status == 'good':
-            # Good item undo: Decrement good qty in prep status, restore qty to base UPC in bol_items
-            if action == 'incremented':
-                # This was an increment - decrement the good qty in prep status (or delete if becomes 0)
-                cur.execute('SELECT quantity FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (upc,))
-                row = cur.fetchone()
-                if row and row[0] is not None and row[0] > qty:
-                    # Decrement good qty in prep status
-                    new_good_qty = row[0] - qty
-                    cur.execute('UPDATE items_prep_status SET quantity = ? WHERE upc = ? COLLATE NOCASE', (new_good_qty, upc))
-                    # Update bol_items to match
-                    cur.execute('UPDATE bol_items SET quantity = ? WHERE upc = ? COLLATE NOCASE', (new_good_qty, upc))
-                    print(f'[UNDO GOOD] Decremented {upc} from {row[0]} to {new_good_qty}')
-                else:
-                    # Delete status entry if qty would be 0 or less
-                    cur.execute('DELETE FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (upc,))
-                    # Set bol_items qty to 0 (or delete if you prefer)
-                    cur.execute('UPDATE bol_items SET quantity = 0 WHERE upc = ? COLLATE NOCASE', (upc,))
-                    print(f'[UNDO GOOD] Deleted status for {upc}, set qty to 0')
+            # Good item undo: Move qty from good back to unchecked
+            cur.execute('SELECT good_qty, unchecked_qty FROM bol_items WHERE upc = ? COLLATE NOCASE', (upc,))
+            row = cur.fetchone()
+            
+            if not row:
+                conn.close()
+                return jsonify({'success': False, 'error': f'UPC {upc} not found'}), 404
+            
+            current_good = row[0] or 0
+            current_unchecked = row[1] or 0
+            
+            if qty > current_good:
+                conn.close()
+                return jsonify({'success': False, 'error': f'Cannot undo {qty} - only {current_good} marked as good'}), 400
+            
+            # Move qty from good back to unchecked
+            new_good = current_good - qty
+            new_unchecked = current_unchecked + qty
+            
+            cur.execute('''
+                UPDATE bol_items 
+                SET good_qty = ?, unchecked_qty = ?, quantity = ?
+                WHERE upc = ? COLLATE NOCASE
+            ''', (new_good, new_unchecked, new_good, upc))
+            
+            # Update prep status
+            if new_good > 0:
+                cur.execute('UPDATE items_prep_status SET quantity = ? WHERE upc = ? COLLATE NOCASE', (new_good, upc))
             else:
-                # This was a new entry - delete the status entirely and reset bol_items qty
+                # Delete status if no good items left
                 cur.execute('DELETE FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (upc,))
-                cur.execute('UPDATE bol_items SET quantity = 0 WHERE upc = ? COLLATE NOCASE', (upc,))
-                print(f'[UNDO GOOD] Deleted new good entry for {upc}')
+            
+            print(f'[UNDO GOOD] {upc}: moved {qty} from good to unchecked (good: {current_good}→{new_good}, unchecked: {current_unchecked}→{new_unchecked})')
             
         elif status == 'bad':
-            # Bad item undo: Delete suffixed entry and restore base qty (since we now decrement immediately)
+            # Bad item undo: Delete suffixed entry and move qty from bad back to unchecked
             cur.execute('SELECT quantity, temporary FROM bol_items WHERE upc = ? COLLATE NOCASE', (upc,))
             row = cur.fetchone()
             
-            if row:
-                bad_qty = row[0] if row[0] else 1
-                temporary = row[1]
-                
-                # Delete the suffixed bad entry
-                cur.execute('DELETE FROM bol_items WHERE upc = ? COLLATE NOCASE', (upc,))
-                cur.execute('DELETE FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (upc,))
-                
-                # Delete associated photos and notes if completed
-                if temporary == 0:
-                    cur.execute('DELETE FROM items_prep_images WHERE upc = ? COLLATE NOCASE', (upc,))
+            if not row:
+                conn.close()
+                return jsonify({'success': False, 'error': f'UPC {upc} not found'}), 404
+            
+            bad_qty_for_this_entry = row[0] if row[0] else 1
+            temporary = row[1]
+            
+            # Delete the suffixed bad entry
+            cur.execute('DELETE FROM bol_items WHERE upc = ? COLLATE NOCASE', (upc,))
+            cur.execute('DELETE FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (upc,))
+            
+            # Delete associated photos and notes if completed
+            if temporary == 0:
+                cur.execute('DELETE FROM items_prep_images WHERE upc = ? COLLATE NOCASE', (upc,))
+                try:
                     cur.execute('DELETE FROM items_prep_notes WHERE upc = ? COLLATE NOCASE', (upc,))
+                except:
+                    pass
+            
+            # Move qty from bad back to unchecked in base UPC
+            if base_upc:
+                cur.execute('SELECT bad_qty, unchecked_qty FROM bol_items WHERE upc = ? COLLATE NOCASE', (base_upc,))
+                base_row = cur.fetchone()
                 
-                # ALWAYS restore qty to base UPC (since we decrement immediately on bad entry creation now)
-                if base_upc:
-                    cur.execute('UPDATE bol_items SET quantity = quantity + ? WHERE upc = ? COLLATE NOCASE', (bad_qty, base_upc))
-                    print(f'[UNDO BAD] Deleted {upc} (qty={bad_qty}), restored {bad_qty} to base {base_upc}')
-                else:
-                    print(f'[UNDO BAD] Warning: No base_upc provided, could not restore qty')
+                if base_row:
+                    current_bad = base_row[0] or 0
+                    current_unchecked = base_row[1] or 0
+                    
+                    new_bad = max(0, current_bad - bad_qty_for_this_entry)
+                    new_unchecked = current_unchecked + bad_qty_for_this_entry
+                    
+                    cur.execute('''
+                        UPDATE bol_items 
+                        SET bad_qty = ?, unchecked_qty = ?
+                        WHERE upc = ? COLLATE NOCASE
+                    ''', (new_bad, new_unchecked, base_upc))
+                    
+                    print(f'[UNDO BAD] Deleted {upc}, {base_upc}: moved {bad_qty_for_this_entry} from bad to unchecked (bad: {current_bad}→{new_bad}, unchecked: {current_unchecked}→{new_unchecked})')
+            else:
+                print(f'[UNDO BAD] Warning: No base_upc provided for {upc}, could not restore qty')
         
         conn.commit()
         conn.close()
@@ -2285,7 +2433,24 @@ def api_items_prep_reset():
             pass  # Table may not exist
         
         # 4. Restore quantity in bol_items
-        cur.execute('UPDATE bol_items SET quantity = ? WHERE upc = ? COLLATE NOCASE', (rawbol_qty, upc))
+        # Check if new quantity columns exist
+        cur.execute('PRAGMA table_info(bol_items)')
+        cols = [col[1].lower() for col in cur.fetchall()]
+        has_new_cols = 'original_qty' in cols and 'unchecked_qty' in cols
+        
+        if has_new_cols:
+            # Reset all quantity columns to rawbol value
+            cur.execute('''UPDATE bol_items 
+                          SET quantity = ?, 
+                              original_qty = ?,
+                              good_qty = 0,
+                              bad_qty = 0,
+                              unchecked_qty = ?
+                          WHERE upc = ? COLLATE NOCASE''', 
+                       (rawbol_qty, rawbol_qty, rawbol_qty, upc))
+        else:
+            # Old behavior
+            cur.execute('UPDATE bol_items SET quantity = ? WHERE upc = ? COLLATE NOCASE', (rawbol_qty, upc))
         
         # 5. Clear list_status if it exists
         try:
@@ -2505,9 +2670,19 @@ def api_bol_items():
         unique_items = count_row[1] or 0
         total_quantity = count_row[2] or 0
         
+        # Check if new quantity columns exist
+        has_original_qty = any(c.lower() == 'original_qty' for c in cols)
+        has_good_qty = any(c.lower() == 'good_qty' for c in cols)
+        has_bad_qty = any(c.lower() == 'bad_qty' for c in cols)
+        has_unchecked_qty = any(c.lower() == 'unchecked_qty' for c in cols)
+        
         sql = (
             'SELECT b.id, b.upc, b.item_description, b.image_url, b.lot_number, b.bol_number, b.import_date, b.list_status, b.quantity, ' +
             ('b.temporary, ' if has_temporary else '') +
+            ('b.original_qty, ' if has_original_qty else '') +
+            ('b.good_qty, ' if has_good_qty else '') +
+            ('b.bad_qty, ' if has_bad_qty else '') +
+            ('b.unchecked_qty, ' if has_unchecked_qty else '') +
             's.status as prep_status, s.reason as prep_reason, s.note as prep_note, s.updated_at as prep_updated_at '
             'FROM bol_items b '
             'LEFT JOIN items_prep_status s ON s.upc = b.upc '
@@ -2702,7 +2877,25 @@ def api_bulk_delete_bol_items():
                         pass
                     
                     # Restore quantity and clear list_status
-                    cur.execute('UPDATE bol_items SET quantity = ? WHERE upc = ? COLLATE NOCASE', (rawbol_qty, upc))
+                    # Check if new quantity columns exist
+                    cur.execute('PRAGMA table_info(bol_items)')
+                    cols = [col[1].lower() for col in cur.fetchall()]
+                    has_new_cols = 'original_qty' in cols and 'unchecked_qty' in cols
+                    
+                    if has_new_cols:
+                        # Reset all quantity columns to rawbol value
+                        cur.execute('''UPDATE bol_items 
+                                      SET quantity = ?, 
+                                          original_qty = ?,
+                                          good_qty = 0,
+                                          bad_qty = 0,
+                                          unchecked_qty = ?
+                                      WHERE upc = ? COLLATE NOCASE''', 
+                                   (rawbol_qty, rawbol_qty, rawbol_qty, upc))
+                    else:
+                        # Old behavior
+                        cur.execute('UPDATE bol_items SET quantity = ? WHERE upc = ? COLLATE NOCASE', (rawbol_qty, upc))
+                    
                     try:
                         cur.execute('UPDATE bol_items SET list_status = NULL WHERE upc = ? COLLATE NOCASE', (upc,))
                     except:
