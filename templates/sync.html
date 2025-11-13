@@ -408,6 +408,12 @@
             <button class="sync-btn amazon" style="margin-top: 12px; width: 100%;" onclick="manualSync('amazon-upcs')">
                 Fetch Missing Amazon UPCs
             </button>
+            <button class="sync-btn amazon" style="margin-top: 8px; width: 100%; background: #d35400;" onclick="recoverCorruptedUpcs()">
+                🛡️ Recover Corrupted UPCs
+            </button>
+            <button class="sync-btn amazon" style="margin-top: 8px; width: 100%; background: #16a085;" onclick="fixAmazonBarcodes()">
+                🔧 Fix Amazon Barcodes (One-Time)
+            </button>
             <div class="status-message" id="manual-status"></div>
         </div>
     </div>
@@ -508,6 +514,60 @@
                     status.className = 'status-message success';
                     status.textContent = `✅ ${data.message}`;
                     loadSyncStatus();
+                } else {
+                    status.className = 'status-message error';
+                    status.textContent = `❌ ${data.message}`;
+                }
+            } catch (error) {
+                status.className = 'status-message error';
+                status.textContent = '❌ Error: ' + error.message;
+            }
+        }
+        
+        async function recoverCorruptedUpcs() {
+            const status = document.getElementById('manual-status');
+            
+            if (!confirm('This will reset tracking for all corrupted UPCs (where UPC = ASIN but status = 3). Continue?')) {
+                return;
+            }
+            
+            status.className = 'status-message info';
+            status.textContent = '🔄 Scanning for corrupted UPCs...';
+            
+            try {
+                const response = await fetch('/api/sync/recover-upcs', { method: 'POST' });
+                const data = await response.json();
+                
+                if (data.success) {
+                    status.className = 'status-message success';
+                    status.textContent = `✅ ${data.message}`;
+                } else {
+                    status.className = 'status-message error';
+                    status.textContent = `❌ ${data.message}`;
+                }
+            } catch (error) {
+                status.className = 'status-message error';
+                status.textContent = '❌ Error: ' + error.message;
+            }
+        }
+        
+        async function fixAmazonBarcodes() {
+            const status = document.getElementById('manual-status');
+            
+            if (!confirm('This will scan all Amazon orders and fix missing barcodes/images from amazonStore.db. Continue?')) {
+                return;
+            }
+            
+            status.className = 'status-message info';
+            status.textContent = '🔄 Scanning and fixing Amazon orders...';
+            
+            try {
+                const response = await fetch('/api/sync/fix-amazon-barcodes', { method: 'POST' });
+                const data = await response.json();
+                
+                if (data.success) {
+                    status.className = 'status-message success';
+                    status.textContent = `✅ Fixed ${data.fixed_barcodes} barcodes and ${data.fixed_images} images`;
                 } else {
                     status.className = 'status-message error';
                     status.textContent = `❌ ${data.message}`;

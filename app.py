@@ -6540,6 +6540,45 @@ def sync_amazon_orders_api():
         from DBmanager import enrich_amazon_sold_images
         enrich_amazon_sold_images()
         
+        # ADDITIONAL: Enrich barcodes for orders that don't have them yet
+        try:
+            sold_conn = sqlite3.connect('sold.db')
+            sold_cur = sold_conn.cursor()
+            
+            amazon_conn = sqlite3.connect('amazonStore.db')
+            amazon_conn.row_factory = sqlite3.Row
+            amazon_cur = amazon_conn.cursor()
+            
+            # Find Amazon orders without barcodes
+            sold_cur.execute('''
+                SELECT id, item_id FROM orders 
+                WHERE store = 'amazon' 
+                AND (barcode IS NULL OR barcode = '' OR barcode = item_id)
+                AND item_id IS NOT NULL
+            ''')
+            
+            orders_to_enrich = sold_cur.fetchall()
+            enriched = 0
+            
+            for order_id, asin in orders_to_enrich:
+                # Look up UPC in amazonStore.db
+                amazon_cur.execute('SELECT UPC FROM ITEMS WHERE ASIN = ? COLLATE NOCASE', (asin,))
+                row = amazon_cur.fetchone()
+                
+                if row and row['UPC'] and row['UPC'] != asin:
+                    # Update sold order with proper UPC
+                    sold_cur.execute('UPDATE orders SET barcode = ? WHERE id = ?', (row['UPC'], order_id))
+                    enriched += 1
+            
+            sold_conn.commit()
+            sold_conn.close()
+            amazon_conn.close()
+            
+            print(f"✅ Enriched {enriched} Amazon orders with barcodes")
+            
+        except Exception as e:
+            print(f"⚠️ Error enriching Amazon order barcodes: {e}")
+        
         from DBmanager import process_sold_orders_inventory_reduction
         process_sold_orders_inventory_reduction()
         update_sync_timestamp('amazon_orders')
@@ -6549,14 +6588,33 @@ def sync_amazon_orders_api():
 
 @app.route('/api/sync/amazon-listings', methods=['POST'])
 def sync_amazon_listings_api():
-    """Sync Amazon listings"""
+    """Sync Amazon listings with quota protection"""
     if not AMAZON_AVAILABLE:
         return jsonify({'success': False, 'message': 'Amazon integration not available'}), 500
     try:
         amazon = AmazonManager()
-        amazon.sync_listings_to_db()
+        result = amazon.sync_listings_to_db()
+        
+        # Handle quota exceeded
+        if result == -1:
+            return jsonify({
+                'success': False, 
+                'message': 'Amazon listings sync quota exceeded - please wait 24 hours',
+                'quota_exceeded': True
+            }), 429  # 429 Too Many Requests
+        
+        # Handle no changes
+        if result == 0:
+            return jsonify({
+                'success': True, 
+                'message': 'No listings to sync (last sync was recent)'
+            })
+        
         update_sync_timestamp('amazon_listings')
-        return jsonify({'success': True, 'message': 'Amazon listings synced successfully'})
+        return jsonify({
+            'success': True, 
+            'message': f'Amazon listings synced successfully ({result} items)'
+        })
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
 
@@ -6771,6 +6829,136 @@ def sync_amazon_upcs_api():
         import traceback
         error_details = traceback.format_exc()
         print(f"❌ Amazon UPC sync error: {e}")
+        print(error_details)
+        return jsonify({'success': False, 'message': str(e), 'error': error_details}), 500
+
+@app.route('/api/sync/recover-upcs', methods=['POST'])
+def recover_corrupted_upcs_api():
+    """One-time bulk recovery for corrupted UPCs (UPC = ASIN but status = 3)"""
+    if not AMAZON_AVAILABLE:
+        return jsonify({'success': False, 'message': 'Amazon integration not available'}), 500
+    try:
+        print("🔍 Scanning for corrupted UPCs...")
+        
+        conn = sqlite3.connect('amazonStore.db')
+        cur = conn.cursor()
+        
+        # Find all items where UPC = ASIN but upc_fetch_attempted = 3 (corrupted)
+        cur.execute('''
+            SELECT ASIN, UPC, upc_fetch_attempted 
+            FROM ITEMS 
+            WHERE UPC = ASIN AND upc_fetch_attempted = 3
+        ''')
+        corrupted_items = cur.fetchall()
+        
+        if not corrupted_items:
+            conn.close()
+            return jsonify({
+                'success': True, 
+                'message': 'No corrupted UPCs found - all items are healthy',
+                'count': 0
+            })
+        
+        print(f"📋 Found {len(corrupted_items)} corrupted UPCs:")
+        for item in corrupted_items[:5]:  # Show first 5
+            print(f"   - ASIN: {item[0]}, UPC: {item[1]}")
+        if len(corrupted_items) > 5:
+            print(f"   ... and {len(corrupted_items) - 5} more")
+        
+        # Reset tracking for all corrupted items
+        cur.execute('''
+            UPDATE ITEMS 
+            SET upc_fetch_attempted = 0, upc_last_fetch_date = NULL
+            WHERE UPC = ASIN AND upc_fetch_attempted = 3
+        ''')
+        conn.commit()
+        reset_count = cur.rowcount
+        conn.close()
+        
+        print(f"✅ Reset tracking for {reset_count} corrupted UPCs")
+        
+        return jsonify({
+            'success': True,
+            'message': f'Reset {reset_count} corrupted UPCs - run "Fetch Missing Amazon UPCs" to re-fetch them',
+            'count': reset_count
+        })
+        
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"❌ UPC recovery error: {e}")
+        print(error_details)
+        return jsonify({'success': False, 'message': str(e), 'error': error_details}), 500
+
+@app.route('/api/sync/fix-amazon-barcodes', methods=['POST'])
+def fix_amazon_barcodes():
+    """One-time fix: Enrich Amazon orders in sold.db with barcodes and images from amazonStore.db"""
+    try:
+        sold_conn = sqlite3.connect('sold.db')
+        sold_cur = sold_conn.cursor()
+        
+        amazon_conn = sqlite3.connect('amazonStore.db')
+        amazon_conn.row_factory = sqlite3.Row
+        amazon_cur = amazon_conn.cursor()
+        
+        # Find ALL Amazon orders without proper barcodes (where barcode = ASIN or null)
+        sold_cur.execute('''
+            SELECT id, item_id, barcode, image FROM orders 
+            WHERE store = 'amazon' 
+            AND item_id IS NOT NULL
+        ''')
+        
+        all_amazon_orders = sold_cur.fetchall()
+        fixed_barcodes = 0
+        fixed_images = 0
+        
+        print(f"🔍 Scanning {len(all_amazon_orders)} Amazon orders...")
+        
+        for order_id, asin, current_barcode, current_image in all_amazon_orders:
+            # Look up in amazonStore.db
+            amazon_cur.execute('SELECT UPC, IMAGE FROM ITEMS WHERE ASIN = ? COLLATE NOCASE', (asin,))
+            row = amazon_cur.fetchone()
+            
+            if row:
+                needs_update = False
+                updates = []
+                params = []
+                
+                # Fix barcode if missing or equals ASIN
+                if row['UPC'] and row['UPC'] != asin and (not current_barcode or current_barcode == asin):
+                    updates.append('barcode = ?')
+                    params.append(row['UPC'])
+                    fixed_barcodes += 1
+                    needs_update = True
+                
+                # Fix image if missing
+                if row['IMAGE'] and not current_image:
+                    updates.append('image = ?')
+                    params.append(row['IMAGE'])
+                    fixed_images += 1
+                    needs_update = True
+                
+                if needs_update:
+                    params.append(order_id)
+                    sold_cur.execute(f"UPDATE orders SET {', '.join(updates)} WHERE id = ?", params)
+        
+        sold_conn.commit()
+        sold_conn.close()
+        amazon_conn.close()
+        
+        print(f"✅ Fixed {fixed_barcodes} barcodes and {fixed_images} images")
+        
+        return jsonify({
+            'success': True,
+            'message': f'Fixed {fixed_barcodes} barcodes and {fixed_images} images for Amazon orders',
+            'fixed_barcodes': fixed_barcodes,
+            'fixed_images': fixed_images
+        })
+        
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"❌ Fix Amazon barcodes error: {e}")
         print(error_details)
         return jsonify({'success': False, 'message': str(e), 'error': error_details}), 500
 
@@ -7163,23 +7351,9 @@ def auto_sync_worker():
                     orders_lookback = int(row[0]) if row else 30
                     conn.close()
                     
+                    # CHANGED ORDER: Sync listings FIRST so amazonStore.db has latest data
                     try:
-                        print("  📦 Syncing Amazon orders...")
-                        amazon = AmazonManager()
-                        amazon.sync_orders_to_db(days_back=orders_lookback)
-                        
-                        from DBmanager import enrich_amazon_sold_images
-                        enrich_amazon_sold_images()
-                        
-                        from DBmanager import process_sold_orders_inventory_reduction
-                        process_sold_orders_inventory_reduction()
-                        update_sync_timestamp('amazon_orders')
-                        print("  ✅ Amazon orders synced")
-                    except Exception as e:
-                        print(f"  ⚠️ Amazon orders sync failed: {e}")
-                    
-                    try:
-                        print("  📋 Syncing Amazon listings...")
+                        print("  � Syncing Amazon listings...")
                         amazon = AmazonManager()
                         amazon.sync_listings_to_db()
                         update_sync_timestamp('amazon_listings')
@@ -7195,15 +7369,72 @@ def auto_sync_worker():
                     auto_upc = row and row[0] == 'true'
                     conn.close()
                     
+                    # MOVED UP: Fetch UPCs BEFORE orders so they're available for enrichment
                     if auto_upc:
                         try:
-                            print("  🔍 Fetching Amazon UPCs...")
+                            print("  � Fetching Amazon UPCs...")
                             # Call the correct function with max_items limit (reduced to 25 to avoid quota issues)
                             upcs_found = sync_missing_upcs(max_items=25)
                             update_sync_timestamp('amazon_upcs')
                             print(f"  ✅ Amazon UPCs fetched: {upcs_found} found")
                         except Exception as e:
                             print(f"  ⚠️ Amazon UPCs fetch failed: {e}")
+                    
+                    # NOW sync orders LAST (UPCs and listings are already in amazonStore.db)
+                    try:
+                        print("  📦 Syncing Amazon orders...")
+                        amazon = AmazonManager()
+                        amazon.sync_orders_to_db(days_back=orders_lookback)
+                        
+                        from DBmanager import enrich_amazon_sold_images
+                        enrich_amazon_sold_images()
+                        
+                        # ADDED: Enrich barcodes for orders that don't have them yet
+                        try:
+                            sold_conn = sqlite3.connect('sold.db')
+                            sold_cur = sold_conn.cursor()
+                            
+                            amazon_conn = sqlite3.connect('amazonStore.db')
+                            amazon_conn.row_factory = sqlite3.Row
+                            amazon_cur = amazon_conn.cursor()
+                            
+                            # Find Amazon orders without barcodes
+                            sold_cur.execute('''
+                                SELECT id, item_id FROM orders 
+                                WHERE store = 'amazon' 
+                                AND (barcode IS NULL OR barcode = '' OR barcode = item_id)
+                                AND item_id IS NOT NULL
+                            ''')
+                            
+                            orders_to_enrich = sold_cur.fetchall()
+                            enriched = 0
+                            
+                            for order_id, asin in orders_to_enrich:
+                                # Look up UPC in amazonStore.db
+                                amazon_cur.execute('SELECT UPC FROM ITEMS WHERE ASIN = ? COLLATE NOCASE', (asin,))
+                                row = amazon_cur.fetchone()
+                                
+                                if row and row['UPC'] and row['UPC'] != asin:
+                                    # Update sold order with proper UPC
+                                    sold_cur.execute('UPDATE orders SET barcode = ? WHERE id = ?', (row['UPC'], order_id))
+                                    enriched += 1
+                            
+                            sold_conn.commit()
+                            sold_conn.close()
+                            amazon_conn.close()
+                            
+                            if enriched > 0:
+                                print(f"  ✅ Enriched {enriched} Amazon orders with barcodes")
+                            
+                        except Exception as e:
+                            print(f"  ⚠️ Error enriching Amazon order barcodes: {e}")
+                        
+                        from DBmanager import process_sold_orders_inventory_reduction
+                        process_sold_orders_inventory_reduction()
+                        update_sync_timestamp('amazon_orders')
+                        print("  ✅ Amazon orders synced")
+                    except Exception as e:
+                        print(f"  ⚠️ Amazon orders sync failed: {e}")
                 
                 # Update last auto-sync timestamp
                 conn = sqlite3.connect('sync_settings.db')

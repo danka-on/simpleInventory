@@ -322,8 +322,8 @@ class AmazonManager:
     
     def get_active_listings(self):
         """
-        Fetch active listings from Amazon using Reports API
-        Returns list of inventory items
+        Fetch active listings from Amazon using Reports API with quota protection
+        Returns list of inventory items or None if quota exceeded
         """
         try:
             print("🔄 Fetching active Amazon listings...")
@@ -333,9 +333,17 @@ class AmazonManager:
             
             # Request an inventory report
             # ReportType: GET_MERCHANT_LISTINGS_ALL_DATA gets all active listings
-            response = reports_api.create_report(
-                reportType='GET_MERCHANT_LISTINGS_ALL_DATA'
-            )
+            try:
+                response = reports_api.create_report(
+                    reportType='GET_MERCHANT_LISTINGS_ALL_DATA'
+                )
+            except SellingApiException as e:
+                error_str = str(e)
+                if 'QuotaExceeded' in error_str or 'Throttled' in error_str:
+                    print("⚠️ Amazon Listings Report quota exceeded - will retry later")
+                    print("   Quota typically resets after 24 hours")
+                    return None  # Signal quota exceeded
+                raise
             
             if response.errors:
                 print(f"❌ Error creating report: {response.errors}")
@@ -345,13 +353,22 @@ class AmazonManager:
             print(f"📄 Report requested: {report_id}")
             print("⏳ Waiting for report to be generated (this may take 1-2 minutes)...")
             
-            # Poll for report completion
+            # Poll for report completion with rate limiting
             import time
             max_attempts = 60  # 5 minutes max
             for attempt in range(max_attempts):
-                time.sleep(5)  # Wait 5 seconds between checks
+                time.sleep(5)  # Wait 5 seconds between checks (rate limiting)
                 
-                status_response = reports_api.get_report(report_id)
+                try:
+                    status_response = reports_api.get_report(report_id)
+                except SellingApiException as e:
+                    error_str = str(e)
+                    if 'QuotaExceeded' in error_str or 'Throttled' in error_str:
+                        print("⚠️ Quota exceeded while checking report status - waiting longer...")
+                        time.sleep(10)  # Wait longer and retry
+                        continue
+                    raise
+                
                 if status_response.errors:
                     print(f"❌ Error checking report status: {status_response.errors}")
                     return []
@@ -361,16 +378,24 @@ class AmazonManager:
                 if processing_status == 'DONE':
                     print("✅ Report ready!")
                     
-                    # Get the report document
+                    # Get the report document with rate limiting
                     document_id = status_response.payload.get('reportDocumentId')
-                    doc_response = reports_api.get_report_document(document_id, download=True)
+                    time.sleep(2)  # Rate limit before downloading
+                    
+                    try:
+                        doc_response = reports_api.get_report_document(document_id, download=True)
+                    except SellingApiException as e:
+                        error_str = str(e)
+                        if 'QuotaExceeded' in error_str or 'Throttled' in error_str:
+                            print("⚠️ Quota exceeded while downloading report - will retry later")
+                            return None
+                        raise
                     
                     if doc_response.errors:
                         print(f"❌ Error downloading report: {doc_response.errors}")
                         return []
                     
                     # The payload contains the actual report content
-                    # It could be a string, bytes, or dict with url/content
                     report_content = doc_response.payload
                     
                     # Parse the report (TSV format)
@@ -389,6 +414,11 @@ class AmazonManager:
             return []
             
         except SellingApiException as e:
+            error_str = str(e)
+            if 'QuotaExceeded' in error_str or 'Throttled' in error_str:
+                print("⚠️ Amazon Listings API quota exceeded")
+                print("   Your quota will reset in approximately 24 hours")
+                return None
             print(f"❌ Amazon API Error: {e}")
             return []
         except Exception as e:
@@ -459,23 +489,18 @@ class AmazonManager:
         """
         Fetch active listings from Amazon and sync to amazonStore.db
         Similar to eBay's ebayStore.db
+        With quota protection and smart syncing
         
         Returns:
-            Number of listings synced
+            Number of listings synced, or -1 if quota exceeded
         """
         print("🔄 Starting Amazon listings sync...\n")
         
-        listings = self.get_active_listings()
-        
-        if not listings:
-            print("ℹ️ No listings to sync")
-            return 0
-        
-        # Connect to amazonStore.db
+        # Connect to amazonStore.db first to check last sync
         conn = sqlite3.connect('amazonStore.db')
         cur = conn.cursor()
         
-        # Create table if it doesn't exist (similar to ebayStore structure)
+        # Create table if it doesn't exist
         cur.execute('''
             CREATE TABLE IF NOT EXISTS ITEMS (
                 ID INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -489,13 +514,60 @@ class AmazonManager:
                 UPC TEXT,
                 CONDITION TEXT,
                 FULFILLMENT_CHANNEL TEXT,
-                LAST_UPDATED TEXT
+                LAST_UPDATED TEXT,
+                upc_fetch_attempted INTEGER DEFAULT 0,
+                upc_last_fetch_date TEXT
+            )
+        ''')
+        
+        # Create sync metadata table to track quota usage
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS sync_metadata (
+                key TEXT PRIMARY KEY,
+                value TEXT,
+                updated_at TEXT
             )
         ''')
         conn.commit()
         
+        # Check last successful sync time to avoid unnecessary API calls
+        cur.execute('SELECT value, updated_at FROM sync_metadata WHERE key = ?', ('last_listings_sync',))
+        last_sync_row = cur.fetchone()
+        
+        if last_sync_row:
+            last_sync_time = datetime.fromisoformat(last_sync_row[1])
+            time_since_sync = (datetime.now() - last_sync_time).total_seconds() / 3600  # hours
+            
+            # Only sync if it's been more than 4 hours (reduce quota usage)
+            if time_since_sync < 4:
+                print(f"ℹ️ Last sync was {time_since_sync:.1f} hours ago - skipping to preserve quota")
+                print(f"   Next sync available in {4 - time_since_sync:.1f} hours")
+                conn.close()
+                return 0
+        
+        # Fetch listings from Amazon
+        listings = self.get_active_listings()
+        
+        # Handle quota exceeded
+        if listings is None:
+            print("⚠️ Amazon listings sync skipped due to quota limits")
+            # Record quota exceeded event
+            cur.execute('''
+                INSERT OR REPLACE INTO sync_metadata (key, value, updated_at)
+                VALUES (?, ?, ?)
+            ''', ('last_quota_exceeded', 'listings_report', datetime.utcnow().isoformat()))
+            conn.commit()
+            conn.close()
+            return -1  # Signal quota exceeded
+        
+        if not listings:
+            print("ℹ️ No listings to sync")
+            conn.close()
+            return 0
+        
         synced_count = 0
         updated_count = 0
+        skipped_count = 0
         
         for listing in listings:
             try:
@@ -517,7 +589,31 @@ class AmazonManager:
                     quantity = 0
                 
                 # Get UPC - from product-id column
-                upc = listing.get('upc', '').strip()
+                upc_from_report = listing.get('upc', '').strip()
+                
+                # 🛡️ UPC PRESERVATION: Check existing UPC before overwriting
+                # If we already have a valid UPC (not ASIN, status=3), preserve it
+                cur.execute('SELECT UPC, upc_fetch_attempted FROM ITEMS WHERE ASIN = ?', (asin,))
+                existing_item = cur.fetchone()
+                existing_upc = existing_item[0] if existing_item else None
+                existing_status = existing_item[1] if existing_item and len(existing_item) > 1 else None
+                
+                # Determine final UPC to use:
+                # 1. If existing UPC is valid (not ASIN and successfully fetched), keep it
+                # 2. Otherwise, use report UPC if it's valid (not ASIN)
+                # 3. Otherwise, keep existing UPC or fallback to ASIN
+                if existing_upc and existing_upc != asin and existing_status == 3:
+                    # Preserve successfully fetched UPC
+                    upc = existing_upc
+                elif upc_from_report and upc_from_report != asin:
+                    # Use report UPC if valid
+                    upc = upc_from_report
+                elif existing_upc:
+                    # Keep whatever was there before
+                    upc = existing_upc
+                else:
+                    # No valid UPC anywhere, use ASIN as fallback
+                    upc = asin
                 
                 # Get image: Try Amazon Catalog API first, then fallback to rawbol.db
                 image_url = listing.get('image', '')
@@ -605,11 +701,19 @@ class AmazonManager:
                 print(f"⚠️ Error syncing listing {listing.get('asin')}: {e}")
                 continue
         
+        # Record successful sync
+        cur.execute('''
+            INSERT OR REPLACE INTO sync_metadata (key, value, updated_at)
+            VALUES (?, ?, ?)
+        ''', ('last_listings_sync', str(synced_count + updated_count), datetime.utcnow().isoformat()))
+        conn.commit()
         conn.close()
         
         print(f"\n✅ Amazon listings sync complete:")
         print(f"   - New: {synced_count} items")
         print(f"   - Updated: {updated_count} items")
+        if skipped_count > 0:
+            print(f"   - Skipped (unchanged): {skipped_count} items")
         print(f"   - Total: {synced_count + updated_count} items")
         
         return synced_count + updated_count
