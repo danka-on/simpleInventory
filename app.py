@@ -506,6 +506,8 @@ def _ensure_items_prep_tables():
             cur.execute('ALTER TABLE items_prep_status ADD COLUMN location TEXT')
         if 'pictureposition' not in status_cols:
             cur.execute('ALTER TABLE items_prep_status ADD COLUMN pictureposition TEXT')
+        if 'quantity' not in status_cols:
+            cur.execute('ALTER TABLE items_prep_status ADD COLUMN quantity INTEGER DEFAULT 1')
         
         cur.execute("PRAGMA table_info(items_prep_images)")
         cols = [r[1] for r in cur.fetchall()]
@@ -1393,37 +1395,35 @@ def api_items_prep_status():
         # GOOD flow - always uses base UPC
         if status == 'good':
             # Check if base_upc already has a 'good' status
-            cur.execute('SELECT upc FROM items_prep_status WHERE upc = ? AND status = ? COLLATE NOCASE', (base_upc, 'good'))
+            cur.execute('SELECT quantity FROM items_prep_status WHERE upc = ? AND status = ? COLLATE NOCASE', (base_upc, 'good'))
             existing_good = cur.fetchone()
             
             if existing_good:
-                # Increment existing good qty
-                cur.execute('SELECT quantity FROM bol_items WHERE upc = ? COLLATE NOCASE', (base_upc,))
-                qty_row = cur.fetchone()
-                current_qty = qty_row[0] if qty_row and qty_row[0] is not None else 1
-                new_qty = current_qty + qty
+                # Increment good quantity in prep status (tracks accumulated good items)
+                current_good_qty = existing_good[0] if existing_good[0] is not None else 0
+                new_good_qty = current_good_qty + qty
                 
-                # Update bol_items quantity for the good entry
-                cur.execute('UPDATE bol_items SET quantity = ? WHERE upc = ? COLLATE NOCASE', (new_qty, base_upc))
+                # Update prep status with new accumulated good quantity
+                cur.execute('UPDATE items_prep_status SET quantity = ?, updated_at = ? WHERE upc = ? AND status = ? COLLATE NOCASE',
+                           (new_good_qty, ts, base_upc, 'good'))
+                
+                # Update bol_items to match the good quantity (this is the "good pile")
+                cur.execute('UPDATE bol_items SET quantity = ? WHERE upc = ? COLLATE NOCASE', (new_good_qty, base_upc))
                 conn.commit()
                 
-                # Update status timestamp
-                cur.execute('UPDATE items_prep_status SET updated_at=? WHERE upc=? COLLATE NOCASE', (ts, base_upc))
-                conn.commit()
-                
-                print(f'[GOOD] Incremented {base_upc}: {current_qty} + {qty} = {new_qty}')
+                print(f'[GOOD] Incremented {base_upc}: {current_good_qty} + {qty} = {new_good_qty}')
                 conn.close()
-                return jsonify({'success': True, 'action': 'incremented', 'upc': base_upc, 'quantity': new_qty})
+                return jsonify({'success': True, 'action': 'incremented', 'upc': base_upc, 'quantity': new_good_qty})
             else:
                 # Create new good entry
-                # Upsert into items_prep_status
+                # Upsert into items_prep_status with initial quantity
                 cur.execute('SELECT upc FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (base_upc,))
                 if cur.fetchone():
-                    cur.execute('UPDATE items_prep_status SET status=?, reason=?, note=?, updated_at=? WHERE upc=? COLLATE NOCASE', 
-                              (status, reason, note, ts, base_upc))
+                    cur.execute('UPDATE items_prep_status SET status=?, reason=?, note=?, quantity=?, updated_at=? WHERE upc=? COLLATE NOCASE', 
+                              (status, reason, note, qty, ts, base_upc))
                 else:
-                    cur.execute('INSERT INTO items_prep_status (upc, status, reason, note, updated_at) VALUES (?,?,?,?,?)', 
-                              (base_upc, status, reason, note, ts))
+                    cur.execute('INSERT INTO items_prep_status (upc, status, reason, note, quantity, updated_at) VALUES (?,?,?,?,?,?)', 
+                              (base_upc, status, reason, note, qty, ts))
                 conn.commit()
                 
                 # Update bol_items quantity to qty (this is the "good" pile)
@@ -1535,8 +1535,13 @@ def api_items_prep_create_bad_entry():
         ''', (suffixed_upc, base_item[0], base_item[1], base_item[2], base_item[3], import_date, qty))
         conn.commit()
         
+        # IMMEDIATELY decrement base UPC quantity by qty (don't wait for Complete)
+        cur.execute('UPDATE bol_items SET quantity = quantity - ? WHERE upc = ? COLLATE NOCASE', (qty, base_upc))
+        affected = cur.rowcount
+        conn.commit()
+        
         print(f'[BAD] Created temporary suffixed entry: {suffixed_upc} (temporary=1, qty={qty})')
-        print(f'[BAD] Base UPC {base_upc} quantity NOT decremented yet (will decrement on Complete)')
+        print(f'[BAD] Decremented base UPC {base_upc} quantity by {qty} (affected rows: {affected})')
         
         conn.close()
         return jsonify({'success': True, 'suffixed_upc': suffixed_upc, 'base_upc': base_upc})
@@ -1662,47 +1667,54 @@ def api_items_prep_undo():
         cur = conn.cursor()
         
         if status == 'good':
-            # Good item undo: Restore qty to base UPC
+            # Good item undo: Decrement good qty in prep status, restore qty to base UPC in bol_items
             if action == 'incremented':
-                # This was an increment - decrement the status qty (or delete if becomes 0)
+                # This was an increment - decrement the good qty in prep status (or delete if becomes 0)
                 cur.execute('SELECT quantity FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (upc,))
                 row = cur.fetchone()
-                if row and row[0] > 1:
-                    # Decrement status qty
-                    cur.execute('UPDATE items_prep_status SET quantity = quantity - ? WHERE upc = ? COLLATE NOCASE', (qty, upc))
+                if row and row[0] is not None and row[0] > qty:
+                    # Decrement good qty in prep status
+                    new_good_qty = row[0] - qty
+                    cur.execute('UPDATE items_prep_status SET quantity = ? WHERE upc = ? COLLATE NOCASE', (new_good_qty, upc))
+                    # Update bol_items to match
+                    cur.execute('UPDATE bol_items SET quantity = ? WHERE upc = ? COLLATE NOCASE', (new_good_qty, upc))
+                    print(f'[UNDO GOOD] Decremented {upc} from {row[0]} to {new_good_qty}')
                 else:
                     # Delete status entry if qty would be 0 or less
                     cur.execute('DELETE FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (upc,))
+                    # Set bol_items qty to 0 (or delete if you prefer)
+                    cur.execute('UPDATE bol_items SET quantity = 0 WHERE upc = ? COLLATE NOCASE', (upc,))
+                    print(f'[UNDO GOOD] Deleted status for {upc}, set qty to 0')
             else:
-                # This was a new entry - delete the status entirely
+                # This was a new entry - delete the status entirely and reset bol_items qty
                 cur.execute('DELETE FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (upc,))
-            
-            # Increment base UPC qty back
-            cur.execute('UPDATE bol_items SET quantity = quantity + ? WHERE upc = ? COLLATE NOCASE', (qty, upc))
+                cur.execute('UPDATE bol_items SET quantity = 0 WHERE upc = ? COLLATE NOCASE', (upc,))
+                print(f'[UNDO GOOD] Deleted new good entry for {upc}')
             
         elif status == 'bad':
-            # Bad item undo: Check if completed or not
-            cur.execute('SELECT temporary FROM bol_items WHERE upc = ? COLLATE NOCASE', (upc,))
+            # Bad item undo: Delete suffixed entry and restore base qty (since we now decrement immediately)
+            cur.execute('SELECT quantity, temporary FROM bol_items WHERE upc = ? COLLATE NOCASE', (upc,))
             row = cur.fetchone()
             
             if row:
-                temporary = row[0]
-                if temporary == 1:
-                    # Not completed yet - just delete the suffixed entry
-                    # No need to restore base qty because it was never decremented
-                    cur.execute('DELETE FROM bol_items WHERE upc = ? COLLATE NOCASE', (upc,))
-                    cur.execute('DELETE FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (upc,))
-                else:
-                    # Completed (temporary=0) - delete suffixed entry and restore base qty
-                    cur.execute('DELETE FROM bol_items WHERE upc = ? COLLATE NOCASE', (upc,))
-                    cur.execute('DELETE FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (upc,))
-                    # Also delete associated photos and notes
+                bad_qty = row[0] if row[0] else 1
+                temporary = row[1]
+                
+                # Delete the suffixed bad entry
+                cur.execute('DELETE FROM bol_items WHERE upc = ? COLLATE NOCASE', (upc,))
+                cur.execute('DELETE FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (upc,))
+                
+                # Delete associated photos and notes if completed
+                if temporary == 0:
                     cur.execute('DELETE FROM items_prep_images WHERE upc = ? COLLATE NOCASE', (upc,))
                     cur.execute('DELETE FROM items_prep_notes WHERE upc = ? COLLATE NOCASE', (upc,))
-                    
-                    if base_upc:
-                        # Restore qty to base UPC
-                        cur.execute('UPDATE bol_items SET quantity = quantity + ? WHERE upc = ? COLLATE NOCASE', (qty, base_upc))
+                
+                # ALWAYS restore qty to base UPC (since we decrement immediately on bad entry creation now)
+                if base_upc:
+                    cur.execute('UPDATE bol_items SET quantity = quantity + ? WHERE upc = ? COLLATE NOCASE', (bad_qty, base_upc))
+                    print(f'[UNDO BAD] Deleted {upc} (qty={bad_qty}), restored {bad_qty} to base {base_upc}')
+                else:
+                    print(f'[UNDO BAD] Warning: No base_upc provided, could not restore qty')
         
         conn.commit()
         conn.close()
@@ -1737,7 +1749,7 @@ def api_items_prep_diagnostic():
         print(f'[DEBUG] Form keys: {list(request.form.keys())}')
         print(f'[DEBUG] Files keys: {list(request.files.keys())}')
         
-        # Mark temporary entry as permanent and decrement base UPC qty if this is a Bad flow completion
+        # Mark temporary entry as permanent (no qty changes needed - already done on bad entry creation)
         conn_temp = sqlite3.connect('bol.db')
         cur_temp = conn_temp.cursor()
         
@@ -1747,23 +1759,11 @@ def api_items_prep_diagnostic():
         is_temporary = temp_row and temp_row[0] == 1
         
         if is_temporary:
-            # This is a Bad flow completion - set temporary=0 and decrement base qty
-            base_upc = upc.split('-')[0] if '-' in upc else upc
-            
-            # Get qty to decrement
-            cur_temp.execute('SELECT quantity FROM bol_items WHERE upc = ? COLLATE NOCASE', (upc,))
-            qty_row = cur_temp.fetchone()
-            qty_to_decrement = qty_row[0] if qty_row and qty_row[0] else 1
-            
-            # Set temporary=0 (make it permanent)
+            # This is a Bad flow completion - just set temporary=0 (base qty already decremented on bad entry creation)
             cur_temp.execute('UPDATE bol_items SET temporary = 0 WHERE upc = ? COLLATE NOCASE', (upc,))
-            
-            # Decrement base UPC quantity (processing units from original inventory)
-            cur_temp.execute('UPDATE bol_items SET quantity = quantity - ? WHERE upc = ? COLLATE NOCASE', (qty_to_decrement, base_upc))
-            
             conn_temp.commit()
             print(f'[DIAGNOSTIC COMPLETE] Set {upc} to permanent (temporary=0)')
-            print(f'[DIAGNOSTIC COMPLETE] Decremented base {base_upc} qty by {qty_to_decrement}')
+            print(f'[DIAGNOSTIC COMPLETE] Base qty already decremented on bad entry creation - no further changes needed')
         else:
             # Not temporary, just ensure it's marked as permanent
             cur_temp.execute('UPDATE bol_items SET temporary = 0 WHERE upc = ? COLLATE NOCASE AND temporary = 1', (upc,))
