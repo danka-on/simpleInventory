@@ -136,6 +136,15 @@
     <a id="back-link" href="/"><button class="btn btn-danger">Back</button></a>
     <h2>Diagnostic</h2>
     <div style="display:flex;gap:8px">
+      <button type="button" class="btn" id="resetBtn" style="background:#f39c12;color:#fff;display:flex;align-items:center;gap:6px" title="Reset to original unchecked state">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M21 3v5h-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M3 21v-5h5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        Reset
+      </button>
       <button type="button" class="btn" id="doneBtn" style="background:#00c853;color:#fff;display:flex;align-items:center;gap:6px">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
           <path d="M20 6L9 17L4 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -987,6 +996,43 @@
     // Load location on page load
     window.addEventListener('DOMContentLoaded', loadLocation);
     window.addEventListener('DOMContentLoaded', loadExistingStatus);
+
+    // Reset button functionality
+    document.getElementById('resetBtn').addEventListener('click', async ()=>{
+      const upc = '{{ upc }}'.trim();
+      if(!upc) return;
+      
+      if(!confirm('Reset this item to original unchecked state? This will:\n\n• Clear good/bad quantities\n• Restore all to unchecked\n• Clear status and reason\n\nThis cannot be undone.')){
+        return;
+      }
+      
+      const btn = document.getElementById('resetBtn');
+      const originalHTML = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = '<span>Resetting...</span>';
+      
+      try{
+        const res = await fetch(`/api/items_prep/diagnostic/${encodeURIComponent(upc)}/reset`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'}
+        });
+        const j = await res.json();
+        
+        if(j.success){
+          alert(`✅ Reset successful!\n\n${j.message || 'Item restored to original state'}`);
+          // Reload the page to show updated state
+          window.location.reload();
+        } else {
+          alert('❌ Reset failed: ' + (j.error || 'Unknown error'));
+          btn.disabled = false;
+          btn.innerHTML = originalHTML;
+        }
+      }catch(e){
+        alert('❌ Reset error: ' + e);
+        btn.disabled = false;
+        btn.innerHTML = originalHTML;
+      }
+    });
   </script>
 </body>
 </html>

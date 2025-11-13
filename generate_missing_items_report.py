@@ -1,0 +1,126 @@
+import sqlite3
+import csv
+from datetime import datetime
+
+conn = sqlite3.connect('bol.db')
+cur = conn.cursor()
+
+print("="*80)
+print("GENERATING MISSING ITEMS REPORT FOR LOT# 16423315")
+print("="*80)
+
+# Get all unchecked items from LOT 16423315, excluding BergHOFF knife set
+cur.execute('''
+    SELECT upc, item_description, image_url, original_qty, good_qty, bad_qty, unchecked_qty, 
+           import_date, bol_number
+    FROM bol_items
+    WHERE lot_number = '16423315'
+    AND unchecked_qty > 0
+    AND LOWER(item_description) NOT LIKE '%berghoff%knife%'
+    ORDER BY item_description
+''')
+
+items = cur.fetchall()
+
+if not items:
+    print("\n❌ No unchecked items found in LOT# 16423315 (excluding BergHOFF knife set)")
+    conn.close()
+    exit(0)
+
+print(f"\nFound {len(items)} unchecked items (excluding BergHOFF knife set)\n")
+
+# Prepare CSV data
+csv_filename = f'LOT_16423315_Missing_Items_Report_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv'
+
+with open(csv_filename, 'w', newline='', encoding='utf-8') as csvfile:
+    writer = csv.writer(csvfile)
+    
+    # Write header section
+    writer.writerow(['MISSING ITEMS REPORT'])
+    writer.writerow([f'LOT Number: 16423315'])
+    writer.writerow([f'Report Date: {datetime.now().strftime("%B %d, %Y at %I:%M %p")}'])
+    writer.writerow([f'Total Missing Items: {len(items)}'])
+    writer.writerow([])
+    
+    # Executive Summary
+    writer.writerow(['EXECUTIVE SUMMARY'])
+    writer.writerow([])
+    writer.writerow(['This report identifies merchandise from LOT# 16423315 that remains unaccounted for during the physical inventory verification process. The items listed below were received and documented in the Bill of Lading but have not been physically located or verified in the warehouse. This discrepancy requires immediate investigation to determine whether the items are misplaced, improperly stored, or were not actually delivered despite being documented on the shipping manifest.'])
+    writer.writerow([])
+    writer.writerow(['INVESTIGATION REQUIRED'])
+    writer.writerow([])
+    writer.writerow(['The following actions are recommended:'])
+    writer.writerow(['1. Conduct a comprehensive physical search of all warehouse locations, including overflow areas and mislabeled storage positions.'])
+    writer.writerow(['2. Review security footage and receiving documentation to verify actual delivery of these items.'])
+    writer.writerow(['3. Cross-reference with packing slips and supplier documentation to confirm items were included in the shipment.'])
+    writer.writerow(['4. Contact the supplier/shipper to report the discrepancy and initiate a claim if items were not delivered.'])
+    writer.writerow(['5. Document all findings and update inventory records accordingly.'])
+    writer.writerow([])
+    writer.writerow(['FINANCIAL IMPACT'])
+    writer.writerow([])
+    writer.writerow(['Note: Individual item values were not available in the inventory database. However, given the nature of the merchandise (home goods, kitchenware, and collectibles), the total value of missing items could represent a significant financial loss. A formal valuation should be conducted using supplier invoices and current market prices.'])
+    writer.writerow([])
+    writer.writerow(['DETAILED ITEM LIST'])
+    writer.writerow([])
+    
+    # Column headers
+    writer.writerow(['Item #', 'UPC/Barcode', 'Description', 'Qty Missing', 'Original Qty', 
+                     'Good Qty', 'Bad Qty', 'Import Date', 'BOL Number', 'Status'])
+    
+    # Write each item
+    for idx, item in enumerate(items, 1):
+        upc, desc, image_url, orig_qty, good_qty, bad_qty, unch_qty, imp_date, bol_num = item
+        desc_clean = (desc or 'No description available').strip()
+        
+        # Status explanation
+        status = 'NOT LOCATED - Physical verification incomplete'
+        
+        writer.writerow([
+            idx,
+            upc or 'N/A',
+            desc_clean,
+            unch_qty,
+            orig_qty,
+            good_qty,
+            bad_qty,
+            imp_date or 'Unknown',
+            bol_num or 'N/A',
+            status
+        ])
+    
+    writer.writerow([])
+    writer.writerow(['REPORT FOOTER'])
+    writer.writerow([])
+    writer.writerow(['This report was generated automatically from the inventory management system. All data reflects the current state of LOT# 16423315 as of the report generation date. Items marked as "unchecked" indicate merchandise that was documented on the receiving manifest but has not been physically verified or located in the warehouse.'])
+    writer.writerow([])
+    writer.writerow(['For questions or to report updates on the status of these items, please contact the warehouse manager or inventory control supervisor.'])
+    writer.writerow([])
+    writer.writerow([f'Report Generated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}'])
+    writer.writerow(['Report Generated By: Inventory Management System'])
+    writer.writerow(['Classification: Internal Use Only'])
+
+conn.close()
+
+print(f"✅ Report generated: {csv_filename}\n")
+print("Report Summary:")
+print(f"  • LOT Number: 16423315")
+print(f"  • Missing Items: {len(items)}")
+print(f"  • Report includes professional documentation with:")
+print(f"    - Executive summary")
+print(f"    - Investigation recommendations")
+print(f"    - Financial impact assessment")
+print(f"    - Detailed item listing")
+print(f"    - Report metadata")
+print("\nFirst 10 items:")
+print("-"*80)
+
+for idx, item in enumerate(items[:10], 1):
+    upc, desc, image_url, orig_qty, good_qty, bad_qty, unch_qty, imp_date, bol_num = item
+    desc_short = (desc[:60] + '...') if desc and len(desc) > 60 else (desc or 'N/A')
+    print(f"{idx}. {desc_short}")
+    print(f"   UPC: {upc}, Missing: {unch_qty}")
+
+if len(items) > 10:
+    print(f"\n... and {len(items) - 10} more items")
+
+print("\n" + "="*80)

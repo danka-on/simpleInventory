@@ -186,7 +186,7 @@ def insert_raw_bol_items(df, lot_number, import_date, avg_cost=None, bol_locatio
     Only extracts: UPC, ITEM DESCRIPTION, ORIGINAL QTY, IMAGE
     avg_cost is calculated as total_bol_cost / total_bol_qty and applied to all items
     lot_number is the extracted LOT # from the file
-    Does NOT check for duplicates - allows re-imports.
+    Consolidates same-UPC duplicates within the same LOT by summing quantities.
     Returns: {'success': True, 'inserted': n} or error dict.
     """
     try:
@@ -194,8 +194,9 @@ def insert_raw_bol_items(df, lot_number, import_date, avg_cost=None, bol_locatio
         conn = sqlite3.connect('rawbol.db')
         cur = conn.cursor()
         
-        inserted = 0
-        created_at = datetime.datetime.utcnow().isoformat()
+        # First pass: consolidate duplicates in DataFrame
+        from collections import defaultdict
+        consolidated_items = {}  # {upc: {'qty': total, 'desc': desc, 'image': image}}
         
         for _, row in df.iterrows():
             upc = str(row.get('UPC', '')).strip()
@@ -232,14 +233,36 @@ def insert_raw_bol_items(df, lot_number, import_date, avg_cost=None, bol_locatio
                 if match:
                     image_url = match.group(1).strip()
             
+            desc = str(row.get('ITEM DESCRIPTION', '')).strip()
+            
+            # If this UPC already exists, sum the quantities
+            if upc in consolidated_items:
+                consolidated_items[upc]['qty'] += qty
+                # Keep the first non-empty description/image
+                if not consolidated_items[upc]['desc'] and desc:
+                    consolidated_items[upc]['desc'] = desc
+                if not consolidated_items[upc]['image'] and image_url:
+                    consolidated_items[upc]['image'] = image_url
+            else:
+                consolidated_items[upc] = {
+                    'qty': qty,
+                    'desc': desc,
+                    'image': image_url
+                }
+        
+        # Second pass: insert consolidated items
+        inserted = 0
+        created_at = datetime.datetime.utcnow().isoformat()
+        
+        for upc, item_data in consolidated_items.items():
             cur.execute('''INSERT INTO raw_bol_items 
                 (upc, item_description, avg_cost, image_url, quantity, lot_number, bol_location, import_date, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                 (upc,
-                 str(row.get('ITEM DESCRIPTION', '')).strip(),
+                 item_data['desc'],
                  avg_cost,
-                 image_url,
-                 qty,
+                 item_data['image'],
+                 item_data['qty'],
                  lot_number,
                  bol_location,
                  import_date,

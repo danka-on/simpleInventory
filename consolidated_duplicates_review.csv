@@ -1,0 +1,79 @@
+UPC,LOT,Duplicate_Entries,Individual_Quantities,Total_Consolidated,Description,Assessment,Likely_Issue
+400013532749,LOT 16264617,8,"1, 4, 4, 27, 4, 4, 12, 27",83,CRC GENERIC,REVIEW NEEDED,Multiple boxes/pallets OR Excel error - check original file
+400013532749,LOT 16448708,8,"9, 8, 11, 2, 9, 10, 7, 23",79,CRC GENERIC,REVIEW NEEDED,Multiple boxes/pallets OR Excel error - check original file
+400013532749,LOT 16578199,8,"11, 10, 12, 23, 4, 7, 6, 7",80,CRC GENERIC,REVIEW NEEDED,Multiple boxes/pallets OR Excel error - check original file
+48552491662,LOT 16578199,5,"1, 1, 4, 1, 5",12,Tabletops Unlimited 16-Pc. Alec Dinnerware Set White,REVIEW NEEDED,Multiple boxes/pallets OR Excel error - check original file
+48552491662,LOT 16448708,2,"1, 1",2,Tabletops Unlimited 16-Pc. Alec Dinnerware Set White,SUSPICIOUS,Excel had duplicate rows - same item listed multiple times
+48552584265,LOT 16448708,4,"1, 1, 1, 1",4,Tabletops Unlimited Soft Square 42-Pc. Dinnerware White,SUSPICIOUS,Excel had duplicate rows - same item listed multiple times
+48552584265,LOT 16578199,4,"1, 1, 1, 1",4,Tabletops Unlimited Soft Square 42-Pc. Dinnerware White,SUSPICIOUS,Excel had duplicate rows - same item listed multiple times
+48552590518,LOT 16448708,4,"4, 2, 1, 1",8,Tabletops Gallery Tabletops Gallery Round 40 Pc. White,REVIEW NEEDED,Multiple boxes/pallets OR Excel error - check original file
+28199274910,LOT 16264617,3,"1, 1, 1",3,Godinger Godinger Dublin Whiskey Shot G Clear,SUSPICIOUS,Excel had duplicate rows - same item listed multiple times
+28199274910,LOT 16578199,2,"3, 1",4,Godinger Godinger Dublin Whiskey Shot G Clear,REVIEW NEEDED,Multiple boxes/pallets OR Excel error - check original file
+400011639440,LOT 16448708,3,"1, 15, 1",17,DIV 22/34 CRC REJECTS,REVIEW NEEDED,Multiple boxes/pallets OR Excel error - check original file
+48552722612,LOT 16578199,3,"6, 2, 1",9,"Haven Floral Scalloped Salad Plates, White With Floral Debossed",REVIEW NEEDED,Multiple boxes/pallets OR Excel error - check original file
+48552733311,LOT 16578199,3,"1, 1, 1",3,Haven Soft Square 32-Pc. Dinnerware White,SUSPICIOUS,Excel had duplicate rows - same item listed multiple times
+86279178893,LOT 16448708,3,"1, 1, 1",3,Cuisinart Cuisinart Space-Saving Onyx 8- Onyx,SUSPICIOUS,Excel had duplicate rows - same item listed multiple times
+13302451029,LOT 16264617,2,"1, 2",3,The Cellar The Cellar Set of 3 Whiteware White,REVIEW NEEDED,Multiple boxes/pallets OR Excel error - check original file
+194137133059,LOT 16578199,2,"2, 1",3,The Cellar Whiteware James Collection Lid White,REVIEW NEEDED,Multiple boxes/pallets OR Excel error - check original file
+194137133066,LOT 16264617,2,"2, 2",4,The Cellar Whiteware James Round Dip Bowl White,SUSPICIOUS,Excel had 2 rows with identical qty=2 each
+194137133080,LOT 16578199,2,"4, 1",5,The Cellar Aaden Textured Dinner Bowl White,REVIEW NEEDED,Multiple boxes/pallets OR Excel error - check original file
+194137133431,LOT 16578199,2,"1, 1",2,"Oake Clay Dinner Plates, Set of 4 Khaki",SUSPICIOUS,Excel had duplicate rows - same item listed multiple times
+194137198225,LOT 16448708,2,"6, 5",11,Oake 4-Pc. Dip Bowls Tray Set Wood,REVIEW NEEDED,Multiple boxes/pallets OR Excel error - check original file
+194590060978,LOT 16448708,2,"2, 1",3,Villeroy Boch Villeroy Boch Manufacture,REVIEW NEEDED,Multiple boxes/pallets OR Excel error - check original file
+194590199524,LOT 16578199,2,"2, 1",3,Elrene Vietri Medallion Blue Block Pr Bl,REVIEW NEEDED,Multiple boxes/pallets OR Excel error - check original file
+21864337323,LOT 16264617,2,"1, 1",2,Portmeirion Blue Portofino 60 x 120 Tabl,SUSPICIOUS,Excel had duplicate rows - same item listed multiple times
+25398232475,LOT 16264617,2,"2, 1",3,Pfaltzgraff Pfaltzgraff Carrie 12-Pc Din,REVIEW NEEDED,Multiple boxes/pallets OR Excel error - check original file
+25398243808,LOT 16264617,2,"1, 1",2,Pfaltzgraff Pfaltzgraff Medallion Radian,SUSPICIOUS,Excel had duplicate rows - same item listed multiple times
+28199256657,LOT 16448708,2,"1, 1",2,Godinger Godinger Dublin Set of 4 5oz J,SUSPICIOUS,Excel had duplicate rows - same item listed multiple times
+28199257296,LOT 16448708,2,"1, 1",2,Godinger Dublin Double Old-Fashioned,SUSPICIOUS,Excel had duplicate rows - same item listed multiple times
+28199260364,LOT 16264617,2,"1, 2",3,Godinger Godinger West Street Shooters C,REVIEW NEEDED,Multiple boxes/pallets OR Excel error - check original file
+28199291566,LOT 16448708,2,"1, 1",2,Godinger Godinger Red Peppermint Wrappe,SUSPICIOUS,Excel had duplicate rows - same item listed multiple times
+28225897489,LOT 16578199,2,"1, 1",2,International Silver 67-Pc. Carleigh Fla,SUSPICIOUS,Excel had duplicate rows - same item listed multiple times
+28332846226,LOT 16264617,2,"1, 1",2,kate spade new york kate spade new york,SUSPICIOUS,Excel had duplicate rows - same item listed multiple times
+35886129972,LOT 16448708,2,"1, 1",2,J.A. Henckels TWIN Brand Opus 1810 Stain,SUSPICIOUS,Excel had duplicate rows - same item listed multiple times
+35886214388,LOT 16264617,2,"1, 1",2,J.A. Henckels Vintage 1876 1810 Stainles,SUSPICIOUS,Excel had duplicate rows - same item listed multiple times
+35886385323,LOT 16264617,2,"1, 1",2,J.A. Henckels Madison Square 65-Pc. 1810,SUSPICIOUS,Excel had duplicate rows - same item listed multiple times
+35886385330,LOT 16578199,2,"1, 1",2,Henckels Lani 65-Pc. 1810 Stainless St S,SUSPICIOUS,Excel had duplicate rows - same item listed multiple times
+35886387624,LOT 16578199,2,"1, 1",2,J.A. Henckels Modernist 13-Pc. Knife Blo,SUSPICIOUS,Excel had duplicate rows - same item listed multiple times
+35886439255,LOT 16448708,2,"1, 1",2,"Zwilling Gourmet Steak Knives, Set of 4",SUSPICIOUS,Excel had duplicate rows - same item listed multiple times
+35886482893,LOT 16448708,2,"2, 2",4,Zwilling Twin Gourmet 15-Pc. Cutlery Se,SUSPICIOUS,Excel had 2 rows with identical qty=2 each
+35886645564,LOT 16264617,2,"2, 1",3,J.A. Henckels HENCKELS Solution 16-Piece,REVIEW NEEDED,Multiple boxes/pallets OR Excel error - check original file
+37725606613,LOT 16264617,2,"1, 1",2,"Noritake Colorwave Coupe Pasta Bowls, S",SUSPICIOUS,Excel had duplicate rows - same item listed multiple times
+37725607597,LOT 16264617,2,"1, 1",2,"Noritake Colorwave SidePrep Bowls, Set G",SUSPICIOUS,Excel had duplicate rows - same item listed multiple times
+45908144173,LOT 16448708,2,"1, 1",2,Farberware Farberware Edgekeeper 15-Piec,SUSPICIOUS,Excel had duplicate rows - same item listed multiple times
+47596030349,LOT 16448708,2,"1, 3",4,Lenox French Perle Collection Pistac Nat,REVIEW NEEDED,Multiple boxes/pallets OR Excel error - check original file
+47596043677,LOT 16448708,2,"1, 1",2,Lenox Lenox Laurel Leaf Placemat 19 Plat,SUSPICIOUS,Excel had duplicate rows - same item listed multiple times
+47596142387,LOT 16264617,2,"1, 1",2,Lenox Opal Innocence Oblong Tablec White,SUSPICIOUS,Excel had duplicate rows - same item listed multiple times
+47596162637,LOT 16264617,2,"1, 1",2,Lenox Opal Innocence Oblong Tablec Ivory,SUSPICIOUS,Excel had duplicate rows - same item listed multiple times
+48552397896,LOT 16448708,2,"1, 1",2,Tabletops Unlimited Wildflower 16-Pc. Di,SUSPICIOUS,Excel had duplicate rows - same item listed multiple times
+48552488846,LOT 16578199,2,"1, 1",2,Tabletops Unlimited 16-Pc. Adams Dinnerw,SUSPICIOUS,Excel had duplicate rows - same item listed multiple times
+48552527729,LOT 16264617,2,"1, 1",2,"Tabletops Unlimited Denmark Latte Mugs,",SUSPICIOUS,Excel had duplicate rows - same item listed multiple times
+48552604673,LOT 16578199,2,"1, 1",2,Tabletops Unlimited Fiore 42pc Dinnerwar,SUSPICIOUS,Excel had duplicate rows - same item listed multiple times
+48552703161,LOT 16448708,2,"1, 1",2,Denmark Tools for Cooks Denmark Tools fo,SUSPICIOUS,Excel had duplicate rows - same item listed multiple times
+48552722650,LOT 16578199,2,"3, 1",4,Haven 14 Scallop Floral-Print Stone Whit,REVIEW NEEDED,Multiple boxes/pallets OR Excel error - check original file
+692786820790,LOT 16264617,2,"2, 1",3,French Home French Home Faux Ivory Chops,REVIEW NEEDED,Multiple boxes/pallets OR Excel error - check original file
+701587159432,LOT 16264617,2,"1, 1",2,Wedgwood Wedgwood Hibiscus Dinner Plate,SUSPICIOUS,Excel had duplicate rows - same item listed multiple times
+701587447119,LOT 16264617,2,"1, 0",1,"Waterford Wedding Heirloom Frame, 8 x 1",REVIEW NEEDED,Multiple boxes/pallets OR Excel error - check original file
+715021869726,LOT 16578199,2,"1, 1",2,Euro Ceramica White Essential 16 Piece D,SUSPICIOUS,Excel had duplicate rows - same item listed multiple times
+715021871606,LOT 16264617,2,"1, 1",2,Euro Ceramica Highlands 3 Piece Serving,SUSPICIOUS,Excel had duplicate rows - same item listed multiple times
+72456117281,LOT 16578199,2,"1, 1",2,Design Imports Design Imports Lemon Blis,SUSPICIOUS,Excel had duplicate rows - same item listed multiple times
+730384895007,LOT 16264617,2,"1, 2",3,Certified International Vera Cruz 12-Pc.,REVIEW NEEDED,Multiple boxes/pallets OR Excel error - check original file
+731742133144,LOT 16578199,2,"1, 1",2,Infinity Instruments Infinity Instrument,SUSPICIOUS,Excel had duplicate rows - same item listed multiple times
+733652135973,LOT 16264617,2,"1, 2",3,Hampton Forge Hampton Forge 180 Stainles,REVIEW NEEDED,Multiple boxes/pallets OR Excel error - check original file
+76440141368,LOT 16578199,2,"1, 1",2,Anchor Hocking Anchor Hocking 16 Piece M,SUSPICIOUS,Excel had duplicate rows - same item listed multiple times
+790824227911,LOT 16578199,2,"1, 1",2,Michael Aram Heart Dreidel Multi,SUSPICIOUS,Excel had duplicate rows - same item listed multiple times
+790824320919,LOT 16448708,2,"1, 1",2,Michael Aram Calla Lily 8 x 10 Frame No,SUSPICIOUS,Excel had duplicate rows - same item listed multiple times
+790824462220,LOT 16578199,2,"1, 1",2,Michael Aram Ivy and Oak 4-Pc. Gift Set,SUSPICIOUS,Excel had duplicate rows - same item listed multiple times
+810071428500,LOT 16448708,2,"1, 2",3,JoyJolt JoyJolt Savor Fluted Glass Cof C,REVIEW NEEDED,Multiple boxes/pallets OR Excel error - check original file
+840191207679,LOT 16578199,2,"1, 1",2,Elama Elama Gia 24 Pc. Dinnerware Se Whi,SUSPICIOUS,Excel had duplicate rows - same item listed multiple times
+88235775368,LOT 16448708,2,"1, 1",2,Circleware Tipsy With Style Set of 6 - 1,SUSPICIOUS,Excel had duplicate rows - same item listed multiple times
+882864264909,LOT 16264617,2,"1, 1",2,"Lenox Flatware, Esquire 65-Piece Set",SUSPICIOUS,Excel had duplicate rows - same item listed multiple times
+882864277947,LOT 16264617,2,"1, 1",2,"Lenox Dinnerware, Set of 6 Butterfly",SUSPICIOUS,Excel had duplicate rows - same item listed multiple times
+882864391216,LOT 16264617,2,"2, 1",3,Lenox Tuscany Buy 4 Get 6 Red Wine S No,REVIEW NEEDED,Multiple boxes/pallets OR Excel error - check original file
+882864435019,LOT 16264617,2,"1, 1",2,Lenox Butterfly Meadow Thermal Trave,SUSPICIOUS,Excel had duplicate rows - same item listed multiple times
+882864646866,LOT 16448708,2,"1, 1",2,Lenox Lenox Butterfly Meadow 28 Pc. Mult,SUSPICIOUS,Excel had duplicate rows - same item listed multiple times
+882864841001,LOT 16448708,2,"1, 1",2,Lenox Lenox Butterfly Meadow Salt White,SUSPICIOUS,Excel had duplicate rows - same item listed multiple times
+885991045229,LOT 16578199,2,"1, 1",2,Mikasa Regent Bead 65-Piece Flatware,SUSPICIOUS,Excel had duplicate rows - same item listed multiple times
+885991196938,LOT 16264617,2,"1, 1",2,Mikasa Mikasa Cassia 12 Crystal Vase No,SUSPICIOUS,Excel had duplicate rows - same item listed multiple times
+885991245780,LOT 16264617,2,"1, 1",2,Year Day Year Day 20-Pc. Flatware Set Ma,SUSPICIOUS,Excel had duplicate rows - same item listed multiple times
+99967248372,LOT 16578199,2,"1, 2",3,Picnic Time St. Tropez Blanket Tote Outd,REVIEW NEEDED,Multiple boxes/pallets OR Excel error - check original file

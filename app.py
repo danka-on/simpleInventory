@@ -2392,6 +2392,49 @@ def api_items_prep_trash_restore(upc):
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
+@app.route('/api/items_prep/diagnostic/<upc>/reset', methods=['POST'])
+def api_items_prep_diagnostic_reset(upc):
+    """Reset item to original unchecked state: restore original_qty to unchecked, clear good/bad quantities"""
+    try:
+        upc_n = _normalize_upc(upc)
+        conn = sqlite3.connect('bol.db')
+        cur = conn.cursor()
+        
+        # Get the current original_qty
+        cur.execute('SELECT original_qty FROM bol_items WHERE upc = ? COLLATE NOCASE', (upc_n,))
+        row = cur.fetchone()
+        
+        if not row:
+            conn.close()
+            return jsonify({'success': False, 'error': 'Item not found'}), 404
+        
+        original_qty = row[0] or 0
+        
+        # Reset: unchecked_qty = original_qty, good_qty = 0, bad_qty = 0, quantity = 0
+        cur.execute('''
+            UPDATE bol_items 
+            SET unchecked_qty = ?, 
+                good_qty = 0, 
+                bad_qty = 0, 
+                quantity = 0
+            WHERE upc = ? COLLATE NOCASE
+        ''', (original_qty, upc_n))
+        
+        # Also clear the status and reason from items_prep_status
+        _ensure_items_prep_tables()
+        cur.execute('DELETE FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (upc_n,))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            'success': True, 
+            'original_qty': original_qty,
+            'message': f'Reset to {original_qty} unchecked'
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/shelfcreator')
 def shelfcreator():
     # Legacy route; redirect to Shelf Manager
@@ -5200,7 +5243,7 @@ def api_search_db(db_key):
             'sold': 'sold.db',
             'searchRack': 'searchRack.db',
             'found': 'found.db',
-            'bol': 'rawbol.db'  # changed from bol.db to rawbol.db
+            'bol': 'rawbol.db'  # Search rawbol.db to see original imported amounts across all LOTs
         }
         if db_key not in mapping:
             return jsonify({'error': 'Unknown db_key'}), 400
@@ -5655,98 +5698,92 @@ def api_get_lot_numbers():
 
 @app.route('/api/bol_stats', methods=['GET'])
 def api_bol_stats():
-    """Calculate BOL statistics for each LOT number."""
+    """Calculate BOL statistics using the new quantity tracking system.
+    Now properly tracks original_qty, good_qty, bad_qty, and unchecked_qty per LOT.
+    """
     try:
-        # Connect to both databases
-        rawbol_conn = sqlite3.connect('rawbol.db')
-        rawbol_conn.row_factory = sqlite3.Row
-        rawbol_cur = rawbol_conn.cursor()
+        conn = sqlite3.connect('bol.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
         
-        bol_conn = sqlite3.connect('bol.db')
-        bol_conn.row_factory = sqlite3.Row
-        bol_cur = bol_conn.cursor()
+        # Check if new quantity columns exist
+        cur.execute('PRAGMA table_info(bol_items)')
+        cols = [col[1].lower() for col in cur.fetchall()]
+        has_new_columns = all(c in cols for c in ['original_qty', 'good_qty', 'bad_qty', 'unchecked_qty'])
         
-        # Get all LOT numbers ordered by date (newest first)
-        rawbol_cur.execute('''
+        if not has_new_columns:
+            conn.close()
+            return jsonify({
+                'success': False, 
+                'error': 'Quantity columns not yet migrated. Please restart Flask to run migration.'
+            }), 500
+        
+        # Get all LOT numbers with their stats, ordered by import_date DESC (newest first)
+        cur.execute('''
             SELECT 
                 lot_number,
-                MAX(import_date) as latest_date
-            FROM raw_bol_items
-            WHERE lot_number IS NOT NULL 
+                MAX(import_date) as latest_date,
+                COUNT(DISTINCT upc) as unique_items,
+                SUM(COALESCE(original_qty, 0)) as total_original,
+                SUM(COALESCE(good_qty, 0)) as total_good,
+                SUM(COALESCE(bad_qty, 0)) as total_bad,
+                SUM(COALESCE(unchecked_qty, 0)) as total_unchecked
+            FROM bol_items
+            WHERE (temporary IS NULL OR temporary = 0)
+                AND upc NOT LIKE '%-%'
+                AND lot_number IS NOT NULL 
                 AND TRIM(COALESCE(lot_number, '')) != ''
                 AND LOWER(lot_number) NOT IN ('nan', 'none', 'null')
             GROUP BY lot_number
             ORDER BY latest_date DESC
         ''')
         
-        lots = rawbol_cur.fetchall()
+        lots = cur.fetchall()
         stats = []
         
         for lot_row in lots:
             lot_number = lot_row['lot_number']
             import_date = lot_row['latest_date']
+            unique_items = lot_row['unique_items'] or 0
+            total_original = lot_row['total_original'] or 0
+            total_good = lot_row['total_good'] or 0
+            total_bad = lot_row['total_bad'] or 0
+            total_unchecked = lot_row['total_unchecked'] or 0
             
-            # Get unique items and total quantity from rawbol (original data)
-            rawbol_cur.execute('''
-                SELECT 
-                    COUNT(DISTINCT upc) as unique_items,
-                    SUM(COALESCE(quantity, 1)) as total_quantity
-                FROM raw_bol_items
-                WHERE lot_number = ?
-            ''', (lot_number,))
+            # Calculate prepped quantity (good + bad)
+            total_prepped = total_good + total_bad
             
-            rawbol_data = rawbol_cur.fetchone()
-            unique_items = rawbol_data['unique_items'] or 0
-            original_total_qty = rawbol_data['total_quantity'] or 0
-            
-            # Get list of base UPCs from rawbol for this LOT
-            rawbol_cur.execute('''
-                SELECT DISTINCT upc FROM raw_bol_items WHERE lot_number = ?
-            ''', (lot_number,))
-            rawbol_upcs = [row['upc'] for row in rawbol_cur.fetchall()]
-            
-            # Count how many of these UPCs still exist as base items (not suffixed) in bol.db
-            # This gives us an indicator of prep progress (items that haven't been processed yet)
-            # NOTE: We check ANY lot_number in bol.db since lot numbers may have changed
-            if rawbol_upcs:
-                placeholders = ','.join('?' * len(rawbol_upcs))
-                bol_cur.execute(f'''
-                    SELECT COUNT(DISTINCT upc) as unchecked_count
-                    FROM bol_items
-                    WHERE (temporary IS NULL OR temporary = 0)
-                        AND upc NOT LIKE '%-%'
-                        AND upc IN ({placeholders})
-                ''', rawbol_upcs)
-                bol_data = bol_cur.fetchone()
-                unchecked_count = bol_data['unchecked_count'] or 0
-            else:
-                unchecked_count = 0
-            
-            # Calculate prepped items (items that no longer exist as base UPCs in bol.db)
-            # This could be because they were: marked as good, bad, listed, or deleted
-            prepped_count = unique_items - unchecked_count
-            
-            # Calculate percentage done based on unique items (not quantity)
-            if unique_items > 0:
-                percent_done = round((prepped_count / unique_items) * 100, 1)
+            # Calculate percentage done based on quantity (not item count)
+            if total_original > 0:
+                percent_done = round((total_prepped / total_original) * 100, 1)
             else:
                 percent_done = 0.0
+            
+            # Calculate loss rate (bad / original)
+            if total_original > 0:
+                loss_rate = round((total_bad / total_original) * 100, 1)
+            else:
+                loss_rate = 0.0
             
             stats.append({
                 'lot_number': lot_number,
                 'import_date': import_date,
                 'unique_items': unique_items,
-                'total_quantity': original_total_qty,
-                'unchecked_items': unchecked_count,
-                'prepped_items': prepped_count,
-                'percent_done': percent_done
+                'total_original': total_original,
+                'total_good': total_good,
+                'total_bad': total_bad,
+                'total_unchecked': total_unchecked,
+                'total_prepped': total_prepped,
+                'percent_done': percent_done,
+                'loss_rate': loss_rate
             })
         
-        rawbol_conn.close()
-        bol_conn.close()
+        conn.close()
         
         return jsonify({'success': True, 'stats': stats})
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
 
 

@@ -89,6 +89,12 @@
                 if(percent >= 70) progressClass = 'progress-high';
                 else if(percent >= 30) progressClass = 'progress-medium';
                 
+                // Format loss rate color
+                const lossRate = stat.loss_rate || 0;
+                let lossColor = '#27ae60'; // green for low loss
+                if(lossRate > 10) lossColor = '#e74c3c'; // red for high loss
+                else if(lossRate > 5) lossColor = '#f39c12'; // orange for medium loss
+                
                 html += `
                 <div class="stat-card">
                     <div class="stat-card-header">
@@ -104,29 +110,42 @@
                     </div>
                     
                     <div class="stat-row">
-                        <span class="stat-label">Total Quantity:</span>
-                        <span class="stat-value">${stat.total_quantity}</span>
+                        <span class="stat-label">Original Quantity:</span>
+                        <span class="stat-value">${stat.total_original}</span>
+                    </div>
+                    
+                    <div class="stat-row" style="border-top:1px solid #f0f0f0;padding-top:10px;margin-top:8px">
+                        <span class="stat-label" style="color:#27ae60">✓ Good:</span>
+                        <span class="stat-value" style="color:#27ae60">${stat.total_good}</span>
                     </div>
                     
                     <div class="stat-row">
-                        <span class="stat-label">Unchecked Items:</span>
-                        <span class="stat-value">${stat.unchecked_items}</span>
+                        <span class="stat-label" style="color:#e74c3c">✗ Bad:</span>
+                        <span class="stat-value" style="color:#e74c3c">${stat.total_bad}</span>
                     </div>
                     
                     <div class="stat-row">
-                        <span class="stat-label">Prepped Items:</span>
-                        <span class="stat-value">${stat.prepped_items}</span>
+                        <span class="stat-label" style="color:#95a5a6">⧗ Unchecked:</span>
+                        <span class="stat-value" style="color:#95a5a6">${stat.total_unchecked}</span>
+                    </div>
+                    
+                    <div class="stat-row" style="border-top:1px solid #f0f0f0;padding-top:10px;margin-top:8px">
+                        <span class="stat-label">Loss Rate:</span>
+                        <span class="stat-value" style="color:${lossColor};font-weight:700">${lossRate.toFixed(1)}%</span>
                     </div>
                     
                     <div class="progress-container">
                         <div class="progress-label">
-                            <span class="stat-label">Progress:</span>
+                            <span class="stat-label">Prep Progress:</span>
                             <span class="progress-percent">${percent.toFixed(1)}%</span>
                         </div>
                         <div class="progress-bar-bg">
                             <div class="progress-bar-fill ${progressClass}" style="width:${Math.min(percent,100)}%">
                                 ${percent >= 10 ? percent.toFixed(0) + '%' : ''}
                             </div>
+                        </div>
+                        <div style="font-size:0.8rem;color:#7f8c8d;margin-top:6px;text-align:center">
+                            ${stat.total_prepped} / ${stat.total_original} items prepped
                         </div>
                     </div>
                 </div>
