@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.ico') }}">
+    <title>Emailer - Sweet Shelves</title>
+    <style>
+        :root {
+            --primary: #0984e3;
+            --accent: #00b894;
+            --danger: #e74c3c;
+            --bg: #f9f9f9;
+            --card: #fff;
+            --border: #e0e0e0;
+            --radius: 14px;
+        }
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background: var(--bg);
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px 16px 80px 16px;
+        }
+        h1 {
+            margin: 0 0 18px 0;
+            font-weight: 600;
+            color: #2c3e50;
+            text-align: center;
+        }
+        .card {
+            background: var(--card);
+            border-radius: var(--radius);
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+            border: 1px solid var(--border);
+            margin-bottom: 20px;
+        }
+        .card h2 {
+            margin-top: 0;
+            font-size: 1.3rem;
+            color: #2c3e50;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #555;
+            font-weight: 500;
+        }
+        .form-group input[type="email"],
+        .form-group input[type="text"],
+        .form-group textarea {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 1rem;
+            box-sizing: border-box;
+        }
+        .form-group textarea {
+            min-height: 80px;
+            resize: vertical;
+            font-family: inherit;
+        }
+        .email-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-top: 10px;
+        }
+        .email-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px;
+            background: #f5f5f5;
+            border-radius: 8px;
+        }
+        .email-item span {
+            flex: 1;
+            color: #2c3e50;
+        }
+        .email-item button {
+            background: var(--danger);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            padding: 6px 12px;
+            cursor: pointer;
+            font-size: 0.9rem;
+        }
+        .email-item button:hover {
+            opacity: 0.85;
+        }
+        .add-email-btn {
+            background: var(--accent);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 10px 16px;
+            cursor: pointer;
+            font-size: 1rem;
+            margin-top: 10px;
+        }
+        .add-email-btn:hover {
+            opacity: 0.85;
+        }
+        .toggle-group {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 15px;
+            background: #f5f5f5;
+            border-radius: 8px;
+            margin-bottom: 10px;
+        }
+        .toggle-group label {
+            color: #2c3e50;
+            font-weight: 500;
+            margin: 0;
+        }
+        .toggle-switch {
+            position: relative;
+            width: 50px;
+            height: 28px;
+        }
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .3s;
+            border-radius: 28px;
+        }
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 20px;
+            width: 20px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .3s;
+            border-radius: 50%;
+        }
+        input:checked + .toggle-slider {
+            background-color: var(--accent);
+        }
+        input:checked + .toggle-slider:before {
+            transform: translateX(22px);
+        }
+        .timer-selector {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .timer-option {
+            padding: 12px;
+            background: white;
+            border: 2px solid var(--border);
+            border-radius: 8px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .timer-option:hover {
+            border-color: var(--primary);
+        }
+        .timer-option.active {
+            background: var(--primary);
+            color: white;
+            border-color: var(--primary);
+        }
+        .timer-option span {
+            display: block;
+            font-size: 0.9rem;
+        }
+        .save-btn {
+            width: 100%;
+            background: var(--primary);
+            color: white;
+            border: none;
+            border-radius: var(--radius);
+            padding: 14px;
+            font-size: 1.1rem;
+            cursor: pointer;
+            font-weight: 500;
+            margin-top: 20px;
+        }
+        .save-btn:hover {
+            opacity: 0.9;
+        }
+        .test-email-btn {
+            width: 100%;
+            background: #f39c12;
+            color: white;
+            border: none;
+            border-radius: var(--radius);
+            padding: 14px;
+            font-size: 1.1rem;
+            cursor: pointer;
+            font-weight: 500;
+            margin-top: 10px;
+        }
+        .test-email-btn:hover {
+            opacity: 0.9;
+        }
+        .status-message {
+            padding: 12px;
+            border-radius: 8px;
+            margin-top: 15px;
+            display: none;
+        }
+        .status-message.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status-message.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        @media (max-width: 768px) {
+            .container {
+                padding: 16px 12px 80px 12px;
+            }
+            .timer-selector {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+    </style>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+</head>
+<body>
+    <div class="container">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:20px;">
+            <a href="/tools" style="text-decoration:none;">
+                <button style="background:#e74c3c;color:#fff;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;display:flex;align-items:center;gap:8px;">
+                    <i class="fas fa-arrow-left"></i> Back
+                </button>
+            </a>
+            <h1 style="flex:1;text-align:center;margin:0;">Email Alerts</h1>
+            <div style="width:84px"></div>
+        </div>
+
+        <!-- Email Recipients -->
+        <div class="card">
+            <h2><i class="fas fa-users" style="color: var(--primary);"></i> Email Recipients</h2>
+            <div class="form-group">
+                <label>Add Email Address</label>
+                <div style="display: flex; gap: 10px;">
+                    <input type="email" id="newEmail" placeholder="email@example.com" style="flex: 1;">
+                    <button class="add-email-btn" onclick="addEmail()">
+                        <i class="fas fa-plus"></i> Add
+                    </button>
+                </div>
+            </div>
+            <div id="emailList" class="email-list">
+                <!-- Email items will be added here dynamically -->
+            </div>
+        </div>
+
+        <!-- Alert Configuration -->
+        <div class="card">
+            <h2><i class="fas fa-bell" style="color: var(--accent);"></i> Alert Configuration</h2>
+            
+            <div class="toggle-group">
+                <label for="testToggle">Test Email Alerts</label>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="testToggle">
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+            <p style="color: #666; font-size: 0.9rem; margin-top: -5px; margin-bottom: 20px;">
+                <i class="fas fa-info-circle"></i> Enable to receive periodic test emails
+            </p>
+
+            <div class="form-group">
+                <label><i class="fas fa-clock"></i> Email Frequency</label>
+                <div class="timer-selector">
+                    <div class="timer-option" data-interval="10m" onclick="selectTimer(this)">
+                        <i class="fas fa-clock" style="font-size: 1.5rem; margin-bottom: 5px;"></i>
+                        <span>10 Minutes</span>
+                    </div>
+                    <div class="timer-option" data-interval="1h" onclick="selectTimer(this)">
+                        <i class="fas fa-clock" style="font-size: 1.5rem; margin-bottom: 5px;"></i>
+                        <span>1 Hour</span>
+                    </div>
+                    <div class="timer-option" data-interval="12h" onclick="selectTimer(this)">
+                        <i class="fas fa-clock" style="font-size: 1.5rem; margin-bottom: 5px;"></i>
+                        <span>12 Hours</span>
+                    </div>
+                    <div class="timer-option active" data-interval="1d" onclick="selectTimer(this)">
+                        <i class="fas fa-calendar-day" style="font-size: 1.5rem; margin-bottom: 5px;"></i>
+                        <span>1 Day</span>
+                    </div>
+                    <div class="timer-option" data-interval="1w" onclick="selectTimer(this)">
+                        <i class="fas fa-calendar-week" style="font-size: 1.5rem; margin-bottom: 5px;"></i>
+                        <span>1 Week</span>
+                    </div>
+                    <div class="timer-option" data-interval="1mo" onclick="selectTimer(this)">
+                        <i class="fas fa-calendar-alt" style="font-size: 1.5rem; margin-bottom: 5px;"></i>
+                        <span>1 Month</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Action Buttons -->
+        <button class="test-email-btn" onclick="sendTestEmail()">
+            <i class="fas fa-paper-plane"></i> Send Test Email Now
+        </button>
+        
+        <button class="save-btn" onclick="saveSettings()">
+            <i class="fas fa-save"></i> Save Settings
+        </button>
+
+        <div id="statusMessage" class="status-message"></div>
+    </div>
+
+    <script>
+        let emails = [];
+        let selectedInterval = '1d';
+
+        // Load saved settings on page load
+        window.onload = function() {
+            loadSettings();
+        };
+
+        function loadSettings() {
+            fetch('/api/emailer/settings')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        emails = data.emails || [];
+                        selectedInterval = data.interval || '1d';
+                        document.getElementById('testToggle').checked = data.test_enabled || false;
+                        
+                        renderEmailList();
+                        
+                        // Set active timer option
+                        document.querySelectorAll('.timer-option').forEach(opt => {
+                            opt.classList.remove('active');
+                            if (opt.dataset.interval === selectedInterval) {
+                                opt.classList.add('active');
+                            }
+                        });
+                    }
+                })
+                .catch(err => {
+                    console.error('Failed to load settings:', err);
+                });
+        }
+
+        function addEmail() {
+            const emailInput = document.getElementById('newEmail');
+            const email = emailInput.value.trim();
+            
+            if (!email) {
+                showStatus('Please enter an email address', 'error');
+                return;
+            }
+            
+            // Basic email validation
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (!emailRegex.test(email)) {
+                showStatus('Please enter a valid email address', 'error');
+                return;
+            }
+            
+            if (emails.includes(email)) {
+                showStatus('Email already added', 'error');
+                return;
+            }
+            
+            emails.push(email);
+            emailInput.value = '';
+            renderEmailList();
+            showStatus('Email added successfully', 'success');
+        }
+
+        function removeEmail(email) {
+            emails = emails.filter(e => e !== email);
+            renderEmailList();
+            showStatus('Email removed', 'success');
+        }
+
+        function renderEmailList() {
+            const listContainer = document.getElementById('emailList');
+            
+            if (emails.length === 0) {
+                listContainer.innerHTML = '<p style="color: #999; text-align: center; padding: 20px;">No email addresses added yet</p>';
+                return;
+            }
+            
+            listContainer.innerHTML = emails.map(email => `
+                <div class="email-item">
+                    <i class="fas fa-envelope" style="color: var(--primary);"></i>
+                    <span>${email}</span>
+                    <button onclick="removeEmail('${email}')">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            `).join('');
+        }
+
+        function selectTimer(element) {
+            document.querySelectorAll('.timer-option').forEach(opt => {
+                opt.classList.remove('active');
+            });
+            element.classList.add('active');
+            selectedInterval = element.dataset.interval;
+        }
+
+        function saveSettings() {
+            const testEnabled = document.getElementById('testToggle').checked;
+            
+            const settings = {
+                emails: emails,
+                interval: selectedInterval,
+                test_enabled: testEnabled
+            };
+            
+            fetch('/api/emailer/settings', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(settings)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    showStatus('Settings saved successfully!', 'success');
+                } else {
+                    showStatus('Failed to save settings: ' + (data.error || 'Unknown error'), 'error');
+                }
+            })
+            .catch(err => {
+                showStatus('Failed to save settings: ' + err.message, 'error');
+            });
+        }
+
+        function sendTestEmail() {
+            if (emails.length === 0) {
+                showStatus('Please add at least one email address first', 'error');
+                return;
+            }
+            
+            fetch('/api/emailer/send-test', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ emails: emails })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    showStatus('Test email sent successfully!', 'success');
+                } else {
+                    showStatus('Failed to send test email: ' + (data.error || 'Unknown error'), 'error');
+                }
+            })
+            .catch(err => {
+                showStatus('Failed to send test email: ' + err.message, 'error');
+            });
+        }
+
+        function showStatus(message, type) {
+            const statusEl = document.getElementById('statusMessage');
+            statusEl.textContent = message;
+            statusEl.className = 'status-message ' + type;
+            statusEl.style.display = 'block';
+            
+            setTimeout(() => {
+                statusEl.style.display = 'none';
+            }, 5000);
+        }
+
+        // Allow pressing Enter to add email
+        document.addEventListener('DOMContentLoaded', function() {
+            document.getElementById('newEmail').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    addEmail();
+                }
+            });
+        });
+    </script>
+</body>
+</html>

@@ -9,6 +9,9 @@ import io, time, subprocess, os, requests, json, threading, sqlite3, sys, dateti
 import xml.etree.ElementTree as ET
 from dotenv import load_dotenv
 import xml.dom.minidom as minidom
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 
 
@@ -164,6 +167,55 @@ def _run_enrich_in_background():
     t.start()
     return True
 
+def send_email_smtp(to_emails, subject, body, html_body=None):
+    """
+    Send email using SMTP (Gmail, Outlook, etc.)
+    
+    Args:
+        to_emails: List of recipient email addresses
+        subject: Email subject line
+        body: Plain text email body
+        html_body: Optional HTML email body
+    
+    Returns:
+        (success: bool, error_message: str or None)
+    """
+    try:
+        # Get SMTP settings from environment or database
+        smtp_server = os.getenv('SMTP_SERVER', 'smtp.gmail.com')
+        smtp_port = int(os.getenv('SMTP_PORT', '587'))
+        smtp_user = os.getenv('SMTP_USER', '')
+        smtp_password = os.getenv('SMTP_PASSWORD', '')
+        from_email = os.getenv('SMTP_FROM_EMAIL', smtp_user)
+        
+        if not smtp_user or not smtp_password:
+            return False, 'SMTP credentials not configured. Set SMTP_USER and SMTP_PASSWORD in environment variables or .env file'
+        
+        # Create message
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = subject
+        msg['From'] = from_email
+        msg['To'] = ', '.join(to_emails)
+        
+        # Attach text and HTML parts
+        text_part = MIMEText(body, 'plain')
+        msg.attach(text_part)
+        
+        if html_body:
+            html_part = MIMEText(html_body, 'html')
+            msg.attach(html_part)
+        
+        # Send email
+        with smtplib.SMTP(smtp_server, smtp_port) as server:
+            server.starttls()
+            server.login(smtp_user, smtp_password)
+            server.send_message(msg)
+        
+        return True, None
+        
+    except Exception as e:
+        return False, str(e)
+
 
 
 
@@ -171,6 +223,129 @@ def _run_enrich_in_background():
 @app.route('/tools')
 def tools():
     return render_template('tools.html')
+
+# Emailer page
+@app.route('/emailer')
+def emailer():
+    return render_template('emailer.html')
+
+# API endpoints for emailer
+@app.route('/api/emailer/settings', methods=['GET'])
+def get_emailer_settings():
+    """Get saved emailer settings"""
+    try:
+        conn = sqlite3.connect('searchRack.db')
+        cur = conn.cursor()
+        
+        # Create emailer settings table if it doesn't exist
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS emailer_settings (
+                id INTEGER PRIMARY KEY,
+                emails TEXT,
+                interval TEXT DEFAULT '1d',
+                test_enabled INTEGER DEFAULT 0,
+                last_test_sent TEXT
+            )
+        ''')
+        
+        # Get settings
+        cur.execute('SELECT emails, interval, test_enabled FROM emailer_settings WHERE id = 1')
+        row = cur.fetchone()
+        
+        if row:
+            emails = json.loads(row[0]) if row[0] else []
+            interval = row[1] or '1d'
+            test_enabled = bool(row[2])
+        else:
+            emails = []
+            interval = '1d'
+            test_enabled = False
+        
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'emails': emails,
+            'interval': interval,
+            'test_enabled': test_enabled
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/emailer/settings', methods=['POST'])
+def save_emailer_settings():
+    """Save emailer settings"""
+    try:
+        data = request.json
+        emails = data.get('emails', [])
+        interval = data.get('interval', '1d')
+        test_enabled = 1 if data.get('test_enabled', False) else 0
+        
+        conn = sqlite3.connect('searchRack.db')
+        cur = conn.cursor()
+        
+        # Create table if it doesn't exist
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS emailer_settings (
+                id INTEGER PRIMARY KEY,
+                emails TEXT,
+                interval TEXT DEFAULT '1d',
+                test_enabled INTEGER DEFAULT 0,
+                last_test_sent TEXT
+            )
+        ''')
+        
+        # Upsert settings
+        cur.execute('''
+            INSERT OR REPLACE INTO emailer_settings (id, emails, interval, test_enabled)
+            VALUES (1, ?, ?, ?)
+        ''', (json.dumps(emails), interval, test_enabled))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/emailer/send-test', methods=['POST'])
+def send_test_email():
+    """Send a test email"""
+    try:
+        data = request.json
+        emails = data.get('emails', [])
+        
+        if not emails:
+            return jsonify({'success': False, 'error': 'No email addresses provided'}), 400
+        
+        # Send actual email
+        subject = "This is an automated test email from store app"
+        body = "Hello, this is the store app speaking."
+        
+        success, error = send_email_smtp(emails, subject, body)
+        
+        if not success:
+            return jsonify({'success': False, 'error': error}), 500
+        
+        # Update last test sent time
+        conn = sqlite3.connect('searchRack.db')
+        cur = conn.cursor()
+        cur.execute('''
+            UPDATE emailer_settings 
+            SET last_test_sent = ? 
+            WHERE id = 1
+        ''', (datetime.datetime.now().isoformat(),))
+        conn.commit()
+        conn.close()
+        
+        print(f"✅ Test email sent successfully to: {', '.join(emails)}")
+        
+        return jsonify({
+            'success': True,
+            'message': f'Test email sent to {len(emails)} recipient(s)'
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 # BOL Statistics page
 @app.route('/bol-stats')

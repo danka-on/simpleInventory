@@ -5,6 +5,7 @@ Handles authentication and data fetching from Amazon Seller Central
 
 import json
 import sqlite3
+import time
 from datetime import datetime, timedelta
 from sp_api.api import Orders, Reports, CatalogItems, ListingsItems
 from sp_api.base import Marketplaces
@@ -31,6 +32,14 @@ class AmazonManager:
         # Marketplace configuration (default to US)
         self.marketplace = Marketplaces.US
         self.region = self.creds.get('region', 'us-east-1')
+        
+        # Rate limiting for Catalog API (max 2 requests per second to be safe)
+        self.last_catalog_call_time = 0
+        self.catalog_api_delay = 1.0  # 1 second between calls = 1 request/second
+        
+        # Rate limiting for Order Items API (even more conservative)
+        self.last_order_items_call_time = 0
+        self.order_items_api_delay = 1.0  # 1 second between calls = 1 request/second
     
     def get_orders(self, days_back=30, max_results=100):
         """
@@ -99,6 +108,8 @@ class AmazonManager:
     def get_order_items(self, order_id):
         """
         Fetch line items for a specific order
+        Rate limited to avoid QuotaExceeded errors.
+        Includes retry logic with exponential backoff.
         
         Args:
             order_id: Amazon Order ID
@@ -106,24 +117,52 @@ class AmazonManager:
         Returns:
             List of order items
         """
-        try:
-            orders_api = Orders(credentials=self.credentials, marketplace=self.marketplace)
-            
-            response = orders_api.get_order_items(order_id=order_id)
-            
-            if response.errors:
-                print(f"❌ Error fetching order items: {response.errors}")
+        max_retries = 3
+        base_wait = 5  # Start with 5 second wait on quota error
+        
+        for attempt in range(max_retries):
+            try:
+                # Rate limiting: ensure we don't exceed Amazon's quota
+                current_time = time.time()
+                time_since_last_call = current_time - self.last_order_items_call_time
+                
+                if time_since_last_call < self.order_items_api_delay:
+                    sleep_time = self.order_items_api_delay - time_since_last_call
+                    time.sleep(sleep_time)
+                
+                self.last_order_items_call_time = time.time()
+                
+                orders_api = Orders(credentials=self.credentials, marketplace=self.marketplace)
+                
+                response = orders_api.get_order_items(order_id=order_id)
+                
+                if response.errors:
+                    print(f"❌ Error fetching order items: {response.errors}")
+                    return []
+                
+                items = response.payload.get('OrderItems', [])
+                return items
+                
+            except SellingApiException as e:
+                error_str = str(e)
+                # Check if it's a quota error
+                if 'QuotaExceeded' in error_str:
+                    if attempt < max_retries - 1:
+                        wait_time = base_wait * (2 ** attempt)  # Exponential backoff
+                        print(f"⏳ Quota exceeded, waiting {wait_time}s before retry {attempt + 2}/{max_retries}...")
+                        time.sleep(wait_time)
+                        continue
+                    else:
+                        print(f"❌ Amazon API quota exhausted after {max_retries} attempts")
+                        return []
+                else:
+                    print(f"❌ Amazon API Error: {e}")
+                    return []
+            except Exception as e:
+                print(f"❌ Error fetching order items: {e}")
                 return []
-            
-            items = response.payload.get('OrderItems', [])
-            return items
-            
-        except SellingApiException as e:
-            print(f"❌ Amazon API Error: {e}")
-            return []
-        except Exception as e:
-            print(f"❌ Error fetching order items: {e}")
-            return []
+        
+        return []
     
     def sync_orders_to_db(self, days_back=30):
         """
@@ -172,6 +211,7 @@ class AmazonManager:
             pass
         
         synced_count = 0
+        order_items_api_calls = 0
         
         for order in orders:
             try:
@@ -196,6 +236,7 @@ class AmazonManager:
                     continue
                 
                 # Get order items
+                order_items_api_calls += 1
                 items = self.get_order_items(amazon_order_id)
                 
                 for item in items:
@@ -318,6 +359,8 @@ class AmazonManager:
         
         conn.close()
         print(f"✅ Synced {synced_count} Amazon orders to database")
+        if order_items_api_calls > 0:
+            print(f"   Order Items API calls: {order_items_api_calls} (rate limited)")
         return synced_count
     
     def get_active_listings(self):
@@ -568,6 +611,7 @@ class AmazonManager:
         synced_count = 0
         updated_count = 0
         skipped_count = 0
+        catalog_api_calls = 0  # Track Catalog API usage
         
         for listing in listings:
             try:
@@ -619,7 +663,8 @@ class AmazonManager:
                 image_url = listing.get('image', '')
                 if not image_url:
                     try:
-                        # Fetch from Amazon Catalog API
+                        # Fetch from Amazon Catalog API (rate limited)
+                        catalog_api_calls += 1
                         catalog_data = self.get_catalog_item(asin)
                         if catalog_data and 'images' in catalog_data:
                             # Extract the MAIN variant image with largest size
@@ -715,36 +760,68 @@ class AmazonManager:
         if skipped_count > 0:
             print(f"   - Skipped (unchanged): {skipped_count} items")
         print(f"   - Total: {synced_count + updated_count} items")
+        if catalog_api_calls > 0:
+            print(f"   - Catalog API calls: {catalog_api_calls} (rate limited)")
         
         return synced_count + updated_count
 
     def get_catalog_item(self, asin: str):
         """Fetch a single catalog item (2022-04-01) and return payload dict.
         Includes attributes and identifiers so we can extract UPC/EAN.
+        Rate limited to avoid QuotaExceeded errors with retry logic.
         """
-        try:
-            ci = CatalogItems(credentials=self.credentials, marketplace=self.marketplace)
-            # Some library versions prefer marketplaceIds param
+        max_retries = 3
+        base_wait = 5  # Start with 5 second wait on quota error
+        
+        for attempt in range(max_retries):
             try:
-                resp = ci.get_catalog_item(
-                    asin=asin,
-                    marketplaceIds=[self.marketplace.marketplace_id],
-                    includedData=["attributes", "identifiers", "images", "summaries"],
-                )
-            except TypeError:
-                # Fallback signature without keyword args in some versions
-                resp = ci.get_catalog_item(
-                    asin,
-                    marketplaceIds=[self.marketplace.marketplace_id],
-                    includedData=["attributes", "identifiers", "images", "summaries"],
-                )
-            return resp.payload if hasattr(resp, 'payload') else resp
-        except SellingApiException as e:
-            print(f"❌ Amazon Catalog API error for {asin}: {e}")
-            return None
-        except Exception as e:
-            print(f"❌ Error fetching catalog item {asin}: {e}")
-            return None
+                # Rate limiting: ensure we don't exceed Amazon's quota
+                current_time = time.time()
+                time_since_last_call = current_time - self.last_catalog_call_time
+                
+                if time_since_last_call < self.catalog_api_delay:
+                    sleep_time = self.catalog_api_delay - time_since_last_call
+                    time.sleep(sleep_time)
+                
+                self.last_catalog_call_time = time.time()
+                
+                ci = CatalogItems(credentials=self.credentials, marketplace=self.marketplace)
+                # Some library versions prefer marketplaceIds param
+                try:
+                    resp = ci.get_catalog_item(
+                        asin=asin,
+                        marketplaceIds=[self.marketplace.marketplace_id],
+                        includedData=["attributes", "identifiers", "images", "summaries"],
+                    )
+                except TypeError:
+                    # Fallback signature without keyword args in some versions
+                    resp = ci.get_catalog_item(
+                        asin,
+                        marketplaceIds=[self.marketplace.marketplace_id],
+                        includedData=["attributes", "identifiers", "images", "summaries"],
+                    )
+                return resp.payload if hasattr(resp, 'payload') else resp
+                
+            except SellingApiException as e:
+                error_str = str(e)
+                # Check if it's a quota error
+                if 'QuotaExceeded' in error_str:
+                    if attempt < max_retries - 1:
+                        wait_time = base_wait * (2 ** attempt)  # Exponential backoff: 5s, 10s, 20s
+                        print(f"⏳ Catalog quota exceeded for {asin}, waiting {wait_time}s before retry {attempt + 2}/{max_retries}...")
+                        time.sleep(wait_time)
+                        continue
+                    else:
+                        print(f"❌ Catalog API quota exhausted for {asin} after {max_retries} attempts")
+                        return None
+                else:
+                    print(f"❌ Amazon Catalog API error for {asin}: {e}")
+                    return None
+            except Exception as e:
+                print(f"❌ Error fetching catalog item {asin}: {e}")
+                return None
+        
+        return None
     
     def get_inventory_summary(self):
         """
