@@ -22,7 +22,7 @@
             min-height: 100vh;
         }
         .container {
-            max-width: 600px;
+            max-width: 800px;
             margin: 0 auto;
             padding: 20px 16px 80px 16px;
         }
@@ -67,30 +67,65 @@
             font-size: 1rem;
             box-sizing: border-box;
         }
-        .form-group textarea {
-            min-height: 80px;
-            resize: vertical;
-            font-family: inherit;
-        }
         .email-list {
             display: flex;
             flex-direction: column;
-            gap: 8px;
+            gap: 12px;
             margin-top: 10px;
         }
-        .email-item {
+        .email-card {
+            background: var(--card);
+            border: 2px solid var(--border);
+            border-radius: var(--radius);
+            padding: 16px;
+            transition: border-color 0.2s;
             display: flex;
             align-items: center;
-            gap: 10px;
-            padding: 10px;
-            background: #f5f5f5;
-            border-radius: 8px;
+            gap: 16px;
         }
-        .email-item span {
+        .email-card:hover {
+            border-color: var(--primary);
+        }
+        .email-info {
             flex: 1;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .email-info i {
+            color: var(--primary);
+            font-size: 1.2rem;
+        }
+        .email-address {
+            font-weight: 600;
             color: #2c3e50;
         }
-        .email-item button {
+        .alert-type {
+            background: #f39c12;
+            color: white;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            font-weight: 500;
+        }
+        .frequency-select {
+            padding: 10px 12px;
+            border: 2px solid var(--border);
+            border-radius: 8px;
+            font-size: 0.95rem;
+            background: white;
+            cursor: pointer;
+            min-width: 140px;
+        }
+        .frequency-select:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+        .email-actions {
+            display: flex;
+            gap: 8px;
+        }
+        .remove-btn {
             background: var(--danger);
             color: white;
             border: none;
@@ -98,6 +133,34 @@
             padding: 6px 12px;
             cursor: pointer;
             font-size: 0.9rem;
+        }
+        .remove-btn:hover {
+            opacity: 0.85;
+        }
+        .test-btn {
+            background: #f39c12;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            padding: 6px 12px;
+            cursor: pointer;
+            font-size: 0.9rem;
+        }
+        .test-btn:hover {
+            opacity: 0.85;
+        }
+        .alert-type-select {
+            padding: 12px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 1rem;
+            background: white;
+            cursor: pointer;
+            flex: 1;
+        }
+        .alert-type-select:focus {
+            outline: none;
+            border-color: var(--primary);
         }
         .email-item button:hover {
             opacity: 0.85;
@@ -119,20 +182,21 @@
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 15px;
-            background: #f5f5f5;
+            padding: 12px;
+            background: #f9f9f9;
             border-radius: 8px;
-            margin-bottom: 10px;
+            margin-bottom: 8px;
         }
         .toggle-group label {
-            color: #2c3e50;
+            color: #555;
             font-weight: 500;
             margin: 0;
+            font-size: 0.9rem;
         }
         .toggle-switch {
             position: relative;
-            width: 50px;
-            height: 28px;
+            width: 44px;
+            height: 24px;
         }
         .toggle-switch input {
             opacity: 0;
@@ -148,15 +212,15 @@
             bottom: 0;
             background-color: #ccc;
             transition: .3s;
-            border-radius: 28px;
+            border-radius: 24px;
         }
         .toggle-slider:before {
             position: absolute;
             content: "";
-            height: 20px;
-            width: 20px;
-            left: 4px;
-            bottom: 4px;
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
             background-color: white;
             transition: .3s;
             border-radius: 50%;
@@ -165,22 +229,23 @@
             background-color: var(--accent);
         }
         input:checked + .toggle-slider:before {
-            transform: translateX(22px);
+            transform: translateX(20px);
         }
         .timer-selector {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
-            gap: 10px;
-            margin-top: 10px;
+            gap: 8px;
+            margin-top: 8px;
         }
         .timer-option {
-            padding: 12px;
+            padding: 8px;
             background: white;
             border: 2px solid var(--border);
-            border-radius: 8px;
+            border-radius: 6px;
             text-align: center;
             cursor: pointer;
             transition: all 0.2s;
+            font-size: 0.8rem;
         }
         .timer-option:hover {
             border-color: var(--primary);
@@ -190,9 +255,9 @@
             color: white;
             border-color: var(--primary);
         }
-        .timer-option span {
-            display: block;
-            font-size: 0.9rem;
+        .timer-option i {
+            font-size: 1rem;
+            margin-bottom: 2px;
         }
         .save-btn {
             width: 100%;
@@ -207,21 +272,6 @@
             margin-top: 20px;
         }
         .save-btn:hover {
-            opacity: 0.9;
-        }
-        .test-email-btn {
-            width: 100%;
-            background: #f39c12;
-            color: white;
-            border: none;
-            border-radius: var(--radius);
-            padding: 14px;
-            font-size: 1.1rem;
-            cursor: pointer;
-            font-weight: 500;
-            margin-top: 10px;
-        }
-        .test-email-btn:hover {
             opacity: 0.9;
         }
         .status-message {
@@ -239,6 +289,18 @@
             background: #f8d7da;
             color: #721c24;
             border: 1px solid #f5c6cb;
+        }
+        .add-email-btn {
+            background: var(--accent);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 10px 16px;
+            cursor: pointer;
+            font-size: 1rem;
+        }
+        .add-email-btn:hover {
+            opacity: 0.85;
         }
         @media (max-width: 768px) {
             .container {
@@ -263,84 +325,39 @@
             <div style="width:84px"></div>
         </div>
 
-        <!-- Email Recipients -->
+        <!-- Add Email -->
         <div class="card">
-            <h2><i class="fas fa-users" style="color: var(--primary);"></i> Email Recipients</h2>
+            <h2><i class="fas fa-user-plus" style="color: var(--accent);"></i> Add Alert</h2>
             <div class="form-group">
-                <label>Add Email Address</label>
+                <label>Email Address</label>
+                <input type="email" id="newEmail" placeholder="email@example.com" style="margin-bottom: 10px;">
+                <label>Alert Type</label>
                 <div style="display: flex; gap: 10px;">
-                    <input type="email" id="newEmail" placeholder="email@example.com" style="flex: 1;">
+                    <select id="alertType" class="alert-type-select">
+                        <option value="test">Test Email</option>
+                        <option value="health">App Health Stats</option>
+                    </select>
                     <button class="add-email-btn" onclick="addEmail()">
                         <i class="fas fa-plus"></i> Add
                     </button>
                 </div>
             </div>
-            <div id="emailList" class="email-list">
-                <!-- Email items will be added here dynamically -->
-            </div>
         </div>
 
-        <!-- Alert Configuration -->
-        <div class="card">
-            <h2><i class="fas fa-bell" style="color: var(--accent);"></i> Alert Configuration</h2>
-            
-            <div class="toggle-group">
-                <label for="testToggle">Test Email Alerts</label>
-                <label class="toggle-switch">
-                    <input type="checkbox" id="testToggle">
-                    <span class="toggle-slider"></span>
-                </label>
-            </div>
-            <p style="color: #666; font-size: 0.9rem; margin-top: -5px; margin-bottom: 20px;">
-                <i class="fas fa-info-circle"></i> Enable to receive periodic test emails
-            </p>
-
-            <div class="form-group">
-                <label><i class="fas fa-clock"></i> Email Frequency</label>
-                <div class="timer-selector">
-                    <div class="timer-option" data-interval="10m" onclick="selectTimer(this)">
-                        <i class="fas fa-clock" style="font-size: 1.5rem; margin-bottom: 5px;"></i>
-                        <span>10 Minutes</span>
-                    </div>
-                    <div class="timer-option" data-interval="1h" onclick="selectTimer(this)">
-                        <i class="fas fa-clock" style="font-size: 1.5rem; margin-bottom: 5px;"></i>
-                        <span>1 Hour</span>
-                    </div>
-                    <div class="timer-option" data-interval="12h" onclick="selectTimer(this)">
-                        <i class="fas fa-clock" style="font-size: 1.5rem; margin-bottom: 5px;"></i>
-                        <span>12 Hours</span>
-                    </div>
-                    <div class="timer-option active" data-interval="1d" onclick="selectTimer(this)">
-                        <i class="fas fa-calendar-day" style="font-size: 1.5rem; margin-bottom: 5px;"></i>
-                        <span>1 Day</span>
-                    </div>
-                    <div class="timer-option" data-interval="1w" onclick="selectTimer(this)">
-                        <i class="fas fa-calendar-week" style="font-size: 1.5rem; margin-bottom: 5px;"></i>
-                        <span>1 Week</span>
-                    </div>
-                    <div class="timer-option" data-interval="1mo" onclick="selectTimer(this)">
-                        <i class="fas fa-calendar-alt" style="font-size: 1.5rem; margin-bottom: 5px;"></i>
-                        <span>1 Month</span>
-                    </div>
-                </div>
-            </div>
+        <!-- Email List with Individual Settings -->
+        <div id="emailList" class="email-list">
+            <!-- Email cards will be added here dynamically -->
         </div>
 
-        <!-- Action Buttons -->
-        <button class="test-email-btn" onclick="sendTestEmail()">
-            <i class="fas fa-paper-plane"></i> Send Test Email Now
-        </button>
-        
-        <button class="save-btn" onclick="saveSettings()">
-            <i class="fas fa-save"></i> Save Settings
+        <button class="save-btn" onclick="saveAllSettings()">
+            <i class="fas fa-save"></i> Save All Settings
         </button>
 
         <div id="statusMessage" class="status-message"></div>
     </div>
 
     <script>
-        let emails = [];
-        let selectedInterval = '1d';
+        let emailSettings = []; // Array of {email, alert_type, interval}
 
         // Load saved settings on page load
         window.onload = function() {
@@ -352,19 +369,8 @@
                 .then(response => response.json())
                 .then(data => {
                     if (data.success) {
-                        emails = data.emails || [];
-                        selectedInterval = data.interval || '1d';
-                        document.getElementById('testToggle').checked = data.test_enabled || false;
-                        
+                        emailSettings = data.email_settings || [];
                         renderEmailList();
-                        
-                        // Set active timer option
-                        document.querySelectorAll('.timer-option').forEach(opt => {
-                            opt.classList.remove('active');
-                            if (opt.dataset.interval === selectedInterval) {
-                                opt.classList.add('active');
-                            }
-                        });
                     }
                 })
                 .catch(err => {
@@ -374,7 +380,9 @@
 
         function addEmail() {
             const emailInput = document.getElementById('newEmail');
+            const alertTypeSelect = document.getElementById('alertType');
             const email = emailInput.value.trim();
+            const alertType = alertTypeSelect.value;
             
             if (!email) {
                 showStatus('Please enter an email address', 'error');
@@ -388,65 +396,103 @@
                 return;
             }
             
-            if (emails.includes(email)) {
-                showStatus('Email already added', 'error');
+            // Check if this email+alertType combo already exists
+            if (emailSettings.find(e => e.email === email && e.alert_type === alertType)) {
+                showStatus('This email with this alert type already exists', 'error');
                 return;
             }
             
-            emails.push(email);
+            emailSettings.push({
+                email: email,
+                alert_type: alertType,
+                interval: '1d'
+            });
+            
             emailInput.value = '';
             renderEmailList();
-            showStatus('Email added successfully', 'success');
+            showStatus('Alert added successfully', 'success');
         }
 
-        function removeEmail(email) {
-            emails = emails.filter(e => e !== email);
+        function removeEmail(index) {
+            emailSettings.splice(index, 1);
             renderEmailList();
-            showStatus('Email removed', 'success');
+            showStatus('Alert removed', 'success');
+        }
+
+        function updateInterval(index, interval) {
+            emailSettings[index].interval = interval;
+        }
+
+        function sendTestToEmail(email, alertType) {
+            const endpoint = alertType === 'health' ? '/api/emailer/send-health' : '/api/emailer/send-test';
+            
+            fetch(endpoint, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ emails: [email] })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    showStatus(`${alertType === 'health' ? 'Health report' : 'Test email'} sent to ${email}!`, 'success');
+                } else {
+                    showStatus('Failed to send email: ' + (data.error || 'Unknown error'), 'error');
+                }
+            })
+            .catch(err => {
+                showStatus('Failed to send email: ' + err.message, 'error');
+            });
         }
 
         function renderEmailList() {
             const listContainer = document.getElementById('emailList');
             
-            if (emails.length === 0) {
-                listContainer.innerHTML = '<p style="color: #999; text-align: center; padding: 20px;">No email addresses added yet</p>';
+            if (emailSettings.length === 0) {
+                listContainer.innerHTML = '<div class="card"><p style="color: #999; text-align: center; padding: 20px;">No alerts configured yet</p></div>';
                 return;
             }
             
-            listContainer.innerHTML = emails.map(email => `
-                <div class="email-item">
-                    <i class="fas fa-envelope" style="color: var(--primary);"></i>
-                    <span>${email}</span>
-                    <button onclick="removeEmail('${email}')">
-                        <i class="fas fa-trash"></i>
-                    </button>
+            listContainer.innerHTML = emailSettings.map((setting, index) => {
+                const alertBadgeColor = setting.alert_type === 'health' ? '#3498db' : '#f39c12';
+                const alertBadgeText = setting.alert_type === 'health' ? 'Health Stats' : 'Test Email';
+                
+                return `
+                <div class="email-card">
+                    <div class="email-info">
+                        <i class="fas fa-envelope"></i>
+                        <span class="email-address">${setting.email}</span>
+                        <span class="alert-type" style="background: ${alertBadgeColor};">${alertBadgeText}</span>
+                    </div>
+                    <select class="frequency-select" onchange="updateInterval(${index}, this.value)">
+                        <option value="10m" ${setting.interval === '10m' ? 'selected' : ''}>Every 10 minutes</option>
+                        <option value="1h" ${setting.interval === '1h' ? 'selected' : ''}>Every 1 hour</option>
+                        <option value="12h" ${setting.interval === '12h' ? 'selected' : ''}>Every 12 hours</option>
+                        <option value="1d" ${setting.interval === '1d' ? 'selected' : ''}>Every 1 day</option>
+                        <option value="1w" ${setting.interval === '1w' ? 'selected' : ''}>Every 1 week</option>
+                        <option value="1mo" ${setting.interval === '1mo' ? 'selected' : ''}>Every 1 month</option>
+                    </select>
+                    <div class="email-actions">
+                        <button class="test-btn" onclick="sendTestToEmail('${setting.email}', '${setting.alert_type}')">
+                            <i class="fas fa-paper-plane"></i> Send
+                        </button>
+                        <button class="remove-btn" onclick="removeEmail(${index})">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
                 </div>
-            `).join('');
+                `;
+            }).join('');
         }
 
-        function selectTimer(element) {
-            document.querySelectorAll('.timer-option').forEach(opt => {
-                opt.classList.remove('active');
-            });
-            element.classList.add('active');
-            selectedInterval = element.dataset.interval;
-        }
-
-        function saveSettings() {
-            const testEnabled = document.getElementById('testToggle').checked;
-            
-            const settings = {
-                emails: emails,
-                interval: selectedInterval,
-                test_enabled: testEnabled
-            };
-            
+        function saveAllSettings() {
             fetch('/api/emailer/settings', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify(settings)
+                body: JSON.stringify({ email_settings: emailSettings })
             })
             .then(response => response.json())
             .then(data => {
@@ -458,32 +504,6 @@
             })
             .catch(err => {
                 showStatus('Failed to save settings: ' + err.message, 'error');
-            });
-        }
-
-        function sendTestEmail() {
-            if (emails.length === 0) {
-                showStatus('Please add at least one email address first', 'error');
-                return;
-            }
-            
-            fetch('/api/emailer/send-test', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ emails: emails })
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    showStatus('Test email sent successfully!', 'success');
-                } else {
-                    showStatus('Failed to send test email: ' + (data.error || 'Unknown error'), 'error');
-                }
-            })
-            .catch(err => {
-                showStatus('Failed to send test email: ' + err.message, 'error');
             });
         }
 

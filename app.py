@@ -101,6 +101,7 @@ CLIENT_ID = os.getenv("EBAY_CLIENT_ID")
 CLIENT_SECRET = os.getenv("EBAY_CLIENT_SECRET")
 RUNAME = os.getenv("EBAY_RUNAME")
 app = Flask(__name__)
+app.start_time = time.time()  # Track app startup time for uptime calculation
 # Production settings - optimized for Raspberry Pi deployment
 app.config['TEMPLATES_AUTO_RELOAD'] = False  # Disable template reloading for better performance
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 31536000  # Cache static files for 1 year (31536000 seconds)
@@ -232,54 +233,50 @@ def emailer():
 # API endpoints for emailer
 @app.route('/api/emailer/settings', methods=['GET'])
 def get_emailer_settings():
-    """Get saved emailer settings"""
+    """Get saved emailer settings with per-email configuration"""
     try:
         conn = sqlite3.connect('searchRack.db')
         cur = conn.cursor()
         
-        # Create emailer settings table if it doesn't exist
+        # Create table if it doesn't exist (don't drop it!)
         cur.execute('''
             CREATE TABLE IF NOT EXISTS emailer_settings (
-                id INTEGER PRIMARY KEY,
-                emails TEXT,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                email TEXT,
+                alert_type TEXT DEFAULT 'test',
                 interval TEXT DEFAULT '1d',
-                test_enabled INTEGER DEFAULT 0,
-                last_test_sent TEXT
+                last_test_sent TEXT,
+                UNIQUE(email, alert_type)
             )
         ''')
         
-        # Get settings
-        cur.execute('SELECT emails, interval, test_enabled FROM emailer_settings WHERE id = 1')
-        row = cur.fetchone()
+        # Get all email settings
+        cur.execute('SELECT email, alert_type, interval FROM emailer_settings')
+        rows = cur.fetchall()
         
-        if row:
-            emails = json.loads(row[0]) if row[0] else []
-            interval = row[1] or '1d'
-            test_enabled = bool(row[2])
-        else:
-            emails = []
-            interval = '1d'
-            test_enabled = False
+        email_settings = []
+        for row in rows:
+            email_settings.append({
+                'email': row[0],
+                'alert_type': row[1] or 'test',
+                'interval': row[2] or '1d'
+            })
         
         conn.close()
         
         return jsonify({
             'success': True,
-            'emails': emails,
-            'interval': interval,
-            'test_enabled': test_enabled
+            'email_settings': email_settings
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/emailer/settings', methods=['POST'])
 def save_emailer_settings():
-    """Save emailer settings"""
+    """Save emailer settings with per-email configuration"""
     try:
         data = request.json
-        emails = data.get('emails', [])
-        interval = data.get('interval', '1d')
-        test_enabled = 1 if data.get('test_enabled', False) else 0
+        email_settings = data.get('email_settings', [])
         
         conn = sqlite3.connect('searchRack.db')
         cur = conn.cursor()
@@ -287,19 +284,28 @@ def save_emailer_settings():
         # Create table if it doesn't exist
         cur.execute('''
             CREATE TABLE IF NOT EXISTS emailer_settings (
-                id INTEGER PRIMARY KEY,
-                emails TEXT,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                email TEXT,
+                alert_type TEXT DEFAULT 'test',
                 interval TEXT DEFAULT '1d',
-                test_enabled INTEGER DEFAULT 0,
-                last_test_sent TEXT
+                last_test_sent TEXT,
+                UNIQUE(email, alert_type)
             )
         ''')
         
-        # Upsert settings
-        cur.execute('''
-            INSERT OR REPLACE INTO emailer_settings (id, emails, interval, test_enabled)
-            VALUES (1, ?, ?, ?)
-        ''', (json.dumps(emails), interval, test_enabled))
+        # Delete all existing settings
+        cur.execute('DELETE FROM emailer_settings')
+        
+        # Insert new settings
+        for setting in email_settings:
+            email = setting.get('email')
+            alert_type = setting.get('alert_type', 'test')
+            interval = setting.get('interval', '1d')
+            
+            cur.execute('''
+                INSERT INTO emailer_settings (email, alert_type, interval)
+                VALUES (?, ?, ?)
+            ''', (email, alert_type, interval))
         
         conn.commit()
         conn.close()
@@ -346,6 +352,311 @@ def send_test_email():
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/emailer/send-health', methods=['POST'])
+def send_health_email():
+    """Send health stats email to configured recipients"""
+    try:
+        data = request.json
+        emails = data.get('emails', [])
+        
+        if not emails:
+            return jsonify({'success': False, 'error': 'No email addresses provided'}), 400
+        
+        # Collect health stats
+        health_data = collect_health_stats()
+        
+        # Generate HTML email
+        html_body = generate_health_email_html(health_data)
+        plain_body = generate_health_email_plain(health_data)
+        
+        # Send email
+        subject = f"📊 Store App Health Report - {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}"
+        success, error = send_email_smtp(emails, subject, plain_body, html_body)
+        
+        if not success:
+            return jsonify({'success': False, 'error': error}), 500
+        
+        print(f"✅ Health email sent to: {', '.join(emails)}")
+        
+        return jsonify({
+            'success': True,
+            'message': f'Health report sent to {len(emails)} recipient(s)'
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+def collect_health_stats():
+    """Collect all health statistics for the app"""
+    import platform
+    
+    stats = {}
+    
+    # Server uptime (Flask process uptime)
+    try:
+        if not hasattr(app, 'start_time'):
+            app.start_time = time.time()
+        uptime_seconds = time.time() - app.start_time
+        days = int(uptime_seconds // 86400)
+        hours = int((uptime_seconds % 86400) // 3600)
+        minutes = int((uptime_seconds % 3600) // 60)
+        stats['uptime'] = f"{days}d {hours}h {minutes}m"
+    except:
+        stats['uptime'] = 'Unknown'
+    
+    # System info
+    stats['python_version'] = platform.python_version()
+    stats['timestamp'] = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    
+    # Disk space
+    try:
+        import shutil
+        total, used, free = shutil.disk_usage('.')
+        stats['disk_free_gb'] = round(free / (1024**3), 2)
+        stats['disk_total_gb'] = round(total / (1024**3), 2)
+        stats['disk_percent'] = round((used / total) * 100, 1)
+    except:
+        stats['disk_free_gb'] = 0
+        stats['disk_total_gb'] = 0
+        stats['disk_percent'] = 0
+    
+    # Database sizes
+    db_sizes = {}
+    for db_name in ['sold.db', 'bol.db', 'amazonStore.db', 'ebayStore.db', 'searchRack.db']:
+        try:
+            size_bytes = os.path.getsize(db_name)
+            db_sizes[db_name] = round(size_bytes / (1024**2), 2)  # MB
+        except:
+            db_sizes[db_name] = 0
+    stats['db_sizes'] = db_sizes
+    
+    # Sync status (last sync times from sync_settings.db)
+    try:
+        conn = sqlite3.connect('sync_settings.db')
+        cur = conn.cursor()
+        cur.execute('CREATE TABLE IF NOT EXISTS sync_status (key TEXT PRIMARY KEY, value TEXT)')
+        cur.execute('SELECT key, value FROM sync_status')
+        sync_data = dict(cur.fetchall())
+        
+        stats['ebay_orders_last'] = sync_data.get('ebay_orders_last', 'Never')
+        stats['ebay_listings_last'] = sync_data.get('ebay_listings_last', 'Never')
+        stats['amazon_orders_last'] = sync_data.get('amazon_orders_last', 'Never')
+        stats['amazon_listings_last'] = sync_data.get('amazon_listings_last', 'Never')
+        stats['amazon_upcs_last'] = sync_data.get('amazon_upcs_last', 'Never')
+        stats['auto_sync_enabled'] = sync_data.get('auto_sync_enabled', 'false') == 'true'
+        
+        conn.close()
+    except:
+        stats['ebay_orders_last'] = 'Unknown'
+        stats['ebay_listings_last'] = 'Unknown'
+        stats['amazon_orders_last'] = 'Unknown'
+        stats['amazon_listings_last'] = 'Unknown'
+        stats['amazon_upcs_last'] = 'Unknown'
+        stats['auto_sync_enabled'] = False
+    
+    # Order processing stats
+    try:
+        conn = sqlite3.connect('sold.db')
+        cur = conn.cursor()
+        
+        # Unhandled orders
+        cur.execute("SELECT COUNT(*) FROM orders WHERE isHandled IS NULL OR isHandled = ''")
+        stats['unhandled_orders'] = cur.fetchone()[0]
+        
+        conn.close()
+    except:
+        stats['unhandled_orders'] = 0
+    
+    # Inventory stats
+    try:
+        conn = sqlite3.connect('searchRack.db')
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*), SUM(QUANTITY) FROM SEARCHRACK")
+        row = cur.fetchone()
+        stats['searchrack_items'] = row[0] or 0
+        stats['searchrack_quantity'] = row[1] or 0
+        conn.close()
+    except:
+        stats['searchrack_items'] = 0
+        stats['searchrack_quantity'] = 0
+    
+    try:
+        conn = sqlite3.connect('bol.db')
+        cur = conn.cursor()
+        cur.execute("SELECT SUM(unchecked_qty) FROM bol_items WHERE (temporary IS NULL OR temporary = 0)")
+        stats['items_needing_prep'] = cur.fetchone()[0] or 0
+        conn.close()
+    except:
+        stats['items_needing_prep'] = 0
+    
+    try:
+        conn = sqlite3.connect('removed.db')
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM removed WHERE time_removed >= datetime('now', '-1 day')")
+        stats['recently_removed'] = cur.fetchone()[0] or 0
+        conn.close()
+    except:
+        stats['recently_removed'] = 0
+    
+    # System warnings
+    warnings = []
+    
+    # Check for low disk space
+    if stats['disk_percent'] > 90:
+        warnings.append(f"⚠️ Low disk space: {stats['disk_percent']}% used")
+    
+    # Check for stale syncs (> 24 hours)
+    for sync_key, sync_label in [
+        ('ebay_orders_last', 'eBay Orders'),
+        ('amazon_orders_last', 'Amazon Orders')
+    ]:
+        last_sync = stats.get(sync_key, 'Never')
+        if last_sync not in ['Never', 'Unknown']:
+            try:
+                last_sync_dt = datetime.datetime.fromisoformat(last_sync)
+                hours_ago = (datetime.datetime.now() - last_sync_dt).total_seconds() / 3600
+                if hours_ago > 24:
+                    warnings.append(f"⚠️ {sync_label} not synced in {int(hours_ago)} hours")
+            except:
+                pass
+    
+    # Check for high unhandled orders
+    if stats['unhandled_orders'] > 10:
+        warnings.append(f"⚠️ High unhandled orders: {stats['unhandled_orders']}")
+    
+    stats['warnings'] = warnings
+    
+    return stats
+
+def generate_health_email_html(stats):
+    """Generate HTML email body for health report"""
+    warnings_html = ""
+    if stats['warnings']:
+        warnings_html = "<h3 style='color: #e74c3c;'>⚠️ WARNINGS</h3><ul style='margin: 10px 0;'>"
+        for warning in stats['warnings']:
+            warnings_html += f"<li style='color: #e74c3c;'>{warning}</li>"
+        warnings_html += "</ul>"
+    else:
+        warnings_html = "<h3 style='color: #27ae60;'>✅ No Warnings</h3><p style='color: #7f8c8d;'>All systems operating normally</p>"
+    
+    disk_color = '#27ae60' if stats['disk_percent'] < 80 else ('#f39c12' if stats['disk_percent'] < 90 else '#e74c3c')
+    sync_status_color = '#27ae60' if stats['auto_sync_enabled'] else '#95a5a6'
+    
+    html = f"""
+    <html>
+    <head>
+        <style>
+            body {{ font-family: 'Segoe UI', Arial, sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; }}
+            .header {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; border-radius: 10px; text-align: center; margin-bottom: 30px; }}
+            .section {{ margin: 20px 0; padding: 20px; background: #f8f9fa; border-left: 4px solid #3498db; border-radius: 8px; }}
+            .metric {{ margin: 12px 0; padding: 10px 0; border-bottom: 1px solid #e0e0e0; display: flex; justify-content: space-between; }}
+            .metric:last-child {{ border-bottom: none; }}
+            .label {{ font-weight: 600; color: #555; }}
+            .value {{ color: #2c3e50; font-weight: 500; }}
+            h2 {{ color: #2c3e50; margin-top: 0; padding-bottom: 10px; border-bottom: 2px solid #3498db; }}
+            .footer {{ margin-top: 30px; padding: 20px; background: #ecf0f1; border-radius: 8px; font-size: 13px; color: #7f8c8d; }}
+        </style>
+    </head>
+    <body>
+        <div class='header'>
+            <h1 style='margin: 0; font-size: 28px;'>📊 Store App Health Report</h1>
+            <p style='margin: 10px 0 0 0; opacity: 0.9;'>{stats['timestamp']}</p>
+        </div>
+        
+        <div class='section'>
+            <h2>🏥 SERVER HEALTH</h2>
+            <div class='metric'><span class='label'>Uptime</span> <span class='value'>{stats['uptime']}</span></div>
+            <div class='metric'><span class='label'>Python Version</span> <span class='value'>{stats['python_version']}</span></div>
+            <div class='metric'><span class='label'>Disk Space</span> <span class='value' style='color: {disk_color}; font-weight: bold;'>{stats['disk_free_gb']} GB free ({100-stats['disk_percent']:.1f}% available)</span></div>
+        </div>
+        
+        <div class='section'>
+            <h2>🔄 SYNC STATUS</h2>
+            <div class='metric'><span class='label'>Auto-sync</span> <span class='value' style='color: {sync_status_color}; font-weight: bold;'>{'✅ Enabled' if stats['auto_sync_enabled'] else '❌ Disabled'}</span></div>
+            <div class='metric'><span class='label'>eBay Orders</span> <span class='value'>{format_time_ago(stats['ebay_orders_last'])}</span></div>
+            <div class='metric'><span class='label'>Amazon Orders</span> <span class='value'>{format_time_ago(stats['amazon_orders_last'])}</span></div>
+            <div class='metric'><span class='label'>Amazon UPCs</span> <span class='value'>{format_time_ago(stats['amazon_upcs_last'])}</span></div>
+        </div>
+        
+        <div class='section'>
+            <h2>📊 INVENTORY</h2>
+            <div class='metric'><span class='label'>SearchRack Items</span> <span class='value'>{stats['searchrack_items']:,} items ({stats['searchrack_quantity']:,} qty)</span></div>
+            <div class='metric'><span class='label'>Items Needing Prep</span> <span class='value'>{stats['items_needing_prep']:,}</span></div>
+            <div class='metric'><span class='label'>Recently Removed</span> <span class='value'>{stats['recently_removed']} (last 24h)</span></div>
+            <div class='metric'><span class='label'>Unhandled Orders</span> <span class='value'>{stats['unhandled_orders']}</span></div>
+        </div>
+        
+        <div class='section' style='border-left-color: {"#e74c3c" if stats["warnings"] else "#27ae60"};'>
+            {warnings_html}
+        </div>
+        
+        <div class='footer'>
+            <p style='margin: 0 0 10px 0; font-weight: bold;'>📁 Database Sizes:</p>
+            <ul style='margin: 5px 0; padding-left: 20px;'>
+                {''.join([f"<li>{db}: <strong>{size} MB</strong></li>" for db, size in stats['db_sizes'].items()])}
+            </ul>
+        </div>
+    </body>
+    </html>
+    """
+    return html
+
+def generate_health_email_plain(stats):
+    """Generate plain text email body for health report"""
+    warnings_text = "\n".join(stats['warnings']) if stats['warnings'] else "✅ None"
+    
+    text = f"""
+📊 STORE APP HEALTH REPORT
+Generated: {stats['timestamp']}
+
+🏥 SERVER HEALTH
+├─ Uptime: {stats['uptime']}
+├─ Python: {stats['python_version']}
+└─ Disk: {stats['disk_free_gb']} GB free ({100-stats['disk_percent']:.1f}%)
+
+🔄 SYNC STATUS
+├─ Auto-sync: {'✅ Enabled' if stats['auto_sync_enabled'] else '❌ Disabled'}
+├─ eBay Orders: {format_time_ago(stats['ebay_orders_last'])}
+├─ Amazon Orders: {format_time_ago(stats['amazon_orders_last'])}
+└─ Amazon UPCs: {format_time_ago(stats['amazon_upcs_last'])}
+
+📊 INVENTORY
+├─ SearchRack: {stats['searchrack_items']:,} items ({stats['searchrack_quantity']:,} qty)
+├─ Needing Prep: {stats['items_needing_prep']:,}
+├─ Removed (24h): {stats['recently_removed']}
+└─ Unhandled Orders: {stats['unhandled_orders']}
+
+⚠️ WARNINGS
+{warnings_text}
+
+--
+Database Sizes: {', '.join([f"{db}: {size}MB" for db, size in stats['db_sizes'].items()])}
+"""
+    return text
+
+def format_time_ago(timestamp_str):
+    """Format timestamp as human-readable time ago"""
+    if timestamp_str in ['Never', 'Unknown']:
+        return timestamp_str
+    
+    try:
+        dt = datetime.datetime.fromisoformat(timestamp_str)
+        now = datetime.datetime.now()
+        diff = now - dt
+        
+        if diff.total_seconds() < 60:
+            return "✅ Just now"
+        elif diff.total_seconds() < 3600:
+            mins = int(diff.total_seconds() / 60)
+            return f"✅ {mins}m ago"
+        elif diff.total_seconds() < 86400:
+            hours = int(diff.total_seconds() / 3600)
+            return f"⏰ {hours}h ago"
+        else:
+            days = int(diff.total_seconds() / 86400)
+            return f"⚠️ {days}d ago"
+    except:
+        return timestamp_str
 
 # BOL Statistics page
 @app.route('/bol-stats')
