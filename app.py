@@ -467,37 +467,6 @@ def collect_health_stats():
     except:
         stats['unhandled_orders'] = 0
     
-    # Inventory stats
-    try:
-        conn = sqlite3.connect('searchRack.db')
-        cur = conn.cursor()
-        cur.execute("SELECT COUNT(*), SUM(QUANTITY) FROM SEARCHRACK")
-        row = cur.fetchone()
-        stats['searchrack_items'] = row[0] or 0
-        stats['searchrack_quantity'] = row[1] or 0
-        conn.close()
-    except:
-        stats['searchrack_items'] = 0
-        stats['searchrack_quantity'] = 0
-    
-    try:
-        conn = sqlite3.connect('bol.db')
-        cur = conn.cursor()
-        cur.execute("SELECT SUM(unchecked_qty) FROM bol_items WHERE (temporary IS NULL OR temporary = 0)")
-        stats['items_needing_prep'] = cur.fetchone()[0] or 0
-        conn.close()
-    except:
-        stats['items_needing_prep'] = 0
-    
-    try:
-        conn = sqlite3.connect('removed.db')
-        cur = conn.cursor()
-        cur.execute("SELECT COUNT(*) FROM removed WHERE time_removed >= datetime('now', '-1 day')")
-        stats['recently_removed'] = cur.fetchone()[0] or 0
-        conn.close()
-    except:
-        stats['recently_removed'] = 0
-    
     # System warnings
     warnings = []
     
@@ -565,25 +534,18 @@ def generate_health_email_html(stats):
         
         <div class='section'>
             <h2>🏥 SERVER HEALTH</h2>
-            <div class='metric'><span class='label'>Uptime</span> <span class='value'>{stats['uptime']}</span></div>
-            <div class='metric'><span class='label'>Python Version</span> <span class='value'>{stats['python_version']}</span></div>
-            <div class='metric'><span class='label'>Disk Space</span> <span class='value' style='color: {disk_color}; font-weight: bold;'>{stats['disk_free_gb']} GB free ({100-stats['disk_percent']:.1f}% available)</span></div>
+            <div class='metric'><span class='label'>Uptime:</span> <span class='value'>{stats['uptime']}</span></div>
+            <div class='metric'><span class='label'>Python Version:</span> <span class='value'>{stats['python_version']}</span></div>
+            <div class='metric'><span class='label'>Disk Space:</span> <span class='value' style='color: {disk_color}; font-weight: bold;'>{stats['disk_free_gb']} GB free ({100-stats['disk_percent']:.1f}% available)</span></div>
         </div>
         
         <div class='section'>
             <h2>🔄 SYNC STATUS</h2>
-            <div class='metric'><span class='label'>Auto-sync</span> <span class='value' style='color: {sync_status_color}; font-weight: bold;'>{'✅ Enabled' if stats['auto_sync_enabled'] else '❌ Disabled'}</span></div>
-            <div class='metric'><span class='label'>eBay Orders</span> <span class='value'>{format_time_ago(stats['ebay_orders_last'])}</span></div>
-            <div class='metric'><span class='label'>Amazon Orders</span> <span class='value'>{format_time_ago(stats['amazon_orders_last'])}</span></div>
-            <div class='metric'><span class='label'>Amazon UPCs</span> <span class='value'>{format_time_ago(stats['amazon_upcs_last'])}</span></div>
-        </div>
-        
-        <div class='section'>
-            <h2>📊 INVENTORY</h2>
-            <div class='metric'><span class='label'>SearchRack Items</span> <span class='value'>{stats['searchrack_items']:,} items ({stats['searchrack_quantity']:,} qty)</span></div>
-            <div class='metric'><span class='label'>Items Needing Prep</span> <span class='value'>{stats['items_needing_prep']:,}</span></div>
-            <div class='metric'><span class='label'>Recently Removed</span> <span class='value'>{stats['recently_removed']} (last 24h)</span></div>
-            <div class='metric'><span class='label'>Unhandled Orders</span> <span class='value'>{stats['unhandled_orders']}</span></div>
+            <div class='metric'><span class='label'>Auto-sync:</span> <span class='value' style='color: {sync_status_color}; font-weight: bold;'>{'✅ Enabled' if stats['auto_sync_enabled'] else '❌ Disabled'}</span></div>
+            <div class='metric'><span class='label'>eBay Orders:</span> <span class='value'>{format_time_ago(stats['ebay_orders_last'])}</span></div>
+            <div class='metric'><span class='label'>Amazon Orders:</span> <span class='value'>{format_time_ago(stats['amazon_orders_last'])}</span></div>
+            <div class='metric'><span class='label'>Amazon UPCs:</span> <span class='value'>{format_time_ago(stats['amazon_upcs_last'])}</span></div>
+            <div class='metric'><span class='label'>Unhandled Orders:</span> <span class='value'>{stats['unhandled_orders']}</span></div>
         </div>
         
         <div class='section' style='border-left-color: {"#e74c3c" if stats["warnings"] else "#27ae60"};'>
@@ -618,12 +580,7 @@ Generated: {stats['timestamp']}
 ├─ Auto-sync: {'✅ Enabled' if stats['auto_sync_enabled'] else '❌ Disabled'}
 ├─ eBay Orders: {format_time_ago(stats['ebay_orders_last'])}
 ├─ Amazon Orders: {format_time_ago(stats['amazon_orders_last'])}
-└─ Amazon UPCs: {format_time_ago(stats['amazon_upcs_last'])}
-
-📊 INVENTORY
-├─ SearchRack: {stats['searchrack_items']:,} items ({stats['searchrack_quantity']:,} qty)
-├─ Needing Prep: {stats['items_needing_prep']:,}
-├─ Removed (24h): {stats['recently_removed']}
+├─ Amazon UPCs: {format_time_ago(stats['amazon_upcs_last'])}
 └─ Unhandled Orders: {stats['unhandled_orders']}
 
 ⚠️ WARNINGS

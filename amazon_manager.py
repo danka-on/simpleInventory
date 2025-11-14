@@ -7,7 +7,7 @@ import json
 import sqlite3
 import time
 from datetime import datetime, timedelta
-from sp_api.api import Orders, Reports, CatalogItems, ListingsItems
+from sp_api.api import Orders, Reports, CatalogItems, ListingsItems, Finances, MerchantFulfillment
 from sp_api.base import Marketplaces
 from sp_api.base.exceptions import SellingApiException
 
@@ -164,15 +164,290 @@ class AmazonManager:
         
         return []
     
-    def sync_orders_to_db(self, days_back=30):
+    def get_shipping_costs(self, order_ids):
+        """
+        Fetch actual shipping costs from Amazon Buy Shipping / MerchantFulfillment API
+        Returns a dictionary mapping order_id to shipping cost
+        """
+        try:
+            mf_api = MerchantFulfillment(credentials=self.credentials, marketplace=self.marketplace)
+            shipping_costs = {}
+            
+            print(f"🚚 Fetching shipping costs for {len(order_ids)} orders...")
+            
+            for i, order_id in enumerate(order_ids, 1):
+                try:
+                    # Get shipment info for this order
+                    response = mf_api.get_shipment(ShipmentId=order_id)
+                    
+                    if response.errors:
+                        continue
+                    
+                    shipment = response.payload.get('Shipment', {})
+                    shipping_service = shipment.get('ShippingService', {})
+                    
+                    # Get the shipping cost
+                    rate = shipping_service.get('Rate', {})
+                    amount = rate.get('Amount')
+                    
+                    if amount:
+                        shipping_costs[order_id] = float(amount)
+                        print(f"  ✅ {order_id}: ${float(amount):.2f}")
+                    
+                    # Rate limiting
+                    if i % 10 == 0:
+                        time.sleep(1)
+                        
+                except SellingApiException as e:
+                    # Order might not have shipping purchased through Amazon
+                    continue
+                except Exception as e:
+                    continue
+            
+            print(f"✅ Retrieved shipping costs for {len(shipping_costs)} orders")
+            return shipping_costs
+            
+        except Exception as e:
+            print(f"⚠️  Could not fetch shipping costs: {e}")
+            return {}
+    
+    def get_financial_events(self, days_back=30):
+        """
+        Fetch financial events (fees, shipping, taxes) from Amazon
+        Returns a dictionary mapping order_id to financial data
+        """
+        try:
+            finances_api = Finances(credentials=self.credentials, marketplace=self.marketplace)
+            
+            # Calculate date range
+            posted_after = (datetime.utcnow() - timedelta(days=days_back)).isoformat()
+            
+            print(f"🔄 Fetching Amazon financial events from last {days_back} days...")
+            
+            # Dictionary to store financial data by order ID
+            financial_data = {}
+            all_shipment_events = []
+            all_adjustment_events = []
+            next_token = None
+            page = 1
+            
+            # Paginate through financial events
+            while True:
+                try:
+                    if next_token:
+                        response = finances_api.list_financial_events(NextToken=next_token)
+                    else:
+                        response = finances_api.list_financial_events(
+                            PostedAfter=posted_after,
+                            MaxResultsPerPage=100
+                        )
+                    
+                    if response.errors:
+                        print(f"❌ Error fetching financial events (page {page}): {response.errors}")
+                        break
+                    
+                    payload = response.payload
+                    financial_events = payload.get('FinancialEvents', {})
+                    shipment_events = financial_events.get('ShipmentEventList', [])
+                    adjustment_events = financial_events.get('AdjustmentEventList', [])
+                    
+                    # Collect all events across pages
+                    all_shipment_events.extend(shipment_events)
+                    all_adjustment_events.extend(adjustment_events)
+                    
+                    print(f"  📄 Page {page}: Retrieved {len(shipment_events)} shipment events, {len(adjustment_events)} adjustments")
+                    
+                    # Check for next page
+                    next_token = payload.get('NextToken')
+                    if not next_token:
+                        break
+                    
+                    page += 1
+                    time.sleep(1)  # Rate limiting
+                    
+                except SellingApiException as e:
+                    if 'QuotaExceeded' in str(e):
+                        print(f"⚠️  Rate limit hit, waiting 5 seconds...")
+                        time.sleep(5)
+                        continue
+                    else:
+                        print(f"❌ Error fetching financial events: {e}")
+                        break
+            
+            # Process all shipment events
+            print(f"\n💰 Processing {len(all_shipment_events)} shipment events...")
+            for event in all_shipment_events:
+                amazon_order_id = event.get('AmazonOrderId')
+                if not amazon_order_id:
+                    continue
+                
+                # Initialize data for this order
+                if amazon_order_id not in financial_data:
+                    financial_data[amazon_order_id] = {
+                        'seller_fee': 0,
+                        'shipping_cost': 0,
+                        'taxes': 0,
+                        'total_fees': 0
+                    }
+                
+                # Extract shipment-level fees (ShippingLabel from Buy Shipping)
+                # This is where USPS label costs appear when purchased through Amazon
+                shipment_fees = event.get('ShipmentFeeList', [])
+                for fee in shipment_fees:
+                    fee_type = fee.get('FeeType', '')
+                    fee_amount = float(fee.get('Amount', {}).get('CurrencyAmount', 0))
+                    
+                    # ShippingLabel is the USPS label cost paid through Amazon Buy Shipping
+                    if fee_type == 'ShippingLabel':
+                        shipping_cost = abs(fee_amount)
+                        financial_data[amazon_order_id]['shipping_cost'] = shipping_cost
+                        financial_data[amazon_order_id]['total_fees'] += shipping_cost
+                        print(f"  ✅ {amazon_order_id}: ${shipping_cost:.2f} (USPS label via Buy Shipping)")
+                    else:
+                        # Add other shipment fees to total
+                        financial_data[amazon_order_id]['total_fees'] += abs(fee_amount)
+                
+                # Extract item fees and charges
+                item_list = event.get('ShipmentItemList', [])
+                for item in item_list:
+                    # Get all fee components
+                    item_fees = item.get('ItemFeeList', [])
+                    for fee in item_fees:
+                        fee_type = fee.get('FeeType', '')
+                        fee_amount = float(fee.get('FeeAmount', {}).get('CurrencyAmount', 0))
+                        
+                        # Sum up all fees (they're negative values)
+                        financial_data[amazon_order_id]['total_fees'] += abs(fee_amount)
+                        
+                        # Track specific fee types
+                        if fee_type in ['Commission', 'RefundCommission', 'ReferralFee']:
+                            financial_data[amazon_order_id]['seller_fee'] += abs(fee_amount)
+                    
+                    # Get item tax - try multiple possible structures
+                    item_tax_list = item.get('ItemTaxWithheldList', [])
+                    if item_tax_list:
+                        try:
+                            for tax_item in item_tax_list:
+                                if isinstance(tax_item, dict):
+                                    # Try TaxesWithheld field
+                                    if 'TaxesWithheld' in tax_item:
+                                        for tax_component in tax_item.get('TaxesWithheld', []):
+                                            if isinstance(tax_component, dict):
+                                                tax_amount = float(tax_component.get('ChargeAmount', {}).get('CurrencyAmount', 0))
+                                                financial_data[amazon_order_id]['taxes'] += abs(tax_amount)
+                                    # Try ChargeComponent field
+                                    elif 'ChargeComponent' in tax_item:
+                                        for charge in tax_item.get('ChargeComponent', []):
+                                            if isinstance(charge, dict):
+                                                tax_amount = float(charge.get('ChargeAmount', {}).get('CurrencyAmount', 0))
+                                                financial_data[amazon_order_id]['taxes'] += abs(tax_amount)
+                        except Exception as tax_err:
+                            # Tax parsing failed, skip silently (we get tax from Orders API anyway)
+                            pass
+            
+            # Process PostageBilling_Postage adjustments (actual USPS label costs)
+            print(f"\n📦 Processing {len(all_adjustment_events)} adjustment events for shipping costs...")
+            
+            # Collect all PostageBilling_Postage with timestamps
+            from datetime import datetime as dt
+            postage_billings = []
+            for adj in all_adjustment_events:
+                adj_type = adj.get('AdjustmentType', '')
+                if adj_type == 'PostageBilling_Postage':
+                    posted_date = adj.get('PostedDate', '')
+                    amount = float(adj.get('AdjustmentAmount', {}).get('CurrencyAmount', 0))
+                    if amount < 0:  # Costs are negative
+                        try:
+                            timestamp = dt.fromisoformat(posted_date.replace('Z', '+00:00'))
+                            postage_billings.append({
+                                'timestamp': timestamp,
+                                'amount': abs(amount),
+                                'used': False
+                            })
+                        except:
+                            pass
+            
+            # Sort by timestamp
+            postage_billings.sort(key=lambda x: x['timestamp'])
+            
+            # Create list of orders with timestamps
+            order_list = []
+            for event in all_shipment_events:
+                order_id = event.get('AmazonOrderId')
+                posted_date = event.get('PostedDate', '')
+                if order_id and posted_date:
+                    try:
+                        timestamp = dt.fromisoformat(posted_date.replace('Z', '+00:00'))
+                        order_list.append({
+                            'order_id': order_id,
+                            'timestamp': timestamp
+                        })
+                    except:
+                        pass
+            
+            # Sort orders by timestamp
+            order_list.sort(key=lambda x: x['timestamp'])
+            
+            # Match each order to the nearest unused postage billing within 48 hours
+            shipping_matched = 0
+            for order in order_list:
+                order_id = order['order_id']
+                order_time = order['timestamp']
+                
+                # Find closest unused postage billing (before or after, within 48 hours)
+                best_match = None
+                best_diff = None
+                
+                for pb in postage_billings:
+                    if pb['used']:
+                        continue
+                    
+                    time_diff = abs((pb['timestamp'] - order_time).total_seconds())
+                    
+                    # Within 48 hours (172800 seconds)
+                    if time_diff <= 172800:
+                        if best_diff is None or time_diff < best_diff:
+                            best_diff = time_diff
+                            best_match = pb
+                
+                if best_match:
+                    best_match['used'] = True
+                    shipping_cost = best_match['amount']
+                    financial_data[order_id]['shipping_cost'] = shipping_cost
+                    financial_data[order_id]['total_fees'] += shipping_cost
+                    shipping_matched += 1
+                    hours_diff = best_diff / 3600
+                    print(f"  ✅ {order_id}: ${shipping_cost:.2f} (±{hours_diff:.1f}h match)")
+            
+            print(f"\n✅ Retrieved financial data for {len(financial_data)} orders")
+            print(f"   Orders with shipping costs: {shipping_matched}/{len(financial_data)}")
+            return financial_data
+            
+        except Exception as e:
+            print(f"❌ Error in get_financial_events: {e}")
+            import traceback
+            traceback.print_exc()
+            return {}
+    
+    def sync_orders_to_db(self, days_back=30, financial_days_back=None):
         """
         Fetch orders from Amazon and sync to local sold.db
         Similar to eBay sold order handling
+        
+        Args:
+            days_back: How many days of orders to fetch (default 30)
+            financial_days_back: How many days of financial events to fetch
+                               (default: same as days_back, but can be extended 
+                                to capture older shipping label purchases)
         
         Returns:
             Number of orders synced
         """
         print("🔄 Starting Amazon order sync...")
+        
+        # If financial_days_back not specified, use same as orders
+        if financial_days_back is None:
+            financial_days_back = days_back
         
         orders = self.get_orders(days_back=days_back)
         
@@ -212,6 +487,20 @@ class AmazonManager:
         
         synced_count = 0
         order_items_api_calls = 0
+        orders_with_actual_fees = 0
+        orders_with_estimated_fees = 0
+        orders_with_shipping_costs = 0
+        
+        # Fetch financial events (fees, shipping, taxes) for these orders
+        print(f"\n📊 Fetching financial data (fees, shipping, taxes) - {financial_days_back} day window...")
+        financial_data = self.get_financial_events(days_back=financial_days_back)
+        
+        # Get all order IDs to fetch shipping costs
+        order_ids = [order.get('AmazonOrderId') for order in orders]
+        
+        # Fetch shipping costs from Buy Shipping API
+        print("\n🚚 Fetching shipping costs from Buy Shipping API...")
+        shipping_costs = self.get_shipping_costs(order_ids)
         
         for order in orders:
             try:
@@ -246,19 +535,45 @@ class AmazonManager:
                     quantity = item.get('QuantityOrdered', 1)
                     price = float(item.get('ItemPrice', {}).get('Amount', 0))
                     
-                    # Extract shipping cost from item
-                    shipping_price = item.get('ShippingPrice', {})
-                    shipping_cost = float(shipping_price.get('Amount', 0)) if shipping_price else 0
+                    # Get actual financial data from Financial Events API
+                    order_financial_data = financial_data.get(amazon_order_id, {})
                     
-                    # Calculate estimated Amazon seller fees
-                    # Amazon referral fee averages 15% (varies by category: 8-15%)
-                    # Calculated on item price only (not including shipping)
-                    seller_fee = price * 0.15
-                    taxes = 0
+                    # Get actual shipping cost - Priority order:
+                    # 1. From Financial Events (PostageBilling_Postage adjustments)
+                    # 2. From Buy Shipping API
+                    # 3. From Orders API (customer's charge - often $0 for free shipping)
+                    shipping_cost = 0
+                    if order_financial_data and order_financial_data.get('shipping_cost', 0) > 0:
+                        shipping_cost = order_financial_data.get('shipping_cost', 0)
+                        orders_with_shipping_costs += 1
+                    elif shipping_costs.get(amazon_order_id, 0) > 0:
+                        shipping_cost = shipping_costs.get(amazon_order_id, 0)
+                        orders_with_shipping_costs += 1
+                    else:
+                        # Fallback to Orders API
+                        shipping_price = item.get('ShippingPrice', {})
+                        shipping_cost = float(shipping_price.get('Amount', 0)) if shipping_price else 0
                     
-                    # Amazon provides ItemTax
-                    item_tax = item.get('ItemTax', {})
-                    taxes = float(item_tax.get('Amount', 0)) if item_tax else 0
+                    # Use actual fees and taxes from Financial Events API (or fallback to estimates)
+                    if order_financial_data:
+                        seller_fee = order_financial_data.get('seller_fee', 0)
+                        # Use Financial Events tax if available, otherwise Orders API
+                        taxes = order_financial_data.get('taxes', 0)
+                        if taxes == 0:
+                            item_tax = item.get('ItemTax', {})
+                            taxes = float(item_tax.get('Amount', 0)) if item_tax else 0
+                        orders_with_actual_fees += 1
+                        print(f"  💰 Using actual financial data for {amazon_order_id}: Fee=${seller_fee:.2f}, Ship=${shipping_cost:.2f}, Tax=${taxes:.2f}")
+                    else:
+                        # Fallback to estimates for fees
+                        seller_fee = price * 0.15
+                        
+                        # Get tax from Orders API
+                        item_tax = item.get('ItemTax', {})
+                        taxes = float(item_tax.get('Amount', 0)) if item_tax else 0
+                        
+                        orders_with_estimated_fees += 1
+                        print(f"  ⚠️  Using estimated fees for {amazon_order_id}: Fee=${seller_fee:.2f} (15% est), Ship=${shipping_cost:.2f}, Tax=${taxes:.2f}")
                     
                     # Try to find barcode and image from amazonStore.db
                     barcode = None
@@ -361,6 +676,14 @@ class AmazonManager:
         print(f"✅ Synced {synced_count} Amazon orders to database")
         if order_items_api_calls > 0:
             print(f"   Order Items API calls: {order_items_api_calls} (rate limited)")
+        print(f"\n💰 Financial Data Summary:")
+        print(f"   Orders with actual fees: {orders_with_actual_fees}")
+        print(f"   Orders with estimated fees: {orders_with_estimated_fees}")
+        print(f"   Orders with shipping costs: {orders_with_shipping_costs}")
+        if orders_with_actual_fees > 0:
+            print(f"   ✅ {orders_with_actual_fees}/{orders_with_actual_fees + orders_with_estimated_fees} orders have accurate Amazon fee data!")
+        if orders_with_shipping_costs > 0:
+            print(f"   ✅ {orders_with_shipping_costs}/{len(orders)} orders have actual shipping cost data!")
         return synced_count
     
     def get_active_listings(self):
