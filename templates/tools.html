@@ -79,6 +79,21 @@
             color: #666;
             font-size: 0.9rem;
         }
+        .section-title {
+            margin: 30px 0 16px 0;
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #2c3e50;
+            padding-bottom: 8px;
+            border-bottom: 2px solid var(--primary);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .section-title i {
+            color: var(--primary);
+            font-size: 1.2rem;
+        }
         .back-btn {
             display: inline-block;
             margin-top: 25px;
@@ -211,20 +226,53 @@
                 <p>Extract BOL data from Excel files</p>
             </a>
 
-            <!-- BOL Stats -->
+            <!-- Sync Manager - Wide button -->
+            <a href="/sync" class="tool-card wide sync-orange">
+                <i class="fas fa-sync-alt"></i>
+                <h3>Sync Manager</h3>
+                <p>Manage eBay & Amazon syncing</p>
+            </a>
+        </div>
+
+        <!-- Statistics Section -->
+        <div class="section-title">
+            <i class="fas fa-chart-line"></i>
+            <span>Statistics</span>
+        </div>
+
+        <div class="tools-grid">
+            <a href="/financial-analytics" class="tool-card">
+                <i class="fas fa-dollar-sign" style="color: #00b894;"></i>
+                <h3>Financial Analytics</h3>
+                <p>View profit & cost analysis</p>
+            </a>
+
+            <a href="/marketplace-stats" class="tool-card">
+                <i class="fas fa-chart-line"></i>
+                <h3>Marketplace Stats</h3>
+                <p>View sales history</p>
+            </a>
+
             <a href="/bol-stats" class="tool-card">
                 <i class="fas fa-chart-bar"></i>
                 <h3>BOL Stats</h3>
                 <p>View LOT prep progress</p>
             </a>
 
-            <!-- Sync Manager -->
-            <a href="/sync" class="tool-card sync-orange">
-                <i class="fas fa-sync-alt"></i>
-                <h3>Sync Manager</h3>
-                <p>Manage eBay & Amazon syncing</p>
+            <a href="/returns" class="tool-card">
+                <i class="fas fa-undo"></i>
+                <h3>Returns</h3>
+                <p>Manage Amazon & eBay returns</p>
             </a>
+        </div>
 
+        <!-- Management Tools Section -->
+        <div class="section-title">
+            <i class="fas fa-tools"></i>
+            <span>Management Tools</span>
+        </div>
+
+        <div class="tools-grid">
             <!-- Bottom section: shelf manager, trash manager, misc -->
             <a href="/shelfmanager" class="tool-card">
                 <i class="fas fa-box"></i>
@@ -254,24 +302,6 @@
                 <i class="fas fa-cogs"></i>
                 <h3>Misc</h3>
                 <p>Timer & workflow settings</p>
-            </a>
-
-            <a href="/marketplace-stats" class="tool-card">
-                <i class="fas fa-chart-line"></i>
-                <h3>Marketplace Stats</h3>
-                <p>View sales history</p>
-            </a>
-
-            <a href="/returns" class="tool-card">
-                <i class="fas fa-undo"></i>
-                <h3>Returns</h3>
-                <p>Manage Amazon & eBay returns</p>
-            </a>
-
-            <a href="/financial-analytics" class="tool-card">
-                <i class="fas fa-chart-pie"></i>
-                <h3>Financial Analytics</h3>
-                <p>View profit & cost analysis</p>
             </a>
 
             <a href="/test-sold-orders" class="tool-card">
