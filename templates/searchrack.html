@@ -523,9 +523,9 @@ function renderResults(results){
     
     // Returns-specific cells
     const returnDateCell = hasReturns ? (dbRaw === 'returns' && r.raw && r.raw.return_date ? `<td>${fmtLocal(r.raw.return_date)}</td>` : '<td></td>') : '';
-    const refundAmountCell = hasReturns ? (dbRaw === 'returns' && r.raw && r.raw.refund_amount ? `<td style="color:#e74c3c;font-weight:500;">$${parseFloat(r.raw.refund_amount).toFixed(2)}</td>` : '<td></td>') : '';
-    const originalShippingCell = hasReturns ? (dbRaw === 'returns' && r.raw && r.raw.original_shipping_cost ? `<td>$${parseFloat(r.raw.original_shipping_cost).toFixed(2)}</td>` : '<td>$0.00</td>') : '';
-    const returnShippingCell = hasReturns ? (dbRaw === 'returns' && r.raw && r.raw.return_shipping_cost ? `<td>$${parseFloat(r.raw.return_shipping_cost).toFixed(2)}</td>` : '<td>$0.00</td>') : '';
+    const refundAmountCell = hasReturns ? (dbRaw === 'returns' && r.raw ? `<td style="color:#e74c3c;font-weight:500;">$${parseFloat(r.raw.refund_amount || 0).toFixed(2)}</td>` : '<td></td>') : '';
+    const originalShippingCell = hasReturns ? (dbRaw === 'returns' && r.raw ? `<td>$${parseFloat(r.raw.original_shipping_cost || 0).toFixed(2)}</td>` : '<td></td>') : '';
+    const returnShippingCell = hasReturns ? (dbRaw === 'returns' && r.raw ? `<td>$${parseFloat(r.raw.return_shipping_cost || 0).toFixed(2)}</td>` : '<td></td>') : '';
     const totalReturnCostCell = hasReturns ? (dbRaw === 'returns' && r.raw ? 
         `<td style="color:#c0392b;font-weight:600;">$${(
             parseFloat(r.raw.refund_amount || 0) + 
