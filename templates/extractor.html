@@ -23,6 +23,18 @@
         table{width:100%;border-collapse:collapse;margin-top:10px}
         th,td{padding:8px;text-align:left;border-bottom:1px solid #ddd}
         th{background:#007bff;color:#fff}
+        .edit-icon{cursor:pointer;color:#007bff;font-size:16px;margin-left:8px}
+        .edit-icon:hover{color:#0056b3}
+        .modal{display:none;position:fixed;z-index:1000;left:0;top:0;width:100%;height:100%;background:rgba(0,0,0,0.5)}
+        .modal-content{background:#fff;margin:10% auto;padding:20px;border-radius:8px;width:90%;max-width:500px}
+        .modal-content h3{margin-top:0}
+        .modal-content .form-group{margin-bottom:15px}
+        .modal-content label{display:block;margin-bottom:5px;font-weight:600}
+        .modal-content input{width:100%;padding:8px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box}
+        .modal-content .btn-group{display:flex;gap:10px;margin-top:20px}
+        .modal-content button{flex:1}
+        .btn-cancel{background:#6c757d}
+        .btn-cancel:hover{background:#5a6268}
     </style>
 </head>
 <body>
@@ -38,6 +50,10 @@
         <div class="form-group">
             <label for="import-date">Date of Purchase:</label>
             <input type="date" id="import-date" name="import_date" required>
+        </div>
+        <div class="form-group">
+            <label for="shipping-cost">Shipping Cost ($):</label>
+            <input type="number" id="shipping-cost" name="shipping_cost" step="0.01" min="0" placeholder="0.00">
         </div>
         <button type="submit">Upload & Sync to BOL</button>
     </form>
@@ -91,6 +107,10 @@
                     if (data.total_client_cost !== undefined && data.total_client_cost !== null) {
                         const formattedCost = '$' + parseFloat(data.total_client_cost).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
                         msg += `<br><strong>Total Client Cost:</strong> ${formattedCost}`;
+                    }
+                    if (data.shipping_cost !== undefined && data.shipping_cost !== null) {
+                        const formattedShipping = '$' + parseFloat(data.shipping_cost).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                        msg += `<br><strong>Shipping Cost:</strong> ${formattedShipping}`;
                     }
                     if (data.avg_cost !== undefined && data.avg_cost !== null) {
                         const formattedAvgCost = '$' + parseFloat(data.avg_cost).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
@@ -146,8 +166,9 @@
                 console.log('API Response:', data); // Debug logging
                 
                 if (data.success && data.logs && data.logs.length > 0) {
-                    let html = '<table><tr><th>Location</th><th>Filename</th><th>LOT #</th><th>Items</th><th>Cost</th><th>Date</th><th>Uploaded At</th></tr>';
+                    let html = '<table><tr><th>Location</th><th>Filename</th><th>LOT #</th><th>Items</th><th>Cost</th><th>Shipping</th><th>Date</th><th>Uploaded At</th><th>Edit</th></tr>';
                     let totalCostSum = 0;
+                    let totalShippingSum = 0;
                     let totalItemsSum = 0;
                     
                     data.logs.forEach(log => {
@@ -169,9 +190,19 @@
                             totalCostSum += costValue;
                             totalCost = '$' + costValue.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
                         }
+                        
+                        // Format shipping_cost
+                        let shippingCost = '—';
+                        if (log.shipping_cost !== undefined && log.shipping_cost !== null) {
+                            const shippingValue = parseFloat(log.shipping_cost);
+                            totalShippingSum += shippingValue;
+                            shippingCost = '$' + shippingValue.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                        }
+                        
                         // Show lot_number (which now contains the extracted LOT #)
                         const lotNumber = log.lot_number || '—';
                         const bolLocation = log.bol_location || '—';
+                        const shippingForEdit = log.shipping_cost || '';
                         console.log('Log data:', log, 'totalQty:', totalQty); // Debug logging
                         html += `<tr>
                             <td>${bolLocation}</td>
@@ -179,25 +210,29 @@
                             <td>${lotNumber}</td>
                             <td>${totalQty}</td>
                             <td>${totalCost}</td>
+                            <td>${shippingCost}</td>
                             <td>${log.import_date}</td>
                             <td>${uploadedAt}</td>
+                            <td><span class="edit-icon" onclick="openEditModal('${lotNumber}', '${log.import_date}', '${shippingForEdit}')" title="Edit LOT">⚙️</span></td>
                         </tr>`;
                     });
                     
                     // Add summary row
                     const formattedTotal = '$' + totalCostSum.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                    const formattedShippingTotal = '$' + totalShippingSum.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
                     html += `<tr style="background:#e8f4f8;font-weight:bold;border-top:2px solid #007bff">
                         <td colspan="3" style="text-align:right">TOTAL:</td>
                         <td>${totalItemsSum.toLocaleString()}</td>
                         <td>${formattedTotal}</td>
-                        <td colspan="2"></td>
+                        <td>${formattedShippingTotal}</td>
+                        <td colspan="3"></td>
                     </tr>`;
                     
                     html += '</table>';
                     logsEl.innerHTML = html;
                     
-                    // Update global total cost and refresh stats
-                    globalTotalCost = totalCostSum;
+                    // Update global total cost (include shipping) and refresh stats
+                    globalTotalCost = totalCostSum + totalShippingSum;
                     loadStats();
                 } else {
                     logsEl.innerHTML = '<p>No uploads yet.</p>';
@@ -264,8 +299,89 @@
             // Function removed - X button no longer available
             alert('Delete functionality has been disabled.');
         }
+        
+        // Edit LOT functionality
+        let currentEditLot = null;
+        
+        function openEditModal(lotNumber, importDate, shippingCost) {
+            currentEditLot = lotNumber;
+            document.getElementById('edit-lot-number').value = lotNumber;
+            document.getElementById('edit-import-date').value = importDate || '';
+            document.getElementById('edit-shipping-cost').value = shippingCost || '';
+            document.getElementById('edit-modal').style.display = 'block';
+        }
+        
+        function closeEditModal() {
+            document.getElementById('edit-modal').style.display = 'none';
+            currentEditLot = null;
+        }
+        
+        async function saveEditLot() {
+            const newLotNumber = document.getElementById('edit-lot-number').value.trim();
+            const newImportDate = document.getElementById('edit-import-date').value.trim();
+            const newShippingCost = document.getElementById('edit-shipping-cost').value.trim();
+            
+            if (!newLotNumber) {
+                alert('LOT # is required.');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/rawbol/update/${currentEditLot}`, {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        lot_number: newLotNumber,
+                        import_date: newImportDate,
+                        shipping_cost: newShippingCost
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert('LOT information updated successfully!');
+                    closeEditModal();
+                    loadUploadLogs();
+                    loadStats();
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            } catch (err) {
+                alert('Error updating LOT: ' + err);
+            }
+        }
+        
+        // Close modal if clicking outside
+        window.onclick = function(event) {
+            const modal = document.getElementById('edit-modal');
+            if (event.target == modal) {
+                closeEditModal();
+            }
+        }
     </script>
-</body>
-</html>
+    
+    <!-- Edit LOT Modal -->
+    <div id="edit-modal" class="modal">
+        <div class="modal-content">
+            <h3>Edit LOT Information</h3>
+            <div class="form-group">
+                <label for="edit-lot-number">LOT #:</label>
+                <input type="text" id="edit-lot-number">
+            </div>
+            <div class="form-group">
+                <label for="edit-import-date">Date:</label>
+                <input type="date" id="edit-import-date">
+            </div>
+            <div class="form-group">
+                <label for="edit-shipping-cost">Shipping Cost ($):</label>
+                <input type="number" id="edit-shipping-cost" step="0.01" min="0">
+            </div>
+            <div class="btn-group">
+                <button onclick="closeEditModal()" class="btn-cancel">Cancel</button>
+                <button onclick="saveEditLot()">Save Changes</button>
+            </div>
+        </div>
+    </div>
 </body>
 </html>

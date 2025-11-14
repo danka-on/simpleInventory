@@ -4937,18 +4937,27 @@ def api_rawbol_upload():
     
     file = request.files['excel_file']
     import_date = request.form['import_date'].strip()
+    shipping_cost_str = request.form.get('shipping_cost', '').strip()
+    
+    # Parse shipping cost if provided
+    shipping_cost = None
+    if shipping_cost_str:
+        try:
+            shipping_cost = float(shipping_cost_str)
+        except ValueError:
+            return jsonify({'success': False, 'error': 'Invalid shipping cost value.'})
     
     if file.filename == '':
         return jsonify({'success': False, 'error': 'No file selected.'})
     
-    print(f'DEBUG: Received file: {file.filename}, Date: {import_date}')
+    print(f'DEBUG: Received file: {file.filename}, Date: {import_date}, Shipping: {shipping_cost}')
     
     # Upload to rawbol.db - lot_number will be extracted from file
     # Use filename without extension as temporary lot_number for database storage
     import os
     temp_lot_number = os.path.splitext(file.filename)[0]
     
-    result = process_bol_excel(file, temp_lot_number, import_date)
+    result = process_bol_excel(file, temp_lot_number, import_date, shipping_cost)
     
     # If upload successful, auto-sync ONLY THIS LOT to bol.db
     if result.get('success'):
@@ -4996,12 +5005,103 @@ def api_rawbol_delete_lot(lot_number):
     result = delete_lot(lot_number)
     return jsonify(result)
 
+@app.route('/api/rawbol/update/<lot_number>', methods=['PUT'])
+def api_rawbol_update_lot(lot_number):
+    """Update LOT information (name, date, shipping cost)"""
+    try:
+        data = request.get_json() or {}
+        new_lot_number = data.get('lot_number', '').strip()
+        import_date = data.get('import_date', '').strip()
+        shipping_cost_str = data.get('shipping_cost', '')
+        
+        # Parse shipping cost
+        shipping_cost = None
+        if shipping_cost_str != '' and shipping_cost_str is not None:
+            try:
+                shipping_cost = float(shipping_cost_str)
+            except ValueError:
+                return jsonify({'success': False, 'error': 'Invalid shipping cost value.'}), 400
+        
+        conn = sqlite3.connect('rawbol.db')
+        cur = conn.cursor()
+        
+        # Update upload_logs
+        update_fields = []
+        update_values = []
+        
+        if new_lot_number and new_lot_number != lot_number:
+            # Check if new lot number already exists
+            cur.execute('SELECT COUNT(*) as count FROM upload_logs WHERE lot_number = ?', (new_lot_number,))
+            if cur.fetchone()[0] > 0:
+                conn.close()
+                return jsonify({'success': False, 'error': f'LOT # "{new_lot_number}" already exists.'}), 400
+            update_fields.append('lot_number = ?')
+            update_values.append(new_lot_number)
+        
+        if import_date:
+            update_fields.append('import_date = ?')
+            update_values.append(import_date)
+        
+        if shipping_cost is not None:
+            update_fields.append('shipping_cost = ?')
+            update_values.append(shipping_cost)
+        
+        if not update_fields:
+            conn.close()
+            return jsonify({'success': False, 'error': 'No fields to update.'}), 400
+        
+        # Update upload_logs
+        update_values.append(lot_number)  # WHERE clause
+        cur.execute(f"UPDATE upload_logs SET {', '.join(update_fields)} WHERE lot_number = ?", update_values)
+        
+        # If lot_number changed, also update raw_bol_items
+        if new_lot_number and new_lot_number != lot_number:
+            cur.execute('UPDATE raw_bol_items SET lot_number = ? WHERE lot_number = ?', (new_lot_number, lot_number))
+        
+        if import_date and (new_lot_number and new_lot_number != lot_number or not new_lot_number):
+            # Update import_date in raw_bol_items
+            cur.execute('UPDATE raw_bol_items SET import_date = ? WHERE lot_number = ?', 
+                       (import_date, new_lot_number if new_lot_number else lot_number))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'LOT information updated successfully.',
+            'new_lot_number': new_lot_number if new_lot_number else lot_number
+        })
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/api/rawbol/desync', methods=['POST'])
 def api_rawbol_desync_all():
     """Desync (undo) ALL raw BOL from main BOL database"""
     from rawbol_manager import desync_all_rawbol
     result = desync_all_rawbol()
     return jsonify(result)
+
+@app.route('/api/sold/enrich-lot-numbers', methods=['POST'])
+def api_sold_enrich_lot_numbers():
+    """Backfill LOT numbers for all sold orders using smart matching"""
+    try:
+        from lot_matcher import backfill_all_sold_orders
+        result = backfill_all_sold_orders()
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/sold/enrich-recent', methods=['POST'])
+def api_sold_enrich_recent():
+    """Enrich recent orders (last 7 days) with LOT numbers"""
+    try:
+        from lot_matcher import enrich_new_orders
+        days_back = int(request.args.get('days', 7))
+        result = enrich_new_orders(days_back=days_back)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/rawbol/items/<bol_number>', methods=['GET'])
 def api_rawbol_items(bol_number):
@@ -7564,6 +7664,15 @@ def sync_ebay_orders_api():
         except Exception as e:
             print(f"⚠️ Error syncing eBay returns: {e}")
         
+        # Auto-enrich recent orders with LOT numbers
+        try:
+            from lot_matcher import enrich_new_orders
+            enrich_result = enrich_new_orders(days_back=7)
+            if enrich_result.get('success'):
+                print(f"✅ Enriched {enrich_result.get('enriched', 0)} eBay orders with LOT numbers")
+        except Exception as e:
+            print(f"⚠️ Error enriching eBay orders with LOTs: {e}")
+        
         update_sync_timestamp('ebay_orders')
         return jsonify({'success': True, 'message': 'eBay orders synced successfully'})
     except Exception as e:
@@ -7638,6 +7747,15 @@ def sync_amazon_orders_api():
             
         except Exception as e:
             print(f"⚠️ Error enriching Amazon order barcodes: {e}")
+        
+        # Auto-enrich recent orders with LOT numbers
+        try:
+            from lot_matcher import enrich_new_orders
+            enrich_result = enrich_new_orders(days_back=7)
+            if enrich_result.get('success'):
+                print(f"✅ Enriched {enrich_result.get('enriched', 0)} Amazon orders with LOT numbers")
+        except Exception as e:
+            print(f"⚠️ Error enriching Amazon orders with LOTs: {e}")
         
         from DBmanager import process_sold_orders_inventory_reduction
         process_sold_orders_inventory_reduction()

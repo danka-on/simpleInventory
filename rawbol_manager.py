@@ -30,7 +30,8 @@ def ensure_rawbol_db():
         import_date TEXT,
         rows_imported INTEGER,
         uploaded_at TEXT,
-        total_client_cost REAL
+        total_client_cost REAL,
+        shipping_cost REAL
     )''')
     
     # Create sync history table
@@ -56,6 +57,15 @@ def ensure_rawbol_db():
     except sqlite3.OperationalError:
         print("Adding total_client_cost column to upload_logs table...")
         cur.execute("ALTER TABLE upload_logs ADD COLUMN total_client_cost REAL")
+        conn.commit()
+        print("Column added successfully!")
+    
+    # Migration: Add shipping_cost column to upload_logs if it doesn't exist
+    try:
+        cur.execute("SELECT shipping_cost FROM upload_logs LIMIT 1")
+    except sqlite3.OperationalError:
+        print("Adding shipping_cost column to upload_logs table...")
+        cur.execute("ALTER TABLE upload_logs ADD COLUMN shipping_cost REAL")
         conn.commit()
         print("Column added successfully!")
     
@@ -275,7 +285,7 @@ def insert_raw_bol_items(df, lot_number, import_date, avg_cost=None, bol_locatio
     except Exception as e:
         return {'success': False, 'error': str(e)}
 
-def log_upload(filename, lot_number, import_date, rows_imported, total_client_cost=None, bol_location=None):
+def log_upload(filename, lot_number, import_date, rows_imported, total_client_cost=None, bol_location=None, shipping_cost=None):
     """Log an upload to upload_logs table. lot_number is the extracted LOT # from file."""
     try:
         ensure_rawbol_db()
@@ -283,9 +293,9 @@ def log_upload(filename, lot_number, import_date, rows_imported, total_client_co
         cur = conn.cursor()
         uploaded_at = datetime.datetime.utcnow().isoformat()
         cur.execute('''INSERT INTO upload_logs 
-            (filename, lot_number, bol_location, import_date, rows_imported, uploaded_at, total_client_cost)
-            VALUES (?, ?, ?, ?, ?, ?, ?)''',
-            (filename, lot_number, bol_location, import_date, rows_imported, uploaded_at, total_client_cost))
+            (filename, lot_number, bol_location, import_date, rows_imported, uploaded_at, total_client_cost, shipping_cost)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+            (filename, lot_number, bol_location, import_date, rows_imported, uploaded_at, total_client_cost, shipping_cost))
         conn.commit()
         conn.close()
         return True

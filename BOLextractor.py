@@ -4,11 +4,13 @@ import io
 import os
 from io import StringIO
 
-def process_bol_excel(file, lot_number, import_date):
+def process_bol_excel(file, lot_number, import_date, shipping_cost=None):
     """
     Process the uploaded Excel file (.xls, .xlsx, or .csv), find the row with 'UPC', 
     then read all data below it into rawbol.db.
     Also extracts LOT # and TOTAL CLIENT COST from header section before UPC table.
+    Args:
+        shipping_cost: Optional shipping cost for this lot (float or None)
     Returns: {'success': True, 'inserted': n, 'extracted_lot_number': str, 'total_client_cost': float} 
              or {'success': False, 'error': '...'}
     """
@@ -496,14 +498,15 @@ def process_bol_excel(file, lot_number, import_date):
         result = insert_raw_bol_items(df, final_lot_number, import_date, avg_cost, bol_location)
         
         if result.get('success'):
-            # Log the upload with extracted header data
-            log_upload(filename, final_lot_number, import_date, result.get('inserted', 0), total_client_cost_header, bol_location)
+            # Log the upload with extracted header data and shipping cost
+            log_upload(filename, final_lot_number, import_date, result.get('inserted', 0), total_client_cost_header, bol_location, shipping_cost)
             # Include extracted data in response
             result['lot_number'] = final_lot_number
             result['extracted_lot_number'] = extracted_lot_number
             result['bol_location'] = bol_location
             result['total_client_cost'] = total_client_cost_header
             result['avg_cost'] = avg_cost
+            result['shipping_cost'] = shipping_cost
         
         return result
     except Exception as e:
