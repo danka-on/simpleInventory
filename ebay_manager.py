@@ -22,6 +22,125 @@ class EbayManager:
             print(f"❌ Error getting eBay access token: {e}")
             return None
     
+    def get_order_fees(self, days_back=90):
+        """
+        Fetch seller fees from eBay Fulfillment API
+        eBay includes totalMarketplaceFee in each order
+        """
+        try:
+            token = self.get_access_token()
+            if not token:
+                print("❌ No eBay access token available")
+                return {}
+            
+            headers = {
+                'Authorization': f'Bearer {token}',
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            }
+            
+            # Calculate date range
+            from_date = (datetime.now() - timedelta(days=days_back)).strftime('%Y-%m-%dT%H:%M:%S.000Z')
+            
+            print(f"🔄 Fetching eBay seller fees from last {days_back} days...")
+            
+            url = f"{self.base_url}/sell/fulfillment/v1/order"
+            
+            params = {
+                'filter': f'lastmodifieddate:[{from_date}..]',
+                'limit': 200
+            }
+            
+            fees_data = {}
+            offset = 0
+            
+            while True:
+                params['offset'] = offset
+                
+                try:
+                    response = requests.get(url, headers=headers, params=params, timeout=30)
+                    
+                    if response.status_code == 200:
+                        data = response.json()
+                        orders = data.get('orders', [])
+                        
+                        if not orders:
+                            break
+                        
+                        print(f"  📄 Processing {len(orders)} orders (offset {offset})...")
+                        
+                        for order in orders:
+                            order_id = order.get('legacyOrderId', order.get('orderId'))
+                            
+                            # Get marketplace fee
+                            marketplace_fee = order.get('totalMarketplaceFee', {})
+                            fee_amount = float(marketplace_fee.get('value', 0))
+                            
+                            if fee_amount > 0:
+                                fees_data[order_id] = fee_amount
+                        
+                        # Check if there are more results
+                        total = data.get('total', 0)
+                        if offset + len(orders) >= total:
+                            break
+                        
+                        offset += len(orders)
+                        time.sleep(0.5)  # Rate limiting
+                        
+                    elif response.status_code == 204:
+                        break
+                    else:
+                        print(f"❌ Error fetching eBay orders: {response.status_code}")
+                        break
+                        
+                except Exception as e:
+                    print(f"❌ Error in eBay request: {e}")
+                    break
+            
+            print(f"\n✅ Retrieved fees for {len(fees_data)} eBay orders")
+            return fees_data
+            
+        except Exception as e:
+            print(f"❌ Error in get_order_fees: {e}")
+            import traceback
+            traceback.print_exc()
+            return {}
+    
+    def sync_fees_to_db(self, days_back=90):
+        """
+        Sync eBay seller fees to sold.db orders table
+        """
+        print("🔄 Starting eBay fees sync...")
+        
+        fees_data = self.get_order_fees(days_back=days_back)
+        
+        if not fees_data:
+            print("ℹ️  No eBay fees to sync")
+            return 0
+        
+        conn = sqlite3.connect('sold.db')
+        cur = conn.cursor()
+        
+        updated_count = 0
+        
+        for order_id, fee_amount in fees_data.items():
+            # Update seller_fee for this order
+            cur.execute('''
+                UPDATE orders
+                SET seller_fee = ?
+                WHERE order_id = ? AND store = 'ebay'
+            ''', (fee_amount, order_id))
+            
+            if cur.rowcount > 0:
+                updated_count += 1
+                print(f"  ✅ {order_id}: ${fee_amount:.2f} seller fee")
+        
+        conn.commit()
+        conn.close()
+        
+        print(f"\n✅ Updated {updated_count} eBay orders with seller fees")
+        return updated_count
+    
     def get_returns(self, days_back=90):
         """
         Fetch returns/refunds from eBay Fulfillment API

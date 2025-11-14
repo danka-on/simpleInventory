@@ -7546,6 +7546,15 @@ def sync_ebay_orders_api():
         # Use the local eBay orders sync function defined in this file
         orders()
         
+        # Sync eBay seller fees
+        try:
+            from ebay_manager import EbayManager
+            em = EbayManager()
+            fees_count = em.sync_fees_to_db(days_back=90)
+            print(f"✅ Synced fees for {fees_count} eBay orders")
+        except Exception as e:
+            print(f"⚠️ Error syncing eBay fees: {e}")
+        
         # Sync eBay returns
         try:
             from ebay_manager import EbayManager

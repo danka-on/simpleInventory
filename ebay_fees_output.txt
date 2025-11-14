@@ -1,0 +1,225 @@
+SAMPLE ORDER - LOOKING FOR FEE DATA
+================================================================================
+
+Order ID: 05-13830-53627
+
+Checking for fee-related fields:
+  Found: ebayCollectAndRemitTax = True
+  Found: totalFeeBasisAmount = {'value': '19.24', 'currency': 'USD'}
+  Found: totalMarketplaceFee = {'value': '3.99', 'currency': 'USD'}
+
+pricingSummary:
+{
+  "priceSubtotal": {
+    "value": "13.99",
+    "currency": "USD"
+  },
+  "deliveryCost": {
+    "value": "3.99",
+    "currency": "USD"
+  },
+  "total": {
+    "value": "17.98",
+    "currency": "USD"
+  }
+}
+
+paymentSummary:
+{
+  "totalDueSeller": {
+    "value": "13.99",
+    "currency": "USD"
+  },
+  "refunds": [],
+  "payments": [
+    {
+      "paymentMethod": "EBAY",
+      "paymentReferenceId": "420004_S",
+      "paymentDate": "2025-11-12T09:40:50.337Z",
+      "amount": {
+        "value": "13.99",
+        "currency": "USD"
+      },
+      "paymentStatus": "PAID"
+    }
+  ]
+}
+
+totalFeeBasisAmount: {'value': '19.24', 'currency': 'USD'}
+totalMarketplaceFee: {'value': '3.99', 'currency': 'USD'}
+
+Line Items (checking for fees):
+
+  Item 1:
+    listingMarketplaceId = EBAY_US
+    purchaseMarketplaceId = EBAY_US
+    ebayCollectAndRemitTaxes = [{'taxType': 'STATE_SALES_TAX', 'amount': {'value': '1.26', 'currency': 'USD'}, 'collectionMethod': 'NET'}]
+    Total: {'value': '17.98', 'currency': 'USD'}
+    Line Item Cost: {'value': '13.99', 'currency': 'USD'}
+
+================================================================================
+FULL ORDER STRUCTURE:
+================================================================================
+{
+  "orderId": "05-13830-53627",
+  "legacyOrderId": "05-13830-53627",
+  "creationDate": "2025-11-12T09:40:50.000Z",
+  "lastModifiedDate": "2025-11-14T18:59:01.000Z",
+  "orderFulfillmentStatus": "FULFILLED",
+  "orderPaymentStatus": "PAID",
+  "sellerId": "ilona-corner",
+  "buyer": {
+    "username": "boda08",
+    "taxAddress": {
+      "city": "Bradenton",
+      "stateOrProvince": "FL",
+      "postalCode": "34208-1405",
+      "countryCode": "US"
+    },
+    "buyerRegistrationAddress": {
+      "fullName": "Tammy Svoboda",
+      "contactAddress": {
+        "addressLine1": "1603 2nd Ave. East",
+        "city": "Bradenton",
+        "stateOrProvince": "FL",
+        "postalCode": "34208",
+        "countryCode": "US"
+      },
+      "primaryPhone": {
+        "phoneNumber": "9415925484"
+      },
+      "secondaryPhone": {
+        "phoneNumber": "9417491317"
+      },
+      "email": "10ac0f998cb149edd270@members.ebay.com"
+    }
+  },
+  "pricingSummary": {
+    "priceSubtotal": {
+      "value": "13.99",
+      "currency": "USD"
+    },
+    "deliveryCost": {
+      "value": "3.99",
+      "currency": "USD"
+    },
+    "total": {
+      "value": "17.98",
+      "currency": "USD"
+    }
+  },
+  "cancelStatus": {
+    "cancelState": "NONE_REQUESTED",
+    "cancelRequests": []
+  },
+  "paymentSummary": {
+    "totalDueSeller": {
+      "value": "13.99",
+      "currency": "USD"
+    },
+    "refunds": [],
+    "payments": [
+      {
+        "paymentMethod": "EBAY",
+        "paymentReferenceId": "420004_S",
+        "paymentDate": "2025-11-12T09:40:50.337Z",
+        "amount": {
+          "value": "13.99",
+          "currency": "USD"
+        },
+        "paymentStatus": "PAID"
+      }
+    ]
+  },
+  "fulfillmentStartInstructions": [
+    {
+      "fulfillmentInstructionsType": "SHIP_TO",
+      "minEstimatedDeliveryDate": "2025-11-14T08:00:00.000Z",
+      "maxEstimatedDeliveryDate": "2025-11-18T08:00:00.000Z",
+      "ebaySupportedFulfillment": false,
+      "shippingStep": {
+        "shipTo": {
+          "fullName": "Tammy Svoboda",
+          "contactAddress": {
+            "addressLine1": "1603 2nd Ave E",
+            "city": "Bradenton",
+            "stateOrProvince": "FL",
+            "postalCode": "34208-1405",
+            "countryCode": "US"
+          },
+          "primaryPhone": {
+            "phoneNumber": "9415184360"
+          },
+          "email": "10ac0f998cb149edd270@members.ebay.com"
+        },
+        "shippingCarrierCode": "USPS",
+        "shippingServiceCode": "USPSFirstClass"
+      }
+    }
+  ],
+  "fulfillmentHrefs": [
+    "https://api.ebay.com/sell/fulfillment/v1/order/05-13830-53627/shipping_fulfillment/9400108106245480225788"
+  ],
+  "lineItems": [
+    {
+      "lineItemId": "10076419027905",
+      "legacyItemId": "187728842209",
+      "title": "Lenox Butterfly Meadow 1-Piece Kitchen Linens Apron only",
+      "lineItemCost": {
+        "value": "13.99",
+        "currency": "USD"
+      },
+      "quantity": 1,
+      "soldFormat": "FIXED_PRICE",
+      "listingMarketplaceId": "EBAY_US",
+      "purchaseMarketplaceId": "EBAY_US",
+      "lineItemFulfillmentStatus": "FULFILLED",
+      "total": {
+        "value": "17.98",
+        "currency": "USD"
+      },
+      "deliveryCost": {
+        "shippingCost": {
+          "value": "3.99",
+          "currency": "USD"
+        }
+      },
+      "appliedPromotions": [],
+      "taxes": [],
+      "ebayCollectAndRemitTaxes": [
+        {
+          "taxType": "STATE_SALES_TAX",
+          "amount": {
+            "value": "1.26",
+            "currency": "USD"
+          },
+          "collectionMethod": "NET"
+        }
+      ],
+      "properties": {
+        "buyerProtection": true
+      },
+      "lineItemFulfillmentInstructions": {
+        "minEstimatedDeliveryDate": "2025-11-14T08:00:00.000Z",
+        "maxEstimatedDeliveryDate": "2025-11-18T08:00:00.000Z",
+        "shipByDate": "2025-11-18T07:59:59.000Z",
+        "guaranteedDelivery": false
+      },
+      "itemLocation": {
+        "location": "Fort Myers, Florida",
+        "countryCode": "US",
+        "postalCode": "33908"
+      }
+    }
+  ],
+  "ebayCollectAndRemitTax": true,
+  "salesRecordReference": "867",
+  "totalFeeBasisAmount": {
+    "value": "19.24",
+    "currency": "USD"
+  },
+  "totalMarketplaceFee": {
+    "value": "3.99",
+    "currency": "USD"
+  }
+}
