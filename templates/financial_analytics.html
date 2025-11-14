@@ -370,6 +370,14 @@
                     </select>
                 </div>
                 <div class="filter-group">
+                    <label>Returns</label>
+                    <select id="returnsFilter">
+                        <option value="all">All Orders</option>
+                        <option value="no-returns">No Returns</option>
+                        <option value="returned">Returned Only</option>
+                    </select>
+                </div>
+                <div class="filter-group">
                     <label>LOT #</label>
                     <select id="bolFilter">
                         <option value="all">All LOTs</option>
@@ -444,6 +452,7 @@
                                 <th data-sort="cost">Cost <span class="sort-icon">↕</span></th>
                                 <th data-sort="fees">Fees <span class="sort-icon">↕</span></th>
                                 <th data-sort="shipping">Shipping <span class="sort-icon">↕</span></th>
+                                <th data-sort="returns">Return Cost <span class="sort-icon">↕</span></th>
                                 <th data-sort="profit">Net Profit <span class="sort-icon">↕</span></th>
                                 <th data-sort="margin">Margin % <span class="sort-icon">↕</span></th>
                             </tr>
@@ -572,6 +581,7 @@
             const storeFilter = document.getElementById('storeFilter').value;
             const costFilter = document.getElementById('costFilter').value;
             const bolFilter = document.getElementById('bolFilter').value;
+            const returnsFilter = document.getElementById('returnsFilter').value;
             
             filteredData = allData.filter(item => {
                 // Date filter
@@ -602,6 +612,10 @@
                     if (!item.bol_number || item.bol_number !== bolFilter) return false;
                 }
                 
+                // Returns filter
+                if (returnsFilter === 'no-returns' && item.return_cost > 0) return false;
+                if (returnsFilter === 'returned' && (!item.return_cost || item.return_cost <= 0)) return false;
+                
                 return true;
             });
             
@@ -617,7 +631,8 @@
             const totalCosts = filteredData.reduce((sum, item) => sum + (item.cost ? item.cost * item.quantity : 0), 0);
             const totalFees = filteredData.reduce((sum, item) => sum + (item.seller_fee || 0) + (item.taxes || 0), 0);
             const totalShipping = filteredData.reduce((sum, item) => sum + (item.shipping_cost || 0), 0);
-            const netProfit = totalRevenue - totalCosts - totalFees - totalShipping;
+            const totalReturns = filteredData.reduce((sum, item) => sum + (item.return_cost || 0), 0);
+            const netProfit = totalRevenue - totalCosts - totalFees - totalShipping - totalReturns;
             const profitMargin = totalRevenue > 0 ? (netProfit / totalRevenue * 100) : 0;
             const avgCost = filteredData.filter(i => i.cost).length > 0 
                 ? totalCosts / filteredData.filter(i => i.cost).reduce((sum, i) => sum + i.quantity, 0) 
@@ -637,8 +652,8 @@
                 document.getElementById('avgCost').textContent = 'Avg: $' + avgCost.toFixed(2) + '/item';
             }
             document.getElementById('totalCosts').textContent = costsText;
-            document.getElementById('totalFees').textContent = '$' + (totalFees + totalShipping).toFixed(2);
-            document.getElementById('feeBreakdown').textContent = 'Seller + Taxes + Shipping';
+            document.getElementById('totalFees').textContent = '$' + (totalFees + totalShipping + totalReturns).toFixed(2);
+            document.getElementById('feeBreakdown').textContent = `Fees: $${totalFees.toFixed(2)} + Ship: $${totalShipping.toFixed(2)} + Returns: $${totalReturns.toFixed(2)}`;
             document.getElementById('netProfit').textContent = '$' + netProfit.toFixed(2);
             document.getElementById('profitMargin').textContent = profitMargin.toFixed(1) + '% margin';
             
@@ -774,15 +789,19 @@
                         valA = a.shipping_cost || 0;
                         valB = b.shipping_cost || 0;
                         break;
+                    case 'returns':
+                        valA = a.return_cost || 0;
+                        valB = b.return_cost || 0;
+                        break;
                     case 'profit':
-                        valA = (a.price * a.quantity) - ((a.cost || 0) * a.quantity) - (a.seller_fee || 0) - (a.taxes || 0) - (a.shipping_cost || 0);
-                        valB = (b.price * b.quantity) - ((b.cost || 0) * b.quantity) - (b.seller_fee || 0) - (b.taxes || 0) - (b.shipping_cost || 0);
+                        valA = (a.price * a.quantity) - ((a.cost || 0) * a.quantity) - (a.seller_fee || 0) - (a.taxes || 0) - (a.shipping_cost || 0) - (a.return_cost || 0);
+                        valB = (b.price * b.quantity) - ((b.cost || 0) * b.quantity) - (b.seller_fee || 0) - (b.taxes || 0) - (b.shipping_cost || 0) - (b.return_cost || 0);
                         break;
                     case 'margin':
                         const revenueA = a.price * a.quantity;
                         const revenueB = b.price * b.quantity;
-                        valA = revenueA > 0 ? ((revenueA - ((a.cost || 0) * a.quantity) - (a.seller_fee || 0) - (a.taxes || 0) - (a.shipping_cost || 0)) / revenueA * 100) : 0;
-                        valB = revenueB > 0 ? ((revenueB - ((b.cost || 0) * b.quantity) - (b.seller_fee || 0) - (b.taxes || 0) - (b.shipping_cost || 0)) / revenueB * 100) : 0;
+                        valA = revenueA > 0 ? ((revenueA - ((a.cost || 0) * a.quantity) - (a.seller_fee || 0) - (a.taxes || 0) - (a.shipping_cost || 0) - (a.return_cost || 0)) / revenueA * 100) : 0;
+                        valB = revenueB > 0 ? ((revenueB - ((b.cost || 0) * b.quantity) - (b.seller_fee || 0) - (b.taxes || 0) - (b.shipping_cost || 0) - (b.return_cost || 0)) / revenueB * 100) : 0;
                         break;
                     default:
                         valA = a[sortColumn];
@@ -806,7 +825,8 @@
                 const cost = (item.cost || 0) * item.quantity;
                 const fees = (item.seller_fee || 0) + (item.taxes || 0);
                 const shipping = item.shipping_cost || 0;
-                const profit = revenue - cost - fees - shipping;
+                const returnCost = item.return_cost || 0;
+                const profit = revenue - cost - fees - shipping - returnCost;
                 const margin = revenue > 0 ? (profit / revenue * 100) : 0;
                 
                 return `
@@ -821,6 +841,7 @@
                         <td>${item.cost ? '$' + cost.toFixed(2) : '<span class="no-data">No data</span>'}</td>
                         <td>$${fees.toFixed(2)}</td>
                         <td>${shipping > 0 ? '$' + shipping.toFixed(2) : '<span class="no-data">$0.00</span>'}</td>
+                        <td>${returnCost > 0 ? '<span style="color:var(--danger)">$' + returnCost.toFixed(2) + '</span>' : '<span class="no-data">—</span>'}</td>
                         <td class="${profit >= 0 ? 'profit-positive' : 'profit-negative'}">$${profit.toFixed(2)}</td>
                         <td class="${margin >= 0 ? 'profit-positive' : 'profit-negative'}">${margin.toFixed(1)}%</td>
                     </tr>

@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.ico') }}">
+    <title>Returns - Sweet Shelves</title>
+    <style>
+        :root {
+            --primary: #0984e3;
+            --accent: #00b894;
+            --danger: #e74c3c;
+            --warning: #f39c12;
+            --bg: #f9f9f9;
+            --card: #fff;
+            --border: #e0e0e0;
+            --radius: 14px;
+        }
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background: var(--bg);
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px 16px 80px 16px;
+        }
+        h1 {
+            margin: 0 0 18px 0;
+            font-weight: 600;
+            color: #2c3e50;
+            text-align: center;
+        }
+        .header-controls {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        .filters {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            flex: 1;
+        }
+        .filters select,
+        .filters input {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            background: white;
+        }
+        .btn {
+            padding: 8px 14px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 500;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.2s;
+        }
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+        }
+        .btn-primary:hover {
+            background: var(--accent);
+        }
+        .btn-danger {
+            background: var(--danger);
+            color: white;
+        }
+        .btn-warning {
+            background: var(--warning);
+            color: white;
+        }
+        .btn-success {
+            background: var(--accent);
+            color: white;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+        .stat-card {
+            background: var(--card);
+            border-radius: var(--radius);
+            padding: 16px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+            border: 1px solid var(--border);
+        }
+        .stat-card h3 {
+            margin: 0 0 8px 0;
+            font-size: 0.85rem;
+            color: #888;
+            text-transform: uppercase;
+            font-weight: 500;
+        }
+        .stat-card .value {
+            font-size: 1.8rem;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+        .returns-table {
+            background: var(--card);
+            border-radius: var(--radius);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+            border: 1px solid var(--border);
+            overflow: hidden;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th {
+            background: #f8f9fa;
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+            color: #555;
+            border-bottom: 2px solid var(--border);
+            font-size: 0.9rem;
+        }
+        td {
+            padding: 12px;
+            border-bottom: 1px solid #f0f0f0;
+            font-size: 0.95rem;
+        }
+        tr:hover {
+            background: #f8f9fa;
+        }
+        .badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+        .badge-amazon {
+            background: #ff9900;
+            color: white;
+        }
+        .badge-ebay {
+            background: #0064d2;
+            color: white;
+        }
+        .badge-pending {
+            background: #f39c12;
+            color: white;
+        }
+        .badge-received {
+            background: #3498db;
+            color: white;
+        }
+        .badge-restocked {
+            background: #00b894;
+            color: white;
+        }
+        .message {
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            display: none;
+        }
+        .message.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+            display: block;
+        }
+        .message.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+            display: block;
+        }
+        .message.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+            display: block;
+        }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #888;
+        }
+        @media (max-width: 768px) {
+            .container {
+                padding: 16px 12px 80px 12px;
+            }
+            .header-controls {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            .filters {
+                flex-direction: column;
+            }
+            .returns-table {
+                overflow-x: auto;
+            }
+            table {
+                min-width: 800px;
+            }
+        }
+    </style>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+</head>
+<body>
+    <div class="container">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
+            <a href="/tools" style="text-decoration:none;">
+                <button class="btn btn-danger">
+                    <i class="fas fa-arrow-left"></i> Back
+                </button>
+            </a>
+            <h1 style="flex:1;text-align:center;margin:0;">Returns</h1>
+            <button class="btn btn-primary" onclick="syncReturns()">
+                <i class="fas fa-sync-alt"></i> Sync Amazon
+            </button>
+        </div>
+
+        <div id="message" class="message"></div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <h3>Total Returns</h3>
+                <div class="value" id="stat-total">-</div>
+            </div>
+            <div class="stat-card">
+                <h3>Total Refunded</h3>
+                <div class="value" id="stat-refunded">-</div>
+            </div>
+            <div class="stat-card">
+                <h3>Total Return Cost</h3>
+                <div class="value" id="stat-cost">-</div>
+            </div>
+            <div class="stat-card">
+                <h3>Return Rate</h3>
+                <div class="value" id="stat-rate">-</div>
+            </div>
+        </div>
+
+        <div class="header-controls">
+            <div class="filters">
+                <select id="storeFilter" onchange="loadReturns()">
+                    <option value="">All Stores</option>
+                    <option value="amazon">Amazon</option>
+                    <option value="ebay">eBay</option>
+                </select>
+                <select id="statusFilter" onchange="loadReturns()">
+                    <option value="">All Status</option>
+                    <option value="pending">Pending</option>
+                    <option value="received">Received</option>
+                    <option value="restocked">Restocked</option>
+                </select>
+                <input type="text" id="searchBox" placeholder="Search order ID, barcode, title..." onkeyup="filterTable()">
+            </div>
+        </div>
+
+        <div class="returns-table">
+            <div id="loading" class="loading">
+                <i class="fas fa-spinner fa-spin"></i> Loading returns...
+            </div>
+            <table id="returnsTable" style="display:none;">
+                <thead>
+                    <tr>
+                        <th>Return Date</th>
+                        <th>Order ID</th>
+                        <th>Title</th>
+                        <th>Store</th>
+                        <th>Qty</th>
+                        <th>Refund Amount</th>
+                        <th>Return Cost</th>
+                        <th>Total Cost</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="returnsBody">
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        let allReturns = [];
+
+        async function loadReturns() {
+            const storeFilter = document.getElementById('storeFilter').value;
+            const statusFilter = document.getElementById('statusFilter').value;
+
+            try {
+                showLoading(true);
+                
+                const params = new URLSearchParams();
+                if (storeFilter) params.append('store', storeFilter);
+                if (statusFilter) params.append('status', statusFilter);
+                
+                const response = await fetch(`/api/returns?${params.toString()}`);
+                const result = await response.json();
+                
+                if (!result.success) {
+                    throw new Error(result.error || 'Failed to load returns');
+                }
+                
+                allReturns = result.returns;
+                updateStats(result.stats);
+                renderReturns(allReturns);
+                
+                showLoading(false);
+            } catch (error) {
+                showMessage('error', `Error loading returns: ${error.message}`);
+                showLoading(false);
+            }
+        }
+
+        function renderReturns(returns) {
+            const tbody = document.getElementById('returnsBody');
+            tbody.innerHTML = '';
+            
+            if (returns.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:40px;color:#888;">No returns found</td></tr>';
+                document.getElementById('returnsTable').style.display = 'table';
+                return;
+            }
+            
+            returns.forEach(ret => {
+                const totalCost = ret.refund_amount + ret.original_shipping_cost + ret.return_shipping_cost;
+                const status = ret.restocked ? 'restocked' : (ret.received_date ? 'received' : 'pending');
+                
+                const row = `
+                    <tr>
+                        <td>${formatDate(ret.return_date)}</td>
+                        <td><code>${ret.order_id}</code></td>
+                        <td>${ret.title}</td>
+                        <td><span class="badge badge-${ret.store}">${ret.store.toUpperCase()}</span></td>
+                        <td>${ret.quantity}</td>
+                        <td>$${ret.refund_amount.toFixed(2)}</td>
+                        <td>$${(ret.original_shipping_cost + ret.return_shipping_cost).toFixed(2)}</td>
+                        <td><strong>$${totalCost.toFixed(2)}</strong></td>
+                        <td><span class="badge badge-${status}">${status.toUpperCase()}</span></td>
+                        <td>
+                            ${!ret.received_date ? `<button class="btn btn-warning" style="padding:4px 8px;font-size:0.85rem;" onclick="markReceived(${ret.id})"><i class="fas fa-box"></i> Received</button>` : ''}
+                            ${ret.received_date && !ret.restocked ? `<button class="btn btn-success" style="padding:4px 8px;font-size:0.85rem;" onclick="markRestocked(${ret.id})"><i class="fas fa-check"></i> Restock</button>` : ''}
+                        </td>
+                    </tr>
+                `;
+                tbody.innerHTML += row;
+            });
+            
+            document.getElementById('returnsTable').style.display = 'table';
+        }
+
+        function updateStats(stats) {
+            document.getElementById('stat-total').textContent = stats.total_returns || 0;
+            document.getElementById('stat-refunded').textContent = stats.total_refunded ? `$${stats.total_refunded.toFixed(2)}` : '$0.00';
+            document.getElementById('stat-cost').textContent = stats.total_cost ? `$${stats.total_cost.toFixed(2)}` : '$0.00';
+            document.getElementById('stat-rate').textContent = stats.return_rate ? `${stats.return_rate.toFixed(1)}%` : '0%';
+        }
+
+        function filterTable() {
+            const searchTerm = document.getElementById('searchBox').value.toLowerCase();
+            const filtered = allReturns.filter(ret => 
+                ret.order_id.toLowerCase().includes(searchTerm) ||
+                ret.barcode.toLowerCase().includes(searchTerm) ||
+                ret.title.toLowerCase().includes(searchTerm)
+            );
+            renderReturns(filtered);
+        }
+
+        async function syncReturns() {
+            try {
+                showMessage('info', 'Syncing returns from Amazon...');
+                
+                const response = await fetch('/api/amazon/sync-returns', {
+                    method: 'POST'
+                });
+                
+                const result = await response.json();
+                
+                if (!result.success) {
+                    throw new Error(result.error || 'Sync failed');
+                }
+                
+                showMessage('success', `✓ Successfully synced ${result.synced_count} returns from Amazon`);
+                
+                // Reload returns
+                setTimeout(() => loadReturns(), 1000);
+            } catch (error) {
+                showMessage('error', `Sync error: ${error.message}`);
+            }
+        }
+
+        async function markReceived(returnId) {
+            try {
+                const response = await fetch(`/api/returns/${returnId}/mark-received`, {
+                    method: 'POST'
+                });
+                
+                const result = await response.json();
+                
+                if (!result.success) {
+                    throw new Error(result.error || 'Failed to mark as received');
+                }
+                
+                showMessage('success', '✓ Marked as received');
+                loadReturns();
+            } catch (error) {
+                showMessage('error', `Error: ${error.message}`);
+            }
+        }
+
+        async function markRestocked(returnId) {
+            try {
+                const response = await fetch(`/api/returns/${returnId}/restock`, {
+                    method: 'POST'
+                });
+                
+                const result = await response.json();
+                
+                if (!result.success) {
+                    throw new Error(result.error || 'Failed to restock');
+                }
+                
+                showMessage('success', '✓ Item restocked and inventory updated');
+                loadReturns();
+            } catch (error) {
+                showMessage('error', `Error: ${error.message}`);
+            }
+        }
+
+        function showLoading(show) {
+            document.getElementById('loading').style.display = show ? 'block' : 'none';
+            document.getElementById('returnsTable').style.display = show ? 'none' : 'table';
+        }
+
+        function showMessage(type, message) {
+            const messageDiv = document.getElementById('message');
+            messageDiv.className = `message ${type}`;
+            messageDiv.textContent = message;
+            messageDiv.style.display = 'block';
+            
+            if (type === 'success' || type === 'info') {
+                setTimeout(() => {
+                    messageDiv.style.display = 'none';
+                }, 5000);
+            }
+        }
+
+        function formatDate(dateStr) {
+            if (!dateStr) return '-';
+            const date = new Date(dateStr);
+            return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        }
+
+        // Load returns on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            loadReturns();
+        });
+    </script>
+</body>
+</html>

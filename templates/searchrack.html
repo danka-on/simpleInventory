@@ -131,8 +131,8 @@
 
 <script>
 console.log('searchrack v3 loaded');
-const DBS = ['searchRack','ebayStore','amazonStore','bol','sold','archived'];
-const DB_LABELS = {searchRack:'Inventory', ebayStore:'Ebay live', amazonStore:'Amazon live', bol:'Macy BOL', sold:'Sold', archived:'Archived'};
+const DBS = ['searchRack','ebayStore','amazonStore','bol','sold','returns','archived'];
+const DB_LABELS = {searchRack:'Inventory', ebayStore:'Ebay live', amazonStore:'Amazon live', bol:'Macy BOL', sold:'Sold', returns:'Returns', archived:'Archived'};
 const defaultChecked = {'searchRack':true};
 let _allResults = [];
 let _currentPage = 1;
@@ -367,17 +367,24 @@ function renderResults(results){
     const hasAmazonStore = results.some(r => r.source_db === 'amazonStore');
     const hasSold = results.some(r => r.source_db === 'sold');
     const hasBol = results.some(r => r.source_db === 'bol');
+    const hasReturns = results.some(r => r.source_db === 'returns');
     
     // Build dynamic headers based on which databases are present
     const dateAddedHeader = hasSearchRack ? '<th>Date Added</th>' : '';
     const itemIdHeader = (hasEbayStore || hasAmazonStore) ? '<th>Item ID</th>' : '';
     const lotHeader = hasBol ? '<th>LOT #</th>' : '';
-    const locationHeader = (!hasEbayStore && !hasAmazonStore && !hasSold && !hasBol) ? '<th>Location</th>' : ''; // Hide location for ebay/amazon live, sold, and bol
+    const locationHeader = (!hasEbayStore && !hasAmazonStore && !hasSold && !hasBol && !hasReturns) ? '<th>Location</th>' : ''; // Hide location for ebay/amazon live, sold, bol, and returns
     const dateSoldHeader = hasSold ? '<th>Date Sold</th>' : '';
     const dateShippedHeader = hasSold ? '<th>Date Shipped</th>' : '';
     const storeHeader = hasSold ? '<th>Store</th>' : '';
+    // Returns-specific headers
+    const returnDateHeader = hasReturns ? '<th>Return Date</th>' : '';
+    const refundAmountHeader = hasReturns ? '<th>Refund</th>' : '';
+    const originalShippingHeader = hasReturns ? '<th>Orig Ship</th>' : '';
+    const returnShippingHeader = hasReturns ? '<th>Return Ship</th>' : '';
+    const totalReturnCostHeader = hasReturns ? '<th>Total Cost</th>' : '';
     
-    let html = `<table><thead><tr><th>Title</th><th>Barcode</th>${itemIdHeader}${lotHeader}${locationHeader}<th>Qty</th>${dateAddedHeader}${dateSoldHeader}${dateShippedHeader}${storeHeader}<th>DB</th><th>Actions</th></tr></thead><tbody>`;
+    let html = `<table><thead><tr><th>Title</th><th>Barcode</th>${itemIdHeader}${lotHeader}${locationHeader}<th>Qty</th>${dateAddedHeader}${dateSoldHeader}${dateShippedHeader}${storeHeader}${returnDateHeader}${refundAmountHeader}${originalShippingHeader}${returnShippingHeader}${totalReturnCostHeader}<th>DB</th><th>Actions</th></tr></thead><tbody>`;
     results.forEach(r=>{
     const dbRaw = r.source_db || '';
     const isArchived = !!(r.archived || dbRaw === 'archived');
@@ -497,7 +504,7 @@ function renderResults(results){
         }
     }
     
-    const locationCell = (!hasEbayStore && !hasAmazonStore && !hasSold && !hasBol) ? `<td>${ locDisplay ? `<a href="#" class=\"location-link\" data-src=\"${db}\" data-id=\"${r.id}\" data-barcode=\"${barcode}\" data-picture=\"${esc(r.pictureposition||'')}\" data-item_position=\"${esc((r.item_position||'').toLowerCase())}\">${esc(locDisplay)}</a>` : '' }</td>` : '';
+    const locationCell = (!hasEbayStore && !hasAmazonStore && !hasSold && !hasBol && !hasReturns) ? `<td>${ locDisplay ? `<a href="#" class=\"location-link\" data-src=\"${db}\" data-id=\"${r.id}\" data-barcode=\"${barcode}\" data-picture=\"${esc(r.pictureposition||'')}\" data-item_position=\"${esc((r.item_position||'').toLowerCase())}\">${esc(locDisplay)}</a>` : '' }</td>` : '';
     
     // Date sold and date shipped cells (only for sold items)
     const dateSoldCell = hasSold ? (dbRaw === 'sold' && r.raw && r.raw.paid_time ? `<td>${fmtLocal(r.raw.paid_time)}</td>` : '<td></td>') : '';
@@ -514,6 +521,18 @@ function renderResults(results){
         })() : 
         '<td></td>') : '';
     
+    // Returns-specific cells
+    const returnDateCell = hasReturns ? (dbRaw === 'returns' && r.raw && r.raw.return_date ? `<td>${fmtLocal(r.raw.return_date)}</td>` : '<td></td>') : '';
+    const refundAmountCell = hasReturns ? (dbRaw === 'returns' && r.raw && r.raw.refund_amount ? `<td style="color:#e74c3c;font-weight:500;">$${parseFloat(r.raw.refund_amount).toFixed(2)}</td>` : '<td></td>') : '';
+    const originalShippingCell = hasReturns ? (dbRaw === 'returns' && r.raw && r.raw.original_shipping_cost ? `<td>$${parseFloat(r.raw.original_shipping_cost).toFixed(2)}</td>` : '<td>$0.00</td>') : '';
+    const returnShippingCell = hasReturns ? (dbRaw === 'returns' && r.raw && r.raw.return_shipping_cost ? `<td>$${parseFloat(r.raw.return_shipping_cost).toFixed(2)}</td>` : '<td>$0.00</td>') : '';
+    const totalReturnCostCell = hasReturns ? (dbRaw === 'returns' && r.raw ? 
+        `<td style="color:#c0392b;font-weight:600;">$${(
+            parseFloat(r.raw.refund_amount || 0) + 
+            parseFloat(r.raw.original_shipping_cost || 0) + 
+            parseFloat(r.raw.return_shipping_cost || 0)
+        ).toFixed(2)}</td>` : '<td></td>') : '';
+    
     html += `<tr data-src="${db}" data-id="${r.id}" data-qty="${qty}">`+
         `<td><div class="title-cell"><img class="thumb" src="${thumb}" onerror="this.src='${missingThumb(48,48,'No Img')}'"><div><a href="#" class="title-link" data-src="${db}" data-id="${r.id}" data-image="${img}" data-title="${title}">${title}</a>${deletedInfo}${createdInfo}</div></div></td>`+
                 `<td>${barcode}</td>`+
@@ -525,6 +544,11 @@ function renderResults(results){
                 dateSoldCell +
                 dateShippedCell +
                 storeCell +
+                returnDateCell +
+                refundAmountCell +
+                originalShippingCell +
+                returnShippingCell +
+                totalReturnCostCell +
                 `<td>${ (r.archived||db==='archived') ? ('Archive ('+esc(DB_LABELS[r.orig_source_db]||r.orig_source_db||'Unknown')+')') : esc(DB_LABELS[db] || db) }</td>`+
                 `<td><div class="results-actions">${actionHtml}</div></td>`+
                 `</tr>`;

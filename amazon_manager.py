@@ -1184,6 +1184,190 @@ class AmazonManager:
         except Exception as e:
             print(f"❌ Connection Error: {e}")
             return False
+    
+    def get_returns(self, days_back=90):
+        """
+        Fetch returns from Amazon Financial Events API (RefundEventList)
+        Returns list of return items with financial details
+        """
+        try:
+            finances_api = Finances(credentials=self.credentials, marketplace=self.marketplace)
+            
+            posted_after = (datetime.utcnow() - timedelta(days=days_back)).isoformat()
+            
+            print(f"🔄 Fetching Amazon returns from last {days_back} days...")
+            
+            all_refund_events = []
+            next_token = None
+            page = 1
+            
+            while True:
+                try:
+                    if next_token:
+                        response = finances_api.list_financial_events(NextToken=next_token)
+                    else:
+                        response = finances_api.list_financial_events(
+                            PostedAfter=posted_after,
+                            MaxResultsPerPage=100
+                        )
+                    
+                    if response.errors:
+                        print(f"❌ Error fetching returns (page {page}): {response.errors}")
+                        break
+                    
+                    payload = response.payload
+                    financial_events = payload.get('FinancialEvents', {})
+                    refund_events = financial_events.get('RefundEventList', [])
+                    
+                    all_refund_events.extend(refund_events)
+                    
+                    print(f"  📄 Page {page}: Retrieved {len(refund_events)} refund events")
+                    
+                    next_token = payload.get('NextToken')
+                    if not next_token:
+                        break
+                    
+                    page += 1
+                    time.sleep(1)
+                    
+                except SellingApiException as e:
+                    if 'QuotaExceeded' in str(e):
+                        print(f"⚠️  Rate limit hit, waiting 5 seconds...")
+                        time.sleep(5)
+                        continue
+                    else:
+                        print(f"❌ Error fetching returns: {e}")
+                        break
+            
+            print(f"\n✅ Retrieved {len(all_refund_events)} return events")
+            
+            # Process return events to extract key data
+            returns_data = []
+            
+            for event in all_refund_events:
+                amazon_order_id = event.get('AmazonOrderId')
+                posted_date = event.get('PostedDate')
+                
+                # Get item details from ShipmentItemAdjustmentList
+                items = event.get('ShipmentItemAdjustmentList', [])
+                
+                for item in items:
+                    order_item_id = item.get('OrderItemId')
+                    seller_sku = item.get('SellerSKU', '')
+                    quantity_shipped = item.get('QuantityShipped', 0)
+                    
+                    # Extract refund amount from ItemChargeAdjustmentList
+                    refund_amount = 0
+                    item_charges = item.get('ItemChargeAdjustmentList', [])
+                    for charge in item_charges:
+                        charge_type = charge.get('ChargeType', '')
+                        if charge_type == 'Principal':  # Main refund amount
+                            amount = charge.get('ChargeAmount', {}).get('CurrencyAmount', 0)
+                            refund_amount += abs(float(amount))
+                    
+                    # Extract fees refunded
+                    seller_fee_refund = 0
+                    item_fees = item.get('ItemFeeAdjustmentList', [])
+                    for fee in item_fees:
+                        fee_type = fee.get('FeeType', '')
+                        if fee_type in ['Commission', 'RefundCommission', 'ReferralFee']:
+                            fee_amount = fee.get('FeeAmount', {}).get('CurrencyAmount', 0)
+                            seller_fee_refund += abs(float(fee_amount))
+                    
+                    # Extract return shipping cost (if seller paid for return label)
+                    return_shipping_cost = 0
+                    for charge in item_charges:
+                        charge_type = charge.get('ChargeType', '')
+                        if charge_type in ['Shipping', 'ShippingCharge']:
+                            amount = charge.get('ChargeAmount', {}).get('CurrencyAmount', 0)
+                            return_shipping_cost += abs(float(amount))
+                    
+                    returns_data.append({
+                        'order_id': amazon_order_id,
+                        'item_id': order_item_id,
+                        'seller_sku': seller_sku,
+                        'return_date': posted_date,
+                        'quantity': quantity_shipped,
+                        'refund_amount': refund_amount,
+                        'seller_fee_refund': seller_fee_refund,
+                        'return_shipping_cost': return_shipping_cost
+                    })
+            
+            return returns_data
+            
+        except Exception as e:
+            print(f"❌ Error in get_returns: {e}")
+            import traceback
+            traceback.print_exc()
+            return []
+    
+    def sync_returns_to_db(self, days_back=90):
+        """
+        Sync Amazon returns to sold.db returns table
+        Matches returns with original orders to get full details
+        """
+        print("🔄 Starting Amazon returns sync...")
+        
+        returns = self.get_returns(days_back=days_back)
+        
+        if not returns:
+            print("ℹ️  No returns to sync")
+            return 0
+        
+        conn = sqlite3.connect('sold.db')
+        cur = conn.cursor()
+        
+        synced_count = 0
+        
+        for return_data in returns:
+            order_id = return_data['order_id']
+            
+            # Find original order in sold.db
+            cur.execute('''
+                SELECT id, barcode, title, price, shipping_cost, seller_fee, lot_number, location
+                FROM orders
+                WHERE order_id = ? AND store = 'amazon'
+            ''', (order_id,))
+            
+            original_order = cur.fetchone()
+            
+            if not original_order:
+                print(f"⚠️  Original order not found for return: {order_id}")
+                continue
+            
+            original_order_id, barcode, title, original_price, original_shipping, original_fee, lot_number, location = original_order
+            
+            # Calculate total return cost: refund + original shipping + return shipping
+            total_return_cost = (
+                return_data['refund_amount'] +
+                (original_shipping or 0) +
+                return_data['return_shipping_cost']
+            )
+            
+            # Insert or update return
+            cur.execute('''
+                INSERT OR REPLACE INTO returns (
+                    original_order_id, order_id, item_id, barcode, title, quantity,
+                    original_price, refund_amount, original_shipping_cost, return_shipping_cost,
+                    original_seller_fee, seller_fee_refund,
+                    return_date, store, lot_number, location
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                original_order_id, order_id, return_data['item_id'], barcode, title,
+                return_data['quantity'], original_price, return_data['refund_amount'],
+                original_shipping, return_data['return_shipping_cost'],
+                original_fee, return_data['seller_fee_refund'],
+                return_data['return_date'], 'amazon', lot_number, location
+            ))
+            
+            synced_count += 1
+            print(f"  ✅ {order_id}: ${total_return_cost:.2f} total return cost")
+        
+        conn.commit()
+        conn.close()
+        
+        print(f"\n✅ Synced {synced_count} returns to database")
+        return synced_count
 
 
 if __name__ == '__main__':

@@ -642,7 +642,8 @@ def financial_analytics():
 
 # API endpoint for financial analytics data
 @app.route('/api/financial-analytics')
-@cache.cached(timeout=300, query_string=True)  # Cache for 5 minutes
+# Temporarily disable cache to debug
+# @cache.cached(timeout=300, query_string=True)  # Cache for 5 minutes
 def api_financial_analytics():
     """
     Fetch all sold orders with cost data from BOL and calculate profits.
@@ -657,6 +658,7 @@ def api_financial_analytics():
         # Get all sold orders with lot_number
         sold_cur.execute('''
             SELECT 
+                id,
                 order_id,
                 item_id,
                 title,
@@ -687,10 +689,45 @@ def api_financial_analytics():
         amazon_conn = get_db_connection('amazonStore.db')
         amazon_cur = amazon_conn.cursor()
         
+        # Get returns data from sold.db
+        returns_data = {}
+        try:
+            sold_cur.execute('''
+                SELECT 
+                    original_order_id,
+                    refund_amount,
+                    original_shipping_cost,
+                    return_shipping_cost
+                FROM returns
+            ''')
+            
+            returns_rows = sold_cur.fetchall()
+            print(f"DEBUG: Found {len(returns_rows)} returns in database")
+            
+            for row in returns_rows:
+                original_order_id = row['original_order_id']
+                total_return_cost = (
+                    (row['refund_amount'] or 0) +
+                    (row['original_shipping_cost'] or 0) +
+                    (row['return_shipping_cost'] or 0)
+                )
+                returns_data[original_order_id] = total_return_cost
+                
+            print(f"DEBUG: Processed returns for {len(returns_data)} orders, total return costs: ${sum(returns_data.values()):.2f}")
+        except Exception as e:
+            print(f"Warning: Could not load returns data: {e}")
+            import traceback
+            traceback.print_exc()
+        
         transactions = []
         
         for order in orders:
             item_data = dict(order)
+            
+            # Add return cost if this order has a return
+            # Use .get() to safely access the id key
+            order_pk_id = item_data.get('id', 0)
+            item_data['return_cost'] = returns_data.get(order_pk_id, 0)
             
             # Try to get cost from rawbol.db
             upc = order['barcode'] or order['item_id']
@@ -808,14 +845,15 @@ def api_financial_analytics():
 def api_amazon_financial_summary():
     """
     Get aggregate financial totals from Amazon Financial Events API.
-    Returns total seller fees, shipping costs, and taxes across all orders.
-    Query params: days (default 30)
+    Returns total seller fees, shipping costs, taxes, and returns data across all orders.
+    Query params: days (default 30), include_returns (default true)
     """
     if not AMAZON_AVAILABLE:
         return jsonify({'success': False, 'error': 'Amazon integration not available'}), 503
     
     try:
         days = int(request.args.get('days', 30))
+        include_returns = request.args.get('include_returns', 'true').lower() == 'true'
         
         amazon = AmazonManager()
         financial_data = amazon.get_financial_events(days_back=days)
@@ -838,18 +876,57 @@ def api_amazon_financial_summary():
             
             total_taxes += data['taxes']
         
+        summary = {
+            'total_orders': len(financial_data),
+            'orders_with_fees': orders_with_fees,
+            'orders_with_shipping': orders_with_shipping,
+            'total_seller_fees': round(total_seller_fees, 2),
+            'total_shipping_costs': round(total_shipping_costs, 2),
+            'total_taxes': round(total_taxes, 2),
+            'total_amazon_costs': round(total_seller_fees + total_shipping_costs + total_taxes, 2)
+        }
+        
+        # Add returns data if requested
+        if include_returns:
+            try:
+                conn = sqlite3.connect('sold.db')
+                conn.row_factory = sqlite3.Row
+                cur = conn.cursor()
+                
+                # Get returns within the same time period
+                cur.execute('''
+                    SELECT 
+                        COUNT(*) as total_returns,
+                        SUM(refund_amount) as total_refunded,
+                        SUM(refund_amount + original_shipping_cost + return_shipping_cost) as total_return_cost
+                    FROM returns
+                    WHERE store = 'amazon'
+                    AND return_date >= datetime('now', '-' || ? || ' days')
+                ''', (days,))
+                
+                returns_row = cur.fetchone()
+                
+                summary['returns'] = {
+                    'total_returns': returns_row['total_returns'] or 0,
+                    'total_refunded': round(returns_row['total_refunded'] or 0, 2),
+                    'total_return_cost': round(returns_row['total_return_cost'] or 0, 2),
+                    'return_rate': round((returns_row['total_returns'] or 0) / len(financial_data) * 100, 2) if len(financial_data) > 0 else 0
+                }
+                
+                # Calculate net profit impact
+                summary['net_costs_with_returns'] = round(
+                    summary['total_amazon_costs'] + summary['returns']['total_return_cost'], 2
+                )
+                
+                conn.close()
+            except Exception as e:
+                print(f"Warning: Could not include returns data: {e}")
+                summary['returns'] = None
+        
         return jsonify({
             'success': True,
             'days': days,
-            'summary': {
-                'total_orders': len(financial_data),
-                'orders_with_fees': orders_with_fees,
-                'orders_with_shipping': orders_with_shipping,
-                'total_seller_fees': round(total_seller_fees, 2),
-                'total_shipping_costs': round(total_shipping_costs, 2),
-                'total_taxes': round(total_taxes, 2),
-                'total_amazon_costs': round(total_seller_fees + total_shipping_costs + total_taxes, 2)
-            }
+            'summary': summary
         })
         
     except Exception as e:
@@ -5742,6 +5819,7 @@ def api_search_db(db_key):
             'ebayStore': 'ebayStore.db',
             'amazonStore': 'amazonStore.db',
             'sold': 'sold.db',
+            'returns': 'sold.db',  # Returns table in sold.db
             'searchRack': 'searchRack.db',
             'found': 'found.db',
             'bol': 'rawbol.db'  # Search rawbol.db to see original imported amounts across all LOTs
@@ -5776,10 +5854,14 @@ def api_search_db(db_key):
             conn.close()
             return jsonify({'results': []})
         prefer = None
-        for t in ['orders','INVENTORY','SEARCHRACK','searchrack','rack','items','bol_items']:
-            if t in tables:
-                prefer = t
-                break
+        # Special case for returns: use returns table
+        if db_key == 'returns':
+            prefer = 'returns' if 'returns' in tables else None
+        else:
+            for t in ['orders','INVENTORY','SEARCHRACK','searchrack','rack','items','bol_items']:
+                if t in tables:
+                    prefer = t
+                    break
         table = prefer or tables[0]
         cur.execute(f"PRAGMA table_info('{table}')")
         cols = [r[1] for r in cur.fetchall()]
@@ -8073,6 +8155,211 @@ def api_marketplace_sale_update(sale_id):
             price=data.get('price')
         )
         return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# ============================================================================
+# RETURNS MANAGEMENT
+# ============================================================================
+@app.route('/returns')
+def returns_page():
+    """Returns management page."""
+    return render_template('returns.html')
+
+@app.route('/api/returns', methods=['GET'])
+def api_get_returns():
+    """Get all returns with optional filters."""
+    try:
+        store = request.args.get('store', '').strip()
+        status = request.args.get('status', '').strip()
+        
+        conn = sqlite3.connect('sold.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        
+        # Build query with filters
+        query = 'SELECT * FROM returns WHERE 1=1'
+        params = []
+        
+        if store:
+            query += ' AND store = ?'
+            params.append(store)
+        
+        if status == 'pending':
+            query += ' AND received_date IS NULL'
+        elif status == 'received':
+            query += ' AND received_date IS NOT NULL AND restocked = 0'
+        elif status == 'restocked':
+            query += ' AND restocked = 1'
+        
+        query += ' ORDER BY return_date DESC'
+        
+        cur.execute(query, params)
+        rows = cur.fetchall()
+        
+        returns = []
+        for row in rows:
+            returns.append({
+                'id': row['id'],
+                'original_order_id': row['original_order_id'],
+                'order_id': row['order_id'],
+                'item_id': row['item_id'],
+                'barcode': row['barcode'],
+                'title': row['title'],
+                'quantity': row['quantity'],
+                'original_price': row['original_price'] or 0,
+                'refund_amount': row['refund_amount'] or 0,
+                'original_shipping_cost': row['original_shipping_cost'] or 0,
+                'return_shipping_cost': row['return_shipping_cost'] or 0,
+                'original_seller_fee': row['original_seller_fee'] or 0,
+                'seller_fee_refund': row['seller_fee_refund'] or 0,
+                'return_date': row['return_date'],
+                'received_date': row['received_date'],
+                'store': row['store'],
+                'return_reason': row['return_reason'],
+                'condition_received': row['condition_received'],
+                'restocked': row['restocked'] == 1,
+                'lot_number': row['lot_number'],
+                'location': row['location']
+            })
+        
+        # Calculate stats
+        total_returns = len(returns)
+        total_refunded = sum(r['refund_amount'] for r in returns)
+        total_cost = sum(
+            r['refund_amount'] + r['original_shipping_cost'] + r['return_shipping_cost']
+            for r in returns
+        )
+        
+        # Get total orders for return rate
+        cur.execute('SELECT COUNT(*) FROM orders')
+        total_orders = cur.fetchone()[0]
+        return_rate = (total_returns / total_orders * 100) if total_orders > 0 else 0
+        
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'returns': returns,
+            'stats': {
+                'total_returns': total_returns,
+                'total_refunded': total_refunded,
+                'total_cost': total_cost,
+                'return_rate': return_rate
+            }
+        })
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/amazon/sync-returns', methods=['POST'])
+def api_sync_amazon_returns():
+    """Sync returns from Amazon API."""
+    try:
+        from amazon_manager import AmazonManager
+        
+        am = AmazonManager()
+        synced_count = am.sync_returns_to_db(days_back=90)
+        
+        return jsonify({
+            'success': True,
+            'synced_count': synced_count,
+            'message': f'Successfully synced {synced_count} returns from Amazon'
+        })
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/returns/<int:return_id>/mark-received', methods=['POST'])
+def api_mark_return_received(return_id):
+    """Mark a return as received."""
+    try:
+        conn = sqlite3.connect('sold.db')
+        cur = conn.cursor()
+        
+        cur.execute('''
+            UPDATE returns
+            SET received_date = CURRENT_TIMESTAMP
+            WHERE id = ?
+        ''', (return_id,))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Return marked as received'
+        })
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/returns/<int:return_id>/restock', methods=['POST'])
+def api_restock_return(return_id):
+    """Mark return as restocked and update inventory."""
+    try:
+        conn = sqlite3.connect('sold.db')
+        cur = conn.cursor()
+        
+        # Get return details
+        cur.execute('''
+            SELECT barcode, quantity, lot_number, location
+            FROM returns
+            WHERE id = ?
+        ''', (return_id,))
+        
+        result = cur.fetchone()
+        if not result:
+            return jsonify({'success': False, 'error': 'Return not found'}), 404
+        
+        barcode, quantity, lot_number, location = result
+        
+        # Mark as restocked
+        cur.execute('''
+            UPDATE returns
+            SET restocked = 1
+            WHERE id = ?
+        ''', (return_id,))
+        
+        # Update inventory in searchRack.db
+        try:
+            rack_conn = sqlite3.connect('searchRack.db')
+            rack_cur = rack_conn.cursor()
+            
+            # Try to find item and restore to inventory
+            rack_cur.execute('''
+                SELECT id, quantity FROM rack WHERE barcode = ?
+            ''', (barcode,))
+            
+            item = rack_cur.fetchone()
+            
+            if item:
+                # Item exists, increase quantity
+                new_quantity = item[1] + quantity
+                rack_cur.execute('''
+                    UPDATE rack
+                    SET quantity = ?
+                    WHERE id = ?
+                ''', (new_quantity, item[0]))
+            else:
+                # Item doesn't exist, would need more details to recreate
+                # For now just mark as restocked in returns table
+                pass
+            
+            rack_conn.commit()
+            rack_conn.close()
+            
+        except Exception as inv_error:
+            print(f"Warning: Could not update inventory: {inv_error}")
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Return marked as restocked'
+        })
+        
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
