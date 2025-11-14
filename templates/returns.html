@@ -224,9 +224,17 @@
                 </button>
             </a>
             <h1 style="flex:1;text-align:center;margin:0;">Returns</h1>
-            <button class="btn btn-primary" onclick="syncReturns()">
-                <i class="fas fa-sync-alt"></i> Sync Amazon
-            </button>
+            <div style="display:flex;gap:8px;">
+                <button class="btn btn-success" onclick="showAddReturnModal()">
+                    <i class="fas fa-plus"></i> Add Return
+                </button>
+                <button class="btn btn-primary" onclick="syncAmazonReturns()">
+                    <i class="fas fa-sync-alt"></i> Sync Amazon
+                </button>
+                <button class="btn btn-primary" onclick="syncEbayReturns()">
+                    <i class="fas fa-sync-alt"></i> Sync eBay
+                </button>
+            </div>
         </div>
 
         <div id="message" class="message"></div>
@@ -378,7 +386,7 @@
             renderReturns(filtered);
         }
 
-        async function syncReturns() {
+        async function syncAmazonReturns() {
             try {
                 showMessage('info', 'Syncing returns from Amazon...');
                 
@@ -393,6 +401,29 @@
                 }
                 
                 showMessage('success', `✓ Successfully synced ${result.synced_count} returns from Amazon`);
+                
+                // Reload returns
+                setTimeout(() => loadReturns(), 1000);
+            } catch (error) {
+                showMessage('error', `Sync error: ${error.message}`);
+            }
+        }
+
+        async function syncEbayReturns() {
+            try {
+                showMessage('info', 'Syncing returns from eBay...');
+                
+                const response = await fetch('/api/ebay/sync-returns', {
+                    method: 'POST'
+                });
+                
+                const result = await response.json();
+                
+                if (!result.success) {
+                    throw new Error(result.error || 'Sync failed');
+                }
+                
+                showMessage('success', `✓ Successfully synced ${result.synced_count} returns from eBay`);
                 
                 // Reload returns
                 setTimeout(() => loadReturns(), 1000);

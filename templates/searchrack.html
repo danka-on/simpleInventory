@@ -376,7 +376,7 @@ function renderResults(results){
     const locationHeader = (!hasEbayStore && !hasAmazonStore && !hasSold && !hasBol && !hasReturns) ? '<th>Location</th>' : ''; // Hide location for ebay/amazon live, sold, bol, and returns
     const dateSoldHeader = hasSold ? '<th>Date Sold</th>' : '';
     const dateShippedHeader = hasSold ? '<th>Date Shipped</th>' : '';
-    const storeHeader = hasSold ? '<th>Store</th>' : '';
+    const storeHeader = (hasSold || hasReturns) ? '<th>Store</th>' : '';
     // Returns-specific headers
     const returnDateHeader = hasReturns ? '<th>Return Date</th>' : '';
     const refundAmountHeader = hasReturns ? '<th>Refund</th>' : '';
@@ -510,8 +510,8 @@ function renderResults(results){
     const dateSoldCell = hasSold ? (dbRaw === 'sold' && r.raw && r.raw.paid_time ? `<td>${fmtLocal(r.raw.paid_time)}</td>` : '<td></td>') : '';
     const dateShippedCell = hasSold ? (dbRaw === 'sold' && r.raw && r.raw.shipped_time ? `<td>${fmtLocal(r.raw.shipped_time)}</td>` : '<td></td>') : '';
     
-    // Store badge for sold items
-    const storeCell = hasSold ? (dbRaw === 'sold' && r.raw && r.raw.store ? 
+    // Store badge for sold items and returns
+    const storeCell = (hasSold || hasReturns) ? ((dbRaw === 'sold' || dbRaw === 'returns') && r.raw && r.raw.store ? 
         (() => {
             const store = r.raw.store.toLowerCase();
             if (store === 'amazon') return `<td><span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:0.85rem;font-weight:500;background:#FF9900;color:white;">🟠 Amazon</span></td>`;

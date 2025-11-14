@@ -5988,6 +5988,8 @@ def api_search_db(db_key):
                 'quantity': item.get('QUANTITY') or item.get('Quantity') or item.get('quantity') or item.get('qty') or '',
                 # created_at available on SEARCHRACK rows populated by DBmanager
                 'created_at': item.get('CREATED_AT') or item.get('created_at') or '',
+                # store field for returns (amazon/ebay)
+                'store': item.get('store') or item.get('Store') or item.get('STORE') or '',
                 'raw': item
             }
             # If this row comes from searchRack (the inventory snapshot), try to enrich it
@@ -8265,6 +8267,24 @@ def api_sync_amazon_returns():
             'success': True,
             'synced_count': synced_count,
             'message': f'Successfully synced {synced_count} returns from Amazon'
+        })
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/ebay/sync-returns', methods=['POST'])
+def api_sync_ebay_returns():
+    """Sync returns from eBay API."""
+    try:
+        from ebay_manager import EbayManager
+        
+        em = EbayManager()
+        synced_count = em.sync_returns_to_db(days_back=90)
+        
+        return jsonify({
+            'success': True,
+            'synced_count': synced_count,
+            'message': f'Successfully synced {synced_count} returns from eBay'
         })
         
     except Exception as e:
