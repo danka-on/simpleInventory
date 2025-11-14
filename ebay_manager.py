@@ -158,7 +158,8 @@ class EbayManager:
     def sync_returns_to_db(self, days_back=90):
         """
         Sync eBay returns to sold.db returns table
-        Matches returns with original orders to get full details
+        Matches returns with original orders when possible, but also includes
+        unmatched returns so they appear in financial analytics
         """
         print("🔄 Starting eBay returns sync...")
         
@@ -172,11 +173,13 @@ class EbayManager:
         cur = conn.cursor()
         
         synced_count = 0
+        matched_count = 0
+        unmatched_count = 0
         
         for return_data in returns:
             order_id = return_data['order_id']
             
-            # Find original order in sold.db
+            # Try to find original order in sold.db
             cur.execute('''
                 SELECT id, barcode, title, price, shipping_cost, seller_fee, lot_number, location
                 FROM orders
@@ -185,11 +188,27 @@ class EbayManager:
             
             original_order = cur.fetchone()
             
-            if not original_order:
-                print(f"⚠️  Original order not found for eBay return: {order_id}")
-                continue
-            
-            original_order_id, barcode, title, original_price, original_shipping, original_fee, lot_number, location = original_order
+            if original_order:
+                # Matched - use data from original order
+                original_order_id, barcode, orig_title, original_price, original_shipping, original_fee, lot_number, location = original_order
+                
+                # Use return title if original is missing
+                title = orig_title or return_data['title']
+                
+                matched_count += 1
+            else:
+                # Unmatched - use data from return API
+                original_order_id = None
+                barcode = None
+                title = return_data['title']
+                original_price = return_data['refund_amount']  # Best estimate
+                original_shipping = 0
+                original_fee = 0
+                lot_number = None
+                location = None
+                
+                unmatched_count += 1
+                print(f"  ⚠️  Unmatched return (no original order): {order_id} - ${return_data['refund_amount']:.2f}")
             
             # Calculate total return cost
             total_return_cost = (
@@ -216,12 +235,15 @@ class EbayManager:
             ))
             
             synced_count += 1
-            print(f"  ✅ {order_id}: ${total_return_cost:.2f} total return cost")
+            if original_order:
+                print(f"  ✅ {order_id}: ${total_return_cost:.2f} total return cost")
         
         conn.commit()
         conn.close()
         
         print(f"\n✅ Synced {synced_count} eBay returns to database")
+        print(f"   • {matched_count} matched to original orders")
+        print(f"   • {unmatched_count} without original order (still included for analytics)")
         return synced_count
 
 

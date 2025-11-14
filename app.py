@@ -691,13 +691,19 @@ def api_financial_analytics():
         
         # Get returns data from sold.db
         returns_data = {}
+        unmatched_returns = []  # Store returns without original_order_id
         try:
             sold_cur.execute('''
                 SELECT 
                     original_order_id,
+                    order_id,
+                    title,
                     refund_amount,
                     original_shipping_cost,
-                    return_shipping_cost
+                    return_shipping_cost,
+                    return_date,
+                    store,
+                    return_reason
                 FROM returns
             ''')
             
@@ -711,9 +717,24 @@ def api_financial_analytics():
                     (row['original_shipping_cost'] or 0) +
                     (row['return_shipping_cost'] or 0)
                 )
-                returns_data[original_order_id] = total_return_cost
                 
-            print(f"DEBUG: Processed returns for {len(returns_data)} orders, total return costs: ${sum(returns_data.values()):.2f}")
+                if original_order_id:
+                    # Matched return - add to returns_data for order matching
+                    returns_data[original_order_id] = total_return_cost
+                else:
+                    # Unmatched return - add as standalone transaction
+                    unmatched_returns.append({
+                        'order_id': row['order_id'],
+                        'title': row['title'],
+                        'refund_amount': row['refund_amount'],
+                        'return_cost': total_return_cost,
+                        'return_date': row['return_date'],
+                        'store': row['store'],
+                        'return_reason': row['return_reason'],
+                        'is_unmatched_return': True
+                    })
+                
+            print(f"DEBUG: Processed {len(returns_data)} matched returns, {len(unmatched_returns)} unmatched returns, total return costs: ${(sum(returns_data.values()) + sum(r['return_cost'] for r in unmatched_returns)):.2f}")
         except Exception as e:
             print(f"Warning: Could not load returns data: {e}")
             import traceback
@@ -823,6 +844,35 @@ def api_financial_analytics():
             print(f"Warning: Could not fetch LOT # data from rawbol.db: {e}")
             import traceback
             traceback.print_exc()
+        
+        # Add unmatched returns as standalone transactions (for financial impact)
+        for unmatched in unmatched_returns:
+            # Create a transaction entry for unmatched return
+            # Use negative values to represent a loss
+            transactions.append({
+                'id': None,
+                'order_id': unmatched['order_id'],
+                'title': unmatched['title'],
+                'quantity': 1,
+                'price': 0,  # No revenue from return
+                'seller_fee': 0,
+                'taxes': 0,
+                'paid_time': unmatched['return_date'],
+                'shipped_time': None,
+                'barcode': None,
+                'store': unmatched['store'],
+                'location': None,
+                'shipping_cost': 0,
+                'lot_number': None,
+                'return_cost': unmatched['return_cost'],
+                'cost': 0,
+                'cost_source': 'unmatched_return',
+                'upc': None,
+                'bol_number': None,
+                'is_unmatched_return': True  # Flag for UI
+            })
+        
+        print(f"DEBUG: Total transactions (including {len(unmatched_returns)} unmatched returns): {len(transactions)}")
         
         return jsonify({
             'success': True,
