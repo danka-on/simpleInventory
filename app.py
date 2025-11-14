@@ -803,6 +803,64 @@ def api_financial_analytics():
             'error': str(e)
         }), 500
 
+@app.route('/api/amazon/financial-summary', methods=['GET'])
+@cache.cached(timeout=300, query_string=True)  # Cache for 5 minutes
+def api_amazon_financial_summary():
+    """
+    Get aggregate financial totals from Amazon Financial Events API.
+    Returns total seller fees, shipping costs, and taxes across all orders.
+    Query params: days (default 30)
+    """
+    if not AMAZON_AVAILABLE:
+        return jsonify({'success': False, 'error': 'Amazon integration not available'}), 503
+    
+    try:
+        days = int(request.args.get('days', 30))
+        
+        amazon = AmazonManager()
+        financial_data = amazon.get_financial_events(days_back=days)
+        
+        # Calculate totals
+        total_seller_fees = 0
+        total_shipping_costs = 0
+        total_taxes = 0
+        orders_with_fees = 0
+        orders_with_shipping = 0
+        
+        for order_id, data in financial_data.items():
+            if data['seller_fee'] > 0:
+                total_seller_fees += data['seller_fee']
+                orders_with_fees += 1
+            
+            if data['shipping_cost'] > 0:
+                total_shipping_costs += data['shipping_cost']
+                orders_with_shipping += 1
+            
+            total_taxes += data['taxes']
+        
+        return jsonify({
+            'success': True,
+            'days': days,
+            'summary': {
+                'total_orders': len(financial_data),
+                'orders_with_fees': orders_with_fees,
+                'orders_with_shipping': orders_with_shipping,
+                'total_seller_fees': round(total_seller_fees, 2),
+                'total_shipping_costs': round(total_shipping_costs, 2),
+                'total_taxes': round(total_taxes, 2),
+                'total_amazon_costs': round(total_seller_fees + total_shipping_costs + total_taxes, 2)
+            }
+        })
+        
+    except Exception as e:
+        print(f"Error fetching Amazon financial summary: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 @app.route('/api/refresh-sold-data', methods=['POST'])
 def api_refresh_sold_data():
     """
