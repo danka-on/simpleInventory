@@ -7545,6 +7545,16 @@ def sync_ebay_orders_api():
     try:
         # Use the local eBay orders sync function defined in this file
         orders()
+        
+        # Sync eBay returns
+        try:
+            from ebay_manager import EbayManager
+            em = EbayManager()
+            returns_count = em.sync_returns_to_db(days_back=90)
+            print(f"✅ Synced {returns_count} eBay returns")
+        except Exception as e:
+            print(f"⚠️ Error syncing eBay returns: {e}")
+        
         update_sync_timestamp('ebay_orders')
         return jsonify({'success': True, 'message': 'eBay orders synced successfully'})
     except Exception as e:
@@ -7569,6 +7579,13 @@ def sync_amazon_orders_api():
     try:
         amazon = AmazonManager()
         amazon.sync_orders_to_db(days_back=30)
+        
+        # Sync returns
+        try:
+            returns_count = amazon.sync_returns_to_db(days_back=90)
+            print(f"✅ Synced {returns_count} Amazon returns")
+        except Exception as e:
+            print(f"⚠️ Error syncing Amazon returns: {e}")
         
         # Enrich with images from amazonStore.db
         from DBmanager import enrich_amazon_sold_images
