@@ -69,6 +69,16 @@
   <h2 style="margin:0 auto;text-align:center;flex:1">Preperation</h2>
   <a href="/barcode-print-que" style="text-decoration:none"><button class="btn btn-primary">🖨️ Print Que</button></a>
   </div>
+  
+  <div class="card" style="margin-top:12px;padding:12px;">
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+      <label style="font-weight:600;color:#2c3e50;white-space:nowrap;">Working LOT:</label>
+      <select id="lotSelector" style="flex:1;min-width:200px;padding:8px 12px;border:2px solid #00b894;border-radius:8px;font-size:1rem;background:#fff;cursor:pointer;">
+        <option value="">Loading lots...</option>
+      </select>
+      <div id="lotDate" style="color:#666;font-size:0.9rem;white-space:nowrap;"></div>
+    </div>
+  </div>
 
   <div class="card">
     <div id="scanner" style="max-width:320px">
@@ -118,18 +128,7 @@
     <div id="statusMsg" class="muted"></div>
   </div>
 
-  <!-- LOT Allocation Modal -->
-  <div id="lotModal" class="hidden" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:1000">
-    <div style="background:#fff;border-radius:16px;padding:24px;max-width:500px;width:90%;max-height:80vh;overflow-y:auto">
-      <h3 style="margin:0 0 16px 0">Allocate Quantity Across LOTs</h3>
-      <div id="lotModalMessage" style="color:#666;margin-bottom:16px;font-size:0.95rem"></div>
-      <div id="lotList" style="display:flex;flex-direction:column;gap:12px"></div>
-      <div style="display:flex;gap:12px;margin-top:20px">
-        <button class="btn btn-primary" id="lotConfirmBtn" style="flex:1">Confirm</button>
-        <button class="btn btn-gray" id="lotCancelBtn" style="flex:1">Cancel</button>
-      </div>
-    </div>
-  </div>
+
 
   <script>
     const video = document.getElementById('video');
@@ -139,6 +138,78 @@
 
     function missingThumb(width=56,height=56,text='No Img'){return 'data:image/svg+xml;utf8,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="'+width+'" height="'+height+'"><rect width="100%" height="100%" fill="#f8f8f8"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#b0b0b0" font-size="10">'+text+'</text></svg>');}
 
+    let selectedLot = null;
+    let availableLots = [];
+    let lotsLoaded = false;
+    
+    async function loadLots() {
+      try {
+        const r = await fetch('/api/lots');
+        const j = await r.json();
+        
+        if (j.error) {
+          console.error('Error loading lots:', j.error);
+          return;
+        }
+        
+        availableLots = j.lots || [];
+        selectedLot = j.selected_lot || (availableLots.length > 0 ? availableLots[0].lot_number : null);
+        
+        const selector = document.getElementById('lotSelector');
+        const lotDate = document.getElementById('lotDate');
+        
+        if (!selector) {
+          console.error('lotSelector element not found');
+          return;
+        }
+        
+        selector.innerHTML = '';
+        if (availableLots.length === 0) {
+          selector.innerHTML = '<option value="">No LOTs available</option>';
+          if (lotDate) lotDate.textContent = '';
+          return;
+        }
+        
+        availableLots.forEach(lot => {
+          const opt = document.createElement('option');
+          opt.value = lot.lot_number;
+          opt.textContent = lot.import_date ? `${lot.lot_number} (${lot.import_date})` : lot.lot_number;
+          if (lot.lot_number === selectedLot) {
+            opt.selected = true;
+            if (lotDate) lotDate.textContent = lot.import_date ? `Imported: ${lot.import_date}` : '';
+          }
+          selector.appendChild(opt);
+        });
+        
+        // Only add listener once
+        if (!lotsLoaded) {
+          selector.addEventListener('change', async (e) => {
+            selectedLot = e.target.value;
+            const lot = availableLots.find(l => l.lot_number === selectedLot);
+            if (lotDate) lotDate.textContent = lot && lot.import_date ? `Imported: ${lot.import_date}` : '';
+            
+            // Save to session
+            try {
+              await fetch('/api/lots/select', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({lot_number: selectedLot})
+              });
+            } catch(err) {
+              console.error('Failed to save lot selection:', err);
+            }
+          });
+          lotsLoaded = true;
+        }
+      } catch(e) {
+        console.error('Failed to load lots:', e);
+        const selector = document.getElementById('lotSelector');
+        if (selector) {
+          selector.innerHTML = '<option value="">Error loading LOTs</option>';
+        }
+      }
+    }
+    
     async function startScanner(){
       try{
         reader = new ZXing.BrowserMultiFormatReader();
@@ -247,115 +318,12 @@
     }
 
     async function setStatus(upc, status, qty){
-      // Note: Quantity is handled by the /api/items_prep/status endpoint
-      // Do not call updateQuantity here as it would interfere with the API's increment logic
+      // Status endpoint now uses selected LOT from session
       const r = await fetch('/api/items_prep/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({upc,status,qty})});
       const j = await r.json();
-      
-      // Check if LOT allocation is needed
-      if (j.needs_lot_allocation && status === 'good') {
-        const allocated = await showLotAllocationModal(j.lots, j.qty_requested, j.message);
-        if (allocated) {
-          // Call allocation endpoint
-          const allocRes = await fetch('/api/items_prep/allocate_lots', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({upc, allocations: allocated})
-          });
-          return await allocRes.json();
-        } else {
-          return {success: false, error: 'Allocation cancelled'};
-        }
-      }
-      
       return j;
     }
     
-    function showLotAllocationModal(lots, qtyRequested, message) {
-      return new Promise((resolve) => {
-        const modal = document.getElementById('lotModal');
-        const lotList = document.getElementById('lotList');
-        const modalMsg = document.getElementById('lotModalMessage');
-        
-        modalMsg.textContent = message || `Allocate ${qtyRequested} items across ${lots.length} LOTs`;
-        
-        // Build LOT list with inputs
-        lotList.innerHTML = lots.map((lot, idx) => `
-          <div style="border:1px solid #ddd;border-radius:8px;padding:12px;background:${idx === 0 ? '#e8f5e9' : '#f8f9fa'}">
-            <div style="font-weight:600;margin-bottom:4px">
-              ${idx === 0 ? '🆕 ' : ''}LOT: ${lot.lot_number || 'N/A'}
-            </div>
-            <div style="font-size:0.85rem;color:#666;margin-bottom:8px">
-              Date: ${lot.import_date || 'Unknown'} | Unchecked: ${lot.unchecked_qty}
-            </div>
-            <div style="display:flex;align-items:center;gap:8px">
-              <label style="font-size:0.9rem">Qty:</label>
-              <input type="number" 
-                id="lotQty_${idx}" 
-                data-lot-id="${lot.id}"
-                data-max="${lot.unchecked_qty}"
-                value="${lot.default_qty}" 
-                min="0" 
-                max="${lot.unchecked_qty}"
-                style="padding:8px;border:1px solid #ddd;border-radius:6px;width:80px;font-size:1rem">
-              <span style="font-size:0.85rem;color:#999">/ ${lot.unchecked_qty}</span>
-            </div>
-          </div>
-        `).join('');
-        
-        // Auto-adjust allocations on input change
-        lots.forEach((lot, idx) => {
-          const input = document.getElementById(`lotQty_${idx}`);
-          input.addEventListener('input', () => autoAdjustAllocations(lots, qtyRequested));
-        });
-        
-        modal.classList.remove('hidden');
-        
-        document.getElementById('lotConfirmBtn').onclick = () => {
-          const allocations = lots.map((lot, idx) => ({
-            id: lot.id,
-            qty: parseInt(document.getElementById(`lotQty_${idx}`).value) || 0
-          })).filter(a => a.qty > 0);
-          
-          const total = allocations.reduce((sum, a) => sum + a.qty, 0);
-          
-          if (total !== qtyRequested) {
-            alert(`Total allocated (${total}) must equal requested quantity (${qtyRequested})`);
-            return;
-          }
-          
-          modal.classList.add('hidden');
-          resolve(allocations);
-        };
-        
-        document.getElementById('lotCancelBtn').onclick = () => {
-          modal.classList.add('hidden');
-          resolve(null);
-        };
-      });
-    }
-    
-    function autoAdjustAllocations(lots, qtyRequested) {
-      // Calculate total currently allocated
-      let total = 0;
-      lots.forEach((lot, idx) => {
-        const input = document.getElementById(`lotQty_${idx}`);
-        total += parseInt(input.value) || 0;
-      });
-      
-      // If total exceeds requested, reduce from last LOT
-      if (total > qtyRequested) {
-        for (let i = lots.length - 1; i >= 0; i--) {
-          const input = document.getElementById(`lotQty_${i}`);
-          const current = parseInt(input.value) || 0;
-          const excess = total - qtyRequested;
-          const reduction = Math.min(current, excess);
-          input.value = current - reduction;
-          total -= reduction;
-          if (total <= qtyRequested) break;
-        }
-      }
-    }
 
     document.getElementById('lookupBtn').onclick = ()=>{ const v=document.getElementById('manualUpc').value.trim(); if(v) lookup(v); };
     
@@ -516,7 +484,8 @@
       }, 120);
     }
 
-    window.addEventListener('DOMContentLoaded', ()=>{
+    window.addEventListener('DOMContentLoaded', async ()=>{
+      await loadLots(); // Load LOT selector first
       setupDeviceMode();
       // If no UPC param, focus the manual input for quick scanning/typing
       try{

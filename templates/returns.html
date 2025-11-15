@@ -165,6 +165,124 @@
             background: #00b894;
             color: white;
         }
+        .badge-relisted {
+            background: #6c5ce7;
+            color: white;
+        }
+        .badge-resold {
+            background: #00b894;
+            color: white;
+        }
+        .lifecycle-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 0.75rem;
+            padding: 2px 6px;
+            border-radius: 3px;
+            background: #f0f0f0;
+            color: #666;
+        }
+        .timeline {
+            position: relative;
+            padding-left: 30px;
+            margin: 20px 0;
+        }
+        .timeline-item {
+            position: relative;
+            padding-bottom: 20px;
+            border-left: 2px solid #e0e0e0;
+        }
+        .timeline-item:last-child {
+            border-left: 2px solid transparent;
+        }
+        .timeline-icon {
+            position: absolute;
+            left: -9px;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #fff;
+            border: 2px solid #3498db;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+        }
+        .timeline-icon.auto {
+            border-color: #00b894;
+        }
+        .timeline-content {
+            margin-left: 20px;
+        }
+        .timeline-date {
+            color: #888;
+            font-size: 0.85rem;
+            margin-bottom: 4px;
+        }
+        .timeline-text {
+            font-size: 0.95rem;
+            color: #333;
+        }
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        .modal-content {
+            background: white;
+            padding: 24px;
+            border-radius: 12px;
+            max-width: 500px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        .modal-header {
+            margin: 0 0 16px 0;
+            font-size: 1.25rem;
+            font-weight: 600;
+        }
+        .form-group {
+            margin-bottom: 16px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 4px;
+            font-weight: 500;
+        }
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 0.95rem;
+        }
+        .form-group textarea {
+            min-height: 60px;
+            resize: vertical;
+        }
+        .modal-actions {
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
+            margin-top: 20px;
+        }
+        .btn-lifecycle {
+            padding: 4px 8px;
+            font-size: 0.85rem;
+            margin-left: 4px;
+            white-space: nowrap;
+        }
         .message {
             padding: 12px;
             border-radius: 8px;
@@ -256,6 +374,10 @@
                 <h3>Return Rate</h3>
                 <div class="value" id="stat-rate">-</div>
             </div>
+            <div class="stat-card">
+                <h3>Recovery Rate</h3>
+                <div class="value" id="stat-recovery">-</div>
+            </div>
         </div>
 
         <div class="header-controls">
@@ -270,6 +392,8 @@
                     <option value="pending">Pending</option>
                     <option value="received">Received</option>
                     <option value="restocked">Restocked</option>
+                    <option value="relisted">Relisted</option>
+                    <option value="resold">Resold</option>
                 </select>
                 <input type="text" id="searchBox" placeholder="Search order ID, barcode, title..." onkeyup="filterTable()">
             </div>
@@ -332,6 +456,14 @@
             }
         }
 
+        function getLifecycleStatus(ret) {
+            if (ret.resold) return { status: 'resold', label: 'RESOLD', badge: 'badge-resold' };
+            if (ret.relisted) return { status: 'relisted', label: 'RELISTED', badge: 'badge-relisted' };
+            if (ret.restocked) return { status: 'restocked', label: 'RESTOCKED', badge: 'badge-restocked' };
+            if (ret.received_date) return { status: 'received', label: 'RECEIVED', badge: 'badge-received' };
+            return { status: 'pending', label: 'PENDING', badge: 'badge-pending' };
+        }
+
         function renderReturns(returns) {
             const tbody = document.getElementById('returnsBody');
             tbody.innerHTML = '';
@@ -344,7 +476,29 @@
             
             returns.forEach(ret => {
                 const totalCost = ret.refund_amount + ret.original_shipping_cost + ret.return_shipping_cost;
-                const status = ret.restocked ? 'restocked' : (ret.received_date ? 'received' : 'pending');
+                const lifecycle = getLifecycleStatus(ret);
+                const cycleIndicator = ret.lifecycle_count > 1 ? `<span class="lifecycle-indicator" title="Returned ${ret.lifecycle_count} times">↻${ret.lifecycle_count}</span>` : '';
+                
+                // Determine action buttons based on lifecycle stage
+                let actionButtons = '';
+                if (lifecycle.status === 'pending') {
+                    actionButtons = `<button class="btn btn-warning btn-lifecycle" onclick="markReceived(${ret.id})"><i class="fas fa-box"></i> Received</button>`;
+                } else if (lifecycle.status === 'received') {
+                    actionButtons = `<button class="btn btn-success btn-lifecycle" onclick="openRestockModal(${ret.id})"><i class="fas fa-check"></i> Restocked</button>`;
+                } else if (lifecycle.status === 'restocked') {
+                    actionButtons = `<button class="btn btn-primary btn-lifecycle" onclick="openRelistModal(${ret.id})"><i class="fas fa-arrow-up"></i> Relist</button>`;
+                } else if (lifecycle.status === 'relisted') {
+                    actionButtons = `<button class="btn btn-success btn-lifecycle" onclick="openResoldModal(${ret.id})"><i class="fas fa-check-circle"></i> Resold</button>`;
+                } else if (lifecycle.status === 'resold') {
+                    actionButtons = `<button class="btn btn-secondary btn-lifecycle" onclick="restartLifecycle(${ret.id})"><i class="fas fa-redo"></i> Restart</button>`;
+                }
+                
+                // Always add history button to view lifecycle details
+                const historyTitle = ret.event_count > 0 ? `View ${ret.event_count} lifecycle events` : 'View lifecycle history';
+                actionButtons += `<button class="btn btn-info btn-lifecycle" onclick="openHistoryModal(${ret.id})" title="${historyTitle}"><i class="fas fa-history"></i></button>`;
+                
+                // Add edit button
+                actionButtons += `<button class="btn btn-secondary btn-lifecycle" onclick="openEditModal(${ret.id}, ${ret.restocked}, '${ret.location || ''}', '${encodeURIComponent(ret.return_reason || '')}', '${ret.received_date || ''}')" title="Edit return details"><i class="fas fa-gear"></i></button>`;
                 
                 const row = `
                     <tr>
@@ -356,10 +510,9 @@
                         <td>$${ret.refund_amount.toFixed(2)}</td>
                         <td>$${(ret.original_shipping_cost + ret.return_shipping_cost).toFixed(2)}</td>
                         <td><strong>$${totalCost.toFixed(2)}</strong></td>
-                        <td><span class="badge badge-${status}">${status.toUpperCase()}</span></td>
-                        <td>
-                            ${!ret.received_date ? `<button class="btn btn-warning" style="padding:4px 8px;font-size:0.85rem;" onclick="markReceived(${ret.id})"><i class="fas fa-box"></i> Received</button>` : ''}
-                            ${ret.received_date && !ret.restocked ? `<button class="btn btn-success" style="padding:4px 8px;font-size:0.85rem;" onclick="markRestocked(${ret.id})"><i class="fas fa-check"></i> Restock</button>` : ''}
+                        <td><span class="badge ${lifecycle.badge}">${lifecycle.label}</span> ${cycleIndicator}</td>
+                        <td style="text-align:right;white-space:nowrap;">
+                            ${actionButtons}
                         </td>
                     </tr>
                 `;
@@ -374,6 +527,12 @@
             document.getElementById('stat-refunded').textContent = stats.total_refunded ? `$${stats.total_refunded.toFixed(2)}` : '$0.00';
             document.getElementById('stat-cost').textContent = stats.total_cost ? `$${stats.total_cost.toFixed(2)}` : '$0.00';
             document.getElementById('stat-rate').textContent = stats.return_rate ? `${stats.return_rate.toFixed(1)}%` : '0%';
+            
+            // Calculate recovery rate
+            const relistCount = allReturns.filter(r => r.relisted).length;
+            const resoldCount = allReturns.filter(r => r.resold).length;
+            const recoveryRate = relistCount > 0 ? (resoldCount / relistCount * 100).toFixed(1) : '0.0';
+            document.getElementById('stat-recovery').textContent = `${recoveryRate}%`;
         }
 
         function filterTable() {
@@ -451,19 +610,366 @@
             }
         }
 
+        function openRestockModal(returnId) {
+            const modal = document.createElement('div');
+            modal.className = 'modal-overlay';
+            modal.innerHTML = `
+                <div class="modal-content">
+                    <h3 class="modal-header">Mark as Restocked</h3>
+                    <div class="form-group">
+                        <label for="restockLocation">Shelf Location:</label>
+                        <input type="text" id="restockLocation" placeholder="e.g., A3, B12, etc." autofocus>
+                    </div>
+                    <div class="modal-actions">
+                        <button onclick="this.closest('.modal-overlay').remove()" class="btn btn-secondary">Cancel</button>
+                        <button onclick="markRestocked(${returnId})" class="btn btn-success">Restocked</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+            window.currentLifecycleModal = modal;
+        }
+
         async function markRestocked(returnId) {
             try {
+                const location = document.getElementById('restockLocation').value;
+                
                 const response = await fetch(`/api/returns/${returnId}/restock`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ location })
+                });
+                
+                const result = await response.json();
+                
+                if (!result.success) {
+                    throw new Error(result.error || 'Failed to mark as restocked');
+                }
+                
+                if (window.currentLifecycleModal) {
+                    window.currentLifecycleModal.remove();
+                }
+                
+                showMessage('success', '✓ Marked as restocked');
+                loadReturns();
+            } catch (error) {
+                showMessage('error', `Error: ${error.message}`);
+            }
+        }
+
+        function addToShelf(barcode, title, quantity) {
+            // Redirect to position/add to shelf page with pre-filled data
+            const params = new URLSearchParams({
+                barcode: barcode,
+                title: decodeURIComponent(title),
+                quantity: quantity,
+                from: 'returns'
+            });
+            window.location.href = `/position?${params.toString()}`;
+        }
+        
+        function openEditModal(returnId, restocked, location, returnReason, receivedDate) {
+            const modal = document.createElement('div');
+            modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:1000;';
+            modal.innerHTML = `
+                <div style="background:white;padding:24px;border-radius:12px;max-width:500px;width:90%;">
+                    <h3 style="margin:0 0 16px 0;">Edit Return</h3>
+                    <div style="margin-bottom:16px;">
+                        <label style="display:block;margin-bottom:8px;font-weight:500;">
+                            <input type="checkbox" id="editReceived" ${receivedDate ? 'checked' : ''}>
+                            Received
+                        </label>
+                    </div>
+                    <div style="margin-bottom:16px;">
+                        <label style="display:block;margin-bottom:8px;font-weight:500;">
+                            <input type="checkbox" id="editRestocked" ${restocked ? 'checked' : ''}>
+                            Restocked
+                        </label>
+                    </div>
+                    <div style="margin-bottom:16px;">
+                        <label style="display:block;margin-bottom:4px;font-weight:500;">Location:</label>
+                        <input type="text" id="editLocation" value="${location}" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;">
+                    </div>
+                    <div style="margin-bottom:16px;">
+                        <label style="display:block;margin-bottom:4px;font-weight:500;">Return Reason:</label>
+                        <textarea id="editReason" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;min-height:60px;">${decodeURIComponent(returnReason)}</textarea>
+                    </div>
+                    <div style="display:flex;gap:8px;justify-content:space-between;">
+                        <button onclick="deleteReturn(${returnId})" style="padding:10px 16px;background:#e74c3c;color:white;border:none;border-radius:8px;cursor:pointer;">Delete</button>
+                        <div style="display:flex;gap:8px;">
+                            <button onclick="this.closest('div').parentElement.parentElement.parentElement.remove()" style="padding:10px 16px;background:#95a5a6;color:white;border:none;border-radius:8px;cursor:pointer;">Cancel</button>
+                            <button onclick="saveReturn(${returnId})" style="padding:10px 16px;background:#00b894;color:white;border:none;border-radius:8px;cursor:pointer;">Save</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+            window.currentModal = modal;
+        }
+        
+        async function saveReturn(returnId) {
+            try {
+                const received = document.getElementById('editReceived').checked;
+                const restocked = document.getElementById('editRestocked').checked;
+                const location = document.getElementById('editLocation').value;
+                const returnReason = document.getElementById('editReason').value;
+                
+                const response = await fetch(`/api/returns/${returnId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        received: received,
+                        restocked: restocked,
+                        location: location,
+                        return_reason: returnReason
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (!result.success) {
+                    throw new Error(result.error || 'Failed to update');
+                }
+                
+                if (window.currentModal) {
+                    window.currentModal.remove();
+                }
+                
+                showMessage('success', '✓ Return updated successfully');
+                loadReturns();
+            } catch (error) {
+                showMessage('error', `Error: ${error.message}`);
+            }
+        }
+        
+        function openRelistModal(returnId) {
+            const modal = document.createElement('div');
+            modal.className = 'modal-overlay';
+            modal.innerHTML = `
+                <div class="modal-content">
+                    <h3 class="modal-header">Mark as Relisted</h3>
+                    <div class="form-group">
+                        <label for="relistStore">Store:</label>
+                        <select id="relistStore">
+                            <option value="amazon">Amazon</option>
+                            <option value="ebay">eBay</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="relistItemId">Item ID (optional):</label>
+                        <input type="text" id="relistItemId" placeholder="SKU or listing ID">
+                    </div>
+                    <div class="form-group">
+                        <label for="relistNotes">Notes (optional):</label>
+                        <textarea id="relistNotes" placeholder="Any additional notes..."></textarea>
+                    </div>
+                    <div class="modal-actions">
+                        <button onclick="this.closest('.modal-overlay').remove()" class="btn btn-secondary">Cancel</button>
+                        <button onclick="saveRelist(${returnId})" class="btn btn-primary">Save</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+            window.currentLifecycleModal = modal;
+        }
+
+        async function saveRelist(returnId) {
+            try {
+                const store = document.getElementById('relistStore').value;
+                const itemId = document.getElementById('relistItemId').value;
+                const notes = document.getElementById('relistNotes').value;
+                
+                const response = await fetch(`/api/returns/${returnId}/relist`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ store, item_id: itemId, notes })
+                });
+                
+                const result = await response.json();
+                
+                if (!result.success) {
+                    throw new Error(result.error || 'Failed to mark as relisted');
+                }
+                
+                if (window.currentLifecycleModal) {
+                    window.currentLifecycleModal.remove();
+                }
+                
+                showMessage('success', '✓ Marked as relisted');
+                loadReturns();
+            } catch (error) {
+                showMessage('error', `Error: ${error.message}`);
+            }
+        }
+
+        function openResoldModal(returnId) {
+            const modal = document.createElement('div');
+            modal.className = 'modal-overlay';
+            modal.innerHTML = `
+                <div class="modal-content">
+                    <h3 class="modal-header">Mark as Resold</h3>
+                    <div class="form-group">
+                        <label for="resoldOrderId">Order ID (optional):</label>
+                        <input type="text" id="resoldOrderId" placeholder="New order ID">
+                    </div>
+                    <div class="form-group">
+                        <label for="resoldNotes">Notes (optional):</label>
+                        <textarea id="resoldNotes" placeholder="Any additional notes..."></textarea>
+                    </div>
+                    <div class="modal-actions">
+                        <button onclick="this.closest('.modal-overlay').remove()" class="btn btn-secondary">Cancel</button>
+                        <button onclick="saveResold(${returnId})" class="btn btn-success">Save</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+            window.currentLifecycleModal = modal;
+        }
+
+        async function saveResold(returnId) {
+            try {
+                const orderId = document.getElementById('resoldOrderId').value;
+                const notes = document.getElementById('resoldNotes').value;
+                
+                const response = await fetch(`/api/returns/${returnId}/resold`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ order_id: orderId, notes })
+                });
+                
+                const result = await response.json();
+                
+                if (!result.success) {
+                    throw new Error(result.error || 'Failed to mark as resold');
+                }
+                
+                if (window.currentLifecycleModal) {
+                    window.currentLifecycleModal.remove();
+                }
+                
+                showMessage('success', '✓ Marked as resold');
+                loadReturns();
+            } catch (error) {
+                showMessage('error', `Error: ${error.message}`);
+            }
+        }
+
+        async function restartLifecycle(returnId) {
+            if (!confirm('This will reset the lifecycle for another return cycle. Continue?')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/returns/${returnId}/restart-lifecycle`, {
                     method: 'POST'
                 });
                 
                 const result = await response.json();
                 
                 if (!result.success) {
-                    throw new Error(result.error || 'Failed to restock');
+                    throw new Error(result.error || 'Failed to restart lifecycle');
                 }
                 
-                showMessage('success', '✓ Item restocked and inventory updated');
+                showMessage('success', '✓ Lifecycle restarted - ready for next return cycle');
+                loadReturns();
+            } catch (error) {
+                showMessage('error', `Error: ${error.message}`);
+            }
+        }
+
+        async function openHistoryModal(returnId) {
+            try {
+                const response = await fetch(`/api/returns/${returnId}/history`);
+                const result = await response.json();
+                
+                if (!result.success) {
+                    throw new Error(result.error || 'Failed to load history');
+                }
+                
+                const ret = result.return;
+                const events = result.events || [];
+                
+                let timelineHTML = '';
+                events.forEach(event => {
+                    const icon = event.auto_detected ? '🤖' : '👤';
+                    const iconClass = event.auto_detected ? 'auto' : 'manual';
+                    let eventText = '';
+                    
+                    if (event.event_type === 'received') {
+                        eventText = 'Return received';
+                    } else if (event.event_type === 'restocked') {
+                        eventText = 'Item restocked to inventory';
+                    } else if (event.event_type === 'relisted') {
+                        eventText = `Relisted on ${event.store || 'unknown'}`;
+                        if (event.item_id) eventText += ` (${event.item_id})`;
+                    } else if (event.event_type === 'resold') {
+                        eventText = 'Item resold';
+                        if (event.order_id) eventText += ` - Order ${event.order_id}`;
+                    } else if (event.event_type === 'lifecycle_restart') {
+                        eventText = 'Lifecycle restarted for next return cycle';
+                    }
+                    
+                    if (event.notes) {
+                        eventText += `<br><small style="color:#888;">${event.notes}</small>`;
+                    }
+                    
+                    timelineHTML += `
+                        <div class="timeline-item">
+                            <div class="timeline-icon ${iconClass}">${icon}</div>
+                            <div class="timeline-content">
+                                <div class="timeline-date">${formatDate(event.event_date)}</div>
+                                <div class="timeline-text">${eventText}</div>
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                const modal = document.createElement('div');
+                modal.className = 'modal-overlay';
+                modal.innerHTML = `
+                    <div class="modal-content">
+                        <h3 class="modal-header">Lifecycle History</h3>
+                        <div style="margin-bottom:16px;padding:12px;background:#f8f9fa;border-radius:8px;">
+                            <div style="font-weight:600;margin-bottom:4px;">${ret.title}</div>
+                            <div style="color:#666;font-size:0.9rem;">Order: ${ret.order_id}</div>
+                            ${ret.lifecycle_count > 1 ? `<div style="color:#888;font-size:0.85rem;margin-top:4px;">Return Cycle: ${ret.lifecycle_count}</div>` : ''}
+                        </div>
+                        <div class="timeline">
+                            ${timelineHTML || '<p style="color:#888;text-align:center;">No lifecycle events yet</p>'}
+                        </div>
+                        <div class="modal-actions">
+                            <button onclick="this.closest('.modal-overlay').remove()" class="btn btn-primary">Close</button>
+                        </div>
+                    </div>
+                `;
+                document.body.appendChild(modal);
+                window.currentLifecycleModal = modal;
+            } catch (error) {
+                showMessage('error', `Error loading history: ${error.message}`);
+            }
+        }
+        
+        async function deleteReturn(returnId) {
+            if (!confirm('Are you sure you want to delete this return?')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/returns/${returnId}`, {
+                    method: 'DELETE'
+                });
+                
+                const result = await response.json();
+                
+                if (!result.success) {
+                    throw new Error(result.error || 'Failed to delete');
+                }
+                
+                if (window.currentModal) {
+                    window.currentModal.remove();
+                }
+                
+                showMessage('success', '✓ Return deleted successfully');
                 loadReturns();
             } catch (error) {
                 showMessage('error', `Error: ${error.message}`);

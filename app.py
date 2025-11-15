@@ -1,6 +1,6 @@
 from contextlib import nullcontext
 
-from flask import Flask, request, send_file, url_for, render_template, jsonify, redirect
+from flask import Flask, request, send_file, url_for, render_template, jsonify, redirect, session
 from flask_caching import Cache
 from flask_compress import Compress
 from werkzeug.exceptions import RequestEntityTooLarge
@@ -101,6 +101,7 @@ CLIENT_ID = os.getenv("EBAY_CLIENT_ID")
 CLIENT_SECRET = os.getenv("EBAY_CLIENT_SECRET")
 RUNAME = os.getenv("EBAY_RUNAME")
 app = Flask(__name__)
+app.secret_key = 'your-secret-key-change-in-production'  # Required for session management
 app.start_time = time.time()  # Track app startup time for uptime calculation
 # Production settings - optimized for Raspberry Pi deployment
 app.config['TEMPLATES_AUTO_RELOAD'] = False  # Disable template reloading for better performance
@@ -874,11 +875,38 @@ def api_financial_analytics():
         
         print(f"DEBUG: Total transactions (including {len(unmatched_returns)} unmatched returns): {len(transactions)}")
         
+        # Get BOL extract totals from rawbol.db (total_client_cost + shipping_cost per LOT)
+        bol_extract_totals = {}
+        try:
+            rawbol_cur.execute('''
+                SELECT 
+                    lot_number,
+                    total_client_cost,
+                    shipping_cost
+                FROM upload_logs
+                WHERE lot_number IS NOT NULL
+            ''')
+            
+            for row in rawbol_cur.fetchall():
+                lot_num = row['lot_number']
+                total_cost = float(row['total_client_cost']) if row['total_client_cost'] else 0
+                shipping_cost = float(row['shipping_cost']) if row['shipping_cost'] else 0
+                
+                bol_extract_totals[lot_num] = {
+                    'total_cost': total_cost,
+                    'shipping_cost': shipping_cost
+                }
+            
+            print(f"DEBUG: Loaded BOL extract totals for {len(bol_extract_totals)} LOTs")
+        except Exception as e:
+            print(f"Warning: Could not fetch BOL extract totals: {e}")
+        
         return jsonify({
             'success': True,
             'transactions': transactions,
             'count': len(transactions),
-            'lot_options': lot_options
+            'lot_options': lot_options,
+            'bol_extract_totals': bol_extract_totals
         })
         
     except Exception as e:
@@ -2090,58 +2118,40 @@ def api_items_prep_status():
         
         # GOOD flow - always uses base UPC, tracks quantities explicitly
         if status == 'good':
-            # Check if multiple LOTs exist for this UPC
+            # Get selected LOT from session
+            selected_lot = session.get('selected_lot')
+            if not selected_lot:
+                conn.close()
+                return jsonify({'success': False, 'error': 'No LOT selected. Please select a LOT from the dropdown.'}), 400
+            
+            # Get import_date for the selected LOT from rawbol.db
+            rawbol_conn = sqlite3.connect('rawbol.db')
+            rawbol_cur = rawbol_conn.cursor()
+            rawbol_cur.execute('''
+                SELECT import_date FROM raw_bol_items
+                WHERE lot_number = ? COLLATE NOCASE
+                LIMIT 1
+            ''', (selected_lot,))
+            lot_date_row = rawbol_cur.fetchone()
+            rawbol_conn.close()
+            
+            import_date = lot_date_row[0] if lot_date_row else None
+            
+            # Check if base item exists (any LOT)
             cur.execute('''
-                SELECT lot_number, unchecked_qty, import_date, id
+                SELECT good_qty, unchecked_qty, original_qty
                 FROM bol_items 
                 WHERE upc = ? COLLATE NOCASE 
                 AND (temporary IS NULL OR temporary = 0)
                 AND upc NOT LIKE '%-%'
-                ORDER BY import_date DESC, id DESC
+                LIMIT 1
             ''', (base_upc,))
             
-            available_lots = cur.fetchall()
-            
-            # Multi-LOT scenario: check if qty exceeds newest LOT's capacity
-            if len(available_lots) > 1:
-                newest_lot = available_lots[0]
-                newest_unchecked = newest_lot[1] or 0
-                
-                if qty > newest_unchecked:
-                    # Calculate default allocation (fill newest first, then older)
-                    allocations = []
-                    remaining = qty
-                    
-                    for lot_number, unchecked, import_date, lot_id in available_lots:
-                        unchecked_avail = unchecked or 0
-                        if unchecked_avail > 0 and remaining > 0:
-                            allocated = min(remaining, unchecked_avail)
-                            allocations.append({
-                                'lot_number': lot_number,
-                                'unchecked_qty': unchecked_avail,
-                                'import_date': import_date,
-                                'default_qty': allocated,
-                                'id': lot_id
-                            })
-                            remaining -= allocated
-                    
-                    conn.close()
-                    return jsonify({
-                        'success': False,
-                        'needs_lot_allocation': True,
-                        'lots': allocations,
-                        'qty_requested': qty,
-                        'message': f'Multiple LOTs available. Newest LOT only has {newest_unchecked} unchecked.'
-                    })
-            
-            # Single LOT or newest LOT has enough - continue with normal Good flow
-            # Check base item exists and has enough unchecked
-            cur.execute('SELECT good_qty, unchecked_qty, original_qty FROM bol_items WHERE upc = ? COLLATE NOCASE', (base_upc,))
             base_row = cur.fetchone()
             
             if not base_row:
                 conn.close()
-                return jsonify({'success': False, 'error': f'Base UPC {base_upc} not found in bol_items'}), 404
+                return jsonify({'success': False, 'error': f'UPC {base_upc} not found in bol.db'}), 404
             
             current_good = base_row[0] or 0
             current_unchecked = base_row[1] or 0
@@ -2155,15 +2165,17 @@ def api_items_prep_status():
                     'error': f'Cannot mark {qty} as good - only {current_unchecked} unchecked (original: {original_qty}, good: {current_good})'
                 }), 400
             
-            # Update quantities: move from unchecked to good
+            # Update quantities: move from unchecked to good and set the selected LOT
             new_good = current_good + qty
             new_unchecked = current_unchecked - qty
             
             cur.execute('''
                 UPDATE bol_items 
-                SET good_qty = ?, unchecked_qty = ?, quantity = ?
-                WHERE upc = ? COLLATE NOCASE
-            ''', (new_good, new_unchecked, new_good, base_upc))
+                SET good_qty = ?, unchecked_qty = ?, quantity = ?, lot_number = ?, import_date = ?
+                WHERE upc = ? COLLATE NOCASE 
+                AND (temporary IS NULL OR temporary = 0)
+                AND upc NOT LIKE '%-%'
+            ''', (new_good, new_unchecked, new_good, selected_lot, import_date, base_upc))
             
             # Update prep status
             cur.execute('SELECT upc FROM items_prep_status WHERE upc = ? AND status = ? COLLATE NOCASE', (base_upc, 'good'))
@@ -2177,11 +2189,12 @@ def api_items_prep_status():
             conn.commit()
             conn.close()
             
-            print(f'[GOOD] {base_upc}: moved {qty} from unchecked to good (good: {current_good}→{new_good}, unchecked: {current_unchecked}→{new_unchecked})')
+            print(f'[GOOD] {base_upc} LOT {selected_lot}: moved {qty} from unchecked to good (good: {current_good}→{new_good}, unchecked: {current_unchecked}→{new_unchecked})')
             return jsonify({
                 'success': True, 
                 'action': 'incremented',
                 'upc': base_upc,
+                'lot_number': selected_lot,
                 'good_qty': new_good,
                 'unchecked_qty': new_unchecked,
                 'original_qty': original_qty
@@ -3751,6 +3764,23 @@ def api_bulk_delete_bol_items():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
+@app.route('/api/lots/select', methods=['POST'])
+def api_set_selected_lot():
+    """Set the selected LOT in session storage."""
+    try:
+        data = request.get_json() or {}
+        lot_number = data.get('lot_number', '').strip()
+        
+        if not lot_number:
+            return jsonify({'success': False, 'error': 'Missing lot_number'}), 400
+        
+        session['selected_lot'] = lot_number
+        return jsonify({'success': True, 'selected_lot': lot_number})
+    
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/lots', methods=['GET'])
 @app.route('/api/bol_lots', methods=['GET'])
 def api_bol_lots():
     """Return list of available lots with most recent import_date from rawbol.db. Sorted newest first."""
@@ -3763,7 +3793,7 @@ def api_bol_lots():
         cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='raw_bol_items'")
         if not cur.fetchone():
             conn.close()
-            return jsonify({'lots': []})
+            return jsonify({'lots': [], 'selected_lot': session.get('selected_lot')})
         
         # Get distinct LOT numbers with their import dates, filtered and sorted
         cur.execute('''
@@ -3796,7 +3826,15 @@ def api_bol_lots():
             })
         
         conn.close()
-        return jsonify({'lots': lots})
+        
+        # Return lots with current selected lot from session
+        selected_lot = session.get('selected_lot')
+        # If no lot selected, default to the newest (first in list)
+        if not selected_lot and lots:
+            selected_lot = lots[0]['lot_number']
+            session['selected_lot'] = selected_lot
+        
+        return jsonify({'lots': lots, 'selected_lot': selected_lot})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -4883,6 +4921,76 @@ def finalize_barcodes():
         print("✅ Barcode finalization complete.")
     except Exception as e:
         print(f"❌ Error finalizing barcodes: {e}")
+
+def ensure_lifecycle_tables():
+    """Ensure returns table has lifecycle columns and create lifecycle events table"""
+    try:
+        conn = sqlite3.connect('sold.db')
+        cur = conn.cursor()
+        
+        # Add lifecycle columns to returns table if they don't exist
+        try:
+            cur.execute("ALTER TABLE returns ADD COLUMN relisted INTEGER DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+        
+        try:
+            cur.execute("ALTER TABLE returns ADD COLUMN relisted_date TEXT")
+        except sqlite3.OperationalError:
+            pass
+        
+        try:
+            cur.execute("ALTER TABLE returns ADD COLUMN relisted_store TEXT")
+        except sqlite3.OperationalError:
+            pass
+        
+        try:
+            cur.execute("ALTER TABLE returns ADD COLUMN relisted_item_id TEXT")
+        except sqlite3.OperationalError:
+            pass
+        
+        try:
+            cur.execute("ALTER TABLE returns ADD COLUMN resold INTEGER DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass
+        
+        try:
+            cur.execute("ALTER TABLE returns ADD COLUMN resold_date TEXT")
+        except sqlite3.OperationalError:
+            pass
+        
+        try:
+            cur.execute("ALTER TABLE returns ADD COLUMN resold_order_id TEXT")
+        except sqlite3.OperationalError:
+            pass
+        
+        try:
+            cur.execute("ALTER TABLE returns ADD COLUMN lifecycle_count INTEGER DEFAULT 1")
+        except sqlite3.OperationalError:
+            pass
+        
+        # Create lifecycle events table
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS return_lifecycle_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                return_id INTEGER NOT NULL,
+                event_type TEXT NOT NULL,
+                event_date TEXT NOT NULL,
+                auto_detected INTEGER DEFAULT 0,
+                store TEXT,
+                item_id TEXT,
+                order_id TEXT,
+                notes TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (return_id) REFERENCES returns (id) ON DELETE CASCADE
+            )
+        ''')
+        
+        conn.commit()
+        conn.close()
+        print("✅ Lifecycle tables initialized")
+    except Exception as e:
+        print(f"⚠️ Error initializing lifecycle tables: {e}")
 
 def start_flask():
     app.run(host="0.0.0.0", port=8080)
@@ -8222,6 +8330,39 @@ def api_marketplace_sale():
                     VALUES (?, ?, ?, ?, ?)''',
                     (barcode, title, price, sale_date, 'marketplace'))
             
+            # Auto-detect if this is a resold return
+            if barcode:
+                sold_cur.execute('''
+                    SELECT id, relisted_store, relisted_item_id 
+                    FROM returns 
+                    WHERE barcode = ? 
+                    AND relisted = 1 
+                    AND resold = 0
+                    ORDER BY relisted_date DESC
+                    LIMIT 1
+                ''', (barcode,))
+                return_row = sold_cur.fetchone()
+                
+                if return_row:
+                    return_id = return_row[0]
+                    
+                    # Mark as resold
+                    sold_cur.execute('''
+                        UPDATE returns 
+                        SET resold = 1, resold_date = ?, resold_order_id = ?,
+                            lifecycle_count = lifecycle_count + 1
+                        WHERE id = ?
+                    ''', (sale_date, f'marketplace-{result["id"]}', return_id))
+                    
+                    # Add auto-detected lifecycle event
+                    sold_cur.execute('''
+                        INSERT INTO return_lifecycle_events 
+                        (return_id, event_type, event_date, auto_detected, order_id, store, notes)
+                        VALUES (?, 'resold', ?, 1, ?, ?, ?)
+                    ''', (return_id, sale_date, f'marketplace-{result["id"]}', 'marketplace', 'Auto-detected from marketplace sale'))
+                    
+                    print(f'[AUTO-DETECT] Return #{return_id} marked as resold (Marketplace sale #{result["id"]})')
+            
             sold_conn.commit()
             sold_conn.close()
         except Exception as e:
@@ -8364,7 +8505,7 @@ def returns_page():
 
 @app.route('/api/returns', methods=['GET'])
 def api_get_returns():
-    """Get all returns with optional filters."""
+    """Get all returns with optional filters and lifecycle info."""
     try:
         store = request.args.get('store', '').strip()
         status = request.args.get('status', '').strip()
@@ -8373,22 +8514,32 @@ def api_get_returns():
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         
-        # Build query with filters
-        query = 'SELECT * FROM returns WHERE 1=1'
+        # Build query with filters - include lifecycle columns
+        query = '''
+            SELECT r.*, 
+                   COUNT(e.id) as event_count
+            FROM returns r
+            LEFT JOIN return_lifecycle_events e ON e.return_id = r.id
+            WHERE 1=1
+        '''
         params = []
         
         if store:
-            query += ' AND store = ?'
+            query += ' AND r.store = ?'
             params.append(store)
         
         if status == 'pending':
-            query += ' AND received_date IS NULL'
+            query += ' AND r.received_date IS NULL'
         elif status == 'received':
-            query += ' AND received_date IS NOT NULL AND restocked = 0'
+            query += ' AND r.received_date IS NOT NULL AND r.restocked = 0'
         elif status == 'restocked':
-            query += ' AND restocked = 1'
+            query += ' AND r.restocked = 1'
+        elif status == 'relisted':
+            query += ' AND r.relisted = 1 AND r.resold = 0'
+        elif status == 'resold':
+            query += ' AND r.resold = 1'
         
-        query += ' ORDER BY return_date DESC'
+        query += ' GROUP BY r.id ORDER BY r.return_date DESC'
         
         cur.execute(query, params)
         rows = cur.fetchall()
@@ -8497,6 +8648,13 @@ def api_mark_return_received(return_id):
             WHERE id = ?
         ''', (return_id,))
         
+        # Create lifecycle event
+        cur.execute('''
+            INSERT INTO return_lifecycle_events 
+            (return_id, event_type, event_date, auto_detected)
+            VALUES (?, 'received', CURRENT_TIMESTAMP, 0)
+        ''', (return_id,))
+        
         conn.commit()
         conn.close()
         
@@ -8512,6 +8670,9 @@ def api_mark_return_received(return_id):
 def api_restock_return(return_id):
     """Mark return as restocked and update inventory."""
     try:
+        data = request.get_json() or {}
+        shelf_location = data.get('location', '')
+        
         conn = sqlite3.connect('sold.db')
         cur = conn.cursor()
         
@@ -8526,45 +8687,25 @@ def api_restock_return(return_id):
         if not result:
             return jsonify({'success': False, 'error': 'Return not found'}), 404
         
-        barcode, quantity, lot_number, location = result
+        barcode, quantity, lot_number, existing_location = result
         
-        # Mark as restocked
+        # Use provided location or fall back to existing
+        final_location = shelf_location or existing_location
+        
+        # Update return with restocked status and location
         cur.execute('''
             UPDATE returns
-            SET restocked = 1
+            SET restocked = 1, location = ?
             WHERE id = ?
-        ''', (return_id,))
+        ''', (final_location, return_id))
         
-        # Update inventory in searchRack.db
-        try:
-            rack_conn = sqlite3.connect('searchRack.db')
-            rack_cur = rack_conn.cursor()
-            
-            # Try to find item and restore to inventory
-            rack_cur.execute('''
-                SELECT id, quantity FROM rack WHERE barcode = ?
-            ''', (barcode,))
-            
-            item = rack_cur.fetchone()
-            
-            if item:
-                # Item exists, increase quantity
-                new_quantity = item[1] + quantity
-                rack_cur.execute('''
-                    UPDATE rack
-                    SET quantity = ?
-                    WHERE id = ?
-                ''', (new_quantity, item[0]))
-            else:
-                # Item doesn't exist, would need more details to recreate
-                # For now just mark as restocked in returns table
-                pass
-            
-            rack_conn.commit()
-            rack_conn.close()
-            
-        except Exception as inv_error:
-            print(f"Warning: Could not update inventory: {inv_error}")
+        # Create lifecycle event with shelf location
+        notes = f'Restocked to shelf: {final_location}' if final_location else 'Restocked to inventory'
+        cur.execute('''
+            INSERT INTO return_lifecycle_events 
+            (return_id, event_type, event_date, auto_detected, notes)
+            VALUES (?, 'restocked', CURRENT_TIMESTAMP, 0, ?)
+        ''', (return_id, notes))
         
         conn.commit()
         conn.close()
@@ -8572,6 +8713,218 @@ def api_restock_return(return_id):
         return jsonify({
             'success': True,
             'message': 'Return marked as restocked'
+        })
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/returns/<int:return_id>', methods=['PUT'])
+def api_update_return(return_id):
+    """Update return details (for editing)."""
+    try:
+        data = request.json
+        conn = sqlite3.connect('sold.db')
+        cur = conn.cursor()
+        
+        # Build update query based on provided fields
+        update_fields = []
+        values = []
+        
+        if 'received' in data:
+            if data['received']:
+                # Set received_date to current timestamp if marking as received
+                update_fields.append('received_date = datetime("now")')
+            else:
+                # Clear received_date if unmarking as received
+                update_fields.append('received_date = NULL')
+        
+        if 'restocked' in data:
+            update_fields.append('restocked = ?')
+            values.append(1 if data['restocked'] else 0)
+        
+        if 'location' in data:
+            update_fields.append('location = ?')
+            values.append(data['location'])
+        
+        if 'return_reason' in data:
+            update_fields.append('return_reason = ?')
+            values.append(data['return_reason'])
+        
+        if not update_fields:
+            return jsonify({'success': False, 'error': 'No fields to update'}), 400
+        
+        values.append(return_id)
+        query = f"UPDATE returns SET {', '.join(update_fields)} WHERE id = ?"
+        
+        cur.execute(query, values)
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True})
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/returns/<int:return_id>', methods=['DELETE'])
+def api_delete_return(return_id):
+    """Delete a return record."""
+    try:
+        conn = sqlite3.connect('sold.db')
+        cur = conn.cursor()
+        
+        cur.execute('DELETE FROM returns WHERE id = ?', (return_id,))
+        cur.execute('DELETE FROM return_lifecycle_events WHERE return_id = ?', (return_id,))
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True})
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/returns/<int:return_id>/relist', methods=['POST'])
+def api_relist_return(return_id):
+    """Mark return as relisted."""
+    try:
+        data = request.json
+        store = data.get('store', '').strip()
+        item_id = data.get('item_id', '').strip()
+        notes = data.get('notes', '').strip()
+        
+        conn = sqlite3.connect('sold.db')
+        cur = conn.cursor()
+        
+        import datetime
+        now = datetime.datetime.now().isoformat()
+        
+        # Update returns table
+        cur.execute('''
+            UPDATE returns 
+            SET relisted = 1, relisted_date = ?, relisted_store = ?, relisted_item_id = ?,
+                lifecycle_count = lifecycle_count + 1
+            WHERE id = ?
+        ''', (now, store, item_id, return_id))
+        
+        # Add lifecycle event
+        cur.execute('''
+            INSERT INTO return_lifecycle_events 
+            (return_id, event_type, event_date, auto_detected, store, item_id, notes)
+            VALUES (?, 'relisted', ?, 0, ?, ?, ?)
+        ''', (return_id, now, store, item_id, notes))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True})
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/returns/<int:return_id>/resold', methods=['POST'])
+def api_resold_return(return_id):
+    """Mark return as resold."""
+    try:
+        data = request.json
+        order_id = data.get('order_id', '').strip()
+        notes = data.get('notes', '').strip()
+        
+        conn = sqlite3.connect('sold.db')
+        cur = conn.cursor()
+        
+        import datetime
+        now = datetime.datetime.now().isoformat()
+        
+        # Update returns table
+        cur.execute('''
+            UPDATE returns 
+            SET resold = 1, resold_date = ?, resold_order_id = ?,
+                lifecycle_count = lifecycle_count + 1
+            WHERE id = ?
+        ''', (now, order_id, return_id))
+        
+        # Add lifecycle event
+        cur.execute('''
+            INSERT INTO return_lifecycle_events 
+            (return_id, event_type, event_date, auto_detected, order_id, notes)
+            VALUES (?, 'resold', ?, 0, ?, ?)
+        ''', (return_id, now, order_id, notes))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True})
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/returns/<int:return_id>/restart-lifecycle', methods=['POST'])
+def api_restart_return_lifecycle(return_id):
+    """Restart lifecycle - mark as received again after being resold."""
+    try:
+        data = request.json
+        notes = data.get('notes', '').strip()
+        
+        conn = sqlite3.connect('sold.db')
+        cur = conn.cursor()
+        
+        import datetime
+        now = datetime.datetime.now().isoformat()
+        
+        # Reset lifecycle flags but keep history
+        cur.execute('''
+            UPDATE returns 
+            SET restocked = 0, relisted = 0, resold = 0,
+                relisted_date = NULL, relisted_store = NULL, relisted_item_id = NULL,
+                resold_date = NULL, resold_order_id = NULL,
+                lifecycle_count = lifecycle_count + 1
+            WHERE id = ?
+        ''', (return_id,))
+        
+        # Add lifecycle event
+        cur.execute('''
+            INSERT INTO return_lifecycle_events 
+            (return_id, event_type, event_date, auto_detected, notes)
+            VALUES (?, 'returned_again', ?, 0, ?)
+        ''', (return_id, now, notes))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True})
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/returns/<int:return_id>/history', methods=['GET'])
+def api_get_return_history(return_id):
+    """Get lifecycle history for a return."""
+    try:
+        conn = sqlite3.connect('sold.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        
+        # Get return info
+        cur.execute('SELECT * FROM returns WHERE id = ?', (return_id,))
+        return_data = cur.fetchone()
+        
+        if not return_data:
+            conn.close()
+            return jsonify({'success': False, 'error': 'Return not found'}), 404
+        
+        # Get lifecycle events
+        cur.execute('''
+            SELECT * FROM return_lifecycle_events 
+            WHERE return_id = ? 
+            ORDER BY event_date ASC
+        ''', (return_id,))
+        events = [dict(row) for row in cur.fetchall()]
+        
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'return': dict(return_data),
+            'events': events
         })
         
     except Exception as e:
@@ -8865,6 +9218,9 @@ def _start_auto_sync_thread():
 if __name__ == "__main__":
     # Enable WAL mode for all databases (better concurrent performance)
     enable_wal_mode()
+    
+    # Initialize lifecycle tracking tables
+    ensure_lifecycle_tables()
     
     # Start Flask in a thread
     flask_thread = threading.Thread(target=start_flask, daemon=True)

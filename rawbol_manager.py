@@ -69,6 +69,17 @@ def ensure_rawbol_db():
         conn.commit()
         print("Column added successfully!")
     
+    # Migration: Add aftersale_quantity column to raw_bol_items if it doesn't exist
+    try:
+        cur.execute("SELECT aftersale_quantity FROM raw_bol_items LIMIT 1")
+    except sqlite3.OperationalError:
+        print("Adding aftersale_quantity column to raw_bol_items table...")
+        cur.execute("ALTER TABLE raw_bol_items ADD COLUMN aftersale_quantity INTEGER")
+        # Initialize aftersale_quantity with quantity value
+        cur.execute("UPDATE raw_bol_items SET aftersale_quantity = quantity")
+        conn.commit()
+        print("Column added and initialized successfully!")
+    
     # Migration: Remove old cost columns and add avg_cost to raw_bol_items if needed
     cur.execute("PRAGMA table_info(raw_bol_items)")
     columns = [col[1] for col in cur.fetchall()]
@@ -266,8 +277,8 @@ def insert_raw_bol_items(df, lot_number, import_date, avg_cost=None, bol_locatio
         
         for upc, item_data in consolidated_items.items():
             cur.execute('''INSERT INTO raw_bol_items 
-                (upc, item_description, avg_cost, image_url, quantity, lot_number, bol_location, import_date, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                (upc, item_description, avg_cost, image_url, quantity, lot_number, bol_location, import_date, created_at, aftersale_quantity)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                 (upc,
                  item_data['desc'],
                  avg_cost,
@@ -276,7 +287,8 @@ def insert_raw_bol_items(df, lot_number, import_date, avg_cost=None, bol_locatio
                  lot_number,
                  bol_location,
                  import_date,
-                 created_at))
+                 created_at,
+                 item_data['qty']))  # Initialize aftersale_quantity with quantity
             inserted += 1
         
         conn.commit()

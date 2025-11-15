@@ -141,6 +141,32 @@
         .summary-card.revenue .value { color: var(--primary); }
         .summary-card.cost .value { color: var(--warning); }
         .summary-card.fees .value { color: var(--danger); }
+        .summary-card.hidden { display: none; }
+        
+        .toggle-section {
+            background: var(--card);
+            border-radius: var(--radius);
+            padding: 12px 20px;
+            margin-bottom: 16px;
+            box-shadow: var(--shadow);
+            border: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .toggle-section label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            font-size: 0.95rem;
+            color: var(--text);
+        }
+        .toggle-section input[type="checkbox"] {
+            cursor: pointer;
+            width: 18px;
+            height: 18px;
+        }
         
         /* Charts Section */
         .charts-section {
@@ -383,6 +409,14 @@
             <p>Loading financial data...</p>
         </div>
         
+        <!-- Toggle Section -->
+        <div class="toggle-section" id="toggleSection" style="display:none;">
+            <label>
+                <input type="checkbox" id="showBolCostToggle">
+                <span>Show Total BOL Order Cost</span>
+            </label>
+        </div>
+        
         <!-- Summary Cards -->
         <div id="summarySection" style="display:none;">
             <div class="summary-grid">
@@ -391,10 +425,15 @@
                     <div class="value" id="totalRevenue">$0.00</div>
                     <div class="subtext" id="itemsSold">0 items sold</div>
                 </div>
-                <div class="summary-card cost">
-                    <div class="label">Total Costs</div>
-                    <div class="value" id="totalCosts">$0.00</div>
-                    <div class="subtext" id="avgCost">Avg: $0.00/item</div>
+                <div class="summary-card cost hidden" id="bolCostCard">
+                    <div class="label">BOL Cost</div>
+                    <div class="value" id="bolExtractCost">$0.00</div>
+                    <div class="subtext" id="bolCostInfo">From BOL uploads</div>
+                </div>
+                <div class="summary-card fees hidden" id="totalCostCard">
+                    <div class="label">Total Cost</div>
+                    <div class="value" id="totalCostValue">$0.00</div>
+                    <div class="subtext" id="totalCostBreakdown">BOL + Fees + Shipping</div>
                 </div>
                 <div class="summary-card fees">
                     <div class="label">Total Fees & Shipping</div>
@@ -485,6 +524,7 @@
             document.getElementById('searchTable').addEventListener('input', handleSearch);
             document.getElementById('prevPage').addEventListener('click', () => changePage(-1));
             document.getElementById('nextPage').addEventListener('click', () => changePage(1));
+            document.getElementById('showBolCostToggle').addEventListener('change', toggleBolCost);
             
             // Table sorting
             document.querySelectorAll('th[data-sort]').forEach(th => {
@@ -506,6 +546,23 @@
             }
         }
         
+        function toggleBolCost() {
+            const isChecked = document.getElementById('showBolCostToggle').checked;
+            const bolCostCard = document.getElementById('bolCostCard');
+            const totalCostCard = document.getElementById('totalCostCard');
+            
+            if (isChecked) {
+                bolCostCard.classList.remove('hidden');
+                totalCostCard.classList.remove('hidden');
+            } else {
+                bolCostCard.classList.add('hidden');
+                totalCostCard.classList.add('hidden');
+            }
+            
+            // Recalculate profit with the toggled state
+            updateSummary();
+        }
+        
         async function loadData() {
             document.getElementById('loading').classList.add('active');
             document.getElementById('summarySection').style.display = 'none';
@@ -518,8 +575,10 @@
                     allData = data.transactions;
                     window.bolStats = data.bol_stats || {};
                     window.lotOptions = data.lot_options || [];
+                    window.bolExtractTotals = data.bol_extract_totals || {};
                     populateBOLFilter();
                     applyFilters();
+                    document.getElementById('toggleSection').style.display = 'flex';
                 } else {
                     alert('Error loading data: ' + (data.error || 'Unknown error'));
                 }
@@ -615,12 +674,56 @@
         
         function updateSummary() {
             const bolFilter = document.getElementById('bolFilter').value;
+            const isBolCostToggled = document.getElementById('showBolCostToggle').checked;
+            
             const totalRevenue = filteredData.reduce((sum, item) => sum + (item.price * item.quantity), 0);
             const totalCosts = filteredData.reduce((sum, item) => sum + (item.cost ? item.cost * item.quantity : 0), 0);
             const totalFees = filteredData.reduce((sum, item) => sum + (item.seller_fee || 0) + (item.taxes || 0), 0);
             const totalShipping = filteredData.reduce((sum, item) => sum + (item.shipping_cost || 0), 0);
             const totalReturns = filteredData.reduce((sum, item) => sum + (item.return_cost || 0), 0);
-            const netProfit = totalRevenue - totalCosts - totalFees - totalShipping - totalReturns;
+            const totalFeesAndShipping = totalFees + totalShipping + totalReturns;
+            
+            // Calculate BOL extract cost
+            let bolExtractCost = 0;
+            if (bolFilter !== 'all' && window.bolExtractTotals && window.bolExtractTotals[bolFilter]) {
+                const bolExtractTotal = window.bolExtractTotals[bolFilter].total_cost || 0;
+                const bolShippingCost = window.bolExtractTotals[bolFilter].shipping_cost || 0;
+                bolExtractCost = bolExtractTotal + bolShippingCost;
+                document.getElementById('bolExtractCost').textContent = '$' + bolExtractCost.toFixed(2);
+                document.getElementById('bolCostInfo').textContent = `Client Cost: $${bolExtractTotal.toFixed(2)} + Ship: $${bolShippingCost.toFixed(2)}`;
+            } else {
+                // Calculate total across all filtered LOTs
+                const uniqueLots = [...new Set(filteredData.map(item => item.bol_number).filter(bol => bol))];
+                let totalBolCost = 0;
+                let totalBolShipping = 0;
+                
+                uniqueLots.forEach(lot => {
+                    if (window.bolExtractTotals && window.bolExtractTotals[lot]) {
+                        totalBolCost += window.bolExtractTotals[lot].total_cost || 0;
+                        totalBolShipping += window.bolExtractTotals[lot].shipping_cost || 0;
+                    }
+                });
+                
+                bolExtractCost = totalBolCost + totalBolShipping;
+                document.getElementById('bolExtractCost').textContent = '$' + bolExtractCost.toFixed(2);
+                document.getElementById('bolCostInfo').textContent = `Client Cost: $${totalBolCost.toFixed(2)} + Ship: $${totalBolShipping.toFixed(2)}`;
+            }
+            
+            // Calculate net profit based on toggle state
+            let netProfit;
+            if (isBolCostToggled) {
+                // When toggled: use BOL cost instead of item costs
+                const totalCostWithBol = bolExtractCost + totalFeesAndShipping;
+                netProfit = totalRevenue - totalCostWithBol;
+                
+                // Update Total Cost card
+                document.getElementById('totalCostValue').textContent = '$' + totalCostWithBol.toFixed(2);
+                document.getElementById('totalCostBreakdown').textContent = `BOL: $${bolExtractCost.toFixed(2)} + Fees: $${totalFeesAndShipping.toFixed(2)}`;
+            } else {
+                // When not toggled: use original item costs
+                netProfit = totalRevenue - totalCosts - totalFeesAndShipping;
+            }
+            
             const profitMargin = totalRevenue > 0 ? (netProfit / totalRevenue * 100) : 0;
             const avgCost = filteredData.filter(i => i.cost).length > 0 
                 ? totalCosts / filteredData.filter(i => i.cost).reduce((sum, i) => sum + i.quantity, 0) 
@@ -629,18 +732,7 @@
             document.getElementById('totalRevenue').textContent = '$' + totalRevenue.toFixed(2);
             document.getElementById('itemsSold').textContent = filteredData.reduce((sum, i) => sum + i.quantity, 0) + ' items sold';
             
-            // Show BOL cost comparison if filtering by BOL
-            let costsText = '$' + totalCosts.toFixed(2);
-            if (bolFilter !== 'all' && window.bolStats[bolFilter]) {
-                const bolTotalCost = window.bolStats[bolFilter].total_cost;
-                const roi = bolTotalCost > 0 ? ((totalRevenue - bolTotalCost) / bolTotalCost * 100) : 0;
-                costsText = '$' + totalCosts.toFixed(2);
-                document.getElementById('avgCost').textContent = `BOL Total: $${bolTotalCost.toFixed(2)} | ROI: ${roi.toFixed(1)}%`;
-            } else {
-                document.getElementById('avgCost').textContent = 'Avg: $' + avgCost.toFixed(2) + '/item';
-            }
-            document.getElementById('totalCosts').textContent = costsText;
-            document.getElementById('totalFees').textContent = '$' + (totalFees + totalShipping + totalReturns).toFixed(2);
+            document.getElementById('totalFees').textContent = '$' + totalFeesAndShipping.toFixed(2);
             document.getElementById('feeBreakdown').textContent = `Fees: $${totalFees.toFixed(2)} + Ship: $${totalShipping.toFixed(2)} + Returns: $${totalReturns.toFixed(2)}`;
             document.getElementById('netProfit').textContent = '$' + netProfit.toFixed(2);
             document.getElementById('profitMargin').textContent = profitMargin.toFixed(1) + '% margin';

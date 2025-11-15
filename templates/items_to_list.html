@@ -647,7 +647,8 @@ async function loadItems(){
   }
   
   render(results);
-  renderPagination(total, page, limit);
+  // Use filtered_count for pagination instead of server total (which doesn't account for client-side filters)
+  renderPagination(filtered_count, page, limit);
   // Auto-clear the search input after loading items
   document.getElementById('filter-q').value = '';
 }
