@@ -1369,6 +1369,84 @@ class AmazonManager:
         print(f"\n✅ Synced {synced_count} returns to database")
         return synced_count
 
+    def sync_settlements_to_db(self, days_back=90):
+        """
+        Fetch Amazon settlement data and sync to payouts table
+        Settlements represent actual payouts from Amazon
+        """
+        try:
+            from sp_api.api import Finances
+            import sqlite3
+            
+            finances_api = Finances(credentials=self.credentials, marketplace=self.marketplace)
+            
+            # Calculate date range
+            started_after = (datetime.utcnow() - timedelta(days=days_back)).isoformat()
+            
+            print(f"🔄 Fetching Amazon settlements from last {days_back} days...")
+            
+            # Get settlement groups (payouts)
+            response = finances_api.list_financial_event_groups(
+                FinancialEventGroupStartedAfter=started_after,
+                MaxResultsPerPage=100
+            )
+            
+            if response.errors:
+                print(f"❌ Error fetching settlements: {response.errors}")
+                return 0
+            
+            groups = response.payload.get('FinancialEventGroupList', [])
+            print(f"📊 Found {len(groups)} settlements")
+            
+            # Connect to database
+            conn = sqlite3.connect('sold.db')
+            cur = conn.cursor()
+            
+            synced_count = 0
+            
+            for group in groups:
+                settlement_id = group.get('FinancialEventGroupId')
+                start_date = group.get('FinancialEventGroupStart')
+                end_date = group.get('FinancialEventGroupEnd')
+                status = group.get('ProcessingStatus', 'Unknown')
+                
+                # Get payout amount
+                original_total = group.get('OriginalTotal', {})
+                converted_total = group.get('ConvertedTotal', {})
+                
+                amount = float(converted_total.get('CurrencyAmount', original_total.get('CurrencyAmount', 0)))
+                currency = converted_total.get('CurrencyCode', original_total.get('CurrencyCode', 'USD'))
+                
+                # Determine payout date (use end_date for closed settlements)
+                payout_date = end_date if status == 'Closed' else None
+                
+                # Insert or update settlement
+                cur.execute('''
+                    INSERT INTO payouts (store, settlement_id, start_date, end_date, payout_date, amount, currency, status, synced_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(settlement_id) DO UPDATE SET
+                        end_date = excluded.end_date,
+                        payout_date = excluded.payout_date,
+                        amount = excluded.amount,
+                        status = excluded.status,
+                        synced_at = CURRENT_TIMESTAMP
+                ''', ('amazon', settlement_id, start_date, end_date, payout_date, amount, currency, status))
+                
+                synced_count += 1
+                print(f"  ✅ {settlement_id[:20]}...: {currency} ${amount:.2f} ({status})")
+            
+            conn.commit()
+            conn.close()
+            
+            print(f"\n✅ Synced {synced_count} settlements to database")
+            return synced_count
+            
+        except Exception as e:
+            print(f"❌ Error syncing settlements: {e}")
+            import traceback
+            traceback.print_exc()
+            return 0
+
 
 if __name__ == '__main__':
     # Test the connection

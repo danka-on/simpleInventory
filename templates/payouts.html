@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Payouts - Inventory System</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --primary: #00b894;
+            --secondary: #0984e3;
+            --danger: #d63031;
+            --warning: #fdcb6e;
+            --dark: #2d3436;
+            --light: #dfe6e9;
+            --card: #ffffff;
+            --border: #e1e8ed;
+            --text: #2c3e50;
+            --radius: 12px;
+        }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+            padding-bottom: 80px;
+        }
+        h1 {
+            color: white;
+            margin-bottom: 24px;
+            font-size: 2rem;
+            text-align: center;
+        }
+        .header-section {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .btn-primary {
+            background: var(--secondary);
+            color: white;
+        }
+        .btn-primary:hover {
+            background: #0770c9;
+            transform: translateY(-1px);
+        }
+        .btn-success {
+            background: var(--primary);
+            color: white;
+        }
+        .btn-success:hover {
+            background: #00a07f;
+            transform: translateY(-1px);
+        }
+        .btn-danger {
+            background: var(--danger);
+            color: white;
+        }
+        .btn-danger:hover {
+            background: #c22828;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+        .stat-card {
+            background: var(--card);
+            padding: 20px;
+            border-radius: var(--radius);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+        .stat-card h3 {
+            font-size: 0.9rem;
+            color: #888;
+            font-weight: 500;
+            margin-bottom: 8px;
+        }
+        .stat-card .value {
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: var(--primary);
+        }
+        .filters-section {
+            background: var(--card);
+            padding: 20px;
+            border-radius: var(--radius);
+            margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+        .filters {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 12px;
+        }
+        .filters select,
+        .filters input {
+            padding: 10px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 0.95rem;
+            width: 100%;
+        }
+        .payouts-table {
+            background: var(--card);
+            border-radius: var(--radius);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+            border: 1px solid var(--border);
+            overflow: hidden;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th {
+            background: #f8f9fa;
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+            color: #555;
+            border-bottom: 2px solid var(--border);
+            font-size: 0.9rem;
+        }
+        td {
+            padding: 12px;
+            border-bottom: 1px solid #f0f0f0;
+            font-size: 0.95rem;
+        }
+        tr:hover {
+            background: #f8f9fa;
+        }
+        .badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+        .badge-amazon {
+            background: #ff9900;
+            color: white;
+        }
+        .badge-ebay {
+            background: #0064d2;
+            color: white;
+        }
+        .badge-open {
+            background: #f39c12;
+            color: white;
+        }
+        .badge-closed {
+            background: #00b894;
+            color: white;
+        }
+        .message {
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            display: none;
+        }
+        .message.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+            display: block;
+        }
+        .message.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+            display: block;
+        }
+        .message.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+            display: block;
+        }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #888;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header-section">
+            <a href="/financial_analytics" style="text-decoration:none;">
+                <button class="btn btn-danger">
+                    <i class="fas fa-arrow-left"></i> Back to Analytics
+                </button>
+            </a>
+            <h1 style="flex:1;margin:0;">Store Payouts</h1>
+            <button class="btn btn-success" onclick="syncPayouts()">
+                <i class="fas fa-sync-alt"></i> Sync Payouts
+            </button>
+        </div>
+
+        <div id="message" class="message"></div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <h3>Total Payouts</h3>
+                <div class="value" id="stat-total">-</div>
+            </div>
+            <div class="stat-card">
+                <h3>Total Amount</h3>
+                <div class="value" id="stat-amount">-</div>
+            </div>
+            <div class="stat-card">
+                <h3>Open Settlements</h3>
+                <div class="value" id="stat-open">-</div>
+            </div>
+            <div class="stat-card">
+                <h3>Closed Settlements</h3>
+                <div class="value" id="stat-closed">-</div>
+            </div>
+        </div>
+
+        <div class="filters-section">
+            <div class="filters">
+                <select id="storeFilter" onchange="loadPayouts()">
+                    <option value="">All Stores</option>
+                    <option value="amazon">Amazon</option>
+                    <option value="ebay">eBay</option>
+                </select>
+                <select id="statusFilter" onchange="loadPayouts()">
+                    <option value="">All Status</option>
+                    <option value="open">Open</option>
+                    <option value="closed">Closed</option>
+                </select>
+                <input type="date" id="startDateFilter" onchange="loadPayouts()" placeholder="Start Date">
+                <input type="date" id="endDateFilter" onchange="loadPayouts()" placeholder="End Date">
+            </div>
+        </div>
+
+        <div class="payouts-table">
+            <div id="loading" class="loading">
+                <i class="fas fa-spinner fa-spin"></i> Loading payouts...
+            </div>
+            <table id="payoutsTable" style="display:none;">
+                <thead>
+                    <tr>
+                        <th>Store</th>
+                        <th>Settlement ID</th>
+                        <th>Period Start</th>
+                        <th>Period End</th>
+                        <th>Payout Date</th>
+                        <th>Amount</th>
+                        <th>Status</th>
+                        <th>Last Synced</th>
+                    </tr>
+                </thead>
+                <tbody id="payoutsBody">
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        let allPayouts = [];
+
+        async function loadPayouts() {
+            const storeFilter = document.getElementById('storeFilter').value;
+            const statusFilter = document.getElementById('statusFilter').value;
+            const startDate = document.getElementById('startDateFilter').value;
+            const endDate = document.getElementById('endDateFilter').value;
+
+            try {
+                showLoading(true);
+                
+                const params = new URLSearchParams();
+                if (storeFilter) params.append('store', storeFilter);
+                if (statusFilter) params.append('status', statusFilter);
+                if (startDate) params.append('start_date', startDate);
+                if (endDate) params.append('end_date', endDate);
+                
+                const response = await fetch(`/api/payouts?${params.toString()}`);
+                const result = await response.json();
+                
+                if (!result.success) {
+                    throw new Error(result.error || 'Failed to load payouts');
+                }
+                
+                allPayouts = result.payouts;
+                updateStats(result.stats);
+                renderPayouts(allPayouts);
+                
+                showLoading(false);
+            } catch (error) {
+                showMessage('error', `Error loading payouts: ${error.message}`);
+                showLoading(false);
+            }
+        }
+
+        function renderPayouts(payouts) {
+            const tbody = document.getElementById('payoutsBody');
+            tbody.innerHTML = '';
+            
+            if (payouts.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:40px;color:#888;">No payouts found</td></tr>';
+                document.getElementById('payoutsTable').style.display = 'table';
+                return;
+            }
+            
+            payouts.forEach(payout => {
+                const row = `
+                    <tr>
+                        <td><span class="badge badge-${payout.store}">${payout.store.toUpperCase()}</span></td>
+                        <td><code style="font-size:0.85rem;">${payout.settlement_id.substring(0, 30)}...</code></td>
+                        <td>${formatDate(payout.start_date)}</td>
+                        <td>${payout.end_date ? formatDate(payout.end_date) : '<em>Ongoing</em>'}</td>
+                        <td>${payout.payout_date ? formatDate(payout.payout_date) : '<em>Pending</em>'}</td>
+                        <td><strong>${payout.currency} $${payout.amount.toFixed(2)}</strong></td>
+                        <td><span class="badge badge-${payout.status.toLowerCase()}">${payout.status.toUpperCase()}</span></td>
+                        <td>${formatDate(payout.synced_at)}</td>
+                    </tr>
+                `;
+                tbody.innerHTML += row;
+            });
+            
+            document.getElementById('payoutsTable').style.display = 'table';
+        }
+
+        function updateStats(stats) {
+            document.getElementById('stat-total').textContent = stats.total_payouts || 0;
+            document.getElementById('stat-amount').textContent = stats.total_amount ? `$${stats.total_amount.toFixed(2)}` : '$0.00';
+            document.getElementById('stat-open').textContent = stats.open_count || 0;
+            document.getElementById('stat-closed').textContent = stats.closed_count || 0;
+        }
+
+        async function syncPayouts() {
+            try {
+                showMessage('info', 'Syncing payouts from Amazon...');
+                
+                const response = await fetch('/api/payouts/sync', {
+                    method: 'POST'
+                });
+                
+                const result = await response.json();
+                
+                if (!result.success) {
+                    throw new Error(result.error || 'Sync failed');
+                }
+                
+                showMessage('success', `✓ Successfully synced ${result.synced_count} settlements`);
+                
+                // Reload payouts
+                setTimeout(() => loadPayouts(), 1000);
+            } catch (error) {
+                showMessage('error', `Sync error: ${error.message}`);
+            }
+        }
+
+        function formatDate(dateStr) {
+            if (!dateStr) return '-';
+            const date = new Date(dateStr);
+            return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+        }
+
+        function showMessage(type, text) {
+            const msgDiv = document.getElementById('message');
+            msgDiv.className = `message ${type}`;
+            msgDiv.textContent = text;
+            
+            if (type === 'success' || type === 'info') {
+                setTimeout(() => {
+                    msgDiv.style.display = 'none';
+                }, 5000);
+            }
+        }
+
+        function showLoading(show) {
+            document.getElementById('loading').style.display = show ? 'block' : 'none';
+            document.getElementById('payoutsTable').style.display = show ? 'none' : 'table';
+        }
+
+        // Load on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            loadPayouts();
+        });
+    </script>
+</body>
+</html>

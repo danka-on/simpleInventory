@@ -364,6 +364,120 @@ class EbayManager:
         print(f"   • {matched_count} matched to original orders")
         print(f"   • {unmatched_count} without original order (still included for analytics)")
         return synced_count
+    
+    def sync_payouts_to_db(self, days_back=90):
+        """
+        Fetch eBay payout data and sync to payouts table
+        Uses eBay Finances API to get payout summaries
+        """
+        try:
+            token = self.get_access_token()
+            if not token:
+                print("❌ No eBay access token available")
+                return 0
+            
+            headers = {
+                'Authorization': f'Bearer {token}',
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            }
+            
+            # Calculate date range
+            filter_date = (datetime.now() - timedelta(days=days_back)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+            
+            print(f"🔄 Fetching eBay payouts from last {days_back} days...")
+            
+            # eBay Finances API endpoint for payouts (must use apiz.ebay.com)
+            url = "https://apiz.ebay.com/sell/finances/v1/payout_summary"
+            
+            params = {
+                'filter': f'payoutDate:[{filter_date}..]',
+                'limit': 200
+            }
+            
+            all_payouts = []
+            
+            # Paginate through results
+            while True:
+                response = requests.get(url, headers=headers, params=params, timeout=30)
+                
+                if response.status_code == 403:
+                    print("⚠️ eBay Finances API access denied - need User OAuth token or proper permissions")
+                    return 0
+                elif response.status_code != 200:
+                    print(f"❌ eBay API error: {response.status_code}")
+                    print(f"Response: {response.text}")
+                    return 0
+                
+                data = response.json()
+                payouts = data.get('payouts', [])
+                all_payouts.extend(payouts)
+                
+                print(f"  📄 Retrieved {len(payouts)} payouts")
+                
+                # Check for next page
+                next_url = data.get('next')
+                if not next_url:
+                    break
+                
+                url = next_url
+                params = {}  # Next URL has params embedded
+                time.sleep(0.5)  # Rate limiting
+            
+            print(f"📊 Found {len(all_payouts)} total eBay payouts")
+            
+            # Connect to database
+            conn = sqlite3.connect('sold.db')
+            cur = conn.cursor()
+            
+            synced_count = 0
+            
+            for payout in all_payouts:
+                payout_id = payout.get('payoutId')
+                payout_date = payout.get('payoutDate')
+                payout_status = payout.get('payoutStatus', 'UNKNOWN')
+                
+                # Get amount
+                amount_obj = payout.get('amount', {})
+                amount = float(amount_obj.get('value', 0))
+                currency = amount_obj.get('currency', 'USD')
+                
+                # Skip $0 payouts
+                if amount <= 0:
+                    continue
+                
+                # eBay payouts are single-day, use payout_date for all date fields
+                start_date = payout_date
+                end_date = payout_date
+                
+                # Map eBay status to our status
+                status = 'Closed' if payout_status == 'SUCCEEDED' else payout_status.title()
+                
+                # Insert or update payout
+                cur.execute('''
+                    INSERT INTO payouts (store, settlement_id, start_date, end_date, payout_date, amount, currency, status, synced_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(settlement_id) DO UPDATE SET
+                        payout_date = excluded.payout_date,
+                        amount = excluded.amount,
+                        status = excluded.status,
+                        synced_at = CURRENT_TIMESTAMP
+                ''', ('ebay', payout_id, start_date, end_date, payout_date, amount, currency, status))
+                
+                synced_count += 1
+                print(f"  ✅ {payout_id}: {currency} ${amount:.2f} ({status})")
+            
+            conn.commit()
+            conn.close()
+            
+            print(f"\n✅ Synced {synced_count} eBay payouts to database")
+            return synced_count
+            
+        except Exception as e:
+            print(f"❌ Error syncing eBay payouts: {e}")
+            import traceback
+            traceback.print_exc()
+            return 0
 
 
 if __name__ == '__main__':
