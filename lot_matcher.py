@@ -31,25 +31,36 @@ def match_sold_item_to_lot(barcode, sold_date):
         # Parse sold date
         sold_datetime = datetime.fromisoformat(sold_date.replace('Z', '+00:00'))
         
+        # Normalize barcode - strip leading zeros for matching
+        # sold.db may have "088235725301" while rawbol.db has "88235725301"
+        barcode_normalized = barcode.lstrip('0') if barcode else barcode
+        
         # Get all LOTs with this UPC, ordered by import_date DESC (newest first)
         # Only consider LOTs with import_date BEFORE sold date
+        # Match both original and normalized barcode to handle leading zero variations
         rawbol_cur.execute('''
             SELECT 
                 lot_number,
                 import_date,
                 SUM(quantity) as total_quantity
             FROM raw_bol_items
-            WHERE upc = ? COLLATE NOCASE
+            WHERE (upc = ? COLLATE NOCASE OR upc = ? COLLATE NOCASE)
             AND import_date IS NOT NULL
             AND import_date != ''
             GROUP BY lot_number, import_date
             ORDER BY import_date DESC
-        ''', (barcode,))
+        ''', (barcode, barcode_normalized))
         
         available_lots = []
         for row in rawbol_cur.fetchall():
             try:
                 lot_date = datetime.fromisoformat(row['import_date'])
+                # Make lot_date timezone-aware to match sold_datetime
+                if lot_date.tzinfo is None:
+                    # Assume UTC if no timezone
+                    from datetime import timezone
+                    lot_date = lot_date.replace(tzinfo=timezone.utc)
+                
                 # Only include LOTs before sold date
                 if lot_date <= sold_datetime:
                     available_lots.append({
@@ -76,13 +87,14 @@ def match_sold_item_to_lot(barcode, sold_date):
             total_quantity = lot['total_quantity']
             
             # Count how many items from this LOT have already been sold
+            # Also normalize barcode for consistency
             sold_cur.execute('''
                 SELECT COUNT(*) as sold_count
                 FROM orders
-                WHERE barcode = ? COLLATE NOCASE
+                WHERE (barcode = ? COLLATE NOCASE OR barcode = ? COLLATE NOCASE)
                 AND lot_number = ?
                 AND paid_time IS NOT NULL
-            ''', (barcode, lot_number))
+            ''', (barcode, barcode_normalized, lot_number))
             
             sold_count = sold_cur.fetchone()['sold_count']
             
