@@ -388,7 +388,8 @@ class EbayManager:
             print(f"🔄 Fetching eBay payouts from last {days_back} days...")
             
             # eBay Finances API endpoint for payouts (must use apiz.ebay.com)
-            url = "https://apiz.ebay.com/sell/finances/v1/payout_summary"
+            # Use /payout endpoint (not /payout_summary) to get actual payout records
+            url = "https://apiz.ebay.com/sell/finances/v1/payout"
             
             params = {
                 'filter': f'payoutDate:[{filter_date}..]',
