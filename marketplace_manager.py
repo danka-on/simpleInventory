@@ -90,20 +90,96 @@ def get_marketplace_sales(limit=None, offset=None):
         return {'success': False, 'error': str(e)}
 
 def delete_marketplace_sale(sale_id):
-    """Delete a marketplace sale."""
+    """Delete a marketplace sale from both marketplace.db and sold.db."""
     try:
         ensure_marketplace_db()
+        
+        # First, get sale details before deleting
         conn = sqlite3.connect('marketplace.db')
+        conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         
+        cur.execute('SELECT * FROM marketplace_sales WHERE id = ?', (sale_id,))
+        sale = cur.fetchone()
+        
+        if not sale:
+            conn.close()
+            return {'success': False, 'error': 'Sale not found'}
+        
+        sale_barcode = sale['barcode']
+        sale_quantity = sale['quantity']
+        sale_date = sale['sale_date']
+        
+        # Delete from marketplace.db
         cur.execute('DELETE FROM marketplace_sales WHERE id = ?', (sale_id,))
-        deleted = cur.rowcount
+        deleted_marketplace = cur.rowcount
         
         conn.commit()
         conn.close()
         
-        return {'success': True, 'deleted': deleted}
+        # Delete from sold.db (orders table where store='marketplace')
+        # Match by barcode and approximate date (same day)
+        sold_conn = sqlite3.connect('sold.db')
+        sold_cur = sold_conn.cursor()
+        
+        # Find matching orders from the same day
+        sold_cur.execute('''
+            DELETE FROM orders 
+            WHERE barcode = ? 
+            AND store = 'marketplace'
+            AND DATE(paid_time) = ?
+            AND id IN (
+                SELECT id FROM orders 
+                WHERE barcode = ? 
+                AND store = 'marketplace'
+                AND DATE(paid_time) = ?
+                ORDER BY paid_time DESC
+                LIMIT ?
+            )
+        ''', (sale_barcode, sale_date, sale_barcode, sale_date, sale_quantity))
+        
+        deleted_sold = sold_cur.rowcount
+        
+        # Also check if this was marked as a resold return and revert it
+        sold_cur.execute('''
+            SELECT id FROM returns 
+            WHERE resold = 1 
+            AND resold_order_id = ?
+        ''', (f'marketplace-{sale_id}',))
+        
+        return_row = sold_cur.fetchone()
+        if return_row:
+            return_id = return_row[0]
+            
+            # Revert the resold status
+            sold_cur.execute('''
+                UPDATE returns 
+                SET resold = 0, resold_date = NULL, resold_order_id = NULL,
+                    lifecycle_count = lifecycle_count - 1
+                WHERE id = ?
+            ''', (return_id,))
+            
+            # Delete the lifecycle event
+            sold_cur.execute('''
+                DELETE FROM return_lifecycle_events 
+                WHERE return_id = ? 
+                AND event_type = 'resold' 
+                AND order_id = ?
+            ''', (return_id, f'marketplace-{sale_id}'))
+            
+            print(f'[DELETE] Reverted resold status for return #{return_id}')
+        
+        sold_conn.commit()
+        sold_conn.close()
+        
+        return {
+            'success': True, 
+            'deleted': deleted_marketplace,
+            'deleted_from_sold': deleted_sold
+        }
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return {'success': False, 'error': str(e)}
 
 def update_marketplace_sale(sale_id, barcode=None, title=None, quantity=None, price=None):

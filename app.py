@@ -354,6 +354,70 @@ def send_test_email():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
+@app.route('/api/emailer/send-test-inventory', methods=['POST'])
+def send_test_inventory_email():
+    """Send a test inventory alert email with sample data"""
+    try:
+        data = request.json
+        emails = data.get('emails', [])
+        
+        if not emails:
+            return jsonify({'success': False, 'error': 'No email addresses provided'}), 400
+        
+        # Generate fake inventory issues for testing
+        test_issues = {
+            'has_issues': True,
+            'timestamp': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'ebay_items': [
+                {
+                    'barcode': '0123456789012',
+                    'title': 'Sample Product - Wireless Bluetooth Headphones with Noise Cancellation',
+                    'store_qty': 3,
+                    'item_id': '123456789012'
+                },
+                {
+                    'barcode': '9876543210987',
+                    'title': 'Test Item - Premium Leather Wallet with RFID Protection Technology',
+                    'store_qty': 1,
+                    'item_id': '987654321098'
+                }
+            ],
+            'amazon_items': [
+                {
+                    'barcode': '5551234567890',
+                    'title': 'Example Product - Stainless Steel Water Bottle 32oz Insulated',
+                    'store_qty': 5,
+                    'asin': 'B08ABCD1234'
+                },
+                {
+                    'barcode': '4449876543210',
+                    'title': 'Demo Item - USB-C Hub Multi-Port Adapter with HDMI and Ethernet',
+                    'store_qty': 2,
+                    'asin': 'B09WXYZ5678'
+                }
+            ]
+        }
+        
+        # Generate HTML email
+        html_body = generate_inventory_email_html(test_issues)
+        plain_body = generate_inventory_email_plain(test_issues)
+        
+        # Send email
+        subject = f"⚠️ [TEST] Inventory Alert - 4 Items Need Attention - {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}"
+        success, error = send_email_smtp(emails, subject, plain_body, html_body)
+        
+        if not success:
+            return jsonify({'success': False, 'error': error}), 500
+        
+        print(f"✅ Test inventory alert sent to: {', '.join(emails)}")
+        
+        return jsonify({
+            'success': True,
+            'message': f'Test inventory alert sent to {len(emails)} recipient(s)'
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/api/emailer/send-health', methods=['POST'])
 def send_health_email():
     """Send health stats email to configured recipients"""
@@ -383,6 +447,45 @@ def send_health_email():
         return jsonify({
             'success': True,
             'message': f'Health report sent to {len(emails)} recipient(s)'
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/emailer/send-inventory', methods=['POST'])
+def send_inventory_alert_email():
+    """Send inventory alert email for items with store quantity but no searchRack quantity"""
+    try:
+        data = request.json
+        emails = data.get('emails', [])
+        
+        if not emails:
+            return jsonify({'success': False, 'error': 'No email addresses provided'}), 400
+        
+        # Collect inventory mismatches
+        inventory_issues = collect_inventory_mismatches()
+        
+        if not inventory_issues['has_issues']:
+            return jsonify({
+                'success': True,
+                'message': 'No inventory issues found - email not sent'
+            })
+        
+        # Generate HTML email
+        html_body = generate_inventory_email_html(inventory_issues)
+        plain_body = generate_inventory_email_plain(inventory_issues)
+        
+        # Send email
+        subject = f"⚠️ Inventory Alert - {len(inventory_issues['ebay_items']) + len(inventory_issues['amazon_items'])} Items Need Attention - {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}"
+        success, error = send_email_smtp(emails, subject, plain_body, html_body)
+        
+        if not success:
+            return jsonify({'success': False, 'error': error}), 500
+        
+        print(f"✅ Inventory alert sent to: {', '.join(emails)}")
+        
+        return jsonify({
+            'success': True,
+            'message': f'Inventory alert sent to {len(emails)} recipient(s)'
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -615,6 +718,254 @@ def format_time_ago(timestamp_str):
             return f"⚠️ {days}d ago"
     except:
         return timestamp_str
+
+def collect_inventory_mismatches():
+    """
+    Find items where store listings have quantity > 0 but searchRack has 0 quantity.
+    Only reports on items that exist in searchRack with 0 quantity (not missing items).
+    """
+    issues = {
+        'has_issues': False,
+        'ebay_items': [],
+        'amazon_items': [],
+        'timestamp': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    }
+    
+    try:
+        # Get searchRack items with 0 quantity
+        rack_conn = sqlite3.connect('searchRack.db')
+        rack_conn.row_factory = sqlite3.Row
+        rack_cur = rack_conn.cursor()
+        
+        # Get quantity column name
+        rack_cur.execute('PRAGMA table_info(SEARCHRACK)')
+        cols = [r[1] for r in rack_cur.fetchall()]
+        qty_col = 'QUANTITY' if 'QUANTITY' in cols else ('QTY' if 'QTY' in cols else None)
+        
+        if not qty_col:
+            rack_conn.close()
+            return issues
+        
+        # Get all items with 0 quantity and their barcodes
+        rack_cur.execute(f'''
+            SELECT ITEMID as barcode, TITLE, {qty_col} as quantity 
+            FROM SEARCHRACK 
+            WHERE ITEMID IS NOT NULL 
+            AND TRIM(ITEMID) != ''
+            AND ({qty_col} = 0 OR {qty_col} IS NULL)
+        ''')
+        zero_qty_items = {row['barcode'].strip().upper(): row['TITLE'] for row in rack_cur.fetchall() if row['barcode']}
+        rack_conn.close()
+        
+        if not zero_qty_items:
+            return issues
+        
+        # Check eBay store for matching items with quantity > 0
+        try:
+            ebay_conn = sqlite3.connect('ebayStore.db')
+            ebay_conn.row_factory = sqlite3.Row
+            ebay_cur = ebay_conn.cursor()
+            
+            ebay_cur.execute('''
+                SELECT SKU, Title, Quantity, ItemID 
+                FROM INVENTORY 
+                WHERE SKU IS NOT NULL 
+                AND TRIM(SKU) != ''
+                AND CAST(Quantity AS INTEGER) > 0
+            ''')
+            
+            for row in ebay_cur.fetchall():
+                sku = row['SKU'].strip().upper() if row['SKU'] else ''
+                if sku and sku in zero_qty_items:
+                    issues['ebay_items'].append({
+                        'barcode': sku,
+                        'title': row['Title'] or zero_qty_items[sku],
+                        'store_qty': row['Quantity'],
+                        'item_id': row['ItemID']
+                    })
+                    issues['has_issues'] = True
+            
+            ebay_conn.close()
+        except Exception as e:
+            print(f"Error checking eBay inventory: {e}")
+        
+        # Check Amazon store for matching items with quantity > 0
+        try:
+            amazon_conn = sqlite3.connect('amazonStore.db')
+            amazon_conn.row_factory = sqlite3.Row
+            amazon_cur = amazon_conn.cursor()
+            
+            amazon_cur.execute('''
+                SELECT UPC, TITLE, QTY, ASIN 
+                FROM ITEMS 
+                WHERE UPC IS NOT NULL 
+                AND TRIM(UPC) != ''
+                AND CAST(QTY AS INTEGER) > 0
+            ''')
+            
+            for row in amazon_cur.fetchall():
+                upc = row['UPC'].strip().upper() if row['UPC'] else ''
+                if upc and upc in zero_qty_items:
+                    issues['amazon_items'].append({
+                        'barcode': upc,
+                        'title': row['TITLE'] or zero_qty_items[upc],
+                        'store_qty': row['QTY'],
+                        'asin': row['ASIN']
+                    })
+                    issues['has_issues'] = True
+            
+            amazon_conn.close()
+        except Exception as e:
+            print(f"Error checking Amazon inventory: {e}")
+        
+    except Exception as e:
+        print(f"Error collecting inventory mismatches: {e}")
+    
+    return issues
+
+def generate_inventory_email_html(issues):
+    """Generate HTML email body for inventory alert"""
+    ebay_rows = ""
+    for item in issues['ebay_items']:
+        ebay_rows += f"""
+        <tr>
+            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0;">{item['barcode']}</td>
+            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0;">{item['title'][:60]}...</td>
+            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; text-align: center; font-weight: bold; color: #e74c3c;">{item['store_qty']}</td>
+        </tr>
+        """
+    
+    amazon_rows = ""
+    for item in issues['amazon_items']:
+        amazon_rows += f"""
+        <tr>
+            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0;">{item['barcode']}</td>
+            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0;">{item['title'][:60]}...</td>
+            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; text-align: center; font-weight: bold; color: #e74c3c;">{item['store_qty']}</td>
+        </tr>
+        """
+    
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <style>
+            body {{ font-family: 'Segoe UI', Arial, sans-serif; background: #f9f9f9; margin: 0; padding: 20px; }}
+            .container {{ max-width: 800px; margin: 0 auto; background: white; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }}
+            .header {{ background: linear-gradient(135deg, #e74c3c, #c0392b); color: white; padding: 30px; border-radius: 12px 12px 0 0; }}
+            .header h1 {{ margin: 0; font-size: 28px; }}
+            .header p {{ margin: 10px 0 0 0; opacity: 0.9; }}
+            .content {{ padding: 30px; }}
+            .section {{ margin-bottom: 30px; }}
+            .section h2 {{ color: #2c3e50; font-size: 20px; margin: 0 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid #e0e0e0; }}
+            table {{ width: 100%; border-collapse: collapse; background: white; }}
+            th {{ background: #34495e; color: white; padding: 12px; text-align: left; font-weight: 600; }}
+            .alert {{ background: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 20px 0; border-radius: 4px; }}
+            .footer {{ padding: 20px; text-align: center; color: #7f8c8d; font-size: 14px; background: #ecf0f1; border-radius: 0 0 12px 12px; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>⚠️ Inventory Alert</h1>
+                <p>Items listed online but showing 0 in physical inventory</p>
+                <p style="font-size: 14px; margin-top: 10px;">{issues['timestamp']}</p>
+            </div>
+            
+            <div class="content">
+                <div class="alert">
+                    <strong>⚠️ Action Required:</strong> The following items have quantity listed on marketplaces but show 0 quantity in your searchRack inventory. Please verify and update accordingly.
+                </div>
+    """
+    
+    if issues['ebay_items']:
+        html += f"""
+                <div class="section">
+                    <h2>🛒 eBay ({len(issues['ebay_items'])} items)</h2>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Barcode (SKU)</th>
+                                <th>Title</th>
+                                <th style="text-align: center;">Store Qty</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {ebay_rows}
+                        </tbody>
+                    </table>
+                </div>
+        """
+    
+    if issues['amazon_items']:
+        html += f"""
+                <div class="section">
+                    <h2>📦 Amazon ({len(issues['amazon_items'])} items)</h2>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Barcode (UPC)</th>
+                                <th>Title</th>
+                                <th style="text-align: center;">Store Qty</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {amazon_rows}
+                        </tbody>
+                    </table>
+                </div>
+        """
+    
+    html += """
+            </div>
+            
+            <div class="footer">
+                <p>This is an automated inventory alert from your Store App</p>
+                <p>These alerts are sent when items are listed online but show zero physical inventory</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    
+    return html
+
+def generate_inventory_email_plain(issues):
+    """Generate plain text email body for inventory alert"""
+    text = f"""
+⚠️ INVENTORY ALERT
+Generated: {issues['timestamp']}
+
+Items listed online but showing 0 in physical inventory.
+Action required: Please verify and update inventory.
+
+"""
+    
+    if issues['ebay_items']:
+        text += f"\n🛒 eBay ({len(issues['ebay_items'])} items):\n"
+        text += "-" * 70 + "\n"
+        for item in issues['ebay_items']:
+            text += f"Barcode: {item['barcode']}\n"
+            text += f"Title: {item['title'][:60]}\n"
+            text += f"Store Qty: {item['store_qty']}\n"
+            text += "-" * 70 + "\n"
+    
+    if issues['amazon_items']:
+        text += f"\n📦 Amazon ({len(issues['amazon_items'])} items):\n"
+        text += "-" * 70 + "\n"
+        for item in issues['amazon_items']:
+            text += f"Barcode: {item['barcode']}\n"
+            text += f"Title: {item['title'][:60]}\n"
+            text += f"Store Qty: {item['store_qty']}\n"
+            text += "-" * 70 + "\n"
+    
+    text += """
+--
+This is an automated inventory alert from your Store App.
+These alerts are sent when items are listed online but show zero physical inventory.
+"""
+    
+    return text
 
 # BOL Statistics page
 @app.route('/bol-stats')
@@ -1330,6 +1681,129 @@ def _start_trash_purger_thread():
             _time.sleep(24*60*60)
     t = threading.Thread(target=_runner, daemon=True)
     t.start()
+
+# ZERO-QUANTITY DELETION WORKER
+# ============================================================================
+_zero_qty_deleter_started = False
+
+def _purge_zero_qty_items():
+    """Delete searchRack items that have been at 0 quantity for 24+ hours"""
+    try:
+        conn = sqlite3.connect('searchRack.db')
+        cur = conn.cursor()
+        
+        # Ensure table exists
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS zero_qty_pending_deletion (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                searchrack_id INTEGER,
+                marked_at TEXT,
+                delete_at TEXT
+            )
+        ''')
+        
+        # Find items ready for deletion
+        from datetime import datetime
+        now = datetime.now()
+        
+        cur.execute('''
+            SELECT id, searchrack_id, marked_at, delete_at 
+            FROM zero_qty_pending_deletion 
+            WHERE delete_at <= ?
+        ''', (now.isoformat(),))
+        
+        items_to_delete = cur.fetchall()
+        
+        if not items_to_delete:
+            return
+        
+        print(f"🗑️  Processing {len(items_to_delete)} zero-quantity items for deletion...")
+        
+        # Ensure archived table exists
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS archived_searchrack (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                original_id INTEGER,
+                title TEXT,
+                barcode TEXT,
+                item_position TEXT,
+                images TEXT,
+                pictureposition TEXT,
+                itemid TEXT,
+                quantity INTEGER,
+                created_at TEXT,
+                image TEXT,
+                archived_at TEXT,
+                reason TEXT
+            )
+        ''')
+        
+        deleted_count = 0
+        for pending_id, searchrack_id, marked_at, delete_at in items_to_delete:
+            # Verify the item still has 0 quantity
+            cur.execute('SELECT QUANTITY FROM SEARCHRACK WHERE ID = ?', (searchrack_id,))
+            row = cur.fetchone()
+            
+            if not row:
+                # Item already deleted somehow, just remove from pending
+                cur.execute('DELETE FROM zero_qty_pending_deletion WHERE id = ?', (pending_id,))
+                continue
+            
+            qty = row[0] or 0
+            if qty > 0:
+                # Quantity was increased, remove from pending deletion
+                cur.execute('DELETE FROM zero_qty_pending_deletion WHERE id = ?', (pending_id,))
+                print(f"  ℹ️  Item {searchrack_id} quantity is now {qty}, skipping deletion")
+                continue
+            
+            # Archive the item before deletion
+            cur.execute('''
+                INSERT INTO archived_searchrack 
+                (original_id, title, barcode, item_position, images, pictureposition, itemid, quantity, created_at, image, archived_at, reason)
+                SELECT ID, TITLE, BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION, ITEMID, QUANTITY, CREATED_AT, IMAGE, ?, 'zero_quantity_24h'
+                FROM SEARCHRACK WHERE ID = ?
+            ''', (now.isoformat(), searchrack_id))
+            
+            # Delete the item from SEARCHRACK
+            cur.execute('DELETE FROM SEARCHRACK WHERE ID = ?', (searchrack_id,))
+            
+            # Remove from pending deletion
+            cur.execute('DELETE FROM zero_qty_pending_deletion WHERE id = ?', (pending_id,))
+            
+            deleted_count += 1
+            print(f"  ✓ Deleted item {searchrack_id} (marked at {marked_at})")
+        
+        conn.commit()
+        conn.close()
+        
+        if deleted_count > 0:
+            print(f"✅ Deleted {deleted_count} zero-quantity items from searchRack")
+    
+    except Exception as e:
+        print(f"❌ Error purging zero-quantity items: {e}")
+        import traceback
+        traceback.print_exc()
+
+def _start_zero_qty_deleter_thread():
+    """Start background thread to delete zero-quantity items after 24 hours"""
+    global _zero_qty_deleter_started
+    if _zero_qty_deleter_started:
+        return
+    _zero_qty_deleter_started = True
+    
+    def _runner():
+        import time as _time
+        while True:
+            try:
+                _purge_zero_qty_items()
+            except Exception as e:
+                print('Zero-qty deletion tick error:', e)
+            # Check every hour
+            _time.sleep(60*60)
+    
+    t = threading.Thread(target=_runner, daemon=True)
+    t.start()
+    print("🚀 Zero-quantity deletion thread started")
 
 def _ensure_bol_list_status_column():
     """Ensure bol_items has list_status, temporary, and quantity tracking columns."""
@@ -5646,6 +6120,182 @@ def api_set_grace_period():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
+# Zero-Quantity Deletion Settings API
+@app.route('/api/zero_qty_settings', methods=['GET'])
+def api_get_zero_qty_settings():
+    try:
+        conn = sqlite3.connect('searchRack.db')
+        cur = conn.cursor()
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS zero_qty_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+        ''')
+        
+        # Get show_display setting
+        cur.execute("SELECT value FROM zero_qty_settings WHERE key = 'show_display'")
+        row = cur.fetchone()
+        show_display = row and row[0] == 'true'
+        
+        # Get interval_minutes setting
+        cur.execute("SELECT value FROM zero_qty_settings WHERE key = 'interval_minutes'")
+        row = cur.fetchone()
+        interval_minutes = int(row[0]) if row else 1440
+        
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'show_display': show_display,
+            'interval_minutes': interval_minutes
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/zero_qty_settings', methods=['POST'])
+def api_set_zero_qty_settings():
+    try:
+        data = request.get_json() or {}
+        show_display = data.get('show_display', False)
+        interval_minutes = int(data.get('interval_minutes', 1440))
+        
+        conn = sqlite3.connect('searchRack.db')
+        cur = conn.cursor()
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS zero_qty_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+        ''')
+        
+        cur.execute('''
+            INSERT INTO zero_qty_settings (key, value) 
+            VALUES ('show_display', ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+        ''', ('true' if show_display else 'false',))
+        
+        cur.execute('''
+            INSERT INTO zero_qty_settings (key, value) 
+            VALUES ('interval_minutes', ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+        ''', (str(interval_minutes),))
+        
+        conn.commit()
+        
+        # Update the deletion intervals for items already in the queue
+        if interval_minutes != 1440:  # If not default 24 hours
+            from datetime import datetime, timedelta
+            cur.execute('SELECT id, marked_at FROM zero_qty_pending_deletion')
+            pending_items = cur.fetchall()
+            
+            for item_id, marked_at in pending_items:
+                marked_dt = datetime.fromisoformat(marked_at)
+                new_delete_at = marked_dt + timedelta(minutes=interval_minutes)
+                cur.execute('UPDATE zero_qty_pending_deletion SET delete_at = ? WHERE id = ?',
+                           (new_delete_at.isoformat(), item_id))
+            
+            conn.commit()
+        
+        conn.close()
+        
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/zero_qty_pending', methods=['GET'])
+def api_get_zero_qty_pending():
+    try:
+        conn = sqlite3.connect('searchRack.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        
+        cur.execute('''
+            SELECT 
+                p.id,
+                p.searchrack_id,
+                p.marked_at,
+                p.delete_at,
+                s.TITLE as title,
+                s.BARCODE as barcode,
+                s.QUANTITY as quantity
+            FROM zero_qty_pending_deletion p
+            LEFT JOIN SEARCHRACK s ON p.searchrack_id = s.ID
+            ORDER BY p.delete_at ASC
+        ''')
+        
+        items = []
+        for row in cur.fetchall():
+            items.append({
+                'id': row['id'],
+                'searchrack_id': row['searchrack_id'],
+                'marked_at': row['marked_at'],
+                'delete_at': row['delete_at'],
+                'title': row['title'],
+                'barcode': row['barcode'],
+                'quantity': row['quantity']
+            })
+        
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'items': items
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/zero_qty_delete_now/<int:searchrack_id>', methods=['POST'])
+def api_zero_qty_delete_now(searchrack_id):
+    """Immediately delete a searchRack item (bypass grace period)"""
+    try:
+        conn = sqlite3.connect('searchRack.db')
+        cur = conn.cursor()
+        
+        # Archive the item
+        from datetime import datetime
+        now = datetime.now()
+        
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS archived_searchrack (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                original_id INTEGER,
+                title TEXT,
+                barcode TEXT,
+                item_position TEXT,
+                images TEXT,
+                pictureposition TEXT,
+                itemid TEXT,
+                quantity INTEGER,
+                created_at TEXT,
+                image TEXT,
+                archived_at TEXT,
+                reason TEXT
+            )
+        ''')
+        
+        cur.execute('''
+            INSERT INTO archived_searchrack 
+            (original_id, title, barcode, item_position, images, pictureposition, itemid, quantity, created_at, image, archived_at, reason)
+            SELECT ID, TITLE, BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION, ITEMID, QUANTITY, CREATED_AT, IMAGE, ?, 'manual_zero_quantity'
+            FROM SEARCHRACK WHERE ID = ?
+        ''', (now.isoformat(), searchrack_id))
+        
+        # Delete from SEARCHRACK
+        cur.execute('DELETE FROM SEARCHRACK WHERE ID = ?', (searchrack_id,))
+        
+        # Remove from pending deletion queue
+        cur.execute('DELETE FROM zero_qty_pending_deletion WHERE searchrack_id = ?', (searchrack_id,))
+        
+        conn.commit()
+        conn.close()
+        
+        print(f"✓ Manually deleted searchRack item {searchrack_id}")
+        
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
 # Removed items: list and page
 @app.route('/api/removed', methods=['GET'])
 def api_removed_list():
@@ -6251,6 +6901,23 @@ def api_search_db(db_key):
                 # image from image_url if present
                 image_val = item.get('image_url') or item.get('image') or image_val or ''
 
+            # Quantity extraction that properly handles 0 values
+            qty_raw = None
+            for qkey in ['QUANTITY', 'Quantity', 'quantity', 'qty']:
+                if qkey in item and item[qkey] is not None:
+                    qty_raw = item[qkey]
+                    if db_key == 'searchRack':
+                        print(f"[QTY EXTRACT] Found {qkey}={qty_raw}, type={type(qty_raw)}, barcode={item.get('BARCODE') or item.get('barcode')}")
+                    break
+            if qty_raw is None:
+                qty_raw = ''
+                if db_key == 'searchRack':
+                    print(f"[QTY EXTRACT] No quantity found, defaulting to empty, barcode={item.get('BARCODE') or item.get('barcode')}")
+            
+            # Debug logging for zero quantity items
+            if qty_raw == 0 and db_key == 'searchRack':
+                print(f"[DEBUG] Zero quantity item found: barcode={barcode_val}, qty_raw={qty_raw}, type={type(qty_raw)}")
+            
             item_out = {
                 'source_db': db_key,
                 'source_table': table,
@@ -6261,7 +6928,7 @@ def api_search_db(db_key):
                 'item_id': item.get('ItemID') or item.get('item_id') or item.get('ItemId') or item.get('ASIN') or item.get('asin') or (barcode_val if barcode_val else ''),
                 'pictureposition': item.get('PICTUREPOSITION') or item.get('pictureposition') or item.get('picture_position') or '',
                 'item_position': item.get('ITEM_POSITION') or item.get('item_position') or item.get('position') or '',
-                'quantity': item.get('QUANTITY') or item.get('Quantity') or item.get('quantity') or item.get('qty') or '',
+                'quantity': qty_raw,
                 # created_at available on SEARCHRACK rows populated by DBmanager
                 'created_at': item.get('CREATED_AT') or item.get('created_at') or '',
                 # store field for returns (amazon/ebay)
@@ -6484,10 +7151,26 @@ def api_search_db(db_key):
                 
                 if key not in merged:
                     merged[key] = r.copy()
-                    # normalize quantity
-                    merged[key]['quantity'] = int(r.get('quantity')) if str(r.get('quantity') or '').isdigit() else 1
+                    # normalize quantity - handle 0 values properly
+                    qty_val = r.get('quantity')
+                    if qty_val is None or qty_val == '':
+                        merged[key]['quantity'] = 1
+                    elif isinstance(qty_val, (int, float)):
+                        merged[key]['quantity'] = int(qty_val)
+                    elif str(qty_val).isdigit():
+                        merged[key]['quantity'] = int(qty_val)
+                    else:
+                        merged[key]['quantity'] = 1
                 else:
-                    add_q = int(r.get('quantity')) if str(r.get('quantity') or '').isdigit() else 1
+                    qty_val = r.get('quantity')
+                    if qty_val is None or qty_val == '':
+                        add_q = 1
+                    elif isinstance(qty_val, (int, float)):
+                        add_q = int(qty_val)
+                    elif str(qty_val).isdigit():
+                        add_q = int(qty_val)
+                    else:
+                        add_q = 1
                     merged[key]['quantity'] = merged[key].get('quantity', 0) + add_q
             results = list(merged.values())
             # adjust total_count to reflect merged items count
@@ -6520,6 +7203,12 @@ def api_search_db(db_key):
                     total_quantity += 1
             except:
                 total_quantity += 1
+
+        # Debug: Check what quantities are in results before sending
+        if db_key == 'searchRack':
+            for r in results:
+                if r.get('barcode') == '882864825810':
+                    print(f"[BEFORE JSONIFY] barcode={r.get('barcode')}, quantity={r.get('quantity')}, type={type(r.get('quantity'))}")
 
         return jsonify({'results': results, 'total': total_count, 'total_quantity': total_quantity})
     except Exception as e:
@@ -6944,6 +7633,56 @@ def api_update_row(db_key, item_id):
         cur.execute(sql, params)
         conn.commit()
         updated = cur.rowcount
+        
+        # If updating searchRack and quantity is being set to 0, mark for deletion
+        if db_key == 'searchRack' and 'quantity' in [k.lower() for k in data.keys()]:
+            qty_value = next((v for k, v in data.items() if k.lower() == 'quantity'), None)
+            if qty_value == 0:
+                # Mark this item for deletion after configured interval
+                cur.execute('''
+                    CREATE TABLE IF NOT EXISTS zero_qty_pending_deletion (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        searchrack_id INTEGER,
+                        marked_at TEXT,
+                        delete_at TEXT
+                    )
+                ''')
+                
+                # Get configured interval (default 24 hours = 1440 minutes)
+                cur.execute('''
+                    CREATE TABLE IF NOT EXISTS zero_qty_settings (
+                        key TEXT PRIMARY KEY,
+                        value TEXT
+                    )
+                ''')
+                cur.execute("SELECT value FROM zero_qty_settings WHERE key = 'interval_minutes'")
+                interval_row = cur.fetchone()
+                interval_minutes = int(interval_row[0]) if interval_row else 1440
+                
+                from datetime import datetime, timedelta
+                now = datetime.now()
+                delete_at = now + timedelta(minutes=interval_minutes)
+                
+                # Check if already marked
+                cur.execute('SELECT id FROM zero_qty_pending_deletion WHERE searchrack_id = ?', (item_id,))
+                existing = cur.fetchone()
+                
+                if not existing:
+                    cur.execute('''
+                        INSERT INTO zero_qty_pending_deletion (searchrack_id, marked_at, delete_at)
+                        VALUES (?, ?, ?)
+                    ''', (item_id, now.isoformat(), delete_at.isoformat()))
+                    interval_display = f"{interval_minutes} minute{'s' if interval_minutes != 1 else ''}" if interval_minutes < 60 else f"{interval_minutes/60:.1f} hours"
+                    print(f"✓ Marked searchRack item {item_id} for deletion in {interval_display}")
+                
+                conn.commit()
+            elif qty_value > 0:
+                # If quantity is increased back above 0, remove from deletion queue
+                cur.execute('DELETE FROM zero_qty_pending_deletion WHERE searchrack_id = ?', (item_id,))
+                if cur.rowcount > 0:
+                    print(f"✓ Removed searchRack item {item_id} from deletion queue (quantity > 0)")
+                conn.commit()
+        
         conn.close()
         
         print(f"DEBUG UPDATE: Updated {updated} rows")
@@ -9395,6 +10134,143 @@ def _start_auto_sync_thread():
     auto_sync_thread.start()
     print("🚀 Auto-sync thread started")
 
+# EMAILER ALERT BACKGROUND THREAD
+# ============================================================================
+def emailer_alert_worker():
+    """Background thread that checks and sends scheduled email alerts"""
+    print("📧 Emailer alert worker started")
+    
+    while True:
+        try:
+            # Check every 5 minutes if any alerts need to be sent
+            time.sleep(300)  # 5 minutes
+            
+            # Get emailer settings
+            conn = sqlite3.connect('searchRack.db')
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            
+            # Ensure table exists
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS emailer_settings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    email TEXT,
+                    alert_type TEXT DEFAULT 'test',
+                    interval TEXT DEFAULT '1d',
+                    last_test_sent TEXT,
+                    UNIQUE(email, alert_type)
+                )
+            ''')
+            
+            # Get all active alert settings
+            cur.execute('SELECT email, alert_type, interval, last_test_sent FROM emailer_settings')
+            settings = cur.fetchall()
+            conn.close()
+            
+            if not settings:
+                continue
+            
+            from datetime import datetime, timedelta
+            now = datetime.now()
+            
+            for setting in settings:
+                email = setting['email']
+                alert_type = setting['alert_type']
+                interval = setting['interval']
+                last_sent = setting['last_test_sent']
+                
+                # Only process inventory alerts in this worker
+                if alert_type != 'inventory':
+                    continue
+                
+                # Parse interval to minutes
+                interval_minutes = 0
+                if interval == '30m':
+                    interval_minutes = 30
+                elif interval == '10m':
+                    interval_minutes = 10
+                elif interval == '1h':
+                    interval_minutes = 60
+                elif interval == '12h':
+                    interval_minutes = 720
+                elif interval == '1d':
+                    interval_minutes = 1440
+                elif interval == '1w':
+                    interval_minutes = 10080
+                elif interval == '1mo':
+                    interval_minutes = 43200
+                else:
+                    continue
+                
+                # Check if it's time to send
+                should_send = False
+                if not last_sent:
+                    should_send = True
+                else:
+                    try:
+                        last_sent_dt = datetime.fromisoformat(last_sent)
+                        time_since_sent = (now - last_sent_dt).total_seconds() / 60  # minutes
+                        if time_since_sent >= interval_minutes:
+                            should_send = True
+                    except:
+                        should_send = True
+                
+                if should_send:
+                    try:
+                        # Collect inventory issues
+                        inventory_issues = collect_inventory_mismatches()
+                        
+                        # Only send if there are actual issues
+                        if inventory_issues['has_issues']:
+                            html_body = generate_inventory_email_html(inventory_issues)
+                            plain_body = generate_inventory_email_plain(inventory_issues)
+                            
+                            subject = f"⚠️ Inventory Alert - {len(inventory_issues['ebay_items']) + len(inventory_issues['amazon_items'])} Items Need Attention - {now.strftime('%Y-%m-%d %H:%M')}"
+                            success, error = send_email_smtp([email], subject, plain_body, html_body)
+                            
+                            if success:
+                                print(f"✅ Inventory alert sent to: {email}")
+                                
+                                # Update last sent time
+                                conn = sqlite3.connect('searchRack.db')
+                                cur = conn.cursor()
+                                cur.execute('''
+                                    UPDATE emailer_settings 
+                                    SET last_test_sent = ? 
+                                    WHERE email = ? AND alert_type = ?
+                                ''', (now.isoformat(), email, alert_type))
+                                conn.commit()
+                                conn.close()
+                            else:
+                                print(f"❌ Failed to send inventory alert to {email}: {error}")
+                        else:
+                            print(f"ℹ️ No inventory issues - skipping alert for {email}")
+                            
+                            # Still update timestamp to avoid checking too frequently
+                            conn = sqlite3.connect('searchRack.db')
+                            cur = conn.cursor()
+                            cur.execute('''
+                                UPDATE emailer_settings 
+                                SET last_test_sent = ? 
+                                WHERE email = ? AND alert_type = ?
+                            ''', (now.isoformat(), email, alert_type))
+                            conn.commit()
+                            conn.close()
+                            
+                    except Exception as e:
+                        print(f"❌ Error sending inventory alert to {email}: {e}")
+            
+        except Exception as e:
+            print(f"❌ Emailer alert worker error: {e}")
+            import traceback
+            traceback.print_exc()
+
+def _start_emailer_alert_thread():
+    """Start the emailer alert background thread"""
+    emailer_thread = threading.Thread(target=emailer_alert_worker, daemon=True)
+    emailer_thread.start()
+    print("🚀 Emailer alert thread started")
+
 if __name__ == "__main__":
     # Enable WAL mode for all databases (better concurrent performance)
     enable_wal_mode()
@@ -9422,8 +10298,14 @@ if __name__ == "__main__":
     # Start trash purger daily
     _start_trash_purger_thread()
     
+    # Start zero-quantity deletion thread
+    _start_zero_qty_deleter_thread()
+    
     # Start auto-sync background thread
     _start_auto_sync_thread()
+    
+    # Start emailer alert background thread
+    _start_emailer_alert_thread()
 
     # Keep main thread alive
     while True:

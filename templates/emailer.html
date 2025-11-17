@@ -336,6 +336,7 @@
                     <select id="alertType" class="alert-type-select">
                         <option value="test">Test Email</option>
                         <option value="health">App Health Stats</option>
+                        <option value="inventory">Inventory Alert</option>
                     </select>
                     <button class="add-email-btn" onclick="addEmail()">
                         <i class="fas fa-plus"></i> Add
@@ -424,7 +425,10 @@
         }
 
         function sendTestToEmail(email, alertType) {
-            const endpoint = alertType === 'health' ? '/api/emailer/send-health' : '/api/emailer/send-test';
+            let endpoint = '/api/emailer/send-test';
+            if (alertType === 'health') endpoint = '/api/emailer/send-health';
+            if (alertType === 'inventory') endpoint = '/api/emailer/send-inventory';
+            if (alertType === 'test') endpoint = '/api/emailer/send-test-inventory';  // Send inventory test for "test" type
             
             fetch(endpoint, {
                 method: 'POST',
@@ -436,7 +440,8 @@
             .then(response => response.json())
             .then(data => {
                 if (data.success) {
-                    showStatus(`${alertType === 'health' ? 'Health report' : 'Test email'} sent to ${email}!`, 'success');
+                    const msgType = alertType === 'health' ? 'Health report' : (alertType === 'inventory' ? 'Inventory alert' : 'Test inventory alert');
+                    showStatus(`${msgType} sent to ${email}!`, 'success');
                 } else {
                     showStatus('Failed to send email: ' + (data.error || 'Unknown error'), 'error');
                 }
@@ -455,8 +460,15 @@
             }
             
             listContainer.innerHTML = emailSettings.map((setting, index) => {
-                const alertBadgeColor = setting.alert_type === 'health' ? '#3498db' : '#f39c12';
-                const alertBadgeText = setting.alert_type === 'health' ? 'Health Stats' : 'Test Email';
+                let alertBadgeColor = '#f39c12';
+                let alertBadgeText = 'Test Email';
+                if (setting.alert_type === 'health') {
+                    alertBadgeColor = '#3498db';
+                    alertBadgeText = 'Health Stats';
+                } else if (setting.alert_type === 'inventory') {
+                    alertBadgeColor = '#e74c3c';
+                    alertBadgeText = 'Inventory Alert';
+                }
                 
                 return `
                 <div class="email-card">
@@ -466,6 +478,7 @@
                         <span class="alert-type" style="background: ${alertBadgeColor};">${alertBadgeText}</span>
                     </div>
                     <select class="frequency-select" onchange="updateInterval(${index}, this.value)">
+                        ${setting.alert_type === 'inventory' ? '<option value="30m" ' + (setting.interval === '30m' ? 'selected' : '') + '>Every 30 minutes</option>' : ''}
                         <option value="10m" ${setting.interval === '10m' ? 'selected' : ''}>Every 10 minutes</option>
                         <option value="1h" ${setting.interval === '1h' ? 'selected' : ''}>Every 1 hour</option>
                         <option value="12h" ${setting.interval === '12h' ? 'selected' : ''}>Every 12 hours</option>

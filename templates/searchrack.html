@@ -130,7 +130,7 @@
     </div></div></div>
 
 <script>
-console.log('searchrack v3 loaded');
+console.log('searchrack v3.1-qty-debug loaded - timestamp: 2025-11-17-15:50');
 const DBS = ['searchRack','ebayStore','amazonStore','bol','sold','returns','archived'];
 const DB_LABELS = {searchRack:'Inventory', ebayStore:'Ebay live', amazonStore:'Amazon live', bol:'Macy BOL', sold:'Sold', returns:'Returns', archived:'Archived'};
 const defaultChecked = {'searchRack':true};
@@ -436,20 +436,24 @@ function renderResults(results){
     const barcodeStripped = barcodeRaw && /^\d+$/.test(String(barcodeRaw)) ? String(barcodeRaw).replace(/^0+/, '') : barcodeRaw;
     const barcode = esc(barcodeStripped);
     const itemid = esc(r.item_id || (r.raw && (r.raw.ItemID || r.raw.item_id || r.raw.id || r.raw.upc)) || '')
-        // Normalize quantity like inventory: default to 1 and coerce int-like values
-        function toIntLike(q){
+        // Normalize quantity: allow 0 for searchRack, default to 1 for others
+        function toIntLike(q, allowZero){
             try{
-                if(q === undefined || q === null) return 1;
+                if(q === undefined || q === null) return allowZero ? 0 : 1;
                 const s = String(q).trim();
-                if(!s) return 1;
+                if(!s) return allowZero ? 0 : 1;
                 if(/^\d+$/.test(s)) return parseInt(s,10);
                 if(/^[0-9]+\.0$/.test(s)) return parseInt(parseFloat(s));
                 const f = parseFloat(s);
                 if(Number.isFinite(f) && Math.abs(f - Math.trunc(f)) < 1e-9) return Math.trunc(f);
-                return 1;
-            }catch(_){ return 1; }
+                return allowZero ? 0 : 1;
+            }catch(_){ return allowZero ? 0 : 1; }
         }
-        const qty = esc(String(toIntLike(r.quantity)))
+        const allowZeroQty = (dbRaw === 'searchRack');
+        console.log('[QTY DEBUG]', 'barcode:', r.barcode, 'r.quantity:', r.quantity, 'type:', typeof r.quantity, 'dbRaw:', dbRaw, 'allowZero:', allowZeroQty);
+        const qtyValue = toIntLike(r.quantity, allowZeroQty);
+        console.log('[QTY DEBUG]', 'barcode:', r.barcode, 'qtyValue after toIntLike:', qtyValue);
+        const qty = esc(String(qtyValue))
         const db = esc(dbRaw)
         let locDisplay = '';
         if(r.pictureposition) locDisplay = r.pictureposition;
@@ -857,6 +861,11 @@ function onEdit(db, id){
                   `<div class=\"form-row\"><label>Barcode</label><input id=\"edit_barcode\" value=\"${esc(barcode)}\"></div>`+
                   `<div class=\"form-row\"><label>Item ID</label><input id=\"edit_itemid\" value=\"${esc(itemid)}\" readonly style=\"background:#f0f0f0\" title=\"Read-only: eBay/Amazon listing ID\"></div>`+
                   `<div class=\"form-row\"><label>Quantity</label><input id=\"edit_qty\" type=\"number\" min=\"1\" value=\"${esc(qty)}\"></div>`;
+    } else if(db === 'searchRack'){
+        // For searchRack (inventory): title, barcode, qty (NO item_id, allow 0 qty)
+        content = `<div class=\"form-row\"><label>Title</label><input id=\"edit_title\" value=\"${esc(title)}\"></div>`+
+                  `<div class=\"form-row\"><label>Barcode</label><input id=\"edit_barcode\" value=\"${esc(barcode)}\"></div>`+
+                  `<div class=\"form-row\"><label>Qty</label><input id=\"edit_qty\" type=\"number\" min=\"0\" value=\"${esc(qty)}\"></div>`;
     } else {
         // For other databases: title, barcode, itemid, qty
         content = `<div class=\"form-row\"><label>Title</label><input id=\"edit_title\" value=\"${esc(title)}\"></div>`+
@@ -875,6 +884,12 @@ function onEdit(db, id){
                 title: document.getElementById('edit_title').value, 
                 barcode: document.getElementById('edit_barcode').value, 
                 quantity: parseInt(document.getElementById('edit_qty').value) || 1
+            };
+        } else if(db === 'searchRack'){
+            payload = { 
+                Title: document.getElementById('edit_title').value, 
+                BARCODE: document.getElementById('edit_barcode').value, 
+                Quantity: parseInt(document.getElementById('edit_qty').value) || 0
             };
         } else {
             payload = { 

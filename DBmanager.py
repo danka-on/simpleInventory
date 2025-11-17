@@ -883,9 +883,10 @@ def enrich_searchrack_db(batch_size=500, do_backup=True):
                             new_title = src_title if write_title else curtitle
                             new_image = curimage or curimages or data.get('image')
                             new_itemid = curitemid or data.get('itemid')
-                            new_qty = curqty or data.get('quantity')
-                            if write_title or new_image or new_itemid or new_qty:
-                                s_cur.execute('UPDATE SEARCHRACK SET TITLE = ?, IMAGE = ?, ITEMID = ?, QUANTITY = ? WHERE ID = ?', (new_title, new_image, new_itemid, new_qty, rid))
+                            # Do not enrich quantity - keep existing value only
+                            new_qty = curqty
+                            if write_title or new_image or new_itemid:
+                                s_cur.execute('UPDATE SEARCHRACK SET TITLE = ?, IMAGE = ?, ITEMID = ? WHERE ID = ?', (new_title, new_image, new_itemid, rid))
                                 total_updates += 1
                         except Exception:
                             continue

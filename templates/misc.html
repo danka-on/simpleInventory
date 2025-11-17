@@ -48,6 +48,30 @@
         <button type="submit">Save Grace Period</button>
         <div id="graceStatus" style="margin-top:10px;color:#555;display:none;"></div>
     </form>
+    
+    <hr style="margin:24px 0;">
+    <h2 style="margin:0 0 10px 0; font-size:1.1rem;">Zero-Quantity Deletion Settings</h2>
+    <div class="desc">Configure automatic deletion of inventory items with 0 quantity.</div>
+    
+    <label style="display:flex;align-items:center;gap:8px;margin-bottom:16px;">
+        <input type="checkbox" id="showZeroQtyPending" style="width:auto;">
+        <span>Show pending zero-quantity deletions</span>
+    </label>
+    
+    <label for="zeroQtyInterval">Deletion interval:</label>
+    <select id="zeroQtyInterval" style="padding:8px;font-size:1em;margin-bottom:16px;border-radius:4px;">
+        <option value="1">1 minute (testing)</option>
+        <option value="60">1 hour</option>
+        <option value="720">12 hours</option>
+        <option value="1440" selected>24 hours (default)</option>
+    </select>
+    <button onclick="saveZeroQtySettings()" style="display:block;">Save Zero-Qty Settings</button>
+    <div id="zeroQtyStatus" style="margin-top:10px;color:#555;display:none;"></div>
+    
+    <div id="zeroQtyPendingContainer" style="display:none;margin-top:20px;">
+        <h3 style="margin:0 0 12px 0;font-size:1rem;color:#e74c3c;">⏳ Pending Zero-Quantity Deletions</h3>
+        <div id="zeroQtyPendingList" style="font-size:0.95em;"></div>
+    </div>
     <script>
         // Load settings from localStorage
         function loadSettings() {
@@ -96,7 +120,172 @@
             }
         });
         // On page load, always show saved settings and grace period
-        document.addEventListener('DOMContentLoaded', function(){ loadSettings(); loadGrace(); });
+        document.addEventListener('DOMContentLoaded', function(){ loadSettings(); loadGrace(); loadZeroQtySettings(); });
+        
+        // Zero-Quantity Deletion Settings
+        async function loadZeroQtySettings() {
+            try {
+                const r = await fetch('/api/zero_qty_settings');
+                const j = await r.json();
+                if (j.success) {
+                    document.getElementById('showZeroQtyPending').checked = j.show_display || false;
+                    document.getElementById('zeroQtyInterval').value = j.interval_minutes || 1440;
+                    
+                    if (j.show_display) {
+                        loadZeroQtyPending();
+                    }
+                }
+            } catch(e) {
+                console.warn('Failed to load zero-qty settings', e);
+            }
+        }
+        
+        async function saveZeroQtySettings() {
+            const showDisplay = document.getElementById('showZeroQtyPending').checked;
+            const intervalMinutes = parseInt(document.getElementById('zeroQtyInterval').value);
+            
+            try {
+                const r = await fetch('/api/zero_qty_settings', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        show_display: showDisplay,
+                        interval_minutes: intervalMinutes
+                    })
+                });
+                const j = await r.json();
+                const el = document.getElementById('zeroQtyStatus');
+                
+                if (j.success) {
+                    el.style.display = '';
+                    el.style.color = '#388e3c';
+                    el.textContent = 'Settings saved!';
+                    
+                    if (showDisplay) {
+                        loadZeroQtyPending();
+                    } else {
+                        document.getElementById('zeroQtyPendingContainer').style.display = 'none';
+                    }
+                } else {
+                    el.style.display = '';
+                    el.style.color = '#e74c3c';
+                    el.textContent = 'Save failed: ' + (j.error || 'Unknown');
+                }
+                
+                setTimeout(() => { el.style.display = 'none'; }, 2000);
+            } catch(err) {
+                const el = document.getElementById('zeroQtyStatus');
+                el.style.display = '';
+                el.style.color = '#e74c3c';
+                el.textContent = 'Save failed';
+                setTimeout(() => { el.style.display = 'none'; }, 2000);
+            }
+        }
+        
+        async function loadZeroQtyPending() {
+            const showDisplay = document.getElementById('showZeroQtyPending').checked;
+            
+            if (!showDisplay) {
+                document.getElementById('zeroQtyPendingContainer').style.display = 'none';
+                return;
+            }
+            
+            try {
+                const r = await fetch('/api/zero_qty_pending');
+                const j = await r.json();
+                
+                const container = document.getElementById('zeroQtyPendingContainer');
+                const listEl = document.getElementById('zeroQtyPendingList');
+                
+                if (!j.success || !j.items || j.items.length === 0) {
+                    container.style.display = 'block';
+                    listEl.innerHTML = '<div style="color:#999;padding:12px;text-align:center;">No items pending deletion</div>';
+                    return;
+                }
+                
+                container.style.display = 'block';
+                
+                let html = '';
+                j.items.forEach(item => {
+                    const deleteAt = new Date(item.delete_at);
+                    const now = new Date();
+                    const msRemaining = deleteAt - now;
+                    const hoursRemaining = Math.max(0, msRemaining / (1000 * 60 * 60));
+                    
+                    let timeDisplay;
+                    if (hoursRemaining < 0.017) { // less than 1 minute
+                        timeDisplay = '<span style="color:#e74c3c;font-weight:bold;">Deleting soon...</span>';
+                    } else if (hoursRemaining < 1) {
+                        const mins = Math.ceil(hoursRemaining * 60);
+                        timeDisplay = `<span style="color:#ff9800;">${mins} minute${mins !== 1 ? 's' : ''}</span>`;
+                    } else if (hoursRemaining < 24) {
+                        const hrs = hoursRemaining.toFixed(1);
+                        timeDisplay = `<span style="color:#2196F3;">${hrs} hours</span>`;
+                    } else {
+                        const days = (hoursRemaining / 24).toFixed(1);
+                        timeDisplay = `<span style="color:#4caf50;">${days} days</span>`;
+                    }
+                    
+                    html += `
+                        <div style="border:1px solid #ddd;border-radius:6px;padding:12px;margin-bottom:10px;background:#fafafa;">
+                            <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px;">
+                                <div style="flex:1;">
+                                    <div style="font-weight:bold;color:#333;margin-bottom:4px;">${item.title || 'Untitled'}</div>
+                                    <div style="color:#666;font-size:0.9em;">Barcode: ${item.barcode || 'N/A'}</div>
+                                    <div style="color:#666;font-size:0.9em;">Quantity: ${item.quantity || 0}</div>
+                                </div>
+                                <button onclick="deleteZeroQtyItemNow(${item.searchrack_id})" 
+                                        style="background:#e74c3c;color:#fff;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-size:0.9em;">
+                                    Delete Now
+                                </button>
+                            </div>
+                            <div style="font-size:0.9em;color:#555;">
+                                ⏳ Will be deleted in ${timeDisplay}
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                listEl.innerHTML = html;
+                
+                // Auto-refresh every 30 seconds if display is shown
+                setTimeout(() => {
+                    if (document.getElementById('showZeroQtyPending').checked) {
+                        loadZeroQtyPending();
+                    }
+                }, 30000);
+                
+            } catch(e) {
+                console.error('Failed to load pending deletions', e);
+            }
+        }
+        
+        async function deleteZeroQtyItemNow(searchrackId) {
+            if (!confirm('Delete this item immediately?')) return;
+            
+            try {
+                const r = await fetch(`/api/zero_qty_delete_now/${searchrackId}`, {method: 'POST'});
+                const j = await r.json();
+                
+                if (j.success) {
+                    alert('Item deleted successfully');
+                    loadZeroQtyPending();
+                } else {
+                    alert('Delete failed: ' + (j.error || 'Unknown error'));
+                }
+            } catch(err) {
+                alert('Delete failed: ' + err.message);
+            }
+        }
+        
+        // Watch checkbox changes
+        document.getElementById('showZeroQtyPending').addEventListener('change', function() {
+            if (this.checked) {
+                loadZeroQtyPending();
+            } else {
+                document.getElementById('zeroQtyPendingContainer').style.display = 'none';
+            }
+        });
     </script>
 </body>
 </html>
