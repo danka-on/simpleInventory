@@ -1803,13 +1803,19 @@ def _start_zero_qty_deleter_thread():
     
     def _runner():
         import time as _time
+        # Run immediately on startup
+        try:
+            _purge_zero_qty_items()
+        except Exception as e:
+            print('Zero-qty deletion initial run error:', e)
+        
         while True:
+            # Check every hour
+            _time.sleep(60*60)
             try:
                 _purge_zero_qty_items()
             except Exception as e:
                 print('Zero-qty deletion tick error:', e)
-            # Check every hour
-            _time.sleep(60*60)
     
     t = threading.Thread(target=_runner, daemon=True)
     t.start()
