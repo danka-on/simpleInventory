@@ -104,9 +104,24 @@
                 <strong style="color:#856404;">⏰ Pending Automatic Inventory Removals</strong>
                 <span id="pending-grace-info" style="color:#856404; opacity:0.9; margin-left:6px;"></span>
             </div>
-            <button id="refresh-pending-btn" class="btn" style="padding:4px 8px; font-size:0.9rem;">Refresh</button>
+            <div style="display:flex; gap:8px;">
+                <button id="trigger-automatic-removal-btn" class="btn" style="padding:4px 8px; font-size:0.9rem; background:#6f42c1; color:white;">Run Now</button>
+                <button id="refresh-pending-btn" class="btn" style="padding:4px 8px; font-size:0.9rem;">Refresh</button>
+            </div>
         </div>
         <div id="pending-removals-list" style="font-size:0.9rem; color:#856404;"></div>
+    </div>
+
+    <!-- Zero Quantity Pending Deletions (only shown when viewing inventory) -->
+    <div id="zero-qty-notice" style="display:none; margin-top:12px; padding:12px; background:#ffe5e5; border:1px solid #ff6b6b; border-radius:8px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <div>
+                <strong style="color:#c92a2a;">🗑️ Pending Zero-Quantity Deletions</strong>
+                <span id="zero-qty-grace-info" style="color:#c92a2a; opacity:0.9; margin-left:6px;"></span>
+            </div>
+            <button id="refresh-zero-qty-btn" class="btn" style="padding:4px 8px; font-size:0.9rem;">Refresh</button>
+        </div>
+        <div id="zero-qty-list" style="font-size:0.9rem; color:#c92a2a;"></div>
     </div>
 
     <div id="results"></div>
@@ -267,6 +282,15 @@ async function doSearch(){
     } else {
         console.log('Sold database NOT selected, hiding pending removals notice');
         document.getElementById('pending-removals-notice').style.display = 'none';
+    }
+    
+    // If viewing inventory, fetch and display zero-quantity pending deletions
+    if(dbs.includes('searchRack')){
+        console.log('Inventory selected, fetching zero-qty pending...');
+        fetchZeroQtyPending();
+    } else {
+        console.log('Inventory NOT selected, hiding zero-qty notice');
+        document.getElementById('zero-qty-notice').style.display = 'none';
     }
 }
 
@@ -1146,8 +1170,173 @@ async function removeNow(orderId){
     }
 }
 
+async function triggerAutomaticRemoval(){
+    if(!confirm('Manually trigger the automatic removal process now? This will process all eligible items immediately.')){
+        return;
+    }
+    try{
+        const resp = await fetch('/api/sold/trigger-automatic-removal', {method: 'POST'});
+        const j = await resp.json();
+        if(j.success){
+            alert('Automatic removal process completed. Check console for details.');
+            // Refresh the pending list after a short delay
+            setTimeout(fetchPendingRemovals, 1000);
+        } else {
+            alert('Failed to trigger: ' + (j.error || 'Unknown error'));
+        }
+    }catch(err){
+        console.error('Error triggering automatic removal:', err);
+        alert('Error triggering automatic removal');
+    }
+}
+
 // Attach refresh button handler
 document.getElementById('refresh-pending-btn').addEventListener('click', fetchPendingRemovals);
+document.getElementById('trigger-automatic-removal-btn').addEventListener('click', triggerAutomaticRemoval);
+
+// ===== Zero Quantity Pending Deletions =====
+
+async function fetchZeroQtyPending(){
+    console.log('Fetching zero-qty pending deletions...');
+    try{
+        const resp = await fetch('/api/zero_qty_pending');
+        console.log('Zero-qty response status:', resp.status);
+        const j = await resp.json();
+        console.log('Zero-qty response data:', j);
+        
+        // Update grace period info if available
+        try{
+            const graceInfoEl = document.getElementById('zero-qty-grace-info');
+            if (graceInfoEl) {
+                if (j && typeof j.grace_hours !== 'undefined' && j.grace_hours !== null) {
+                    graceInfoEl.textContent = `(grace: ${j.grace_hours}h)`;
+                } else {
+                    graceInfoEl.textContent = '';
+                }
+            }
+        }catch(_e){ /* no-op */ }
+        
+        if(j.success && j.items && j.items.length > 0){
+            console.log(`Found ${j.items.length} zero-qty pending deletions`);
+            displayZeroQtyPending(j.items);
+        } else {
+            console.log('No zero-qty pending deletions to display');
+            document.getElementById('zero-qty-notice').style.display = 'none';
+        }
+    }catch(err){
+        console.error('Error fetching zero-qty pending:', err);
+        document.getElementById('zero-qty-notice').style.display = 'none';
+    }
+}
+
+function displayZeroQtyPending(items){
+    console.log('Displaying zero-qty pending:', items);
+    const notice = document.getElementById('zero-qty-notice');
+    const list = document.getElementById('zero-qty-list');
+    
+    if(!items || items.length === 0){
+        notice.style.display = 'none';
+        return;
+    }
+    
+    console.log('Building HTML for', items.length, 'zero-qty items');
+    let html = '<div style="max-height:300px; overflow-y:auto;">';
+    html += '<table style="width:100%; font-size:0.9rem; border-collapse:collapse;">';
+    html += '<thead><tr style="background:#f8f9fa;"><th style="padding:6px; text-align:left;">Barcode</th><th style="padding:6px; text-align:left;">Title</th><th style="padding:6px; text-align:left;">Position</th><th style="padding:6px; text-align:left;">Status</th><th style="padding:6px; text-align:left;">Action</th></tr></thead>';
+    html += '<tbody>';
+    
+    items.forEach(item => {
+        const isCancelled = item.deletion_cancelled === 1;
+        const statusText = isCancelled ? '❌ Cancelled' : 
+                          item.is_eligible ? '⚠️ Ready to delete' : 
+                          `⏰ ${item.hours_remaining}h remaining`;
+        const statusColor = isCancelled ? '#dc3545' : 
+                           item.is_eligible ? '#ff6b6b' : '#c92a2a';
+        
+        let actionBtn = '';
+        if (isCancelled) {
+            actionBtn = `<button class="btn" style="padding:4px 8px; font-size:0.85rem; background:#28a745; color:white;" onclick="allowZeroQtyDeletion('${esc(item.barcode)}')">Re-enable</button>`;
+        } else {
+            const cancelBtn = `<button class="btn" style="padding:4px 8px; font-size:0.85rem; background:#dc3545; color:white;" onclick="cancelZeroQtyDeletion('${esc(item.barcode)}')">Cancel</button>`;
+            const deleteNowBtn = !item.is_eligible ? ` <button class="btn" style="padding:4px 8px; font-size:0.85rem; background:#6f42c1; color:white;" onclick="deleteZeroQtyNow('${esc(item.barcode)}')">Delete now</button>` : '';
+            actionBtn = cancelBtn + deleteNowBtn;
+        }
+        
+        html += `<tr style="border-bottom:1px solid #dee2e6;">
+            <td style="padding:6px;">${esc(item.barcode || '')}</td>
+            <td style="padding:6px;">${esc((item.title || '').substring(0, 40))}${(item.title || '').length > 40 ? '...' : ''}</td>
+            <td style="padding:6px;">${esc(item.position || '')}</td>
+            <td style="padding:6px; color:${statusColor}; font-weight:bold;">${statusText}</td>
+            <td style="padding:6px;">${actionBtn}</td>
+        </tr>`;
+    });
+    
+    html += '</tbody></table></div>';
+    list.innerHTML = html;
+    notice.style.display = 'block';
+    console.log('Zero-qty notice displayed');
+}
+
+async function cancelZeroQtyDeletion(barcode){
+    if(!confirm('Cancel automatic deletion for this zero-quantity item?')){
+        return;
+    }
+    try{
+        const resp = await fetch(`/api/zero_qty_cancel/${encodeURIComponent(barcode)}`, {method: 'POST'});
+        const j = await resp.json();
+        if(j.success){
+            alert('Automatic deletion cancelled');
+            fetchZeroQtyPending();
+        } else {
+            alert('Failed to cancel: ' + (j.error || 'Unknown error'));
+        }
+    }catch(err){
+        console.error('Error cancelling zero-qty deletion:', err);
+        alert('Error cancelling deletion');
+    }
+}
+
+async function allowZeroQtyDeletion(barcode){
+    if(!confirm('Re-enable automatic deletion for this zero-quantity item?')){
+        return;
+    }
+    try{
+        const resp = await fetch(`/api/zero_qty_allow/${encodeURIComponent(barcode)}`, {method: 'POST'});
+        const j = await resp.json();
+        if(j.success){
+            alert('Automatic deletion re-enabled');
+            fetchZeroQtyPending();
+        } else {
+            alert('Failed to re-enable: ' + (j.error || 'Unknown error'));
+        }
+    }catch(err){
+        console.error('Error re-enabling zero-qty deletion:', err);
+        alert('Error re-enabling deletion');
+    }
+}
+
+async function deleteZeroQtyNow(barcode){
+    if(!confirm('Immediately delete this zero-quantity item? This bypasses the grace period.')){
+        return;
+    }
+    try{
+        const resp = await fetch(`/api/zero_qty_delete_now/${encodeURIComponent(barcode)}`, {method: 'POST'});
+        const j = await resp.json();
+        if(j.success){
+            alert('Item deleted successfully');
+            fetchZeroQtyPending();
+            doSearch(); // Refresh the main results
+        } else {
+            alert('Failed to delete: ' + (j.error || 'Unknown error'));
+        }
+    }catch(err){
+        console.error('Error deleting zero-qty item:', err);
+        alert('Error deleting item');
+    }
+}
+
+// Attach refresh button handler for zero-qty
+document.getElementById('refresh-zero-qty-btn').addEventListener('click', fetchZeroQtyPending);
 
 </script>
 </body>

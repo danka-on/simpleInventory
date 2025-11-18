@@ -1102,6 +1102,15 @@ def api_financial_analytics():
             order_pk_id = item_data.get('id', 0)
             item_data['return_cost'] = returns_data.get(order_pk_id, 0)
             
+            # Skip cost lookup for marketplace sales (no cost associated)
+            if order['store'] == 'marketplace':
+                item_data['cost'] = None
+                item_data['cost_source'] = 'marketplace'
+                item_data['upc'] = order['barcode'] or order['item_id']
+                item_data['bol_number'] = None
+                transactions.append(item_data)
+                continue
+            
             # Try to get cost from rawbol.db
             upc = order['barcode'] or order['item_id']
             cost = None
@@ -1685,6 +1694,7 @@ def _start_trash_purger_thread():
 # ZERO-QUANTITY DELETION WORKER
 # ============================================================================
 _zero_qty_deleter_started = False
+_automatic_removal_started = False
 
 def _purge_zero_qty_items():
     """Delete searchRack items that have been at 0 quantity for 24+ hours"""
@@ -1804,6 +1814,176 @@ def _start_zero_qty_deleter_thread():
     t = threading.Thread(target=_runner, daemon=True)
     t.start()
     print("🚀 Zero-quantity deletion thread started")
+
+def _process_automatic_inventory_removals():
+    """Process sold orders that are past grace period and reduce inventory automatically"""
+    try:
+        print("🔄 Checking for automatic inventory removals...")
+        sold_conn = sqlite3.connect('sold.db')
+        sold_conn.row_factory = sqlite3.Row
+        sold_cur = sold_conn.cursor()
+        
+        # Get grace period setting
+        sold_cur.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)")
+        sold_conn.commit()
+        sold_cur.execute("SELECT value FROM settings WHERE key = 'removal_grace_hours'")
+        row = sold_cur.fetchone()
+        grace_period_hours = float(row[0]) if row and str(row[0]).strip() else 48
+        
+        print(f"   Grace period: {grace_period_hours} hours ({grace_period_hours * 60:.1f} minutes)")
+        
+        # Get orders eligible for automatic removal - MUST include shipped_time
+        sold_cur.execute('''
+            SELECT id, order_id, barcode, quantity, title, shipped_time
+            FROM orders 
+            WHERE rackupdated = 0 
+            AND shipped_time IS NOT NULL 
+            AND shipped_time != ''
+            AND barcode IS NOT NULL
+            AND barcode != ''
+            AND COALESCE(removal_cancelled, 0) = 0
+        ''')
+        orders = sold_cur.fetchall()
+        
+        print(f"   Found {len(orders)} orders with shipped_time")
+        
+        from datetime import datetime
+        now = datetime.now()
+        
+        searchrack_conn = sqlite3.connect('searchRack.db')
+        searchrack_cur = searchrack_conn.cursor()
+        
+        processed_count = 0
+        
+        for order in orders:
+            try:
+                shipped_str = order['shipped_time']
+                
+                # Parse shipped time
+                if 'T' in shipped_str:
+                    if shipped_str.endswith('Z'):
+                        shipped_dt = datetime.fromisoformat(shipped_str.replace('Z', '+00:00'))
+                    else:
+                        shipped_dt = datetime.fromisoformat(shipped_str)
+                else:
+                    shipped_dt = datetime.fromisoformat(shipped_str)
+                
+                if shipped_dt.tzinfo:
+                    shipped_dt = shipped_dt.replace(tzinfo=None)
+                
+                hours_since_shipped = (now - shipped_dt).total_seconds() / 3600
+                
+                # Check if eligible for removal (past grace period)
+                if hours_since_shipped < grace_period_hours:
+                    continue
+                
+                # Get barcode and try to find in searchRack
+                barcode = order['barcode']
+                
+                # Try original barcode first (searchRack may store without leading zeros)
+                searchrack_cur.execute('SELECT ID, QUANTITY FROM SEARCHRACK WHERE BARCODE = ?', (barcode,))
+                item_row = searchrack_cur.fetchone()
+                
+                # If not found, try with zero-padding (for items that have leading zeros)
+                if not item_row:
+                    barcode_padded = barcode.zfill(12) if barcode and barcode.isdigit() else barcode
+                    searchrack_cur.execute('SELECT ID, QUANTITY FROM SEARCHRACK WHERE BARCODE = ?', (barcode_padded,))
+                    item_row = searchrack_cur.fetchone()
+                
+                if not item_row:
+                    # Item not found in searchRack, mark as handled anyway
+                    sold_cur.execute('UPDATE orders SET rackupdated = 1 WHERE id = ?', (order['id'],))
+                    print(f"  ℹ️  Order {order['order_id']}: Item not found in searchRack (barcode: {barcode})")
+                    continue
+                
+                item_id, current_qty = item_row
+                current_qty = current_qty or 0
+                sold_qty = order['quantity'] or 1
+                
+                # Calculate new quantity (don't go below 0)
+                new_qty = max(0, current_qty - sold_qty)
+                
+                # Update searchRack quantity
+                searchrack_cur.execute('UPDATE SEARCHRACK SET QUANTITY = ? WHERE ID = ?', (new_qty, item_id))
+                
+                # Mark order as processed
+                sold_cur.execute('UPDATE orders SET rackupdated = 1 WHERE id = ?', (order['id'],))
+                
+                # Log to removed.db
+                removed_conn = sqlite3.connect('removed.db')
+                removed_cur = removed_conn.cursor()
+                removed_cur.execute('''
+                    CREATE TABLE IF NOT EXISTS removed_items (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        order_id TEXT,
+                        barcode TEXT,
+                        title TEXT,
+                        quantity_removed INTEGER,
+                        removed_at TEXT,
+                        searchrack_id INTEGER,
+                        old_quantity INTEGER,
+                        new_quantity INTEGER,
+                        removal_type TEXT
+                    )
+                ''')
+                removed_cur.execute('''
+                    INSERT INTO removed_items 
+                    (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (order['order_id'], barcode, order['title'], sold_qty, now.isoformat(), item_id, current_qty, new_qty, 'automatic'))
+                removed_conn.commit()
+                removed_conn.close()
+                
+                processed_count += 1
+                if new_qty == 0:
+                    print(f"  ✓ Order {order['order_id']}: Reduced {barcode} from {current_qty} to {new_qty} (will be marked for deletion)")
+                else:
+                    print(f"  ✓ Order {order['order_id']}: Reduced {barcode} from {current_qty} to {new_qty}")
+                
+            except Exception as e:
+                print(f"  ❌ Error processing order {order['order_id']}: {e}")
+                continue
+        
+        searchrack_conn.commit()
+        searchrack_conn.close()
+        
+        sold_conn.commit()
+        sold_conn.close()
+        
+        if processed_count > 0:
+            print(f"✅ Automatically processed {processed_count} inventory removals")
+    
+    except Exception as e:
+        print(f"❌ Error in automatic inventory removal: {e}")
+        import traceback
+        traceback.print_exc()
+
+def _start_automatic_removal_thread():
+    """Start background thread to automatically process inventory removals after grace period"""
+    global _automatic_removal_started
+    if _automatic_removal_started:
+        return
+    _automatic_removal_started = True
+    
+    def _runner():
+        import time as _time
+        # Run immediately on startup
+        try:
+            _process_automatic_inventory_removals()
+        except Exception as e:
+            print('Automatic removal initial run error:', e)
+        
+        # Then run every 5 minutes
+        while True:
+            _time.sleep(5*60)
+            try:
+                _process_automatic_inventory_removals()
+            except Exception as e:
+                print('Automatic removal tick error:', e)
+    
+    t = threading.Thread(target=_runner, daemon=True)
+    t.start()
+    print("🚀 Automatic inventory removal thread started")
 
 def _ensure_bol_list_status_column():
     """Ensure bol_items has list_status, temporary, and quantity tracking columns."""
@@ -5983,7 +6163,14 @@ def mark_order_handled():
     try:
         conn = sqlite3.connect('sold.db')
         cur = conn.cursor()
-        cur.execute("UPDATE orders SET isHandled = '1', isHandledDate = datetime('now') WHERE id = ?", (order_id,))
+        # Set shipped_time if not already set (for test orders to trigger automatic removal)
+        cur.execute("""
+            UPDATE orders 
+            SET isHandled = '1', 
+                isHandledDate = datetime('now'),
+                shipped_time = COALESCE(shipped_time, datetime('now'))
+            WHERE id = ?
+        """, (order_id,))
         conn.commit()
         conn.close()
         return jsonify({'success': True})
@@ -6021,7 +6208,7 @@ def get_pending_removals():
             conn.commit()
             cur.execute("SELECT value FROM settings WHERE key = 'removal_grace_hours'")
             row = cur.fetchone()
-            grace_period_hours = int(row[0]) if row and str(row[0]).strip().isdigit() else 48
+            grace_period_hours = float(row[0]) if row and str(row[0]).strip() else 48
         except Exception:
             grace_period_hours = 48
         
@@ -6127,6 +6314,15 @@ def allow_automatic_removal(order_id):
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
+@app.route('/api/sold/trigger-automatic-removal', methods=['POST'])
+def trigger_automatic_removal():
+    """Manually trigger automatic inventory removal process (for testing)"""
+    try:
+        _process_automatic_inventory_removals()
+        return jsonify({'success': True, 'message': 'Automatic removal process triggered'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
 # Grace period settings endpoints
 @app.route('/api/grace_period', methods=['GET'])
 def api_get_grace_period():
@@ -6138,7 +6334,7 @@ def api_get_grace_period():
         cur.execute("SELECT value FROM settings WHERE key = 'removal_grace_hours'")
         row = cur.fetchone()
         conn.close()
-        hours = int(row[0]) if row and str(row[0]).strip().isdigit() else 48
+        hours = float(row[0]) if row and str(row[0]).strip() else 48
         return jsonify({'success': True, 'hours': hours})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
@@ -6147,7 +6343,7 @@ def api_get_grace_period():
 def api_set_grace_period():
     try:
         data = request.get_json(force=True) if request.is_json else {}
-        hours = int(data.get('hours', 48))
+        hours = float(data.get('hours', 48))  # Allow fractional hours for testing (e.g., 0.0167 = 1 minute)
         if hours < 0 or hours > 240:
             return jsonify({'success': False, 'error': 'hours out of range (0-240)'}), 400
         conn = sqlite3.connect('sold.db')
@@ -6251,47 +6447,85 @@ def api_get_zero_qty_pending():
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         
+        # Add deletion_cancelled column if not exists
+        try:
+            cur.execute('ALTER TABLE zero_qty_pending_deletion ADD COLUMN deletion_cancelled INTEGER DEFAULT 0')
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+        
+        # Get grace period setting
+        cur.execute("SELECT value FROM zero_qty_settings WHERE key = 'interval_minutes'")
+        interval_row = cur.fetchone()
+        interval_minutes = int(interval_row['value']) if interval_row else 2880  # Default 48 hours
+        grace_hours = interval_minutes / 60
+        
         cur.execute('''
             SELECT 
                 p.id,
                 p.searchrack_id,
                 p.marked_at,
                 p.delete_at,
+                COALESCE(p.deletion_cancelled, 0) as deletion_cancelled,
                 s.TITLE as title,
                 s.BARCODE as barcode,
-                s.QUANTITY as quantity
+                s.QUANTITY as quantity,
+                s.ITEM_POSITION as position
             FROM zero_qty_pending_deletion p
             LEFT JOIN SEARCHRACK s ON p.searchrack_id = s.ID
             ORDER BY p.delete_at ASC
         ''')
         
+        from datetime import datetime
+        now = datetime.now()
+        
         items = []
         for row in cur.fetchall():
+            delete_at = datetime.fromisoformat(row['delete_at'])
+            time_remaining = (delete_at - now).total_seconds() / 3600
+            is_eligible = time_remaining <= 0 and row['deletion_cancelled'] == 0
+            
             items.append({
                 'id': row['id'],
                 'searchrack_id': row['searchrack_id'],
                 'marked_at': row['marked_at'],
                 'delete_at': row['delete_at'],
+                'deletion_cancelled': row['deletion_cancelled'],
                 'title': row['title'],
                 'barcode': row['barcode'],
-                'quantity': row['quantity']
+                'quantity': row['quantity'],
+                'position': row['position'],
+                'is_eligible': is_eligible,
+                'hours_remaining': max(0, round(time_remaining, 1))
             })
         
         conn.close()
         
         return jsonify({
             'success': True,
-            'items': items
+            'items': items,
+            'grace_hours': grace_hours
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
-@app.route('/api/zero_qty_delete_now/<int:searchrack_id>', methods=['POST'])
-def api_zero_qty_delete_now(searchrack_id):
+@app.route('/api/zero_qty_delete_now/<barcode>', methods=['POST'])
+def api_zero_qty_delete_now(barcode):
     """Immediately delete a searchRack item (bypass grace period)"""
     try:
         conn = sqlite3.connect('searchRack.db')
         cur = conn.cursor()
+        
+        # Find the item by barcode (pad to 12 digits)
+        barcode_padded = barcode.zfill(12) if barcode.isdigit() else barcode
+        cur.execute('SELECT ID FROM SEARCHRACK WHERE BARCODE = ?', (barcode_padded,))
+        row = cur.fetchone()
+        
+        if not row:
+            conn.close()
+            return jsonify({'success': False, 'error': 'Item not found'})
+        
+        searchrack_id = row[0]
         
         # Archive the item
         from datetime import datetime
@@ -6331,7 +6565,75 @@ def api_zero_qty_delete_now(searchrack_id):
         conn.commit()
         conn.close()
         
-        print(f"✓ Manually deleted searchRack item {searchrack_id}")
+        print(f"✓ Manually deleted searchRack item {searchrack_id} (barcode: {barcode})")
+        
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/zero_qty_cancel/<barcode>', methods=['POST'])
+def api_zero_qty_cancel(barcode):
+    """Cancel automatic deletion for a zero-quantity item"""
+    try:
+        conn = sqlite3.connect('searchRack.db')
+        cur = conn.cursor()
+        
+        # Find the item by barcode
+        barcode_padded = barcode.zfill(12) if barcode.isdigit() else barcode
+        cur.execute('SELECT ID FROM SEARCHRACK WHERE BARCODE = ?', (barcode_padded,))
+        row = cur.fetchone()
+        
+        if not row:
+            conn.close()
+            return jsonify({'success': False, 'error': 'Item not found'})
+        
+        searchrack_id = row[0]
+        
+        # Update deletion_cancelled flag
+        cur.execute('''
+            UPDATE zero_qty_pending_deletion 
+            SET deletion_cancelled = 1 
+            WHERE searchrack_id = ?
+        ''', (searchrack_id,))
+        
+        conn.commit()
+        conn.close()
+        
+        print(f"✓ Cancelled automatic deletion for item {searchrack_id} (barcode: {barcode})")
+        
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/zero_qty_allow/<barcode>', methods=['POST'])
+def api_zero_qty_allow(barcode):
+    """Re-enable automatic deletion for a zero-quantity item"""
+    try:
+        conn = sqlite3.connect('searchRack.db')
+        cur = conn.cursor()
+        
+        # Find the item by barcode
+        barcode_padded = barcode.zfill(12) if barcode.isdigit() else barcode
+        cur.execute('SELECT ID FROM SEARCHRACK WHERE BARCODE = ?', (barcode_padded,))
+        row = cur.fetchone()
+        
+        if not row:
+            conn.close()
+            return jsonify({'success': False, 'error': 'Item not found'})
+        
+        searchrack_id = row[0]
+        
+        # Update deletion_cancelled flag
+        cur.execute('''
+            UPDATE zero_qty_pending_deletion 
+            SET deletion_cancelled = 0 
+            WHERE searchrack_id = ?
+        ''', (searchrack_id,))
+        
+        conn.commit()
+        conn.close()
+        
+        print(f"✓ Re-enabled automatic deletion for item {searchrack_id} (barcode: {barcode})")
         
         return jsonify({'success': True})
     except Exception as e:
@@ -6486,9 +6788,16 @@ def api_sold_remove_now(order_id: int):
         if not qty_col:
             r_conn.close(); s_conn.close()
             return jsonify({'success': False, 'error': 'No quantity column in SEARCHRACK'}), 500
-        barcode_padded = barcode.zfill(12) if barcode and barcode.isdigit() else barcode
-        r_cur.execute(f'SELECT ID, {qty_col} FROM SEARCHRACK WHERE BARCODE = ? COLLATE NOCASE', (barcode_padded,))
+        
+        # Try original barcode first (searchRack may store without leading zeros)
+        r_cur.execute(f'SELECT ID, {qty_col} FROM SEARCHRACK WHERE BARCODE = ? COLLATE NOCASE', (barcode,))
         row = r_cur.fetchone()
+        
+        # If not found, try with zero-padding
+        if not row:
+            barcode_padded = barcode.zfill(12) if barcode and barcode.isdigit() else barcode
+            r_cur.execute(f'SELECT ID, {qty_col} FROM SEARCHRACK WHERE BARCODE = ? COLLATE NOCASE', (barcode_padded,))
+            row = r_cur.fetchone()
         inventory_found = False
         new_qty = None
         if row:
@@ -9126,11 +9435,12 @@ def api_marketplace_sale():
             
             sale_date = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             
-            for _ in range(quantity):
-                sold_cur.execute('''INSERT INTO orders 
-                    (barcode, title, price, paid_time, store)
-                    VALUES (?, ?, ?, ?, ?)''',
-                    (barcode, title, price, sale_date, 'marketplace'))
+            # Insert ONE row with the quantity value
+            # Marketplace orders are immediately handled (isHandled='1') and don't need inventory removal
+            sold_cur.execute('''INSERT INTO orders 
+                (barcode, title, price, paid_time, store, quantity, isHandled, isHandledDate, rackupdated)
+                VALUES (?, ?, ?, ?, ?, ?, '1', ?, 1)''',
+                (barcode, title, price, sale_date, 'marketplace', quantity, sale_date))
             
             # Auto-detect if this is a resold return
             if barcode:
@@ -9919,6 +10229,9 @@ def api_create_test_sold_order():
         shipping_state = data.get('shipping_state', '').strip()
         shipping_postal_code = data.get('shipping_postal_code', '').strip()
         
+        # Check if shipped time should be set
+        set_shipped = data.get('set_shipped', False)
+        
         # Generate test order_id
         import random
         import time
@@ -9927,6 +10240,7 @@ def api_create_test_sold_order():
         # Insert into sold.db
         import datetime
         paid_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        shipped_time = paid_time if set_shipped else None
         
         conn = sqlite3.connect('sold.db')
         cur = conn.cursor()
@@ -9936,13 +10250,13 @@ def api_create_test_sold_order():
                 order_id, item_id, title, quantity, price, 
                 shipping_name, shipping_street1, shipping_city, 
                 shipping_state, shipping_postal_code, shipping_country,
-                paid_time, barcode, store, isHandled, rackupdated
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', 0)
+                paid_time, shipped_time, barcode, store, isHandled, rackupdated
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', 0)
         ''', (
             order_id, order_id, title, quantity, price,
             shipping_name, shipping_street1, shipping_city,
             shipping_state, shipping_postal_code, 'US',
-            paid_time, barcode, store
+            paid_time, shipped_time, barcode, store
         ))
         
         conn.commit()
@@ -10345,6 +10659,9 @@ if __name__ == "__main__":
     
     # Start zero-quantity deletion thread
     _start_zero_qty_deleter_thread()
+    
+    # Start automatic inventory removal thread
+    _start_automatic_removal_thread()
     
     # Start auto-sync background thread
     _start_auto_sync_thread()

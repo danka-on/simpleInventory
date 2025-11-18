@@ -516,6 +516,16 @@
         let revenueChart = null;
         let storeChart = null;
         
+        // Helper function: For marketplace items, price is total (don't multiply by quantity)
+        // For other stores, price is per-unit (multiply by quantity)
+        function getRevenue(item) {
+            return item.store === 'marketplace' ? item.price : (item.price * item.quantity);
+        }
+        
+        function getCost(item) {
+            return item.store === 'marketplace' ? 0 : ((item.cost || 0) * item.quantity);
+        }
+        
         // Load data on page load
         document.addEventListener('DOMContentLoaded', () => {
             loadData();
@@ -681,8 +691,8 @@
             const bolFilter = document.getElementById('bolFilter').value;
             const isBolCostToggled = document.getElementById('showBolCostToggle').checked;
             
-            const totalRevenue = filteredData.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-            const totalCosts = filteredData.reduce((sum, item) => sum + (item.cost ? item.cost * item.quantity : 0), 0);
+            const totalRevenue = filteredData.reduce((sum, item) => sum + getRevenue(item), 0);
+            const totalCosts = filteredData.reduce((sum, item) => sum + getCost(item), 0);
             const totalFees = filteredData.reduce((sum, item) => sum + (item.seller_fee || 0) + (item.taxes || 0), 0);
             const totalShipping = filteredData.reduce((sum, item) => sum + (item.shipping_cost || 0), 0);
             const totalReturns = filteredData.reduce((sum, item) => sum + (item.return_cost || 0), 0);
@@ -756,8 +766,8 @@
             
             filteredData.forEach(item => {
                 const date = item.paid_time.split('T')[0];
-                const revenue = item.price * item.quantity;
-                const cost = (item.cost || 0) * item.quantity;
+                const revenue = getRevenue(item);
+                const cost = getCost(item);
                 
                 revenueByDay[date] = (revenueByDay[date] || 0) + revenue;
                 costsByDay[date] = (costsByDay[date] || 0) + cost;
@@ -812,7 +822,7 @@
             };
             
             filteredData.forEach(item => {
-                storeData[item.store] = (storeData[item.store] || 0) + (item.price * item.quantity);
+                storeData[item.store] = (storeData[item.store] || 0) + getRevenue(item);
             });
             
             const storeCtx = document.getElementById('storeChart');
@@ -879,14 +889,14 @@
                         valB = b.return_cost || 0;
                         break;
                     case 'profit':
-                        valA = (a.price * a.quantity) - ((a.cost || 0) * a.quantity) - (a.seller_fee || 0) - (a.taxes || 0) - (a.shipping_cost || 0) - (a.return_cost || 0);
-                        valB = (b.price * b.quantity) - ((b.cost || 0) * b.quantity) - (b.seller_fee || 0) - (b.taxes || 0) - (b.shipping_cost || 0) - (b.return_cost || 0);
+                        valA = getRevenue(a) - getCost(a) - (a.seller_fee || 0) - (a.taxes || 0) - (a.shipping_cost || 0) - (a.return_cost || 0);
+                        valB = getRevenue(b) - getCost(b) - (b.seller_fee || 0) - (b.taxes || 0) - (b.shipping_cost || 0) - (b.return_cost || 0);
                         break;
                     case 'margin':
-                        const revenueA = a.price * a.quantity;
-                        const revenueB = b.price * b.quantity;
-                        valA = revenueA > 0 ? ((revenueA - ((a.cost || 0) * a.quantity) - (a.seller_fee || 0) - (a.taxes || 0) - (a.shipping_cost || 0) - (a.return_cost || 0)) / revenueA * 100) : 0;
-                        valB = revenueB > 0 ? ((revenueB - ((b.cost || 0) * b.quantity) - (b.seller_fee || 0) - (b.taxes || 0) - (b.shipping_cost || 0) - (b.return_cost || 0)) / revenueB * 100) : 0;
+                        const revenueA = getRevenue(a);
+                        const revenueB = getRevenue(b);
+                        valA = revenueA > 0 ? ((revenueA - getCost(a) - (a.seller_fee || 0) - (a.taxes || 0) - (a.shipping_cost || 0) - (a.return_cost || 0)) / revenueA * 100) : 0;
+                        valB = revenueB > 0 ? ((revenueB - getCost(b) - (b.seller_fee || 0) - (b.taxes || 0) - (b.shipping_cost || 0) - (b.return_cost || 0)) / revenueB * 100) : 0;
                         break;
                     default:
                         valA = a[sortColumn];
@@ -906,8 +916,8 @@
             // Render table rows
             const tbody = document.getElementById('tableBody');
             tbody.innerHTML = pageData.map(item => {
-                const revenue = item.price * item.quantity;
-                const cost = (item.cost || 0) * item.quantity;
+                const revenue = getRevenue(item);
+                const cost = getCost(item);
                 const fees = (item.seller_fee || 0) + (item.taxes || 0);
                 const shipping = item.shipping_cost || 0;
                 const returnCost = item.return_cost || 0;

@@ -71,8 +71,8 @@ def get_marketplace_sales(limit=None, offset=None):
         cur.execute(query, params)
         sales = [dict(r) for r in cur.fetchall()]
         
-        # Calculate totals
-        cur.execute('SELECT SUM(quantity) as total_quantity, SUM(price * quantity) as total_revenue FROM marketplace_sales')
+        # Calculate totals (price is already total, not per-unit)
+        cur.execute('SELECT SUM(quantity) as total_quantity, SUM(price) as total_revenue FROM marketplace_sales')
         totals_row = cur.fetchone()
         total_quantity = totals_row['total_quantity'] or 0
         total_revenue = totals_row['total_revenue'] or 0.0
