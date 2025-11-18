@@ -5928,7 +5928,9 @@ def sold_orders():
             # If location is empty and barcode exists, look it up in searchRack
             if (not order_dict.get('location') or order_dict.get('location', '').strip() == '') and order_dict.get('barcode'):
                 try:
-                    rack_cur.execute('SELECT ITEM_POSITION, PICTUREPOSITION FROM SEARCHRACK WHERE BARCODE = ? COLLATE NOCASE', (order_dict['barcode'],))
+                    # Pad barcode with leading zeros to match SEARCHRACK format (UPC-12 with leading zeros)
+                    barcode_padded = order_dict['barcode'].zfill(12) if order_dict['barcode'] and order_dict['barcode'].isdigit() else order_dict['barcode']
+                    rack_cur.execute('SELECT ITEM_POSITION, PICTUREPOSITION FROM SEARCHRACK WHERE BARCODE = ? COLLATE NOCASE', (barcode_padded,))
                     rack_row = rack_cur.fetchone()
                     if rack_row:
                         # Use ITEM_POSITION as location (area code), fallback to PICTUREPOSITION
@@ -6420,7 +6422,7 @@ def api_removed_undo(rem_id: int):
             rem_conn.close()
             return jsonify({'success': False, 'error': 'Invalid removed entry data'}), 400
 
-        # Update searchRack quantity by ITEMID (barcode)
+        # Update searchRack quantity by BARCODE (pad with leading zeros)
         rack_conn = sqlite3.connect('searchRack.db')
         rack_cur = rack_conn.cursor()
         rack_cur.execute('PRAGMA table_info(SEARCHRACK)')
@@ -6431,7 +6433,8 @@ def api_removed_undo(rem_id: int):
             rem_conn.close()
             return jsonify({'success': False, 'error': 'No quantity column in SEARCHRACK'}), 500
 
-        rack_cur.execute(f'SELECT ID, {qty_col} FROM SEARCHRACK WHERE ITEMID = ? COLLATE NOCASE', (barcode,))
+        barcode_padded = barcode.zfill(12) if barcode and barcode.isdigit() else barcode
+        rack_cur.execute(f'SELECT ID, {qty_col} FROM SEARCHRACK WHERE BARCODE = ? COLLATE NOCASE', (barcode_padded,))
         found = rack_cur.fetchone()
         if not found:
             rack_conn.close()
@@ -6483,7 +6486,8 @@ def api_sold_remove_now(order_id: int):
         if not qty_col:
             r_conn.close(); s_conn.close()
             return jsonify({'success': False, 'error': 'No quantity column in SEARCHRACK'}), 500
-        r_cur.execute(f'SELECT ID, {qty_col} FROM SEARCHRACK WHERE ITEMID = ? COLLATE NOCASE', (barcode,))
+        barcode_padded = barcode.zfill(12) if barcode and barcode.isdigit() else barcode
+        r_cur.execute(f'SELECT ID, {qty_col} FROM SEARCHRACK WHERE BARCODE = ? COLLATE NOCASE', (barcode_padded,))
         row = r_cur.fetchone()
         inventory_found = False
         new_qty = None
