@@ -119,7 +119,10 @@
                 <strong style="color:#c92a2a;">🗑️ Pending Zero-Quantity Deletions</strong>
                 <span id="zero-qty-grace-info" style="color:#c92a2a; opacity:0.9; margin-left:6px;"></span>
             </div>
-            <button id="refresh-zero-qty-btn" class="btn" style="padding:4px 8px; font-size:0.9rem;">Refresh</button>
+            <div style="display:flex; gap:8px;">
+                <button id="run-zero-qty-now-btn" class="btn" style="padding:4px 8px; font-size:0.9rem; background:#c92a2a; color:white;">Run Now</button>
+                <button id="refresh-zero-qty-btn" class="btn" style="padding:4px 8px; font-size:0.9rem;">Refresh</button>
+            </div>
         </div>
         <div id="zero-qty-list" style="font-size:0.9rem; color:#c92a2a;"></div>
     </div>
@@ -1337,6 +1340,26 @@ async function deleteZeroQtyNow(barcode){
 
 // Attach refresh button handler for zero-qty
 document.getElementById('refresh-zero-qty-btn').addEventListener('click', fetchZeroQtyPending);
+
+// Attach run now button handler for zero-qty
+document.getElementById('run-zero-qty-now-btn').addEventListener('click', async function() {
+    if (!confirm('Run zero-quantity deletion now? This will delete all items past their grace period.')) {
+        return;
+    }
+    try {
+        const resp = await fetch('/api/zero_qty/trigger-purge', {method: 'POST'});
+        const data = await resp.json();
+        if (data.success) {
+            alert('✓ Zero-quantity purge completed! Refreshing...');
+            fetchZeroQtyPending();
+            searchItems(); // Refresh main list
+        } else {
+            alert('Error: ' + (data.error || 'Unknown error'));
+        }
+    } catch (err) {
+        alert('Error triggering zero-quantity purge: ' + err.message);
+    }
+});
 
 </script>
 </body>

@@ -1817,6 +1817,8 @@ def _start_zero_qty_deleter_thread():
 
 def _process_automatic_inventory_removals():
     """Process sold orders that are past grace period and reduce inventory automatically"""
+    from datetime import datetime, timedelta
+    
     try:
         print("🔄 Checking for automatic inventory removals...")
         sold_conn = sqlite3.connect('sold.db')
@@ -1935,8 +1937,43 @@ def _process_automatic_inventory_removals():
                 removed_conn.close()
                 
                 processed_count += 1
+                
+                # If item is now at 0 quantity, mark for deletion
                 if new_qty == 0:
-                    print(f"  ✓ Order {order['order_id']}: Reduced {barcode} from {current_qty} to {new_qty} (will be marked for deletion)")
+                    try:
+                        # Get interval from settings
+                        searchrack_cur.execute("SELECT value FROM zero_qty_settings WHERE key = 'interval_minutes'")
+                        settings = searchrack_cur.fetchone()
+                        interval = int(settings[0]) if settings else 60
+                        
+                        # Calculate deletion time
+                        delete_at = datetime.now() + timedelta(minutes=interval)
+                        
+                        # Check if already marked (and not cancelled)
+                        searchrack_cur.execute('SELECT id, deletion_cancelled FROM zero_qty_pending_deletion WHERE searchrack_id = ?', (item_id,))
+                        existing = searchrack_cur.fetchone()
+                        
+                        if not existing:
+                            # Mark for deletion
+                            searchrack_cur.execute('''
+                                INSERT INTO zero_qty_pending_deletion (searchrack_id, marked_at, delete_at, deletion_cancelled)
+                                VALUES (?, ?, ?, 0)
+                            ''', (item_id, datetime.now().isoformat(), delete_at.isoformat()))
+                            print(f"  ✓ Order {order['order_id']}: Reduced {barcode} from {current_qty} to 0 → Marked for deletion in {interval} min")
+                        elif existing[1] == 1:
+                            # Entry exists but was cancelled - update it to re-enable
+                            searchrack_cur.execute('''
+                                UPDATE zero_qty_pending_deletion 
+                                SET deletion_cancelled = 0, marked_at = ?, delete_at = ?
+                                WHERE searchrack_id = ?
+                            ''', (datetime.now().isoformat(), delete_at.isoformat(), item_id))
+                            print(f"  ✓ Order {order['order_id']}: Reduced {barcode} from {current_qty} to 0 → Re-enabled deletion (was cancelled)")
+                        else:
+                            print(f"  ✓ Order {order['order_id']}: Reduced {barcode} from {current_qty} to 0 (already marked for deletion)")
+                    except Exception as mark_error:
+                        print(f"  ❌ Error marking item {item_id} for zero-qty deletion: {mark_error}")
+                        import traceback
+                        traceback.print_exc()
                 else:
                     print(f"  ✓ Order {order['order_id']}: Reduced {barcode} from {current_qty} to {new_qty}")
                 
@@ -6108,10 +6145,16 @@ def sold_orders():
             # If location is empty and barcode exists, look it up in searchRack
             if (not order_dict.get('location') or order_dict.get('location', '').strip() == '') and order_dict.get('barcode'):
                 try:
-                    # Pad barcode with leading zeros to match SEARCHRACK format (UPC-12 with leading zeros)
-                    barcode_padded = order_dict['barcode'].zfill(12) if order_dict['barcode'] and order_dict['barcode'].isdigit() else order_dict['barcode']
-                    rack_cur.execute('SELECT ITEM_POSITION, PICTUREPOSITION FROM SEARCHRACK WHERE BARCODE = ? COLLATE NOCASE', (barcode_padded,))
+                    # Try original barcode first (searchRack stores without leading zeros)
+                    rack_cur.execute('SELECT ITEM_POSITION, PICTUREPOSITION FROM SEARCHRACK WHERE BARCODE = ? COLLATE NOCASE', (order_dict['barcode'],))
                     rack_row = rack_cur.fetchone()
+                    
+                    # If not found, try padded version
+                    if not rack_row and order_dict['barcode'] and order_dict['barcode'].isdigit():
+                        barcode_padded = order_dict['barcode'].zfill(12)
+                        rack_cur.execute('SELECT ITEM_POSITION, PICTUREPOSITION FROM SEARCHRACK WHERE BARCODE = ? COLLATE NOCASE', (barcode_padded,))
+                        rack_row = rack_cur.fetchone()
+                    
                     if rack_row:
                         # Use ITEM_POSITION as location (area code), fallback to PICTUREPOSITION
                         order_dict['location'] = rack_row['ITEM_POSITION'] or rack_row['PICTUREPOSITION']
@@ -6636,6 +6679,16 @@ def api_zero_qty_allow(barcode):
         print(f"✓ Re-enabled automatic deletion for item {searchrack_id} (barcode: {barcode})")
         
         return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/zero_qty/trigger-purge', methods=['POST'])
+def api_trigger_zero_qty_purge():
+    """Manually trigger zero-quantity deletion process"""
+    try:
+        print("🔄 Manual trigger: Running zero-quantity purge...")
+        _purge_zero_qty_items()
+        return jsonify({'success': True, 'message': 'Zero-quantity purge triggered'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
