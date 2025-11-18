@@ -2611,67 +2611,92 @@ def api_items_prep_status():
             
             import_date = lot_date_row[0] if lot_date_row else None
             
-            # Check if base item exists (any LOT)
+            # Ensure itemprepped column exists
+            cur.execute("PRAGMA table_info(bol_items)")
+            cols = [r[1] for r in cur.fetchall()]
+            if 'itemprepped' not in [c.lower() for c in cols]:
+                cur.execute('ALTER TABLE bol_items ADD COLUMN itemprepped INTEGER DEFAULT 0')
+                conn.commit()
+            
+            # Check if an itemprepped entry already exists for this UPC + LOT
             cur.execute('''
-                SELECT good_qty, unchecked_qty, original_qty
+                SELECT id, good_qty, item_description, image_url
                 FROM bol_items 
                 WHERE upc = ? COLLATE NOCASE 
-                AND (temporary IS NULL OR temporary = 0)
+                AND lot_number = ? COLLATE NOCASE
+                AND itemprepped = 1
                 AND upc NOT LIKE '%-%'
                 LIMIT 1
-            ''', (base_upc,))
+            ''', (base_upc, selected_lot))
             
-            base_row = cur.fetchone()
+            prepped_row = cur.fetchone()
             
-            if not base_row:
-                conn.close()
-                return jsonify({'success': False, 'error': f'UPC {base_upc} not found in bol.db'}), 404
+            if prepped_row:
+                # Update existing itemprepped entry
+                row_id = prepped_row[0]
+                current_good = prepped_row[1] or 0
+                new_good = current_good + qty
+                
+                cur.execute('''
+                    UPDATE bol_items 
+                    SET good_qty = ?, quantity = ?, import_date = ?
+                    WHERE id = ?
+                ''', (new_good, new_good, import_date, row_id))
+                
+                print(f'[GOOD] {base_upc} LOT {selected_lot} (id={row_id}): updated itemprepped entry (good: {current_good}→{new_good})')
+            else:
+                # Get item details from any existing row for this UPC to copy metadata
+                cur.execute('''
+                    SELECT item_description, image_url
+                    FROM bol_items 
+                    WHERE upc = ? COLLATE NOCASE 
+                    LIMIT 1
+                ''', (base_upc,))
+                
+                item_row = cur.fetchone()
+                
+                if not item_row:
+                    conn.close()
+                    return jsonify({'success': False, 'error': f'UPC {base_upc} not found in bol.db'}), 404
+                
+                item_description = item_row[0]
+                image_url = item_row[1]
+                
+                # Create new itemprepped entry for this LOT
+                cur.execute('''
+                    INSERT INTO bol_items (
+                        upc, item_description, image_url, lot_number, import_date,
+                        quantity, good_qty, unchecked_qty, original_qty, itemprepped
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (base_upc, item_description, image_url, selected_lot, import_date,
+                      qty, qty, 0, qty, 1))
+                
+                row_id = cur.lastrowid
+                new_good = qty
+                
+                print(f'[GOOD] {base_upc} LOT {selected_lot} (id={row_id}): created new itemprepped entry (good: 0→{new_good})')
             
-            current_good = base_row[0] or 0
-            current_unchecked = base_row[1] or 0
-            original_qty = base_row[2] or 0
-            
-            # Validate we have enough unchecked items
-            if qty > current_unchecked:
-                conn.close()
-                return jsonify({
-                    'success': False, 
-                    'error': f'Cannot mark {qty} as good - only {current_unchecked} unchecked (original: {original_qty}, good: {current_good})'
-                }), 400
-            
-            # Update quantities: move from unchecked to good and set the selected LOT
-            new_good = current_good + qty
-            new_unchecked = current_unchecked - qty
-            
-            cur.execute('''
-                UPDATE bol_items 
-                SET good_qty = ?, unchecked_qty = ?, quantity = ?, lot_number = ?, import_date = ?
-                WHERE upc = ? COLLATE NOCASE 
-                AND (temporary IS NULL OR temporary = 0)
-                AND upc NOT LIKE '%-%'
-            ''', (new_good, new_unchecked, new_good, selected_lot, import_date, base_upc))
-            
-            # Update prep status
-            cur.execute('SELECT upc FROM items_prep_status WHERE upc = ? AND status = ? COLLATE NOCASE', (base_upc, 'good'))
-            if cur.fetchone():
+            # Update prep status (accumulates across all LOTs for this UPC)
+            cur.execute('SELECT quantity FROM items_prep_status WHERE upc = ? AND status = ? COLLATE NOCASE', (base_upc, 'good'))
+            existing_prep_row = cur.fetchone()
+            if existing_prep_row:
+                # Add to existing prep status quantity (accumulates across LOTs)
+                total_prep_good = (existing_prep_row[0] or 0) + qty
                 cur.execute('UPDATE items_prep_status SET quantity = ?, updated_at = ? WHERE upc = ? AND status = ? COLLATE NOCASE',
-                           (new_good, ts, base_upc, 'good'))
+                           (total_prep_good, ts, base_upc, 'good'))
             else:
                 cur.execute('INSERT INTO items_prep_status (upc, status, reason, note, quantity, updated_at) VALUES (?,?,?,?,?,?)',
-                           (base_upc, 'good', reason, note, new_good, ts))
+                           (base_upc, 'good', reason, note, qty, ts))
             
             conn.commit()
             conn.close()
             
-            print(f'[GOOD] {base_upc} LOT {selected_lot}: moved {qty} from unchecked to good (good: {current_good}→{new_good}, unchecked: {current_unchecked}→{new_unchecked})')
             return jsonify({
                 'success': True, 
                 'action': 'incremented',
                 'upc': base_upc,
                 'lot_number': selected_lot,
-                'good_qty': new_good,
-                'unchecked_qty': new_unchecked,
-                'original_qty': original_qty
+                'good_qty': new_good
             })
         
         # BAD/UNCHECKED flow - upc should already be suffixed if coming from Bad button
