@@ -3982,8 +3982,12 @@ def api_bol_items():
         cur.execute("PRAGMA table_info(bol_items)")
         cols = [r[1] for r in cur.fetchall()]
         has_temporary = any(c.lower() == 'temporary' for c in cols)
+        has_itemprepped = any(c.lower() == 'itemprepped' for c in cols)
         where = []
         params = []
+        # Exclude itemprepped entries (internal prep tracking) from item manager
+        if has_itemprepped:
+            where.append('(b.itemprepped IS NULL OR b.itemprepped = 0)')
         # Treat 'all' or 'all lots' as no lot filter
         if lot and lot.lower() not in ('all', 'all lots'):
             where.append('b.lot_number = ?')
@@ -3995,6 +3999,20 @@ def api_bol_items():
             where.append('(b.upc LIKE ? COLLATE NOCASE OR b.item_description LIKE ? COLLATE NOCASE)')
             like = f"%{q_stripped}%"
             params.extend([like, like])
+        
+        # Apply status filter in SQL WHERE clause
+        sf = status_filter.replace(' ', '_') if status_filter else ''
+        if sf in ('good','bad','unchecked'):
+            if sf == 'unchecked':
+                # Unchecked: no prep_status OR explicit 'unchecked', AND exclude suffixed items (BAD flow temporaries)
+                where.append('(s.status IS NULL OR s.status = ?)')
+                params.append('unchecked')
+                where.append("b.upc NOT LIKE '%-%'")
+            else:
+                # Good or Bad: explicit status match
+                where.append('s.status = ?')
+                params.append(sf)
+        
         # Build WHERE clause only when we actually have conditions
         where_sql = (' WHERE ' + ' AND '.join(where)) if where else ''
         # Build sort
@@ -4042,11 +4060,8 @@ def api_bol_items():
         )
         sql += ' LIMIT ? OFFSET ?'
         params.extend([limit, offset])
-        print(f"[api_bol_items] SQL: {sql}")
-        print(f"[api_bol_items] Params: {params}")
         cur.execute(sql, params)
-        rows_all = [dict(r) for r in cur.fetchall()]
-        print(f"[api_bol_items] rows_all count before status filter: {len(rows_all)}")
+        rows = [dict(r) for r in cur.fetchall()]
         conn.close()
         # Build a status map keyed by both raw UPC and normalized UPC to handle formats like '16094950.0'
         status_map = {}
@@ -4066,7 +4081,7 @@ def api_bol_items():
             c2.close()
         except Exception:
             status_map = {}
-        # Apply status filter in Python for flexibility (unchecked = no status or explicit 'unchecked')
+        # Enrich rows with status map for any missing joins
         def status_of(row):
             # fallback to status_map using normalized upc if join didn't match
             st = (row.get('prep_status') or '').strip().lower()
@@ -4080,18 +4095,17 @@ def api_bol_items():
                     row['prep_updated_at'] = sm.get('prep_updated_at')
                     st = (row.get('prep_status') or '').strip().lower()
             return st if st in ('good','bad','unchecked') else 'unchecked'
-        rows = rows_all
-        sf = status_filter.replace(' ', '_') if status_filter else ''
-        if sf in ('good','bad','unchecked'):
-            if sf == 'unchecked':
-                rows = [r for r in rows_all if status_of(r) == 'unchecked']
-            else:
-                rows = [r for r in rows_all if status_of(r) == sf]
-        elif sf in ('listed','not_listed'):
+        
+        # Apply status enrichment to rows
+        for r in rows:
+            status_of(r)
+        
+        # Apply list_status filter if needed (not in SQL since it's more complex)
+        if sf in ('listed','not_listed'):
             if sf == 'listed':
-                rows = [r for r in rows_all if (str(r.get('list_status') or '').strip().lower() == 'listed')]
+                rows = [r for r in rows if (str(r.get('list_status') or '').strip().lower() == 'listed')]
             else:
-                rows = [r for r in rows_all if not (str(r.get('list_status') or '').strip().lower() == 'listed')]
+                rows = [r for r in rows if not (str(r.get('list_status') or '').strip().lower() == 'listed')]
         # Normalize for UI
         results = []
         for r in rows:
