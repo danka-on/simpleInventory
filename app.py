@@ -470,7 +470,9 @@ def send_inventory_alert_email():
         
         print(f"📊 Issues found - eBay: {len(inventory_issues['ebay_items'])}, Amazon: {len(inventory_issues['amazon_items'])}, Duplicates: {len(inventory_issues['duplicate_locations'])}, Has issues: {inventory_issues['has_issues']}")
         
-        if not inventory_issues['has_issues']:
+        # Only send if there are eBay or Amazon issues (exclude duplicate locations from email)
+        has_email_issues = len(inventory_issues['ebay_items']) > 0 or len(inventory_issues['amazon_items']) > 0
+        if not has_email_issues:
             print("ℹ️ No inventory issues found - email not sent")
             return jsonify({
                 'success': True,
@@ -885,19 +887,7 @@ def generate_inventory_email_html(issues):
         </tr>
         """
     
-    duplicate_rows = ""
-    for item in issues['duplicate_locations']:
-        duplicate_rows += f"""
-        <tr>
-            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0;">{item['barcode']}</td>
-            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0;">{item['title'][:60]}</td>
-            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0;">{item['locations']}</td>
-            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; text-align: center; font-weight: bold; color: #f39c12;">{item['location_count']}</td>
-            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; text-align: center;">{item['total_qty']}</td>
-        </tr>
-        """
-    
-    total_issues = len(issues['ebay_items']) + len(issues['amazon_items']) + len(issues['duplicate_locations'])
+    total_issues = len(issues['ebay_items']) + len(issues['amazon_items'])
     
     html = f"""
     <!DOCTYPE html>
@@ -931,28 +921,6 @@ def generate_inventory_email_html(issues):
                     <strong>⚠️ Action Required:</strong> Issues detected with your inventory. Please review and address the following items.
                 </div>
     """
-    
-    if issues['duplicate_locations']:
-        html += f"""
-                <div class="section">
-                    <h2>📍 Duplicate Locations ({len(issues['duplicate_locations'])} items)</h2>
-                    <p style="color: #7f8c8d; margin-bottom: 15px;">Same barcode found in multiple locations - please consolidate:</p>
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Barcode</th>
-                                <th>Title</th>
-                                <th>Locations</th>
-                                <th style="text-align: center;">Count</th>
-                                <th style="text-align: center;">Total Qty</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {duplicate_rows}
-                        </tbody>
-                    </table>
-                </div>
-        """
     
     if issues['ebay_items']:
         html += f"""
@@ -1009,7 +977,7 @@ def generate_inventory_email_html(issues):
 
 def generate_inventory_email_plain(issues):
     """Generate plain text email body for inventory alert"""
-    total_issues = len(issues['ebay_items']) + len(issues['amazon_items']) + len(issues['duplicate_locations'])
+    total_issues = len(issues['ebay_items']) + len(issues['amazon_items'])
     
     text = f"""
 ⚠️ INVENTORY ALERT
@@ -1019,17 +987,6 @@ Generated: {issues['timestamp']}
 Action required: Please review and address the following items.
 
 """
-    
-    if issues['duplicate_locations']:
-        text += f"\n📍 Duplicate Locations ({len(issues['duplicate_locations'])} items):\n"
-        text += "Same barcode found in multiple locations - please consolidate\n"
-        text += "-" * 80 + "\n"
-        for item in issues['duplicate_locations']:
-            text += f"Barcode: {item['barcode']}\n"
-            text += f"Title: {item['title'][:60]}\n"
-            text += f"Locations: {item['locations']}\n"
-            text += f"Location Count: {item['location_count']} | Total Qty: {item['total_qty']}\n"
-            text += "-" * 80 + "\n"
     
     if issues['ebay_items']:
         text += f"\n🛒 eBay ({len(issues['ebay_items'])} items):\n"
@@ -11390,8 +11347,8 @@ def emailer_alert_worker():
                 interval = setting['interval']
                 last_sent = setting['last_test_sent']
                 
-                # Only process inventory alerts in this worker
-                if alert_type != 'inventory':
+                # Only process inventory and health alerts in this worker (skip test)
+                if alert_type not in ['inventory', 'health']:
                     continue
                 
                 # Parse interval to minutes
@@ -11428,19 +11385,60 @@ def emailer_alert_worker():
                 
                 if should_send:
                     try:
-                        # Collect inventory issues
-                        inventory_issues = collect_inventory_mismatches()
-                        
-                        # Only send if there are actual issues
-                        if inventory_issues['has_issues']:
-                            html_body = generate_inventory_email_html(inventory_issues)
-                            plain_body = generate_inventory_email_plain(inventory_issues)
+                        if alert_type == 'inventory':
+                            # Collect inventory issues
+                            inventory_issues = collect_inventory_mismatches()
                             
-                            subject = f"⚠️ Inventory Alert - {len(inventory_issues['ebay_items']) + len(inventory_issues['amazon_items'])} Items Need Attention - {now.strftime('%Y-%m-%d %H:%M')}"
+                            # Only send if there are eBay or Amazon issues (exclude duplicate locations)
+                            has_email_issues = len(inventory_issues['ebay_items']) > 0 or len(inventory_issues['amazon_items']) > 0
+                            if has_email_issues:
+                                html_body = generate_inventory_email_html(inventory_issues)
+                                plain_body = generate_inventory_email_plain(inventory_issues)
+                                
+                                subject = f"⚠️ Inventory Alert - {len(inventory_issues['ebay_items']) + len(inventory_issues['amazon_items'])} Items Need Attention - {now.strftime('%Y-%m-%d %H:%M')}"
+                                success, error = send_email_smtp([email], subject, plain_body, html_body)
+                                
+                                if success:
+                                    print(f"✅ Inventory alert sent to: {email}")
+                                    
+                                    # Update last sent time
+                                    conn = sqlite3.connect('searchRack.db')
+                                    cur = conn.cursor()
+                                    cur.execute('''
+                                        UPDATE emailer_settings 
+                                        SET last_test_sent = ? 
+                                        WHERE email = ? AND alert_type = ?
+                                    ''', (now.isoformat(), email, alert_type))
+                                    conn.commit()
+                                    conn.close()
+                                else:
+                                    print(f"❌ Failed to send inventory alert to {email}: {error}")
+                            else:
+                                print(f"ℹ️ No inventory issues - skipping alert for {email}")
+                                
+                                # Still update timestamp to avoid checking too frequently
+                                conn = sqlite3.connect('searchRack.db')
+                                cur = conn.cursor()
+                                cur.execute('''
+                                    UPDATE emailer_settings 
+                                    SET last_test_sent = ? 
+                                    WHERE email = ? AND alert_type = ?
+                                ''', (now.isoformat(), email, alert_type))
+                                conn.commit()
+                                conn.close()
+                        
+                        elif alert_type == 'health':
+                            # Collect health stats
+                            health_stats = collect_health_stats()
+                            html_body = generate_health_email_html(health_stats)
+                            plain_body = generate_health_email_plain(health_stats)
+                            
+                            warnings_count = len(health_stats.get('warnings', []))
+                            subject = f"📊 App Health Report{' - ' + str(warnings_count) + ' Warnings' if warnings_count > 0 else ''} - {now.strftime('%Y-%m-%d %H:%M')}"
                             success, error = send_email_smtp([email], subject, plain_body, html_body)
                             
                             if success:
-                                print(f"✅ Inventory alert sent to: {email}")
+                                print(f"✅ Health alert sent to: {email}")
                                 
                                 # Update last sent time
                                 conn = sqlite3.connect('searchRack.db')
@@ -11453,20 +11451,7 @@ def emailer_alert_worker():
                                 conn.commit()
                                 conn.close()
                             else:
-                                print(f"❌ Failed to send inventory alert to {email}: {error}")
-                        else:
-                            print(f"ℹ️ No inventory issues - skipping alert for {email}")
-                            
-                            # Still update timestamp to avoid checking too frequently
-                            conn = sqlite3.connect('searchRack.db')
-                            cur = conn.cursor()
-                            cur.execute('''
-                                UPDATE emailer_settings 
-                                SET last_test_sent = ? 
-                                WHERE email = ? AND alert_type = ?
-                            ''', (now.isoformat(), email, alert_type))
-                            conn.commit()
-                            conn.close()
+                                print(f"❌ Failed to send health alert to {email}: {error}")
                             
                     except Exception as e:
                         print(f"❌ Error sending inventory alert to {email}: {e}")
