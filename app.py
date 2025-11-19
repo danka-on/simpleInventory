@@ -723,11 +723,13 @@ def collect_inventory_mismatches():
     """
     Find items where store listings have quantity > 0 but searchRack has 0 quantity.
     Only reports on items that exist in searchRack with 0 quantity (not missing items).
+    Also checks for duplicate barcodes in different locations.
     """
     issues = {
         'has_issues': False,
         'ebay_items': [],
         'amazon_items': [],
+        'duplicate_locations': [],
         'timestamp': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     }
     
@@ -818,6 +820,52 @@ def collect_inventory_mismatches():
         except Exception as e:
             print(f"Error checking Amazon inventory: {e}")
         
+        # Check for duplicate barcodes (non-suffixed) in different locations
+        try:
+            rack_conn = sqlite3.connect('searchRack.db')
+            rack_conn.row_factory = sqlite3.Row
+            rack_cur = rack_conn.cursor()
+            
+            # Get quantity column name
+            rack_cur.execute('PRAGMA table_info(SEARCHRACK)')
+            cols = [r[1] for r in rack_cur.fetchall()]
+            qty_col = 'QUANTITY' if 'QUANTITY' in cols else ('QTY' if 'QTY' in cols else None)
+            
+            if qty_col:
+                # Find barcodes that appear in multiple different locations (excluding suffixed barcodes)
+                rack_cur.execute(f'''
+                    SELECT 
+                        BARCODE,
+                        TITLE,
+                        GROUP_CONCAT(ITEM_POSITION || ' (Qty: ' || {qty_col} || ')', ', ') as locations,
+                        COUNT(DISTINCT ITEM_POSITION) as location_count,
+                        SUM({qty_col}) as total_qty
+                    FROM SEARCHRACK
+                    WHERE BARCODE IS NOT NULL 
+                    AND TRIM(BARCODE) != ''
+                    AND BARCODE NOT LIKE '%-%'
+                    AND ITEM_POSITION IS NOT NULL
+                    AND TRIM(ITEM_POSITION) != ''
+                    AND ({qty_col} > 0 OR {qty_col} IS NULL)
+                    GROUP BY BARCODE
+                    HAVING COUNT(DISTINCT ITEM_POSITION) > 1
+                    ORDER BY location_count DESC, BARCODE
+                ''')
+                
+                for row in rack_cur.fetchall():
+                    issues['duplicate_locations'].append({
+                        'barcode': row['BARCODE'],
+                        'title': row['TITLE'] or 'Unknown',
+                        'locations': row['locations'],
+                        'location_count': row['location_count'],
+                        'total_qty': row['total_qty'] or 0
+                    })
+                    issues['has_issues'] = True
+            
+            rack_conn.close()
+        except Exception as e:
+            print(f"Error checking for duplicate locations: {e}")
+        
     except Exception as e:
         print(f"Error collecting inventory mismatches: {e}")
     
@@ -845,13 +893,27 @@ def generate_inventory_email_html(issues):
         </tr>
         """
     
+    duplicate_rows = ""
+    for item in issues['duplicate_locations']:
+        duplicate_rows += f"""
+        <tr>
+            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0;">{item['barcode']}</td>
+            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0;">{item['title'][:60]}</td>
+            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0;">{item['locations']}</td>
+            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; text-align: center; font-weight: bold; color: #f39c12;">{item['location_count']}</td>
+            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; text-align: center;">{item['total_qty']}</td>
+        </tr>
+        """
+    
+    total_issues = len(issues['ebay_items']) + len(issues['amazon_items']) + len(issues['duplicate_locations'])
+    
     html = f"""
     <!DOCTYPE html>
     <html>
     <head>
         <style>
             body {{ font-family: 'Segoe UI', Arial, sans-serif; background: #f9f9f9; margin: 0; padding: 20px; }}
-            .container {{ max-width: 800px; margin: 0 auto; background: white; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }}
+            .container {{ max-width: 900px; margin: 0 auto; background: white; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }}
             .header {{ background: linear-gradient(135deg, #e74c3c, #c0392b); color: white; padding: 30px; border-radius: 12px 12px 0 0; }}
             .header h1 {{ margin: 0; font-size: 28px; }}
             .header p {{ margin: 10px 0 0 0; opacity: 0.9; }}
@@ -868,20 +930,43 @@ def generate_inventory_email_html(issues):
         <div class="container">
             <div class="header">
                 <h1>⚠️ Inventory Alert</h1>
-                <p>Items listed online but showing 0 in physical inventory</p>
+                <p>{total_issues} issue(s) detected in inventory</p>
                 <p style="font-size: 14px; margin-top: 10px;">{issues['timestamp']}</p>
             </div>
             
             <div class="content">
                 <div class="alert">
-                    <strong>⚠️ Action Required:</strong> The following items have quantity listed on marketplaces but show 0 quantity in your searchRack inventory. Please verify and update accordingly.
+                    <strong>⚠️ Action Required:</strong> Issues detected with your inventory. Please review and address the following items.
                 </div>
     """
+    
+    if issues['duplicate_locations']:
+        html += f"""
+                <div class="section">
+                    <h2>📍 Duplicate Locations ({len(issues['duplicate_locations'])} items)</h2>
+                    <p style="color: #7f8c8d; margin-bottom: 15px;">Same barcode found in multiple locations - please consolidate:</p>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Barcode</th>
+                                <th>Title</th>
+                                <th>Locations</th>
+                                <th style="text-align: center;">Count</th>
+                                <th style="text-align: center;">Total Qty</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {duplicate_rows}
+                        </tbody>
+                    </table>
+                </div>
+        """
     
     if issues['ebay_items']:
         html += f"""
                 <div class="section">
                     <h2>🛒 eBay ({len(issues['ebay_items'])} items)</h2>
+                    <p style="color: #7f8c8d; margin-bottom: 15px;">Listed online but showing 0 in physical inventory:</p>
                     <table>
                         <thead>
                             <tr>
@@ -901,6 +986,7 @@ def generate_inventory_email_html(issues):
         html += f"""
                 <div class="section">
                     <h2>📦 Amazon ({len(issues['amazon_items'])} items)</h2>
+                    <p style="color: #7f8c8d; margin-bottom: 15px;">Listed online but showing 0 in physical inventory:</p>
                     <table>
                         <thead>
                             <tr>
@@ -921,7 +1007,6 @@ def generate_inventory_email_html(issues):
             
             <div class="footer">
                 <p>This is an automated inventory alert from your Store App</p>
-                <p>These alerts are sent when items are listed online but show zero physical inventory</p>
             </div>
         </div>
     </body>
@@ -932,17 +1017,31 @@ def generate_inventory_email_html(issues):
 
 def generate_inventory_email_plain(issues):
     """Generate plain text email body for inventory alert"""
+    total_issues = len(issues['ebay_items']) + len(issues['amazon_items']) + len(issues['duplicate_locations'])
+    
     text = f"""
 ⚠️ INVENTORY ALERT
 Generated: {issues['timestamp']}
 
-Items listed online but showing 0 in physical inventory.
-Action required: Please verify and update inventory.
+{total_issues} issue(s) detected in inventory.
+Action required: Please review and address the following items.
 
 """
     
+    if issues['duplicate_locations']:
+        text += f"\n📍 Duplicate Locations ({len(issues['duplicate_locations'])} items):\n"
+        text += "Same barcode found in multiple locations - please consolidate\n"
+        text += "-" * 80 + "\n"
+        for item in issues['duplicate_locations']:
+            text += f"Barcode: {item['barcode']}\n"
+            text += f"Title: {item['title'][:60]}\n"
+            text += f"Locations: {item['locations']}\n"
+            text += f"Location Count: {item['location_count']} | Total Qty: {item['total_qty']}\n"
+            text += "-" * 80 + "\n"
+    
     if issues['ebay_items']:
         text += f"\n🛒 eBay ({len(issues['ebay_items'])} items):\n"
+        text += "Listed online but showing 0 in physical inventory\n"
         text += "-" * 70 + "\n"
         for item in issues['ebay_items']:
             text += f"Barcode: {item['barcode']}\n"
@@ -952,6 +1051,7 @@ Action required: Please verify and update inventory.
     
     if issues['amazon_items']:
         text += f"\n📦 Amazon ({len(issues['amazon_items'])} items):\n"
+        text += "Listed online but showing 0 in physical inventory\n"
         text += "-" * 70 + "\n"
         for item in issues['amazon_items']:
             text += f"Barcode: {item['barcode']}\n"
@@ -962,7 +1062,6 @@ Action required: Please verify and update inventory.
     text += """
 --
 This is an automated inventory alert from your Store App.
-These alerts are sent when items are listed online but show zero physical inventory.
 """
     
     return text
@@ -6678,7 +6777,13 @@ def api_get_zero_qty_pending():
         now = datetime.now()
         
         items = []
+        orphaned_ids = []
         for row in cur.fetchall():
+            # Skip orphaned entries (where the searchRack item no longer exists)
+            if row['title'] is None:
+                orphaned_ids.append(row['id'])
+                continue
+                
             delete_at = datetime.fromisoformat(row['delete_at'])
             time_remaining = (delete_at - now).total_seconds() / 3600
             is_eligible = time_remaining <= 0 and row['deletion_cancelled'] == 0
@@ -6696,6 +6801,13 @@ def api_get_zero_qty_pending():
                 'is_eligible': is_eligible,
                 'hours_remaining': max(0, round(time_remaining, 1))
             })
+        
+        # Clean up any orphaned entries found
+        if orphaned_ids:
+            for orphan_id in orphaned_ids:
+                cur.execute('DELETE FROM zero_qty_pending_deletion WHERE id = ?', (orphan_id,))
+            conn.commit()
+            print(f"🧹 Cleaned up {len(orphaned_ids)} orphaned pending deletion entries")
         
         conn.close()
         
@@ -6961,6 +7073,16 @@ def api_inventory_history():
                     elif removal_type == 'manual':
                         action = 'Removed'
                         source = 'Diagnostic' if is_diagnostic else 'Manual Deletion'
+                    elif removal_type == 'manual_sold_removal':
+                        action = 'Removed'
+                        source = 'Manual Sold Removal (Remove Now)'
+                    elif removal_type == 'location_edit':
+                        if qty_change > 0:
+                            action = 'Added'
+                            source = 'Location Change (Moved Here)'
+                        else:
+                            action = 'Removed'
+                            source = 'Location Change (Moved Away)'
                     elif removal_type == 'automatic':
                         action = 'Removed'
                         source = 'Automatic Removal'
@@ -7191,6 +7313,8 @@ def api_sold_remove_now(order_id: int):
         # Log to rackhistory.db
         rem_conn = sqlite3.connect('rackhistory.db')
         rem_cur = rem_conn.cursor()
+        
+        # Log to old removed table (legacy)
         rem_cur.execute('''
             CREATE TABLE IF NOT EXISTS removed (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -7201,12 +7325,45 @@ def api_sold_remove_now(order_id: int):
                 undone_at TEXT
             )
         ''')
-        rem_conn.commit()
         import datetime as _dt
         rem_cur.execute(
             'INSERT INTO removed (name, barcode, qty, time_removed) VALUES (?,?,?,?)',
-            (order['title'] or '', barcode, sold_qty, _dt.datetime.now(_dt.UTC).isoformat() + 'Z')
+            (order['title'] or '', barcode, sold_qty, _dt.datetime.now().isoformat())
         )
+        
+        # Log to removed_items table (for history view)
+        rem_cur.execute('''
+            CREATE TABLE IF NOT EXISTS removed_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                order_id TEXT,
+                barcode TEXT,
+                title TEXT,
+                quantity_removed INTEGER,
+                removed_at TEXT,
+                searchrack_id INTEGER,
+                old_quantity INTEGER,
+                new_quantity INTEGER,
+                removal_type TEXT,
+                item_position TEXT
+            )
+        ''')
+        
+        # Get location if inventory was found
+        item_location = None
+        if inventory_found:
+            r_cur.execute('SELECT ITEM_POSITION FROM SEARCHRACK WHERE ID = ?', (rack_id,))
+            loc_row = r_cur.fetchone()
+            if loc_row:
+                item_location = loc_row[0]
+        
+        rem_cur.execute('''
+            INSERT INTO removed_items 
+            (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (order['order_id'], barcode, order['title'] or '', sold_qty, _dt.datetime.now().isoformat(), 
+              rack_id if inventory_found else None, current_qty if inventory_found else 0, 
+              new_qty if inventory_found else 0, 'manual_sold_removal', item_location))
+        
         rem_conn.commit()
         rem_conn.close()
 
