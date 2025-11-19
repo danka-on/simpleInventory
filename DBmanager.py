@@ -170,16 +170,77 @@ def addToSearchRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITI
                 WHERE ID = ?
             """, (new_qty, title, itemid, image, now_iso, existing_id))
             action = f"incremented quantity to {new_qty} for barcode={barcode_norm}, position={position_norm}"
+            
+            # Log to history
+            try:
+                rem_conn = sqlite3.connect('removed.db')
+                rem_cur = rem_conn.cursor()
+                rem_cur.execute('''
+                    CREATE TABLE IF NOT EXISTS removed_items (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        order_id TEXT,
+                        barcode TEXT,
+                        title TEXT,
+                        quantity_removed INTEGER,
+                        removed_at TEXT,
+                        searchrack_id INTEGER,
+                        old_quantity INTEGER,
+                        new_quantity INTEGER,
+                        removal_type TEXT,
+                        item_position TEXT
+                    )
+                ''')
+                rem_cur.execute('''
+                    INSERT INTO removed_items 
+                    (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (None, barcode_norm, title, 1, now_iso, existing_id, existing_qty, new_qty, 'add_to_shelf', position_norm))
+                rem_conn.commit()
+                rem_conn.close()
+                print(f"✅ Logged add-to-shelf (update) to history")
+            except Exception as log_err:
+                print(f"❌ Error logging to history: {log_err}")
         else:
             # Picture position item OR different location OR new barcode - always create new record
             cursor.execute("""
                 INSERT INTO SEARCHRACK (TITLE, BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION, ITEMID, QUANTITY, IMAGE, CREATED_AT) 
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (title, barcode_norm, position_norm, IMAGES, PICTUREPOSITION, itemid, 1, image, now_iso))
+            new_id = cursor.lastrowid
             if has_picture:
                 action = f"added new picture position entry (always unique): barcode={barcode_norm}, picture={PICTUREPOSITION}"
             else:
                 action = f"added new shelf entry: barcode={barcode_norm}, position={position_norm}"
+            
+            # Log to history
+            try:
+                rem_conn = sqlite3.connect('removed.db')
+                rem_cur = rem_conn.cursor()
+                rem_cur.execute('''
+                    CREATE TABLE IF NOT EXISTS removed_items (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        order_id TEXT,
+                        barcode TEXT,
+                        title TEXT,
+                        quantity_removed INTEGER,
+                        removed_at TEXT,
+                        searchrack_id INTEGER,
+                        old_quantity INTEGER,
+                        new_quantity INTEGER,
+                        removal_type TEXT,
+                        item_position TEXT
+                    )
+                ''')
+                rem_cur.execute('''
+                    INSERT INTO removed_items 
+                    (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (None, barcode_norm, title, 1, now_iso, new_id, 0, 1, 'add_to_shelf', PICTUREPOSITION if has_picture else position_norm))
+                rem_conn.commit()
+                rem_conn.close()
+                print(f"✅ Logged add-to-shelf (insert) to history")
+            except Exception as log_err:
+                print(f"❌ Error logging to history: {log_err}")
             
         conn.commit()
         print(f"{action} to searchRack: position={ITEM_POSITION}, barcode={BARCODE}, title={title}")

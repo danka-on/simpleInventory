@@ -51,6 +51,7 @@
                 <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false"><path d="M21 12.79A9 9 0 1 0 11.21 3" stroke="none"/></svg>
                 Sync DB
             </button>
+            <button class="btn" id="history-btn" style="display:none;background-color:#6c757d;color:white;">History</button>
             <span id="refresh-status" class="small-muted" style="margin-left:8px"></span>
         </div>
         <div class="actions">
@@ -146,6 +147,28 @@
         <button id="qty-confirm" class="btn btn-primary">Move</button>
         <button id="qty-cancel" class="btn btn-danger">Cancel</button>
     </div></div></div>
+
+    <!-- History Modal -->
+    <div id="historyModal" class="modal">
+        <div class="card" style="max-width:90%;max-height:90vh;width:1000px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                <h3 style="margin:0;">Inventory History</h3>
+                <div style="display:flex;gap:8px;">
+                    <button id="refreshHistory" class="btn" style="background-color:#28a745;color:white;">↻ Refresh</button>
+                    <button id="closeHistory" class="btn">Close</button>
+                </div>
+            </div>
+            <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
+                <input type="text" id="history-search" placeholder="Search by title, barcode, or location..." style="flex:1;min-width:200px;">
+                <select id="history-sort" style="padding:8px;border-radius:6px;border:1px solid #ddd;">
+                    <option value="desc">Date (newest first)</option>
+                    <option value="asc">Date (oldest first)</option>
+                </select>
+                <button class="btn btn-primary" id="history-search-btn">Search</button>
+            </div>
+            <div id="historyContent" style="overflow:auto;max-height:calc(90vh - 180px);"></div>
+        </div>
+    </div>
 
 <script>
 console.log('searchrack v3.1-qty-debug loaded - timestamp: 2025-11-17-15:50');
@@ -744,8 +767,13 @@ function showQtyModal(rackId, maxQty){
     function onAll(){ setVal(maxQty); }
     function onConfirm(){
         cleanup();
-        // navigate including move_qty param
-        window.location.href = '/position?edit_rack_id=' + encodeURIComponent(rackId) + '&move_qty=' + encodeURIComponent(String(v));
+        // Store move_qty in sessionStorage as backup for cache issues
+        sessionStorage.setItem('edit_move_qty', String(v));
+        sessionStorage.setItem('edit_rack_id', String(rackId));
+        // WORKAROUND for cache: encode move_qty directly in the rack_id parameter as "id:qty"
+        const encodedId = rackId + ':' + v;
+        // navigate including move_qty param with version to force cache refresh
+        window.location.href = '/position?edit_rack_id=' + encodeURIComponent(encodedId) + '&move_qty=' + encodeURIComponent(String(v)) + '&v=' + Date.now();
     }
     function onCancel(){ cleanup(); }
 
@@ -880,6 +908,10 @@ function onEdit(db, id){
     const itemid = tr.children[2].textContent;
     const qty = tr.children[4].textContent;
     
+    // Extract location from the location link (for searchRack)
+    const locationLink = tr.querySelector('.location-link');
+    const location = locationLink ? locationLink.textContent.trim() : '';
+    
     // Different fields for different databases
     let content = '';
     if(db === 'sold'){
@@ -889,9 +921,10 @@ function onEdit(db, id){
                   `<div class=\"form-row\"><label>Item ID</label><input id=\"edit_itemid\" value=\"${esc(itemid)}\" readonly style=\"background:#f0f0f0\" title=\"Read-only: eBay/Amazon listing ID\"></div>`+
                   `<div class=\"form-row\"><label>Quantity</label><input id=\"edit_qty\" type=\"number\" min=\"1\" value=\"${esc(qty)}\"></div>`;
     } else if(db === 'searchRack'){
-        // For searchRack (inventory): title, barcode, qty (NO item_id, allow 0 qty)
+        // For searchRack (inventory): title, barcode, location, qty (NO item_id, allow 0 qty)
         content = `<div class=\"form-row\"><label>Title</label><input id=\"edit_title\" value=\"${esc(title)}\"></div>`+
                   `<div class=\"form-row\"><label>Barcode</label><input id=\"edit_barcode\" value=\"${esc(barcode)}\"></div>`+
+                  `<div class=\"form-row\"><label>Location</label><input id=\"edit_location\" value=\"${esc(location)}\" placeholder=\"e.g., Gr5s4\"></div>`+
                   `<div class=\"form-row\"><label>Qty</label><input id=\"edit_qty\" type=\"number\" min=\"0\" value=\"${esc(qty)}\"></div>`;
     } else {
         // For other databases: title, barcode, itemid, qty
@@ -915,7 +948,8 @@ function onEdit(db, id){
         } else if(db === 'searchRack'){
             payload = { 
                 Title: document.getElementById('edit_title').value, 
-                BARCODE: document.getElementById('edit_barcode').value, 
+                BARCODE: document.getElementById('edit_barcode').value,
+                ITEM_POSITION: document.getElementById('edit_location').value.trim(),
                 Quantity: parseInt(document.getElementById('edit_qty').value) || 0
             };
         } else {
@@ -1338,6 +1372,95 @@ async function deleteZeroQtyNow(barcode){
     }
 }
 
+// History functionality
+document.getElementById('history-btn').addEventListener('click', () => {
+    document.getElementById('historyModal').style.display = 'flex';
+    loadHistory();
+});
+
+document.getElementById('closeHistory').addEventListener('click', () => {
+    document.getElementById('historyModal').style.display = 'none';
+});
+
+document.getElementById('refreshHistory').addEventListener('click', () => {
+    loadHistory();
+});
+
+document.getElementById('history-search-btn').addEventListener('click', loadHistory);
+document.getElementById('history-search').addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') loadHistory();
+});
+document.getElementById('history-sort').addEventListener('change', loadHistory);
+
+async function loadHistory() {
+    const search = document.getElementById('history-search').value;
+    const sort = document.getElementById('history-sort').value;
+    
+    try {
+        const resp = await fetch(`/api/inventory/history?search=${encodeURIComponent(search)}&sort=${sort}`);
+        const data = await resp.json();
+        
+        if (!data.success) {
+            document.getElementById('historyContent').innerHTML = `<div style="color:#e74c3c;padding:20px;">Error: ${data.error}</div>`;
+            return;
+        }
+        
+        const items = data.items || [];
+        
+        if (items.length === 0) {
+            document.getElementById('historyContent').innerHTML = '<div style="color:#999;padding:20px;text-align:center;">No history found</div>';
+            return;
+        }
+        
+        let html = '<table style="width:100%;border-collapse:collapse;font-size:0.9rem;">';
+        html += '<thead><tr style="background:#f0f0f0;">';
+        html += '<th style="padding:8px;border:1px solid #ddd;">Date/Time</th>';
+        html += '<th style="padding:8px;border:1px solid #ddd;">Action</th>';
+        html += '<th style="padding:8px;border:1px solid #ddd;">Title</th>';
+        html += '<th style="padding:8px;border:1px solid #ddd;">Barcode</th>';
+        html += '<th style="padding:8px;border:1px solid #ddd;">Location</th>';
+        html += '<th style="padding:8px;border:1px solid #ddd;">Qty Change</th>';
+        html += '<th style="padding:8px;border:1px solid #ddd;">Method</th>';
+        html += '<th style="padding:8px;border:1px solid #ddd;">Source</th>';
+        html += '</tr></thead><tbody>';
+        
+        items.forEach(item => {
+            const date = new Date(item.timestamp).toLocaleString();
+            const qtyColor = item.quantity_change > 0 ? '#00b894' : '#e74c3c';
+            const qtySign = item.quantity_change > 0 ? '+' : '';
+            
+            html += '<tr>';
+            html += `<td style="padding:8px;border:1px solid #ddd;white-space:nowrap;">${date}</td>`;
+            html += `<td style="padding:8px;border:1px solid #ddd;">${item.action}</td>`;
+            html += `<td style="padding:8px;border:1px solid #ddd;">${item.title}</td>`;
+            html += `<td style="padding:8px;border:1px solid #ddd;">${item.barcode}</td>`;
+            html += `<td style="padding:8px;border:1px solid #ddd;">${item.location || ''}</td>`;
+            html += `<td style="padding:8px;border:1px solid #ddd;color:${qtyColor};font-weight:bold;">${qtySign}${item.quantity_change} (${item.old_quantity}→${item.new_quantity})</td>`;
+            html += `<td style="padding:8px;border:1px solid #ddd;">${item.method}</td>`;
+            html += `<td style="padding:8px;border:1px solid #ddd;">${item.source}</td>`;
+            html += '</tr>';
+        });
+        
+        html += '</tbody></table>';
+        document.getElementById('historyContent').innerHTML = html;
+        
+    } catch (err) {
+        document.getElementById('historyContent').innerHTML = `<div style="color:#e74c3c;padding:20px;">Error loading history: ${err.message}</div>`;
+    }
+}
+
+// Show history button only when searchRack is selected
+function updateHistoryButtonVisibility() {
+    const searchRackChecked = document.querySelector('input[value="searchRack"]')?.checked;
+    document.getElementById('history-btn').style.display = searchRackChecked ? '' : 'none';
+}
+
+// Watch for DB filter changes
+document.getElementById('db-filters').addEventListener('change', updateHistoryButtonVisibility);
+
+// Call immediately on page load
+setTimeout(updateHistoryButtonVisibility, 100);
+
 // Attach refresh button handler for zero-qty
 document.getElementById('refresh-zero-qty-btn').addEventListener('click', fetchZeroQtyPending);
 
@@ -1352,7 +1475,7 @@ document.getElementById('run-zero-qty-now-btn').addEventListener('click', async 
         if (data.success) {
             alert('✓ Zero-quantity purge completed! Refreshing...');
             fetchZeroQtyPending();
-            searchItems(); // Refresh main list
+            doSearch(); // Refresh main list
         } else {
             alert('Error: ' + (data.error || 'Unknown error'));
         }

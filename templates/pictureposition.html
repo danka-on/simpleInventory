@@ -137,7 +137,13 @@
                 const forDiagnostic = params.get('for_diagnostic');
                 const returnUrl = params.get('return');
                 if(editId){
-                    fetch('/api/set_rack_location', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id: editId, pictureposition: result.path})})
+                    // Include move_qty if provided in URL
+                    const moveQty = params.get('move_qty');
+                    const payload = {id: editId, pictureposition: result.path};
+                    if(moveQty){
+                        payload.move_qty = parseInt(moveQty);
+                    }
+                    fetch('/api/set_rack_location', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)})
                         .then(r=>r.json())
                         .then(j=>{
                             sessionStorage.removeItem('pictureposition_path');

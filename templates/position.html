@@ -115,6 +115,12 @@
         <h1 style="margin: 0;">Location</h1>
         <img src="/static/qrcode.jpg" alt="QR Code" style="width:50px; height:50px; object-fit:contain; border:2px solid #000; background:#fff;" />
     </div>
+    
+    <!-- Edit Mode Banner -->
+    <div id="editModeBanner" style="display:none; background:#ff9800; color:white; padding:12px; text-align:center; font-weight:bold; margin-bottom:15px; border-radius:8px; box-shadow:0 2px 8px rgba(0,0,0,0.2);">
+        📦 EDIT MODE: Moving <span id="editModeQty">?</span> items
+    </div>
+    
     <div id="reader"></div>
 
     <!-- Simplified overlay with just the scanning line -->
@@ -311,18 +317,43 @@
                     const urlParams = new URLSearchParams(window.location.search);
                     const editId = urlParams.get('edit_rack_id');
                     if(editId){
-                        // call API
-                        fetch('/api/set_rack_location', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id: editId, item_position: posCode})})
+                        // call API - include move_qty if provided in URL OR sessionStorage
+                        let moveQty = urlParams.get('move_qty');
+                        
+                        // Fallback: read from sessionStorage if not in URL (cache issue workaround)
+                        if(!moveQty && editId === sessionStorage.getItem('edit_rack_id')){
+                            moveQty = sessionStorage.getItem('edit_move_qty');
+                            console.log('📦 Retrieved move_qty from sessionStorage:', moveQty);
+                        }
+                        
+                        console.log('🔍 Edit mode detected:', {editId, moveQty, fullURL: window.location.href});
+                        const payload = {id: editId, item_position: posCode};
+                        if(moveQty){
+                            payload.move_qty = parseInt(moveQty);
+                            console.log('✅ Including move_qty in payload:', payload.move_qty);
+                            alert('DEBUG: Sending move_qty=' + payload.move_qty + ' to server');
+                        } else {
+                            console.log('⚠️ No move_qty in URL or sessionStorage - will move all items');
+                            alert('DEBUG: No move_qty found! URL: ' + window.location.href);
+                        }
+                        
+                        // Clear sessionStorage after reading
+                        sessionStorage.removeItem('edit_move_qty');
+                        sessionStorage.removeItem('edit_rack_id');
+                        
+                        console.log('📤 Sending payload:', payload);
+                        fetch('/api/set_rack_location', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)})
                         .then(r=>r.json())
                         .then(j=>{
+                            console.log('✅ Location update response:', j);
                             // restore search state if any
                             const st = sessionStorage.getItem('searchrack_return_state');
                             if(st){
                                 sessionStorage.removeItem('searchrack_return_state');
                             }
-                            // briefly show green then redirect back
-                            setTimeout(()=>{ window.location.href = '/searchrack'; }, 600);
-                        }).catch(err=>{ console.error('Failed to set rack location', err); setTimeout(()=>{ window.location.href = '/searchrack'; }, 600); });
+                            // briefly show green then redirect back with cache buster
+                            setTimeout(()=>{ window.location.href = '/searchrack?refresh=' + Date.now(); }, 600);
+                        }).catch(err=>{ console.error('Failed to set rack location', err); setTimeout(()=>{ window.location.href = '/searchrack?refresh=' + Date.now(); }, 600); });
                     } else {
                         // normal flow: submit form to /submitposition
                         setTimeout(() => { document.getElementById("scan_form").submit(); }, 250);
@@ -425,11 +456,16 @@
     document.getElementById('picturePositionBtn').addEventListener('click', function() {
         const params = new URLSearchParams(window.location.search);
         const editId = params.get('edit_rack_id');
+        const moveQty = params.get('move_qty');
         const forDiagnostic = params.get('for_diagnostic');
         const returnUrl = params.get('return');
         if(editId){
-            // forward the edit id so pictureposition.html knows to persist PICTUREPOSITION for this searchRack row
-            window.location.href = '/pictureposition?edit_rack_id=' + encodeURIComponent(editId);
+            // forward the edit id and move_qty so pictureposition.html knows to persist PICTUREPOSITION for this searchRack row
+            let url = '/pictureposition?edit_rack_id=' + encodeURIComponent(editId);
+            if(moveQty){
+                url += '&move_qty=' + encodeURIComponent(moveQty);
+            }
+            window.location.href = url;
         } else if(forDiagnostic){
             // forward diagnostic parameters
             let url = '/pictureposition?for_diagnostic=' + encodeURIComponent(forDiagnostic);
@@ -590,6 +626,20 @@
         const urlParams = new URLSearchParams(window.location.search);
         const forDiagnostic = urlParams.get('for_diagnostic');
         const returnUrl = urlParams.get('return');
+        const editId = urlParams.get('edit_rack_id');
+        const moveQty = urlParams.get('move_qty');
+        
+        // Show edit mode banner if editing
+        if(editId){
+            const banner = document.getElementById('editModeBanner');
+            const qtySpan = document.getElementById('editModeQty');
+            if(moveQty){
+                qtySpan.textContent = moveQty;
+            } else {
+                qtySpan.textContent = 'ALL';
+            }
+            banner.style.display = 'block';
+        }
         
         // Update back button to return to diagnostic page if we came from there
         if(returnUrl){

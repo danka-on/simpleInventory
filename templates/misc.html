@@ -67,21 +67,27 @@
     
     <hr style="margin:24px 0;">
     <h2 style="margin:0 0 10px 0; font-size:1.1rem;">Zero-Quantity Deletion Settings</h2>
-    <div class="desc">Configure automatic deletion of inventory items with 0 quantity.</div>
+    <div class="desc">Configure automatic deletion of inventory items with 0 quantity. System scans every hour for unmarked items.</div>
     
     <label style="display:flex;align-items:center;gap:8px;margin-bottom:16px;">
         <input type="checkbox" id="showZeroQtyPending" style="width:auto;">
         <span>Show pending zero-quantity deletions</span>
     </label>
     
-    <label for="zeroQtyInterval">Deletion interval:</label>
+    <label for="zeroQtyInterval">Deletion interval (after reaching 0 qty):</label>
     <select id="zeroQtyInterval" style="padding:8px;font-size:1em;margin-bottom:16px;border-radius:4px;">
         <option value="1">1 minute (testing)</option>
         <option value="60">1 hour</option>
         <option value="720">12 hours</option>
         <option value="1440" selected>24 hours (default)</option>
+        <option value="2880">48 hours</option>
     </select>
-    <button onclick="saveZeroQtySettings()" style="display:block;">Save Zero-Qty Settings</button>
+    
+    <div style="display:flex;gap:8px;margin-bottom:16px;">
+        <button onclick="saveZeroQtySettings()" style="flex:1;">Save Settings</button>
+        <button onclick="scanZeroQtyNow()" style="flex:1;background:#00b894;">Scan Now</button>
+    </div>
+    
     <div id="zeroQtyStatus" style="margin-top:10px;color:#555;display:none;"></div>
     
     <div id="zeroQtyPendingContainer" style="display:none;margin-top:20px;">
@@ -305,6 +311,37 @@
                 }
             } catch(err) {
                 alert('Delete failed: ' + err.message);
+            }
+        }
+        
+        async function scanZeroQtyNow() {
+            const el = document.getElementById('zeroQtyStatus');
+            el.style.display = '';
+            el.style.color = '#2196F3';
+            el.textContent = 'Scanning for zero-quantity items...';
+            
+            try {
+                const r = await fetch('/api/zero_qty/trigger-purge', {method: 'POST'});
+                const j = await r.json();
+                
+                if (j.success) {
+                    el.style.color = '#388e3c';
+                    el.textContent = '✓ Scan completed! Check terminal for details.';
+                    
+                    // Refresh pending list if visible
+                    if (document.getElementById('showZeroQtyPending').checked) {
+                        setTimeout(() => loadZeroQtyPending(), 500);
+                    }
+                } else {
+                    el.style.color = '#e74c3c';
+                    el.textContent = 'Scan failed: ' + (j.error || 'Unknown error');
+                }
+                
+                setTimeout(() => { el.style.display = 'none'; }, 3000);
+            } catch(err) {
+                el.style.color = '#e74c3c';
+                el.textContent = 'Scan failed: ' + err.message;
+                setTimeout(() => { el.style.display = 'none'; }, 3000);
             }
         }
         
