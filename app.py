@@ -458,27 +458,37 @@ def send_inventory_alert_email():
         data = request.json
         emails = data.get('emails', [])
         
+        print(f"📧 Inventory alert request received for emails: {emails}")
+        
         if not emails:
+            print("❌ No emails provided")
             return jsonify({'success': False, 'error': 'No email addresses provided'}), 400
         
         # Collect inventory mismatches
+        print("🔍 Collecting inventory mismatches...")
         inventory_issues = collect_inventory_mismatches()
         
+        print(f"📊 Issues found - eBay: {len(inventory_issues['ebay_items'])}, Amazon: {len(inventory_issues['amazon_items'])}, Duplicates: {len(inventory_issues['duplicate_locations'])}, Has issues: {inventory_issues['has_issues']}")
+        
         if not inventory_issues['has_issues']:
+            print("ℹ️ No inventory issues found - email not sent")
             return jsonify({
                 'success': True,
                 'message': 'No inventory issues found - email not sent'
             })
         
         # Generate HTML email
+        print("📝 Generating email content...")
         html_body = generate_inventory_email_html(inventory_issues)
         plain_body = generate_inventory_email_plain(inventory_issues)
         
         # Send email
         subject = f"⚠️ Inventory Alert - {len(inventory_issues['ebay_items']) + len(inventory_issues['amazon_items'])} Items Need Attention - {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}"
+        print(f"📤 Sending email with subject: {subject}")
         success, error = send_email_smtp(emails, subject, plain_body, html_body)
         
         if not success:
+            print(f"❌ Email send failed: {error}")
             return jsonify({'success': False, 'error': error}), 500
         
         print(f"✅ Inventory alert sent to: {', '.join(emails)}")
@@ -488,6 +498,9 @@ def send_inventory_alert_email():
             'message': f'Inventory alert sent to {len(emails)} recipient(s)'
         })
     except Exception as e:
+        print(f"❌ Exception in send_inventory_alert_email: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
 
 def collect_health_stats():
@@ -558,19 +571,6 @@ def collect_health_stats():
         stats['amazon_upcs_last'] = 'Unknown'
         stats['auto_sync_enabled'] = False
     
-    # Order processing stats
-    try:
-        conn = sqlite3.connect('sold.db')
-        cur = conn.cursor()
-        
-        # Unhandled orders
-        cur.execute("SELECT COUNT(*) FROM orders WHERE isHandled IS NULL OR isHandled = ''")
-        stats['unhandled_orders'] = cur.fetchone()[0]
-        
-        conn.close()
-    except:
-        stats['unhandled_orders'] = 0
-    
     # System warnings
     warnings = []
     
@@ -592,10 +592,6 @@ def collect_health_stats():
                     warnings.append(f"⚠️ {sync_label} not synced in {int(hours_ago)} hours")
             except:
                 pass
-    
-    # Check for high unhandled orders
-    if stats['unhandled_orders'] > 10:
-        warnings.append(f"⚠️ High unhandled orders: {stats['unhandled_orders']}")
     
     stats['warnings'] = warnings
     
@@ -649,7 +645,6 @@ def generate_health_email_html(stats):
             <div class='metric'><span class='label'>eBay Orders:</span> <span class='value'>{format_time_ago(stats['ebay_orders_last'])}</span></div>
             <div class='metric'><span class='label'>Amazon Orders:</span> <span class='value'>{format_time_ago(stats['amazon_orders_last'])}</span></div>
             <div class='metric'><span class='label'>Amazon UPCs:</span> <span class='value'>{format_time_ago(stats['amazon_upcs_last'])}</span></div>
-            <div class='metric'><span class='label'>Unhandled Orders:</span> <span class='value'>{stats['unhandled_orders']}</span></div>
         </div>
         
         <div class='section' style='border-left-color: {"#e74c3c" if stats["warnings"] else "#27ae60"};'>
@@ -684,8 +679,7 @@ Generated: {stats['timestamp']}
 ├─ Auto-sync: {'✅ Enabled' if stats['auto_sync_enabled'] else '❌ Disabled'}
 ├─ eBay Orders: {format_time_ago(stats['ebay_orders_last'])}
 ├─ Amazon Orders: {format_time_ago(stats['amazon_orders_last'])}
-├─ Amazon UPCs: {format_time_ago(stats['amazon_upcs_last'])}
-└─ Unhandled Orders: {stats['unhandled_orders']}
+└─ Amazon UPCs: {format_time_ago(stats['amazon_upcs_last'])}
 
 ⚠️ WARNINGS
 {warnings_text}
@@ -759,66 +753,64 @@ def collect_inventory_mismatches():
         zero_qty_items = {row['barcode'].strip().upper(): row['TITLE'] for row in rack_cur.fetchall() if row['barcode']}
         rack_conn.close()
         
-        if not zero_qty_items:
-            return issues
-        
-        # Check eBay store for matching items with quantity > 0
-        try:
-            ebay_conn = sqlite3.connect('ebayStore.db')
-            ebay_conn.row_factory = sqlite3.Row
-            ebay_cur = ebay_conn.cursor()
+        # Check eBay store for matching items with quantity > 0 (only if we have zero-qty items)
+        if zero_qty_items:
+            try:
+                ebay_conn = sqlite3.connect('ebayStore.db')
+                ebay_conn.row_factory = sqlite3.Row
+                ebay_cur = ebay_conn.cursor()
+                
+                ebay_cur.execute('''
+                    SELECT SKU, Title, Quantity, ItemID 
+                    FROM INVENTORY 
+                    WHERE SKU IS NOT NULL 
+                    AND TRIM(SKU) != ''
+                    AND CAST(Quantity AS INTEGER) > 0
+                ''')
+                
+                for row in ebay_cur.fetchall():
+                    sku = row['SKU'].strip().upper() if row['SKU'] else ''
+                    if sku and sku in zero_qty_items:
+                        issues['ebay_items'].append({
+                            'barcode': sku,
+                            'title': row['Title'] or zero_qty_items[sku],
+                            'store_qty': row['Quantity'],
+                            'item_id': row['ItemID']
+                        })
+                        issues['has_issues'] = True
+                
+                ebay_conn.close()
+            except Exception as e:
+                print(f"Error checking eBay inventory: {e}")
             
-            ebay_cur.execute('''
-                SELECT SKU, Title, Quantity, ItemID 
-                FROM INVENTORY 
-                WHERE SKU IS NOT NULL 
-                AND TRIM(SKU) != ''
-                AND CAST(Quantity AS INTEGER) > 0
-            ''')
-            
-            for row in ebay_cur.fetchall():
-                sku = row['SKU'].strip().upper() if row['SKU'] else ''
-                if sku and sku in zero_qty_items:
-                    issues['ebay_items'].append({
-                        'barcode': sku,
-                        'title': row['Title'] or zero_qty_items[sku],
-                        'store_qty': row['Quantity'],
-                        'item_id': row['ItemID']
-                    })
-                    issues['has_issues'] = True
-            
-            ebay_conn.close()
-        except Exception as e:
-            print(f"Error checking eBay inventory: {e}")
-        
-        # Check Amazon store for matching items with quantity > 0
-        try:
-            amazon_conn = sqlite3.connect('amazonStore.db')
-            amazon_conn.row_factory = sqlite3.Row
-            amazon_cur = amazon_conn.cursor()
-            
-            amazon_cur.execute('''
-                SELECT UPC, TITLE, QTY, ASIN 
-                FROM ITEMS 
-                WHERE UPC IS NOT NULL 
-                AND TRIM(UPC) != ''
-                AND CAST(QTY AS INTEGER) > 0
-            ''')
-            
-            for row in amazon_cur.fetchall():
-                upc = row['UPC'].strip().upper() if row['UPC'] else ''
-                if upc and upc in zero_qty_items:
-                    issues['amazon_items'].append({
-                        'barcode': upc,
-                        'title': row['TITLE'] or zero_qty_items[upc],
-                        'store_qty': row['QTY'],
-                        'asin': row['ASIN']
-                    })
-                    issues['has_issues'] = True
-            
-            amazon_conn.close()
-        except Exception as e:
-            print(f"Error checking Amazon inventory: {e}")
+            # Check Amazon store for matching items with quantity > 0
+            try:
+                amazon_conn = sqlite3.connect('amazonStore.db')
+                amazon_conn.row_factory = sqlite3.Row
+                amazon_cur = amazon_conn.cursor()
+                
+                amazon_cur.execute('''
+                    SELECT UPC, TITLE, QTY, ASIN 
+                    FROM ITEMS 
+                    WHERE UPC IS NOT NULL 
+                    AND TRIM(UPC) != ''
+                    AND CAST(QTY AS INTEGER) > 0
+                ''')
+                
+                for row in amazon_cur.fetchall():
+                    upc = row['UPC'].strip().upper() if row['UPC'] else ''
+                    if upc and upc in zero_qty_items:
+                        issues['amazon_items'].append({
+                            'barcode': upc,
+                            'title': row['TITLE'] or zero_qty_items[upc],
+                            'store_qty': row['QTY'],
+                            'asin': row['ASIN']
+                        })
+                        issues['has_issues'] = True
+                
+                amazon_conn.close()
+            except Exception as e:
+                print(f"Error checking Amazon inventory: {e}")
         
         # Check for duplicate barcodes (non-suffixed) in different locations
         try:
@@ -7076,6 +7068,9 @@ def api_inventory_history():
                     elif removal_type == 'manual_sold_removal':
                         action = 'Removed'
                         source = 'Manual Sold Removal (Remove Now)'
+                    elif removal_type == 'manual_multidb_delete':
+                        action = 'Removed'
+                        source = 'Multi-DB Search (Gear Icon Delete)'
                     elif removal_type == 'location_edit':
                         if qty_change > 0:
                             action = 'Added'
@@ -9113,6 +9108,43 @@ def api_delete_row(db_key, item_id):
         dconn.commit()
         archive_id = dcur.lastrowid
         dconn.close()
+        # Log to rackhistory if deleting from searchRack
+        if db_key == 'searchRack':
+            try:
+                removed_conn = sqlite3.connect('rackhistory.db')
+                removed_cur = removed_conn.cursor()
+                removed_cur.execute('''
+                    CREATE TABLE IF NOT EXISTS removed_items (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        order_id TEXT,
+                        barcode TEXT,
+                        title TEXT,
+                        quantity_removed INTEGER,
+                        removed_at TEXT,
+                        searchrack_id INTEGER,
+                        old_quantity INTEGER,
+                        new_quantity INTEGER,
+                        removal_type TEXT,
+                        item_position TEXT
+                    )
+                ''')
+                
+                # Extract details from the archived row data
+                item_title = rowdict.get('TITLE') or rowdict.get('title', '')
+                item_barcode = rowdict.get('BARCODE') or rowdict.get('barcode', '')
+                old_qty = rowdict.get('QUANTITY') or rowdict.get('quantity', 0)
+                item_location = rowdict.get('ITEM_POSITION') or rowdict.get('item_position', '')
+                
+                removed_cur.execute('''
+                    INSERT INTO removed_items 
+                    (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (None, item_barcode, item_title, old_qty, deleted_at, item_id, old_qty, 0, 'manual_multidb_delete', item_location))
+                removed_conn.commit()
+                removed_conn.close()
+            except Exception as log_err:
+                print(f"Warning: Could not log multi-db deletion to removed_items: {log_err}")
+        
         conn2 = sqlite3.connect(src_db)
         cur2 = conn2.cursor()
         cur2.execute(f"DELETE FROM {table} WHERE {pk} = ?", (item_id,))
