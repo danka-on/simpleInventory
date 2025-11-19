@@ -9206,6 +9206,114 @@ def api_undelete(archive_id):
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/location_duplicates', methods=['GET'])
+def api_location_duplicates():
+    """Return items that have the same barcode in multiple locations, grouped by barcode"""
+    try:
+        conn = sqlite3.connect('searchRack.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        
+        # Get quantity column name
+        cur.execute('PRAGMA table_info(SEARCHRACK)')
+        cols = [r[1] for r in cur.fetchall()]
+        qty_col = 'QUANTITY' if 'QUANTITY' in cols else ('QTY' if 'QTY' in cols else 'quantity')
+        
+        # Find barcodes that appear in multiple locations (non-suffixed barcodes only)
+        cur.execute(f'''
+            SELECT 
+                BARCODE,
+                TITLE,
+                GROUP_CONCAT(ID || ':' || ITEM_POSITION || ':' || {qty_col}, '|') as location_data
+            FROM SEARCHRACK
+            WHERE BARCODE IS NOT NULL 
+            AND TRIM(BARCODE) != ''
+            AND BARCODE NOT LIKE '%-%'
+            AND ITEM_POSITION IS NOT NULL
+            AND TRIM(ITEM_POSITION) != ''
+            GROUP BY BARCODE
+            HAVING COUNT(DISTINCT ITEM_POSITION) > 1
+            ORDER BY BARCODE
+        ''')
+        
+        grouped_rows = cur.fetchall()
+        results = []
+        total_qty = 0
+        
+        for group_row in grouped_rows:
+            barcode = group_row['BARCODE']
+            title = group_row['TITLE'] or 'Unknown'
+            location_data = group_row['location_data']
+            
+            # Parse location data: "id:location:qty|id:location:qty|..."
+            locations_list = []
+            group_total_qty = 0
+            
+            for loc_entry in location_data.split('|'):
+                parts = loc_entry.split(':')
+                if len(parts) >= 3:
+                    item_id, location, qty_str = parts[0], parts[1], parts[2]
+                    try:
+                        qty = int(float(qty_str)) if qty_str else 0
+                    except:
+                        qty = 0
+                    locations_list.append({
+                        'id': item_id,
+                        'location': location,
+                        'quantity': qty
+                    })
+                    group_total_qty += qty
+            
+            total_qty += group_total_qty
+            
+            # Create a result entry for each location (so they display as separate rows)
+            # but mark them with a group identifier
+            for idx, loc in enumerate(locations_list):
+                # Fetch full row data for each ID
+                cur.execute(f'SELECT * FROM SEARCHRACK WHERE ID = ?', (loc['id'],))
+                row = cur.fetchone()
+                if row:
+                    item = dict(row)
+                    # Add grouping metadata
+                    item['is_duplicate_group'] = True
+                    item['group_barcode'] = barcode
+                    item['group_index'] = idx
+                    item['group_size'] = len(locations_list)
+                    item['group_total_qty'] = group_total_qty
+                    item['other_locations'] = ', '.join([l['location'] for l in locations_list if l['location'] != loc['location']])
+                    
+                    # Normalize fields for frontend
+                    result = {
+                        'id': item.get('ID'),
+                        'barcode': barcode,
+                        'title': title,
+                        'quantity': loc['quantity'],
+                        'location': loc['location'],
+                        'created_at': item.get('CREATED_AT'),
+                        'image': item.get('IMAGE') or item.get('image') or '',
+                        'db': 'searchRack',
+                        'raw': item,
+                        'is_duplicate_group': True,
+                        'group_barcode': barcode,
+                        'group_index': idx,
+                        'group_size': len(locations_list),
+                        'group_total_qty': group_total_qty,
+                        'other_locations': item['other_locations']
+                    }
+                    results.append(result)
+        
+        conn.close()
+        
+        return jsonify({
+            'results': results,
+            'total_quantity': total_qty,
+            'total_groups': len(grouped_rows)
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e), 'results': []}), 500
+
 @app.route('/api/archived', methods=['GET', 'POST'])
 def api_archived_list():
     """Return list of archived (deleted) items from deleted.db as normalized results."""

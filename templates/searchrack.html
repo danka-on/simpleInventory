@@ -14,10 +14,7 @@
         .btn {padding:8px 14px;border-radius:6px;border:none;cursor:pointer}
     .btn-primary{background:#00b894;color:#fff}
     .btn-blue{background:#3498db;color:#fff}
-    /* Sync button: distinct color and inline icon */
-    .btn-sync{background:#2d9cdb;color:#fff;display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:6px;border:none}
-    .btn-sync svg{width:16px;height:16px;flex:0 0 16px;fill:currentColor}
-        .btn-danger{background:#e74c3c;color:#fff}
+    .btn-danger{background:#e74c3c;color:#fff}
         .filters {display:flex;gap:8px;align-items:center}
         .search-row{display:flex;gap:8px;margin-top:12px}
         input[type=text]{flex:1;padding:10px;border:1px solid #ddd;border-radius:6px}
@@ -46,13 +43,14 @@
     <div class="top">
         <div style="display:flex;gap:8px;align-items:center">
             <a href="/" style="text-decoration:none"><button class="btn btn-danger">Back</button></a>
-            <button id="refresh-btn" class="btn btn-sync" title="Sync DB" aria-label="Sync DB">
-                <!-- Inline sync icon -->
-                <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false"><path d="M21 12.79A9 9 0 1 0 11.21 3" stroke="none"/></svg>
-                Sync DB
-            </button>
             <button class="btn" id="history-btn" style="display:none;background-color:#6c757d;color:white;">History</button>
-            <span id="refresh-status" class="small-muted" style="margin-left:8px"></span>
+            <!-- Location Duplicates filter (only visible when Inventory is selected) -->
+            <div id="location-duplicates-container" style="display:none; margin-left:12px;">
+                <label style="font-size:0.95rem; color:#444; padding:6px 12px; background:#fff3cd; border:1px solid #ffc107; border-radius:6px; cursor:pointer;">
+                    <input type="checkbox" id="location-duplicates-filter" style="margin-right:6px;">
+                    📍 Location Duplicates
+                </label>
+            </div>
         </div>
         <div class="actions">
                 <div class="filters" id="db-filters">
@@ -193,6 +191,15 @@ function createFilters(){
 
 createFilters();
 
+// Initialize visibility of filters based on default selection
+(function initializeFilters(){
+    const defaultDb = 'searchRack'; // matches defaultChecked
+    const locationDuplicatesContainer = document.getElementById('location-duplicates-container');
+    if(defaultDb === 'searchRack'){
+        locationDuplicatesContainer.style.display = 'block';
+    }
+})();
+
 // attach change listeners so switching DBs auto-refreshes the results
 function attachDBChangeHandlers(){
     // use event delegation in case inputs are recreated
@@ -209,6 +216,15 @@ function attachDBChangeHandlers(){
                 populateLotFilter();
             } else {
                 lotFilterContainer.style.display = 'none';
+            }
+            
+            // Show/hide Location Duplicates filter for Inventory
+            const locationDuplicatesContainer = document.getElementById('location-duplicates-container');
+            if(selectedDb === 'searchRack'){
+                locationDuplicatesContainer.style.display = 'block';
+            } else {
+                locationDuplicatesContainer.style.display = 'none';
+                document.getElementById('location-duplicates-filter').checked = false;
             }
             
             // run search when user explicitly changes selection
@@ -243,6 +259,9 @@ async function populateLotFilter(){
 // Attach LOT filter change handler
 document.getElementById('lot-filter').addEventListener('change', doSearch);
 
+// Attach Location Duplicates filter change handler
+document.getElementById('location-duplicates-filter').addEventListener('change', doSearch);
+
 function getActiveDBs(){
     // radios ensure at most one DB is selected; return as an array for compatibility
     const sel = document.querySelector('input[name="db_select"]:checked');
@@ -264,29 +283,46 @@ async function doSearch(){
     // Get LOT filter value (only relevant for BOL database)
     const selectedLot = document.getElementById('lot-filter').value.trim();
     
-    for(const db of dbs){
+    // Check if Location Duplicates filter is active
+    const locationDuplicatesActive = document.getElementById('location-duplicates-filter').checked;
+    
+    // Special handling for Location Duplicates filter
+    if(locationDuplicatesActive && dbs.includes('searchRack')){
         try{
-            let j = null;
-            if(db === 'archived'){
-                const resp = await fetch('/api/archived');
-                j = await resp.json();
-            } else {
-                // Include lot_filter in request body for BOL database
-                const payload = {q: q, limit: wantAll ? 0 : 50};
-                if(db === 'bol' && selectedLot){
-                    payload.lot_filter = selectedLot;
-                }
-                const resp = await fetch('/api/search/'+db, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
-                j = await resp.json();
-            }
+            const resp = await fetch('/api/location_duplicates');
+            const j = await resp.json();
             if(j && j.results) {
-                j.results.forEach(r=> _allResults.push(r));
-                // Accumulate total quantity if provided by backend
+                _allResults = j.results;
                 if(j.total_quantity !== undefined){
-                    totalQty += j.total_quantity;
+                    totalQty = j.total_quantity;
                 }
             }
-        }catch(err){console.error('search err',err)}
+        }catch(err){console.error('location duplicates err',err)}
+    } else {
+        for(const db of dbs){
+            try{
+                let j = null;
+                if(db === 'archived'){
+                    const resp = await fetch('/api/archived');
+                    j = await resp.json();
+                } else {
+                    // Include lot_filter in request body for BOL database
+                    const payload = {q: q, limit: wantAll ? 0 : 50};
+                    if(db === 'bol' && selectedLot){
+                        payload.lot_filter = selectedLot;
+                    }
+                    const resp = await fetch('/api/search/'+db, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+                    j = await resp.json();
+                }
+                if(j && j.results) {
+                    j.results.forEach(r=> _allResults.push(r));
+                    // Accumulate total quantity if provided by backend
+                    if(j.total_quantity !== undefined){
+                        totalQty += j.total_quantity;
+                    }
+                }
+            }catch(err){console.error('search err',err)}
+        }
     }
     _currentPage = 1;
     _pageSize = parseInt(document.getElementById('page-size').value || '10', 10);
@@ -435,7 +471,15 @@ function renderResults(results){
     const totalReturnCostHeader = hasReturns ? '<th>Total Cost</th>' : '';
     
     let html = `<table><thead><tr><th>Title</th><th>Barcode</th>${itemIdHeader}${lotHeader}${locationHeader}<th>Qty</th>${dateAddedHeader}${dateSoldHeader}${dateShippedHeader}${storeHeader}${returnDateHeader}${refundAmountHeader}${originalShippingHeader}${returnShippingHeader}${totalReturnCostHeader}<th>DB</th><th>Actions</th></tr></thead><tbody>`;
-    results.forEach(r=>{
+    let lastGroupBarcode = null;
+    results.forEach((r, idx)=>{
+    // Add visual separator between different duplicate groups
+    if(r.is_duplicate_group && r.group_barcode !== lastGroupBarcode && idx > 0 && results[idx-1].is_duplicate_group){
+        html += `<tr style="height:8px; background:#f8f9fa;"><td colspan="20" style="border:none;"></td></tr>`;
+    }
+    if(r.is_duplicate_group){
+        lastGroupBarcode = r.group_barcode;
+    }
     const dbRaw = r.source_db || '';
     const isArchived = !!(r.archived || dbRaw === 'archived');
     const title = esc(
@@ -606,8 +650,8 @@ function renderResults(results){
             parseFloat(r.raw.return_shipping_cost || 0)
         ).toFixed(2)}</td>` : '<td></td>') : '';
     
-    html += `<tr data-src="${db}" data-id="${r.id}" data-qty="${qty}">`+
-        `<td><div class="title-cell"><img class="thumb" src="${thumb}" onerror="this.src='${missingThumb(48,48,'No Img')}'"><div><a href="#" class="title-link" data-src="${db}" data-id="${r.id}" data-image="${img}" data-title="${title}">${title}</a>${deletedInfo}${createdInfo}</div></div></td>`+
+    html += `<tr data-src="${db}" data-id="${r.id}" data-qty="${qty}"${r.is_duplicate_group ? ' style="background:#fff3cd;"' : ''}>`+
+        `<td><div class="title-cell"><img class="thumb" src="${thumb}" onerror="this.src='${missingThumb(48,48,'No Img')}'"><div><a href="#" class="title-link" data-src="${db}" data-id="${r.id}" data-image="${img}" data-title="${title}">${title}</a>${deletedInfo}${createdInfo}${r.is_duplicate_group && r.group_index === 0 ? `<div style="font-size:0.85rem; color:#856404; margin-top:4px;">🔄 <strong>Duplicate Locations</strong> (${r.group_size} locations, ${r.group_total_qty} total qty)</div>` : ''}${r.is_duplicate_group && r.other_locations ? `<div style="font-size:0.8rem; color:#666; margin-top:2px;">Also in: ${esc(r.other_locations)}</div>` : ''}</div></div></td>`+
                 `<td>${barcode}</td>`+
                 itemIdCell +
                 lotCell +
@@ -1051,41 +1095,6 @@ window.addEventListener('load', ()=>{
 });
 
 // Refresh handler: call refresh API and poll status
-document.getElementById('refresh-btn').addEventListener('click', async ()=>{
-    if(!confirm('Run real-time refresh of searchRack? This will update searchRack.db by looking up UPCs in ebayStore.db and bol.db.')) return;
-    document.getElementById('refresh-status').textContent = 'starting...';
-    try{
-        const resp = await fetch('/api/refresh_searchrack', {method:'POST'});
-        const j = await resp.json();
-        if(!j.success){
-            alert('Failed to start refresh: '+(j.message||JSON.stringify(j)));
-            document.getElementById('refresh-status').textContent='failed to start';
-            return;
-        }
-        document.getElementById('refresh-status').textContent = 'running...';
-        // poll status
-        const poll = setInterval(async ()=>{
-            try{
-                const s = await (await fetch('/api/enrich_status')).json();
-                if(s.running){
-                    document.getElementById('refresh-status').textContent = 'running...';
-                } else {
-                    document.getElementById('refresh-status').textContent = s.message || 'idle';
-                    clearInterval(poll);
-                    alert('Refresh complete: '+(s.message||'done'));
-                    doSearch();
-                }
-            }catch(innerErr){
-                console.error('Status poll failed', innerErr);
-            }
-        }, 1500);
-    }catch(err){
-        console.error(err);
-        alert('Refresh failed');
-        document.getElementById('refresh-status').textContent='error';
-    }
-});
-
 // Pending removals functionality
 async function fetchPendingRemovals(){
     console.log('Fetching pending removals...');
