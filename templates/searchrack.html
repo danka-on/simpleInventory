@@ -522,16 +522,35 @@ function renderResults(results){
     function fmtLocal(ts){
         try{
             if(!ts) return '';
-            const d = parseISO(ts);
-            if(isNaN(d.getTime())) return esc(ts);
-            const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', year:'numeric', month:'2-digit', day:'2-digit', hour:'numeric', minute:'2-digit', hour12:true }).formatToParts(d);
-            const vals = {}; parts.forEach(p=> vals[p.type] = p.value);
-            const year = vals.year || d.getFullYear();
-            const month = vals.month || String(d.getMonth()+1).padStart(2,'0');
-            const day = vals.day || String(d.getDate()).padStart(2,'0');
-            let hour = vals.hour || String(d.getHours()).padStart(2,'0'); let minute = vals.minute || String(d.getMinutes()).padStart(2,'0');
-            const ampm = (vals.dayPeriod || '').toLowerCase(); hour = String(hour).replace(/^0/, '');
-            return `${year}-${month}-${day} ${hour}:${minute}${ampm}`;
+            // If timestamp has no timezone info, treat it as local time (already in EST)
+            // If it has +00:00 or Z, it's UTC and needs conversion
+            const hasTimezone = ts.includes('+') || ts.endsWith('Z');
+            
+            if (hasTimezone) {
+                // UTC timestamp - convert to EST
+                const d = parseISO(ts);
+                if(isNaN(d.getTime())) return esc(ts);
+                const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', year:'numeric', month:'2-digit', day:'2-digit', hour:'numeric', minute:'2-digit', hour12:true }).formatToParts(d);
+                const vals = {}; parts.forEach(p=> vals[p.type] = p.value);
+                const year = vals.year || d.getFullYear();
+                const month = vals.month || String(d.getMonth()+1).padStart(2,'0');
+                const day = vals.day || String(d.getDate()).padStart(2,'0');
+                let hour = vals.hour || String(d.getHours()).padStart(2,'0'); let minute = vals.minute || String(d.getMinutes()).padStart(2,'0');
+                const ampm = (vals.dayPeriod || '').toLowerCase(); hour = String(hour).replace(/^0/, '');
+                return `${year}-${month}-${day} ${hour}:${minute}${ampm}`;
+            } else {
+                // Local timestamp - just parse the string directly without timezone conversion
+                // Format: 2025-11-19T12:47:00.123456
+                const match = ts.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+                if (match) {
+                    const [, year, month, day, hour24, minute] = match;
+                    let hour = parseInt(hour24);
+                    const ampm = hour >= 12 ? 'pm' : 'am';
+                    hour = hour % 12 || 12;
+                    return `${year}-${month}-${day} ${hour}:${minute}${ampm}`;
+                }
+                return esc(ts);
+            }
         }catch(_){ return esc(ts||''); }
     }
     const deletedInfo = (isArchived && r.deleted_at) ? `<div class="small-muted">Deleted: ${fmtLocal(r.deleted_at)}</div>` : '';

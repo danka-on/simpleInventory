@@ -151,7 +151,7 @@ def addToSearchRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITI
             """, (barcode_norm, position_norm))
             existing_same_location = cursor.fetchone()
         
-        now_iso = datetime.datetime.utcnow().isoformat()
+        now_iso = datetime.datetime.now().isoformat()
         
         if existing_same_location:
             # Same barcode at same shelf location - increment quantity by 1
@@ -173,7 +173,7 @@ def addToSearchRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITI
             
             # Log to history
             try:
-                rem_conn = sqlite3.connect('removed.db')
+                rem_conn = sqlite3.connect('rackhistory.db')
                 rem_cur = rem_conn.cursor()
                 rem_cur.execute('''
                     CREATE TABLE IF NOT EXISTS removed_items (
@@ -214,7 +214,7 @@ def addToSearchRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITI
             
             # Log to history
             try:
-                rem_conn = sqlite3.connect('removed.db')
+                rem_conn = sqlite3.connect('rackhistory.db')
                 rem_cur = rem_conn.cursor()
                 rem_cur.execute('''
                     CREATE TABLE IF NOT EXISTS removed_items (
@@ -1072,8 +1072,8 @@ def process_sold_orders_inventory_reduction():
         rack_conn = sqlite3.connect('searchRack.db')
         rack_cur = rack_conn.cursor()
 
-        # Prepare removed.db for logging removals
-        rem_conn = sqlite3.connect('removed.db')
+        # Prepare rackhistory.db for logging removals
+        rem_conn = sqlite3.connect('rackhistory.db')
         rem_cur = rem_conn.cursor()
         rem_cur.execute('''
             CREATE TABLE IF NOT EXISTS removed (

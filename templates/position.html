@@ -323,25 +323,16 @@
                         // Fallback: read from sessionStorage if not in URL (cache issue workaround)
                         if(!moveQty && editId === sessionStorage.getItem('edit_rack_id')){
                             moveQty = sessionStorage.getItem('edit_move_qty');
-                            console.log('📦 Retrieved move_qty from sessionStorage:', moveQty);
                         }
                         
-                        console.log('🔍 Edit mode detected:', {editId, moveQty, fullURL: window.location.href});
                         const payload = {id: editId, item_position: posCode};
                         if(moveQty){
                             payload.move_qty = parseInt(moveQty);
-                            console.log('✅ Including move_qty in payload:', payload.move_qty);
-                            alert('DEBUG: Sending move_qty=' + payload.move_qty + ' to server');
-                        } else {
-                            console.log('⚠️ No move_qty in URL or sessionStorage - will move all items');
-                            alert('DEBUG: No move_qty found! URL: ' + window.location.href);
                         }
                         
                         // Clear sessionStorage after reading
                         sessionStorage.removeItem('edit_move_qty');
                         sessionStorage.removeItem('edit_rack_id');
-                        
-                        console.log('📤 Sending payload:', payload);
                         fetch('/api/set_rack_location', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)})
                         .then(r=>r.json())
                         .then(j=>{

@@ -63,7 +63,7 @@ def db_connection(db_name, row_factory=True):
 # Enable WAL mode for SQLite databases for better concurrent performance
 def enable_wal_mode():
     """Enable Write-Ahead Logging for all SQLite databases"""
-    databases = ['sold.db', 'bol.db', 'searchRack.db', 'ebayStore.db', 'amazonStore.db', 'rawbol.db', 'removed.db', 'deleted.db']
+    databases = ['sold.db', 'bol.db', 'searchRack.db', 'ebayStore.db', 'amazonStore.db', 'rawbol.db', 'rackhistory.db', 'deleted.db']
     for db in databases:
         try:
             if os.path.exists(db):
@@ -1958,8 +1958,8 @@ def _process_automatic_inventory_removals():
                 # Mark order as processed
                 sold_cur.execute('UPDATE orders SET rackupdated = 1 WHERE id = ?', (order['id'],))
                 
-                # Log to removed.db
-                removed_conn = sqlite3.connect('removed.db')
+                # Log to rackhistory.db
+                removed_conn = sqlite3.connect('rackhistory.db')
                 removed_cur = removed_conn.cursor()
                 removed_cur.execute('''
                     CREATE TABLE IF NOT EXISTS removed_items (
@@ -5052,7 +5052,7 @@ def position_diagnostic():
         _ensure_items_prep_tables()
         
         import datetime
-        ts = datetime.datetime.now(datetime.UTC).isoformat()
+        ts = datetime.datetime.now().isoformat()
         conn = sqlite3.connect('bol.db')
         cur = conn.cursor()
         
@@ -5111,7 +5111,7 @@ def position_diagnostic():
                     
                     # Log to removed_items for history tracking
                     try:
-                        removed_conn = sqlite3.connect('removed.db')
+                        removed_conn = sqlite3.connect('rackhistory.db')
                         removed_cur = removed_conn.cursor()
                         removed_cur.execute('''
                             CREATE TABLE IF NOT EXISTS removed_items (
@@ -5164,7 +5164,7 @@ def position_diagnostic():
                         
                         # Log to removed_items for history tracking
                         try:
-                            removed_conn = sqlite3.connect('removed.db')
+                            removed_conn = sqlite3.connect('rackhistory.db')
                             removed_cur = removed_conn.cursor()
                             removed_cur.execute('''
                                 CREATE TABLE IF NOT EXISTS removed_items (
@@ -5205,7 +5205,7 @@ def position_diagnostic():
                         
                         # Log to removed_items for history tracking
                         try:
-                            removed_conn = sqlite3.connect('removed.db')
+                            removed_conn = sqlite3.connect('rackhistory.db')
                             removed_cur = removed_conn.cursor()
                             removed_cur.execute('''
                                 CREATE TABLE IF NOT EXISTS removed_items (
@@ -6762,7 +6762,7 @@ def api_zero_qty_delete_now(barcode):
             
             # Log to removed_items for history tracking
             try:
-                removed_conn = sqlite3.connect('removed.db')
+                removed_conn = sqlite3.connect('rackhistory.db')
                 removed_cur = removed_conn.cursor()
                 removed_cur.execute('''
                     CREATE TABLE IF NOT EXISTS removed_items (
@@ -6892,9 +6892,9 @@ def api_inventory_history():
         
         history_items = []
         
-        # Get removal history from removed.db (removed_items table has more detail)
+        # Get removal history from rackhistory.db (removed_items table has more detail)
         try:
-            rem_conn = sqlite3.connect('removed.db')
+            rem_conn = sqlite3.connect('rackhistory.db')
             rem_conn.row_factory = sqlite3.Row
             rem_cur = rem_conn.cursor()
             
@@ -6929,6 +6929,18 @@ def api_inventory_history():
                     old_qty = row['old_quantity'] or 0
                     new_qty = row['new_quantity'] or 0
                     qty_change = new_qty - old_qty
+                    
+                    # Normalize timestamp for display (convert UTC to local time)
+                    display_timestamp = row['removed_at']
+                    try:
+                        from datetime import datetime, timedelta
+                        dt = datetime.fromisoformat(str(display_timestamp))
+                        if dt.tzinfo is not None:
+                            # Convert UTC to local time (EST = UTC-5)
+                            dt = dt.replace(tzinfo=None) - timedelta(hours=5)
+                            display_timestamp = dt.isoformat()
+                    except:
+                        pass  # Keep original if parsing fails
                     
                     # For manual_edit type, show as addition or removal based on qty_change
                     removal_type = row['removal_type'] or 'unknown'
@@ -6966,7 +6978,7 @@ def api_inventory_history():
                         'quantity_change': qty_change,
                         'old_quantity': old_qty,
                         'new_quantity': new_qty,
-                        'timestamp': row['removed_at'],
+                        'timestamp': display_timestamp,
                         'method': removal_type,
                         'source': source,
                         'order_id': row['order_id'],
@@ -6977,8 +6989,28 @@ def api_inventory_history():
         except Exception as e:
             print(f"Error reading removed_items: {e}")
         
-        # Sort by timestamp
-        history_items.sort(key=lambda x: x['timestamp'], reverse=(sort_order == 'desc'))
+        # Sort by timestamp (handle both UTC and local timestamps)
+        def parse_timestamp_for_sort(ts):
+            """Parse timestamp to datetime, converting UTC to local time for consistent sorting"""
+            from datetime import datetime, timedelta
+            try:
+                if not ts:
+                    return datetime.min
+                
+                # Parse ISO format timestamp
+                ts_str = str(ts)
+                dt = datetime.fromisoformat(ts_str)
+                
+                # If timezone-aware (UTC like +00:00), convert to local EST time
+                # Subtract 5 hours to convert UTC to EST
+                if dt.tzinfo is not None:
+                    dt = dt.replace(tzinfo=None) - timedelta(hours=5)
+                
+                return dt
+            except:
+                return datetime.min
+        
+        history_items.sort(key=lambda x: parse_timestamp_for_sort(x['timestamp']), reverse=(sort_order == 'desc'))
         
         return jsonify({'success': True, 'items': history_items[:500]})  # Limit to 500 for performance
         
@@ -6991,7 +7023,7 @@ def api_inventory_history():
 @app.route('/api/removed', methods=['GET'])
 def api_removed_list():
     try:
-        conn = sqlite3.connect('removed.db')
+        conn = sqlite3.connect('rackhistory.db')
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         cur.execute('''
@@ -7041,8 +7073,8 @@ def removed_page():
 def api_removed_undo(rem_id: int):
     """Undo a removal: increment searchRack quantity by qty for the barcode, and mark removed row undone."""
     try:
-        # Open removed.db and fetch entry
-        rem_conn = sqlite3.connect('removed.db')
+        # Open rackhistory.db and fetch entry
+        rem_conn = sqlite3.connect('rackhistory.db')
         rem_conn.row_factory = sqlite3.Row
         rem_cur = rem_conn.cursor()
         # Ensure schema
@@ -7110,7 +7142,7 @@ def api_removed_undo(rem_id: int):
 
 @app.route('/api/sold/remove-now/<int:order_id>', methods=['POST'])
 def api_sold_remove_now(order_id: int):
-    """Immediately reduce inventory for a specific sold order and log to removed.db, bypassing grace period."""
+    """Immediately reduce inventory for a specific sold order and log to rackhistory.db, bypassing grace period."""
     try:
         # Fetch order details
         s_conn = sqlite3.connect('sold.db')
@@ -7156,8 +7188,8 @@ def api_sold_remove_now(order_id: int):
             r_cur.execute(f'UPDATE SEARCHRACK SET {qty_col} = ? WHERE ID = ?', (new_qty, rack_id))
             r_conn.commit()
 
-        # Log to removed.db
-        rem_conn = sqlite3.connect('removed.db')
+        # Log to rackhistory.db
+        rem_conn = sqlite3.connect('rackhistory.db')
         rem_cur = rem_conn.cursor()
         rem_cur.execute('''
             CREATE TABLE IF NOT EXISTS removed (
@@ -7437,7 +7469,7 @@ def update_item(db_type, item_id):
                         from datetime import datetime
                         now = datetime.now()
                         
-                        removed_conn = sqlite3.connect('removed.db')
+                        removed_conn = sqlite3.connect('rackhistory.db')
                         removed_cur = removed_conn.cursor()
                         removed_cur.execute('''
                             CREATE TABLE IF NOT EXISTS removed_items (
@@ -8140,7 +8172,6 @@ def api_set_rack_location():
             item_id_raw = parts[0]
             try:
                 move_qty_from_id = int(parts[1])
-                print(f"🔧 WORKAROUND: Extracted move_qty={move_qty_from_id} from encoded ID")
             except:
                 pass
     
@@ -8155,9 +8186,6 @@ def api_set_rack_location():
     # Use move_qty from encoded ID if not provided in data
     if move_qty is None and move_qty_from_id is not None:
         move_qty = move_qty_from_id
-        print(f"✅ Using move_qty from encoded ID: {move_qty}")
-    
-    print(f"🔄 Edit Location Request: id={item_id}, pos={pos}, pictureposition={pictureposition}, move_qty={move_qty}")
     
     # Require id and at least one of pos or pictureposition
     if not item_id or (not pos and not pictureposition):
@@ -8192,24 +8220,24 @@ def api_set_rack_location():
 
         # Extract current quantity (try common column names)
         existing_dict = {d[0]: existing[idx] for idx, d in enumerate(cur.description)} if cur.description else dict(zip([c[0] for c in cur.description], existing))
-        print(f"🔍 DEBUG: existing_dict keys: {list(existing_dict.keys())}")
-        print(f"🔍 DEBUG: Quantity value: {existing_dict.get('Quantity')}")
         
-        qty_cols = ['Quantity','quantity','Qty','QTY','QUANTITY']  # Added QUANTITY
+        # Get barcode and title for history logging
+        barcode = existing_dict.get('BARCODE') or existing_dict.get('barcode') or existing_dict.get('Barcode') or ''
+        title = existing_dict.get('TITLE') or existing_dict.get('title') or existing_dict.get('Title') or ''
+        old_location = existing_dict.get('ITEM_POSITION') or existing_dict.get('item_position') or existing_dict.get('ItemPosition') or ''
+        
+        qty_cols = ['Quantity','quantity','Qty','QTY','QUANTITY']
         current_qty = None
         for qc in qty_cols:
             if qc in existing_dict and existing_dict.get(qc) is not None:
                 try:
                     current_qty = int(existing_dict.get(qc))
-                    print(f"✅ Found quantity in column '{qc}': {current_qty}")
                     break
-                except Exception as e:
-                    print(f"⚠️ Failed to parse '{qc}': {e}")
+                except Exception:
                     current_qty = None
         # default to 1 when quantity is not known
         if current_qty is None:
             current_qty = 1
-            print(f"⚠️ No quantity found, defaulting to 1")
 
         # If a pictureposition is provided, update PICTUREPOSITION and clear ITEM_POSITION
         if pictureposition:
@@ -8282,14 +8310,12 @@ def api_set_rack_location():
                         break
             # Handle splitting similar to pictureposition case
             target_move = move_qty or current_qty
-            print(f"📊 Item Position Update: current_qty={current_qty}, move_qty={move_qty}, target_move={target_move}")
             
             if target_move < 1 or target_move > current_qty:
                 conn.close()
                 return jsonify({'success': False, 'error': 'move_qty out of range'}), 400
 
             if target_move < current_qty:
-                print(f"✂️ SPLITTING: Moving {target_move} items, leaving {current_qty - target_move} at original location")
                 # decrement existing row's Quantity
                 qty_col_name = None
                 for qc in qty_cols:
@@ -8301,7 +8327,22 @@ def api_set_rack_location():
                         cur.execute(f"UPDATE SEARCHRACK SET {qty_col_name} = {qty_col_name} - ? WHERE {pk} = ?", (target_move, item_id))
                     else:
                         cur.execute(f"UPDATE SEARCHRACK SET {qty_col_name} = {qty_col_name} - ? WHERE rowid = ?", (target_move, item_id))
-                    print(f"   ✅ Decremented original row ID={item_id} by {target_move}")
+                    
+                    # Log the quantity reduction to history
+                    try:
+                        from datetime import datetime
+                        now = datetime.now().isoformat()
+                        removed_conn = sqlite3.connect('rackhistory.db')
+                        removed_cur = removed_conn.cursor()
+                        removed_cur.execute('''
+                            INSERT INTO removed_items 
+                            (barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (barcode, title, target_move, now, item_id, current_qty, current_qty - target_move, 'location_edit', old_location))
+                        removed_conn.commit()
+                        removed_conn.close()
+                    except Exception:
+                        pass
 
                 # insert new row for moved qty
                 # Exclude primary key column from INSERT so it auto-increments
@@ -8320,10 +8361,24 @@ def api_set_rack_location():
                         val = pos
                     cur_vals.append(val)
                 cur.execute(f"INSERT INTO SEARCHRACK ({', '.join(col_names)}) VALUES ({placeholders})", tuple(cur_vals))
-                print(f"   ✅ Inserted new row with {target_move} items at location {pos}")
+                
+                # Log the new row creation to history
+                try:
+                    from datetime import datetime
+                    now = datetime.now().isoformat()
+                    removed_conn = sqlite3.connect('rackhistory.db')
+                    removed_cur = removed_conn.cursor()
+                    removed_cur.execute('''
+                        INSERT INTO removed_items 
+                        (barcode, title, quantity_removed, removed_at, old_quantity, new_quantity, removal_type, item_position)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (barcode, title, target_move, now, 0, target_move, 'location_edit', pos))
+                    removed_conn.commit()
+                    removed_conn.close()
+                except Exception:
+                    pass
             else:
-                print(f"🔄 MOVING ALL: Updating location for all {current_qty} items")
-                # update in-place
+                # update in-place - log location change
                 if pk:
                     if pic_col:
                         cur.execute(f"UPDATE SEARCHRACK SET ITEM_POSITION = ?, {pic_col} = ? WHERE {pk} = ?", (pos, '', item_id))
@@ -8458,7 +8513,7 @@ def api_update_row(db_key, item_id):
                     from datetime import datetime
                     now = datetime.now()
                     
-                    removed_conn = sqlite3.connect('removed.db')
+                    removed_conn = sqlite3.connect('rackhistory.db')
                     removed_cur = removed_conn.cursor()
                     removed_cur.execute('''
                         CREATE TABLE IF NOT EXISTS removed_items (
