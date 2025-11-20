@@ -107,9 +107,19 @@
 <script>
 // IMMEDIATE CHECK: Redirect if BOL lookup returns a different (suffixed) UPC
 // This must happen before any other page initialization
+// SKIP this logic if we're editing an existing entry from Item Manager (from=items)
 (async function() {
   const upc = '{{ upc }}'.trim();
   if (!upc) return;
+  
+  // Check if this is an edit from Item Manager - if so, skip suffix redirect
+  const urlParams = new URLSearchParams(window.location.search);
+  const fromItems = urlParams.get('from') === 'items';
+  
+  if (fromItems) {
+    console.log('[EDIT MODE] Skipping BOL redirect - editing existing entry from Item Manager');
+    return;
+  }
   
   try {
     const r = await fetch(`/api/bol_lookup?upc=${encodeURIComponent(upc)}`);
@@ -499,7 +509,9 @@
               const statusData = await statusRes.json();
               
               // Update sessionStorage with the actual UPC that was created (important for bad status with suffixed UPCs)
-              if(statusData && statusData.success && statusData.upc){
+              // SKIP this if editing from Item Manager - we don't want to change the original UPC
+              const fromItems = urlParams.get('from') === 'items';
+              if(statusData && statusData.success && statusData.upc && !fromItems){
                 const stored = sessionStorage.getItem('lastEntry');
                 if(stored){
                   try{
@@ -579,6 +591,7 @@
       bubble.addEventListener('click', () => {
         const status = bubble.dataset.status;
         updateStatusBubbles(status);
+        updateDoneButtonState(); // Update button state when status changes
       });
     });
     window.addEventListener('beforeunload', stopCam);
@@ -588,21 +601,30 @@
       const doneBtn = document.getElementById('doneBtn');
       const completeBtn = document.getElementById('completeBtn');
       const hasReason = reasonSelect.value && reasonSelect.value.trim() !== '';
+      const currentStatus = statusInput.value;
       
-      if(hasReason){
+      // For "good" status, allow saving without a reason (defect is optional)
+      // For "bad" status, require a reason
+      const canSave = (currentStatus === 'good') || hasReason;
+      
+      if(canSave){
         doneBtn.disabled = false;
         doneBtn.style.opacity = '1';
         doneBtn.style.cursor = 'pointer';
-        completeBtn.disabled = false;
-        completeBtn.style.opacity = '1';
-        completeBtn.style.cursor = 'pointer';
+        if(completeBtn){
+          completeBtn.disabled = false;
+          completeBtn.style.opacity = '1';
+          completeBtn.style.cursor = 'pointer';
+        }
       } else {
         doneBtn.disabled = true;
         doneBtn.style.opacity = '0.4';
         doneBtn.style.cursor = 'not-allowed';
-        completeBtn.disabled = true;
-        completeBtn.style.opacity = '0.4';
-        completeBtn.style.cursor = 'not-allowed';
+        if(completeBtn){
+          completeBtn.disabled = true;
+          completeBtn.style.opacity = '0.4';
+          completeBtn.style.cursor = 'not-allowed';
+        }
       }
     }
 
@@ -978,6 +1000,12 @@
       const from = params.get('from');
       if(from === 'bad'){
         updateStatusBubbles('bad');
+        return;
+      }
+      
+      // Skip loading existing status if editing from Item Manager - let user change it freely
+      if(from === 'items'){
+        console.log('[EDIT MODE] Skipping auto-load of existing status - user can change freely');
         return;
       }
       

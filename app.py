@@ -2913,9 +2913,21 @@ def api_items_prep_status():
         if status == 'good':
             # Get selected LOT from session
             selected_lot = session.get('selected_lot')
+            
+            # If no LOT selected (e.g., editing existing item from Item Manager),
+            # just update the status record without creating BOL inventory entries
             if not selected_lot:
+                print(f'[GOOD] No LOT selected - updating status only for {upc}')
+                cur.execute('SELECT upc FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (base_upc,))
+                if cur.fetchone():
+                    cur.execute('UPDATE items_prep_status SET status=?, reason=?, note=?, updated_at=? WHERE upc=? COLLATE NOCASE', 
+                              (status, reason, note, ts, base_upc))
+                else:
+                    cur.execute('INSERT INTO items_prep_status (upc, status, reason, note, updated_at) VALUES (?,?,?,?,?)', 
+                              (base_upc, status, reason, note, ts))
+                conn.commit()
                 conn.close()
-                return jsonify({'success': False, 'error': 'No LOT selected. Please select a LOT from the dropdown.'}), 400
+                return jsonify({'success': True, 'upc': base_upc, 'action': 'status_updated', 'quantity': qty})
             
             # Get import_date for the selected LOT from rawbol.db
             rawbol_conn = sqlite3.connect('rawbol.db')
@@ -9429,6 +9441,7 @@ def api_archived_list():
             }
             results.append(item_out)
         # Merge archived rows similar to searchRack: group by barcode+item_position and sum quantities
+        # IMPORTANT: Store ALL archive IDs in merged_archive_ids so we can delete all entries at once
         if results:
             merged = {}
             for r in results:
@@ -9460,9 +9473,15 @@ def api_archived_list():
                 if key not in merged:
                     r_copy = r.copy()
                     r_copy['quantity'] = n
+                    # Store array of all archive IDs that were merged into this row
+                    r_copy['merged_archive_ids'] = [r.get('id')]
                     merged[key] = r_copy
                 else:
                     merged[key]['quantity'] = merged[key].get('quantity', 0) + n
+                    # Append this archive ID to the list
+                    if 'merged_archive_ids' not in merged[key]:
+                        merged[key]['merged_archive_ids'] = []
+                    merged[key]['merged_archive_ids'].append(r.get('id'))
             results = list(merged.values())
         conn.close()
         return jsonify({'results': results})
