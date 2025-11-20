@@ -3002,24 +3002,35 @@ def api_items_prep_status():
                     if deleted_temp > 0:
                         print(f'[GOOD] Deleted bol_items entry {suffixed_upc_found}')
                     
-                    # Increment bol_items quantity by 1
-                    cur.execute('''
-                        SELECT id, quantity
-                        FROM bol_items 
-                        WHERE upc = ? COLLATE NOCASE 
-                        AND lot_number = ? COLLATE NOCASE
-                        AND (itemprepped IS NULL OR itemprepped = 0)
-                        LIMIT 1
-                    ''', (base_upc, selected_lot))
+                    # Check if base UPC is UNCHECKED (happens when original qty was 1 and got converted to BAD)
+                    # If UNCHECKED, change to GOOD instead of incrementing quantity
+                    cur.execute('SELECT status FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (base_upc,))
+                    base_status_row = cur.fetchone()
+                    base_is_unchecked = base_status_row and base_status_row[0] == 'unchecked'
                     
-                    bol_row = cur.fetchone()
-                    if bol_row:
-                        bol_id, current_bol_qty = bol_row
-                        current_bol_qty = current_bol_qty or 1
-                        new_bol_qty = current_bol_qty + 1
+                    if base_is_unchecked:
+                        # Base UPC is UNCHECKED - just change it to GOOD (quantity stays 1)
+                        cur.execute('UPDATE items_prep_status SET status = ? WHERE upc = ? COLLATE NOCASE', ('good', base_upc))
+                        print(f'[GOOD] Changed base UPC {base_upc} from UNCHECKED to GOOD (qty stays 1)')
+                    else:
+                        # Base UPC has multiple units - increment bol_items quantity by 1
+                        cur.execute('''
+                            SELECT id, quantity
+                            FROM bol_items 
+                            WHERE upc = ? COLLATE NOCASE 
+                            AND lot_number = ? COLLATE NOCASE
+                            AND (itemprepped IS NULL OR itemprepped = 0)
+                            LIMIT 1
+                        ''', (base_upc, selected_lot))
                         
-                        cur.execute('UPDATE bol_items SET quantity = ? WHERE id = ?', (new_bol_qty, bol_id))
-                        print(f'[GOOD] Incremented bol_items quantity for {base_upc} from {current_bol_qty} to {new_bol_qty}')
+                        bol_row = cur.fetchone()
+                        if bol_row:
+                            bol_id, current_bol_qty = bol_row
+                            current_bol_qty = current_bol_qty or 1
+                            new_bol_qty = current_bol_qty + 1
+                            
+                            cur.execute('UPDATE bol_items SET quantity = ? WHERE id = ?', (new_bol_qty, bol_id))
+                            print(f'[GOOD] Incremented bol_items quantity for {base_upc} from {current_bol_qty} to {new_bol_qty}')
             
             # Only update the base UPC entry if we didn't keep a suffixed entry with defect
             # If suffixed_upc_found exists AND has a reason, we already updated it above
