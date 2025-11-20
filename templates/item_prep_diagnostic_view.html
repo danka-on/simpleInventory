@@ -207,14 +207,16 @@
         const params = new URLSearchParams(window.location.search);
         const ret = params.get('return');
         const from = params.get('from');
+        const lot = params.get('lot');
         const edit = document.getElementById('editDiagLink');
         if(edit){
-          // Build a proper href preserving upc and optional from/return
+          // Build a proper href preserving upc and optional from/return/lot
           const base = edit.getAttribute('href') || ('/item-prep/diagnostic?upc={{ upc }}');
           const u = new URL(base, window.location.origin);
           u.searchParams.set('upc', '{{ upc }}');
           if(from) u.searchParams.set('from', from);
           if(ret) u.searchParams.set('return', ret);
+          if(lot) u.searchParams.set('lot', lot);
           edit.href = u.pathname + u.search;
         }
       }catch(e){}

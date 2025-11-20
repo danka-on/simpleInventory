@@ -214,9 +214,9 @@ function render(results){
       ? `<button class="btn btn-danger btn-sm btn-unlist" data-upc="${upc}" title="Mark as not listed">✕</button>`
       : `<button class="btn btn-primary btn-sm btn-list" data-upc="${upc}">Mark as Listed</button>`;
     // Diagnostic link moved into its own Info column (first column)
-    const diagLink = `<button class="btn btn-sm diag-link" style="background:transparent;border:1px solid #0066cc;color:#0066cc;border-radius:6px;padding:6px 10px;cursor:pointer" data-upc="${upc}">Open</button>`;
+    const diagLink = `<button class="btn btn-sm diag-link" style="background:transparent;border:1px solid #0066cc;color:#0066cc;border-radius:6px;padding:6px 10px;cursor:pointer" data-upc="${upc}" data-lot="${esc(r.lot_number||'')}">Open</button>`;
     // Pics count — will be updated after fetching actual count. Start with "..." as loading indicator
-    const picsBtn = `<span class="pics-count" data-upc="${upc}" style="color:#2196F3;font-weight:600;cursor:pointer;font-size:0.9rem">...</span>`;
+    const picsBtn = `<span class="pics-count" data-upc="${upc}" data-lot="${esc(r.lot_number||'')}" style="color:#2196F3;font-weight:600;cursor:pointer;font-size:0.9rem">...</span>`;
     // QTY display - make red if > 1 AND status is NOT "unchecked"
     const qty = r.quantity || 1;
     const qtyStyle = (qty > 1 && status !== 'unchecked') ? 'color:#e74c3c;font-weight:700;font-size:1.1rem' : '';
@@ -338,19 +338,24 @@ if (gearBtn && dropdown){
   });
 }
 function onOpenDiag(e){
-  e.preventDefault(); const upc = e.currentTarget.dataset.upc; if(!upc) return;
+  e.preventDefault();
+  const upc = e.currentTarget.dataset.upc; if(!upc) return;
+  const lot = e.currentTarget.dataset.lot || '';
   // Build a compact return URL consisting of the active filter params so we can return to the same list state
   const params = new URLSearchParams(window.location.search);
   const returnParams = [];
   ['lot','q','sort','status','defect'].forEach(k=>{ const v = params.get(k); if(v) returnParams.push(`${k}=${encodeURIComponent(v)}`); });
   const ret = '/items-to-list' + (returnParams.length? ('?'+returnParams.join('&')) : '');
-  window.location.href = '/item-prep/diagnostic/view?upc='+encodeURIComponent(upc)+'&from=items&return='+encodeURIComponent(ret);
+  let url = '/item-prep/diagnostic/view?upc='+encodeURIComponent(upc)+'&from=items&return='+encodeURIComponent(ret);
+  if(lot) url += '&lot='+encodeURIComponent(lot);
+  window.location.href = url;
 }
 
 async function onOpenPics(e){
   e.preventDefault();
   const upc = e.currentTarget.dataset.upc || e.currentTarget.getAttribute('data-upc');
   if(!upc) return;
+  const lot = e.currentTarget.dataset.lot || '';
   const modal = document.getElementById('picsModal');
   const area = document.getElementById('picsGrid');
   const large = document.getElementById('picsLarge');
@@ -363,7 +368,9 @@ async function onOpenPics(e){
   const returnParams = [];
   ['lot','q','sort','status','defect'].forEach(k=>{ const v = params.get(k); if(v) returnParams.push(`${k}=${encodeURIComponent(v)}`); });
   const ret = '/items-to-list' + (returnParams.length? ('?'+returnParams.join('&')) : '');
-  editLink.href = '/item-prep/diagnostic?upc='+encodeURIComponent(upc)+'&from=items&return='+encodeURIComponent(ret);
+  let diagUrl = '/item-prep/diagnostic?upc='+encodeURIComponent(upc)+'&from=items&return='+encodeURIComponent(ret);
+  if(lot) diagUrl += '&lot='+encodeURIComponent(lot);
+  editLink.href = diagUrl;
   dlAll.href = '/api/items_prep/diagnostic/'+encodeURIComponent(upc)+'/photos.zip';
   try{
     const res = await fetch('/api/items_prep/diagnostic/'+encodeURIComponent(upc));

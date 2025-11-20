@@ -499,14 +499,23 @@
           // Also POST status (status, reason) - only if status is set (good or bad)
           try{
             const statusVal = statusInput.value || '';
+            console.log('[SAVE] Status value:', statusVal);
             if(statusVal && (statusVal === 'good' || statusVal === 'bad')){
               const reasonVal = (document.getElementById('reasonSelect') && document.getElementById('reasonSelect').value) || '';
               // Read qty from URL parameter if provided (from bad flow)
               const urlParams = new URLSearchParams(window.location.search);
               const qtyParam = urlParams.get('qty');
               const qty = qtyParam ? parseInt(qtyParam, 10) : 1;
+              console.log('[SAVE] Posting status:', statusVal, 'reason:', reasonVal, 'qty:', qty);
               const statusRes = await fetch('/api/items_prep/status', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ upc: '{{ upc }}', status: statusVal, reason: reasonVal, note: '', qty: qty }) });
               const statusData = await statusRes.json();
+              console.log('[SAVE] Status API response:', statusData);
+              
+              if(!statusData.success){
+                console.error('[SAVE] Status save failed:', statusData.error);
+                msg.textContent = 'Status save failed: ' + (statusData.error || 'Unknown error');
+                return;
+              }
               
               // Update sessionStorage with the actual UPC that was created (important for bad status with suffixed UPCs)
               // SKIP this if editing from Item Manager - we don't want to change the original UPC
@@ -521,8 +530,14 @@
                   }catch(e){ console.error('Failed to update lastEntry:', e); }
                 }
               }
+            } else {
+              console.log('[SAVE] Status not set or invalid, skipping status save');
             }
-          }catch(e){ /* ignore status save errors */ }
+          }catch(e){ 
+            console.error('[SAVE] Status save error:', e);
+            msg.textContent = 'Status save error: ' + e;
+            return;
+          }
           diagnosticCompleted = true; // Mark as completed to prevent cleanup
           msg.textContent='Saved diagnostic';
           // If a return URL was provided in query params, go back to it preserving filters
