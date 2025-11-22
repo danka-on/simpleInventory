@@ -1,34 +1,38 @@
-# Core Web Framework
 Flask==3.0.0
 Werkzeug==3.0.1
 Flask-Caching==2.1.0
 Flask-Compress==1.14
 
-# Environment & Configuration
+# Environment
 python-dotenv==1.0.0
 
-# Image Processing
-Pillow==10.1.0
-
-# HTTP Requests
+# HTTP
 requests==2.31.0
 
-# Amazon SP-API
+# Amazon SP-API (sp-api wrapper)
 python-amazon-sp-api==0.22.0
 
-# Data Processing
+# Data processing
 pandas==2.1.4
 openpyxl==3.1.2
 
-# Barcode Generation
-python-barcode==0.15.1
+# HTML / XML parsing
+lxml==5.0.0
+beautifulsoup4
 
-# Printer Support (for Bluetooth/USB thermal printers)
+# Images, barcodes, printing
+Pillow==10.1.0
+python-barcode==0.15.1
 python-escpos==3.0
 pyserial==3.5
 
-# HTML/XML Parsing (used for eBay API responses)
-lxml==5.0.0
+# Bluetooth support (used by some printer backends)
+pybluez
 
-# Production Server (optional but recommended for Raspberry Pi)
+# Production server (optional)
 gunicorn==21.2.0
+
+# Notes:
+# - This file lists the primary Python dependencies detected in the repository.
+# - Some system binaries (e.g. cloudflared) are required at runtime but are
+#   not Python packages and must be installed on the host separately.
