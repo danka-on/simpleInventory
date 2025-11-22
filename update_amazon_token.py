@@ -5,10 +5,13 @@ Update Amazon refresh token in credentials file
 import json
 import os
 
+# Define base directory for cross-platform compatibility
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 def update_refresh_token():
     """Update the refresh token in amazon_credentials.json"""
     
-    creds_file = 'amazon_credentials.json'
+    creds_file = os.path.join(BASE_DIR, 'amazon_credentials.json')
     
     if not os.path.exists(creds_file):
         print(f"❌ Credentials file not found: {creds_file}")
@@ -38,7 +41,7 @@ def update_refresh_token():
     
     if new_token:
         # Backup old credentials
-        backup_file = 'amazon_credentials.json.bak'
+        backup_file = os.path.join(BASE_DIR, 'amazon_credentials.json.bak')
         with open(backup_file, 'w') as f:
             json.dump(creds, f, indent=2)
         print(f"✅ Backed up old credentials to: {backup_file}")

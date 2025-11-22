@@ -6,14 +6,22 @@ Handles authentication and data fetching from Amazon Seller Central
 import json
 import sqlite3
 import time
+import os
 from datetime import datetime, timedelta
 from sp_api.api import Orders, Reports, CatalogItems, ListingsItems, Finances, MerchantFulfillment
 from sp_api.base import Marketplaces
 from sp_api.base.exceptions import SellingApiException
 
+# Define base directory for cross-platform compatibility
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 class AmazonManager:
     def __init__(self, credentials_path='amazon_credentials.json'):
         """Initialize Amazon SP-API manager with credentials"""
+        # Ensure path is absolute
+        if not os.path.isabs(credentials_path):
+            credentials_path = os.path.join(BASE_DIR, credentials_path)
+            
         with open(credentials_path, 'r') as f:
             self.creds = json.load(f)
         

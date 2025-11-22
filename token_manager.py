@@ -2,8 +2,10 @@ import json, time, os, requests, base64
 from dotenv import load_dotenv
 load_dotenv()
 
+# Define base directory for cross-platform compatibility
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+TOKEN_FILE = os.path.join(BASE_DIR, "tokens.json")
 
-TOKEN_FILE = "tokens.json"
 CLIENT_ID = os.getenv("EBAY_CLIENT_ID", "your_id")
 CLIENT_SECRET = os.getenv("EBAY_CLIENT_SECRET", "your_secret")
 SCOPE = os.getenv("EBAY_SCOPE", "https://api.ebay.com/oauth/api_scope")

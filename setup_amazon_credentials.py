@@ -4,12 +4,17 @@ Use this to add your LWA Client Secret
 """
 
 import json
+import os
+
+# Define base directory for cross-platform compatibility
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+CREDS_FILE = os.path.join(BASE_DIR, 'amazon_credentials.json')
 
 print("🔐 Amazon Credentials Setup\n")
 
 # Load existing credentials
 try:
-    with open('amazon_credentials.json', 'r') as f:
+    with open(CREDS_FILE, 'r') as f:
         creds = json.load(f)
 except FileNotFoundError:
     creds = {
@@ -40,7 +45,7 @@ if client_secret:
     creds['lwa_client_secret'] = client_secret
     
     # Save updated credentials
-    with open('amazon_credentials.json', 'w') as f:
+    with open(CREDS_FILE, 'w') as f:
         json.dump(creds, f, indent=2)
     
     print("\n✅ Credentials updated successfully!")
