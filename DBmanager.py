@@ -6,8 +6,15 @@ except Exception:
     pd = None
 import os
 
+# Define base directory for cross-platform compatibility
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+def connect_db(db_name):
+    """Connect to database using absolute path"""
+    return sqlite3.connect(os.path.join(BASE_DIR, db_name))
+
 def createRack():
-    conn = sqlite3.connect('rack.db')
+    conn = connect_db('rack.db')
     cursor = conn.cursor()
     print("Rack starting creation")
     try:
@@ -29,7 +36,7 @@ def createRack():
         conn.close()
 
 def createEbayStoreDB():
-    conn = sqlite3.connect('ebayStore.db')
+    conn = connect_db('ebayStore.db')
     cursor = conn.cursor()
     print("Table starting creation")
     try:
@@ -60,7 +67,7 @@ def createEbayStoreDB():
 
 def addToSearchRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITION=None):
     """Add item directly to searchRack.db with enrichment from ebayStore.db and bol.db"""
-    conn = sqlite3.connect('searchRack.db')
+    conn = connect_db('searchRack.db')
     cursor = conn.cursor()
     try:
         # Ensure SEARCHRACK table exists with all columns
@@ -94,7 +101,7 @@ def addToSearchRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITI
         
         # First try ebayStore.db
         try:
-            ebay_conn = sqlite3.connect('ebayStore.db')
+            ebay_conn = connect_db('ebayStore.db')
             ebay_conn.row_factory = sqlite3.Row
             ebay_cur = ebay_conn.cursor()
             ebay_cur.execute("SELECT Title, ItemID, Quantity, Image FROM INVENTORY WHERE UPC = ? COLLATE NOCASE LIMIT 1", (BARCODE,))
@@ -111,7 +118,7 @@ def addToSearchRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITI
         # If not found in ebayStore, try bol.db
         if not title:
             try:
-                bol_conn = sqlite3.connect('bol.db')
+                bol_conn = connect_db('bol.db')
                 bol_conn.row_factory = sqlite3.Row
                 bol_cur = bol_conn.cursor()
                 bol_cur.execute('SELECT item_description, image_url FROM bol_items WHERE upc = ? COLLATE NOCASE LIMIT 1', (BARCODE,))
@@ -173,7 +180,7 @@ def addToSearchRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITI
             
             # Log to history
             try:
-                rem_conn = sqlite3.connect('rackhistory.db')
+                rem_conn = connect_db('rackhistory.db')
                 rem_cur = rem_conn.cursor()
                 rem_cur.execute('''
                     CREATE TABLE IF NOT EXISTS removed_items (
@@ -214,7 +221,7 @@ def addToSearchRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITI
             
             # Log to history
             try:
-                rem_conn = sqlite3.connect('rackhistory.db')
+                rem_conn = connect_db('rackhistory.db')
                 rem_cur = rem_conn.cursor()
                 rem_cur.execute('''
                     CREATE TABLE IF NOT EXISTS removed_items (
@@ -250,7 +257,7 @@ def addToSearchRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITI
         conn.close()
 
 def ebayStoreDB(title, item_id, sku = None, price = None, quantity = None, image = None, List_State = None, Sold_Date = None, List_Date = None, URL = None):
-    conn = sqlite3.connect('ebayStore.db')
+    conn = connect_db('ebayStore.db')
     cursor = conn.cursor()
     # Ensure the INVENTORY table exists before querying
     cursor.execute('''CREATE TABLE IF NOT EXISTS INVENTORY (
@@ -292,7 +299,7 @@ def ebayStoreDB(title, item_id, sku = None, price = None, quantity = None, image
         print("Failed to close connection:", e)
 
 def createAmazonStoreDB():
-    conn = sqlite3.connect('amazonStore.db')
+    conn = connect_db('amazonStore.db')
     cursor = conn.cursor()
     print("Amazon Store table starting creation")
     try:
@@ -323,7 +330,7 @@ def createAmazonStoreDB():
 
 def amazonStoreDB(title, asin, sku=None, price=None, quantity=None, image=None, List_State=None, Sold_Date=None, List_Date=None, URL=None, upc=None):
     """Add item to amazonStore.db - similar to ebayStoreDB but uses ASIN instead of ItemID"""
-    conn = sqlite3.connect('amazonStore.db')
+    conn = connect_db('amazonStore.db')
     cursor = conn.cursor()
     # Ensure the INVENTORY table exists before querying
     cursor.execute('''CREATE TABLE IF NOT EXISTS INVENTORY (
@@ -372,7 +379,7 @@ def insert_bol_items(df, import_date):
     Skips duplicates by UPC. Returns {'success': True, 'inserted': n} or error dict.
     """
     try:
-        conn = sqlite3.connect('bol.db')
+        conn = connect_db('bol.db')
         c = conn.cursor()
         c.execute('''CREATE TABLE IF NOT EXISTS bol_items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -413,7 +420,7 @@ def insert_bol_items(df, import_date):
 
 def store_ebay_order(order):
     """Insert a sold order into sold.db (orders table), skipping duplicates by order_id+item_id."""
-    conn = sqlite3.connect('sold.db')
+    conn = connect_db('sold.db')
     cur = conn.cursor()
     cur.execute('''CREATE TABLE IF NOT EXISTS orders (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -470,7 +477,7 @@ def store_ebay_order(order):
     barcode_val = order.get('barcode')
     if not barcode_val and order.get('item_id'):
         try:
-            ebay_conn = sqlite3.connect('ebayStore.db')
+            ebay_conn = connect_db('ebayStore.db')
             ebay_cur = ebay_conn.cursor()
             ebay_cur.execute('SELECT UPC FROM INVENTORY WHERE ItemID = ?', (order.get('item_id'),))
             row = ebay_cur.fetchone()
@@ -488,7 +495,7 @@ def store_ebay_order(order):
     # First try to get image from ebayStore.db using item_id
     if not image_val and order.get('item_id'):
         try:
-            ebay_conn = sqlite3.connect('ebayStore.db')
+            ebay_conn = connect_db('ebayStore.db')
             ebay_cur = ebay_conn.cursor()
             ebay_cur.execute('SELECT Image FROM INVENTORY WHERE ItemID = ?', (order.get('item_id'),))
             row = ebay_cur.fetchone()
@@ -501,7 +508,7 @@ def store_ebay_order(order):
     # Then try rawbol.db using barcode
     if barcode_val:
         try:
-            bol_conn = sqlite3.connect('rawbol.db')
+            bol_conn = connect_db('rawbol.db')
             bol_conn.row_factory = sqlite3.Row
             bol_cur = bol_conn.cursor()
             
@@ -531,7 +538,7 @@ def store_ebay_order(order):
     # Get lot_number from rawbol.db using barcode (this is the source of truth for LOT #)
     if barcode_val and not lot_number_val:
         try:
-            rawbol_conn = sqlite3.connect('rawbol.db')
+            rawbol_conn = connect_db('rawbol.db')
             rawbol_conn.row_factory = sqlite3.Row
             rawbol_cur = rawbol_conn.cursor()
             rawbol_cur.execute('SELECT lot_number FROM raw_bol_items WHERE upc = ? COLLATE NOCASE LIMIT 1', (barcode_val,))
@@ -548,7 +555,7 @@ def store_ebay_order(order):
     location_val = order.get('location')
     if not location_val and order.get('item_id'):
         try:
-            rack_conn = sqlite3.connect('searchRack.db')
+            rack_conn = connect_db('searchRack.db')
             rack_cur = rack_conn.cursor()
             rack_cur.execute('SELECT ITEM_POSITION, PICTUREPOSITION FROM SEARCHRACK WHERE BARCODE = ?', (order.get('item_id'),))
             r = rack_cur.fetchone()
@@ -635,7 +642,7 @@ def store_ebay_order(order):
 
 def createSearchRackDB():
     """Create SEARCHRACK table structure if it doesn't exist"""
-    search_conn = sqlite3.connect('searchRack.db')
+    search_conn = connect_db('searchRack.db')
     search_cur = search_conn.cursor()
     # Create table
     search_cur.execute('''
@@ -681,7 +688,7 @@ def enrich_searchrack_db(batch_size=500, do_backup=True):
         except Exception as e:
             print('Warning: failed to create backup of searchRack.db:', e)
 
-    s_conn = sqlite3.connect('searchRack.db')
+    s_conn = connect_db('searchRack.db')
     s_conn.row_factory = sqlite3.Row
     s_cur = s_conn.cursor()
     # Ensure enrichment columns exist
@@ -747,7 +754,7 @@ def enrich_searchrack_db(batch_size=500, do_backup=True):
 
     # 2) new UPCs added to ebayStore since last run
     try:
-        es_conn = sqlite3.connect('ebayStore.db')
+        es_conn = connect_db('ebayStore.db')
         es_cur = es_conn.cursor()
         es_cur.execute('SELECT COALESCE(MAX(rowid),0) FROM INVENTORY')
         current_ebay_max = int(es_cur.fetchone()[0] or 0)
@@ -764,7 +771,7 @@ def enrich_searchrack_db(batch_size=500, do_backup=True):
 
     # 3) new bol items since last run
     try:
-        bol_conn = sqlite3.connect('bol.db')
+        bol_conn = connect_db('bol.db')
         bol_cur = bol_conn.cursor()
         bol_cur.execute('SELECT COALESCE(MAX(rowid),0) FROM bol_items')
         current_bol_max = int(bol_cur.fetchone()[0] or 0)
@@ -797,7 +804,7 @@ def enrich_searchrack_db(batch_size=500, do_backup=True):
     
     # PRIORITY 1: Check bol.db first
     try:
-        bol_conn = sqlite3.connect('bol.db')
+        bol_conn = connect_db('bol.db')
         bol_conn.row_factory = sqlite3.Row
         bol_cur = bol_conn.cursor()
         for batch in chunks(barcodes, batch_size):
@@ -818,7 +825,7 @@ def enrich_searchrack_db(batch_size=500, do_backup=True):
     remaining = [b for b in norm_barcodes if b not in enrichment and b.lower() not in enrichment]
     try:
         if remaining:
-            es_conn = sqlite3.connect('ebayStore.db')
+            es_conn = connect_db('ebayStore.db')
             es_conn.row_factory = sqlite3.Row
             es_cur = es_conn.cursor()
             for batch in chunks(remaining, batch_size):
@@ -848,12 +855,12 @@ def enrich_searchrack_db(batch_size=500, do_backup=True):
     still_remaining = [b for b in norm_barcodes if b not in enrichment and b.lower() not in enrichment]
     try:
         if still_remaining:
-            amazon_conn = sqlite3.connect('amazonStore.db')
+            amazon_conn = connect_db('amazonStore.db')
             amazon_conn.row_factory = sqlite3.Row
             amazon_cur = amazon_conn.cursor()
             
             # Also connect to rawbol for images
-            rawbol_conn = sqlite3.connect('rawbol.db')
+            rawbol_conn = connect_db('rawbol.db')
             rawbol_conn.row_factory = sqlite3.Row
             rawbol_cur = rawbol_conn.cursor()
             
@@ -980,7 +987,7 @@ def process_sold_orders_inventory_reduction():
     
     try:
         # Connect to sold.db
-        sold_conn = sqlite3.connect('sold.db')
+        sold_conn = connect_db('sold.db')
         sold_conn.row_factory = sqlite3.Row
         sold_cur = sold_conn.cursor()
         # Ensure settings table exists and read grace period hours (default 48)
@@ -1069,11 +1076,11 @@ def process_sold_orders_inventory_reduction():
         print(f"  Found {len(eligible_orders)} orders eligible for inventory reduction")
         
         # Connect to searchRack.db
-        rack_conn = sqlite3.connect('searchRack.db')
+        rack_conn = connect_db('searchRack.db')
         rack_cur = rack_conn.cursor()
 
         # Prepare rackhistory.db for logging removals
-        rem_conn = sqlite3.connect('rackhistory.db')
+        rem_conn = connect_db('rackhistory.db')
         rem_cur = rem_conn.cursor()
         rem_cur.execute('''
             CREATE TABLE IF NOT EXISTS removed (
@@ -1200,10 +1207,10 @@ def enrich_amazon_sold_images():
     """Enrich Amazon sold orders with images from amazonStore.db"""
     try:
         # Connect to both databases
-        sold_conn = sqlite3.connect('sold.db')
+        sold_conn = connect_db('sold.db')
         sold_cur = sold_conn.cursor()
         
-        amazon_conn = sqlite3.connect('amazonStore.db')
+        amazon_conn = connect_db('amazonStore.db')
         amazon_conn.row_factory = sqlite3.Row
         amazon_cur = amazon_conn.cursor()
         

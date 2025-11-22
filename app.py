@@ -38,7 +38,13 @@ def get_db_connection(db_name):
         _db_connections.connections = {}
     
     if db_name not in _db_connections.connections:
-        conn = sqlite3.connect(db_name, check_same_thread=False, timeout=30.0)
+        # Ensure db_name is a string path, but use BASE_DIR if it's a filename
+        if os.path.isabs(db_name):
+            db_path = db_name
+        else:
+            db_path = str(BASE_DIR / db_name)
+            
+        conn = sqlite3.connect(db_path, check_same_thread=False, timeout=30.0)
         conn.row_factory = sqlite3.Row
         _db_connections.connections[db_name] = conn
     
@@ -66,10 +72,11 @@ def db_connection(db_name, row_factory=True):
 def enable_wal_mode():
     """Enable Write-Ahead Logging for all SQLite databases"""
     databases = ['sold.db', 'bol.db', 'searchRack.db', 'ebayStore.db', 'amazonStore.db', 'rawbol.db', 'rackhistory.db', 'deleted.db']
-    for db in databases:
+    for db_name in databases:
         try:
-            if os.path.exists(db):
-                conn = sqlite3.connect(db)
+            db_path = BASE_DIR / db_name
+            if db_path.exists():
+                conn = sqlite3.connect(str(db_path))
                 conn.execute('PRAGMA journal_mode=WAL')
                 conn.close()
         except Exception:
@@ -4948,11 +4955,12 @@ def token_status():
         return jsonify({"error": str(e)})
 
 def start_cloudflare_tunnel():
+    config_path = os.getenv('CLOUDFLARED_CONFIG', os.path.normpath(os.path.expanduser('~/.cloudflared/config.yml')))
     subprocess.Popen([
         "cloudflared",
         "tunnel",
         "--config",
-        "C:\\Users\\boxatron\\.cloudflared\\config.yml",
+        config_path,
         "run",
         "mytunnel"
     ])
@@ -6119,11 +6127,12 @@ def start_flask():
     app.run(host="0.0.0.0", port=8080)
 
 def start_tunnel():
+    config_path = os.getenv('CLOUDFLARED_CONFIG', os.path.normpath(os.path.expanduser('~/.cloudflared/config.yml')))
     subprocess.Popen([
         "cloudflared",
         "tunnel",
         "--config",
-        "C:\\Users\\boxatron\\.cloudflared\\config.yml",
+        config_path,
         "run",
         "mytunnel"
     ])

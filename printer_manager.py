@@ -12,6 +12,9 @@ from PIL import Image
 import barcode
 from barcode.writer import ImageWriter
 
+# Define base directory for cross-platform compatibility
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 # For Bluetooth printer communication
 try:
     from escpos.printer import Serial, Dummy, Network, Usb
@@ -60,7 +63,7 @@ class PrinterManager:
     def load_printer_config(self):
         """Load saved printer configuration from database"""
         try:
-            conn = sqlite3.connect('bol.db')
+            conn = sqlite3.connect(os.path.join(BASE_DIR, 'bol.db'))
             cur = conn.cursor()
             
             # Create printer_config table if it doesn't exist
@@ -125,7 +128,7 @@ class PrinterManager:
     def save_printer_config(self, printer_type, bluetooth_address, printer_name=None, network_ip=None, network_port=9100, printer_mode='thermal', print_method='escpos'):
         """Save printer configuration to database"""
         try:
-            conn = sqlite3.connect('bol.db')
+            conn = sqlite3.connect(os.path.join(BASE_DIR, 'bol.db'))
             cur = conn.cursor()
             
             cur.execute('''

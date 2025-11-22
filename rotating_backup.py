@@ -15,8 +15,9 @@ import os
 import shutil
 from datetime import datetime
 
-BACKUP_DIR = 'backups'
-DB_NAME = 'searchRack.db'
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BACKUP_DIR = os.path.join(BASE_DIR, 'backups')
+DB_NAME = os.path.join(BASE_DIR, 'searchRack.db')
 MAX_BACKUPS = 10
 
 def ensure_backup_directory():
