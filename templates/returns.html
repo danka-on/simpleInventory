@@ -932,18 +932,40 @@
                         <div style="margin-bottom:16px;padding:12px;background:#f8f9fa;border-radius:8px;">
                             <div style="font-weight:600;margin-bottom:4px;">${ret.title}</div>
                             <div style="color:#666;font-size:0.9rem;">Order: ${ret.order_id}</div>
-                            ${ret.lifecycle_count > 1 ? `<div style="color:#888;font-size:0.85rem;margin-top:4px;">Return Cycle: ${ret.lifecycle_count}</div>` : ''}
+                            ${ret.lifecycle_count > 1 ? `<div style=\"color:#888;font-size:0.85rem;margin-top:4px;\">Return Cycle: ${ret.lifecycle_count}</div>` : ''}
                         </div>
                         <div class="timeline">
                             ${timelineHTML || '<p style="color:#888;text-align:center;">No lifecycle events yet</p>'}
                         </div>
                         <div class="modal-actions">
                             <button onclick="this.closest('.modal-overlay').remove()" class="btn btn-primary">Close</button>
+                            ${events.length > 0 ? `<button onclick="undoLastEvent(${returnId}, this)" class="btn btn-danger" style="margin-left:8px;">Undo Last</button>` : ''}
                         </div>
                     </div>
                 `;
                 document.body.appendChild(modal);
                 window.currentLifecycleModal = modal;
+                    async function undoLastEvent(returnId, btn) {
+                        btn.disabled = true;
+                        btn.textContent = 'Undoing...';
+                        try {
+                            const response = await fetch(`/api/returns/${returnId}/undo-last-event`, { method: 'POST' });
+                            const result = await response.json();
+                            if (!result.success) {
+                                alert('Undo failed: ' + (result.error || 'Unknown error'));
+                                btn.disabled = false;
+                                btn.textContent = 'Undo Last';
+                                return;
+                            }
+                            if (window.currentLifecycleModal) window.currentLifecycleModal.remove();
+                            showMessage('success', '✓ Last lifecycle event undone');
+                            loadReturns();
+                        } catch (e) {
+                            alert('Undo failed');
+                            btn.disabled = false;
+                            btn.textContent = 'Undo Last';
+                        }
+                    }
             } catch (error) {
                 showMessage('error', `Error loading history: ${error.message}`);
             }

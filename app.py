@@ -1,3 +1,5 @@
+# Place below app = Flask(__name__)
+
 from contextlib import nullcontext
 
 from flask import Flask, request, send_file, url_for, render_template, jsonify, redirect, session, make_response
@@ -11044,12 +11046,19 @@ def api_relist_return(return_id):
             WHERE id = ?
         ''', (now, store, item_id, return_id))
         
-        # Add lifecycle event
+        # Add lifecycle event for relisted
         cur.execute('''
             INSERT INTO return_lifecycle_events 
             (return_id, event_type, event_date, auto_detected, store, item_id, notes)
             VALUES (?, 'relisted', ?, 0, ?, ?, ?)
         ''', (return_id, now, store, item_id, notes))
+
+        # Add lifecycle event for sold action (for new lifecycle)
+        cur.execute('''
+            INSERT INTO return_lifecycle_events 
+            (return_id, event_type, event_date, auto_detected, store, item_id, notes)
+            VALUES (?, 'sold', ?, 0, ?, ?, ?)
+        ''', (return_id, now, store, item_id, 'Auto-set for new lifecycle'))
         
         conn.commit()
         conn.close()
