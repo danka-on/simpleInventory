@@ -14,8 +14,9 @@ import xml.dom.minidom as minidom
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from pathlib import Path
 
-
+BASE_DIR = Path(__file__).resolve().parent
 
 from inventory import find_item  # adjust this to match your actual import
 from DBmanager import ebayStoreDB, amazonStoreDB, store_ebay_order, createSearchRackDB, addToSearchRack
@@ -8892,39 +8893,63 @@ def api_update_row(db_key, item_id):
         print(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/check_shelf_code', methods=['POST'])
+def api_check_shelf_code():
+    """Check if a shelf code already exists"""
+    data = request.get_json() or {}
+    code = (data.get('code') or '').strip()
+    
+    if not code:
+        return jsonify({'exists': False, 'reason': 'No code provided'}), 200
+    
+    try:
+        conn = sqlite3.connect('searchRack.db')
+        cur = conn.cursor()
+        
+        # Check if shelf_name already exists
+        cur.execute('SELECT shelf_name FROM shelves WHERE shelf_name = ?', (code,))
+        result = cur.fetchone()
+        conn.close()
+        
+        if result:
+            return jsonify({
+                'exists': True,
+                'reason': f'Shelf "{code}" already exists'
+            }), 200
+        else:
+            return jsonify({
+                'exists': False,
+                'reason': 'Code available'
+            }), 200
+            
+    except Exception as e:
+        print(f"Error checking shelf code: {e}")
+        return jsonify({'exists': False, 'reason': 'Error checking code'}), 500
+
 
 @app.route('/api/create_shelf', methods=['POST'])
 def api_create_shelf():
-    """Create a new shelf entry. Expects JSON: { shelf_name, location, notes }"""
+    """Create a new shelf entry. Expects JSON: { shelf_name, location, notes, group_id (optional, defaults to 1) }"""
     data = request.get_json() or {}
     shelf_name = (data.get('shelf_name') or '').strip()
     location = (data.get('location') or '').strip()
     notes = (data.get('notes') or '').strip()
+    group_id = data.get('group_id', 1)  # Default to group 1
     
     if not shelf_name:
         return jsonify({'success': False, 'error': 'Shelf name is required'}), 400
     
     try:
+        ensure_shelf_groups_table()
         # Store shelves in a simple table in searchRack.db
         conn = sqlite3.connect('searchRack.db')
         cur = conn.cursor()
         
-        # Create shelves table if it doesn't exist
+        # Insert the new shelf with group_id
         cur.execute('''
-            CREATE TABLE IF NOT EXISTS shelves (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                shelf_name TEXT NOT NULL,
-                location TEXT,
-                notes TEXT,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        # Insert the new shelf
-        cur.execute('''
-            INSERT INTO shelves (shelf_name, location, notes)
-            VALUES (?, ?, ?)
-        ''', (shelf_name, location, notes))
+            INSERT INTO shelves (shelf_name, location, notes, group_id)
+            VALUES (?, ?, ?, ?)
+        ''', (shelf_name, location, notes, group_id))
         
         conn.commit()
         shelf_id = cur.lastrowid
@@ -8976,6 +9001,10 @@ def api_update_shelf():
                 scur = sconn.cursor()
                 scur.execute("UPDATE SEARCHRACK SET ITEM_POSITION = ? WHERE LOWER(TRIM(ITEM_POSITION)) = LOWER(TRIM(?))", (new_code, old_code))
                 s_updated = scur.rowcount
+                
+                # Also update the shelves table to maintain metadata link
+                scur.execute("UPDATE shelves SET shelf_name = ? WHERE shelf_name = ?", (new_code, old_code))
+                
                 sconn.commit()
                 sconn.close()
             except Exception:
@@ -9112,23 +9141,26 @@ def api_list_shelves():
             files = [f for f in os.listdir(shelves_dir) if f.lower().endswith('.png')]
             codes = [os.path.splitext(f)[0] for f in files]
 
-            # created_at map from searchRack.db.shelves (optional)
+            # Query created_at and group_id from searchRack.db.shelves
             created_map = {}
+            group_map = {}
             # counts map from searchRack.db.SEARCHRACK (ITEM_POSITION)
             counts_map = {}
             sdb_path = os.path.join(app.root_path, 'searchRack.db')
-            # Query created_at; ignore if table missing
+            # Query created_at and group_id; ignore if table missing
             try:
                 conn = sqlite3.connect(sdb_path)
                 cur = conn.cursor()
                 if codes:
                     placeholders = ','.join('?' for _ in codes)
-                    cur.execute(f"SELECT shelf_name, created_at FROM shelves WHERE shelf_name IN ({placeholders})", tuple(codes))
+                    cur.execute(f"SELECT shelf_name, created_at, group_id FROM shelves WHERE shelf_name IN ({placeholders})", tuple(codes))
                     for r in cur.fetchall():
                         created_map[r[0]] = r[1]
+                        group_map[r[0]] = r[2]
                 conn.close()
             except Exception:
                 created_map = {}
+                group_map = {}
             # Query counts; handle missing table separately
             try:
                 conn = sqlite3.connect(sdb_path)
@@ -9149,7 +9181,17 @@ def api_list_shelves():
                     mtime = 0
                 url = url_for('static', filename=f'shelves/{fname}')
                 count = counts_map.get(code.lower().strip(), 0)
-                results.append({'code': code, 'filename': fname, 'url': url, 'lastModified': int(mtime), 'created_at': created_map.get(code), 'count': int(count)})
+                # Default to group 1 (Ungrouped) if not set
+                group_id = group_map.get(code, 1)
+                results.append({
+                    'code': code, 
+                    'filename': fname, 
+                    'url': url, 
+                    'lastModified': int(mtime), 
+                    'created_at': created_map.get(code), 
+                    'count': int(count),
+                    'group_id': group_id
+                })
 
             # Apply server-side sorting
             if sort == 'items':
@@ -9197,6 +9239,307 @@ def api_shelf_counts():
                 result[code] = {'searchrack': 0}
 
         return jsonify({'success': True, 'counts': result})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ============================================================================
+# SHELF GROUPS API
+# ============================================================================
+
+def ensure_shelf_groups_table():
+    """Ensure shelf_groups table exists and shelves table has group_id column"""
+    try:
+        conn = sqlite3.connect('searchRack.db')
+        cur = conn.cursor()
+        
+        # Create shelves table if it doesn't exist
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS shelves (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                shelf_name TEXT NOT NULL,
+                location TEXT,
+                notes TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # Create shelf_groups table if it doesn't exist
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS shelf_groups (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # Check if shelves table has group_id column
+        cur.execute('PRAGMA table_info(shelves)')
+        columns = [row[1] for row in cur.fetchall()]
+        
+        if 'group_id' not in columns:
+            # Add group_id column (defaults to NULL, meaning ungrouped)
+            cur.execute('ALTER TABLE shelves ADD COLUMN group_id INTEGER')
+            print('[SHELF_GROUPS] Added group_id column to shelves table')
+        
+        # Ensure default group exists (id=1, name="Default Group")
+        cur.execute('SELECT id FROM shelf_groups WHERE id = 1')
+        if not cur.fetchone():
+            cur.execute('INSERT INTO shelf_groups (id, name) VALUES (1, ?)', ('Default Group',))
+            print('[SHELF_GROUPS] Created default group')
+        
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f'[SHELF_GROUPS] Error ensuring tables: {e}')
+        import traceback
+        traceback.print_exc()
+        return False
+
+@app.route('/api/groups', methods=['GET'])
+def api_get_groups():
+    """Get all shelf groups with shelf counts"""
+    try:
+        ensure_shelf_groups_table()
+        conn = sqlite3.connect('searchRack.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        
+        # Get all groups with shelf counts
+        cur.execute('''
+            SELECT 
+                g.id,
+                g.name,
+                g.created_at,
+                COUNT(s.id) as shelf_count
+            FROM shelf_groups g
+            LEFT JOIN shelves s ON s.group_id = g.id
+            GROUP BY g.id
+            ORDER BY g.id
+        ''')
+        
+        groups = [dict(row) for row in cur.fetchall()]
+        conn.close()
+        
+        return jsonify({'success': True, 'groups': groups})
+    except Exception as e:
+        print(f'[api_get_groups] Error: {e}')
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/create_group', methods=['POST'])
+def api_create_group():
+    """Create a new shelf group"""
+    try:
+        data = request.get_json() or {}
+        name = (data.get('name') or '').strip()
+        
+        if not name:
+            return jsonify({'success': False, 'error': 'Group name is required'}), 400
+        
+        ensure_shelf_groups_table()
+        conn = sqlite3.connect('searchRack.db')
+        cur = conn.cursor()
+        
+        cur.execute('INSERT INTO shelf_groups (name) VALUES (?)', (name,))
+        group_id = cur.lastrowid
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'group_id': group_id,
+            'message': f'Group "{name}" created successfully'
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/delete_group', methods=['POST'])
+def api_delete_group():
+    """Delete a shelf group and move its shelves to Default Group (id=1)"""
+    try:
+        data = request.get_json() or {}
+        group_id = data.get('group_id')
+        
+        if not group_id:
+            return jsonify({'success': False, 'error': 'group_id is required'}), 400
+        
+        if int(group_id) == 1:
+            return jsonify({'success': False, 'error': 'Cannot delete Default Group'}), 400
+        
+        ensure_shelf_groups_table()
+        conn = sqlite3.connect('searchRack.db')
+        cur = conn.cursor()
+        
+        # Move all shelves from this group to Default Group (id=1)
+        cur.execute('UPDATE shelves SET group_id = 1 WHERE group_id = ?', (group_id,))
+        moved_count = cur.rowcount
+        
+        # Delete the group
+        cur.execute('DELETE FROM shelf_groups WHERE id = ?', (group_id,))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'moved_shelves': moved_count,
+            'message': f'Group deleted. {moved_count} shelf(es) moved to Default Group.'
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/move_shelves', methods=['POST'])
+def api_move_shelves():
+    """Move shelves to a different group. Accepts shelf_codes (list of shelf names) and group_id (or target_group_id)."""
+    try:
+        data = request.get_json() or {}
+        shelf_codes = data.get('shelf_codes', [])
+        target_group_id = data.get('group_id') or data.get('target_group_id')
+        
+        if not shelf_codes or target_group_id is None:
+            return jsonify({'success': False, 'error': 'shelf_codes and group_id are required'}), 400
+        
+        ensure_shelf_groups_table()
+        conn = sqlite3.connect('searchRack.db')
+        cur = conn.cursor()
+        
+        # Verify target group exists
+        cur.execute('SELECT id FROM shelf_groups WHERE id = ?', (target_group_id,))
+        if not cur.fetchone():
+            conn.close()
+            return jsonify({'success': False, 'error': 'Target group does not exist'}), 404
+        
+        # For each shelf code, ensure it exists in the shelves table (create if missing)
+        for code in shelf_codes:
+            cur.execute('SELECT id FROM shelves WHERE shelf_name = ? COLLATE NOCASE', (code,))
+            if not cur.fetchone():
+                # Shelf doesn't exist in table, create it
+                cur.execute('INSERT INTO shelves (shelf_name, group_id) VALUES (?, ?)', (code, target_group_id))
+                print(f'[MOVE_SHELVES] Created missing shelf entry for {code}')
+        
+        # Now update all shelves to the target group
+        placeholders = ','.join('?' for _ in shelf_codes)
+        cur.execute(f'UPDATE shelves SET group_id = ? WHERE shelf_name IN ({placeholders}) COLLATE NOCASE', 
+                   [target_group_id] + shelf_codes)
+        moved_count = cur.rowcount
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'moved_count': moved_count,
+            'message': f'{moved_count} shelf(es) moved successfully'
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/upload_shelf', methods=['POST'])
+def api_upload_shelf():
+    """Upload a shelf image and associate it with a group"""
+    try:
+        group_id = request.form.get('group_id', 1)  # Default to group 1
+        
+        if 'image' not in request.files:
+            return jsonify({'success': False, 'error': 'No image file provided'}), 400
+        
+        file = request.files['image']
+        if not file.filename:
+            return jsonify({'success': False, 'error': 'Empty filename'}), 400
+        
+        # Use provided code or generate a unique shelf code
+        shelf_code = request.form.get('code')
+        if not shelf_code:
+            import uuid
+            shelf_code = str(uuid.uuid4())[:8].upper()
+        
+        # Sanitize shelf_code to be safe for filenames
+        import re
+        shelf_code = re.sub(r'[<>:"/\\|?*]', '_', shelf_code)
+        
+        # Save the image
+        shelves_dir = os.path.join('static', 'shelves')
+        os.makedirs(shelves_dir, exist_ok=True)
+        file_path = os.path.join(shelves_dir, f"{shelf_code}.png")
+        file.save(file_path)
+        
+        # Create or update shelf entry in database
+        ensure_shelf_groups_table()
+        conn = sqlite3.connect('searchRack.db')
+        cur = conn.cursor()
+        
+        # Check if shelf already exists
+        cur.execute('SELECT id FROM shelves WHERE shelf_name = ?', (shelf_code,))
+        existing_row = cur.fetchone()
+        
+        if existing_row:
+            # Update existing shelf's group
+            cur.execute('UPDATE shelves SET group_id = ? WHERE id = ?', (group_id, existing_row[0]))
+        else:
+            # Insert new shelf
+            cur.execute('''
+                INSERT INTO shelves (shelf_name, group_id, created_at)
+                VALUES (?, ?, CURRENT_TIMESTAMP)
+            ''', (shelf_code, group_id))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'code': shelf_code,
+            'message': f'Shelf {shelf_code} uploaded successfully'
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/delete_shelf', methods=['POST'])
+def api_delete_shelf():
+    """Delete a shelf and its associated files"""
+    try:
+        data = request.get_json() or {}
+        shelf_id = data.get('shelf_id')
+        shelf_code = data.get('code')
+        
+        if not shelf_id and not shelf_code:
+            return jsonify({'success': False, 'error': 'shelf_id or code is required'}), 400
+        
+        conn = sqlite3.connect('searchRack.db')
+        cur = conn.cursor()
+        
+        # Get shelf info
+        if shelf_id:
+            cur.execute('SELECT shelf_name FROM shelves WHERE id = ?', (shelf_id,))
+        else:
+            cur.execute('SELECT id, shelf_name FROM shelves WHERE shelf_name = ?', (shelf_code,))
+        
+        row = cur.fetchone()
+        if not row:
+            conn.close()
+            return jsonify({'success': False, 'error': 'Shelf not found'}), 404
+        
+        if shelf_id:
+            code_to_delete = row[0]
+        else:
+            shelf_id = row[0]
+            code_to_delete = row[1]
+        
+        # Delete shelf from database
+        cur.execute('DELETE FROM shelves WHERE id = ?', (shelf_id,))
+        conn.commit()
+        conn.close()
+        
+        # Delete shelf image file
+        shelf_file = os.path.join('static', 'shelves', f"{code_to_delete}.png")
+        if os.path.exists(shelf_file):
+            os.remove(shelf_file)
+        
+        return jsonify({
+            'success': True,
+            'message': f'Shelf {code_to_delete} deleted successfully'
+        })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
@@ -10358,9 +10701,7 @@ def fix_amazon_barcodes():
 
 @app.route('/api/sync/debug', methods=['GET'])
 def sync_debug():
-    """Debug endpoint to check sync system status"""
-    import sys
-    return jsonify({
+      return jsonify({
         'amazon_available': AMAZON_AVAILABLE,
         'bol_available': BOL_AVAILABLE if 'BOL_AVAILABLE' in globals() else False,
         'python_version': sys.version,
@@ -11497,15 +11838,12 @@ def _start_auto_sync_thread():
     auto_sync_thread.start()
     print("🚀 Auto-sync thread started")
 
-# EMAILER ALERT BACKGROUND THREAD
-# ============================================================================
 def emailer_alert_worker():
-    """Background thread that checks and sends scheduled email alerts"""
-    print("📧 Emailer alert worker started")
-    
+    """Background worker to send email alerts"""
+    import time
     while True:
         try:
-            # Check every 5 minutes if any alerts need to be sent
+            # Check every 5 minutes
             time.sleep(300)  # 5 minutes
             
             # Get emailer settings
@@ -11662,20 +12000,79 @@ def _start_emailer_alert_thread():
     emailer_thread.start()
     print("🚀 Emailer alert thread started")
 
-if __name__ == "__main__":
-    # Enable WAL mode for all databases (better concurrent performance)
+def start_background_services():
+    """Start all background services with a lock to ensure single execution"""
+    # Only run on non-Windows (Unix/Pi) to avoid locking issues during dev
+    if os.name != 'nt':
+        try:
+            import fcntl
+            # Create/open lock file
+            lock_file = open("background_tasks.lock", "w")
+            # Try to acquire an exclusive non-blocking lock
+            fcntl.lockf(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            print("🔒 Acquired background task lock")
+        except IOError:
+            print("⚠️ Another worker is already running background tasks. Skipping.")
+            return
+        except ImportError:
+            pass # fcntl not available
+
+    print("🚀 Starting background services...")
+    try:
+        _start_trash_purger_thread()
+    except Exception as e:
+        print(f"Failed to start trash purger: {e}")
+        
+    try:
+        _start_zero_qty_deleter_thread()
+    except Exception as e:
+        print(f"Failed to start zero qty deleter: {e}")
+        
+    try:
+        _start_automatic_removal_thread()
+    except Exception as e:
+        print(f"Failed to start automatic removal: {e}")
+        
+    try:
+        _start_auto_sync_thread()
+    except Exception as e:
+        print(f"Failed to start auto sync: {e}")
+        
+    try:
+        _start_emailer_alert_thread()
+    except Exception as e:
+        print(f"Failed to start emailer: {e}")
+
+# Start background services when imported (for Gunicorn)
+# We use a small delay to allow the app to fully load
+def delayed_start():
+    time.sleep(5)
+    start_background_services()
+
+# Initialize database and tables
+try:
     enable_wal_mode()
-    
-    # Initialize lifecycle tracking tables
     ensure_lifecycle_tables()
-    
+    ensure_shelf_groups_table()
+    print("✅ Database initialization completed")
+except Exception as e:
+    print(f"❌ Database initialization failed: {e}")
+
+# Start background services in a separate thread to not block import
+# This ensures they run regardless of whether app is run directly or via Gunicorn
+threading.Thread(target=delayed_start, daemon=True).start()
+
+if __name__ == "__main__":
     # Start Flask in a thread
     flask_thread = threading.Thread(target=start_flask, daemon=True)
     flask_thread.start()
 
     # Wait a bit, then start tunnel
     time.sleep(1)
-    start_tunnel()
+    try:
+        start_tunnel()
+    except Exception as e:
+        print(f"Warning: Tunnel start failed: {e}")
 
     # Wait until both are likely up
     time.sleep(2)
@@ -11685,21 +12082,6 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Warning: orders() failed: {e}")
     # finalize_barcodes()  # Skip for testing
-    
-    # Start trash purger daily
-    _start_trash_purger_thread()
-    
-    # Start zero-quantity deletion thread
-    _start_zero_qty_deleter_thread()
-    
-    # Start automatic inventory removal thread
-    _start_automatic_removal_thread()
-    
-    # Start auto-sync background thread
-    _start_auto_sync_thread()
-    
-    # Start emailer alert background thread
-    _start_emailer_alert_thread()
 
     # Keep main thread alive
     while True:

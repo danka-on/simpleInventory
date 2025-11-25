@@ -7,7 +7,9 @@
 // GLOBAL STATE
 // ============================================================================
 const state = {
+    groups: [],
     shelves: [],
+    currentGroupId: null, // null = showing groups list
     selectedShelves: new Set(),
     selectMode: false,
     currentShelfCode: '',
@@ -37,9 +39,27 @@ function init() {
     console.log('Initializing Shelf Creator...');
     console.log('Device type:', state.isMobile ? 'Mobile' : 'Desktop');
     
-    loadShelves();
+    loadData();
     setupEventListeners();
     setupCanvas();
+}
+
+/**
+ * Load groups and shelves
+ */
+function loadData() {
+    Promise.all([
+        fetch('/api/groups').then(r => r.json()),
+        fetch('/api/list_shelves').then(r => r.json())
+    ]).then(([groupsData, shelvesData]) => {
+        if (groupsData.success) state.groups = groupsData.groups;
+        if (shelvesData.success) state.shelves = shelvesData.shelves;
+        
+        renderMain();
+    }).catch(err => {
+        console.error('Error loading data:', err);
+        showError('Failed to load data');
+    });
 }
 
 /**
@@ -47,9 +67,13 @@ function init() {
  */
 function setupEventListeners() {
     // List view
-    document.getElementById('add-btn').addEventListener('click', showAddView);
+    document.getElementById('add-btn').addEventListener('click', handleAddClick);
+    // Note: back-btn onclick is set dynamically in renderMain()
     document.getElementById('select-mode-btn').addEventListener('click', toggleSelectMode);
     document.getElementById('print-qr-btn').addEventListener('click', printQRCodes);
+    document.getElementById('move-group-btn').addEventListener('click', showMoveModal);
+    document.getElementById('select-all-btn').addEventListener('click', selectAllShelves);
+    document.getElementById('delete-selected-btn').addEventListener('click', deleteSelectedShelves);
     
     // Add/Edit view
     document.getElementById('cancel-btn').addEventListener('click', cancelAdd);
@@ -59,6 +83,8 @@ function setupEventListeners() {
     // Camera controls
     document.getElementById('capture-btn').addEventListener('click', capturePhoto);
     document.getElementById('retake-btn').addEventListener('click', retakePhoto);
+    const replaceImgBtn = document.getElementById('replace-image-btn');
+    if (replaceImgBtn) replaceImgBtn.addEventListener('click', replaceImage);
     document.getElementById('continue-btn').addEventListener('click', continueToEditor);
     
     // Modal
@@ -71,84 +97,139 @@ function setupEventListeners() {
     if (viewBtn) viewBtn.addEventListener('click', () => {
         const code = state.currentShelfCode;
         if (!code) return;
-        // navigate to searchrack with query for this shelf code
         window.location.href = `/searchrack?q=${encodeURIComponent(code)}`;
     });
+
+    // Group Modals
+    document.getElementById('cancel-group-btn').addEventListener('click', () => {
+        document.getElementById('create-group-modal').classList.remove('active');
+    });
+    document.getElementById('save-group-btn').addEventListener('click', createGroup);
+    
+    document.getElementById('cancel-move-btn').addEventListener('click', () => {
+        document.getElementById('move-group-modal').classList.remove('active');
+    });
+    document.getElementById('confirm-move-btn').addEventListener('click', moveShelves);
     
     // Code validation
     setupCodeValidation();
     // Enable save when code changes
     const codeInput = document.getElementById('shelf-code');
-    if (codeInput) codeInput.addEventListener('input', enableSaveIfReady);
+    if (codeInput) codeInput.addEventListener('input', updateSaveButton);
 
     // Apply sort button (if present)
     const applyBtn = document.getElementById('apply-sort-btn');
     if (applyBtn) applyBtn.addEventListener('click', (e) => {
         e.preventDefault();
-        loadShelves();
+        renderShelves(); // Re-render with sort
     });
 }
 
 /**
- * Enable the Save button if a code is present and an image is loaded into the canvas
+ * Main render function
  */
-function enableSaveIfReady() {
-    const code = (document.getElementById('shelf-code') || {}).value || '';
-    const saveBtn = document.getElementById('save-btn');
-    if (!saveBtn) return;
-    if (code.trim() && state.currentImage) {
-        saveBtn.disabled = false;
+function renderMain() {
+    const container = document.getElementById('shelf-list');
+    const title = document.getElementById('view-title');
+    const backBtn = document.getElementById('back-btn');
+    const backText = document.getElementById('back-btn-text');
+    const sortControls = document.getElementById('sort-controls');
+    const selectBtn = document.getElementById('select-mode-btn');
+    
+    if (state.currentGroupId === null) {
+        // Show Groups
+        title.textContent = 'Groups';
+        backText.textContent = 'Exit';
+        backBtn.onclick = () => window.location.href = '/tools';
+        sortControls.style.display = 'none';
+        selectBtn.style.display = 'none';
+        renderGroups();
     } else {
-        saveBtn.disabled = true;
+        // Show Shelves in Group
+        const group = state.groups.find(g => g.id === state.currentGroupId);
+        title.textContent = group ? group.name : 'Unknown Group';
+        backText.textContent = 'Groups';
+        backBtn.onclick = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            window.location.href = '/shelfmanager';
+        };
+        sortControls.style.display = 'flex';
+        selectBtn.style.display = 'inline-block';
+        renderShelves();
     }
 }
 
 /**
- * Load shelves from API
+ * Render Groups List
  */
-function loadShelves() {
-    console.log('Loading shelves...');
-    const sortSel = document.getElementById('shelf-sort');
-    const sortBy = sortSel ? sortSel.value : 'name';
-
-    fetch(`/api/list_shelves?sort=${encodeURIComponent(sortBy)}`)
-        .then(r => r.json())
-        .then(async data => {
-            console.log('Shelves loaded:', data);
-            if (!data.success) {
-                showError('Failed to load shelves');
-                return;
-            }
-
-            state.shelves = data.shelves || [];
-            state.currentSort = sortBy;
-
-            // Server returns shelves in the requested order and includes 'count', use it directly
-            renderShelves();
-        })
-        .catch(err => {
-            console.error('Error loading shelves:', err);
-            showError('Error loading shelves: ' + err.message);
-        });
+function renderGroups() {
+    const container = document.getElementById('shelf-list');
+    
+    // Sort groups: non-default first, then default (id=1) last
+    const sortedGroups = state.groups.slice().sort((a, b) => {
+        if (a.id === 1) return 1;  // Default group goes last
+        if (b.id === 1) return -1; // Default group goes last
+        return a.id - b.id;
+    });
+    
+    container.innerHTML = sortedGroups.map(g => {
+        // Count shelves in this group
+        const shelvesInGroup = state.shelves.filter(s => s.group_id === g.id);
+        const shelfCount = shelvesInGroup.length;
+        
+        // Hide default group if empty
+        const isDefaultGroup = g.id === 1;
+        if (isDefaultGroup && shelfCount === 0) {
+            return ''; // Don't render empty default group
+        }
+        
+        // Sum up all items from all shelves in this group
+        const totalItems = shelvesInGroup.reduce((sum, shelf) => sum + (shelf.count || 0), 0);
+        
+        return `
+        <div class="shelf-item group-card" onclick="handleGroupClick(${g.id})">
+            <div class="group-icon">
+                <i class="fas ${isDefaultGroup ? 'fa-box-open' : 'fa-folder'}"></i>
+            </div>
+            <div class="shelf-code">${g.name}</div>
+            <div class="group-count">${shelfCount} shelves • ${totalItems} items</div>
+            ${!isDefaultGroup ? `<button class="delete-group-btn" onclick="deleteGroup(event, ${g.id})"><i class="fas fa-trash"></i></button>` : ''}
+        </div>
+        `;
+    }).join('');
 }
 
 /**
- * Render shelf grid
+ * Render Shelves (filtered by current group)
  */
 function renderShelves() {
     const container = document.getElementById('shelf-list');
+    const sortSel = document.getElementById('shelf-sort');
+    const sortBy = sortSel ? sortSel.value : 'name';
     
-    if (state.shelves.length === 0) {
+    // Filter shelves by group
+    let shelves = state.shelves.filter(s => s.group_id === state.currentGroupId);
+    
+    // Sort shelves
+    shelves.sort((a, b) => {
+        if (sortBy === 'name') return a.code.localeCompare(b.code);
+        if (sortBy === 'items') return (b.count || 0) - (a.count || 0);
+        if (sortBy === 'created') return (b.created_at || 0) - (a.created_at || 0);
+        return 0;
+    });
+    
+    if (shelves.length === 0) {
         container.innerHTML = `
             <div class="empty-state">
                 <i class="fas fa-box-open"></i>
-                <p>No shelves yet. Click + to add your first shelf!</p>
+                <p>No shelves in this group. Click + to add one!</p>
             </div>
         `;
         return;
     }
     
-    container.innerHTML = state.shelves.map(shelf => {
+    container.innerHTML = shelves.map(shelf => {
         const isSelected = state.selectedShelves.has(shelf.code);
         const classes = ['shelf-item'];
         if (isSelected) classes.push('selected');
@@ -166,12 +247,126 @@ function renderShelves() {
     `}).join('');
     
     updatePrintButton();
-    console.log(`Rendered ${state.shelves.length} shelves, selected: ${state.selectedShelves.size}`);
+}
 
-    // After rendering, ensure badges reflect latest counts
-    state.shelves.forEach(s => {
-        const badge = document.querySelector(`.shelf-count[data-code='${s.code}']`);
-        if (badge && typeof s.count !== 'undefined') badge.textContent = s.count;
+/**
+ * Handle Group Click
+ */
+function handleGroupClick(groupId) {
+    state.currentGroupId = groupId;
+    state.selectedShelves.clear();
+    state.selectMode = false;
+    renderMain();
+}
+
+/**
+ * Handle Back Click
+ */
+function handleBackClick() {
+    if (state.currentGroupId !== null) {
+        state.currentGroupId = null;
+        renderMain();
+    } else {
+        window.location.href = '/tools';
+    }
+}
+
+/**
+ * Handle Add Button Click
+ */
+function handleAddClick() {
+    if (state.currentGroupId === null) {
+        // In Groups view -> Create Group
+        document.getElementById('create-group-modal').classList.add('active');
+        document.getElementById('new-group-name').value = '';
+        document.getElementById('new-group-name').focus();
+    } else {
+        // In Shelf view -> Add Shelf
+        showAddView();
+    }
+}
+
+/**
+ * Create a new group
+ */
+function createGroup() {
+    const name = document.getElementById('new-group-name').value.trim();
+    if (!name) return;
+    
+    fetch('/api/create_group', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({name})
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            document.getElementById('create-group-modal').classList.remove('active');
+            loadData(); // Reload everything
+        } else {
+            showError(data.error);
+        }
+    });
+}
+
+/**
+ * Delete a group
+ */
+function deleteGroup(e, groupId) {
+    e.stopPropagation();
+    if (!confirm('Delete this group? Shelves inside will be moved to "Ungrouped".')) return;
+    
+    fetch(`/api/delete_group/${groupId}`, {method: 'POST'})
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            loadData();
+        } else {
+            showError(data.error);
+        }
+    });
+}
+
+/**
+ * Show Move Modal
+ */
+function showMoveModal() {
+    if (state.selectedShelves.size === 0) return;
+    
+    const select = document.getElementById('move-group-select');
+    select.innerHTML = state.groups.map(g => 
+        `<option value="${g.id}" ${g.id === state.currentGroupId ? 'disabled' : ''}>${g.name}</option>`
+    ).join('');
+    
+    document.getElementById('move-count').textContent = state.selectedShelves.size;
+    document.getElementById('move-group-modal').classList.add('active');
+}
+
+/**
+ * Move Shelves
+ */
+function moveShelves() {
+    const groupId = parseInt(document.getElementById('move-group-select').value);
+    const shelves = Array.from(state.selectedShelves);
+    
+    fetch('/api/move_shelves', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            shelf_codes: shelves,
+            group_id: groupId
+        })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            document.getElementById('move-group-modal').classList.remove('active');
+            state.selectedShelves.clear();
+            state.selectMode = false;
+            loadData(); // Reload to reflect changes
+        } else {
+            showError(data.error);
+        }
     });
 }
 
@@ -212,17 +407,22 @@ function handleShelfClick(event, code) {
 function toggleSelectMode() {
     state.selectMode = !state.selectMode;
     const btn = document.getElementById('select-mode-btn');
+    const selectAllBtn = document.getElementById('select-all-btn');
+    const deleteBtn = document.getElementById('delete-selected-btn');
     
     if (state.selectMode) {
         btn.innerHTML = '<i class="fas fa-times"></i> Cancel';
         btn.classList.add('btn-warning');
         btn.classList.remove('btn-secondary');
+        selectAllBtn.style.display = 'inline-block';
     } else {
         btn.innerHTML = '<i class="fas fa-check-square"></i> Select';
         btn.classList.remove('btn-warning');
         btn.classList.add('btn-secondary');
         // Clear selections when exiting select mode
         state.selectedShelves.clear();
+        selectAllBtn.style.display = 'none';
+        deleteBtn.style.display = 'none';
         updatePrintButton();
     }
     
@@ -249,14 +449,72 @@ function toggleShelfSelection(code) {
  */
 function updatePrintButton() {
     const printBtn = document.getElementById('print-qr-btn');
+    const moveBtn = document.getElementById('move-group-btn');
+    const deleteBtn = document.getElementById('delete-selected-btn');
     const count = state.selectedShelves.size;
     
     if (count > 0) {
         printBtn.style.display = 'inline-block';
+        moveBtn.style.display = 'inline-block';
+        deleteBtn.style.display = 'inline-block';
         document.getElementById('selected-count').textContent = count;
+        document.getElementById('delete-count').textContent = count;
     } else {
         printBtn.style.display = 'none';
+        moveBtn.style.display = 'none';
+        deleteBtn.style.display = 'none';
     }
+}
+
+/**
+ * Select all shelves in current group
+ */
+function selectAllShelves() {
+    const shelves = state.shelves.filter(s => s.group_id === state.currentGroupId);
+    shelves.forEach(s => state.selectedShelves.add(s.code));
+    renderShelves();
+    updatePrintButton();
+}
+
+/**
+ * Delete selected shelves
+ */
+function deleteSelectedShelves() {
+    if (state.selectedShelves.size === 0) return;
+    
+    const count = state.selectedShelves.size;
+    if (!confirm(`Delete ${count} shelf(es)? This will remove the shelf images and database entries.`)) {
+        return;
+    }
+    
+    const shelves = Array.from(state.selectedShelves);
+    let completed = 0;
+    
+    shelves.forEach(code => {
+        fetch('/api/delete_shelf', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ code: code })
+        })
+        .then(r => r.json())
+        .then(data => {
+            completed++;
+            if (completed === shelves.length) {
+                state.selectedShelves.clear();
+                state.selectMode = false;
+                loadData();
+            }
+        })
+        .catch(err => {
+            console.error('Delete failed:', err);
+            completed++;
+            if (completed === shelves.length) {
+                state.selectedShelves.clear();
+                state.selectMode = false;
+                loadData();
+            }
+        });
+    });
 }
 
 /**
@@ -300,6 +558,12 @@ function editShelf() {
     state.isEditing = true;
     document.getElementById('form-title').textContent = `Edit Shelf: ${code}`;
     document.getElementById('shelf-code').value = code;
+    
+    // Mark code as valid immediately since we are editing
+    const input = document.getElementById('shelf-code');
+    input.classList.add('valid');
+    input.classList.remove('invalid');
+    document.getElementById('code-validation').textContent = '';
 
     // Load image into canvas
     const img = new Image();
@@ -316,7 +580,19 @@ function editShelf() {
         state.ctx = ctx;
         state.currentImage = img;
         state.rectX = 0; state.rectY = 0; state.rectW = 0; state.rectH = 0;
-        enableSaveIfReady();
+        
+        // Show editor, hide other sections
+        document.getElementById('camera-section').style.display = 'none';
+        document.getElementById('upload-section').style.display = 'none';
+        const editorContainer = document.getElementById('editor-container');
+        editorContainer.classList.add('active');
+        editorContainer.style.display = 'block';
+        
+        // Show replace image button
+        const replaceBtn = document.getElementById('replace-image-btn');
+        if (replaceBtn) replaceBtn.style.display = 'inline-block';
+        
+        updateSaveButton();
     };
     img.onerror = () => showError('Failed to load shelf image into editor');
     img.src = shelf.url + '?_=' + Date.now(); // cache bust
@@ -325,6 +601,36 @@ function editShelf() {
     closeModal();
     document.getElementById('list-view').classList.remove('active');
     document.getElementById('add-view').classList.add('active');
+}
+
+/**
+ * Replace the current image (go back to capture/upload)
+ */
+function replaceImage() {
+    console.log('Replacing image...');
+    
+    // Hide editor
+    const editorContainer = document.getElementById('editor-container');
+    editorContainer.classList.remove('active');
+    editorContainer.style.display = 'none';
+    
+    // Hide replace button
+    document.getElementById('replace-image-btn').style.display = 'none';
+    
+    // Show appropriate input method
+    const forceCamera = true; // Consistent with showAddView
+    
+    if (state.isMobile || forceCamera) {
+        document.getElementById('camera-section').style.display = 'block';
+        document.getElementById('upload-section').style.display = 'none';
+        document.getElementById('start-camera-btn').style.display = 'block';
+        // Start camera immediately
+        startCapture();
+    } else {
+        document.getElementById('camera-section').style.display = 'none';
+        document.getElementById('upload-section').style.display = 'block';
+        document.getElementById('start-camera-btn').style.display = 'none';
+    }
 }
 
 /**
@@ -374,7 +680,10 @@ function showAddView() {
     resetForm();
     
     // Show appropriate input method
-    if (state.isMobile) {
+    // Force camera mode for testing if requested, otherwise detect mobile
+    const forceCamera = true; // Set to true to test camera on desktop
+    
+    if (state.isMobile || forceCamera) {
         document.getElementById('camera-section').style.display = 'block';
         document.getElementById('upload-section').style.display = 'none';
         document.getElementById('start-camera-btn').style.display = 'block';
@@ -384,6 +693,11 @@ function showAddView() {
         document.getElementById('start-camera-btn').style.display = 'none';
         setupUploadArea();
     }
+    
+    // Focus on shelf code input
+    setTimeout(() => {
+        document.getElementById('shelf-code').focus();
+    }, 100);
 }
 
 /**
@@ -405,7 +719,14 @@ function resetForm() {
     document.getElementById('code-validation').textContent = '';
     document.getElementById('shelf-code').classList.remove('valid', 'invalid');
     document.getElementById('save-btn').disabled = true;
-    document.getElementById('editor-container').classList.remove('active');
+    
+    const replaceBtn = document.getElementById('replace-image-btn');
+    if (replaceBtn) replaceBtn.style.display = 'none';
+    
+    const editorContainer = document.getElementById('editor-container');
+    editorContainer.classList.remove('active');
+    editorContainer.style.display = 'none';
+    
     state.currentImage = null;
     state.rectX = state.rectY = state.rectW = state.rectH = 0;
     state.isEditing = false;
@@ -425,7 +746,7 @@ function setupCodeValidation() {
         if (!code) {
             document.getElementById('code-validation').textContent = '';
             input.classList.remove('valid', 'invalid');
-            checkSaveReady();
+            updateSaveButton();
             return;
         }
         
@@ -439,6 +760,18 @@ function setupCodeValidation() {
  * Validate shelf code against API
  */
 function validateCode(code) {
+    // If editing and code hasn't changed, it's valid
+    if (state.isEditing && code === state.currentShelfCode) {
+        const input = document.getElementById('shelf-code');
+        const msgEl = document.getElementById('code-validation');
+        input.classList.remove('invalid');
+        input.classList.add('valid');
+        msgEl.className = 'validation-message success';
+        msgEl.innerHTML = '<i class="fas fa-check-circle"></i> Code valid (current)';
+        updateSaveButton();
+        return;
+    }
+
     fetch('/api/check_shelf_code', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -461,25 +794,37 @@ function validateCode(code) {
             msgEl.innerHTML = '<i class="fas fa-check-circle"></i> Code available';
         }
         
-        checkSaveReady();
+        updateSaveButton();
     })
     .catch(err => {
         console.error('Validation error:', err);
+        updateSaveButton();
     });
 }
 
 /**
- * Check if save button should be enabled
+ * Update save button state based on current conditions
  */
-function checkSaveReady() {
-    const code = document.getElementById('shelf-code').value.trim();
-    const codeValid = document.getElementById('shelf-code').classList.contains('valid');
+function updateSaveButton() {
+    const codeInput = document.getElementById('shelf-code');
+    const code = codeInput.value.trim();
+    const codeValid = codeInput.classList.contains('valid');
     const hasImage = state.currentImage !== null;
     
-    const ready = code && codeValid && hasImage;
-    document.getElementById('save-btn').disabled = !ready;
+    // Allow save if code is present and image is present
+    // We relax the 'valid' check slightly to allow saving if the user insists, 
+    // but ideally it should be valid.
+    const canSave = code && hasImage; 
     
-    console.log('Save ready:', {code, codeValid, hasImage, ready});
+    const saveBtn = document.getElementById('save-btn');
+    saveBtn.disabled = !canSave;
+    
+    console.log('Save button update:', {
+        code: code,
+        codeValid: codeValid,
+        hasImage: hasImage,
+        canSave: canSave
+    });
 }
 
 /**
@@ -523,13 +868,30 @@ function handleFileSelect(event) {
  */
 function startCapture() {
     console.log('Starting camera...');
+    
+    // Check if code is entered and valid first
+    const codeInput = document.getElementById('shelf-code');
+    const code = codeInput.value.trim();
+    
+    if (!code) {
+        showError('Please enter a shelf code first');
+        codeInput.focus();
+        return;
+    }
+    
+    if (!codeInput.classList.contains('valid')) {
+        showError('Please wait for code validation or enter a different code');
+        return;
+    }
+    
     const video = document.getElementById('camera-video');
     const cameraContainer = document.getElementById('camera-container');
     const captureBtn = document.getElementById('capture-btn');
     const startCameraBtn = document.getElementById('start-camera-btn');
     
     navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment" }, // Front-facing camera
+        // Use 'user' (front) camera for desktop testing, 'environment' (back) for mobile
+        video: { facingMode: state.isMobile ? "environment" : "user" },
         audio: false
     })
     .then(stream => {
@@ -594,21 +956,32 @@ function retakePhoto() {
  * Continue to rectangle editor with captured photo
  */
 function continueToEditor() {
-    console.log('Continuing to editor...');
+    console.log('Continuing to editor with photo...');
     const preview = document.getElementById('camera-preview');
     
-    // Convert canvas to blob and load into editor
-    preview.toBlob(blob => {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            loadImageToEditor(e.target.result);
-        };
-        reader.readAsDataURL(blob);
-    }, 'image/png');
-    
-    // Hide camera UI
-    document.getElementById('camera-container').classList.remove('active');
-    document.getElementById('camera-controls').style.display = 'none';
+    try {
+        // Use toDataURL directly - it's synchronous and simpler
+        const dataUrl = preview.toDataURL('image/png');
+        console.log('Photo converted to data URL (length: ' + dataUrl.length + '), loading to editor...');
+        
+        // Hide camera UI explicitly
+        document.getElementById('camera-container').classList.remove('active');
+        document.getElementById('camera-controls').style.display = 'none';
+        document.getElementById('camera-section').style.display = 'none'; // Hide the whole section
+        
+        // Stop camera to free resources
+        stopCamera();
+        
+        // Load to editor
+        // Small timeout to allow UI to update
+        setTimeout(() => {
+            loadImageToEditor(dataUrl);
+        }, 100);
+        
+    } catch (e) {
+        console.error('Error converting canvas to image:', e);
+        showError('Failed to process photo: ' + e.message);
+    }
 }
 
 /**
@@ -648,25 +1021,56 @@ function setupCanvas() {
  * Load image to canvas editor
  */
 function loadImageToEditor(dataUrl) {
-    console.log('Loading image to editor');
+    console.log('Loading image to editor...');
     const img = new Image();
     
     img.onload = () => {
+        console.log('Image loaded successfully, dimensions:', img.width, 'x', img.height);
         state.currentImage = img;
         
-        // Set canvas size
+        // Ensure canvas context exists
+        if (!state.canvas) {
+            console.log('Canvas state missing, re-initializing...');
+            setupCanvas();
+        }
+        
+        // Set canvas size to fit the image
         const maxWidth = 600;
         const scale = Math.min(1, maxWidth / img.width);
-        state.canvas.width = img.width * scale;
-        state.canvas.height = img.height * scale;
+        const canvasWidth = img.width * scale;
+        const canvasHeight = img.height * scale;
         
-        // Draw image
+        state.canvas.width = canvasWidth;
+        state.canvas.height = canvasHeight;
+        
+        console.log('Canvas sized to:', canvasWidth, 'x', canvasHeight);
+        
+        // Draw image on canvas
         state.ctx.drawImage(img, 0, 0, state.canvas.width, state.canvas.height);
         
-        // Show editor
-        document.getElementById('editor-container').classList.add('active');
+        console.log('Image drawn on canvas');
         
-        checkSaveReady();
+        // Show the editor container
+        const editorContainer = document.getElementById('editor-container');
+        editorContainer.style.display = 'block'; // Force display block
+        editorContainer.classList.add('active');
+        
+        // Show replace image button if present
+        const replaceBtn = document.getElementById('replace-image-btn');
+        if (replaceBtn) replaceBtn.style.display = 'inline-block';
+        
+        // Ensure canvas is visible
+        state.canvas.style.display = 'block';
+        
+        console.log('Editor container activated. You should now see the image and be able to draw rectangles.');
+        
+        // Update save button - image is now loaded
+        updateSaveButton();
+    };
+    
+    img.onerror = (e) => {
+        console.error('Failed to load image:', e);
+        showError('Failed to load image into editor');
     };
     
     img.src = dataUrl;
@@ -704,16 +1108,24 @@ function stopDrawing() {
         state.isDrawing = false;
         state.rectX = state.startX;
         state.rectY = state.startY;
+        console.log('Drawing stopped. Rectangle:', {
+            x: state.rectX,
+            y: state.rectY,
+            w: state.rectW,
+            h: state.rectH
+        });
     }
 }
 
 function handleTouchStart(e) {
     e.preventDefault();
+    console.log('Touch start');
     const touch = e.touches[0];
     const rect = state.canvas.getBoundingClientRect();
     state.isDrawing = true;
     state.startX = touch.clientX - rect.left;
     state.startY = touch.clientY - rect.top;
+    console.log('Touch start at:', state.startX, state.startY);
 }
 
 function handleTouchMove(e) {
@@ -745,23 +1157,52 @@ function handleTouchMove(e) {
  * Save shelf to server
  */
 function saveShelf() {
+    console.log('=== SAVE SHELF CLICKED ===');
+    
     const code = document.getElementById('shelf-code').value.trim();
-    if (!code || !state.currentImage) {
-        showError('Please provide code and image');
+    const hasImage = state.currentImage !== null;
+    
+    console.log('Save shelf check:', {
+        code: code,
+        hasImage: hasImage,
+        isEditing: state.isEditing
+    });
+    
+    if (!code || !hasImage) {
+        const msg = !code ? 'Please provide a shelf code' : 'Please provide an image';
+        console.error('Save blocked:', msg);
+        showError(msg);
         return;
     }
     
-    console.log('Saving shelf:', code);
+    console.log('Preparing to save shelf:', code);
     
-    // Finalize canvas with rectangle
+    // Finalize canvas with rectangle if one was drawn
     if (state.rectW && state.rectH) {
+        console.log('Drawing final rectangle on canvas');
         state.ctx.strokeStyle = '#00ff00';
         state.ctx.lineWidth = 3;
         state.ctx.strokeRect(state.rectX, state.rectY, state.rectW, state.rectH);
     }
     
+    console.log('Converting canvas to blob...');
+    
+    const saveBtn = document.getElementById('save-btn');
+    const originalBtnText = saveBtn.innerHTML;
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
+    
     // Convert canvas to blob
     state.canvas.toBlob(blob => {
+        if (!blob) {
+            console.error('Failed to create blob from canvas');
+            showError('Failed to process image');
+            saveBtn.disabled = false;
+            saveBtn.innerHTML = originalBtnText;
+            return;
+        }
+        
+        console.log('Blob created, size:', blob.size);
         const formData = new FormData();
         formData.append('image', blob, `${code}.png`);
 
@@ -770,45 +1211,66 @@ function saveShelf() {
             formData.append('old_code', oldCode);
             if (oldCode !== code) formData.append('new_code', code);
 
+            console.log('Updating shelf via /api/update_shelf');
             fetch('/api/update_shelf', {
                 method: 'POST',
                 body: formData
             })
             .then(r => r.json())
             .then(data => {
+                console.log('Update response:', data);
                 if (data.success) {
                     showSuccess('Shelf updated successfully!');
                     state.isEditing = false;
                     state.currentShelfCode = '';
                     cancelAdd();
-                    loadShelves();
+                    loadData();
                 } else {
                     showError(data.error || 'Failed to update shelf');
+                    saveBtn.disabled = false;
+                    saveBtn.innerHTML = originalBtnText;
                 }
             })
             .catch(err => {
                 console.error('Update error:', err);
                 showError('Error updating shelf: ' + err.message);
+                saveBtn.disabled = false;
+                saveBtn.innerHTML = originalBtnText;
             });
         } else {
             formData.append('code', code);
+            // Add group_id if we are inside a group
+            if (state.currentGroupId) {
+                formData.append('group_id', state.currentGroupId);
+                console.log('Adding to group:', state.currentGroupId);
+            }
+            
+            console.log('Creating new shelf via /api/upload_shelf');
             fetch('/api/upload_shelf', {
                 method: 'POST',
                 body: formData
             })
-            .then(r => r.json())
+            .then(r => {
+                console.log('Upload response status:', r.status);
+                return r.json();
+            })
             .then(data => {
+                console.log('Upload response data:', data);
                 if (data.success) {
                     showSuccess('Shelf saved successfully!');
                     cancelAdd();
-                    loadShelves();
+                    loadData();
                 } else {
                     showError(data.error || 'Failed to save shelf');
+                    saveBtn.disabled = false;
+                    saveBtn.innerHTML = originalBtnText;
                 }
             })
             .catch(err => {
                 console.error('Save error:', err);
                 showError('Error saving shelf: ' + err.message);
+                saveBtn.disabled = false;
+                saveBtn.innerHTML = originalBtnText;
             });
         }
     }, 'image/png');
@@ -826,15 +1288,19 @@ function deleteShelf() {
     
     console.log('Deleting shelf:', code);
     
-    fetch(`/api/delete_shelf/${code}`, {
-        method: 'POST'
+    fetch('/api/delete_shelf', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ code: code })
     })
     .then(r => r.json())
     .then(data => {
         if (data.success) {
             showSuccess('Shelf deleted');
             closeModal();
-            loadShelves();
+            loadData();
         } else {
             showError(data.error || 'Failed to delete shelf');
         }

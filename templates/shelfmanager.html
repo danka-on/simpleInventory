@@ -16,31 +16,42 @@
         <div id="list-view" class="view active">
             <div class="action-bar">
                 <div class="action-left">
-                    <a href="/tools" class="back-btn btn btn-exit" id="exit-btn">
-                        <i class="fas fa-arrow-left"></i> Exit
-                    </a>
+                    <button class="back-btn btn btn-exit" id="back-btn">
+                        <i class="fas fa-arrow-left"></i> <span id="back-btn-text">Exit</span>
+                    </button>
                     <button class="btn btn-primary" id="print-qr-btn" style="display: none;">
-                        <i class="fas fa-qrcode"></i> Print QR Codes (<span id="selected-count">0</span>)
+                        <i class="fas fa-qrcode"></i> Print QR (<span id="selected-count">0</span>)
+                    </button>
+                    <button class="btn btn-info" id="move-group-btn" style="display: none;">
+                        <i class="fas fa-folder-open"></i> Move
+                    </button>
+                    <button class="btn btn-secondary" id="select-all-btn" style="display: none;">
+                        <i class="fas fa-check-double"></i> Select All
+                    </button>
+                    <button class="btn btn-danger" id="delete-selected-btn" style="display: none;">
+                        <i class="fas fa-trash"></i> Delete (<span id="delete-count">0</span>)
                     </button>
                 </div>
                 <div style="flex:1; text-align:center; display:flex; align-items:center; justify-content:center; gap:8px;">
-                    <label for="shelf-sort" style="font-size:0.9rem;margin-right:8px;color:#444;">Sort:</label>
-                    <select id="shelf-sort" style="padding:6px;border-radius:6px;border:1px solid #ddd;">
-                        <option value="name">Name (A-Z)</option>
-                        <option value="items">Items (desc)</option>
-                        <option value="created">Created (newest)</option>
-                    </select>
-                    <button id="apply-sort-btn" class="btn btn-primary" style="padding:6px 10px;">Apply</button>
+                    <h2 id="view-title" style="margin:0; font-size:1.2rem; color:#333;">Groups</h2>
                 </div>
                 <div class="action-right">
-                    <button class="btn btn-select" id="select-mode-btn">
+                    <div id="sort-controls" style="display:none; align-items:center; gap:5px;">
+                        <select id="shelf-sort" style="padding:6px;border-radius:6px;border:1px solid #ddd;">
+                            <option value="name">Name (A-Z)</option>
+                            <option value="items">Items (desc)</option>
+                            <option value="created">Created (newest)</option>
+                        </select>
+                        <button id="apply-sort-btn" class="btn btn-primary" style="padding:6px 10px;">Sort</button>
+                    </div>
+                    <button class="btn btn-select" id="select-mode-btn" style="display:none;">
                         <i class="fas fa-check-square"></i> Select
                     </button>
                 </div>
             </div>
             <div id="shelf-list" class="shelf-grid">
                 <div class="loading">
-                    <i class="fas fa-spinner fa-spin"></i> Loading shelves...
+                    <i class="fas fa-spinner fa-spin"></i> Loading...
                 </div>
             </div>
             <button class="add-shelf-btn" id="add-btn">
@@ -99,6 +110,9 @@
                     <button class="btn btn-secondary" id="cancel-btn">
                         <i class="fas fa-times"></i> Cancel
                     </button>
+                    <button class="btn btn-warning" id="replace-image-btn" style="display: none;">
+                        <i class="fas fa-camera-retro"></i> Replace Image
+                    </button>
                     <button class="btn btn-primary" id="start-camera-btn" style="display: none;">
                         <i class="fas fa-camera"></i> Take Photo
                     </button>
@@ -130,6 +144,38 @@
                 <button class="btn btn-warning" id="clear-inventory-btn" title="Clear all items linked to this shelf">
                     <i class="fas fa-broom"></i> Clear All Inventory
                 </button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Modal for Creating Group -->
+    <div id="create-group-modal" class="modal">
+        <div class="modal-content" style="max-width: 400px;">
+            <h3>Create New Group</h3>
+            <div class="form-group">
+                <label for="new-group-name">Group Name</label>
+                <input type="text" id="new-group-name" placeholder="e.g., Aisle 1, Warehouse B">
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" id="cancel-group-btn">Cancel</button>
+                <button class="btn btn-success" id="save-group-btn">Create</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for Moving Shelves -->
+    <div id="move-group-modal" class="modal">
+        <div class="modal-content" style="max-width: 400px;">
+            <h3>Move to Group</h3>
+            <p>Select a destination group for <span id="move-count">0</span> shelves:</p>
+            <div class="form-group">
+                <select id="move-group-select" style="width:100%; padding:10px; font-size:1.1rem;">
+                    <!-- Options populated by JS -->
+                </select>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" id="cancel-move-btn">Cancel</button>
+                <button class="btn btn-primary" id="confirm-move-btn">Move</button>
             </div>
         </div>
     </div>
