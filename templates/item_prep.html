@@ -454,11 +454,20 @@
       const type = getDeviceType();
       const scannerDiv = document.getElementById('scanner');
       const input = document.getElementById('manualUpc');
+      
+      // Check for scanner mode override
+      const scannerMode = localStorage.getItem('scannerMode');
+      const forceHandheld = scannerMode === 'handheld';
+      
       // Requirement: iPad or Desktop -> manual input only; Mobile phones -> camera
-      if (type === 'iPad' || type === 'Desktop'){
+      // UNLESS scanner mode is set to 'handheld'
+      if (type === 'iPad' || type === 'Desktop' || forceHandheld){
         if (scannerDiv) scannerDiv.style.display = 'none';
         stopScanner();
-        if (input){ input.style.display=''; try{ input.focus({preventScroll:true}); if(input.select) input.select(); }catch{} }
+        if (input){ 
+          input.style.display=''; 
+          try{ input.focus({preventScroll:true}); if(input.select) input.select(); }catch{} 
+        }
         scanMsg.textContent = '';
       } else {
         if (scannerDiv) scannerDiv.style.display = '';

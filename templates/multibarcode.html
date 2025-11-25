@@ -392,9 +392,13 @@
         // Setup device mode (hide camera for tablets/desktop)
         function setupDeviceMode() {
             const deviceType = getDeviceType();
+            const scannerMode = localStorage.getItem('scannerMode'); // 'camera' or 'handheld'
             
-            if (deviceType === 'iPad' || deviceType === 'Android Tablet' || deviceType === 'Desktop') {
-                // Hide camera for tablets and desktop
+            // Force handheld mode if selected in settings
+            const isHandheldMode = scannerMode === 'handheld';
+            
+            if (isHandheldMode || deviceType === 'iPad' || deviceType === 'Android Tablet' || deviceType === 'Desktop') {
+                // Hide camera for tablets and desktop OR if handheld mode is enabled
                 if (readerDiv) readerDiv.style.display = 'none';
                 // Focus on input
                 barcodeInput.focus();
@@ -615,9 +619,11 @@
             }
         });
         
-        // Keep focus on scanner input for external scanners (only on desktop/tablet)
+        // Keep focus on scanner input for external scanners (only on desktop/tablet OR handheld mode)
         const deviceType = getDeviceType();
-        if (deviceType === 'Desktop' || deviceType === 'iPad' || deviceType === 'Android Tablet') {
+        const scannerMode = localStorage.getItem('scannerMode');
+        
+        if (scannerMode === 'handheld' || deviceType === 'Desktop' || deviceType === 'iPad' || deviceType === 'Android Tablet') {
             setInterval(() => {
                 if (document.activeElement !== barcodeInput && document.activeElement !== scannerInput) {
                     scannerInput.focus();

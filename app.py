@@ -9543,6 +9543,26 @@ def api_delete_shelf():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
+@app.route('/api/valid_shelves', methods=['GET'])
+def api_valid_shelves():
+    """Get list of valid shelf codes from the database"""
+    try:
+        ensure_shelf_groups_table()
+        conn = sqlite3.connect('searchRack.db')
+        cur = conn.cursor()
+        cur.execute('SELECT shelf_name FROM shelves ORDER BY shelf_name')
+        rows = cur.fetchall()
+        conn.close()
+        
+        codes = [row[0] for row in rows if row[0]]
+        
+        return jsonify({
+            'success': True,
+            'codes': codes
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e), 'codes': []}), 500
+
 
 @app.route('/api/delete/<db_key>/<int:item_id>', methods=['POST'])
 def api_delete_row(db_key, item_id):

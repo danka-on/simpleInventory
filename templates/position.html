@@ -511,7 +511,12 @@
         var readerDiv = document.getElementById('reader');
         var restartBtn = document.getElementById('restartScannerBtn');
         var pictureBtn = document.getElementById('picturePositionBtn');
-        if (deviceType === 'iPad' || deviceType === 'Android Tablet') {
+        
+        // Check for scanner mode override
+        const scannerMode = localStorage.getItem('scannerMode');
+        const forceHandheld = scannerMode === 'handheld';
+        
+        if (deviceType === 'iPad' || deviceType === 'Android Tablet' || forceHandheld) {
             // Hide camera/QR scanner, show QR input
             if (readerDiv) readerDiv.style.display = 'none';
             if (qrInput) {
@@ -528,6 +533,8 @@
             document.getElementById('flashMsg').style.display = 'none';
             // Prevent scanner from starting
             window.startScanner = function(){};
+            // If scanner was already running, stop it
+            stopScanner();
             // Hide Restart Scanner button in tablet mode
             if (restartBtn) restartBtn.style.display = 'none';
             // Picture Position button: camera icon only
@@ -558,92 +565,106 @@
 
     // Optionally, handle QR code input for iPad/tablet
     var qrInput = document.getElementById('qrTextInput');
+    var debounceTimer = null;
+
     if (qrInput) {
         qrInput.addEventListener('input', function() {
-            var code = this.value.trim();
+            var inputEl = this;
+            var code = inputEl.value.trim();
             var flashMsg = document.getElementById('flashMsg');
             
-            let isValid = false;
-            if (validShelves.length > 0) {
-                if (validShelves.includes(code.toLowerCase())) isValid = true;
-            }
-            if (!isValid && code.match(/^(gr[1-5]|or[1-3])s[2-6]$/i)) isValid = true;
+            // Clear any pending validation
+            if (debounceTimer) clearTimeout(debounceTimer);
+            
+            // Hide error message while typing
+            if (flashMsg) flashMsg.style.display = 'none';
 
-            if (isValid) {
-                const posCode = code;
-                document.getElementById('scanned_result').value = posCode;
-                sessionStorage.setItem('item_position', posCode);
-                var greenScreen = document.getElementById('green-screen');
-                greenScreen.classList.add('visible');
-                // Play positive beep
-                try {
-                    var ctx = window.audioCtx || new (window.AudioContext || window.webkitAudioContext)();
-                    window.audioCtx = ctx;
-                    var osc = ctx.createOscillator();
-                    var gain = ctx.createGain();
-                    osc.type = 'sine';
-                    osc.frequency.value = 880;
-                    gain.gain.value = 0.2;
-                    osc.connect(gain);
-                    gain.connect(ctx.destination);
-                    osc.start();
-                    osc.stop(ctx.currentTime + 0.15);
-                    osc.onended = function() {
-                        osc.disconnect();
-                        gain.disconnect();
-                    };
-                } catch(e) {}
-                // If in edit mode, call API and redirect back
-                const urlParams = new URLSearchParams(window.location.search);
-                const editId = urlParams.get('edit_rack_id');
-                if(editId){
-                    fetch('/api/set_rack_location', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id: editId, item_position: posCode})})
-                    .then(r=>r.json()).then(j=>{
-                        // redirect back to searchrack
-                        setTimeout(()=>{ window.location.href = '/searchrack'; }, 600);
-                    }).catch(err=>{ console.error('set location failed',err); setTimeout(()=>{ window.location.href = '/searchrack'; }, 600); });
+            // Set delay for validation
+            debounceTimer = setTimeout(function() {
+                if (!code) return;
+
+                let isValid = false;
+                if (validShelves.length > 0) {
+                    if (validShelves.includes(code.toLowerCase())) isValid = true;
+                }
+                if (!isValid && code.match(/^(gr[1-5]|or[1-3])s[2-6]$/i)) isValid = true;
+
+                if (isValid) {
+                    const posCode = code;
+                    document.getElementById('scanned_result').value = posCode;
+                    sessionStorage.setItem('item_position', posCode);
+                    var greenScreen = document.getElementById('green-screen');
+                    greenScreen.classList.add('visible');
+                    // Play positive beep
+                    try {
+                        var ctx = window.audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+                        window.audioCtx = ctx;
+                        var osc = ctx.createOscillator();
+                        var gain = ctx.createGain();
+                        osc.type = 'sine';
+                        osc.frequency.value = 880;
+                        gain.gain.value = 0.2;
+                        osc.connect(gain);
+                        gain.connect(ctx.destination);
+                        osc.start();
+                        osc.stop(ctx.currentTime + 0.15);
+                        osc.onended = function() {
+                            osc.disconnect();
+                            gain.disconnect();
+                        };
+                    } catch(e) {}
+                    // If in edit mode, call API and redirect back
+                    const urlParams = new URLSearchParams(window.location.search);
+                    const editId = urlParams.get('edit_rack_id');
+                    if(editId){
+                        fetch('/api/set_rack_location', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id: editId, item_position: posCode})})
+                        .then(r=>r.json()).then(j=>{
+                            // redirect back to searchrack
+                            setTimeout(()=>{ window.location.href = '/searchrack'; }, 600);
+                        }).catch(err=>{ console.error('set location failed',err); setTimeout(()=>{ window.location.href = '/searchrack'; }, 600); });
+                    } else {
+                        setTimeout(function() { document.getElementById('scan_form').submit(); }, 200);
+                    }
+                    // Auto-clear the input after processing
+                    inputEl.value = '';
                 } else {
-                    setTimeout(function() { document.getElementById('scan_form').submit(); }, 200);
+                    // Only show error if it's a substantial input (e.g. > 3 chars) to avoid flashing on first char
+                    if (code.length > 3) {
+                        if (flashMsg) {
+                            flashMsg.textContent = 'Invalid Shelf Code';
+                            flashMsg.style.display = '';
+                            flashMsg.style.background = '#ffdddd';
+                            flashMsg.style.color = '#d32f2f';
+                            flashMsg.style.fontWeight = 'bold';
+                            flashMsg.style.padding = '8px';
+                            flashMsg.style.borderRadius = '6px';
+                            flashMsg.style.transition = 'background 0.2s';
+                        }
+                        // Play error beep
+                        try {
+                            var ctx = window.audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+                            window.audioCtx = ctx;
+                            var osc = ctx.createOscillator();
+                            var gain = ctx.createGain();
+                            osc.type = 'square';
+                            osc.frequency.value = 220;
+                            gain.gain.value = 0.3;
+                            osc.connect(gain);
+                            gain.connect(ctx.destination);
+                            osc.start();
+                            osc.stop(ctx.currentTime + 0.25);
+                            osc.onended = function() {
+                                osc.disconnect();
+                                gain.disconnect();
+                            };
+                        } catch(e) {}
+                        setTimeout(function() {
+                            inputEl.value = '';
+                            if (flashMsg) flashMsg.style.display = 'none';
+                        }, 1000);
+                    }
                 }
-                if (flashMsg) {
-                    flashMsg.style.display = 'none';
-                }
-                // Auto-clear the input after processing
-                qrInput.value = '';
-            } else if (code.length > 5) {
-                if (flashMsg) {
-                    flashMsg.textContent = 'Not a QR code';
-                    flashMsg.style.display = '';
-                    flashMsg.style.background = '#ffdddd';
-                    flashMsg.style.color = '#d32f2f';
-                    flashMsg.style.fontWeight = 'bold';
-                    flashMsg.style.padding = '8px';
-                    flashMsg.style.borderRadius = '6px';
-                    flashMsg.style.transition = 'background 0.2s';
-                }
-                // Play error beep
-                try {
-                    var ctx = window.audioCtx || new (window.AudioContext || window.webkitAudioContext)();
-                    window.audioCtx = ctx;
-                    var osc = ctx.createOscillator();
-                    var gain = ctx.createGain();
-                    osc.type = 'square';
-                    osc.frequency.value = 220;
-                    gain.gain.value = 0.3;
-                    osc.connect(gain);
-                    gain.connect(ctx.destination);
-                    osc.start();
-                    osc.stop(ctx.currentTime + 0.25);
-                    osc.onended = function() {
-                        osc.disconnect();
-                        gain.disconnect();
-                    };
-                } catch(e) {}
-                setTimeout(function() {
-                    qrInput.value = '';
-                    if (flashMsg) flashMsg.style.display = 'none';
-                }, 1000);
-            }
+            }, 500); // 0.5s delay
         });
     }
 

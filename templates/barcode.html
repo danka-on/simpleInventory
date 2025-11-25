@@ -398,7 +398,12 @@
             var deviceType = getDeviceType();
             var barcodeInput = document.getElementById('barcodeTextInput');
             var readerDiv = document.getElementById('reader');
-            if (deviceType === 'iPad' || deviceType === 'Android Tablet') {
+            
+            // Check for scanner mode override
+            const scannerMode = localStorage.getItem('scannerMode');
+            const forceHandheld = scannerMode === 'handheld';
+            
+            if (deviceType === 'iPad' || deviceType === 'Android Tablet' || forceHandheld) {
                 // Hide camera/QR scanner, show barcode input
                 if (readerDiv) readerDiv.style.display = 'none';
                 if (barcodeInput) {
@@ -408,8 +413,10 @@
                         barcodeInput.focus();
                     });
                 }
-                // Prevent scanner from starting on tablets
+                // Prevent scanner from starting on tablets or handheld mode
                 window.initScanner = function(){};
+                // If scanner was already running, stop it
+                stopScanner();
             } else {
                 // Mobile or desktop: keep camera, hide barcode input
                 if (readerDiv) readerDiv.style.display = '';

@@ -317,7 +317,63 @@
             </a>
         </div>
 
+        <!-- Device Settings Section (Mobile Only) -->
+        <div class="section-title" id="device-settings-title" style="display:none;">
+            <i class="fas fa-mobile-alt"></i>
+            <span>Device Settings</span>
+        </div>
+
+        <div class="tools-grid" id="device-settings-grid" style="display:none;">
+            <div class="tool-card" id="scanner-mode-card" onclick="toggleScannerMode()" style="cursor: pointer;">
+                <i class="fas fa-camera" id="scanner-mode-icon"></i>
+                <h3 id="scanner-mode-text">Camera Mode</h3>
+                <p id="scanner-mode-desc">Using device camera</p>
+            </div>
+        </div>
+
+        <script>
+            function isMobile() {
+                return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+            }
         
+            function updateScannerModeUI() {
+                const mode = localStorage.getItem('scannerMode') || 'camera';
+                const icon = document.getElementById('scanner-mode-icon');
+                const text = document.getElementById('scanner-mode-text');
+                const desc = document.getElementById('scanner-mode-desc');
+                const card = document.getElementById('scanner-mode-card');
+        
+                if (mode === 'handheld') {
+                    icon.className = 'fas fa-barcode';
+                    text.textContent = 'Scanner Mode';
+                    desc.textContent = 'Using handheld scanner';
+                    card.style.border = '2px solid #00b894';
+                    // Add visual indicator for active state
+                    card.style.background = '#e8f8f5';
+                } else {
+                    icon.className = 'fas fa-camera';
+                    text.textContent = 'Camera Mode';
+                    desc.textContent = 'Using device camera';
+                    card.style.border = '1px solid var(--border)';
+                    card.style.background = 'var(--card)';
+                }
+            }
+        
+            function toggleScannerMode() {
+                const current = localStorage.getItem('scannerMode') || 'camera';
+                const next = current === 'camera' ? 'handheld' : 'camera';
+                localStorage.setItem('scannerMode', next);
+                updateScannerModeUI();
+            }
+        
+            document.addEventListener('DOMContentLoaded', () => {
+                if (isMobile()) {
+                    document.getElementById('device-settings-title').style.display = 'flex';
+                    document.getElementById('device-settings-grid').style.display = 'grid';
+                    updateScannerModeUI();
+                }
+            });
+        </script>
     </div>
 
     
