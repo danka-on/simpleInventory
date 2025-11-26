@@ -38,14 +38,17 @@
                 <div class="action-right">
                     <div id="sort-controls" style="display:none; align-items:center; gap:5px;">
                         <select id="shelf-sort" style="padding:6px;border-radius:6px;border:1px solid #ddd;">
+                            <option value="created" selected>Created (newest)</option>
                             <option value="name">Name (A-Z)</option>
                             <option value="items">Items (desc)</option>
-                            <option value="created">Created (newest)</option>
                         </select>
                         <button id="apply-sort-btn" class="btn btn-primary" style="padding:6px 10px;">Sort</button>
                     </div>
                     <button class="btn btn-select" id="select-mode-btn" style="display:none;">
                         <i class="fas fa-check-square"></i> Select
+                    </button>
+                    <button class="btn btn-success" id="add-btn">
+                        <i class="fas fa-plus"></i> Add
                     </button>
                 </div>
             </div>
@@ -54,9 +57,6 @@
                     <i class="fas fa-spinner fa-spin"></i> Loading...
                 </div>
             </div>
-            <button class="add-shelf-btn" id="add-btn">
-                <i class="fas fa-plus"></i>
-            </button>
         </div>
         
         <!-- Add/Edit View -->
@@ -101,6 +101,11 @@
                 <!-- Rectangle Editor -->
                 <div id="editor-container">
                     <canvas id="editor-canvas"></canvas>
+                    <div class="editor-controls" style="margin-top: 10px; text-align: center;">
+                        <button class="btn btn-secondary" id="redraw-rect-btn" type="button">
+                            <i class="fas fa-sync-alt"></i> Redraw Box
+                        </button>
+                    </div>
                     <div class="editor-hint">
                         <i class="fas fa-hand-pointer"></i> Drag to draw a rectangle around the shelf area
                     </div>
@@ -137,6 +142,9 @@
                 </button>
                 <button class="btn btn-primary" id="edit-shelf-btn">
                     <i class="fas fa-edit"></i> Edit
+                </button>
+                <button class="btn btn-secondary" id="duplicate-shelf-btn">
+                    <i class="fas fa-copy"></i> Duplicate
                 </button>
                 <button class="btn btn-danger" id="delete-shelf-btn">
                     <i class="fas fa-trash"></i> Delete
@@ -180,6 +188,6 @@
         </div>
     </div>
     
-    <script src="{{ url_for('static', filename='shelf-creator.js') }}?v=6"></script>
+    <script src="{{ url_for('static', filename='shelf-creator.js') }}?v=7"></script>
 </body>
 </html>

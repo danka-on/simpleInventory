@@ -8995,6 +8995,10 @@ def api_update_shelf():
 
         shelves_dir = os.path.join('static', 'shelves')
         old_path = os.path.join(shelves_dir, f"{old_code}.png")
+        
+        orig_dir = os.path.join(shelves_dir, 'originals')
+        os.makedirs(orig_dir, exist_ok=True)
+        old_orig_path = os.path.join(orig_dir, f"{old_code}.png")
 
         # If image provided, overwrite or write to new path
         file = request.files.get('image')
@@ -9002,6 +9006,13 @@ def api_update_shelf():
             target_code = new_code if new_code else old_code
             target_path = os.path.join(shelves_dir, f"{target_code}.png")
             file.save(target_path)
+            
+        # If original image provided, save it
+        orig_file = request.files.get('original_image')
+        if orig_file:
+            target_code = new_code if new_code else old_code
+            target_orig_path = os.path.join(orig_dir, f"{target_code}.png")
+            orig_file.save(target_orig_path)
 
         # If renaming requested and file exists, rename on disk
         if new_code and new_code != old_code:
@@ -9009,6 +9020,23 @@ def api_update_shelf():
             # If image was uploaded we already saved to new_path; otherwise rename existing file
             if not os.path.exists(new_path) and os.path.exists(old_path):
                 os.rename(old_path, new_path)
+            elif os.path.exists(new_path) and os.path.exists(old_path):
+                # New file created by upload, remove old file to prevent duplication
+                try:
+                    os.remove(old_path)
+                except Exception as e:
+                    print(f"Error removing old shelf file: {e}")
+            
+            # Rename original if it exists and wasn't just uploaded
+            new_orig_path = os.path.join(orig_dir, f"{new_code}.png")
+            if not os.path.exists(new_orig_path) and os.path.exists(old_orig_path):
+                os.rename(old_orig_path, new_orig_path)
+            elif os.path.exists(new_orig_path) and os.path.exists(old_orig_path):
+                # New original created by upload, remove old original
+                try:
+                    os.remove(old_orig_path)
+                except Exception as e:
+                    print(f"Error removing old original file: {e}")
 
             # Cascade rename into searchRack.db (SEARCHRACK.ITEM_POSITION)
             try:
@@ -9149,7 +9177,7 @@ def api_clear_shelf_inventory(code):
 def api_list_shelves():
     """Return list of shelf images from static/shelves as JSON, with optional sorting and counts."""
     try:
-        sort = (request.args.get('sort') or 'name').lower()
+        sort = (request.args.get('sort') or 'created').lower()
         shelves_dir = os.path.join(app.root_path, 'static', 'shelves')
         results = []
         codes = []
@@ -9216,14 +9244,19 @@ def api_list_shelves():
                 # Sort by created_at desc; fallback to lastModified desc
                 def created_key(x):
                     ca = x.get('created_at')
-                    # Expect 'YYYY-MM-DD HH:MM:SS' from SQLite; parse safely
+                    # If created_at exists, use it. Ensure consistent format (replace T with space)
+                    if ca:
+                        return str(ca).replace('T', ' ')
+                    
+                    # Fallback to lastModified
                     try:
-                        # Replace space with 'T' to help Date.parse on clients; here we can prioritize lastModified for server order
-                        return (x.get('lastModified') or 0) if not ca else x.get('lastModified') or 0
-                    except Exception:
-                        return x.get('lastModified') or 0
-                # Use lastModified as reliable proxy for Newest first
-                results.sort(key=lambda x: x.get('lastModified', 0), reverse=True)
+                        ts = x.get('lastModified', 0)
+                        # Use space separator to match SQLite default
+                        return datetime.datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S')
+                    except:
+                        return '1970-01-01 00:00:00'
+                
+                results.sort(key=created_key, reverse=True)
             else:
                 # name
                 results.sort(key=lambda x: (x.get('code') or '').lower())
@@ -9481,6 +9514,15 @@ def api_upload_shelf():
         file_path = os.path.join(shelves_dir, f"{shelf_code}.png")
         file.save(file_path)
         
+        # Save original image if provided
+        if 'original_image' in request.files:
+            orig_file = request.files['original_image']
+            if orig_file.filename:
+                orig_dir = os.path.join(shelves_dir, 'originals')
+                os.makedirs(orig_dir, exist_ok=True)
+                orig_path = os.path.join(orig_dir, f"{shelf_code}.png")
+                orig_file.save(orig_path)
+        
         # Create or update shelf entry in database
         ensure_shelf_groups_table()
         conn = sqlite3.connect('searchRack.db')
@@ -9519,44 +9561,91 @@ def api_delete_shelf():
         shelf_id = data.get('shelf_id')
         shelf_code = data.get('code')
         
+        print(f"[DELETE_SHELF] Request received for id={shelf_id}, code={shelf_code}")
+
         if not shelf_id and not shelf_code:
             return jsonify({'success': False, 'error': 'shelf_id or code is required'}), 400
         
-        conn = sqlite3.connect('searchRack.db')
+        # Use a timeout for the connection
+        conn = sqlite3.connect('searchRack.db', timeout=10.0)
         cur = conn.cursor()
+        
+        code_to_delete = None
         
         # Get shelf info
         if shelf_id:
             cur.execute('SELECT shelf_name FROM shelves WHERE id = ?', (shelf_id,))
+            row = cur.fetchone()
+            if row:
+                code_to_delete = row[0]
+                # Delete shelf from database
+                cur.execute('DELETE FROM shelves WHERE id = ?', (shelf_id,))
+                print(f"[DELETE_SHELF] Deleted shelf ID {shelf_id} from DB")
+            else:
+                conn.close()
+                print(f"[DELETE_SHELF] Shelf ID {shelf_id} not found in DB")
+                return jsonify({'success': False, 'error': 'Shelf not found'}), 404
         else:
-            cur.execute('SELECT id, shelf_name FROM shelves WHERE shelf_name = ?', (shelf_code,))
+            # Try case-insensitive match first
+            cur.execute('SELECT id, shelf_name FROM shelves WHERE shelf_name = ? COLLATE NOCASE', (shelf_code,))
+            row = cur.fetchone()
+            if row:
+                shelf_id = row[0]
+                code_to_delete = row[1] # Use the actual name from DB
+                # Delete shelf from database
+                cur.execute('DELETE FROM shelves WHERE id = ?', (shelf_id,))
+                print(f"[DELETE_SHELF] Deleted shelf '{code_to_delete}' (ID {shelf_id}) from DB")
+            else:
+                # Shelf not in DB, but we have the code, so we can try to delete the file
+                code_to_delete = shelf_code
+                print(f"[DELETE_SHELF] Shelf '{shelf_code}' not found in DB, proceeding to file deletion")
         
-        row = cur.fetchone()
-        if not row:
-            conn.close()
-            return jsonify({'success': False, 'error': 'Shelf not found'}), 404
-        
-        if shelf_id:
-            code_to_delete = row[0]
-        else:
-            shelf_id = row[0]
-            code_to_delete = row[1]
-        
-        # Delete shelf from database
-        cur.execute('DELETE FROM shelves WHERE id = ?', (shelf_id,))
         conn.commit()
         conn.close()
         
         # Delete shelf image file
-        shelf_file = os.path.join('static', 'shelves', f"{code_to_delete}.png")
-        if os.path.exists(shelf_file):
-            os.remove(shelf_file)
+        if code_to_delete:
+            # Try exact match first
+            shelf_file = os.path.join('static', 'shelves', f"{code_to_delete}.png")
+            orig_file = os.path.join('static', 'shelves', 'originals', f"{code_to_delete}.png")
+            
+            if os.path.exists(shelf_file):
+                try:
+                    os.remove(shelf_file)
+                    print(f"[DELETE_SHELF] Deleted file: {shelf_file}")
+                except Exception as e:
+                    print(f"[DELETE_SHELF] Error deleting file {shelf_file}: {e}")
+            
+            if os.path.exists(orig_file):
+                try:
+                    os.remove(orig_file)
+                    print(f"[DELETE_SHELF] Deleted original file: {orig_file}")
+                except Exception as e:
+                    print(f"[DELETE_SHELF] Error deleting original file {orig_file}: {e}")
+            
+            if not os.path.exists(shelf_file):
+                # Try case-insensitive search for file
+                print(f"[DELETE_SHELF] File {shelf_file} not found, trying case-insensitive search")
+                shelves_dir = os.path.join('static', 'shelves')
+                if os.path.exists(shelves_dir):
+                    for f in os.listdir(shelves_dir):
+                        if f.lower() == f"{code_to_delete}.png".lower():
+                            full_path = os.path.join(shelves_dir, f)
+                            try:
+                                os.remove(full_path)
+                                print(f"[DELETE_SHELF] Deleted file (case-insensitive match): {full_path}")
+                            except Exception as e:
+                                print(f"[DELETE_SHELF] Error deleting file {full_path}: {e}")
+                            break
         
         return jsonify({
             'success': True,
             'message': f'Shelf {code_to_delete} deleted successfully'
         })
     except Exception as e:
+        print(f"[DELETE_SHELF] Error: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/valid_shelves', methods=['GET'])
@@ -12097,6 +12186,101 @@ except Exception as e:
 # Start background services in a separate thread to not block import
 # This ensures they run regardless of whether app is run directly or via Gunicorn
 threading.Thread(target=delayed_start, daemon=True).start()
+
+@app.route('/api/duplicate_shelf', methods=['POST'])
+def api_duplicate_shelf():
+    """Duplicate a shelf including its image and database entry"""
+    try:
+        data = request.get_json() or {}
+        code = data.get('code')
+        
+        if not code:
+            return jsonify({'success': False, 'error': 'Code is required'}), 400
+
+        conn = sqlite3.connect('searchRack.db')
+        cur = conn.cursor()
+        
+        # Get source shelf
+        cur.execute('SELECT id, shelf_name, group_id FROM shelves WHERE shelf_name = ?', (code,))
+        row = cur.fetchone()
+        
+        if not row:
+            # Try case insensitive
+            cur.execute('SELECT id, shelf_name, group_id FROM shelves WHERE shelf_name = ? COLLATE NOCASE', (code,))
+            row = cur.fetchone()
+            
+        if not row:
+            conn.close()
+            return jsonify({'success': False, 'error': 'Shelf not found'}), 404
+            
+        source_id, source_name, group_id = row
+        
+        # Determine new name
+        import re
+        import shutil
+        
+        # Check if name ends with dupeN
+        match = re.search(r'dupe(\d+)$', source_name)
+        if match:
+            number_part = match.group(1)
+            base_name_prefix = source_name[:match.start()]
+            counter = int(number_part) + 1
+            new_name = f"{base_name_prefix}dupe{counter}"
+        else:
+            base_name_prefix = source_name
+            counter = 1
+            new_name = f"{source_name}dupe{counter}"
+            
+        # Verify uniqueness loop
+        while True:
+            cur.execute('SELECT id FROM shelves WHERE shelf_name = ?', (new_name,))
+            if not cur.fetchone():
+                break
+            counter += 1
+            new_name = f"{base_name_prefix}dupe{counter}"
+        
+        # Copy file
+        src_path = os.path.join('static', 'shelves', f"{source_name}.png")
+        dst_path = os.path.join('static', 'shelves', f"{new_name}.png")
+        
+        if not os.path.exists(src_path):
+             # Try to find source file case-insensitively
+             shelves_dir = os.path.join('static', 'shelves')
+             found = False
+             if os.path.exists(shelves_dir):
+                for f in os.listdir(shelves_dir):
+                    if f.lower() == f"{source_name}.png".lower():
+                        src_path = os.path.join(shelves_dir, f)
+                        found = True
+                        break
+             
+             if not found:
+                conn.close()
+                return jsonify({'success': False, 'error': 'Source image not found'}), 404
+             
+        try:
+            shutil.copy2(src_path, dst_path)
+            # Update timestamp to now so it sorts correctly as newest
+            os.utime(dst_path, None)
+        except Exception as e:
+            conn.close()
+            return jsonify({'success': False, 'error': f'Failed to copy image: {str(e)}'}), 500
+        
+        # Insert into DB
+        cur.execute('INSERT INTO shelves (shelf_name, group_id, created_at) VALUES (?, ?, CURRENT_TIMESTAMP)', 
+                   (new_name, group_id))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            'success': True, 
+            'new_code': new_name,
+            'message': f'Shelf duplicated as {new_name}'
+        })
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 if __name__ == "__main__":
     # Start Flask in a thread

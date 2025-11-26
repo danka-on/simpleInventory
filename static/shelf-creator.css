@@ -519,15 +519,145 @@ h2 {
     opacity: 0.5;
 }
 
-/* Mobile Responsive */
-@media (max-width: 600px) {
-    .shelf-grid {
-        grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+/* Mobile Responsive Improvements */
+@media (max-width: 768px) {
+    .container {
+        padding: 10px;
+        padding-bottom: 40px;
+        max-width: 100%;
+    }
+
+    h1 {
+        font-size: 1.5rem;
+        margin-bottom: 15px;
+        text-align: center;
+    }
+
+    /* Action Bar Redesign for Mobile */
+    .action-bar {
+        flex-direction: column;
         gap: 12px;
+        background: #fff;
+        padding: 12px;
+        border-radius: 12px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+        position: sticky;
+        top: 10px;
+        z-index: 90;
+        margin-bottom: 20px;
+        border: 1px solid var(--border);
+    }
+
+    /* Reorder: Title first, then controls */
+    .action-bar > div:nth-child(2) {
+        order: -1;
+        width: 100%;
+        border-bottom: 1px solid #eee;
+        padding-bottom: 8px;
+        margin-bottom: 4px;
     }
     
-    .add-shelf-btn {
-        bottom: 20px;
-        right: 16px;
+    .action-bar > div:nth-child(2) h2 {
+        font-size: 1.1rem !important;
+    }
+
+    .action-bar .action-left, 
+    .action-bar .action-right {
+        width: 100%;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+    
+    /* Make buttons in action bar stretch or fit better */
+    .action-bar .btn {
+        padding: 10px 12px;
+        font-size: 0.9rem;
+        flex: 1;
+        text-align: center;
+        justify-content: center;
+        white-space: nowrap;
+    }
+    
+    /* Specific tweaks for back button */
+    .back-btn {
+        flex: 0 0 auto;
+    }
+
+    /* Grid Layout */
+    .shelf-grid {
+        grid-template-columns: repeat(2, 1fr); /* Force 2 columns */
+        gap: 10px;
+    }
+
+    .shelf-item {
+        padding: 8px;
+    }
+    
+    .shelf-code {
+        font-size: 0.85rem;
+        margin-top: 6px;
+        word-break: break-all;
+    }
+
+    /* Modal Improvements */
+    .modal-content {
+        width: 95%;
+        max-height: 90vh;
+        padding: 20px;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+    }
+    
+    .modal-content img {
+        max-height: 50vh;
+        object-fit: contain;
+        background: #000;
+    }
+    
+    .modal-actions {
+        flex-direction: column;
+        gap: 10px;
+        width: 100%;
+        margin-top: auto; /* Push to bottom if space allows */
+        padding-top: 15px;
+    }
+    
+    .modal-actions .btn {
+        width: 100%;
+        padding: 12px;
+        margin: 0;
+    }
+
+    /* Form & Editor */
+    .form-card {
+        padding: 15px;
+        margin-top: 10px;
+    }
+    
+    .btn-group {
+        flex-direction: column;
+        gap: 10px;
+    }
+    
+    .btn-group .btn {
+        width: 100%;
+        padding: 14px; /* Larger touch target */
+    }
+    
+    #editor-canvas {
+        max-height: 50vh;
+    }
+    
+    /* Camera */
+    #camera-container {
+        margin: 10px auto;
+    }
+    
+    .capture-btn {
+        width: 70px;
+        height: 70px;
+        bottom: 15px;
     }
 }

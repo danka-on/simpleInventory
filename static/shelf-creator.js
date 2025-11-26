@@ -31,7 +31,8 @@ const state = {
     rectY: 0,
     rectW: 0,
     rectH: 0,
-    handleSize: 30 // Size of corner handles for touch
+    rectRotation: 0,
+    handleSize: 40 // Size of corner handles for touch
 };
 
 // ============================================================================
@@ -79,11 +80,22 @@ function setupEventListeners() {
     document.getElementById('print-qr-btn').addEventListener('click', printQRCodes);
     document.getElementById('move-group-btn').addEventListener('click', showMoveModal);
     document.getElementById('select-all-btn').addEventListener('click', selectAllShelves);
-    document.getElementById('delete-selected-btn').addEventListener('click', deleteSelectedShelves);
+    
+    const deleteSelectedBtn = document.getElementById('delete-selected-btn');
+    deleteSelectedBtn.addEventListener('click', deleteSelectedShelves);
+    deleteSelectedBtn.addEventListener('touchend', (e) => {
+        e.preventDefault();
+        deleteSelectedShelves();
+    });
     
     // Add/Edit view
     document.getElementById('cancel-btn').addEventListener('click', cancelAdd);
     document.getElementById('save-btn').addEventListener('click', saveShelf);
+    
+    // Redraw button
+    const redrawBtn = document.getElementById('redraw-rect-btn');
+    if (redrawBtn) redrawBtn.addEventListener('click', resetRect);
+
     document.getElementById('start-camera-btn').addEventListener('click', startCapture);
     
     // Camera controls
@@ -96,7 +108,24 @@ function setupEventListeners() {
     // Modal
     document.getElementById('modal-close-btn').addEventListener('click', closeModal);
     document.getElementById('edit-shelf-btn').addEventListener('click', editShelf);
-    document.getElementById('delete-shelf-btn').addEventListener('click', deleteShelf);
+    
+    const duplicateShelfBtn = document.getElementById('duplicate-shelf-btn');
+    if (duplicateShelfBtn) {
+        duplicateShelfBtn.addEventListener('click', duplicateShelf);
+        duplicateShelfBtn.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            duplicateShelf();
+        });
+    }
+    
+    const deleteShelfBtn = document.getElementById('delete-shelf-btn');
+    deleteShelfBtn.addEventListener('click', deleteShelf);
+    // Add touch listener for better mobile response
+    deleteShelfBtn.addEventListener('touchend', (e) => {
+        e.preventDefault();
+        deleteShelf();
+    });
+
     const clearBtn = document.getElementById('clear-inventory-btn');
     if (clearBtn) clearBtn.addEventListener('click', clearInventory);
     const viewBtn = document.getElementById('view-items-btn');
@@ -221,7 +250,17 @@ function renderShelves() {
     shelves.sort((a, b) => {
         if (sortBy === 'name') return a.code.localeCompare(b.code);
         if (sortBy === 'items') return (b.count || 0) - (a.count || 0);
-        if (sortBy === 'created') return (b.created_at || 0) - (a.created_at || 0);
+        if (sortBy === 'created') {
+            // created_at is string "YYYY-MM-DD HH:MM:SS", lastModified is seconds
+            const getTimestamp = (item) => {
+                if (item.created_at) {
+                    // Replace space with T for better cross-browser parsing
+                    return new Date(item.created_at.replace(' ', 'T')).getTime();
+                }
+                return (item.lastModified || 0) * 1000;
+            };
+            return getTimestamp(b) - getTimestamp(a);
+        }
         return 0;
     });
     
@@ -574,6 +613,7 @@ function editShelf() {
     // Load image into canvas
     const img = new Image();
     img.crossOrigin = 'anonymous';
+    
     img.onload = () => {
         const canvas = document.getElementById('editor-canvas');
         const ctx = canvas.getContext('2d');
@@ -586,6 +626,7 @@ function editShelf() {
         state.ctx = ctx;
         state.currentImage = img;
         state.rectX = 0; state.rectY = 0; state.rectW = 0; state.rectH = 0;
+        state.rectRotation = 0;
         
         // Show editor, hide other sections
         document.getElementById('camera-section').style.display = 'none';
@@ -600,8 +641,14 @@ function editShelf() {
         
         updateSaveButton();
     };
-    img.onerror = () => showError('Failed to load shelf image into editor');
-    img.src = shelf.url + '?_=' + Date.now(); // cache bust
+    
+    img.onerror = () => {
+        showError('Failed to load shelf image into editor');
+    };
+    
+    // Load standard image (with baked-in rectangle)
+    console.log('Loading standard image for editing');
+    img.src = shelf.url + '?_=' + Date.now();
 
     // Show add/edit view
     closeModal();
@@ -907,6 +954,11 @@ function startCapture() {
         cameraContainer.classList.add('active');
         captureBtn.style.display = 'block';
         startCameraBtn.style.display = 'none';
+        
+        // Scroll to camera view
+        setTimeout(() => {
+            cameraContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 100);
     })
     .catch(err => {
         console.error('Camera error:', err);
@@ -1002,8 +1054,42 @@ function stopCamera() {
 }
 
 // ============================================================================
-// STEP 4: RECTANGLE EDITOR (Placeholder - will implement next)
+// STEP 4: RECTANGLE EDITOR
 // ============================================================================
+
+/**
+ * Reset the rectangle to allow drawing a new one
+ */
+function resetRect() {
+    console.log('Resetting rectangle');
+    state.rectX = 0;
+    state.rectY = 0;
+    state.rectW = 0;
+    state.rectH = 0;
+    state.rectRotation = 0;
+
+    // If we are editing, try to load the original clean image
+    if (state.isEditing && state.currentShelfCode) {
+        const originalUrl = `/static/shelves/originals/${state.currentShelfCode}.png`;
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        
+        img.onload = () => {
+            console.log('Loaded original clean image for redraw');
+            state.currentImage = img;
+            redrawCanvas();
+        };
+        
+        img.onerror = () => {
+            console.log('No original image found, sticking with current image');
+            redrawCanvas();
+        };
+        
+        img.src = originalUrl + '?_=' + Date.now();
+    } else {
+        redrawCanvas();
+    }
+}
 
 /**
  * Setup canvas for rectangle drawing with move/resize
@@ -1033,13 +1119,25 @@ function isInsideRect(x, y) {
     const rw = state.rectW;
     const rh = state.rectH;
     
+    // Center
+    const cx = rx + rw / 2;
+    const cy = ry + rh / 2;
+    
+    // Rotate point around center by -rotation
+    const dx = x - cx;
+    const dy = y - cy;
+    const cos = Math.cos(-state.rectRotation);
+    const sin = Math.sin(-state.rectRotation);
+    const lx = cx + dx * cos - dy * sin;
+    const ly = cy + dx * sin + dy * cos;
+    
     // Normalize negative dimensions
     const minX = rw >= 0 ? rx : rx + rw;
     const maxX = rw >= 0 ? rx + rw : rx;
     const minY = rh >= 0 ? ry : ry + rh;
     const maxY = rh >= 0 ? ry + rh : ry;
     
-    return x >= minX && x <= maxX && y >= minY && y <= maxY;
+    return lx >= minX && lx <= maxX && ly >= minY && ly <= maxY;
 }
 
 /**
@@ -1052,21 +1150,39 @@ function getHandle(x, y) {
     const rw = state.rectW;
     const rh = state.rectH;
     
+    // Center
+    const cx = rx + rw / 2;
+    const cy = ry + rh / 2;
+    
+    // Rotate point around center by -rotation
+    const dx = x - cx;
+    const dy = y - cy;
+    const cos = Math.cos(-state.rectRotation);
+    const sin = Math.sin(-state.rectRotation);
+    const lx = cx + dx * cos - dy * sin;
+    const ly = cy + dx * sin + dy * cos;
+    
     // Normalize rectangle coordinates to handle negative dimensions
     const minX = rw >= 0 ? rx : rx + rw;
     const maxX = rw >= 0 ? rx + rw : rx;
     const minY = rh >= 0 ? ry : ry + rh;
     const maxY = rh >= 0 ? ry + rh : ry;
     
+    // Check rotation handle (top center)
+    if (Math.abs(rw) > 10 && Math.abs(rh) > 10) {
+         if (Math.abs(lx - cx) < h && Math.abs(ly - (minY - 30)) < h) return 'rotate';
+    }
+    
     // Check corners first (for resizing)
-    if (Math.abs(x - minX) < h && Math.abs(y - minY) < h) return 'nw';
-    if (Math.abs(x - maxX) < h && Math.abs(y - minY) < h) return 'ne';
-    if (Math.abs(x - minX) < h && Math.abs(y - maxY) < h) return 'sw';
-    if (Math.abs(x - maxX) < h && Math.abs(y - maxY) < h) return 'se';
+    if (Math.abs(lx - minX) < h && Math.abs(ly - minY) < h) return 'nw';
+    if (Math.abs(lx - maxX) < h && Math.abs(ly - minY) < h) return 'ne';
+    if (Math.abs(lx - minX) < h && Math.abs(ly - maxY) < h) return 'sw';
+    if (Math.abs(lx - maxX) < h && Math.abs(ly - maxY) < h) return 'se';
     
     // Check if inside rect (for moving) - only if rect is reasonably sized
     if (Math.abs(rw) > h * 2 && Math.abs(rh) > h * 2) {
-        if (isInsideRect(x, y)) return 'move';
+        // We already calculated rotated point lx, ly
+        if (lx >= minX && lx <= maxX && ly >= minY && ly <= maxY) return 'move';
     }
     
     return null;
@@ -1075,7 +1191,7 @@ function getHandle(x, y) {
 /**
  * Redraw canvas with image and rectangle
  */
-function redrawCanvas() {
+function redrawCanvas(hideHandles = false) {
     if (!state.currentImage) return;
     
     // Clear and redraw image
@@ -1088,6 +1204,13 @@ function redrawCanvas() {
         const ry = state.rectY;
         const rw = state.rectW;
         const rh = state.rectH;
+        const cx = rx + rw / 2;
+        const cy = ry + rh / 2;
+        
+        state.ctx.save();
+        state.ctx.translate(cx, cy);
+        state.ctx.rotate(state.rectRotation);
+        state.ctx.translate(-cx, -cy);
         
         // Draw rectangle
         state.ctx.strokeStyle = '#00ff00';
@@ -1095,7 +1218,7 @@ function redrawCanvas() {
         state.ctx.strokeRect(rx, ry, rw, rh);
         
         // Draw corner handles (only when not actively drawing)
-        if (!state.isDrawing && Math.abs(rw) > 10 && Math.abs(rh) > 10) {
+        if (!hideHandles && !state.isDrawing && Math.abs(rw) > 10 && Math.abs(rh) > 10) {
             const h = 12; // Visual handle size
             state.ctx.fillStyle = '#00ff00';
             
@@ -1113,7 +1236,19 @@ function redrawCanvas() {
             state.ctx.fillRect(minX - h/2, maxY - h/2, h, h);
             // Bottom-right
             state.ctx.fillRect(maxX - h/2, maxY - h/2, h, h);
+
+            // Rotation handle
+            state.ctx.beginPath();
+            state.ctx.moveTo(cx, minY);
+            state.ctx.lineTo(cx, minY - 30);
+            state.ctx.strokeStyle = '#00ff00';
+            state.ctx.stroke();
+            
+            state.ctx.beginPath();
+            state.ctx.arc(cx, minY - 30, 6, 0, Math.PI * 2);
+            state.ctx.fill();
         }
+        state.ctx.restore();
     }
 }
 
@@ -1137,6 +1272,8 @@ function startAction(x, y) {
             state.dragStartY = y;
             return;
         }
+        // If we have a valid rect, prevent drawing a new one unless explicitly reset
+        return;
     }
     
     // Start drawing new rectangle
@@ -1147,6 +1284,7 @@ function startAction(x, y) {
     state.rectY = y;
     state.rectW = 0;
     state.rectH = 0;
+    state.rectRotation = 0;
 }
 
 /**
@@ -1166,14 +1304,29 @@ function moveAction(x, y) {
         state.dragStartY = y;
         redrawCanvas();
     } else if (state.isResizing) {
+        if (state.dragHandle === 'rotate') {
+            const cx = state.rectX + state.rectW / 2;
+            const cy = state.rectY + state.rectH / 2;
+            const angle = Math.atan2(y - cy, x - cx);
+            state.rectRotation = angle + Math.PI / 2;
+            redrawCanvas();
+            return;
+        }
+
         const dx = x - state.dragStartX;
         const dy = y - state.dragStartY;
         
+        // Rotate delta into local space
+        const cos = Math.cos(-state.rectRotation);
+        const sin = Math.sin(-state.rectRotation);
+        const ldx = dx * cos - dy * sin;
+        const ldy = dx * sin + dy * cos;
+        
         switch (state.dragHandle) {
-            case 'nw': state.rectX += dx; state.rectY += dy; state.rectW -= dx; state.rectH -= dy; break;
-            case 'ne': state.rectY += dy; state.rectW += dx; state.rectH -= dy; break;
-            case 'sw': state.rectX += dx; state.rectW -= dx; state.rectH += dy; break;
-            case 'se': state.rectW += dx; state.rectH += dy; break;
+            case 'nw': state.rectX += ldx; state.rectY += ldy; state.rectW -= ldx; state.rectH -= ldy; break;
+            case 'ne': state.rectY += ldy; state.rectW += ldx; state.rectH -= ldy; break;
+            case 'sw': state.rectX += ldx; state.rectW -= ldx; state.rectH += ldy; break;
+            case 'se': state.rectW += ldx; state.rectH += ldy; break;
         }
         
         state.dragStartX = x;
@@ -1183,6 +1336,7 @@ function moveAction(x, y) {
         // Cursor updates (only relevant for mouse usually)
         const handle = getHandle(x, y);
         if (handle === 'move') state.canvas.style.cursor = 'move';
+        else if (handle === 'rotate') state.canvas.style.cursor = 'alias';
         else if (handle) state.canvas.style.cursor = (handle === 'nw' || handle === 'se') ? 'nwse-resize' : 'nesw-resize';
         else state.canvas.style.cursor = 'crosshair';
     }
@@ -1208,14 +1362,28 @@ function endAction() {
 // EVENT HANDLERS
 // ============================================================================
 
-function handleMouseDown(e) {
+/**
+ * Get canvas coordinates from screen coordinates, accounting for CSS scaling
+ */
+function getCanvasCoordinates(clientX, clientY) {
     const rect = state.canvas.getBoundingClientRect();
-    startAction(e.clientX - rect.left, e.clientY - rect.top);
+    const scaleX = state.canvas.width / rect.width;
+    const scaleY = state.canvas.height / rect.height;
+    
+    return {
+        x: (clientX - rect.left) * scaleX,
+        y: (clientY - rect.top) * scaleY
+    };
+}
+
+function handleMouseDown(e) {
+    const coords = getCanvasCoordinates(e.clientX, e.clientY);
+    startAction(coords.x, coords.y);
 }
 
 function handleMouseMove(e) {
-    const rect = state.canvas.getBoundingClientRect();
-    moveAction(e.clientX - rect.left, e.clientY - rect.top);
+    const coords = getCanvasCoordinates(e.clientX, e.clientY);
+    moveAction(coords.x, coords.y);
 }
 
 function handleMouseUp(e) {
@@ -1225,17 +1393,17 @@ function handleMouseUp(e) {
 function handleTouchStart(e) {
     e.preventDefault();
     if (e.touches.length > 1) return; // Ignore multi-touch
-    const rect = state.canvas.getBoundingClientRect();
     const touch = e.touches[0];
-    startAction(touch.clientX - rect.left, touch.clientY - rect.top);
+    const coords = getCanvasCoordinates(touch.clientX, touch.clientY);
+    startAction(coords.x, coords.y);
 }
 
 function handleTouchMove(e) {
     e.preventDefault();
     if (e.touches.length > 1) return;
-    const rect = state.canvas.getBoundingClientRect();
     const touch = e.touches[0];
-    moveAction(touch.clientX - rect.left, touch.clientY - rect.top);
+    const coords = getCanvasCoordinates(touch.clientX, touch.clientY);
+    moveAction(coords.x, coords.y);
 }
 
 function handleTouchEnd(e) {
@@ -1280,6 +1448,11 @@ function loadImageToEditor(dataUrl) {
         const editorContainer = document.getElementById('editor-container');
         editorContainer.style.display = 'block'; // Force display block
         editorContainer.classList.add('active');
+        
+        // Scroll to editor
+        setTimeout(() => {
+            editorContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 100);
         
         // Show replace image button if present
         const replaceBtn = document.getElementById('replace-image-btn');
@@ -1334,9 +1507,13 @@ function saveShelf() {
     console.log('Preparing to save shelf:', code);
     
     // Finalize canvas with rectangle if one was drawn
-    if (state.rectW && state.rectH) {
-        console.log('Drawing final rectangle on canvas');
-        redrawCanvas(); // Use redraw to ensure handles are not included in final image
+    try {
+        if (state.rectW && state.rectH) {
+            console.log('Drawing final rectangle on canvas');
+            redrawCanvas(true); // Use redraw to ensure handles are not included in final image
+        }
+    } catch (e) {
+        console.error('Error redrawing canvas:', e);
     }
     
     console.log('Converting canvas to blob...');
@@ -1346,88 +1523,136 @@ function saveShelf() {
     saveBtn.disabled = true;
     saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
     
-    // Convert canvas to blob
-    state.canvas.toBlob(blob => {
-        if (!blob) {
-            console.error('Failed to create blob from canvas');
-            showError('Failed to process image');
+    // Safety timeout in case toBlob or fetch hangs indefinitely
+    const safetyTimeout = setTimeout(() => {
+        if (saveBtn.disabled) {
+            console.error('Save operation timed out');
+            showError('Save operation timed out. Please try again.');
             saveBtn.disabled = false;
             saveBtn.innerHTML = originalBtnText;
-            return;
         }
-        
-        console.log('Blob created, size:', blob.size);
-        const formData = new FormData();
-        formData.append('image', blob, `${code}.png`);
+    }, 30000); // 30 seconds
 
-        if (state.isEditing) {
-            const oldCode = state.currentShelfCode;
-            formData.append('old_code', oldCode);
-            if (oldCode !== code) formData.append('new_code', code);
+    // Helper to get blob from original image (clean)
+    const getOriginalBlob = () => {
+        return new Promise(resolve => {
+            if (!state.currentImage) return resolve(null);
+            try {
+                const tempCanvas = document.createElement('canvas');
+                tempCanvas.width = state.currentImage.width;
+                tempCanvas.height = state.currentImage.height;
+                const ctx = tempCanvas.getContext('2d');
+                ctx.drawImage(state.currentImage, 0, 0);
+                tempCanvas.toBlob(blob => resolve(blob), 'image/png');
+            } catch (e) {
+                console.error('Error creating original blob:', e);
+                resolve(null);
+            }
+        });
+    };
 
-            console.log('Updating shelf via /api/update_shelf');
-            fetch('/api/update_shelf', {
-                method: 'POST',
-                body: formData
-            })
-            .then(r => r.json())
-            .then(data => {
-                console.log('Update response:', data);
-                if (data.success) {
-                    showSuccess('Shelf updated successfully!');
-                    state.isEditing = false;
-                    state.currentShelfCode = '';
-                    cancelAdd();
-                    loadData();
-                } else {
-                    showError(data.error || 'Failed to update shelf');
-                    saveBtn.disabled = false;
-                    saveBtn.innerHTML = originalBtnText;
-                }
-            })
-            .catch(err => {
-                console.error('Update error:', err);
-                showError('Error updating shelf: ' + err.message);
+    try {
+        // Convert canvas to blob
+        state.canvas.toBlob(async blob => {
+            if (!blob) {
+                clearTimeout(safetyTimeout);
+                console.error('Failed to create blob from canvas');
+                showError('Failed to process image');
                 saveBtn.disabled = false;
                 saveBtn.innerHTML = originalBtnText;
-            });
-        } else {
-            formData.append('code', code);
-            // Add group_id if we are inside a group
-            if (state.currentGroupId) {
-                formData.append('group_id', state.currentGroupId);
-                console.log('Adding to group:', state.currentGroupId);
+                return;
             }
             
-            console.log('Creating new shelf via /api/upload_shelf');
-            fetch('/api/upload_shelf', {
-                method: 'POST',
-                body: formData
-            })
-            .then(r => {
-                console.log('Upload response status:', r.status);
-                return r.json();
-            })
-            .then(data => {
-                console.log('Upload response data:', data);
-                if (data.success) {
-                    showSuccess('Shelf saved successfully!');
-                    cancelAdd();
-                    loadData();
-                } else {
-                    showError(data.error || 'Failed to save shelf');
+            console.log('Blob created, size:', blob.size);
+            const formData = new FormData();
+            formData.append('image', blob, `${code}.png`);
+            
+            // Also save original image (clean)
+            const origBlob = await getOriginalBlob();
+            if (origBlob) {
+                console.log('Original blob created, size:', origBlob.size);
+                formData.append('original_image', origBlob, `${code}.png`);
+            }
+
+            if (state.isEditing) {
+                const oldCode = state.currentShelfCode;
+                formData.append('old_code', oldCode);
+                if (oldCode !== code) formData.append('new_code', code);
+
+                console.log('Updating shelf via /api/update_shelf');
+                fetch('/api/update_shelf', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(r => r.json())
+                .then(data => {
+                    clearTimeout(safetyTimeout);
+                    console.log('Update response:', data);
+                    if (data.success) {
+                        showSuccess('Shelf updated successfully!');
+                        state.isEditing = false;
+                        state.currentShelfCode = '';
+                        cancelAdd();
+                        loadData();
+                    } else {
+                        showError(data.error || 'Failed to update shelf');
+                        saveBtn.disabled = false;
+                        saveBtn.innerHTML = originalBtnText;
+                    }
+                })
+                .catch(err => {
+                    clearTimeout(safetyTimeout);
+                    console.error('Update error:', err);
+                    showError('Error updating shelf: ' + err.message);
                     saveBtn.disabled = false;
                     saveBtn.innerHTML = originalBtnText;
+                });
+            } else {
+                formData.append('code', code);
+                // Add group_id if we are inside a group
+                if (state.currentGroupId) {
+                    formData.append('group_id', state.currentGroupId);
+                    console.log('Adding to group:', state.currentGroupId);
                 }
-            })
-            .catch(err => {
-                console.error('Save error:', err);
-                showError('Error saving shelf: ' + err.message);
-                saveBtn.disabled = false;
-                saveBtn.innerHTML = originalBtnText;
-            });
-        }
-    }, 'image/png');
+                
+                console.log('Creating new shelf via /api/upload_shelf');
+                fetch('/api/upload_shelf', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(r => {
+                    console.log('Upload response status:', r.status);
+                    return r.json();
+                })
+                .then(data => {
+                    clearTimeout(safetyTimeout);
+                    console.log('Upload response data:', data);
+                    if (data.success) {
+                        showSuccess('Shelf saved successfully!');
+                        cancelAdd();
+                        loadData();
+                    } else {
+                        showError(data.error || 'Failed to save shelf');
+                        saveBtn.disabled = false;
+                        saveBtn.innerHTML = originalBtnText;
+                    }
+                })
+                .catch(err => {
+                    clearTimeout(safetyTimeout);
+                    console.error('Save error:', err);
+                    showError('Error saving shelf: ' + err.message);
+                    saveBtn.disabled = false;
+                    saveBtn.innerHTML = originalBtnText;
+                });
+            }
+        }, 'image/png');
+    } catch (e) {
+        clearTimeout(safetyTimeout);
+        console.error('Error in save process:', e);
+        showError('Error preparing save: ' + e.message);
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = originalBtnText;
+    }
 }
 
 // ============================================================================
@@ -1436,11 +1661,20 @@ function saveShelf() {
 
 function deleteShelf() {
     const code = state.currentShelfCode;
-    if (!code) return;
+    if (!code) {
+        showError('No shelf selected');
+        return;
+    }
     
     if (!confirm(`Delete shelf ${code}? This cannot be undone.`)) return;
     
     console.log('Deleting shelf:', code);
+    
+    // Show loading state
+    const btn = document.getElementById('delete-shelf-btn');
+    const originalText = btn.innerHTML;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Deleting...';
+    btn.disabled = true;
     
     fetch('/api/delete_shelf', {
         method: 'POST',
@@ -1462,6 +1696,59 @@ function deleteShelf() {
     .catch(err => {
         console.error('Delete error:', err);
         showError('Error: ' + err.message);
+    })
+    .finally(() => {
+        // Restore button state
+        btn.innerHTML = originalText;
+        btn.disabled = false;
+    });
+}
+
+/**
+ * Duplicate the current shelf
+ */
+function duplicateShelf() {
+    const code = state.currentShelfCode;
+    if (!code) {
+        showError('No shelf selected');
+        return;
+    }
+    
+    if (!confirm(`Duplicate shelf ${code}?`)) return;
+    
+    console.log('Duplicating shelf:', code);
+    
+    // Show loading state
+    const btn = document.getElementById('duplicate-shelf-btn');
+    const originalText = btn.innerHTML;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Copying...';
+    btn.disabled = true;
+    
+    fetch('/api/duplicate_shelf', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ code: code })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            showSuccess(`Duplicated as ${data.new_code}`);
+            closeModal();
+            loadData();
+        } else {
+            showError(data.error || 'Failed to duplicate shelf');
+        }
+    })
+    .catch(err => {
+        console.error('Duplicate error:', err);
+        showError('Error: ' + err.message);
+    })
+    .finally(() => {
+        // Restore button state
+        btn.innerHTML = originalText;
+        btn.disabled = false;
     });
 }
 
@@ -1478,129 +1765,139 @@ function printQRCodes() {
         return;
     }
     
-    console.log('Generating QR codes for:', Array.from(state.selectedShelves));
+    showSuccess('Preparing print job...');
     
-    // Create print window
-    const printWindow = window.open('', '_blank');
+    // Load QRCode library if needed
+    const loadLib = () => {
+        return new Promise((resolve) => {
+            if (window.QRCode) return resolve();
+            const script = document.createElement('script');
+            script.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js';
+            script.onload = resolve;
+            document.head.appendChild(script);
+        });
+    };
     
-    // Build HTML for print page
-    const html = `
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>Shelf QR Codes</title>
-            <style>
-                @page {
-                    size: letter;
-                    margin: 0.5in;
+    loadLib().then(() => {
+        // Create print area
+        let printArea = document.getElementById('print-area');
+        if (!printArea) {
+            printArea = document.createElement('div');
+            printArea.id = 'print-area';
+            document.body.appendChild(printArea);
+        }
+        printArea.innerHTML = ''; // Clear previous
+        
+        // Add styles
+        let style = document.getElementById('print-styles');
+        if (!style) {
+            style = document.createElement('style');
+            style.id = 'print-styles';
+            style.textContent = `
+                @media print {
+                    body > *:not(#print-area) {
+                        display: none !important;
+                    }
+                    #print-area {
+                        display: block !important;
+                        position: absolute;
+                        top: 0;
+                        left: 0;
+                        width: 100%;
+                        background: white;
+                        z-index: 9999;
+                    }
+                    @page {
+                        size: letter;
+                        margin: 0.5in;
+                    }
                 }
-                
-                * {
-                    margin: 0;
-                    padding: 0;
-                    box-sizing: border-box;
+                @media screen {
+                    #print-area {
+                        display: none;
+                    }
                 }
-                
-                body {
-                    font-family: Arial, sans-serif;
-                    background: white;
-                }
-                
                 .qr-grid {
                     display: grid;
-                    grid-template-columns: repeat(4, 2in);
-                    gap: 0.25in;
+                    /* Fit 3 items per row on standard letter paper (7.5in printable width) */
+                    /* 2.4in allows for 2in QR + padding + borders without scaling down */
+                    grid-template-columns: repeat(auto-fill, 2.4in);
+                    gap: 0.1in;
                     padding: 0;
                 }
-                
                 .qr-item {
-                    width: 2in;
-                    height: 2.5in;
+                    width: 2.25in;
                     display: flex;
                     flex-direction: column;
                     align-items: center;
                     justify-content: center;
                     page-break-inside: avoid;
                     border: 1px dashed #ccc;
-                    padding: 0.1in;
+                    padding: 0.125in;
+                    box-sizing: border-box;
                 }
-                
                 .qr-code {
-                    width: 2in;
-                    height: 2in;
+                    width: 2in !important;
+                    height: 2in !important;
                     display: flex;
                     align-items: center;
                     justify-content: center;
                 }
-                
-                .qr-code canvas {
-                    max-width: 100%;
-                    max-height: 100%;
+                .qr-code img, .qr-code canvas {
+                    width: 2in !important;
+                    height: 2in !important;
+                    max-width: none !important;
+                    max-height: none !important;
                 }
-                
                 .qr-label {
                     margin-top: 0.1in;
                     font-size: 14pt;
                     font-weight: bold;
                     text-align: center;
                     color: #000;
+                    word-break: break-all;
                 }
-                
-                @media print {
-                    .qr-item {
-                        border: none;
-                    }
-                }
-            </style>
-            <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-        </head>
-        <body>
-            <div class="qr-grid" id="qr-grid"></div>
-            <script>
-                const codes = ${JSON.stringify(Array.from(state.selectedShelves))};
-                const grid = document.getElementById('qr-grid');
-                
-                codes.forEach(code => {
-                    // Create item container
-                    const item = document.createElement('div');
-                    item.className = 'qr-item';
-                    
-                    // Create QR code container
-                    const qrDiv = document.createElement('div');
-                    qrDiv.className = 'qr-code';
-                    qrDiv.id = 'qr-' + code;
-                    
-                    // Create label
-                    const label = document.createElement('div');
-                    label.className = 'qr-label';
-                    label.textContent = code;
-                    
-                    item.appendChild(qrDiv);
-                    item.appendChild(label);
-                    grid.appendChild(item);
-                    
-                    // Generate QR code
-                    new QRCode(qrDiv, {
-                        text: code,
-                        width: 192,  // 2 inches at 96 DPI
-                        height: 192,
-                        colorDark: '#000000',
-                        colorLight: '#ffffff',
-                        correctLevel: QRCode.CorrectLevel.H
-                    });
-                });
-                
-                // Auto-print after QR codes are generated
-                setTimeout(() => {
-                    window.print();
-                }, 500);
-            </script>
-        </body>
-        </html>
-    `;
-    
-    printWindow.document.write(html);
-    printWindow.document.close();
+            `;
+            document.head.appendChild(style);
+        }
+        
+        // Build content
+        const grid = document.createElement('div');
+        grid.className = 'qr-grid';
+        printArea.appendChild(grid);
+        
+        const codes = Array.from(state.selectedShelves);
+        
+        codes.forEach(code => {
+            const item = document.createElement('div');
+            item.className = 'qr-item';
+            
+            const qrDiv = document.createElement('div');
+            qrDiv.className = 'qr-code';
+            
+            const label = document.createElement('div');
+            label.className = 'qr-label';
+            label.textContent = code;
+            
+            item.appendChild(qrDiv);
+            item.appendChild(label);
+            grid.appendChild(item);
+            
+            new QRCode(qrDiv, {
+                text: code,
+                width: 192,
+                height: 192,
+                colorDark: '#000000',
+                colorLight: '#ffffff',
+                correctLevel: QRCode.CorrectLevel.H
+            });
+        });
+        
+        // Wait for images to render
+        setTimeout(() => {
+            window.print();
+        }, 1000);
+    });
 }
 
 // ============================================================================

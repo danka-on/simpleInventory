@@ -10,3 +10,21 @@ CLEAR_SQL: table=INVENTORY loc_cols=['ITEM_POSITION'] code='or1s6' updated=12
 CLEAR_RESULT: updated=12, loc_cols=['ITEM_POSITION']
 CLEAR_FINAL: code='or1s6' inventory_updated=12 searchrack_updated=3
 SHELF_RENAME: 2025-11-25 12:44:25 39FA1FBC -> h1 searchRack_updated=0
+SHELF_RENAME: 2025-11-26 14:31:08 omr2s2 -> omr2s2(old) searchRack_updated=0
+SHELF_RENAME: 2025-11-26 14:31:47 omr2s2dupe1 -> omr2s2 searchRack_updated=0
+SHELF_RENAME: 2025-11-26 14:32:43 omr2s2dupe3 -> omr2s1 searchRack_updated=0
+SHELF_RENAME: 2025-11-26 14:35:22 or4s5dupe4 -> or4s4 searchRack_updated=0
+SHELF_RENAME: 2025-11-26 14:35:35 or4s5dupe3 -> or4s3 searchRack_updated=0
+SHELF_RENAME: 2025-11-26 14:35:50 or4s5dupe2 -> or4s2 searchRack_updated=0
+SHELF_RENAME: 2025-11-26 14:36:09 or4s5dupe1 -> or4s1 searchRack_updated=0
+SHELF_RENAME: 2025-11-26 14:40:20 or5s5dupe1 -> or5s4 searchRack_updated=0
+SHELF_RENAME: 2025-11-26 14:40:37 or5s5dupe2 -> or5s3 searchRack_updated=0
+SHELF_RENAME: 2025-11-26 14:40:46 or5s5dupe3 -> or5s2 searchRack_updated=0
+SHELF_RENAME: 2025-11-26 14:41:09 or5s5dupe4 -> or5s1 searchRack_updated=0
+SHELF_RENAME: 2025-11-26 14:42:44 or5s1dupe1 -> or5s111 searchRack_updated=0
+SHELF_RENAME: 2025-11-26 14:49:54 or5s111dupe1 -> or5s111dupe11 searchRack_updated=0
+SHELF_RENAME: 2025-11-26 14:54:41 or6s6dupe5 -> or6s5 searchRack_updated=0
+SHELF_RENAME: 2025-11-26 14:55:03 or6s6dupe4 -> or6s4 searchRack_updated=0
+SHELF_RENAME: 2025-11-26 14:55:24 or6s6dupe3 -> or6s3 searchRack_updated=0
+SHELF_RENAME: 2025-11-26 14:55:48 or6s6dupe2 -> or6s2 searchRack_updated=0
+SHELF_RENAME: 2025-11-26 14:56:32 or6s6dupe1 -> or6s1 searchRack_updated=0
