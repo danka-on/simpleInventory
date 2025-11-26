@@ -2260,7 +2260,7 @@ def item_prep_diagnostic_view_page():
         conn = sqlite3.connect('bol.db')
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
-        cur.execute('SELECT status, reason, note, updated_at FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (upc,))
+        cur.execute('SELECT status, reason, note, updated_at, quantity FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (upc,))
         row = cur.fetchone()
         status = dict(row) if row else None
         cur.execute("SELECT id, image_path, created_at FROM items_prep_images WHERE upc = ? COLLATE NOCASE AND (deleted_at IS NULL OR TRIM(COALESCE(deleted_at,'')) = '') ORDER BY created_at DESC, id DESC", (upc,))
@@ -2268,6 +2268,11 @@ def item_prep_diagnostic_view_page():
         cur.execute('SELECT id, upc, item_description, image_url, lot_number, bol_number, import_date, list_status, quantity FROM bol_items WHERE upc = ? COLLATE NOCASE LIMIT 1', (upc,))
         b = cur.fetchone()
         bol = dict(b) if b else None
+        
+        # If item has prep status with quantity, use that instead of bol quantity
+        if bol and status and status.get('quantity') is not None:
+            bol['quantity'] = status['quantity']
+        
         conn.close()
     except Exception as e:
         print('Diagnostic view load error:', e)
@@ -3051,7 +3056,7 @@ def api_items_prep_status():
                 existing_prep_row = cur.fetchone()
                 if existing_prep_row:
                     existing_status = existing_prep_row[0]
-                    existing_qty = existing_prep_row[1] or 0
+                    existing_qty = existing_prep_row[1] if existing_prep_row[1] is not None else 0
                     
                     if existing_status == 'good':
                         # Add to existing GOOD quantity
@@ -3293,21 +3298,21 @@ def api_items_prep_allocate_lots():
             
             print(f'[GOOD-LOT] {base_upc} LOT {lot_number}: moved {qty} from unchecked to good (good: {current_good}→{new_good}, unchecked: {current_unchecked}→{new_unchecked})')
         
-        # Update prep status with total quantity across all LOTs
-        cur.execute('''
-            SELECT SUM(good_qty) 
-            FROM bol_items 
-            WHERE upc = ? COLLATE NOCASE AND (temporary IS NULL OR temporary = 0)
-        ''', (base_upc,))
-        total_good = cur.fetchone()[0] or 0
+        # Update prep status with ONLY the quantity allocated in this request (not the LOT's total good_qty)
+        # This prevents adding the entire LOT quantity when user only specifies a smaller qty
+        cur.execute('SELECT quantity FROM items_prep_status WHERE upc = ? AND status = ? COLLATE NOCASE', (base_upc, 'good'))
+        existing_row = cur.fetchone()
+        existing_qty = existing_row[0] if existing_row else 0
         
-        cur.execute('SELECT upc FROM items_prep_status WHERE upc = ? AND status = ? COLLATE NOCASE', (base_upc, 'good'))
-        if cur.fetchone():
+        # Add only the quantity allocated in this request
+        new_prep_qty = existing_qty + total_qty_allocated
+        
+        if existing_row:
             cur.execute('UPDATE items_prep_status SET quantity = ?, updated_at = ? WHERE upc = ? AND status = ? COLLATE NOCASE',
-                       (total_good, ts, base_upc, 'good'))
+                       (new_prep_qty, ts, base_upc, 'good'))
         else:
             cur.execute('INSERT INTO items_prep_status (upc, status, reason, note, quantity, updated_at) VALUES (?,?,?,?,?,?)',
-                       (base_upc, 'good', reason, note, total_good, ts))
+                       (base_upc, 'good', reason, note, new_prep_qty, ts))
         
         conn.commit()
         conn.close()
@@ -3316,7 +3321,7 @@ def api_items_prep_allocate_lots():
             'success': True,
             'upc': base_upc,
             'total_qty': total_qty_allocated,
-            'total_good': total_good,
+            'total_good': new_prep_qty,
             'lots_updated': results
         })
         
@@ -3498,6 +3503,14 @@ def api_bol_items_update_quantity():
         else:
             # Old behavior
             cur.execute('UPDATE bol_items SET quantity = ? WHERE upc = ? COLLATE NOCASE', (quantity, upc))
+        
+        # Also update items_prep_status.quantity if the item has been prepped (status exists)
+        _ensure_items_prep_tables()
+        cur.execute('SELECT status FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (upc,))
+        prep_row = cur.fetchone()
+        if prep_row:
+            # Item has prep status, update its prep quantity too
+            cur.execute('UPDATE items_prep_status SET quantity = ? WHERE upc = ? COLLATE NOCASE', (quantity, upc))
         
         conn.commit()
         conn.close()
@@ -4538,7 +4551,7 @@ def api_bol_items():
             ('b.good_qty, ' if has_good_qty else '') +
             ('b.bad_qty, ' if has_bad_qty else '') +
             ('b.unchecked_qty, ' if has_unchecked_qty else '') +
-            's.status as prep_status, s.reason as prep_reason, s.note as prep_note, s.updated_at as prep_updated_at '
+            's.status as prep_status, s.reason as prep_reason, s.note as prep_note, s.updated_at as prep_updated_at, s.quantity as prep_quantity '
             'FROM bol_items b '
             'LEFT JOIN items_prep_status s ON s.upc = b.upc '
             + where_sql + order_sql
@@ -4598,9 +4611,12 @@ def api_bol_items():
             last_edited = r.get('prep_updated_at') or r.get('import_date') or ''
             status = (r.get('prep_status') or 'unchecked').strip().lower()
             
-            # Use the regular quantity field - the new good_qty/bad_qty system is only for
-            # internal tracking during GOOD<->BAD conversions
-            display_qty = r.get('quantity') or 1
+            # For GOOD status, use prep_quantity from items_prep_status (if available)
+            # For other statuses, use the bol_items quantity
+            if status == 'good' and r.get('prep_quantity') is not None:
+                display_qty = r.get('prep_quantity')
+            else:
+                display_qty = r.get('quantity') or 1
             
             results.append({
                 'id': r.get('id'),

@@ -512,13 +512,34 @@
             }
         }
         
+        // Validate barcode format (reject invalid formats)
+        function isValidBarcode(code) {
+            // Must be all digits
+            if (!/^\d+$/.test(code)) {
+                return false;
+            }
+            
+            // Valid lengths: 8 (UPC-E), 11, 12 (UPC-A), 13 (EAN-13), 14 (GTIN-14)
+            const len = code.length;
+            if (len < 8 || len > 14) {
+                return false;
+            }
+            
+            // Reject if longer than 14 digits (Macy's internal codes, etc.)
+            if (len > 14) {
+                return false;
+            }
+            
+            return true;
+        }
+        
         // Add barcode to list
         function addBarcode(code) {
-            // Validate barcode (no leading letters)
-            if (/^[a-zA-Z]/.test(code)) {
+            // Validate barcode format
+            if (!isValidBarcode(code)) {
                 playErrorBeep();
                 barcodeInput.style.background = '#ffdddd';
-                barcodeInput.value = '❌ NOT A BARCODE';
+                barcodeInput.value = '❌ INVALID BARCODE';
                 setTimeout(() => {
                     barcodeInput.style.background = 'white';
                     barcodeInput.value = '';

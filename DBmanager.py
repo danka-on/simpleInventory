@@ -634,7 +634,8 @@ def store_ebay_order(order):
             location_val,
             barcode_val,
             'ebay',
-            order.get('shipping_cost')
+            order.get('shipping_cost'),
+            lot_number_val
         )
     )
     conn.commit()

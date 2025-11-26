@@ -20,12 +20,18 @@ const state = {
     canvas: null,
     ctx: null,
     isDrawing: false,
+    isDragging: false,
+    isResizing: false,
+    dragHandle: null, // 'move', 'nw', 'ne', 'sw', 'se'
+    dragStartX: 0,
+    dragStartY: 0,
     startX: 0,
     startY: 0,
     rectX: 0,
     rectY: 0,
     rectW: 0,
-    rectH: 0
+    rectH: 0,
+    handleSize: 30 // Size of corner handles for touch
 };
 
 // ============================================================================
@@ -1000,21 +1006,241 @@ function stopCamera() {
 // ============================================================================
 
 /**
- * Setup canvas for rectangle drawing
+ * Setup canvas for rectangle drawing with move/resize
  */
 function setupCanvas() {
     state.canvas = document.getElementById('editor-canvas');
     state.ctx = state.canvas.getContext('2d');
     
     // Mouse events
-    state.canvas.addEventListener('mousedown', startDrawing);
-    state.canvas.addEventListener('mousemove', draw);
-    state.canvas.addEventListener('mouseup', stopDrawing);
+    state.canvas.addEventListener('mousedown', handleMouseDown);
+    state.canvas.addEventListener('mousemove', handleMouseMove);
+    state.canvas.addEventListener('mouseup', handleMouseUp);
+    state.canvas.addEventListener('mouseout', handleMouseUp);
     
     // Touch events
-    state.canvas.addEventListener('touchstart', handleTouchStart);
-    state.canvas.addEventListener('touchmove', handleTouchMove);
-    state.canvas.addEventListener('touchend', stopDrawing);
+    state.canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
+    state.canvas.addEventListener('touchmove', handleTouchMove, { passive: false });
+    state.canvas.addEventListener('touchend', handleTouchEnd, { passive: false });
+}
+
+/**
+ * Check if point is inside rectangle
+ */
+function isInsideRect(x, y) {
+    const rx = state.rectX;
+    const ry = state.rectY;
+    const rw = state.rectW;
+    const rh = state.rectH;
+    
+    // Normalize negative dimensions
+    const minX = rw >= 0 ? rx : rx + rw;
+    const maxX = rw >= 0 ? rx + rw : rx;
+    const minY = rh >= 0 ? ry : ry + rh;
+    const maxY = rh >= 0 ? ry + rh : ry;
+    
+    return x >= minX && x <= maxX && y >= minY && y <= maxY;
+}
+
+/**
+ * Get which handle (if any) is being touched
+ */
+function getHandle(x, y) {
+    const h = state.handleSize;
+    const rx = state.rectX;
+    const ry = state.rectY;
+    const rw = state.rectW;
+    const rh = state.rectH;
+    
+    // Normalize rectangle coordinates to handle negative dimensions
+    const minX = rw >= 0 ? rx : rx + rw;
+    const maxX = rw >= 0 ? rx + rw : rx;
+    const minY = rh >= 0 ? ry : ry + rh;
+    const maxY = rh >= 0 ? ry + rh : ry;
+    
+    // Check corners first (for resizing)
+    if (Math.abs(x - minX) < h && Math.abs(y - minY) < h) return 'nw';
+    if (Math.abs(x - maxX) < h && Math.abs(y - minY) < h) return 'ne';
+    if (Math.abs(x - minX) < h && Math.abs(y - maxY) < h) return 'sw';
+    if (Math.abs(x - maxX) < h && Math.abs(y - maxY) < h) return 'se';
+    
+    // Check if inside rect (for moving) - only if rect is reasonably sized
+    if (Math.abs(rw) > h * 2 && Math.abs(rh) > h * 2) {
+        if (isInsideRect(x, y)) return 'move';
+    }
+    
+    return null;
+}
+
+/**
+ * Redraw canvas with image and rectangle
+ */
+function redrawCanvas() {
+    if (!state.currentImage) return;
+    
+    // Clear and redraw image
+    state.ctx.clearRect(0, 0, state.canvas.width, state.canvas.height);
+    state.ctx.drawImage(state.currentImage, 0, 0, state.canvas.width, state.canvas.height);
+    
+    // Draw rectangle if it exists
+    if (state.rectW !== 0 || state.rectH !== 0) {
+        const rx = state.rectX;
+        const ry = state.rectY;
+        const rw = state.rectW;
+        const rh = state.rectH;
+        
+        // Draw rectangle
+        state.ctx.strokeStyle = '#00ff00';
+        state.ctx.lineWidth = 3;
+        state.ctx.strokeRect(rx, ry, rw, rh);
+        
+        // Draw corner handles (only when not actively drawing)
+        if (!state.isDrawing && Math.abs(rw) > 10 && Math.abs(rh) > 10) {
+            const h = 12; // Visual handle size
+            state.ctx.fillStyle = '#00ff00';
+            
+            // Normalize coordinates for handles
+            const minX = rw >= 0 ? rx : rx + rw;
+            const maxX = rw >= 0 ? rx + rw : rx;
+            const minY = rh >= 0 ? ry : ry + rh;
+            const maxY = rh >= 0 ? ry + rh : ry;
+            
+            // Top-left
+            state.ctx.fillRect(minX - h/2, minY - h/2, h, h);
+            // Top-right
+            state.ctx.fillRect(maxX - h/2, minY - h/2, h, h);
+            // Bottom-left
+            state.ctx.fillRect(minX - h/2, maxY - h/2, h, h);
+            // Bottom-right
+            state.ctx.fillRect(maxX - h/2, maxY - h/2, h, h);
+        }
+    }
+}
+
+/**
+ * Start action (draw/drag/resize)
+ */
+function startAction(x, y) {
+    console.log('Action start at:', x, y);
+    
+    // Only check for existing rectangle handles if we have a valid rectangle
+    const hasValidRect = state.rectW !== 0 && state.rectH !== 0 && 
+                         Math.abs(state.rectW) > 5 && Math.abs(state.rectH) > 5;
+    
+    if (hasValidRect) {
+        const handle = getHandle(x, y);
+        if (handle) {
+            state.dragHandle = handle;
+            state.isDragging = handle === 'move';
+            state.isResizing = handle !== 'move';
+            state.dragStartX = x;
+            state.dragStartY = y;
+            return;
+        }
+    }
+    
+    // Start drawing new rectangle
+    state.isDrawing = true;
+    state.startX = x;
+    state.startY = y;
+    state.rectX = x;
+    state.rectY = y;
+    state.rectW = 0;
+    state.rectH = 0;
+}
+
+/**
+ * Move action
+ */
+function moveAction(x, y) {
+    if (state.isDrawing) {
+        state.rectW = x - state.startX;
+        state.rectH = y - state.startY;
+        redrawCanvas();
+    } else if (state.isDragging) {
+        const dx = x - state.dragStartX;
+        const dy = y - state.dragStartY;
+        state.rectX += dx;
+        state.rectY += dy;
+        state.dragStartX = x;
+        state.dragStartY = y;
+        redrawCanvas();
+    } else if (state.isResizing) {
+        const dx = x - state.dragStartX;
+        const dy = y - state.dragStartY;
+        
+        switch (state.dragHandle) {
+            case 'nw': state.rectX += dx; state.rectY += dy; state.rectW -= dx; state.rectH -= dy; break;
+            case 'ne': state.rectY += dy; state.rectW += dx; state.rectH -= dy; break;
+            case 'sw': state.rectX += dx; state.rectW -= dx; state.rectH += dy; break;
+            case 'se': state.rectW += dx; state.rectH += dy; break;
+        }
+        
+        state.dragStartX = x;
+        state.dragStartY = y;
+        redrawCanvas();
+    } else {
+        // Cursor updates (only relevant for mouse usually)
+        const handle = getHandle(x, y);
+        if (handle === 'move') state.canvas.style.cursor = 'move';
+        else if (handle) state.canvas.style.cursor = (handle === 'nw' || handle === 'se') ? 'nwse-resize' : 'nesw-resize';
+        else state.canvas.style.cursor = 'crosshair';
+    }
+}
+
+/**
+ * End action
+ */
+function endAction() {
+    if (state.isDrawing) {
+        state.isDrawing = false;
+        // Normalize negative width/height
+        if (state.rectW < 0) { state.rectX += state.rectW; state.rectW = Math.abs(state.rectW); }
+        if (state.rectH < 0) { state.rectY += state.rectH; state.rectH = Math.abs(state.rectH); }
+        redrawCanvas();
+    }
+    state.isDragging = false;
+    state.isResizing = false;
+    state.dragHandle = null;
+}
+
+// ============================================================================
+// EVENT HANDLERS
+// ============================================================================
+
+function handleMouseDown(e) {
+    const rect = state.canvas.getBoundingClientRect();
+    startAction(e.clientX - rect.left, e.clientY - rect.top);
+}
+
+function handleMouseMove(e) {
+    const rect = state.canvas.getBoundingClientRect();
+    moveAction(e.clientX - rect.left, e.clientY - rect.top);
+}
+
+function handleMouseUp(e) {
+    endAction();
+}
+
+function handleTouchStart(e) {
+    e.preventDefault();
+    if (e.touches.length > 1) return; // Ignore multi-touch
+    const rect = state.canvas.getBoundingClientRect();
+    const touch = e.touches[0];
+    startAction(touch.clientX - rect.left, touch.clientY - rect.top);
+}
+
+function handleTouchMove(e) {
+    e.preventDefault();
+    if (e.touches.length > 1) return;
+    const rect = state.canvas.getBoundingClientRect();
+    const touch = e.touches[0];
+    moveAction(touch.clientX - rect.left, touch.clientY - rect.top);
+}
+
+function handleTouchEnd(e) {
+    e.preventDefault();
+    endAction();
 }
 
 /**
@@ -1059,10 +1285,11 @@ function loadImageToEditor(dataUrl) {
         const replaceBtn = document.getElementById('replace-image-btn');
         if (replaceBtn) replaceBtn.style.display = 'inline-block';
         
-        // Ensure canvas is visible
+        // Ensure canvas is visible and has crosshair cursor
         state.canvas.style.display = 'block';
+        state.canvas.style.cursor = 'crosshair';
         
-        console.log('Editor container activated. You should now see the image and be able to draw rectangles.');
+        console.log('Editor container activated. You should now see the image and be able to draw/move rectangles.');
         
         // Update save button - image is now loaded
         updateSaveButton();
@@ -1076,78 +1303,7 @@ function loadImageToEditor(dataUrl) {
     img.src = dataUrl;
 }
 
-function startDrawing(e) {
-    state.isDrawing = true;
-    const rect = state.canvas.getBoundingClientRect();
-    state.startX = e.clientX - rect.left;
-    state.startY = e.clientY - rect.top;
-}
 
-function draw(e) {
-    if (!state.isDrawing || !state.currentImage) return;
-    e.preventDefault();
-    
-    const rect = state.canvas.getBoundingClientRect();
-    const currentX = e.clientX - rect.left;
-    const currentY = e.clientY - rect.top;
-    
-    // Redraw image
-    state.ctx.drawImage(state.currentImage, 0, 0, state.canvas.width, state.canvas.height);
-    
-    // Draw rectangle
-    state.rectW = currentX - state.startX;
-    state.rectH = currentY - state.startY;
-    
-    state.ctx.strokeStyle = '#00ff00';
-    state.ctx.lineWidth = 3;
-    state.ctx.strokeRect(state.startX, state.startY, state.rectW, state.rectH);
-}
-
-function stopDrawing() {
-    if (state.isDrawing) {
-        state.isDrawing = false;
-        state.rectX = state.startX;
-        state.rectY = state.startY;
-        console.log('Drawing stopped. Rectangle:', {
-            x: state.rectX,
-            y: state.rectY,
-            w: state.rectW,
-            h: state.rectH
-        });
-    }
-}
-
-function handleTouchStart(e) {
-    e.preventDefault();
-    console.log('Touch start');
-    const touch = e.touches[0];
-    const rect = state.canvas.getBoundingClientRect();
-    state.isDrawing = true;
-    state.startX = touch.clientX - rect.left;
-    state.startY = touch.clientY - rect.top;
-    console.log('Touch start at:', state.startX, state.startY);
-}
-
-function handleTouchMove(e) {
-    if (!state.isDrawing || !state.currentImage) return;
-    e.preventDefault();
-    
-    const touch = e.touches[0];
-    const rect = state.canvas.getBoundingClientRect();
-    const currentX = touch.clientX - rect.left;
-    const currentY = touch.clientY - rect.top;
-    
-    // Redraw image
-    state.ctx.drawImage(state.currentImage, 0, 0, state.canvas.width, state.canvas.height);
-    
-    // Draw rectangle
-    state.rectW = currentX - state.startX;
-    state.rectH = currentY - state.startY;
-    
-    state.ctx.strokeStyle = '#00ff00';
-    state.ctx.lineWidth = 3;
-    state.ctx.strokeRect(state.startX, state.startY, state.rectW, state.rectH);
-}
 
 // ============================================================================
 // STEP 5: SAVE FUNCTIONALITY
@@ -1180,9 +1336,7 @@ function saveShelf() {
     // Finalize canvas with rectangle if one was drawn
     if (state.rectW && state.rectH) {
         console.log('Drawing final rectangle on canvas');
-        state.ctx.strokeStyle = '#00ff00';
-        state.ctx.lineWidth = 3;
-        state.ctx.strokeRect(state.rectX, state.rectY, state.rectW, state.rectH);
+        redrawCanvas(); // Use redraw to ensure handles are not included in final image
     }
     
     console.log('Converting canvas to blob...');

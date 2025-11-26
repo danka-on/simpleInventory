@@ -426,21 +426,42 @@
 
         window.addEventListener('DOMContentLoaded', setupDeviceMode);
 
+        // Validate barcode format (reject invalid formats)
+        function isValidBarcode(code) {
+            // Must be all digits
+            if (!/^\d+$/.test(code)) {
+                return false;
+            }
+            
+            // Valid lengths: 8 (UPC-E), 11, 12 (UPC-A), 13 (EAN-13), 14 (GTIN-14)
+            const len = code.length;
+            if (len < 8 || len > 14) {
+                return false;
+            }
+            
+            // Reject if longer than 14 digits (Macy's internal codes, etc.)
+            if (len > 14) {
+                return false;
+            }
+            
+            return true;
+        }
+
         // Handle barcode input for tablet mode
         var barcodeInput = document.getElementById('barcodeTextInput');
         if (barcodeInput) {
             barcodeInput.addEventListener('change', function() {
                 var code = this.value.trim();
                 
-                // Check if code starts with a letter (not a valid barcode)
-                if (/^[a-zA-Z]/.test(code)) {
+                // Validate barcode format
+                if (!isValidBarcode(code)) {
                     // Play error beep
                     playErrorBeep();
                     
                     // Show error in the input
                     this.style.background = '#ffdddd';
                     this.style.color = '#d32f2f';
-                    this.value = '❌ NOT A BARCODE';
+                    this.value = '❌ INVALID BARCODE';
                     
                     // Clear error after 1.5 seconds
                     setTimeout(() => {
@@ -730,8 +751,8 @@
         // Ensure barcode is set in sessionStorage on successful scan or input
         // For camera scan (ZXing)
         function handleBarcodeScan(code) {
-            // Check if code starts with a letter (not a valid barcode)
-            if (/^[a-zA-Z]/.test(code)) {
+            // Validate barcode format
+            if (!isValidBarcode(code)) {
                 // Play error beep
                 playErrorBeep();
                 
@@ -740,7 +761,7 @@
                 const originalValue = resultInput.value;
                 const originalBg = resultInput.style.background;
                 
-                resultInput.value = '❌ NOT A BARCODE';
+                resultInput.value = '❌ INVALID BARCODE';
                 resultInput.style.background = '#ffdddd';
                 resultInput.style.color = '#d32f2f';
                 resultInput.style.fontWeight = 'bold';

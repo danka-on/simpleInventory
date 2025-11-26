@@ -139,7 +139,10 @@ function setFiltersFromURL(){
   if(q) document.getElementById('filter-q').value = q;
   if(lot) document.getElementById('filter-lot').value = lot;
   if(sort) document.getElementById('sort-select').value = sort;
-  if(status) document.getElementById('status-select').value = status;
+  // If status is explicitly set in URL, use it; otherwise leave as "All" (don't default to 'good')
+  if(status) {
+    document.getElementById('status-select').value = status;
+  }
   if(defect) document.getElementById('filter-defect').value = defect;
   const listedFlag = (p.get('listed') === 'true') || (p.get('status') === 'listed');
   const notListedFlag = (p.get('not_listed') === 'true') || (p.get('status') === 'not_listed');
@@ -197,10 +200,13 @@ function render(results){
     const img = esc(r.image||'');
     const thumb = img ? img.replace('s-l1600.jpg', 's-l140.jpg') : '';
     const upcRaw = r.upc||'';
-    // Strip leading zeros from UPC display
-    const upcStripped = upcRaw && /^\d+$/.test(String(upcRaw)) ? String(upcRaw).replace(/^0+/, '') : upcRaw;
-    const upc = esc(upcStripped);
-    // Extract base UPC without suffix for copy button
+    // Pad UPCs that are 11 digits or less to 12 digits for display/copy
+    // (Internal system still uses stripped version)
+    const upcPadded = (upcRaw.length > 0 && upcRaw.length <= 11 && /^\d+$/.test(upcRaw)) 
+      ? upcRaw.padStart(12, '0') 
+      : upcRaw;
+    const upc = esc(upcPadded);
+    // Extract base UPC without suffix for copy button (with padding)
     const baseUpc = upc.includes('-') ? upc.split('-')[0] : upc;
     const last_edited = esc(r.last_edited||'');
     const status = (r.status||'').toLowerCase();
@@ -592,9 +598,9 @@ async function loadItems(){
   if(q) params.set('q', q);
   if(sort) params.set('sort', sort); else params.set('sort', 'last_edited');
   if(status) params.set('status', status);
-  // Radio value logic: '' = all, 'listed' or 'not_listed'
-  if(listedVal === 'listed') params.set('status', 'listed');
-  else if(listedVal === 'not_listed') params.set('status', 'not_listed');
+  // Use 'listed' and 'not_listed' as separate params to avoid overwriting status
+  if(listedVal === 'listed') params.set('listed', 'true');
+  else if(listedVal === 'not_listed') params.set('not_listed', 'true');
   
   // First, fetch ALL results for stats calculation (without pagination)
   let allResults = [];
