@@ -4002,6 +4002,59 @@ def api_items_prep_delete_photo(photo_id):
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
+@app.route('/api/items_prep/set_display_image', methods=['POST'])
+def api_items_prep_set_display_image():
+    """Set a diagnostic photo as the display image for a UPC in bol_items.
+    JSON: { upc, photo_id } OR { upc, image_path }
+    Returns: { success, image_url }
+    """
+    try:
+        data = request.get_json() or {}
+        upc = _normalize_upc(data.get('upc', ''))
+        upc_n = upc.lstrip('0') if upc and upc.isdigit() else upc
+        photo_id = data.get('photo_id')
+        image_path = data.get('image_path')
+        
+        if not upc_n:
+            return jsonify({'success': False, 'error': 'Missing upc'}), 400
+        
+        # Get the image path from photo_id if provided
+        if photo_id and not image_path:
+            _ensure_items_prep_tables()
+            conn = sqlite3.connect('bol.db')
+            cur = conn.cursor()
+            cur.execute('SELECT image_path FROM items_prep_images WHERE id = ?', (photo_id,))
+            row = cur.fetchone()
+            if row:
+                image_path = row[0]
+            conn.close()
+        
+        if not image_path:
+            return jsonify({'success': False, 'error': 'Missing photo_id or image_path'}), 400
+        
+        # Convert relative path to full URL (items_prep/xxx.jpg -> http://host/static/items_prep/xxx.jpg)
+        # For simplicity, just store the relative path and let the frontend construct the URL
+        image_url = f"/static/{image_path}" if not image_path.startswith('/') else image_path
+        
+        # Update bol_items with the new image_url
+        conn = sqlite3.connect('bol.db')
+        cur = conn.cursor()
+        
+        # Update all entries with this UPC (base and suffixed) to use this image
+        cur.execute('UPDATE bol_items SET image_url = ? WHERE upc = ? COLLATE NOCASE', (image_url, upc_n))
+        updated = cur.rowcount
+        
+        conn.commit()
+        conn.close()
+        
+        print(f'[SET DISPLAY IMAGE] Updated {updated} bol_items entries for UPC {upc_n} with image_url: {image_url}')
+        
+        return jsonify({'success': True, 'image_url': image_url, 'updated': updated})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/api/items_prep/diagnostic/<upc>/trash', methods=['GET'])
 def api_items_prep_trash_list(upc):
     try:

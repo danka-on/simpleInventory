@@ -33,7 +33,7 @@
     .link{color:#2980b9;text-decoration:none}
     .link:hover{text-decoration:underline}
   /* Delete overlay for photos */
-  .thumb-wrap .del-photo{position:absolute;top:6px;right:6px;background:#e74c3c;color:#fff;border:none;border-radius:50%;width:26px;height:26px;line-height:26px;text-align:center;cursor:pointer;font-weight:700}
+  .thumb-wrap .del-photo{position:absolute;top:6px;right:6px;background:#e74c3c;color:#fff;border:none;border-radius:50%;width:26px;height:26px;line-height:26px;text-align:center;cursor:pointer;font-weight:700;z-index:2}
   .thumb-wrap .del-photo:hover{background:#c0392b}
     /* Modal */
     .modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:9999;align-items:center;justify-content:center}
@@ -68,9 +68,32 @@
 
   <div class="card">
     <div class="title-wrap">
-      {% if bol and bol.image_url %}
-        <img class="hero-img" src="{{ bol.image_url }}" alt="item image" onerror="this.style.display='none'">
-      {% endif %}
+      <div id="heroImgContainer">
+        {% if bol and bol.image_url %}
+          <img class="hero-img" id="heroImg" src="{{ bol.image_url }}" alt="item image" onerror="document.getElementById('heroImgContainer').innerHTML = document.getElementById('placeholderTemplate').innerHTML">
+        {% else %}
+          <div style="width:90px;height:90px;border-radius:10px;background:#f0f0f0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:4px;cursor:pointer" id="addDisplayImgPlaceholder" title="Add display image">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+              <circle cx="8.5" cy="8.5" r="1.5"/>
+              <polyline points="21 15 16 10 5 21"/>
+            </svg>
+            <button type="button" class="btn btnAddDisplayImg" style="background:#00b894;color:#fff;padding:4px 8px;font-size:0.75rem;border:none;cursor:pointer">Add Image</button>
+          </div>
+        {% endif %}
+      </div>
+      <input type="file" id="displayImgInput" accept="image/*" capture="environment" style="display:none">
+      <!-- Template for placeholder (used when image fails to load) -->
+      <template id="placeholderTemplate">
+        <div style="width:90px;height:90px;border-radius:10px;background:#f0f0f0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:4px;cursor:pointer" id="addDisplayImgPlaceholder" title="Add display image">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+            <circle cx="8.5" cy="8.5" r="1.5"/>
+            <polyline points="21 15 16 10 5 21"/>
+          </svg>
+          <button type="button" class="btn btnAddDisplayImg" style="background:#00b894;color:#fff;padding:4px 8px;font-size:0.75rem;border:none;cursor:pointer">Add Image</button>
+        </div>
+      </template>
       <div>
         <h2 class="title">{{ bol.item_description if bol else 'Item' }}</h2>
         <div class="muted">UPC: {{ upc }}</div>
@@ -136,9 +159,10 @@
     <div class="grid" id="photosGrid">
       {% for im in images %}
         {% set src = url_for('static', filename=im.image_path) %}
-        <div class="thumb-wrap" data-id="{{ im.id }}" style="position:relative">
-          <button class="del-photo" data-id="{{ im.id }}" title="Delete photo">✕</button>
-          <img class="thumb" src="{{ src }}" alt="photo" data-src="{{ src }}">
+        <div class="thumb-wrap" data-id="{{ im.id }}" data-path="{{ im.image_path }}" style="position:relative">
+          <button class="del-photo" data-id="{{ im.id }}" title="Delete photo" style="position:absolute;top:6px;right:6px;background:#e74c3c;color:#fff;border:none;border-radius:50%;width:26px;height:26px;line-height:26px;text-align:center;cursor:pointer;font-weight:700;z-index:2">✕</button>
+          <span class="display-badge" style="display:none;position:absolute;bottom:6px;left:6px;background:#00b894;color:#fff;padding:4px 8px;border-radius:6px;font-size:0.75rem;font-weight:600;z-index:2;box-shadow:0 2px 4px rgba(0,0,0,0.3)">DISPLAY</span>
+          <img class="thumb" src="{{ src }}" alt="photo" data-src="{{ src }}" data-id="{{ im.id }}" data-path="{{ im.image_path }}">
         </div>
       {% endfor %}
     </div>
@@ -152,7 +176,13 @@
   <div id="imgModal" class="modal">
     <div class="inner">
       <img id="modalImg" src="" alt="">
-      <div class="bar"><span>Tap anywhere to close</span> <a id="modalDownload" href="#" download>Download</a></div>
+      <div class="bar" style="display:flex;flex-direction:column;gap:10px">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span>Tap anywhere to close</span>
+          <a id="modalDownload" href="#" download>Download</a>
+        </div>
+        <button id="modalSetDisplay" class="btn" style="background:#00b894;color:#fff;padding:10px 20px;border-radius:8px;border:none;cursor:pointer;font-weight:600;width:100%">Set as Display Image</button>
+      </div>
     </div>
   </div>
 
@@ -230,14 +260,171 @@
       const modal = document.getElementById('imgModal');
       const modalImg = document.getElementById('modalImg');
       const modalDl = document.getElementById('modalDownload');
-      function openModal(src){ modalImg.src = src; modalDl.href = src; modal.style.display='flex'; }
-      function closeModal(){ modal.style.display='none'; modalImg.src=''; }
+      const modalSetDisplay = document.getElementById('modalSetDisplay');
+      let currentPhotoId = null;
+      let currentPhotoPath = null;
+      
+      function openModal(src, photoId, photoPath){ 
+        modalImg.src = src; 
+        modalDl.href = src; 
+        currentPhotoId = photoId;
+        currentPhotoPath = photoPath;
+        // Reset button state
+        if(modalSetDisplay){
+          modalSetDisplay.disabled = false;
+          modalSetDisplay.textContent = 'Set as Display Image';
+          modalSetDisplay.style.background = '#00b894';
+        }
+        modal.style.display='flex'; 
+      }
+      
+      function closeModal(e){ 
+        // Don't close if clicking on the set display button or download link
+        if(e && (e.target === modalSetDisplay || e.target === modalDl || modalSetDisplay.contains(e.target) || modalDl.contains(e.target))){
+          return;
+        }
+        modal.style.display='none'; 
+        modalImg.src=''; 
+        currentPhotoId = null;
+        currentPhotoPath = null;
+      }
+      
       document.querySelectorAll('.thumb').forEach(img=>{
-        img.addEventListener('click', ()=> openModal(img.getAttribute('data-src')));
+        img.addEventListener('click', (e)=>{
+          e.stopPropagation();
+          openModal(
+            img.getAttribute('data-src'),
+            img.getAttribute('data-id'),
+            img.getAttribute('data-path')
+          );
+        });
       });
+      
       modal.addEventListener('click', closeModal);
       document.addEventListener('keydown', (e)=>{ if(e.key==='Escape') closeModal(); });
+      
+      // Set display image from modal
+      if(modalSetDisplay){
+        modalSetDisplay.addEventListener('click', async (e)=>{
+          e.stopPropagation();
+          if(!currentPhotoId || !currentPhotoPath) return;
+          try{
+            modalSetDisplay.disabled = true;
+            modalSetDisplay.textContent = 'Setting...';
+            const res = await fetch('/api/items_prep/set_display_image', {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({ upc: '{{ upc }}', photo_id: currentPhotoId, image_path: currentPhotoPath })
+            });
+            const j = await res.json();
+            if(j.success){
+              modalSetDisplay.textContent = '✓ Set as Display!';
+              modalSetDisplay.style.background = '#2ecc71';
+              // Update hero image if it exists
+              const heroImg = document.getElementById('heroImg');
+              if(heroImg){
+                heroImg.src = j.image_url;
+              } else {
+                // Reload to show new display image
+                setTimeout(()=>{ window.location.reload(); }, 800);
+                return;
+              }
+              // Update display badges - hide all, show current
+              document.querySelectorAll('.display-badge').forEach(b=> b.style.display = 'none');
+              document.querySelectorAll('.thumb-wrap').forEach(wrap=>{
+                const imgPath = wrap.getAttribute('data-path');
+                if(imgPath === currentPhotoPath){
+                  const badge = wrap.querySelector('.display-badge');
+                  if(badge) badge.style.display = 'block';
+                }
+              });
+            } else {
+              alert('Failed to set display image: ' + (j.error || 'Unknown'));
+              modalSetDisplay.disabled = false;
+              modalSetDisplay.textContent = 'Set as Display Image';
+            }
+          }catch(e){
+            alert('Error: ' + e);
+            modalSetDisplay.disabled = false;
+            modalSetDisplay.textContent = 'Set as Display Image';
+          }
+        });
+      }
     })();
+
+    // Mark current display image on page load
+    (function(){
+      const currentDisplayUrl = '{{ bol.image_url if bol and bol.image_url else "" }}';
+      if(!currentDisplayUrl) return;
+      
+      // Extract the path from the full URL (e.g., /static/items_prep/xxx.jpg -> items_prep/xxx.jpg)
+      const pathMatch = currentDisplayUrl.match(/items_prep\/[^\/]+$/);
+      if(!pathMatch) return;
+      const currentPath = pathMatch[0];
+      
+      // Find and mark the matching thumbnail
+      document.querySelectorAll('.thumb-wrap').forEach(wrap=>{
+        const imgPath = wrap.getAttribute('data-path');
+        if(imgPath && imgPath.includes(currentPath)){
+          const badge = wrap.querySelector('.display-badge');
+          if(badge) badge.style.display = 'block';
+        }
+      });
+    })();
+
+    // Add display image from camera/file
+    (function(){
+      const fileInput = document.getElementById('displayImgInput');
+      if(!fileInput) return;
+      
+      const handleClick = (e)=> {
+        e.preventDefault();
+        e.stopPropagation();
+        fileInput.click();
+      };
+      
+      // Use event delegation to handle both initial and dynamically added buttons
+      document.addEventListener('click', (e)=>{
+        const btnAdd = e.target.closest('.btnAddDisplayImg');
+        const placeholder = e.target.closest('#addDisplayImgPlaceholder');
+        if(btnAdd || placeholder){
+          handleClick(e);
+        }
+      });
+      
+      fileInput.addEventListener('change', async ()=>{
+        const file = fileInput.files[0];
+        if(!file) return;
+        try{
+          const fd = new FormData();
+          fd.append('photo', file);
+          const res = await fetch('/api/items_prep/diagnostic/{{ upc }}/photos', {method:'POST', body: fd});
+          const j = await res.json();
+          if(!j.success || !j.images || j.images.length === 0){
+            alert('Failed to upload image: ' + (j.error || 'Unknown error'));
+            return;
+          }
+          const img = j.images[0];
+          // Set as display image
+          const setRes = await fetch('/api/items_prep/set_display_image', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ upc: '{{ upc }}', image_path: img.image_path })
+          });
+          const setJ = await setRes.json();
+          if(setJ.success){
+            // Reload page to show new display image
+            window.location.reload();
+          } else {
+            alert('Image uploaded but failed to set as display: ' + (setJ.error || 'Unknown'));
+          }
+        }catch(e){
+          alert('Error uploading display image: ' + e);
+        }
+      });
+    })();
+
+
 
     // Add quality badges based on image intrinsic size (LOW/MED/HIGH)
     (function(){
