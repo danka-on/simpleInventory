@@ -1818,44 +1818,41 @@ function printQRCodes() {
                     }
                 }
                 .qr-grid {
-                    display: grid;
-                    /* Fit 3 items per row on standard letter paper (7.5in printable width) */
-                    /* 2.4in allows for 2in QR + padding + borders without scaling down */
-                    grid-template-columns: repeat(auto-fill, 2.4in);
-                    gap: 0.1in;
+                    display: block;
                     padding: 0;
+                    font-size: 0; /* Eliminates whitespace between inline-block items */
                 }
                 .qr-item {
-                    width: 2.25in;
-                    display: flex;
-                    flex-direction: column;
-                    align-items: center;
-                    justify-content: center;
+                    display: inline-block;
+                    vertical-align: top;
+                    width: 1.75in;
+                    margin: 0.05in;
                     page-break-inside: avoid;
+                    break-inside: avoid; /* Standard property for preventing breaks */
                     border: 1px dashed #ccc;
                     padding: 0.125in;
                     box-sizing: border-box;
+                    text-align: center;
                 }
                 .qr-code {
-                    width: 2in !important;
-                    height: 2in !important;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
+                    width: 1.5in !important;
+                    height: 1.5in !important;
+                    display: inline-block;
                 }
                 .qr-code img, .qr-code canvas {
-                    width: 2in !important;
-                    height: 2in !important;
+                    width: 1.5in !important;
+                    height: 1.5in !important;
                     max-width: none !important;
                     max-height: none !important;
                 }
                 .qr-label {
                     margin-top: 0.1in;
-                    font-size: 14pt;
+                    font-size: 12pt;
                     font-weight: bold;
                     text-align: center;
                     color: #000;
                     word-break: break-all;
+                    font-family: sans-serif;
                 }
             `;
             document.head.appendChild(style);

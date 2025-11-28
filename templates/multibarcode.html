@@ -250,16 +250,6 @@
             100% { background: #2ecc71; }
         }
         
-        /* Auto-submit timer */
-        .timer-display {
-            text-align: center;
-            font-size: 1.1em;
-            color: #e74c3c;
-            font-weight: bold;
-            margin: 15px 0;
-            min-height: 25px;
-        }
-        
         /* Navigation buttons */
         .nav-buttons {
             display: flex;
@@ -336,9 +326,6 @@
         </div>
     </div>
     
-    <!-- Auto-submit timer -->
-    <div class="timer-display" id="timerDisplay"></div>
-    
     <button class="done-button" id="doneButton" disabled>
         <i class="fas fa-check-circle"></i> Done - Add Items to Shelf
     </button>
@@ -409,62 +396,6 @@
                 if (readerDiv) readerDiv.style.display = '';
                 // Initialize camera
                 setTimeout(initializeCamera, 100);
-            }
-        }
-        
-        // Auto-submit timer
-        let autoSubmitTimer = null;
-        let timerSeconds = 5;
-        let timerInterval = null;
-        const timerDisplay = document.getElementById('timerDisplay');
-        
-        function getAutoSubmitSeconds() {
-            // Get timer settings from localStorage (set in misc.html)
-            let seconds = 5;
-            const stored = localStorage.getItem('multibarcodeTimer');
-            if (stored && !isNaN(parseInt(stored))) {
-                seconds = Math.max(1, Math.min(60, parseInt(stored)));
-            }
-            return seconds;
-        }
-        
-        function startAutoSubmitTimer() {
-            // Clear any existing timer
-            clearAutoSubmitTimer();
-            
-            timerSeconds = getAutoSubmitSeconds();
-            timerDisplay.textContent = `Auto-submitting in ${timerSeconds}s...`;
-            timerDisplay.style.display = 'block';
-            
-            timerInterval = setInterval(() => {
-                timerSeconds--;
-                if (timerSeconds > 0) {
-                    timerDisplay.textContent = `Auto-submitting in ${timerSeconds}s...`;
-                } else {
-                    clearAutoSubmitTimer();
-                    timerDisplay.textContent = 'Submitting...';
-                    // Auto-submit if there are items
-                    if (barcodeItems.length > 0) {
-                        submitBarcodes();
-                    }
-                }
-            }, 1000);
-        }
-        
-        function clearAutoSubmitTimer() {
-            if (timerInterval) {
-                clearInterval(timerInterval);
-                timerInterval = null;
-            }
-            timerDisplay.textContent = '';
-            timerDisplay.style.display = 'none';
-        }
-        
-        function resetAutoSubmitTimer() {
-            if (barcodeItems.length > 0) {
-                startAutoSubmitTimer();
-            } else {
-                clearAutoSubmitTimer();
             }
         }
         
@@ -570,7 +501,6 @@
             
             // Update display and reset timer
             updateList();
-            resetAutoSubmitTimer();
         }
         
         // Remove one quantity of barcode from list
@@ -584,7 +514,6 @@
                 barcodeItems.splice(index, 1);
             }
             updateList();
-            resetAutoSubmitTimer();
         }
         
         // Update the barcode list display
@@ -692,8 +621,6 @@
         function submitBarcodes() {
             if (barcodeItems.length === 0) return;
             
-            clearAutoSubmitTimer();
-            
             // Expand quantities into individual barcodes
             const expandedBarcodes = [];
             barcodeItems.forEach(item => {
@@ -726,18 +653,15 @@
         
         // Navigation button handlers
         document.getElementById('backBtn').addEventListener('click', function() {
-            clearAutoSubmitTimer();
             window.location.href = '/position';
         });
         
         document.getElementById('skipBtn').addEventListener('click', function() {
-            clearAutoSubmitTimer();
             // Skip directly to add item page (empty barcode)
             window.location.href = '/additem';
         });
         
         document.getElementById('exitBtn').addEventListener('click', function() {
-            clearAutoSubmitTimer();
             // Clear all session storage and go home
             sessionStorage.removeItem('barcode');
             sessionStorage.removeItem('item_position');
