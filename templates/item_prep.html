@@ -28,6 +28,14 @@
   .qty-display{display:flex;flex-direction:column;gap:12px;margin:12px 0;padding:12px;background:#f8f9fa;border-radius:12px}
   .qty-number{font-size:2.2rem;font-weight:700;min-width:80px;text-align:center;color:#2c3e50}
   .qty-label{font-size:0.72rem;color:#7f8c8d;text-transform:uppercase;letter-spacing:1px;text-align:center;margin-bottom:6px}
+  .loading-overlay{position:absolute;top:0;left:0;right:0;bottom:0;background:rgba(255,255,255,0.9);display:flex;align-items:center;justify-content:center;z-index:10;border-radius:12px}
+  .spinner{border:3px solid #f3f3f3;border-top:3px solid #00b894;border-radius:50%;width:24px;height:24px;animation:spin 1s linear infinite}
+  @keyframes spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
+  .btn:disabled{opacity:0.5;cursor:not-allowed}
+  .loading-overlay{position:absolute;top:0;left:0;right:0;bottom:0;background:rgba(255,255,255,0.9);display:flex;align-items:center;justify-content:center;z-index:10;border-radius:12px}
+  .spinner{border:3px solid #f3f3f3;border-top:3px solid #00b894;border-radius:50%;width:24px;height:24px;animation:spin 1s linear infinite}
+  @keyframes spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
+  .btn:disabled{opacity:0.5;cursor:not-allowed}
   .qty-controls{display:flex;gap:12px;width:100%;align-items:center;justify-content:space-between}
   .qty-btn{font-size:2rem;font-weight:700;padding:12px 0;border:3px solid;border-radius:12px;cursor:pointer;background:#fff;transition:all 0.2s;flex:1;max-width:33vw}
     .qty-btn.plus{color:#00b894;border-color:#00b894}
@@ -102,12 +110,22 @@
 
     <div id="result" class="hidden" style="margin-top:12px">
       <div class="item">
-        <img id="thumb" class="thumb" src="" alt="thumb">
+        <div style="position:relative;display:inline-block">
+          <img id="thumb" class="thumb" src="" alt="thumb">
+          <button id="addThumbBtn" class="btn" style="display:none;position:absolute;top:0;left:0;right:0;bottom:0;background:#00b894;color:#fff;padding:12px;font-size:0.85rem;border:none;cursor:pointer;border-radius:12px;z-index:2;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px">
+            <span style="font-size:1.8rem">📷</span>
+            <span style="font-weight:600;letter-spacing:0.5px">TAKE PHOTO</span>
+          </button>
+          <div id="thumbLoadingOverlay" class="loading-overlay" style="display:none">
+            <div class="spinner"></div>
+          </div>
+        </div>
         <div>
           <div class="title" id="title"></div>
           <div class="muted"><span id="upcTxt"></span></div>
         </div>
       </div>
+      <input type="file" id="tempThumbInput" accept="image/*" capture="environment" style="display:none">
       <img id="hero" class="hero" src="" alt="item image" onerror="this.style.display='none'" style="margin-top:10px">
       <div id="prepSummary" class="muted" style="margin-top:8px"></div>
       <div id="qtyDisplay" class="qty-display hidden">
@@ -301,7 +319,21 @@
       }
       const it = j.item||{};
       currentUpc = it.upc || upc; // Store the actual UPC (may be suffixed if duplicate)
-      document.getElementById('thumb').src = it.image_url || missingThumb();
+      const thumbImg = document.getElementById('thumb');
+      const addThumbBtn = document.getElementById('addThumbBtn');
+      const hasImage = it.image_url && it.image_url.trim() && it.image_url !== 'nan' && it.image_url !== 'None';
+      
+      console.log('Item lookup:', {upc: it.upc, image_url: it.image_url, hasImage: hasImage});
+      
+      thumbImg.src = hasImage ? it.image_url : missingThumb();
+      // Show camera button if no image
+      if(addThumbBtn) {
+        addThumbBtn.style.display = hasImage ? 'none' : 'block';
+        console.log('Camera button display set to:', addThumbBtn.style.display);
+      } else {
+        console.error('addThumbBtn element not found!');
+      }
+      
       const hero = document.getElementById('hero'); hero.style.display=''; hero.src = it.image_url || '';
       document.getElementById('title').textContent = it.item_description || '';
       document.getElementById('upcTxt').textContent = it.upc || '';
@@ -326,6 +358,72 @@
     
 
     document.getElementById('lookupBtn').onclick = ()=>{ const v=document.getElementById('manualUpc').value.trim(); if(v) lookup(v); };
+    
+    // Temporary thumbnail upload
+    const addThumbBtn = document.getElementById('addThumbBtn');
+    const tempThumbInput = document.getElementById('tempThumbInput');
+    if(addThumbBtn && tempThumbInput){
+      addThumbBtn.onclick = (e)=>{
+        e.preventDefault();
+        e.stopPropagation();
+        tempThumbInput.click();
+      };
+      
+      tempThumbInput.onchange = async ()=>{
+        const file = tempThumbInput.files[0];
+        if(!file || !currentUpc) return;
+        
+        const loadingOverlay = document.getElementById('thumbLoadingOverlay');
+        const goodBtn = document.getElementById('goodBtn');
+        const badBtn = document.getElementById('badBtn');
+        
+        // Show loading, disable buttons
+        loadingOverlay.style.display = 'flex';
+        goodBtn.disabled = true;
+        badBtn.disabled = true;
+        
+        try{
+          const fd = new FormData();
+          fd.append('photo', file);
+          const res = await fetch('/api/items_prep/diagnostic/' + encodeURIComponent(currentUpc) + '/photos', {method:'POST', body: fd});
+          const j = await res.json();
+          if(!j.success || !j.images || j.images.length === 0){
+            alert('Failed to upload image: ' + (j.error || 'Unknown error'));
+            return;
+          }
+          const img = j.images[0];
+          // Set as display image
+          const setRes = await fetch('/api/items_prep/set_display_image', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ upc: currentUpc, image_path: img.image_path })
+          });
+          const setJ = await setRes.json();
+          if(setJ.success){
+            // Clear cache so next lookup will show new image
+            await fetch('/api/clear_cache?upc=' + encodeURIComponent(currentUpc));
+            
+            // Update thumbnails
+            const thumbImg = document.getElementById('thumb');
+            const heroImg = document.getElementById('hero');
+            thumbImg.src = setJ.image_url + '?t=' + Date.now();
+            heroImg.src = setJ.image_url + '?t=' + Date.now();
+            heroImg.style.display = '';
+            addThumbBtn.style.display = 'none';
+          } else {
+            alert('Image uploaded but failed to set as display: ' + (setJ.error || 'Unknown'));
+          }
+        }catch(e){
+          alert('Error uploading thumbnail: ' + e);
+        } finally {
+          // Hide loading, re-enable buttons
+          loadingOverlay.style.display = 'none';
+          goodBtn.disabled = false;
+          badBtn.disabled = false;
+          tempThumbInput.value = ''; // Reset input
+        }
+      };
+    }
     
     document.getElementById('qtyPlusBtn').onclick = ()=>{ updateQtyDisplay(1); };
     document.getElementById('qtyMinusBtn').onclick = ()=>{ updateQtyDisplay(-1); };

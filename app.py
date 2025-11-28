@@ -2710,6 +2710,24 @@ def save_temp_item():
 
  
 
+@app.route('/api/clear_cache', methods=['GET'])
+def api_clear_cache():
+    """Clear the cache for a specific UPC lookup to force refresh"""
+    try:
+        upc = request.args.get('upc')
+        if upc:
+            # Clear specific cache key for this UPC
+            cache_key = f"view//api/bol_lookup?upc={upc}"
+            cache.delete(cache_key)
+        else:
+            # Clear all bol_lookup cache
+            cache.delete_memoized(api_bol_lookup)
+        
+        return jsonify({'success': True})
+    except Exception as e:
+        print(f"Cache clear error: {e}")
+        return jsonify({'success': True})  # Always return success, cache clear is not critical
+
 @app.route('/api/bol_lookup', methods=['GET'])
 @cache.cached(timeout=600, query_string=True)  # Cache for 10 minutes
 def api_bol_lookup():
