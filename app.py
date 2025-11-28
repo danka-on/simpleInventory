@@ -1035,6 +1035,11 @@ def bol_stats_page():
 def barcode_print_que():
      return render_template('barcode_print_que.html')
 
+@app.route('/barcode-print-view')
+def barcode_print_view():
+    """Mobile-friendly print view for barcode queue"""
+    return render_template('barcode_print_view.html')
+
 @app.route('/sync')
 def sync():
     return render_template('sync.html')
@@ -2285,7 +2290,7 @@ def item_prep_no_barcode_page():
 
 @app.route('/api/search-rawbol', methods=['POST'])
 def search_rawbol_api():
-    """Search rawbol.db by item description with pagination"""
+    """Search rawbol.db by item description OR UPC with pagination"""
     try:
         data = request.get_json()
         query = data.get('query', '').strip()
@@ -2301,22 +2306,47 @@ def search_rawbol_api():
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         
-        # Get total count for pagination
-        search_pattern = f"%{query}%"
-        cur.execute('''
-            SELECT COUNT(*) as total
-            FROM raw_bol_items 
-            WHERE item_description LIKE ? COLLATE NOCASE
-        ''', (search_pattern,))
-        total = cur.fetchone()['total']
+        # Check if query looks like a UPC (numeric)
+        is_upc_query = query.isdigit()
         
-        # Get paginated results
-        cur.execute('''
-            SELECT upc, item_description, image_url 
-            FROM raw_bol_items 
-            WHERE item_description LIKE ? COLLATE NOCASE
-            LIMIT ? OFFSET ?
-        ''', (search_pattern, per_page, offset))
+        if is_upc_query:
+            # Search by UPC (exact or partial match)
+            search_pattern = f"%{query}%"
+            
+            # Get total count for pagination
+            cur.execute('''
+                SELECT COUNT(*) as total
+                FROM raw_bol_items 
+                WHERE upc LIKE ? COLLATE NOCASE
+            ''', (search_pattern,))
+            total = cur.fetchone()['total']
+            
+            # Get paginated results
+            cur.execute('''
+                SELECT upc, item_description, image_url 
+                FROM raw_bol_items 
+                WHERE upc LIKE ? COLLATE NOCASE
+                LIMIT ? OFFSET ?
+            ''', (search_pattern, per_page, offset))
+        else:
+            # Search by item description
+            search_pattern = f"%{query}%"
+            
+            # Get total count for pagination
+            cur.execute('''
+                SELECT COUNT(*) as total
+                FROM raw_bol_items 
+                WHERE item_description LIKE ? COLLATE NOCASE
+            ''', (search_pattern,))
+            total = cur.fetchone()['total']
+            
+            # Get paginated results
+            cur.execute('''
+                SELECT upc, item_description, image_url 
+                FROM raw_bol_items 
+                WHERE item_description LIKE ? COLLATE NOCASE
+                LIMIT ? OFFSET ?
+            ''', (search_pattern, per_page, offset))
         
         results = [dict(row) for row in cur.fetchall()]
         conn.close()
@@ -2647,7 +2677,7 @@ def generate_custom_barcode():
 
 @app.route('/api/items-prep/temp-item', methods=['POST'])
 def save_temp_item():
-    """Save temporary custom item with image data"""
+    """Save custom item directly to bol_items so it appears in Item Manager"""
     try:
         data = request.get_json()
         upc = data.get('upc', '').strip()
@@ -2668,44 +2698,54 @@ def save_temp_item():
         # Decode base64 image
         image_bytes = base64.b64decode(image_data)
         
-        # Create directory for temp items if it doesn't exist
-        temp_dir = os.path.join('static', 'temp_items')
-        os.makedirs(temp_dir, exist_ok=True)
+        # Create directory for custom items if it doesn't exist
+        custom_dir = os.path.join('static', 'custom_items')
+        os.makedirs(custom_dir, exist_ok=True)
         
         # Save with UPC as filename
         image_filename = f"{upc}.jpg"
-        image_path = os.path.join(temp_dir, image_filename)
+        image_path = os.path.join(custom_dir, image_filename)
         
         with open(image_path, 'wb') as f:
             f.write(image_bytes)
         
-        # Store in session-like temp database table
+        # Insert directly into bol_items table
         conn = sqlite3.connect('bol.db')
         cur = conn.cursor()
         
-        # Create temp_items table if it doesn't exist
-        cur.execute('''
-            CREATE TABLE IF NOT EXISTS temp_items (
-                upc TEXT PRIMARY KEY,
-                item_description TEXT,
-                image_url TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
+        # Check if item already exists
+        cur.execute('SELECT upc FROM bol_items WHERE upc = ? COLLATE NOCASE', (upc,))
+        exists = cur.fetchone()
         
-        # Insert or replace temp item
-        web_image_path = f"/static/temp_items/{image_filename}"
-        cur.execute('''
-            INSERT OR REPLACE INTO temp_items (upc, item_description, image_url)
-            VALUES (?, ?, ?)
-        ''', (upc, item_description, web_image_path))
+        web_image_path = f"/static/custom_items/{image_filename}"
+        
+        if exists:
+            # Update existing item
+            cur.execute('''
+                UPDATE bol_items 
+                SET item_description = ?, image_url = ?
+                WHERE upc = ? COLLATE NOCASE
+            ''', (item_description, web_image_path, upc))
+        else:
+            # Insert new item into bol_items
+            cur.execute('''
+                INSERT INTO bol_items (
+                    upc, item_description, image_url, 
+                    quantity, good_qty, bad_qty, listed_qty,
+                    lot_number, bol_number, import_date, temporary
+                ) VALUES (?, ?, ?, 0, 0, 0, 0, NULL, 'CUSTOM', datetime('now'), 1)
+            ''', (upc, item_description, web_image_path))
         
         conn.commit()
         conn.close()
         
-        return jsonify({'success': True, 'message': 'Temporary item saved', 'image_url': web_image_path})
+        # Clear cache for this UPC
+        cache_key = f"view//api/bol_lookup?upc={upc}"
+        cache.delete(cache_key)
+        
+        return jsonify({'success': True, 'message': 'Custom item saved to inventory', 'image_url': web_image_path})
     except Exception as e:
-        print(f'Error saving temp item: {e}')
+        print(f'Error saving custom item: {e}')
         return jsonify({'success': False, 'error': str(e)})
 
  

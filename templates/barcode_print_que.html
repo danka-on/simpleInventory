@@ -250,45 +250,56 @@
       // Clear any existing cleanup timer
       clearCleanupTimer();
       
-      // Open print popup with all barcodes
-      const printWindow = window.open('', '', 'toolbar=0,location=0,menubar=0,scrollbars=0,status=0,titlebar=0');
-      const html = [
-        '<!DOCTYPE html>',
-        '<html>',
-        '<head>',
-        '  <title></title>',
-        '  <style>',
-        '    @page { size: 3in 1in; margin: 0; }',
-        '    body { font-family: Arial, sans-serif; background: white; margin: 0; padding: 0; display: flex; flex-direction: column; align-items: center; }',
-        '    .barcode-label { width: 3in; height: 1in; display: flex; flex-direction: column; align-items: center; justify-content: center; page-break-inside: avoid; break-inside: avoid; padding: 0; margin-bottom: 0.1in; }',
-        '    .barcode-title { font-size: 12px; font-weight: bold; text-align: center; margin-bottom: 2px; color: #000; max-width: 2.8in; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }',
-        '    .barcode-svg { display: block; margin: 0 auto; width: 2.6in; height: 0.5in; }',
-        '    @media print {',
-        '      .barcode-label { border: none; page-break-inside: avoid; break-inside: avoid; }',
-        '      body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }',
-        '      header, footer { display: none !important; }',
-        '    }',
-        '  </style>',
-        '  <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"><\/script>',
-        '</head>',
-        '<body>',
-        que.map(item => `\
-          <div class="barcode-label">\
-            <div class="barcode-title">${item.title}</div>\
-            <svg class="barcode-svg" id="barcode${item.barcode}"></svg>\
-          </div>\
-        `).join(''),
-        '<script>',
-        que.map(item => `JsBarcode('#barcode${item.barcode}', '${item.barcode}', { format: "CODE128", width: 2, height: 40, displayValue: true, fontSize: 12, margin: 0 });`).join('\n'),
-        'setTimeout(function() { window.print(); }, 400);',
-        'window.onafterprint = function() { window.close(); };',
-        '<\/script>',
-        '</body>',
-        '</html>'
-      ].join('\n');
-      printWindow.document.write(html);
-      printWindow.document.close();
-      printWindow.onload = function() { printWindow.document.title = ''; };
+      // Detect mobile device
+      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+      
+      if (isMobile) {
+        // For mobile, create a dedicated print page and navigate to it
+        // Store queue data in sessionStorage
+        sessionStorage.setItem('printQueue', JSON.stringify(que));
+        // Open in same window for mobile compatibility
+        window.location.href = '/barcode-print-view';
+      } else {
+        // Desktop: Use popup window
+        const printWindow = window.open('', '', 'toolbar=0,location=0,menubar=0,scrollbars=0,status=0,titlebar=0');
+        const html = [
+          '<!DOCTYPE html>',
+          '<html>',
+          '<head>',
+          '  <title></title>',
+          '  <style>',
+          '    @page { margin: 0.25in; }',
+          '    body { font-family: Arial, sans-serif; background: white; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 0.1in; justify-content: flex-start; align-content: flex-start; }',
+          '    .barcode-label { width: 3in; height: 1in; display: flex; flex-direction: column; align-items: center; justify-content: center; page-break-inside: avoid; break-inside: avoid; padding: 0; box-sizing: border-box; }',
+          '    .barcode-title { font-size: 12px; font-weight: bold; text-align: center; margin-bottom: 2px; color: #000; max-width: 2.8in; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }',
+          '    .barcode-svg { display: block; margin: 0 auto; width: 2.6in; height: 0.5in; }',
+          '    @media print {',
+          '      .barcode-label { border: none; page-break-inside: avoid; break-inside: avoid; }',
+          '      body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }',
+          '      header, footer { display: none !important; }',
+          '    }',
+          '  </style>',
+          '  <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"><\/script>',
+          '</head>',
+          '<body>',
+          que.map(item => `\
+            <div class="barcode-label">\
+              <div class="barcode-title">${item.title}</div>\
+              <svg class="barcode-svg" id="barcode${item.barcode}"></svg>\
+            </div>\
+          `).join(''),
+          '<script>',
+          que.map(item => `JsBarcode('#barcode${item.barcode}', '${item.barcode}', { format: "CODE128", width: 2, height: 40, displayValue: true, fontSize: 12, margin: 0 });`).join('\n'),
+          'setTimeout(function() { window.print(); }, 400);',
+          'window.onafterprint = function() { window.close(); };',
+          '<\/script>',
+          '</body>',
+          '</html>'
+        ].join('\n');
+        printWindow.document.write(html);
+        printWindow.document.close();
+        printWindow.onload = function() { printWindow.document.title = ''; };
+      }
       
       // Start cleanup timer instead of clearing immediately
       startCleanupTimer();

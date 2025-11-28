@@ -15,6 +15,9 @@ Write-Host "Transferring template files..." -ForegroundColor Yellow
 scp .\templates\items_to_list.html "$User@$HostName`:$RemotePath/templates/"
 scp .\templates\item_prep_diagnostic_view.html "$User@$HostName`:$RemotePath/templates/"
 scp .\templates\item_prep.html "$User@$HostName`:$RemotePath/templates/"
+scp .\templates\item_prep_no_barcode.html "$User@$HostName`:$RemotePath/templates/"
+scp .\templates\barcode_print_que.html "$User@$HostName`:$RemotePath/templates/"
+scp .\templates\barcode_print_view.html "$User@$HostName`:$RemotePath/templates/"
 
 Write-Host "✅ Files transferred!" -ForegroundColor Green
 Write-Host "🔄 Restarting Flask service..." -ForegroundColor Cyan
