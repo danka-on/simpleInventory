@@ -2941,6 +2941,8 @@ def api_items_prep_status():
         base_upc = upc.split('-')[0] if '-' in upc else upc
         
         print(f'[STATUS API] Received UPC: {data.get("upc")}, Normalized: {upc}, Base: {base_upc}, Status: {status}')
+        print(f'[STATUS API] UPC has suffix: {upc != base_upc}')
+        print(f'[STATUS API] Reason: "{reason}", Note: "{note}", Qty: {qty}')
         
         conn = sqlite3.connect('bol.db', isolation_level='IMMEDIATE')
         cur = conn.cursor()
@@ -2972,10 +2974,28 @@ def api_items_prep_status():
                 # UPC is already suffixed, check if it's a BAD entry
                 cur.execute('SELECT status, reason FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (upc,))
                 row = cur.fetchone()
+                print(f'[GOOD] Checking suffixed UPC {upc} in items_prep_status: {row}')
                 if row and row[0] == 'bad':
                     suffixed_upc_found = upc
                     suffixed_reason = (row[1] or '').strip()
                     print(f'[GOOD] Found suffixed BAD entry directly: {suffixed_upc_found}')
+                elif row:
+                    # Entry exists but is not BAD - this could be from the initial item-prep flow
+                    # where we clicked Bad button and are now changing to Good in diagnostic
+                    print(f'[GOOD] Found suffixed entry {upc} with status={row[0]} (not bad, treating as BAD→GOOD conversion)')
+                    suffixed_upc_found = upc
+                    suffixed_reason = (row[1] or '').strip()
+                else:
+                    # No items_prep_status entry yet - check if this is a bad entry in bol_items
+                    # (created by Bad button but diagnostic not completed yet)
+                    cur.execute('SELECT bad_qty, original_qty FROM bol_items WHERE upc = ? COLLATE NOCASE', (upc,))
+                    bol_row = cur.fetchone()
+                    print(f'[GOOD] No prep_status entry, checking bol_items for {upc}: {bol_row}')
+                    if bol_row and bol_row[0] and bol_row[0] > 0:
+                        # This suffixed entry has bad_qty > 0, meaning it was created from Bad flow
+                        suffixed_upc_found = upc
+                        suffixed_reason = ''
+                        print(f'[GOOD] Found suffixed BAD entry in bol_items (no prep_status yet): {suffixed_upc_found}')
             
             # If not found yet, search for suffixed entries starting from base_upc
             if not suffixed_upc_found:
@@ -2996,84 +3016,92 @@ def api_items_prep_status():
             
             # If we found a BAD suffixed entry, this is a BAD→GOOD conversion
             if suffixed_upc_found:
-                print(f'[GOOD] Converting BAD item {suffixed_upc_found} to GOOD (old reason: "{suffixed_reason}", new reason: "{reason}")')
+                print(f'[GOOD] Converting BAD item {suffixed_upc_found} to GOOD')
                 
-                # Check if the NEW reason being submitted has a defect - if so, keep it as a separate entry
-                # Use the new reason parameter from the form, not the old one from database
-                if reason:
-                    # Keep the suffixed entry but change status to GOOD and update reason
-                    cur.execute('UPDATE items_prep_status SET status = ?, reason = ?, note = ?, updated_at = ? WHERE upc = ? COLLATE NOCASE',
-                              ('good', reason, note, ts, suffixed_upc_found))
-                    print(f'[GOOD] Kept suffixed entry {suffixed_upc_found} as separate GOOD item (has defect reason: "{reason}")')
+                # Keep the suffixed entry but change status to GOOD (don't merge back to base)
+                # This preserves any notes or distinguishing information added during BAD flow
+                
+                # UPSERT items_prep_status (might not exist yet if diagnostic not completed)
+                cur.execute('SELECT upc FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (suffixed_upc_found,))
+                if cur.fetchone():
+                    # Update existing entry
+                    cur.execute('UPDATE items_prep_status SET status = ?, reason = ?, note = ?, updated_at = ?, quantity = ? WHERE upc = ? COLLATE NOCASE',
+                              ('good', reason or '', note, ts, qty, suffixed_upc_found))
+                    print(f'[GOOD] Updated items_prep_status {suffixed_upc_found}: status=good, reason="{reason or ""}"')
                 else:
-                    # No defect - merge back into base UPC
-                    # Delete the suffixed entry from items_prep_status
-                    cur.execute('DELETE FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (suffixed_upc_found,))
-                    print(f'[GOOD] Deleted BAD status entry {suffixed_upc_found}')
+                    # Insert new entry
+                    cur.execute('INSERT INTO items_prep_status (upc, status, reason, note, updated_at, quantity) VALUES (?, ?, ?, ?, ?, ?)',
+                              (suffixed_upc_found, 'good', reason or '', note, ts, qty))
+                    print(f'[GOOD] Inserted items_prep_status {suffixed_upc_found}: status=good, reason="{reason or ""}"')
+                
+                # Update bol_items quantities: move from bad_qty to good_qty
+                cur.execute('SELECT bad_qty, good_qty FROM bol_items WHERE upc = ? COLLATE NOCASE', (suffixed_upc_found,))
+                bol_row = cur.fetchone()
+                if bol_row:
+                    current_bad = bol_row[0] or 0
+                    current_good = bol_row[1] or 0
+                    # Move all bad_qty to good_qty
+                    new_bad = 0
+                    new_good = current_good + current_bad
+                    cur.execute('UPDATE bol_items SET bad_qty = ?, good_qty = ?, temporary = 0 WHERE upc = ? COLLATE NOCASE',
+                              (new_bad, new_good, suffixed_upc_found))
+                    print(f'[GOOD] Updated bol_items {suffixed_upc_found}: bad_qty {current_bad}→{new_bad}, good_qty {current_good}→{new_good}')
                     
-                    # Also delete suffixed entry from bol_items if it exists (any suffixed entry, not just temporary)
-                    cur.execute('DELETE FROM bol_items WHERE upc = ? COLLATE NOCASE', (suffixed_upc_found,))
-                    deleted_temp = cur.rowcount
-                    if deleted_temp > 0:
-                        print(f'[GOOD] Deleted bol_items entry {suffixed_upc_found}')
-                    
-                    # Check if base UPC is UNCHECKED (happens when original qty was 1 and got converted to BAD)
-                    # If UNCHECKED, change to GOOD instead of incrementing quantity
-                    cur.execute('SELECT status FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (base_upc,))
-                    base_status_row = cur.fetchone()
-                    base_is_unchecked = base_status_row and base_status_row[0] == 'unchecked'
-                    
-                    if base_is_unchecked:
-                        # Base UPC is UNCHECKED - just change it to GOOD (quantity stays 1)
-                        cur.execute('UPDATE items_prep_status SET status = ? WHERE upc = ? COLLATE NOCASE', ('good', base_upc))
-                        print(f'[GOOD] Changed base UPC {base_upc} from UNCHECKED to GOOD (qty stays 1)')
-                    else:
-                        # Base UPC has multiple units - increment bol_items quantity by 1
-                        cur.execute('''
-                            SELECT id, quantity
-                            FROM bol_items 
-                            WHERE upc = ? COLLATE NOCASE 
-                            AND lot_number = ? COLLATE NOCASE
-                            AND (itemprepped IS NULL OR itemprepped = 0)
-                            LIMIT 1
-                        ''', (base_upc, selected_lot))
-                        
-                        bol_row = cur.fetchone()
-                        if bol_row:
-                            bol_id, current_bol_qty = bol_row
-                            current_bol_qty = current_bol_qty or 1
-                            new_bol_qty = current_bol_qty + 1
-                            
-                            cur.execute('UPDATE bol_items SET quantity = ? WHERE id = ?', (new_bol_qty, bol_id))
-                            print(f'[GOOD] Incremented bol_items quantity for {base_upc} from {current_bol_qty} to {new_bol_qty}')
+                    # Also update base UPC: decrement bad_qty
+                    cur.execute('SELECT bad_qty FROM bol_items WHERE upc = ? COLLATE NOCASE', (base_upc,))
+                    base_row = cur.fetchone()
+                    if base_row:
+                        base_bad = base_row[0] or 0
+                        new_base_bad = max(0, base_bad - current_bad)
+                        cur.execute('UPDATE bol_items SET bad_qty = ? WHERE upc = ? COLLATE NOCASE',
+                                  (new_base_bad, base_upc))
+                        print(f'[GOOD] Updated base {base_upc}: bad_qty {base_bad}→{new_base_bad}')
+                
+                conn.commit()
+                conn.close()
+                
+                return jsonify({
+                    'success': True, 
+                    'action': 'converted_bad_to_good_kept_suffix',
+                    'upc': suffixed_upc_found,
+                    'lot_number': selected_lot
+                })
             
-            # Only update the base UPC entry if we didn't keep a suffixed entry with defect
-            # If suffixed_upc_found exists AND has a reason, we already updated it above
-            if not (suffixed_upc_found and reason):
-                # Update items_prep_status for the base UPC
-                # Check if ANY entry exists for this UPC (regardless of status)
-                cur.execute('SELECT status, quantity FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (base_upc,))
-                existing_prep_row = cur.fetchone()
-                if existing_prep_row:
-                    existing_status = existing_prep_row[0]
-                    existing_qty = existing_prep_row[1] if existing_prep_row[1] is not None else 0
-                    
-                    if existing_status == 'good':
-                        # Add to existing GOOD quantity
-                        total_prep_good = existing_qty + qty
-                        cur.execute('UPDATE items_prep_status SET quantity = ?, reason = ?, note = ?, updated_at = ? WHERE upc = ? COLLATE NOCASE',
-                                   (total_prep_good, reason, note, ts, base_upc))
-                        print(f'[GOOD] Updated items_prep_status {base_upc}: qty {existing_qty}→{total_prep_good}')
-                    else:
-                        # Replace existing status (was unchecked/bad) with GOOD
-                        cur.execute('UPDATE items_prep_status SET status = ?, quantity = ?, reason = ?, note = ?, updated_at = ? WHERE upc = ? COLLATE NOCASE',
-                                   ('good', qty, reason, note, ts, base_upc))
-                        print(f'[GOOD] Changed items_prep_status {base_upc} from {existing_status} to good, qty={qty}')
+            # Not a BAD→GOOD conversion - proceed with normal GOOD flow for base UPC
+            # Update items_prep_status for the base UPC
+            # Check if ANY entry exists for this UPC (regardless of status)
+            cur.execute('SELECT status, quantity FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (base_upc,))
+            existing_prep_row = cur.fetchone()
+            if existing_prep_row:
+                existing_status = existing_prep_row[0]
+                existing_qty = existing_prep_row[1] if existing_prep_row[1] is not None else 0
+                
+                if existing_status == 'good':
+                    # Add to existing GOOD quantity
+                    total_prep_good = existing_qty + qty
+                    cur.execute('UPDATE items_prep_status SET quantity = ?, reason = ?, note = ?, updated_at = ? WHERE upc = ? COLLATE NOCASE',
+                               (total_prep_good, reason, note, ts, base_upc))
+                    print(f'[GOOD] Updated items_prep_status {base_upc}: qty {existing_qty}→{total_prep_good}')
                 else:
-                    # No existing entry, insert new GOOD status
-                    cur.execute('INSERT INTO items_prep_status (upc, status, reason, note, quantity, updated_at) VALUES (?,?,?,?,?,?)',
-                               (base_upc, 'good', reason, note, qty, ts))
-                    print(f'[GOOD] Created items_prep_status {base_upc} with status=good, qty={qty}')
+                    # Replace existing status (was unchecked/bad) with GOOD
+                    cur.execute('UPDATE items_prep_status SET status = ?, quantity = ?, reason = ?, note = ?, updated_at = ? WHERE upc = ? COLLATE NOCASE',
+                               ('good', qty, reason, note, ts, base_upc))
+                    print(f'[GOOD] Changed items_prep_status {base_upc} from {existing_status} to good, qty={qty}')
+            else:
+                # No existing entry, insert new GOOD status
+                cur.execute('INSERT INTO items_prep_status (upc, status, reason, note, quantity, updated_at) VALUES (?,?,?,?,?,?)',
+                           (base_upc, 'good', reason, note, qty, ts))
+                print(f'[GOOD] Created items_prep_status {base_upc} with status=good, qty={qty}')
+            
+            # Update bol_items good_qty
+            cur.execute('SELECT good_qty FROM bol_items WHERE upc = ? COLLATE NOCASE', (base_upc,))
+            bol_row = cur.fetchone()
+            if bol_row:
+                current_good = bol_row[0] or 0
+                new_good = current_good + qty
+                cur.execute('UPDATE bol_items SET good_qty = ? WHERE upc = ? COLLATE NOCASE', (new_good, base_upc))
+                print(f'[GOOD] Updated bol_items {base_upc}: good_qty {current_good}→{new_good}')
+
             
             conn.commit()
             conn.close()
@@ -4467,7 +4495,15 @@ def api_bol_items():
         elif limit <= 100: pass  # Normal range
         # else: allow limits between 100 and 50000 for stats
         offset = (page - 1) * limit
-        print(f"[api_bol_items] Filters - lot: '{lot}', import_date: '{import_date}', q: '{q_stripped}', status_filter: '{status_filter}'")
+        
+        # Parse comma-separated status filters (e.g., "good,bad")
+        status_filters = [s.strip() for s in status_filter.split(',') if s.strip()] if status_filter else []
+        
+        # Get listed/not_listed filters
+        listed_flag = request.args.get('listed', '').strip().lower() == 'true'
+        not_listed_flag = request.args.get('not_listed', '').strip().lower() == 'true'
+        
+        print(f"[api_bol_items] Filters - lot: '{lot}', import_date: '{import_date}', q: '{q_stripped}', status_filters: {status_filters}, listed: {listed_flag}, not_listed: {not_listed_flag}")
         conn = sqlite3.connect('bol.db')
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
@@ -4498,18 +4534,26 @@ def api_bol_items():
             like = f"%{q_stripped}%"
             params.extend([like, like])
         
-        # Apply status filter in SQL WHERE clause
-        sf = status_filter.replace(' ', '_') if status_filter else ''
-        if sf in ('good','bad','unchecked'):
-            if sf == 'unchecked':
-                # Unchecked: no prep_status OR explicit 'unchecked', AND exclude suffixed items (BAD flow temporaries)
-                where.append('(s.status IS NULL OR s.status = ?)')
-                params.append('unchecked')
-                where.append("b.upc NOT LIKE '%-%'")
-            else:
-                # Good or Bad: explicit status match
-                where.append('s.status = ?')
-                params.append(sf)
+        # Apply status filter in SQL WHERE clause (supports multiple statuses)
+        if status_filters:
+            status_conditions = []
+            for sf in status_filters:
+                sf = sf.replace(' ', '_')
+                if sf == 'unchecked':
+                    # Unchecked: no prep_status OR explicit 'unchecked', AND exclude suffixed items (BAD flow temporaries)
+                    status_conditions.append("((s.status IS NULL OR s.status = 'unchecked') AND b.upc NOT LIKE '%-%')")
+                elif sf in ('good', 'bad'):
+                    # Good or Bad: explicit status match
+                    status_conditions.append(f"s.status = '{sf}'")
+            
+            if status_conditions:
+                where.append(f"({' OR '.join(status_conditions)})")
+        
+        # Apply listed/not_listed filter
+        if listed_flag:
+            where.append("(b.list_status = 'listed')")
+        elif not_listed_flag:
+            where.append("(b.list_status IS NULL OR b.list_status = '' OR b.list_status != 'listed')")
         
         # Build WHERE clause only when we actually have conditions
         where_sql = (' WHERE ' + ' AND '.join(where)) if where else ''
@@ -4576,6 +4620,21 @@ def api_bol_items():
                     status_map[str(raw_upc)] = st
                     nu = _normalize_upc(raw_upc)
                     status_map[nu] = st
+            
+            # Check items_prep_notes table for multi-note entries
+            k2.execute('SELECT upc, COUNT(*) as note_count FROM items_prep_notes GROUP BY upc')
+            for rr in k2.fetchall():
+                raw_upc = rr['upc']
+                note_count = rr['note_count']
+                # If UPC already in status_map, update it; otherwise create entry
+                existing = status_map.get(str(raw_upc), {})
+                existing['prep_note_count'] = note_count
+                status_map[str(raw_upc)] = existing
+                nu = _normalize_upc(raw_upc)
+                existing_n = status_map.get(nu, {})
+                existing_n['prep_note_count'] = note_count
+                status_map[nu] = existing_n
+            
             c2.close()
         except Exception:
             status_map = {}
@@ -4591,7 +4650,14 @@ def api_bol_items():
                     row['prep_reason'] = sm.get('prep_reason')
                     row['prep_note'] = sm.get('prep_note')
                     row['prep_updated_at'] = sm.get('prep_updated_at')
+                    row['prep_note_count'] = sm.get('prep_note_count', 0)
                     st = (row.get('prep_status') or '').strip().lower()
+            # Also enrich with note count if available in status_map
+            if 'prep_note_count' not in row:
+                up = _normalize_upc(row.get('upc'))
+                sm = status_map.get(up)
+                if sm and 'prep_note_count' in sm:
+                    row['prep_note_count'] = sm.get('prep_note_count', 0)
             return st if st in ('good','bad','unchecked') else 'unchecked'
         
         # Apply status enrichment to rows
@@ -4618,6 +4684,9 @@ def api_bol_items():
             else:
                 display_qty = r.get('quantity') or 1
             
+            # Check if item has notes in items_prep_notes table
+            has_notes = r.get('prep_note_count', 0) > 0
+            
             results.append({
                 'id': r.get('id'),
                 'title': r.get('item_description') or '',
@@ -4631,7 +4700,8 @@ def api_bol_items():
                 'status': status,
                 'list_status': (r.get('list_status') or ''),
                 'temporary': r.get('temporary'),
-                'quantity': display_qty
+                'quantity': display_qty,
+                'note': 'yes' if has_notes else ''
             })
         return jsonify({'results': results, 'total': total, 'unique_items': unique_items, 'total_quantity': total_quantity, 'page': page, 'limit': limit})
     except Exception as e:

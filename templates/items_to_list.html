@@ -43,14 +43,25 @@
       <input type="text" id="filter-q" placeholder="UPC or Title">
     </label>
     <button class="btn btn-primary" id="search-btn" style="margin-left:4px">Search</button>
-    <label>Status:
-      <select id="status-select">
-        <option value="">All</option>
-        <option value="unchecked">Unchecked</option>
-        <option value="good">Good</option>
-        <option value="bad">Bad</option>
-      </select>
-    </label>
+    <div style="position:relative">
+      <button class="btn" id="status-filter-btn" style="background:#f0f0f0;min-width:120px;text-align:left;display:flex;justify-content:space-between;align-items:center">
+        <span id="status-filter-label">Status</span>
+        <span style="font-size:0.8rem">▼</span>
+      </button>
+      <div id="status-dropdown" class="dropdown-panel" style="display:none;min-width:200px">
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+            <input type="checkbox" class="status-checkbox" value="good" checked> Good
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+            <input type="checkbox" class="status-checkbox" value="bad" checked> Bad
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+            <input type="checkbox" class="status-checkbox" value="unchecked"> Unchecked
+          </label>
+        </div>
+      </div>
+    </div>
     <button class="btn gear-btn" id="filter-gear" title="More filters" aria-haspopup="true" aria-expanded="false">⚙️</button>
     <div id="filter-dropdown" class="dropdown-panel" role="menu" aria-labelledby="filter-gear">
       <div class="dropdown-section">
@@ -112,6 +123,15 @@
 
   <div id="imgModal" class="modal"><div class="card"><div style="text-align:right"><button id="closeImg">Close</button></div><div id="imgContent"></div></div></div>
 
+  <!-- Notes modal: shows all notes for an item -->
+  <div id="notesModal" class="modal"><div class="card" style="max-width:600px; width:95%;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <h3 style="margin:0">📝 Notes</h3>
+      <button id="closeNotes" class="btn-sm">Close</button>
+    </div>
+    <div id="notesModalContent" style="max-height:400px;overflow-y:auto"></div>
+  </div></div>
+
   <!-- Pics preview modal: shows thumbnails and an edit button linking to diagnostic edit -->
   <div id="picsModal" class="modal"><div class="card" style="max-width:800px; width:95%;">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
@@ -139,10 +159,19 @@ function setFiltersFromURL(){
   if(q) document.getElementById('filter-q').value = q;
   if(lot) document.getElementById('filter-lot').value = lot;
   if(sort) document.getElementById('sort-select').value = sort;
-  // If status is explicitly set in URL, use it; otherwise leave as "All" (don't default to 'good')
+  // If status is explicitly set in URL, use it; otherwise default to good and bad
   if(status) {
-    document.getElementById('status-select').value = status;
+    // Uncheck all first
+    document.querySelectorAll('.status-checkbox').forEach(cb => cb.checked = false);
+    // Check the ones in the URL (comma-separated)
+    const statuses = status.split(',').map(s => s.trim());
+    statuses.forEach(s => {
+      const cb = document.querySelector(`.status-checkbox[value="${s}"]`);
+      if(cb) cb.checked = true;
+    });
   }
+  // Update status filter label
+  updateStatusFilterLabel();
   if(defect) document.getElementById('filter-defect').value = defect;
   const listedFlag = (p.get('listed') === 'true') || (p.get('status') === 'listed');
   const notListedFlag = (p.get('not_listed') === 'true') || (p.get('status') === 'not_listed');
@@ -194,7 +223,7 @@ function formatLastEdited(raw){
 function render(results){
   let html = '<table><thead><tr>';
   if (selectMode) html += '<th>Select</th>';
-  html += '<th>Info</th><th>Status</th><th>Foto</th><th>Defect</th><th>QTY</th><th>Title</th><th>UPC</th><th>Listed</th><th>Action</th><th>Last Edited</th></tr></thead><tbody>';
+  html += '<th>Info</th><th>Status</th><th>Notes</th><th>Foto</th><th>Defect</th><th>QTY</th><th>Title</th><th>UPC</th><th>Listed</th><th>Action</th><th>Last Edited</th></tr></thead><tbody>';
   for (const r of results) {
     const title = esc(r.title||'');
     const img = esc(r.image||'');
@@ -227,6 +256,9 @@ function render(results){
     const qty = r.quantity || 1;
     const qtyStyle = (qty > 1 && status !== 'unchecked') ? 'color:#e74c3c;font-weight:700;font-size:1.1rem' : '';
     const qtyCell = `<td style="text-align:center"><span style="${qtyStyle}">${qty}</span></td>`;
+    // Notes icon - show 📝 if note exists and make it clickable
+    const hasNote = r.note && String(r.note).trim().length > 0;
+    const noteCell = hasNote ? `<td style="text-align:center;font-size:1.2rem"><span class="note-icon" data-upc="${upc}" style="cursor:pointer" title="Click to view notes">📝</span></td>` : `<td style="text-align:center"></td>`;
     html += `<tr>`;
     if (selectMode) {
       // Allow selection of all items (base barcodes will be reset instead of deleted)
@@ -236,6 +268,7 @@ function render(results){
       `<td><div style="display:flex;flex-direction:column;gap:4px;align-items:flex-start">`+
             `<div>${pill}</div>`+
           `</div></td>`+
+            noteCell+
             `<td style="text-align:center">${picsBtn}</td>`+
             `<td>${esc(r.defect||'')}</td>`+
             qtyCell+
@@ -264,6 +297,8 @@ function render(results){
   document.querySelectorAll('.btn-copy').forEach(el=> el.addEventListener('click', onCopyUpc));
   // Wire pics-count handlers (now spans instead of buttons)
   document.querySelectorAll('.pics-count').forEach(el=> el.addEventListener('click', onOpenPics));
+  // Wire note icon handlers
+  document.querySelectorAll('.note-icon').forEach(el=> el.addEventListener('click', onOpenNotes));
   // After rendering, for each displayed UPC, fetch the actual images count in the background and update the number
   document.querySelectorAll('.pics-count').forEach(async (el)=>{
     const upc = el.dataset.upc;
@@ -300,11 +335,63 @@ function onOpenImg(e){
 
 document.getElementById('closeImg').addEventListener('click', ()=>{ document.getElementById('imgModal').style.display='none'; });
 document.getElementById('closePics').addEventListener('click', ()=>{ document.getElementById('picsModal').style.display='none'; });
+document.getElementById('closeNotes').addEventListener('click', ()=>{ document.getElementById('notesModal').style.display='none'; });
 // Apply button removed; filters auto-refresh on change and Enter in search
 // Auto-refresh on dropdown changes
 document.getElementById('filter-lot').addEventListener('change', loadItems);
 document.getElementById('sort-select').addEventListener('change', loadItems);
-document.getElementById('status-select').addEventListener('change', loadItems);
+
+// Status checkbox dropdown toggle
+const statusBtn = document.getElementById('status-filter-btn');
+const statusDropdown = document.getElementById('status-dropdown');
+if (statusBtn && statusDropdown){
+  function positionStatusDropdown(){
+    const rect = statusBtn.getBoundingClientRect();
+    statusDropdown.style.left = rect.left + 'px';
+    statusDropdown.style.top = (rect.bottom + 6) + 'px';
+  }
+  statusBtn.addEventListener('click', (e)=>{
+    e.preventDefault();
+    const open = statusDropdown.style.display === 'block';
+    if(open){
+      statusDropdown.style.display = 'none';
+    } else {
+      positionStatusDropdown();
+      statusDropdown.style.display = 'block';
+    }
+  });
+  window.addEventListener('resize', ()=>{ if(statusDropdown.style.display==='block') positionStatusDropdown(); });
+  window.addEventListener('scroll', ()=>{ if(statusDropdown.style.display==='block') positionStatusDropdown(); }, true);
+  document.addEventListener('click', (e)=>{
+    if (statusDropdown.style.display==='block'){
+      if(!statusDropdown.contains(e.target) && e.target!==statusBtn && !statusBtn.contains(e.target)){
+        statusDropdown.style.display='none';
+      }
+    }
+  });
+}
+
+// Update label based on checked statuses
+function updateStatusFilterLabel(){
+  const checked = Array.from(document.querySelectorAll('.status-checkbox:checked')).map(cb => cb.value);
+  const label = document.getElementById('status-filter-label');
+  if(checked.length === 0){
+    label.textContent = 'Status: None';
+  } else if(checked.length === 3){
+    label.textContent = 'Status: All';
+  } else {
+    label.textContent = `Status: ${checked.join(', ')}`;
+  }
+}
+
+// Status checkboxes auto-refresh
+document.querySelectorAll('.status-checkbox').forEach(cb => {
+  cb.addEventListener('change', ()=>{
+    updateStatusFilterLabel();
+    loadItems();
+  });
+});
+
 // defect filter should behave like other filters
 const defectEl = document.getElementById('filter-defect'); if(defectEl) defectEl.addEventListener('change', loadItems);
 // radio buttons for listed filter
@@ -396,6 +483,39 @@ async function onOpenPics(e){
     });
     modal.style.display = 'flex';
   }catch(e){ area.innerHTML = '<div class="small-muted">Error loading images</div>'; modal.style.display='flex'; }
+}
+
+async function onOpenNotes(e){
+  e.preventDefault();
+  const upc = e.currentTarget.dataset.upc;
+  if(!upc) return;
+  const modal = document.getElementById('notesModal');
+  const content = document.getElementById('notesModalContent');
+  content.innerHTML = '<div class="small-muted">Loading...</div>';
+  modal.style.display = 'flex';
+  try{
+    const res = await fetch('/api/items_prep/notes/'+encodeURIComponent(upc));
+    if(!res.ok){ 
+      content.innerHTML = '<div class="small-muted">Failed to load notes</div>'; 
+      return; 
+    }
+    const j = await res.json();
+    const notes = j.notes || [];
+    if(notes.length === 0){
+      content.innerHTML = '<div class="small-muted">No notes found.</div>';
+    } else {
+      content.innerHTML = notes.map(n=>{
+        const date = new Date(n.created_at).toLocaleString('en-US', {timeZone:'America/New_York', year:'numeric', month:'2-digit', day:'2-digit', hour:'numeric', minute:'2-digit', hour12:true});
+        return `<div style="padding:10px;margin-bottom:8px;background:#f9f9f9;border-radius:6px;border-left:3px solid #00b894">
+          <div style="font-size:0.9rem;color:#666;margin-bottom:4px">${date}</div>
+          <div>${esc(n.note)}</div>
+        </div>`;
+      }).join('');
+    }
+  }catch(err){
+    console.error('Error loading notes:', err);
+    content.innerHTML = '<div class="small-muted">Error loading notes</div>';
+  }
 }
 
 async function onMarkListed(e){
@@ -589,7 +709,9 @@ async function loadItems(){
   const lot = document.getElementById('filter-lot').value.trim();
   const q = document.getElementById('filter-q').value.trim();
   const sort = document.getElementById('sort-select').value;
-  const status = document.getElementById('status-select').value;
+  // Get checked statuses as comma-separated string
+  const checkedStatuses = Array.from(document.querySelectorAll('.status-checkbox:checked')).map(cb => cb.value);
+  const status = checkedStatuses.length > 0 ? checkedStatuses.join(',') : '';
   const defectFilter = (document.getElementById('filter-defect') && document.getElementById('filter-defect').value) || '';
   // Determine listed/not_listed filter from the select
   const listedVal = document.getElementById('filter-listed-select').value;
@@ -625,6 +747,7 @@ async function loadItems(){
   // Now fetch paginated results for display
   params.set('page', currentPage);
   params.set('limit', currentLimit);
+  params.set('_t', Date.now()); // Cache buster
   let j = {results:[], total:0, page:1, limit:currentLimit};
   try{
     const resp = await fetch('/api/bol_items?'+params.toString());

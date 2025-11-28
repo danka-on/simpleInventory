@@ -95,11 +95,14 @@
           {% set r = status.reason.strip().lower() %}
           {% set cls = 'other' %}
           {% if 'missing' in r %}{% set cls = 'missing' %}{% elif 'wrong' in r %}{% set cls = 'wrong' %}{% elif 'broken' in r %}{% set cls = 'broken' %}{% elif 'trash' in r %}{% set cls = 'trash' %}{% endif %}
-          <div style="margin-top:8px"><span class="pill {{ cls }}">Reason: {{ status.reason }}</span></div>
+          <div style="margin-top:8px">
+            <span class="pill {{ cls }}">Reason: {{ status.reason }}</span>
+          </div>
         {% endif %}
         {% if status and status.updated_at %}
           <div class="muted" style="margin-top:6px">Updated: <span id="updatedAt" data-iso="{{ status.updated_at }}">{{ status.updated_at }}</span></div>
         {% endif %}
+        <!-- DEBUG: Note='{{ status.note if status else "None" }}' -->
         <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap">
           <a id="editDiagLink" class="btn btn-danger" href="/item-prep/diagnostic?upc={{ upc }}">Edit Diagnostic</a>
         </div>
@@ -108,7 +111,7 @@
   </div>
 
   <div class="card">
-    <h3 style="margin:0 0 8px 0">Notes</h3>
+    <h3 style="margin:0 0 8px 0">📝 Notes</h3>
     <div id="notesContainer" style="display:flex;flex-direction:column;gap:8px;margin:8px 0;max-height:240px;overflow-y:auto"></div>
     <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
       <input type="text" id="newNoteInput" placeholder="Add a note..." style="flex:1;padding:10px;border:1px solid #ddd;border-radius:8px">
