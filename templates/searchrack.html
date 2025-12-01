@@ -37,12 +37,36 @@
     /* Scope gear styling to results actions only */
     .results-actions .gear-btn{background:#f0f0f0;border:1px solid #ddd;padding:6px 8px;border-radius:4px;cursor:pointer;font-size:14px}
     .results-actions .gear-btn:hover{background:#e0e0e0}
+    /* Loading overlay */
+    .loading-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:99999;align-items:center;justify-content:center}
+    .loading-overlay.active{display:flex}
+    .loading-spinner{border:4px solid #f3f3f3;border-top:4px solid #3498db;border-radius:50%;width:50px;height:50px;animation:spin 1s linear infinite}
+    @keyframes spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
+    /* Database select dropdown */
+    #db-select, #store-select{padding:10px 14px;border-radius:6px;border:2px solid #3498db;font-size:1rem;background:#fff;cursor:pointer;font-weight:500;min-width:160px}
+    .db-selector-group{display:flex;gap:12px;align-items:center;margin-right:auto}
+    .db-selector-group label{font-size:1rem;font-weight:600;color:#2c3e50;display:flex;align-items:center;gap:8px}
     </style>
 </head>
 <body>
     <div class="top">
         <div style="display:flex;gap:8px;align-items:center">
             <a href="/" style="text-decoration:none"><button class="btn btn-danger">Back</button></a>
+            
+            <!-- Database and Store Selectors -->
+            <div class="db-selector-group">
+                <label>Database:
+                    <select id="db-select">
+                        <!-- options inserted by JS -->
+                    </select>
+                </label>
+                <label>Stores:
+                    <select id="store-select">
+                        <!-- options inserted by JS -->
+                    </select>
+                </label>
+            </div>
+            
             <button class="btn" id="history-btn" style="display:none;background-color:#6c757d;color:white;">History</button>
             <!-- Location Duplicates filter (only visible when Inventory is selected) -->
             <div id="location-duplicates-container" style="display:none; margin-left:12px;">
@@ -53,9 +77,6 @@
             </div>
         </div>
         <div class="actions">
-                <div class="filters" id="db-filters">
-                <!-- checkboxes inserted here -->
-            </div>
         </div>
     </div>
 
@@ -128,6 +149,11 @@
 
     <div id="results"></div>
 
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay" class="loading-overlay">
+        <div class="loading-spinner"></div>
+    </div>
+
     <!-- Image / Info Modal -->
     <div id="viewModal" class="modal"><div class="card"><div style="text-align:right"><button id="closeView">Close</button></div><div id="viewContent"></div></div></div>
 
@@ -170,7 +196,9 @@
 
 <script>
 console.log('searchrack v3.1-qty-debug loaded - timestamp: 2025-11-17-15:50');
-const DBS = ['searchRack','ebayStore','amazonStore','bol','sold','returns','archived'];
+// Reordered: Inventory, Macy BOL, Sold, Returns, Archived (databases) + Amazon/Ebay (stores)
+const DATABASES = ['searchRack','bol','sold','returns','archived'];
+const STORES = ['amazonStore','ebayStore'];
 const DB_LABELS = {searchRack:'Inventory', ebayStore:'Ebay live', amazonStore:'Amazon live', bol:'Macy BOL', sold:'Sold', returns:'Returns', archived:'Archived'};
 const defaultChecked = {'searchRack':true};
 let _allResults = [];
@@ -179,14 +207,30 @@ let _pageSize = 10;
 let _sortMode = 'time_desc';
 
 function createFilters(){
-    const container = document.getElementById('db-filters');
-    DBS.forEach(k=>{
-        const id = 'chk-'+k;
-        // use radio buttons so only one DB can be selected at a time
-        const rb = document.createElement('input'); rb.type='radio'; rb.name='db_select'; rb.id=id; rb.value=k; rb.checked=!!defaultChecked[k];
-        const lbl = document.createElement('label'); lbl.htmlFor=id; lbl.style.marginRight='8px'; lbl.appendChild(rb); lbl.appendChild(document.createTextNode(' '+DB_LABELS[k]));
-        container.appendChild(lbl);
-    })
+    // Populate Database dropdown
+    const dbSelect = document.getElementById('db-select');
+    DATABASES.forEach(k=>{
+        const option = document.createElement('option');
+        option.value = k;
+        option.textContent = DB_LABELS[k];
+        if(defaultChecked[k]) option.selected = true;
+        dbSelect.appendChild(option);
+    });
+    
+    // Populate Stores dropdown with "Select a store" placeholder
+    const storeSelect = document.getElementById('store-select');
+    const placeholderOption = document.createElement('option');
+    placeholderOption.value = '';
+    placeholderOption.textContent = 'Select a store...';
+    placeholderOption.selected = true;
+    storeSelect.appendChild(placeholderOption);
+    
+    STORES.forEach(k=>{
+        const option = document.createElement('option');
+        option.value = k;
+        option.textContent = DB_LABELS[k];
+        storeSelect.appendChild(option);
+    });
 }
 
 createFilters();
@@ -202,32 +246,45 @@ createFilters();
 
 // attach change listeners so switching DBs auto-refreshes the results
 function attachDBChangeHandlers(){
-    // use event delegation in case inputs are recreated
-    document.getElementById('db-filters').addEventListener('change', (e)=>{
-        const tgt = e.target;
-        if(tgt && tgt.name === 'db_select'){
-            const selectedDb = tgt.value;
+    document.getElementById('db-select').addEventListener('change', (e)=>{
+        const selectedDb = e.target.value;
+        
+        // Clear store selection when database is changed
+        document.getElementById('store-select').value = '';
+        
+        // Show/hide LOT filter based on selected database
+        const lotFilterContainer = document.getElementById('lot-filter-container');
+        if(selectedDb === 'bol'){
+            lotFilterContainer.style.display = 'block';
+            // Populate LOT dropdown
+            populateLotFilter();
+        } else {
+            lotFilterContainer.style.display = 'none';
+        }
+        
+        // Show/hide Location Duplicates filter for Inventory
+        const locationDuplicatesContainer = document.getElementById('location-duplicates-container');
+        if(selectedDb === 'searchRack'){
+            locationDuplicatesContainer.style.display = 'block';
+        } else {
+            locationDuplicatesContainer.style.display = 'none';
+            document.getElementById('location-duplicates-filter').checked = false;
+        }
+        
+        // run search when user explicitly changes selection
+        doSearch();
+    });
+    
+    // Also attach handler for store selection
+    document.getElementById('store-select').addEventListener('change', (e)=>{
+        const selectedStore = e.target.value;
+        if(selectedStore){
+            // Hide database-specific filters when store is selected
+            document.getElementById('lot-filter-container').style.display = 'none';
+            document.getElementById('location-duplicates-container').style.display = 'none';
+            document.getElementById('location-duplicates-filter').checked = false;
             
-            // Show/hide LOT filter based on selected database
-            const lotFilterContainer = document.getElementById('lot-filter-container');
-            if(selectedDb === 'bol'){
-                lotFilterContainer.style.display = 'block';
-                // Populate LOT dropdown
-                populateLotFilter();
-            } else {
-                lotFilterContainer.style.display = 'none';
-            }
-            
-            // Show/hide Location Duplicates filter for Inventory
-            const locationDuplicatesContainer = document.getElementById('location-duplicates-container');
-            if(selectedDb === 'searchRack'){
-                locationDuplicatesContainer.style.display = 'block';
-            } else {
-                locationDuplicatesContainer.style.display = 'none';
-                document.getElementById('location-duplicates-filter').checked = false;
-            }
-            
-            // run search when user explicitly changes selection
+            // run search
             doSearch();
         }
     });
@@ -263,15 +320,30 @@ document.getElementById('lot-filter').addEventListener('change', doSearch);
 document.getElementById('location-duplicates-filter').addEventListener('change', doSearch);
 
 function getActiveDBs(){
-    // radios ensure at most one DB is selected; return as an array for compatibility
-    const sel = document.querySelector('input[name="db_select"]:checked');
-    return sel ? [sel.value] : [];
+    // Check if a store is selected first
+    const storeSelect = document.getElementById('store-select');
+    if(storeSelect && storeSelect.value){
+        return [storeSelect.value];
+    }
+    
+    // Otherwise return the selected database
+    const dbSelect = document.getElementById('db-select');
+    return dbSelect && dbSelect.value ? [dbSelect.value] : [];
 }
 
 document.getElementById('search-btn').addEventListener('click', doSearch);
 document.getElementById('search-input').addEventListener('keyup', (e)=>{ if(e.key==='Enter') doSearch(); });
 
+function showLoading(){
+    document.getElementById('loadingOverlay').classList.add('active');
+}
+
+function hideLoading(){
+    document.getElementById('loadingOverlay').classList.remove('active');
+}
+
 async function doSearch(){
+    showLoading();
     const q = document.getElementById('search-input').value.trim();
     const dbs = getActiveDBs();
     _allResults = [];
@@ -354,6 +426,8 @@ async function doSearch(){
         console.log('Inventory NOT selected, hiding zero-qty notice');
         document.getElementById('zero-qty-notice').style.display = 'none';
     }
+    
+    hideLoading();
 }
 
 function renderPagedResults() {

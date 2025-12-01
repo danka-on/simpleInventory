@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Unified Search</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; background: #f5f7fa; padding: 20px; }
+    .container { max-width: 1000px; margin: 0 auto; }
+    h1 { color: #2c3e50; margin-bottom: 24px; }
+    .search-box { background: white; padding: 24px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); margin-bottom: 24px; }
+    .search-input-wrapper { display: flex; gap: 12px; }
+    .search-input { flex: 1; padding: 14px; font-size: 16px; border: 2px solid #e0e0e0; border-radius: 8px; transition: border-color 0.2s; }
+    .search-input:focus { outline: none; border-color: #3498db; }
+    .search-btn { padding: 14px 28px; background: #3498db; color: white; border: none; border-radius: 8px; font-size: 16px; cursor: pointer; transition: background 0.2s; }
+    .search-btn:hover { background: #2980b9; }
+    .search-btn:disabled { background: #95a5a6; cursor: not-allowed; }
+    .results-summary { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); margin-bottom: 16px; }
+    .db-result { background: white; padding: 16px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.08); margin-bottom: 12px; cursor: pointer; transition: transform 0.2s, box-shadow 0.2s; }
+    .db-result:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+    .db-result.not-found { opacity: 0.5; cursor: default; }
+    .db-result.not-found:hover { transform: none; box-shadow: 0 2px 4px rgba(0,0,0,0.08); }
+    .db-header { display: flex; align-items: center; justify-content: space-between; }
+    .db-info { display: flex; align-items: center; gap: 12px; }
+    .db-icon { font-size: 24px; }
+    .db-name { font-weight: 600; font-size: 16px; color: #2c3e50; }
+    .db-count { display: inline-block; padding: 4px 12px; border-radius: 12px; font-size: 14px; font-weight: 600; color: white; }
+    .db-samples { margin-top: 12px; padding-top: 12px; border-top: 1px solid #f0f0f0; display: none; }
+    .db-result.expanded .db-samples { display: block; }
+    .sample-item { padding: 8px; background: #f8f9fa; border-radius: 6px; margin-bottom: 8px; font-size: 14px; }
+    .sample-item:last-child { margin-bottom: 0; }
+    .loading { text-align: center; padding: 40px; color: #95a5a6; }
+    .spinner { border: 3px solid #f3f3f3; border-top: 3px solid #3498db; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto 16px; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    .no-results { text-align: center; padding: 40px; color: #95a5a6; }
+    .from-cache { display: inline-block; padding: 4px 8px; background: #e8f8f5; color: #00b894; border-radius: 4px; font-size: 12px; margin-left: 8px; }
+    .view-all-btn { padding: 6px 16px; background: #3498db; color: white; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; margin-left: 12px; }
+    .view-all-btn:hover { background: #2980b9; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🔍 Unified Search</h1>
+    
+    <div class="search-box">
+      <div class="search-input-wrapper">
+        <input type="text" class="search-input" id="searchInput" placeholder="Search by UPC, barcode, or item name..." autofocus>
+        <button class="search-btn" id="searchBtn">Search</button>
+      </div>
+    </div>
+
+    <div id="results">
+      <!-- Results will be inserted here -->
+    </div>
+  </div>
+
+  <script>
+    const searchInput = document.getElementById('searchInput');
+    const searchBtn = document.getElementById('searchBtn');
+    const resultsDiv = document.getElementById('results');
+    
+    let currentQuery = '';
+
+    function showLoading() {
+      resultsDiv.innerHTML = '<div class="loading"><div class="spinner"></div>Searching all databases...</div>';
+    }
+
+    function showNoResults() {
+      resultsDiv.innerHTML = '<div class="no-results">No results found in any database.</div>';
+    }
+
+    async function performSearch(query) {
+      if (!query.trim()) return;
+      
+      currentQuery = query;
+      showLoading();
+      searchBtn.disabled = true;
+      
+      try {
+        const response = await fetch('/api/search-all', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ q: query })
+        });
+        
+        const data = await response.json();
+        
+        if (data.error) {
+          resultsDiv.innerHTML = `<div class="no-results">Error: ${data.error}</div>`;
+          return;
+        }
+        
+        displayResults(data);
+        
+      } catch (error) {
+        resultsDiv.innerHTML = `<div class="no-results">Error: ${error.message}</div>`;
+      } finally {
+        searchBtn.disabled = false;
+      }
+    }
+
+    function displayResults(data) {
+      const databases = data.databases;
+      const foundAny = Object.values(databases).some(db => db.found);
+      
+      if (!foundAny) {
+        showNoResults();
+        return;
+      }
+
+      let html = '<div class="results-summary">';
+      html += `<strong>Searching for:</strong> "${data.query}"`;
+      html += ` <span style="color:#7f8c8d;font-size:14px;">(${data.search_type === 'upc' ? 'UPC/Barcode' : 'Text'} search)</span>`;
+      if (data.from_cache) {
+        html += '<span class="from-cache">⚡ Cached</span>';
+      }
+      html += '</div>';
+
+      // Sort: found databases first, then by count
+      const sortedDbs = Object.entries(databases).sort((a, b) => {
+        if (a[1].found && !b[1].found) return -1;
+        if (!a[1].found && b[1].found) return 1;
+        return (b[1].count || 0) - (a[1].count || 0);
+      });
+
+      for (const [dbKey, dbData] of sortedDbs) {
+        const notFoundClass = !dbData.found ? 'not-found' : '';
+        html += `<div class="db-result ${notFoundClass}" data-db="${dbKey}" data-found="${dbData.found}">`;
+        html += '<div class="db-header">';
+        html += '<div class="db-info">';
+        html += `<span class="db-icon">${dbData.icon}</span>`;
+        html += `<span class="db-name">${dbData.name}</span>`;
+        html += '</div>';
+        
+        if (dbData.found) {
+          html += `<div><span class="db-count" style="background:${dbData.color};">${dbData.count} result${dbData.count !== 1 ? 's' : ''}</span>`;
+          html += `<button class="view-all-btn" onclick="viewFullResults('${dbKey}', '${data.query}')">View All</button>`;
+          html += '</div>';
+        } else {
+          html += '<span style="color:#95a5a6;font-size:14px;">Not found</span>';
+        }
+        
+        html += '</div>';
+        
+        // Show sample results if available
+        if (dbData.samples && dbData.samples.length > 0) {
+          html += '<div class="db-samples">';
+          dbData.samples.forEach(sample => {
+            html += '<div class="sample-item">';
+            const title = sample.title || sample.Title || sample.item_description || sample.name || sample.Name || '';
+            const barcode = sample.barcode || sample.Barcode || sample.UPC || sample.upc || '';
+            html += `<strong>${escapeHtml(title)}</strong><br>`;
+            if (barcode) html += `<span style="color:#7f8c8d;font-size:13px;">UPC: ${escapeHtml(barcode)}</span>`;
+            html += '</div>';
+          });
+          html += '</div>';
+        }
+        
+        html += '</div>';
+      }
+
+      resultsDiv.innerHTML = html;
+
+      // Add click handlers to expand/collapse
+      document.querySelectorAll('.db-result[data-found="true"]').forEach(el => {
+        el.addEventListener('click', (e) => {
+          if (e.target.classList.contains('view-all-btn')) return;
+          el.classList.toggle('expanded');
+        });
+      });
+    }
+
+    function viewFullResults(dbKey, query) {
+      // Store search query and redirect to the specific database search page
+      sessionStorage.setItem('searchQuery', query);
+      
+      // Map db keys to their search pages
+      const pageMap = {
+        'bol': '/searchbol_api?q=' + encodeURIComponent(query),
+        'processed': '/items-to-list?q=' + encodeURIComponent(query),
+        'shelves': '/searchrack?q=' + encodeURIComponent(query),
+        'sold': '/sold?q=' + encodeURIComponent(query),
+        'ebay': '/marketplace-stats?store=ebay&q=' + encodeURIComponent(query),
+        'amazon': '/marketplace-stats?store=amazon&q=' + encodeURIComponent(query)
+      };
+      
+      const url = pageMap[dbKey] || '/tools';
+      window.location.href = url;
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    // Event listeners
+    searchBtn.addEventListener('click', () => performSearch(searchInput.value));
+    searchInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') performSearch(searchInput.value);
+    });
+
+    // Auto-search if there's a query parameter
+    const urlParams = new URLSearchParams(window.location.search);
+    const initialQuery = urlParams.get('q');
+    if (initialQuery) {
+      searchInput.value = initialQuery;
+      performSearch(initialQuery);
+    }
+  </script>
+</body>
+</html>

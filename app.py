@@ -83,6 +83,82 @@ def enable_wal_mode():
         except Exception:
             pass  # Skip if database doesn't exist or error occurs
 
+def create_database_indexes():
+    """Create indexes on frequently searched columns for all databases"""
+    print("🔍 Creating database indexes for faster searches...")
+    
+    # Index definitions: {database: [(table, column), ...]}
+    index_configs = {
+        'rawbol.db': [
+            ('raw_bol_items', 'upc'),
+            ('raw_bol_items', 'item_description'),
+            ('raw_bol_items', 'lot_number')
+        ],
+        'searchRack.db': [
+            ('SEARCHRACK', 'UPC'),
+            ('SEARCHRACK', 'item_position'),
+            ('SEARCHRACK', 'CREATED_AT')
+        ],
+        'sold.db': [
+            ('sold_items', 'UPC'),
+            ('sold_items', 'barcode'),
+            ('sold_items', 'OrderID'),
+            ('returns', 'upc'),
+            ('returns', 'order_id')
+        ],
+        'ebayStore.db': [
+            ('INVENTORY', 'UPC'),
+            ('INVENTORY', 'SKU'),
+            ('orders', 'OrderID')
+        ],
+        'amazonStore.db': [
+            ('INVENTORY', 'UPC'),
+            ('INVENTORY', 'SKU'),
+            ('INVENTORY', 'asin'),
+            ('orders', 'AmazonOrderId')
+        ]
+    }
+    
+    for db_name, indexes in index_configs.items():
+        try:
+            db_path = BASE_DIR / db_name
+            if not db_path.exists():
+                continue
+                
+            conn = sqlite3.connect(str(db_path))
+            cur = conn.cursor()
+            
+            for table, column in indexes:
+                try:
+                    # Check if table exists
+                    cur.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,))
+                    if not cur.fetchone():
+                        continue
+                    
+                    # Check if column exists
+                    cur.execute(f"PRAGMA table_info({table})")
+                    cols = [row[1].lower() for row in cur.fetchall()]
+                    if column.lower() not in cols:
+                        continue
+                    
+                    # Create index if it doesn't exist
+                    index_name = f"idx_{table}_{column}".replace('-', '_')
+                    cur.execute(f"CREATE INDEX IF NOT EXISTS {index_name} ON {table}({column} COLLATE NOCASE)")
+                    print(f"  ✅ Index created: {db_name}.{table}.{column}")
+                except Exception as e:
+                    print(f"  ⚠️ Could not create index on {db_name}.{table}.{column}: {e}")
+            
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            print(f"  ⚠️ Error processing {db_name}: {e}")
+    
+    print("✅ Database indexes created")
+
+# Initialize database optimizations on startup
+enable_wal_mode()
+create_database_indexes()
+
 try:
     from amazon_manager import AmazonManager
     AMAZON_AVAILABLE = True
@@ -6702,6 +6778,7 @@ def get_amazon_orders():
 
 
 @app.route('/sold-orders', methods=['GET'])
+@cache.cached(timeout=300, query_string=True)  # Cache for 5 minutes based on query params (days parameter)
 def sold_orders():
     days = int(request.args.get('days', 1))
     
@@ -6798,6 +6875,10 @@ def mark_order_handled():
         """, (order_id,))
         conn.commit()
         conn.close()
+        
+        # Clear the sold-orders cache since data changed
+        cache.delete_memoized(sold_orders)
+        
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
@@ -6816,6 +6897,10 @@ def mark_order_unhandled():
         cur.execute("UPDATE orders SET isHandled = '', isHandledDate = NULL WHERE id = ?", (order_id,))
         conn.commit()
         conn.close()
+        
+        # Clear the sold-orders cache since data changed
+        cache.delete_memoized(sold_orders)
+        
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
@@ -7810,6 +7895,11 @@ def searchrack_page():
     response.headers['Expires'] = '0'
     return response
 
+@app.route('/unified-search')
+def unified_search_page():
+    """Unified search page that searches across all databases"""
+    return render_template('unified_search.html')
+
 @app.route('/searchrack_api')
 def searchrack_api():
     q = request.args.get('q', '').strip()
@@ -8008,6 +8098,7 @@ def update_item(db_type, item_id):
         conn.close()
 
 @app.route('/api/search/<db_key>', methods=['POST'])
+@cache.cached(timeout=300, query_string=False, unless=lambda: request.json and request.json.get('q'))
 def api_search_db(db_key):
     data = request.get_json() or {}
     q = (data.get('q') or '').strip()
@@ -8050,7 +8141,9 @@ def api_search_db(db_key):
             except Exception:
                 # Don't block search if migration fails
                 pass
-        conn = sqlite3.connect(db_path)
+        
+        # Use cached connection for better performance
+        conn = get_db_connection(db_path)
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
@@ -8312,7 +8405,8 @@ def api_search_db(db_key):
             except Exception:
                 pass
             results.append(item_out)
-        conn.close()
+        
+        # Note: Not closing connection - using connection pooling for performance
         
         # If searching bol (rawbol.db), aggregate by UPC and handle multiple LOTs
         if db_key == 'bol' and results:
@@ -8492,6 +8586,155 @@ def api_search_db(db_key):
                     print(f"[BEFORE JSONIFY] barcode={r.get('barcode')}, quantity={r.get('quantity')}, type={type(r.get('quantity'))}")
 
         return jsonify({'results': results, 'total': total_count, 'total_quantity': total_quantity})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# Quick search cache for UPC/barcode lookups (Option 3: Hybrid search)
+_search_all_cache = {}
+_search_cache_timeout = 300  # 5 minutes
+
+@app.route('/api/search-all', methods=['POST'])
+def api_search_all():
+    """Search across all databases simultaneously with cached quick lookups for UPCs"""
+    try:
+        data = request.get_json() or {}
+        query = (data.get('q') or '').strip()
+        
+        if not query:
+            return jsonify({'error': 'No search query provided'}), 400
+        
+        # Strip leading zeros for barcode searches
+        query_stripped = query.lstrip('0') if query and query.isdigit() else query
+        
+        # Determine search type (UPC searches are cached)
+        is_upc_search = query.isdigit()
+        
+        # Check cache for UPC searches only
+        cache_key = f"search_all:{query_stripped}"
+        if is_upc_search and cache_key in _search_all_cache:
+            cached_data, cached_time = _search_all_cache[cache_key]
+            if time.time() - cached_time < _search_cache_timeout:
+                cached_data['from_cache'] = True
+                return jsonify(cached_data)
+        
+        # Define databases to search with display info
+        databases = [
+            {'key': 'bol', 'path': 'rawbol.db', 'table': 'raw_bol_items', 'name': 'Inventory (BOL)', 'color': '#3498db', 'icon': '📦'},
+            {'key': 'processed', 'path': 'bol.db', 'table': 'bol_items', 'name': 'Processed Items', 'color': '#2ecc71', 'icon': '✅'},
+            {'key': 'shelves', 'path': 'searchRack.db', 'table': 'SEARCHRACK', 'name': 'Shelf Manager', 'color': '#9b59b6', 'icon': '📚'},
+            {'key': 'sold', 'path': 'sold.db', 'table': 'sold_items', 'name': 'Sold Items', 'color': '#e74c3c', 'icon': '💰'},
+            {'key': 'ebay', 'path': 'ebayStore.db', 'table': 'INVENTORY', 'name': 'eBay Store', 'color': '#f39c12', 'icon': '🛒'},
+            {'key': 'amazon', 'path': 'amazonStore.db', 'table': 'INVENTORY', 'name': 'Amazon Store', 'color': '#1abc9c', 'icon': '📦'},
+        ]
+        
+        results = {
+            'query': query,
+            'search_type': 'upc' if is_upc_search else 'text',
+            'databases': {},
+            'from_cache': False
+        }
+        
+        # Search each database
+        for db_info in databases:
+            db_key = db_info['key']
+            db_path = BASE_DIR / db_info['path']
+            
+            if not db_path.exists():
+                results['databases'][db_key] = {
+                    'name': db_info['name'],
+                    'color': db_info['color'],
+                    'icon': db_info['icon'],
+                    'found': False,
+                    'count': 0,
+                    'error': 'Database not found'
+                }
+                continue
+            
+            try:
+                conn = get_db_connection(str(db_path))
+                conn.row_factory = sqlite3.Row
+                cur = conn.cursor()
+                
+                # Check if table exists
+                cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (db_info['table'],))
+                if not cur.fetchone():
+                    results['databases'][db_key] = {
+                        'name': db_info['name'],
+                        'color': db_info['color'],
+                        'icon': db_info['icon'],
+                        'found': False,
+                        'count': 0,
+                        'error': 'Table not found'
+                    }
+                    continue
+                
+                # Get table columns
+                cur.execute(f"PRAGMA table_info({db_info['table']})")
+                cols = [r[1] for r in cur.fetchall()]
+                
+                # Build search query based on type
+                if is_upc_search:
+                    # Fast UPC search on indexed columns
+                    upc_cols = [c for c in cols if c.lower() in ('upc', 'barcode', 'sku')]
+                    if not upc_cols:
+                        upc_cols = [c for c in cols if 'upc' in c.lower() or 'barcode' in c.lower()]
+                    
+                    if upc_cols:
+                        where_parts = [f"{col} LIKE ?" for col in upc_cols]
+                        where_clause = " OR ".join(where_parts)
+                        params = [f"%{query_stripped}%"] * len(upc_cols)
+                    else:
+                        where_clause = "1=0"  # No UPC columns found
+                        params = []
+                else:
+                    # Text search across all columns
+                    where_parts = [f"LOWER(COALESCE({col},'')) LIKE ?" for col in cols]
+                    where_clause = " OR ".join(where_parts)
+                    params = [f"%{query_stripped.lower()}%"] * len(cols)
+                
+                # Get count and sample results
+                count_sql = f"SELECT COUNT(*) as count FROM {db_info['table']} WHERE {where_clause}"
+                cur.execute(count_sql, params)
+                count = cur.fetchone()['count']
+                
+                # Get sample results (up to 3)
+                sample_results = []
+                if count > 0:
+                    sample_sql = f"SELECT * FROM {db_info['table']} WHERE {where_clause} LIMIT 3"
+                    cur.execute(sample_sql, params)
+                    sample_results = [dict(row) for row in cur.fetchall()]
+                
+                results['databases'][db_key] = {
+                    'name': db_info['name'],
+                    'color': db_info['color'],
+                    'icon': db_info['icon'],
+                    'found': count > 0,
+                    'count': count,
+                    'samples': sample_results[:3] if count > 0 else []
+                }
+                
+            except Exception as e:
+                results['databases'][db_key] = {
+                    'name': db_info['name'],
+                    'color': db_info['color'],
+                    'icon': db_info['icon'],
+                    'found': False,
+                    'count': 0,
+                    'error': str(e)
+                }
+        
+        # Cache UPC searches
+        if is_upc_search:
+            _search_all_cache[cache_key] = (results, time.time())
+            # Clean old cache entries (keep cache size under control)
+            current_time = time.time()
+            expired_keys = [k for k, (_, t) in _search_all_cache.items() if current_time - t > _search_cache_timeout]
+            for k in expired_keys:
+                del _search_all_cache[k]
+        
+        return jsonify(results)
+        
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
