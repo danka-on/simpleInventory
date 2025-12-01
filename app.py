@@ -6805,18 +6805,34 @@ def sold_orders():
             if (not order_dict.get('location') or order_dict.get('location', '').strip() == '') and order_dict.get('barcode'):
                 try:
                     # Try original barcode first (searchRack stores without leading zeros)
-                    rack_cur.execute('SELECT ITEM_POSITION, PICTUREPOSITION FROM SEARCHRACK WHERE BARCODE = ? COLLATE NOCASE', (order_dict['barcode'],))
-                    rack_row = rack_cur.fetchone()
+                    rack_cur.execute('SELECT ITEM_POSITION, PICTUREPOSITION, QUANTITY FROM SEARCHRACK WHERE BARCODE = ? COLLATE NOCASE', (order_dict['barcode'],))
+                    rack_rows = rack_cur.fetchall()
                     
                     # If not found, try padded version
-                    if not rack_row and order_dict['barcode'] and order_dict['barcode'].isdigit():
+                    if not rack_rows and order_dict['barcode'] and order_dict['barcode'].isdigit():
                         barcode_padded = order_dict['barcode'].zfill(12)
-                        rack_cur.execute('SELECT ITEM_POSITION, PICTUREPOSITION FROM SEARCHRACK WHERE BARCODE = ? COLLATE NOCASE', (barcode_padded,))
-                        rack_row = rack_cur.fetchone()
+                        rack_cur.execute('SELECT ITEM_POSITION, PICTUREPOSITION, QUANTITY FROM SEARCHRACK WHERE BARCODE = ? COLLATE NOCASE', (barcode_padded,))
+                        rack_rows = rack_cur.fetchall()
                     
-                    if rack_row:
-                        # Use ITEM_POSITION as location (area code), fallback to PICTUREPOSITION
-                        order_dict['location'] = rack_row['ITEM_POSITION'] or rack_row['PICTUREPOSITION']
+                    if rack_rows:
+                        # Collect all locations for this barcode
+                        locations = []
+                        for rack_row in rack_rows:
+                            loc = rack_row['ITEM_POSITION'] or rack_row['PICTUREPOSITION']
+                            if loc:
+                                locations.append({
+                                    'code': loc,
+                                    'image': rack_row['PICTUREPOSITION'] if rack_row['PICTUREPOSITION'] and rack_row['PICTUREPOSITION'].strip() else loc,
+                                    'quantity': rack_row['QUANTITY'] if rack_row['QUANTITY'] else 1
+                                })
+                        
+                        # Store as JSON array if multiple locations, or single string for backward compatibility
+                        if len(locations) > 1:
+                            order_dict['locations'] = locations  # Array of location objects
+                            order_dict['location'] = locations[0]['code']  # First location for backward compatibility
+                        elif len(locations) == 1:
+                            order_dict['location'] = locations[0]['code']
+                            order_dict['location_image'] = locations[0]['image']
                 except sqlite3.Error as e:
                     # If searchRack query fails, just skip location lookup for this order
                     print(f"Warning: Failed to lookup location for barcode {order_dict['barcode']}: {e}")
@@ -7895,6 +7911,14 @@ def searchrack_page():
     response.headers['Expires'] = '0'
     return response
 
+@app.route('/cleanup')
+def cleanup_page():
+    response = make_response(render_template('cleanup.html'))
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
+
 @app.route('/unified-search')
 def unified_search_page():
     """Unified search page that searches across all databases"""
@@ -8111,6 +8135,7 @@ def api_search_db(db_key):
     except Exception:
         limit = 50
     try:
+        print(f"[SEARCH DEBUG] db_key={db_key}, query={q}, query_stripped={q_stripped}")
         mapping = {
             'ebayStore': 'ebayStore.db',
             'amazonStore': 'amazonStore.db',
@@ -8161,8 +8186,10 @@ def api_search_db(db_key):
                     prefer = t
                     break
         table = prefer or tables[0]
+        print(f"[SEARCH DEBUG] db_key={db_key}, db_path={db_path}, table={table}, tables={tables}")
         cur.execute(f"PRAGMA table_info('{table}')")
         cols = [r[1] for r in cur.fetchall()]
+        print(f"[SEARCH DEBUG] columns={cols}")
         where_clause = ''
         params = []
         # Accept optional location filter (from client UI) to search Item_Position specifically
@@ -8204,8 +8231,10 @@ def api_search_db(db_key):
                     where_clause = ' WHERE ' + ' OR '.join(loc_likes)
         # compute total matching count for pagination
         count_sql = f"SELECT COUNT(*) FROM {table} {where_clause}"
+        print(f"[SEARCH DEBUG] count_sql={count_sql}, params={params}")
         cur.execute(count_sql, params)
         total_count = cur.fetchone()[0]
+        print(f"[SEARCH DEBUG] total_count={total_count}")
 
         # If limit <= 0, return all rows; otherwise apply LIMIT/OFFSET
         offset = int(data.get('offset') or 0)

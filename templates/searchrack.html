@@ -46,6 +46,13 @@
     #db-select, #store-select{padding:10px 14px;border-radius:6px;border:2px solid #3498db;font-size:1rem;background:#fff;cursor:pointer;font-weight:500;min-width:160px}
     .db-selector-group{display:flex;gap:12px;align-items:center;margin-right:auto}
     .db-selector-group label{font-size:1rem;font-weight:600;color:#2c3e50;display:flex;align-items:center;gap:8px}
+    /* Inventory options gear dropdown */
+    .inventory-gear-btn{background:#f0f0f0;border:1px solid #ddd;padding:8px 12px;border-radius:6px;cursor:pointer;font-size:18px;margin-left:12px;display:none}
+    .inventory-gear-btn:hover{background:#e0e0e0}
+    .inventory-dropdown{display:none;position:absolute;z-index:10000;background:#fff;border:1px solid #ddd;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.15);padding:8px;min-width:200px;margin-top:4px}
+    .inventory-dropdown.active{display:block}
+    .inventory-dropdown button{display:block;width:100%;text-align:left;padding:10px 12px;border:none;background:none;cursor:pointer;border-radius:4px;font-size:0.95rem}
+    .inventory-dropdown button:hover{background:#f0f0f0}
     </style>
 </head>
 <body>
@@ -67,13 +74,14 @@
                 </label>
             </div>
             
-            <button class="btn" id="history-btn" style="display:none;background-color:#6c757d;color:white;">History</button>
-            <!-- Location Duplicates filter (only visible when Inventory is selected) -->
-            <div id="location-duplicates-container" style="display:none; margin-left:12px;">
-                <label style="font-size:0.95rem; color:#444; padding:6px 12px; background:#fff3cd; border:1px solid #ffc107; border-radius:6px; cursor:pointer;">
-                    <input type="checkbox" id="location-duplicates-filter" style="margin-right:6px;">
-                    📍 Location Duplicates
-                </label>
+            <!-- Inventory Options Gear (only visible for Inventory database) -->
+            <div style="position:relative;">
+                <button class="inventory-gear-btn" id="inventory-gear">⚙️</button>
+                <div class="inventory-dropdown" id="inventory-dropdown">
+                    <button id="location-duplicates-btn">📍 Location Duplicates</button>
+                    <button id="rack-history-btn">📋 Rack History</button>
+                    <button id="automatic-cleanup-btn">🧹 Automatic Cleanup</button>
+                </div>
             </div>
         </div>
         <div class="actions">
@@ -116,36 +124,6 @@
     </div>
 
     <div style="margin-top:10px; font-size:0.95rem; color:#444">Showing: <span id="active-dbs">Inventory</span></div>
-
-    <!-- Pending Removals Notice (only shown when viewing sold items) -->
-    <div id="pending-removals-notice" style="display:none; margin-top:12px; padding:12px; background:#fff3cd; border:1px solid #ffc107; border-radius:8px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-            <div>
-                <strong style="color:#856404;">⏰ Pending Automatic Inventory Removals</strong>
-                <span id="pending-grace-info" style="color:#856404; opacity:0.9; margin-left:6px;"></span>
-            </div>
-            <div style="display:flex; gap:8px;">
-                <button id="trigger-automatic-removal-btn" class="btn" style="padding:4px 8px; font-size:0.9rem; background:#6f42c1; color:white;">Run Now</button>
-                <button id="refresh-pending-btn" class="btn" style="padding:4px 8px; font-size:0.9rem;">Refresh</button>
-            </div>
-        </div>
-        <div id="pending-removals-list" style="font-size:0.9rem; color:#856404;"></div>
-    </div>
-
-    <!-- Zero Quantity Pending Deletions (only shown when viewing inventory) -->
-    <div id="zero-qty-notice" style="display:none; margin-top:12px; padding:12px; background:#ffe5e5; border:1px solid #ff6b6b; border-radius:8px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-            <div>
-                <strong style="color:#c92a2a;">🗑️ Pending Zero-Quantity Deletions</strong>
-                <span id="zero-qty-grace-info" style="color:#c92a2a; opacity:0.9; margin-left:6px;"></span>
-            </div>
-            <div style="display:flex; gap:8px;">
-                <button id="run-zero-qty-now-btn" class="btn" style="padding:4px 8px; font-size:0.9rem; background:#c92a2a; color:white;">Run Now</button>
-                <button id="refresh-zero-qty-btn" class="btn" style="padding:4px 8px; font-size:0.9rem;">Refresh</button>
-            </div>
-        </div>
-        <div id="zero-qty-list" style="font-size:0.9rem; color:#c92a2a;"></div>
-    </div>
 
     <div id="results"></div>
 
@@ -235,15 +213,6 @@ function createFilters(){
 
 createFilters();
 
-// Initialize visibility of filters based on default selection
-(function initializeFilters(){
-    const defaultDb = 'searchRack'; // matches defaultChecked
-    const locationDuplicatesContainer = document.getElementById('location-duplicates-container');
-    if(defaultDb === 'searchRack'){
-        locationDuplicatesContainer.style.display = 'block';
-    }
-})();
-
 // attach change listeners so switching DBs auto-refreshes the results
 function attachDBChangeHandlers(){
     document.getElementById('db-select').addEventListener('change', (e)=>{
@@ -262,13 +231,14 @@ function attachDBChangeHandlers(){
             lotFilterContainer.style.display = 'none';
         }
         
-        // Show/hide Location Duplicates filter for Inventory
-        const locationDuplicatesContainer = document.getElementById('location-duplicates-container');
+        // Show/hide Inventory gear button for searchRack
+        const inventoryGearBtn = document.getElementById('inventory-gear');
         if(selectedDb === 'searchRack'){
-            locationDuplicatesContainer.style.display = 'block';
+            inventoryGearBtn.style.display = 'inline-block';
         } else {
-            locationDuplicatesContainer.style.display = 'none';
-            document.getElementById('location-duplicates-filter').checked = false;
+            inventoryGearBtn.style.display = 'none';
+            // Close dropdown if open
+            document.getElementById('inventory-dropdown').classList.remove('active');
         }
         
         // run search when user explicitly changes selection
@@ -281,8 +251,10 @@ function attachDBChangeHandlers(){
         if(selectedStore){
             // Hide database-specific filters when store is selected
             document.getElementById('lot-filter-container').style.display = 'none';
-            document.getElementById('location-duplicates-container').style.display = 'none';
-            document.getElementById('location-duplicates-filter').checked = false;
+            
+            // Hide inventory gear when store selected
+            document.getElementById('inventory-gear').style.display = 'none';
+            document.getElementById('inventory-dropdown').classList.remove('active');
             
             // run search
             doSearch();
@@ -316,9 +288,6 @@ async function populateLotFilter(){
 // Attach LOT filter change handler
 document.getElementById('lot-filter').addEventListener('change', doSearch);
 
-// Attach Location Duplicates filter change handler
-document.getElementById('location-duplicates-filter').addEventListener('change', doSearch);
-
 function getActiveDBs(){
     // Check if a store is selected first
     const storeSelect = document.getElementById('store-select');
@@ -343,9 +312,11 @@ function hideLoading(){
 }
 
 async function doSearch(){
+    console.log('[SEARCH] doSearch called');
     showLoading();
     const q = document.getElementById('search-input').value.trim();
     const dbs = getActiveDBs();
+    console.log('[SEARCH] query:', q, 'databases:', dbs);
     _allResults = [];
     let totalQty = 0;
     // If user requested fetch-all, send limit=0 to tell server to return all matches
@@ -355,10 +326,7 @@ async function doSearch(){
     // Get LOT filter value (only relevant for BOL database)
     const selectedLot = document.getElementById('lot-filter').value.trim();
     
-    // Check if Location Duplicates filter is active
-    const locationDuplicatesActive = document.getElementById('location-duplicates-filter').checked;
-    
-    // Special handling for Location Duplicates filter
+    // Special handling for Location Duplicates filter (uses global locationDuplicatesActive from gear dropdown)
     if(locationDuplicatesActive && dbs.includes('searchRack')){
         try{
             const resp = await fetch('/api/location_duplicates');
@@ -408,24 +376,6 @@ async function doSearch(){
     renderPagedResults();
     // Auto-clear the search input after search completes
     document.getElementById('search-input').value = '';
-    
-    // If viewing sold items, fetch and display pending removals
-    if(dbs.includes('sold')){
-        console.log('Sold database selected, fetching pending removals...');
-        fetchPendingRemovals();
-    } else {
-        console.log('Sold database NOT selected, hiding pending removals notice');
-        document.getElementById('pending-removals-notice').style.display = 'none';
-    }
-    
-    // If viewing inventory, fetch and display zero-quantity pending deletions
-    if(dbs.includes('searchRack')){
-        console.log('Inventory selected, fetching zero-qty pending...');
-        fetchZeroQtyPending();
-    } else {
-        console.log('Inventory NOT selected, hiding zero-qty notice');
-        document.getElementById('zero-qty-notice').style.display = 'none';
-    }
     
     hideLoading();
 }
@@ -597,9 +547,16 @@ function renderResults(results){
             }
         }catch(e){ /* ignore parse errors */ }
     }
-    const img = esc(imgUrl);
-    // Only use pictureposition if there is no actual item image at all
-    const thumb = (imgUrl && imgUrl.trim() && imgUrl.trim() !== '') ? img : (!isArchived && r.pictureposition ? ('/static/pictureposition/'+r.pictureposition) : missingThumb());
+    const img = esc(imgUrl || '');
+    // Only use pictureposition if there is no actual item image at all AND pictureposition is valid
+    const hasPicturePosition = !isArchived && r.pictureposition && String(r.pictureposition).trim() !== '' && String(r.pictureposition) !== 'undefined' && String(r.pictureposition) !== 'null';
+    const thumb = (imgUrl && imgUrl.trim() && imgUrl.trim() !== '') ? img : (hasPicturePosition ? ('/static/pictureposition/'+r.pictureposition) : missingThumb());
+    
+    // Debug logging for nan issue
+    if (thumb === 'nan' || thumb.includes('nan') || thumb === '' || thumb === 'undefined') {
+        console.warn('[THUMB DEBUG]', {barcode: r.barcode, imgUrl, img, hasPicturePosition, pictureposition: r.pictureposition, thumb});
+    }
+    
     // Strip leading zeros from barcode display
     const barcodeStripped = barcodeRaw && /^\d+$/.test(String(barcodeRaw)) ? String(barcodeRaw).replace(/^0+/, '') : barcodeRaw;
     const barcode = esc(barcodeStripped);
@@ -960,7 +917,10 @@ async function onViewTitle(e){
     const image = el.dataset.image;
     const title = el.dataset.title;
     let html = `<div><h3>${esc(title)}</h3>`;
-    if(image) html += `<img src="${image}" style="max-width:320px;border-radius:8px;display:block;margin:8px 0;" onerror="this.src='${missingThumb(320,180,'Image missing')}'">`;
+    // Only add image if it's a valid URL (not empty, undefined, null, or 'nan')
+    if(image && image.trim() !== '' && image !== 'undefined' && image !== 'null' && image !== 'nan') {
+        html += `<img src="${image}" style="max-width:320px;border-radius:8px;display:block;margin:8px 0;" onerror="this.src='${missingThumb(320,180,'Image missing')}'">`;
+    }
     html += `<div class=\"small-muted\">DB: ${esc(src)}</div></div>`;
     showViewModal(html);
 }
@@ -1235,318 +1195,66 @@ window.addEventListener('load', ()=>{
     }catch(e){ console.error('initial load failed', e); }
 });
 
-// Refresh handler: call refresh API and poll status
-// Pending removals functionality
-async function fetchPendingRemovals(){
-    console.log('Fetching pending removals...');
-    try{
-        const resp = await fetch('/api/sold/pending-removals');
-        console.log('Response status:', resp.status);
-        const j = await resp.json();
-        console.log('Response data:', j);
-        // Update grace period info if available
-        try{
-            const graceInfoEl = document.getElementById('pending-grace-info');
-            if (graceInfoEl) {
-                if (j && typeof j.grace_hours !== 'undefined' && j.grace_hours !== null) {
-                    graceInfoEl.textContent = `(grace: ${j.grace_hours}h)`;
-                } else {
-                    graceInfoEl.textContent = '';
-                }
-            }
-        }catch(_e){ /* no-op */ }
-        if(j.success && j.orders && j.orders.length > 0){
-            console.log(`Found ${j.orders.length} pending removals`);
-            displayPendingRemovals(j.orders);
-        } else {
-            console.log('No pending removals to display');
-            document.getElementById('pending-removals-notice').style.display = 'none';
-        }
-    }catch(err){
-        console.error('Error fetching pending removals:', err);
-        document.getElementById('pending-removals-notice').style.display = 'none';
+// Initialize gear button visibility on page load
+(function initGearButton() {
+    const dbSelect = document.getElementById('db-select');
+    if (dbSelect && dbSelect.value === 'searchRack') {
+        document.getElementById('inventory-gear').style.display = 'inline-block';
     }
-}
+})();
 
-function displayPendingRemovals(orders){
-    console.log('Displaying pending removals:', orders);
-    const notice = document.getElementById('pending-removals-notice');
-    const list = document.getElementById('pending-removals-list');
-    
-    if(!orders || orders.length === 0){
-        notice.style.display = 'none';
-        return;
-    }
-    
-    console.log('Building HTML for', orders.length, 'orders');
-    let html = '<div style="max-height:300px; overflow-y:auto;">';
-    html += '<table style="width:100%; font-size:0.9rem; border-collapse:collapse;">';
-    html += '<thead><tr style="background:#f8f9fa;"><th style="padding:6px; text-align:left;">Order</th><th style="padding:6px; text-align:left;">Title</th><th style="padding:6px; text-align:left;">Barcode</th><th style="padding:6px; text-align:left;">Qty</th><th style="padding:6px; text-align:left;">Status</th><th style="padding:6px; text-align:left;">Action</th></tr></thead>';
-    html += '<tbody>';
-    
-    orders.forEach(order => {
-        const isCancelled = order.removal_cancelled === 1;
-        const statusText = isCancelled ? '❌ Cancelled' : 
-                          order.is_eligible_for_removal ? '⚠️ Ready to remove' : 
-                          `⏰ ${order.hours_remaining}h remaining`;
-        const statusColor = isCancelled ? '#dc3545' : 
-                           order.is_eligible_for_removal ? '#ff6b6b' : '#856404';
-        
-        let actionBtn = '';
-        if (isCancelled) {
-            actionBtn = `<button class="btn" style="padding:4px 8px; font-size:0.85rem; background:#28a745; color:white;" onclick="allowRemoval(${order.id})">Re-enable</button>`;
-        } else {
-            const cancelBtn = `<button class="btn" style="padding:4px 8px; font-size:0.85rem; background:#dc3545; color:white;" onclick="cancelRemoval(${order.id})">Cancel</button>`;
-            // Show "Remove now" only when still in grace period (not yet eligible) and not cancelled
-            const removeNowBtn = !order.is_eligible_for_removal ? ` <button class="btn" style="padding:4px 8px; font-size:0.85rem; background:#6f42c1; color:white;" onclick="removeNow(${order.id})">Remove now</button>` : '';
-            actionBtn = cancelBtn + removeNowBtn;
-        }
-        
-        html += `<tr style="border-bottom:1px solid #dee2e6;">
-            <td style="padding:6px;">${esc(order.order_id || '')}</td>
-            <td style="padding:6px;">${esc((order.title || '').substring(0, 40))}${(order.title || '').length > 40 ? '...' : ''}</td>
-            <td style="padding:6px;">${esc(order.barcode || '')}</td>
-            <td style="padding:6px;">${order.quantity || 1}</td>
-            <td style="padding:6px; color:${statusColor}; font-weight:bold;">${statusText}</td>
-            <td style="padding:6px;">${actionBtn}</td>
-        </tr>`;
-    });
-    
-    html += '</tbody></table></div>';
-    list.innerHTML = html;
-    notice.style.display = 'block';
-    console.log('Pending removals notice displayed');
-}
+// Inventory gear dropdown handlers
+document.getElementById('inventory-gear').addEventListener('click', (e) => {
+    e.stopPropagation();
+    const dropdown = document.getElementById('inventory-dropdown');
+    dropdown.classList.toggle('active');
+});
 
-async function cancelRemoval(orderId){
-    if(!confirm('Cancel automatic inventory removal for this order? You will need to manually adjust inventory.')){
-        return;
+// Close dropdown when clicking outside
+document.addEventListener('click', (e) => {
+    const dropdown = document.getElementById('inventory-dropdown');
+    const gearBtn = document.getElementById('inventory-gear');
+    if (!dropdown.contains(e.target) && !gearBtn.contains(e.target)) {
+        dropdown.classList.remove('active');
     }
-    try{
-        const resp = await fetch(`/api/sold/cancel-removal/${orderId}`, {method: 'POST'});
-        const j = await resp.json();
-        if(j.success){
-            alert('Automatic removal cancelled');
-            fetchPendingRemovals();
-        } else {
-            alert('Failed to cancel: ' + (j.error || 'Unknown error'));
-        }
-    }catch(err){
-        console.error('Error cancelling removal:', err);
-        alert('Error cancelling removal');
-    }
-}
+});
 
-async function allowRemoval(orderId){
-    if(!confirm('Re-enable automatic inventory removal for this order?')){
-        return;
+// Location Duplicates button (toggle state)
+let locationDuplicatesActive = false;
+document.getElementById('location-duplicates-btn').addEventListener('click', () => {
+    locationDuplicatesActive = !locationDuplicatesActive;
+    const btn = document.getElementById('location-duplicates-btn');
+    if (locationDuplicatesActive) {
+        btn.style.background = '#fff3cd';
+        btn.style.fontWeight = 'bold';
+    } else {
+        btn.style.background = 'white';
+        btn.style.fontWeight = 'normal';
     }
-    try{
-        const resp = await fetch(`/api/sold/allow-removal/${orderId}`, {method: 'POST'});
-        const j = await resp.json();
-        if(j.success){
-            alert('Automatic removal re-enabled');
-            fetchPendingRemovals();
-        } else {
-            alert('Failed to re-enable: ' + (j.error || 'Unknown error'));
-        }
-    }catch(err){
-        console.error('Error re-enabling removal:', err);
-        alert('Error re-enabling removal');
-    }
-}
+    // Close dropdown
+    document.getElementById('inventory-dropdown').classList.remove('active');
+    // Re-run search
+    doSearch();
+});
 
-async function removeNow(orderId){
-    if(!confirm('Immediately reduce inventory for this order? This bypasses the grace period.')){
-        return;
-    }
-    try{
-        const resp = await fetch(`/api/sold/remove-now/${orderId}`, {method: 'POST'});
-        const j = await resp.json();
-        if(j.success){
-            alert('Inventory reduced successfully. New quantity: ' + (typeof j.new_qty !== 'undefined' ? j.new_qty : 'updated'));
-            // Refresh the pending list to remove this order from view
-            fetchPendingRemovals();
-        } else {
-            alert('Failed to remove now: ' + (j.error || 'Unknown error'));
-        }
-    }catch(err){
-        console.error('Error performing remove now:', err);
-        alert('Error performing remove now');
-    }
-}
-
-async function triggerAutomaticRemoval(){
-    if(!confirm('Manually trigger the automatic removal process now? This will process all eligible items immediately.')){
-        return;
-    }
-    try{
-        const resp = await fetch('/api/sold/trigger-automatic-removal', {method: 'POST'});
-        const j = await resp.json();
-        if(j.success){
-            alert('Automatic removal process completed. Check console for details.');
-            // Refresh the pending list after a short delay
-            setTimeout(fetchPendingRemovals, 1000);
-        } else {
-            alert('Failed to trigger: ' + (j.error || 'Unknown error'));
-        }
-    }catch(err){
-        console.error('Error triggering automatic removal:', err);
-        alert('Error triggering automatic removal');
-    }
-}
-
-// Attach refresh button handler
-document.getElementById('refresh-pending-btn').addEventListener('click', fetchPendingRemovals);
-document.getElementById('trigger-automatic-removal-btn').addEventListener('click', triggerAutomaticRemoval);
-
-// ===== Zero Quantity Pending Deletions =====
-
-async function fetchZeroQtyPending(){
-    console.log('Fetching zero-qty pending deletions...');
-    try{
-        const resp = await fetch('/api/zero_qty_pending');
-        console.log('Zero-qty response status:', resp.status);
-        const j = await resp.json();
-        console.log('Zero-qty response data:', j);
-        
-        // Update grace period info if available
-        try{
-            const graceInfoEl = document.getElementById('zero-qty-grace-info');
-            if (graceInfoEl) {
-                if (j && typeof j.grace_hours !== 'undefined' && j.grace_hours !== null) {
-                    graceInfoEl.textContent = `(grace: ${j.grace_hours}h)`;
-                } else {
-                    graceInfoEl.textContent = '';
-                }
-            }
-        }catch(_e){ /* no-op */ }
-        
-        if(j.success && j.items && j.items.length > 0){
-            console.log(`Found ${j.items.length} zero-qty pending deletions`);
-            displayZeroQtyPending(j.items);
-        } else {
-            console.log('No zero-qty pending deletions to display');
-            document.getElementById('zero-qty-notice').style.display = 'none';
-        }
-    }catch(err){
-        console.error('Error fetching zero-qty pending:', err);
-        document.getElementById('zero-qty-notice').style.display = 'none';
-    }
-}
-
-function displayZeroQtyPending(items){
-    console.log('Displaying zero-qty pending:', items);
-    const notice = document.getElementById('zero-qty-notice');
-    const list = document.getElementById('zero-qty-list');
-    
-    if(!items || items.length === 0){
-        notice.style.display = 'none';
-        return;
-    }
-    
-    console.log('Building HTML for', items.length, 'zero-qty items');
-    let html = '<div style="max-height:300px; overflow-y:auto;">';
-    html += '<table style="width:100%; font-size:0.9rem; border-collapse:collapse;">';
-    html += '<thead><tr style="background:#f8f9fa;"><th style="padding:6px; text-align:left;">Barcode</th><th style="padding:6px; text-align:left;">Title</th><th style="padding:6px; text-align:left;">Position</th><th style="padding:6px; text-align:left;">Status</th><th style="padding:6px; text-align:left;">Action</th></tr></thead>';
-    html += '<tbody>';
-    
-    items.forEach(item => {
-        const isCancelled = item.deletion_cancelled === 1;
-        const statusText = isCancelled ? '❌ Cancelled' : 
-                          item.is_eligible ? '⚠️ Ready to delete' : 
-                          `⏰ ${item.hours_remaining}h remaining`;
-        const statusColor = isCancelled ? '#dc3545' : 
-                           item.is_eligible ? '#ff6b6b' : '#c92a2a';
-        
-        let actionBtn = '';
-        if (isCancelled) {
-            actionBtn = `<button class="btn" style="padding:4px 8px; font-size:0.85rem; background:#28a745; color:white;" onclick="allowZeroQtyDeletion('${esc(item.barcode)}')">Re-enable</button>`;
-        } else {
-            const cancelBtn = `<button class="btn" style="padding:4px 8px; font-size:0.85rem; background:#dc3545; color:white;" onclick="cancelZeroQtyDeletion('${esc(item.barcode)}')">Cancel</button>`;
-            const deleteNowBtn = !item.is_eligible ? ` <button class="btn" style="padding:4px 8px; font-size:0.85rem; background:#6f42c1; color:white;" onclick="deleteZeroQtyNow('${esc(item.barcode)}')">Delete now</button>` : '';
-            actionBtn = cancelBtn + deleteNowBtn;
-        }
-        
-        html += `<tr style="border-bottom:1px solid #dee2e6;">
-            <td style="padding:6px;">${esc(item.barcode || '')}</td>
-            <td style="padding:6px;">${esc((item.title || '').substring(0, 40))}${(item.title || '').length > 40 ? '...' : ''}</td>
-            <td style="padding:6px;">${esc(item.position || '')}</td>
-            <td style="padding:6px; color:${statusColor}; font-weight:bold;">${statusText}</td>
-            <td style="padding:6px;">${actionBtn}</td>
-        </tr>`;
-    });
-    
-    html += '</tbody></table></div>';
-    list.innerHTML = html;
-    notice.style.display = 'block';
-    console.log('Zero-qty notice displayed');
-}
-
-async function cancelZeroQtyDeletion(barcode){
-    if(!confirm('Cancel automatic deletion for this zero-quantity item?')){
-        return;
-    }
-    try{
-        const resp = await fetch(`/api/zero_qty_cancel/${encodeURIComponent(barcode)}`, {method: 'POST'});
-        const j = await resp.json();
-        if(j.success){
-            alert('Automatic deletion cancelled');
-            fetchZeroQtyPending();
-        } else {
-            alert('Failed to cancel: ' + (j.error || 'Unknown error'));
-        }
-    }catch(err){
-        console.error('Error cancelling zero-qty deletion:', err);
-        alert('Error cancelling deletion');
-    }
-}
-
-async function allowZeroQtyDeletion(barcode){
-    if(!confirm('Re-enable automatic deletion for this zero-quantity item?')){
-        return;
-    }
-    try{
-        const resp = await fetch(`/api/zero_qty_allow/${encodeURIComponent(barcode)}`, {method: 'POST'});
-        const j = await resp.json();
-        if(j.success){
-            alert('Automatic deletion re-enabled');
-            fetchZeroQtyPending();
-        } else {
-            alert('Failed to re-enable: ' + (j.error || 'Unknown error'));
-        }
-    }catch(err){
-        console.error('Error re-enabling zero-qty deletion:', err);
-        alert('Error re-enabling deletion');
-    }
-}
-
-async function deleteZeroQtyNow(barcode){
-    if(!confirm('Immediately delete this zero-quantity item? This bypasses the grace period.')){
-        return;
-    }
-    try{
-        const resp = await fetch(`/api/zero_qty_delete_now/${encodeURIComponent(barcode)}`, {method: 'POST'});
-        const j = await resp.json();
-        if(j.success){
-            alert('Item deleted successfully');
-            fetchZeroQtyPending();
-            doSearch(); // Refresh the main results
-        } else {
-            alert('Failed to delete: ' + (j.error || 'Unknown error'));
-        }
-    }catch(err){
-        console.error('Error deleting zero-qty item:', err);
-        alert('Error deleting item');
-    }
-}
-
-// History functionality
-document.getElementById('history-btn').addEventListener('click', () => {
+// Rack History button
+document.getElementById('rack-history-btn').addEventListener('click', () => {
+    // Close dropdown
+    document.getElementById('inventory-dropdown').classList.remove('active');
+    // Open history modal
     document.getElementById('historyModal').style.display = 'flex';
     loadHistory();
 });
 
+// Automatic Cleanup button
+document.getElementById('automatic-cleanup-btn').addEventListener('click', () => {
+    // Close dropdown
+    document.getElementById('inventory-dropdown').classList.remove('active');
+    // Navigate to cleanup page
+    window.location.href = '/cleanup';
+});
+
+// History modal event handlers
 document.getElementById('closeHistory').addEventListener('click', () => {
     document.getElementById('historyModal').style.display = 'none';
 });
@@ -1617,41 +1325,6 @@ async function loadHistory() {
         document.getElementById('historyContent').innerHTML = `<div style="color:#e74c3c;padding:20px;">Error loading history: ${err.message}</div>`;
     }
 }
-
-// Show history button only when searchRack is selected
-function updateHistoryButtonVisibility() {
-    const searchRackChecked = document.querySelector('input[value="searchRack"]')?.checked;
-    document.getElementById('history-btn').style.display = searchRackChecked ? '' : 'none';
-}
-
-// Watch for DB filter changes
-document.getElementById('db-filters').addEventListener('change', updateHistoryButtonVisibility);
-
-// Call immediately on page load
-setTimeout(updateHistoryButtonVisibility, 100);
-
-// Attach refresh button handler for zero-qty
-document.getElementById('refresh-zero-qty-btn').addEventListener('click', fetchZeroQtyPending);
-
-// Attach run now button handler for zero-qty
-document.getElementById('run-zero-qty-now-btn').addEventListener('click', async function() {
-    if (!confirm('Run zero-quantity deletion now? This will delete all items past their grace period.')) {
-        return;
-    }
-    try {
-        const resp = await fetch('/api/zero_qty/trigger-purge', {method: 'POST'});
-        const data = await resp.json();
-        if (data.success) {
-            alert('✓ Zero-quantity purge completed! Refreshing...');
-            fetchZeroQtyPending();
-            doSearch(); // Refresh main list
-        } else {
-            alert('Error: ' + (data.error || 'Unknown error'));
-        }
-    } catch (err) {
-        alert('Error triggering zero-quantity purge: ' + err.message);
-    }
-});
 
 </script>
 </body>

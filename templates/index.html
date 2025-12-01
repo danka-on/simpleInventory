@@ -466,8 +466,17 @@ function tdInfo(order) {
 }
 
 function tdLocation(order) {
-    const locationText = esc(order.location || '');
     const missingDataUrl = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="120" height="80"><rect width="100%" height="100%" fill="#f8f8f8"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#b0b0b0" font-size="12">Image missing</text></svg>');
+    
+    // Check if multiple locations exist
+    if (order.locations && Array.isArray(order.locations) && order.locations.length > 1) {
+        // Multiple locations - show all codes as clickable links
+        const locationCodes = order.locations.map(loc => esc(loc.code)).join(', ');
+        return `<td class='sold-td-small'><a href="#" class="order-loc-link" data-order-id="${order.id}" style="color:#e53935;font-weight:bold;">${locationCodes}</a></td>`;
+    }
+    
+    // Single location (legacy or single result)
+    const locationText = esc(order.location || '');
     
     if (locationText.match(/\.(jpg|jpeg|png)$/i)) {
         const thumb = `/static/pictureposition/${locationText}`;
@@ -883,7 +892,7 @@ function setupEventDelegation() {
             
             if (order) {
                 if (titleLink) {
-                    showOrderPopup(order.title, order.image || order.image_url, null, null);
+                    showOrderPopup(order.title, order.image || order.image_url, null, null, null, null, order.barcode);
                 } else if (infoLink) {
                     const buyer = order.shipping_name || '';
                     const address = [order.shipping_street1, order.shipping_street2, order.shipping_city, 
@@ -894,7 +903,8 @@ function setupEventDelegation() {
                     const paidTime = order.paid_time ? fmtET(order.paid_time) : 'N/A';
                     showOrderPopup(null, null, info, null, price, paidTime);
                 } else if (locLink) {
-                    showOrderPopup(null, null, null, order.location);
+                    // Pass locations array if available, otherwise single location
+                    showOrderPopup(null, null, null, order.locations || order.location);
                 }
             } else {
                 console.error('Order not found in cache:', orderId);
@@ -949,7 +959,7 @@ window.addEventListener('DOMContentLoaded', async function() {
 // ORDER DETAIL POPUP
 // ============================================================================
 
-function showOrderPopup(title, imageUrl, info, loc, price, paidTime) {
+function showOrderPopup(title, imageUrl, info, loc, price, paidTime, barcode) {
     const oldPopup = document.getElementById('order-popup');
     if (oldPopup) oldPopup.remove();
     
@@ -997,6 +1007,11 @@ function showOrderPopup(title, imageUrl, info, loc, price, paidTime) {
         content += `<img src="${esc(imageUrl)}" alt="${esc(title || 'Order')}" style="max-width: 100%; border-radius: 10px; margin-bottom: 18px;">`;
     }
     
+    // Add barcode under image if available
+    if (barcode) {
+        content += `<div style="font-size: 0.9rem; color: #666; margin-bottom: 12px;"><strong>Barcode:</strong> ${esc(barcode)}</div>`;
+    }
+    
     if (info) {
         const infoParts = info.split(' - ');
         const buyer = infoParts[0] || '';
@@ -1017,12 +1032,71 @@ function showOrderPopup(title, imageUrl, info, loc, price, paidTime) {
     }
     
     if (loc) {
-        content += `<div style="font-size: 0.98rem; margin-bottom: 12px; font-weight: 500;">Location: ${esc(loc)}</div>`;
-        
-        if (loc.match(/\.(jpg|jpeg|png)$/i)) {
-            content += `<img src="/static/pictureposition/${esc(loc)}" alt="${esc(loc)}" style="max-width: 280px; border-radius: 10px; margin-bottom: 18px;" onerror="this.src='${missingDataUrlPopup}'">`;
+        // Check if loc is an array of locations (multiple)
+        if (Array.isArray(loc)) {
+            content += `<div style="font-size: 0.98rem; margin-bottom: 12px; font-weight: 500; color: #e53935;">Multiple Locations:</div>`;
+            
+            // Group locations by shelf classification (h=hallway, o=office, g=garage, etc.)
+            const groups = {
+                hallway: [],
+                office: [],
+                garage: [],
+                other: []
+            };
+            
+            loc.forEach(location => {
+                const locCode = (location.code || '').toLowerCase();
+                if (locCode.startsWith('h')) {
+                    groups.hallway.push(location);
+                } else if (locCode.startsWith('o')) {
+                    groups.office.push(location);
+                } else if (locCode.startsWith('g')) {
+                    groups.garage.push(location);
+                } else {
+                    groups.other.push(location);
+                }
+            });
+            
+            // Display each group
+            ['hallway', 'office', 'garage', 'other'].forEach(groupName => {
+                if (groups[groupName].length === 0) return;
+                
+                const groupTitle = groupName.charAt(0).toUpperCase() + groupName.slice(1);
+                content += `<div style="margin-bottom: 16px;">`;
+                content += `<div style="font-size: 0.95rem; font-weight: 600; margin-bottom: 8px; color: #2c3e50;">${groupTitle}:</div>`;
+                
+                groups[groupName].forEach((location, index) => {
+                    const locCode = esc(location.code || '');
+                    const locImage = esc(location.image || location.code || '');
+                    const qty = location.quantity || 1;
+                    const uniqueId = 'loc-' + Math.random().toString(36).substr(2, 9);
+                    
+                    content += `<div style="margin-left: 12px; margin-bottom: 8px;">`;
+                    content += `<span onclick="document.getElementById('${uniqueId}').style.display=document.getElementById('${uniqueId}').style.display==='none'?'block':'none'" style="cursor: pointer; color: #0984e3; text-decoration: underline; font-weight: 500;">${locCode}</span>`;
+                    content += ` <span style="color: #666; font-size: 0.9rem;">(Qty: ${qty})</span>`;
+                    
+                    // Hidden image that shows on click
+                    content += `<div id="${uniqueId}" style="display: none; margin-top: 8px; margin-bottom: 12px;">`;
+                    if (locImage.match(/\.(jpg|jpeg|png)$/i)) {
+                        content += `<img src="/static/pictureposition/${locImage}" alt="${locCode}" style="max-width: 260px; border-radius: 8px;" onerror="this.src='${missingDataUrlPopup}'">`;
+                    } else {
+                        content += `<img src="/static/shelves/${locImage.toLowerCase()}.png" alt="${locCode}" style="max-width: 260px; border-radius: 8px;" onerror="this.src='${missingDataUrlPopup}'">`;
+                    }
+                    content += `</div>`;
+                    content += `</div>`;
+                });
+                
+                content += `</div>`;
+            });
         } else {
-            content += `<img src="/static/shelves/${esc(loc.toLowerCase())}.png" alt="${esc(loc)}" style="max-width: 280px; border-radius: 10px; margin-bottom: 18px;" onerror="this.src='${missingDataUrlPopup}'">`;
+            // Single location (string)
+            content += `<div style="font-size: 0.98rem; margin-bottom: 12px; font-weight: 500;">Location: ${esc(loc)}</div>`;
+            
+            if (loc.match(/\.(jpg|jpeg|png)$/i)) {
+                content += `<img src="/static/pictureposition/${esc(loc)}" alt="${esc(loc)}" style="max-width: 280px; border-radius: 10px; margin-bottom: 18px;" onerror="this.src='${missingDataUrlPopup}'">`;
+            } else {
+                content += `<img src="/static/shelves/${esc(loc.toLowerCase())}.png" alt="${esc(loc)}" style="max-width: 280px; border-radius: 10px; margin-bottom: 18px;" onerror="this.src='${missingDataUrlPopup}'">`;
+            }
         }
     }
     

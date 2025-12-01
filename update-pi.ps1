@@ -14,6 +14,8 @@ scp .\app.py "$User@$HostName`:$RemotePath/"
 Write-Host "Transferring template files..." -ForegroundColor Yellow
 scp .\templates\unified_search.html "$User@$HostName`:$RemotePath/templates/"
 scp .\templates\searchrack.html "$User@$HostName`:$RemotePath/templates/"
+scp .\templates\index.html "$User@$HostName`:$RemotePath/templates/"
+scp .\templates\cleanup.html "$User@$HostName`:$RemotePath/templates/"
 
 Write-Host "✅ Files transferred!" -ForegroundColor Green
 Write-Host "🔄 Restarting Flask service..." -ForegroundColor Cyan

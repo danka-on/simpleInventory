@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>Automatic Cleanup</title>
+    <style>
+        body{font-family:Segoe UI,Arial,sans-serif;background:#f7f7f8;margin:0;padding:18px}
+        .top {display:flex;gap:10px;align-items:center;margin-bottom:24px}
+        .btn {padding:8px 14px;border-radius:6px;border:none;cursor:pointer}
+        .btn-back{background:#e74c3c;color:#fff}
+        h1{margin:0;font-size:1.8rem;color:#2c3e50}
+        .section{margin-bottom:32px;padding:18px;background:white;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.08)}
+        .section-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+        .section-title{font-size:1.3rem;font-weight:600;color:#2c3e50;display:flex;align-items:center;gap:8px}
+        .info-box{padding:12px;background:#e3f2fd;border-left:4px solid #2196f3;border-radius:4px;margin-bottom:16px;font-size:0.95rem;color:#1565c0}
+        table{width:100%;border-collapse:collapse}
+        th,td{padding:10px;border-bottom:1px solid #e6e6e6;text-align:left}
+        th{background:#f8f9fa;font-weight:600;color:#495057}
+        .table-container{max-height:400px;overflow-y:auto;border:1px solid #e6e6e6;border-radius:6px}
+        .empty-state{text-align:center;padding:40px;color:#999}
+        .grace-info{color:#666;opacity:0.9;margin-left:8px;font-size:0.9rem}
+        .action-buttons{display:flex;gap:8px}
+    </style>
+</head>
+<body>
+    <div class="top">
+        <button class="btn btn-back" onclick="window.location.href='/searchrack'">← Back to Search</button>
+        <h1>🧹 Automatic Cleanup</h1>
+    </div>
+
+    <!-- Pending Automatic Inventory Removals Section -->
+    <div class="section">
+        <div class="section-header">
+            <div class="section-title">
+                ⏰ Pending Automatic Inventory Removals
+                <span id="pending-grace-info" class="grace-info"></span>
+            </div>
+            <div class="action-buttons">
+                <button id="trigger-automatic-removal-btn" class="btn" style="background:#6f42c1; color:white;">Run Now</button>
+                <button id="refresh-pending-btn" class="btn" style="background:#f0f0f0;">Refresh</button>
+            </div>
+        </div>
+        <div class="info-box">
+            📦 Items sold and shipped will automatically reduce inventory after the grace period expires.
+            You can cancel, re-enable, or immediately process removals here.
+        </div>
+        <div id="pending-removals-container">
+            <div id="pending-removals-loading" class="empty-state">Loading...</div>
+        </div>
+    </div>
+
+    <!-- Zero Quantity Pending Deletions Section -->
+    <div class="section">
+        <div class="section-header">
+            <div class="section-title">
+                🗑️ Pending Zero-Quantity Deletions
+                <span id="zero-qty-grace-info" class="grace-info"></span>
+            </div>
+            <div class="action-buttons">
+                <button id="run-zero-qty-now-btn" class="btn" style="background:#c92a2a; color:white;">Run Now</button>
+                <button id="refresh-zero-qty-btn" class="btn" style="background:#f0f0f0;">Refresh</button>
+            </div>
+        </div>
+        <div class="info-box" style="background:#ffe5e5;border-left-color:#ff6b6b;color:#c92a2a">
+            🗑️ Items with zero quantity will be automatically deleted after the grace period expires.
+            You can cancel, re-enable, or immediately delete items here.
+        </div>
+        <div id="zero-qty-container">
+            <div id="zero-qty-loading" class="empty-state">Loading...</div>
+        </div>
+    </div>
+
+<script>
+// Utility function for HTML escaping
+function esc(str) {
+    if (!str) return '';
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
+// ===== Pending Automatic Inventory Removals =====
+
+async function fetchPendingRemovals(){
+    console.log('Fetching pending removals...');
+    const container = document.getElementById('pending-removals-container');
+    try{
+        const resp = await fetch('/api/sold/pending-removals');
+        console.log('Response status:', resp.status);
+        const j = await resp.json();
+        console.log('Response data:', j);
+        
+        // Update grace period info if available
+        try{
+            const graceInfoEl = document.getElementById('pending-grace-info');
+            if (graceInfoEl) {
+                if (j && typeof j.grace_hours !== 'undefined' && j.grace_hours !== null) {
+                    graceInfoEl.textContent = `(grace: ${j.grace_hours}h)`;
+                } else {
+                    graceInfoEl.textContent = '';
+                }
+            }
+        }catch(_e){ /* no-op */ }
+        
+        if(j.success && j.orders && j.orders.length > 0){
+            console.log(`Found ${j.orders.length} pending removals`);
+            displayPendingRemovals(j.orders);
+        } else {
+            console.log('No pending removals to display');
+            container.innerHTML = '<div class="empty-state">No pending automatic inventory removals</div>';
+        }
+    }catch(err){
+        console.error('Error fetching pending removals:', err);
+        container.innerHTML = '<div class="empty-state" style="color:#e74c3c">Error loading pending removals</div>';
+    }
+}
+
+function displayPendingRemovals(orders){
+    console.log('Displaying pending removals:', orders);
+    const container = document.getElementById('pending-removals-container');
+    
+    if(!orders || orders.length === 0){
+        container.innerHTML = '<div class="empty-state">No pending automatic inventory removals</div>';
+        return;
+    }
+    
+    console.log('Building HTML for', orders.length, 'orders');
+    let html = '<div class="table-container">';
+    html += '<table>';
+    html += '<thead><tr><th>Order</th><th>Title</th><th>Barcode</th><th>Qty</th><th>Status</th><th>Action</th></tr></thead>';
+    html += '<tbody>';
+    
+    orders.forEach(order => {
+        const isCancelled = order.removal_cancelled === 1;
+        const statusText = isCancelled ? '❌ Cancelled' : 
+                          order.is_eligible_for_removal ? '⚠️ Ready to remove' : 
+                          `⏰ ${order.hours_remaining}h remaining`;
+        const statusColor = isCancelled ? '#dc3545' : 
+                           order.is_eligible_for_removal ? '#ff6b6b' : '#856404';
+        
+        let actionBtn = '';
+        if (isCancelled) {
+            actionBtn = `<button class="btn" style="padding:6px 10px; font-size:0.9rem; background:#28a745; color:white;" onclick="allowRemoval(${order.id})">Re-enable</button>`;
+        } else {
+            const cancelBtn = `<button class="btn" style="padding:6px 10px; font-size:0.9rem; background:#dc3545; color:white;" onclick="cancelRemoval(${order.id})">Cancel</button>`;
+            const removeNowBtn = !order.is_eligible_for_removal ? ` <button class="btn" style="padding:6px 10px; font-size:0.9rem; background:#6f42c1; color:white;" onclick="removeNow(${order.id})">Remove now</button>` : '';
+            actionBtn = cancelBtn + removeNowBtn;
+        }
+        
+        html += `<tr>
+            <td>${esc(order.order_id || '')}</td>
+            <td>${esc((order.title || '').substring(0, 50))}${(order.title || '').length > 50 ? '...' : ''}</td>
+            <td>${esc(order.barcode || '')}</td>
+            <td>${order.quantity || 1}</td>
+            <td style="color:${statusColor}; font-weight:bold;">${statusText}</td>
+            <td>${actionBtn}</td>
+        </tr>`;
+    });
+    
+    html += '</tbody></table></div>';
+    container.innerHTML = html;
+    console.log('Pending removals displayed');
+}
+
+async function cancelRemoval(orderId){
+    if(!confirm('Cancel automatic inventory removal for this order? You will need to manually adjust inventory.')){
+        return;
+    }
+    try{
+        const resp = await fetch(`/api/sold/cancel-removal/${orderId}`, {method: 'POST'});
+        const j = await resp.json();
+        if(j.success){
+            alert('Automatic removal cancelled');
+            fetchPendingRemovals();
+        } else {
+            alert('Failed to cancel: ' + (j.error || 'Unknown error'));
+        }
+    }catch(err){
+        console.error('Error cancelling removal:', err);
+        alert('Error cancelling removal');
+    }
+}
+
+async function allowRemoval(orderId){
+    if(!confirm('Re-enable automatic inventory removal for this order?')){
+        return;
+    }
+    try{
+        const resp = await fetch(`/api/sold/allow-removal/${orderId}`, {method: 'POST'});
+        const j = await resp.json();
+        if(j.success){
+            alert('Automatic removal re-enabled');
+            fetchPendingRemovals();
+        } else {
+            alert('Failed to re-enable: ' + (j.error || 'Unknown error'));
+        }
+    }catch(err){
+        console.error('Error re-enabling removal:', err);
+        alert('Error re-enabling removal');
+    }
+}
+
+async function removeNow(orderId){
+    if(!confirm('Immediately reduce inventory for this order? This bypasses the grace period.')){
+        return;
+    }
+    try{
+        const resp = await fetch(`/api/sold/remove-now/${orderId}`, {method: 'POST'});
+        const j = await resp.json();
+        if(j.success){
+            alert('Inventory reduced successfully. New quantity: ' + (typeof j.new_qty !== 'undefined' ? j.new_qty : 'updated'));
+            fetchPendingRemovals();
+        } else {
+            alert('Failed to remove now: ' + (j.error || 'Unknown error'));
+        }
+    }catch(err){
+        console.error('Error performing remove now:', err);
+        alert('Error performing remove now');
+    }
+}
+
+async function triggerAutomaticRemoval(){
+    if(!confirm('Manually trigger the automatic removal process now? This will process all eligible items immediately.')){
+        return;
+    }
+    try{
+        const resp = await fetch('/api/sold/trigger-automatic-removal', {method: 'POST'});
+        const j = await resp.json();
+        if(j.success){
+            alert('Automatic removal process completed. Check console for details.');
+            setTimeout(fetchPendingRemovals, 1000);
+        } else {
+            alert('Failed to trigger: ' + (j.error || 'Unknown error'));
+        }
+    }catch(err){
+        console.error('Error triggering automatic removal:', err);
+        alert('Error triggering automatic removal');
+    }
+}
+
+// ===== Zero Quantity Pending Deletions =====
+
+async function fetchZeroQtyPending(){
+    console.log('Fetching zero-qty pending deletions...');
+    const container = document.getElementById('zero-qty-container');
+    try{
+        const resp = await fetch('/api/zero_qty_pending');
+        console.log('Zero-qty response status:', resp.status);
+        const j = await resp.json();
+        console.log('Zero-qty response data:', j);
+        
+        // Update grace period info if available
+        try{
+            const graceInfoEl = document.getElementById('zero-qty-grace-info');
+            if (graceInfoEl) {
+                if (j && typeof j.grace_hours !== 'undefined' && j.grace_hours !== null) {
+                    graceInfoEl.textContent = `(grace: ${j.grace_hours}h)`;
+                } else {
+                    graceInfoEl.textContent = '';
+                }
+            }
+        }catch(_e){ /* no-op */ }
+        
+        if(j.success && j.items && j.items.length > 0){
+            console.log(`Found ${j.items.length} zero-qty pending deletions`);
+            displayZeroQtyPending(j.items);
+        } else {
+            console.log('No zero-qty pending deletions to display');
+            container.innerHTML = '<div class="empty-state">No pending zero-quantity deletions</div>';
+        }
+    }catch(err){
+        console.error('Error fetching zero-qty pending:', err);
+        container.innerHTML = '<div class="empty-state" style="color:#e74c3c">Error loading zero-quantity items</div>';
+    }
+}
+
+function displayZeroQtyPending(items){
+    console.log('Displaying zero-qty pending:', items);
+    const container = document.getElementById('zero-qty-container');
+    
+    if(!items || items.length === 0){
+        container.innerHTML = '<div class="empty-state">No pending zero-quantity deletions</div>';
+        return;
+    }
+    
+    console.log('Building HTML for', items.length, 'zero-qty items');
+    let html = '<div class="table-container">';
+    html += '<table>';
+    html += '<thead><tr><th>Barcode</th><th>Title</th><th>Position</th><th>Status</th><th>Action</th></tr></thead>';
+    html += '<tbody>';
+    
+    items.forEach(item => {
+        const isCancelled = item.deletion_cancelled === 1;
+        const statusText = isCancelled ? '❌ Cancelled' : 
+                          item.is_eligible ? '⚠️ Ready to delete' : 
+                          `⏰ ${item.hours_remaining}h remaining`;
+        const statusColor = isCancelled ? '#dc3545' : 
+                           item.is_eligible ? '#ff6b6b' : '#c92a2a';
+        
+        let actionBtn = '';
+        if (isCancelled) {
+            actionBtn = `<button class="btn" style="padding:6px 10px; font-size:0.9rem; background:#28a745; color:white;" onclick="allowZeroQtyDeletion('${esc(item.barcode)}')">Re-enable</button>`;
+        } else {
+            const cancelBtn = `<button class="btn" style="padding:6px 10px; font-size:0.9rem; background:#dc3545; color:white;" onclick="cancelZeroQtyDeletion('${esc(item.barcode)}')">Cancel</button>`;
+            const deleteNowBtn = !item.is_eligible ? ` <button class="btn" style="padding:6px 10px; font-size:0.9rem; background:#6f42c1; color:white;" onclick="deleteZeroQtyNow('${esc(item.barcode)}')">Delete now</button>` : '';
+            actionBtn = cancelBtn + deleteNowBtn;
+        }
+        
+        html += `<tr>
+            <td>${esc(item.barcode || '')}</td>
+            <td>${esc((item.title || '').substring(0, 50))}${(item.title || '').length > 50 ? '...' : ''}</td>
+            <td>${esc(item.position || '')}</td>
+            <td style="color:${statusColor}; font-weight:bold;">${statusText}</td>
+            <td>${actionBtn}</td>
+        </tr>`;
+    });
+    
+    html += '</tbody></table></div>';
+    container.innerHTML = html;
+    console.log('Zero-qty items displayed');
+}
+
+async function cancelZeroQtyDeletion(barcode){
+    if(!confirm('Cancel automatic deletion for this zero-quantity item?')){
+        return;
+    }
+    try{
+        const resp = await fetch(`/api/zero_qty_cancel/${encodeURIComponent(barcode)}`, {method: 'POST'});
+        const j = await resp.json();
+        if(j.success){
+            alert('Automatic deletion cancelled');
+            fetchZeroQtyPending();
+        } else {
+            alert('Failed to cancel: ' + (j.error || 'Unknown error'));
+        }
+    }catch(err){
+        console.error('Error cancelling zero-qty deletion:', err);
+        alert('Error cancelling deletion');
+    }
+}
+
+async function allowZeroQtyDeletion(barcode){
+    if(!confirm('Re-enable automatic deletion for this zero-quantity item?')){
+        return;
+    }
+    try{
+        const resp = await fetch(`/api/zero_qty_allow/${encodeURIComponent(barcode)}`, {method: 'POST'});
+        const j = await resp.json();
+        if(j.success){
+            alert('Automatic deletion re-enabled');
+            fetchZeroQtyPending();
+        } else {
+            alert('Failed to re-enable: ' + (j.error || 'Unknown error'));
+        }
+    }catch(err){
+        console.error('Error re-enabling zero-qty deletion:', err);
+        alert('Error re-enabling deletion');
+    }
+}
+
+async function deleteZeroQtyNow(barcode){
+    if(!confirm('Immediately delete this zero-quantity item? This bypasses the grace period.')){
+        return;
+    }
+    try{
+        const resp = await fetch(`/api/zero_qty_delete_now/${encodeURIComponent(barcode)}`, {method: 'POST'});
+        const j = await resp.json();
+        if(j.success){
+            alert('Item deleted successfully');
+            fetchZeroQtyPending();
+        } else {
+            alert('Failed to delete: ' + (j.error || 'Unknown error'));
+        }
+    }catch(err){
+        console.error('Error deleting zero-qty item:', err);
+        alert('Error deleting item');
+    }
+}
+
+async function triggerZeroQtyPurge(){
+    if (!confirm('Run zero-quantity deletion now? This will delete all items past their grace period.')) {
+        return;
+    }
+    try {
+        const resp = await fetch('/api/zero_qty/trigger-purge', {method: 'POST'});
+        const data = await resp.json();
+        if (data.success) {
+            alert('✓ Zero-quantity purge completed! Refreshing...');
+            fetchZeroQtyPending();
+        } else {
+            alert('Error: ' + (data.error || 'Unknown error'));
+        }
+    } catch (err) {
+        alert('Error triggering zero-quantity purge: ' + err.message);
+    }
+}
+
+// Attach event handlers
+document.getElementById('refresh-pending-btn').addEventListener('click', fetchPendingRemovals);
+document.getElementById('trigger-automatic-removal-btn').addEventListener('click', triggerAutomaticRemoval);
+document.getElementById('refresh-zero-qty-btn').addEventListener('click', fetchZeroQtyPending);
+document.getElementById('run-zero-qty-now-btn').addEventListener('click', triggerZeroQtyPurge);
+
+// Load data on page load
+document.addEventListener('DOMContentLoaded', () => {
+    fetchPendingRemovals();
+    fetchZeroQtyPending();
+});
+
+</script>
+</body>
+</html>
