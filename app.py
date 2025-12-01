@@ -8,6 +8,7 @@ from flask_compress import Compress
 from werkzeug.exceptions import RequestEntityTooLarge
 from PIL import Image, ImageDraw
 import io, time, subprocess, os, requests, json, threading, sqlite3, sys, datetime
+import pytz
 import xml.etree.ElementTree as ET
 from dotenv import load_dotenv
 import xml.dom.minidom as minidom
@@ -206,6 +207,41 @@ cache = Cache(app, config={
 
 # Initialize Flask-Compress for automatic gzip compression (70% smaller responses)
 Compress(app)
+
+# Global Data Version for cache invalidation
+# Use database to ensure consistency across workers
+def update_data_version():
+    try:
+        conn = sqlite3.connect('bol.db')
+        conn.execute('CREATE TABLE IF NOT EXISTS app_metadata (key TEXT PRIMARY KEY, value TEXT)')
+        conn.execute('INSERT OR REPLACE INTO app_metadata (key, value) VALUES (?, ?)', ('data_version', str(int(time.time()))))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Error updating data version: {e}")
+
+def get_data_version():
+    try:
+        conn = sqlite3.connect('bol.db')
+        conn.execute('CREATE TABLE IF NOT EXISTS app_metadata (key TEXT PRIMARY KEY, value TEXT)')
+        cur = conn.execute('SELECT value FROM app_metadata WHERE key = ?', ('data_version',))
+        row = cur.fetchone()
+        if not row:
+            # Initialize if missing
+            initial_version = str(int(time.time()))
+            conn.execute('INSERT INTO app_metadata (key, value) VALUES (?, ?)', ('data_version', initial_version))
+            conn.commit()
+            conn.close()
+            return int(initial_version)
+        conn.close()
+        return int(row[0])
+    except Exception as e:
+        print(f"Error getting data version: {e}")
+        return int(time.time()) # Fallback to current time to force refresh
+
+@app.route('/api/data_version')
+def api_data_version():
+    return jsonify({'version': get_data_version()})
 
 @app.after_request
 def add_no_cache_headers(response):
@@ -3092,13 +3128,20 @@ def api_items_prep_status():
                 conn.close()
                 return jsonify({'success': False, 'error': 'GOOD items cannot have defect reasons. Please clear the defect field or select BAD status.'}), 400
             
-            # Get selected LOT from session
+            # Get selected LOT from session (used to set lot_number in bol_items for item-manager)
             selected_lot = session.get('selected_lot')
+            print(f'[STATUS API] Selected LOT from session: {selected_lot}')
             
-            # If no LOT selected, return error
+            # If no LOT selected, try to find the item's existing LOT or use a default
             if not selected_lot:
-                conn.close()
-                return jsonify({'success': False, 'error': 'No LOT selected. Please select a LOT from the dropdown.'}), 400
+                cur.execute('SELECT lot_number FROM bol_items WHERE upc = ? COLLATE NOCASE AND (itemprepped IS NULL OR itemprepped = 0) LIMIT 1', (base_upc,))
+                lot_row = cur.fetchone()
+                if lot_row and lot_row[0]:
+                    selected_lot = lot_row[0]
+                    print(f'[STATUS API] No LOT in session, using existing LOT from bol_items: {selected_lot}')
+                else:
+                    print('[STATUS API] Warning: No LOT selected and item has no LOT in bol_items, proceeding without LOT')
+                    selected_lot = None
             
             # Check if the incoming UPC itself is a suffixed BAD entry
             suffixed_upc_found = None
@@ -3194,6 +3237,9 @@ def api_items_prep_status():
                 conn.commit()
                 conn.close()
                 
+                # Update data version for cache invalidation
+                update_data_version()
+
                 return jsonify({
                     'success': True, 
                     'action': 'converted_bad_to_good_kept_suffix',
@@ -3233,13 +3279,24 @@ def api_items_prep_status():
             if bol_row:
                 current_good = bol_row[0] or 0
                 new_good = current_good + qty
-                cur.execute('UPDATE bol_items SET good_qty = ? WHERE upc = ? COLLATE NOCASE', (new_good, base_upc))
-                print(f'[GOOD] Updated bol_items {base_upc}: good_qty {current_good}→{new_good}')
+                # Update good_qty and set lot_number if we have a selected_lot
+                if selected_lot:
+                    cur.execute('UPDATE bol_items SET good_qty = ?, lot_number = ? WHERE upc = ? COLLATE NOCASE', (new_good, selected_lot, base_upc))
+                    print(f'[GOOD] Updated bol_items {base_upc}: good_qty {current_good}→{new_good}, lot_number={selected_lot}')
+                else:
+                    cur.execute('UPDATE bol_items SET good_qty = ? WHERE upc = ? COLLATE NOCASE', (new_good, base_upc))
+                    print(f'[GOOD] Updated bol_items {base_upc}: good_qty {current_good}→{new_good} (no LOT update)')
+            else:
+                print(f'[GOOD] WARNING: Could not find bol_items entry for {base_upc} to update good_qty')
 
             
             conn.commit()
+            print(f'[GOOD] Transaction committed for {base_upc}')
             conn.close()
             
+            # Update data version for cache invalidation
+            update_data_version()
+
             return jsonify({
                 'success': True, 
                 'action': 'converted_to_good' if suffixed_upc_found else 'saved_good',
@@ -3356,6 +3413,10 @@ def api_items_prep_status():
             # Commit all changes atomically
             conn.commit()
             conn.close()
+
+            # Update data version for cache invalidation
+            update_data_version()
+
             return jsonify({'success': True, 'upc': suffixed_upc, 'action': 'converted_to_bad', 'quantity': 1})
         
         # Normal BAD/UNCHECKED flow - UPC already has suffix or is being updated
@@ -3372,6 +3433,10 @@ def api_items_prep_status():
         conn.commit()
         
         conn.close()
+
+        # Update data version for cache invalidation
+        update_data_version()
+
         return jsonify({'success': True, 'upc': upc, 'action': 'updated', 'quantity': qty})
         
     except Exception as e:
@@ -3599,6 +3664,10 @@ def api_items_prep_create_bad_entry():
         print(f'[BAD] {base_upc}: moved {qty} from unchecked to bad (bad: {current_bad}→{new_bad}, unchecked: {unchecked}→{new_unchecked})')
         
         conn.close()
+
+        # Update data version for cache invalidation
+        update_data_version()
+
         return jsonify({
             'success': True, 
             'suffixed_upc': suffixed_upc, 
@@ -3932,6 +4001,10 @@ def api_items_prep_diagnostic():
             print(f'[DEBUG] Total photos saved to database: {len(saved)}')
         # Note: Status is now handled by /api/items_prep/status endpoint which properly handles suffixed UPCs
         # Do not update status here as it would overwrite base barcode status incorrectly
+
+        # Update data version for cache invalidation
+        update_data_version()
+
         return jsonify({'success': True, 'saved': saved})
     except Exception as e:
         try:
@@ -4662,6 +4735,7 @@ def api_trash_purge_expired():
         return jsonify({'success': False, 'error': str(e)})
 
 @app.route('/api/bol_items', methods=['GET'])
+@cache.cached(timeout=31536000, query_string=True)
 def api_bol_items():
     """Return BOL items with sorting and filters: lot (exact), import_date (exact), sort by date/name/qty."""
     try:
@@ -4690,6 +4764,13 @@ def api_bol_items():
         listed_flag = request.args.get('listed', '').strip().lower() == 'true'
         not_listed_flag = request.args.get('not_listed', '').strip().lower() == 'true'
         
+        # Log request for debugging
+        print(f"[api_bol_items] Request: page={page}, limit={limit}, q={q_stripped}, status={status_filters}, _v={request.args.get('_v')}, _t={request.args.get('_t')}")
+        
+        # DEBUG: Check specific UPC if present in query
+        if q_stripped == '86279051523':
+             print(f"[DEBUG] Searching for 86279051523. Status filters: {status_filters}")
+
         print(f"[api_bol_items] Filters - lot: '{lot}', import_date: '{import_date}', q: '{q_stripped}', status_filters: {status_filters}, listed: {listed_flag}, not_listed: {not_listed_flag}")
         conn = sqlite3.connect('bol.db')
         conn.row_factory = sqlite3.Row
@@ -4998,8 +5079,20 @@ def api_bulk_delete_bol_items():
                     conn = sqlite3.connect('bol.db')
                     cur = conn.cursor()
                     
-                    # Delete prep status, images, and notes
-                    cur.execute('DELETE FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (upc,))
+                    # Check if item was marked as "good" - if so, reset to unchecked instead of deleting
+                    cur.execute('SELECT status FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (upc,))
+                    status_row = cur.fetchone()
+                    is_good = status_row and status_row[0] == 'good'
+                    
+                    if is_good:
+                        # Reset to unchecked instead of deleting
+                        print(f'[BULK DELETE] Resetting GOOD item {upc} to unchecked')
+                        cur.execute('UPDATE items_prep_status SET status = ?, reason = "", note = "" WHERE upc = ? COLLATE NOCASE', ('unchecked', upc))
+                    else:
+                        # Not good - delete prep status entirely
+                        cur.execute('DELETE FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (upc,))
+                    
+                    # Always delete images and notes on reset
                     cur.execute('DELETE FROM items_prep_images WHERE upc = ? COLLATE NOCASE', (upc,))
                     try:
                         cur.execute('DELETE FROM items_prep_notes WHERE upc = ? COLLATE NOCASE', (upc,))
@@ -8122,7 +8215,7 @@ def update_item(db_type, item_id):
         conn.close()
 
 @app.route('/api/search/<db_key>', methods=['POST'])
-# @cache.cached(timeout=300, query_string=False, unless=lambda: request.json and request.json.get('q'))
+@cache.cached(timeout=31536000, query_string=False, unless=lambda: request.json and request.json.get('q'))
 def api_search_db(db_key):
     data = request.get_json() or {}
     q = (data.get('q') or '').strip()
@@ -8197,6 +8290,8 @@ def api_search_db(db_key):
         location = (data.get('location') or '').strip()
         # Accept optional LOT filter for BOL database
         lot_filter = (data.get('lot_filter') or '').strip() if db_key == 'bol' else ''
+        # Accept optional location_group_id for filtering by shelf group (from location browser)
+        location_group_id = data.get('location_group_id')
         
         if q_stripped:
             likes = []
@@ -8230,6 +8325,38 @@ def api_search_db(db_key):
                     where_clause += ' AND (' + ' OR '.join(loc_likes) + ')'
                 else:
                     where_clause = ' WHERE ' + ' OR '.join(loc_likes)
+        
+        # If location_group_id is provided (searchRack only), filter by all shelves in that group
+        if db_key == 'searchRack' and location_group_id:
+            try:
+                # Get all shelf codes in this group
+                group_conn = sqlite3.connect('searchRack.db')
+                group_cur = group_conn.cursor()
+                group_cur.execute('SELECT shelf_name FROM shelves WHERE group_id = ?', (location_group_id,))
+                shelf_codes = [row[0] for row in group_cur.fetchall()]
+                group_conn.close()
+                
+                if shelf_codes:
+                    # Find item_position column
+                    loc_cols = [c for c in cols if c.lower() in ('item_position','itemposition','position')]
+                    if not loc_cols:
+                        loc_cols = [c for c in cols if 'position' in c.lower()]
+                    
+                    if loc_cols:
+                        loc_col = loc_cols[0]
+                        # Build OR condition for all shelves in group
+                        shelf_conditions = []
+                        for shelf_code in shelf_codes:
+                            shelf_conditions.append(f"LOWER(TRIM({loc_col})) = LOWER(TRIM(?))")
+                            params.append(shelf_code)
+                        
+                        if where_clause:
+                            where_clause += ' AND (' + ' OR '.join(shelf_conditions) + ')'
+                        else:
+                            where_clause = ' WHERE (' + ' OR '.join(shelf_conditions) + ')'
+            except Exception as e:
+                print(f"[SEARCH DEBUG] Error filtering by location_group_id: {e}")
+        
         # compute total matching count for pagination
         count_sql = f"SELECT COUNT(*) FROM {table} {where_clause}"
         print(f"[SEARCH DEBUG] count_sql={count_sql}, params={params}")
@@ -8648,14 +8775,14 @@ def api_search_all():
                 cached_data['from_cache'] = True
                 return jsonify(cached_data)
         
-        # Define databases to search with display info
+        # Define databases to search with display info (ordered: warehouse, item-manager, Macy BOL, sold, amazon, ebay)
         databases = [
-            {'key': 'bol', 'path': 'rawbol.db', 'table': 'raw_bol_items', 'name': 'Inventory (BOL)', 'color': '#3498db', 'icon': '📦'},
-            {'key': 'processed', 'path': 'bol.db', 'table': 'bol_items', 'name': 'Processed Items', 'color': '#2ecc71', 'icon': '✅'},
-            {'key': 'shelves', 'path': 'searchRack.db', 'table': 'SEARCHRACK', 'name': 'Shelf Manager', 'color': '#9b59b6', 'icon': '📚'},
+            {'key': 'shelves', 'path': 'searchRack.db', 'table': 'SEARCHRACK', 'name': 'Warehouse', 'color': '#9b59b6', 'icon': '📦'},
+            {'key': 'processed', 'path': 'bol.db', 'table': 'bol_items', 'name': 'Item Manager (processed items)', 'color': '#2ecc71', 'icon': '✅', 'filter': 'checked_only'},
+            {'key': 'bol', 'path': 'rawbol.db', 'table': 'raw_bol_items', 'name': 'Macy BOL', 'color': '#3498db', 'icon': '📦'},
             {'key': 'sold', 'path': 'sold.db', 'table': 'sold_items', 'name': 'Sold Items', 'color': '#e74c3c', 'icon': '💰'},
-            {'key': 'ebay', 'path': 'ebayStore.db', 'table': 'INVENTORY', 'name': 'eBay Store', 'color': '#f39c12', 'icon': '🛒'},
             {'key': 'amazon', 'path': 'amazonStore.db', 'table': 'INVENTORY', 'name': 'Amazon Store', 'color': '#1abc9c', 'icon': '📦'},
+            {'key': 'ebay', 'path': 'ebayStore.db', 'table': 'INVENTORY', 'name': 'eBay Store', 'color': '#f39c12', 'icon': '🛒'},
         ]
         
         results = {
@@ -8722,6 +8849,14 @@ def api_search_all():
                     where_parts = [f"LOWER(COALESCE({col},'')) LIKE ?" for col in cols]
                     where_clause = " OR ".join(where_parts)
                     params = [f"%{query_stripped.lower()}%"] * len(cols)
+                
+                # Apply filters for specific databases
+                if db_info.get('filter') == 'checked_only':
+                    # For Item Manager (processed), only show checked items (good or bad)
+                    # Check for items_prep_status table (bol.db)
+                    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='items_prep_status'")
+                    if cur.fetchone():
+                        where_clause = f"({where_clause}) AND upc IN (SELECT upc FROM items_prep_status WHERE status IN ('good', 'bad'))"
                 
                 # Get count and sample results
                 count_sql = f"SELECT COUNT(*) as count FROM {db_info['table']} WHERE {where_clause}"
@@ -10121,6 +10256,74 @@ def api_valid_shelves():
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e), 'codes': []}), 500
+
+@app.route('/api/location_hierarchy', methods=['GET'])
+def api_location_hierarchy():
+    """Get location hierarchy with item counts for searchRack inventory"""
+    try:
+        ensure_shelf_groups_table()
+        conn = sqlite3.connect('searchRack.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        
+        # Get all groups with their shelves and item counts (exclude Default Group)
+        cur.execute('''
+            SELECT 
+                g.id as group_id,
+                g.name as group_name,
+                s.id as shelf_id,
+                s.shelf_name as shelf_code,
+                COUNT(DISTINCT sr.ID) as item_count,
+                COALESCE(SUM(CAST(sr.QUANTITY as INTEGER)), 0) as total_quantity
+            FROM shelf_groups g
+            LEFT JOIN shelves s ON s.group_id = g.id
+            LEFT JOIN SEARCHRACK sr ON LOWER(TRIM(sr.ITEM_POSITION)) = LOWER(TRIM(s.shelf_name))
+            WHERE g.name != 'Default Group' OR g.name IS NULL
+            GROUP BY g.id, s.id
+            ORDER BY s.shelf_name
+        ''')
+        
+        rows = cur.fetchall()
+        conn.close()
+        
+        # Organize into hierarchy
+        hierarchy = {}
+        for row in rows:
+            group_id = row['group_id']
+            group_name = row['group_name']
+            
+            if group_id not in hierarchy:
+                hierarchy[group_id] = {
+                    'id': group_id,
+                    'name': group_name,
+                    'total_items': 0,
+                    'total_quantity': 0,
+                    'shelves': []
+                }
+            
+            if row['shelf_id']:
+                shelf_info = {
+                    'id': row['shelf_id'],
+                    'code': row['shelf_code'],
+                    'item_count': row['item_count'] or 0,
+                    'quantity': row['total_quantity'] or 0
+                }
+                hierarchy[group_id]['shelves'].append(shelf_info)
+                hierarchy[group_id]['total_items'] += shelf_info['item_count']
+                hierarchy[group_id]['total_quantity'] += shelf_info['quantity']
+        
+        # Convert to list and sort by total_quantity descending
+        locations = sorted(hierarchy.values(), key=lambda x: x['total_quantity'], reverse=True)
+        
+        return jsonify({
+            'success': True,
+            'locations': locations
+        })
+    except Exception as e:
+        print(f'[api_location_hierarchy] Error: {e}')
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @app.route('/api/delete/<db_key>/<int:item_id>', methods=['POST'])
@@ -12736,7 +12939,102 @@ def api_duplicate_shelf():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
+# --- Cache Management System ---
+CACHE_CONFIG_FILE = BASE_DIR / 'cache_config.json'
+
+def load_cache_config():
+    default_config = {
+        "auto_reload": True,
+        "reload_time": "00:00", # 24-hour format HH:MM
+        "timezone": "US/Eastern" # Default timezone
+    }
+    if CACHE_CONFIG_FILE.exists():
+        try:
+            with open(CACHE_CONFIG_FILE, 'r') as f:
+                return {**default_config, **json.load(f)}
+        except Exception:
+            pass
+    return default_config
+
+def save_cache_config(config):
+    with open(CACHE_CONFIG_FILE, 'w') as f:
+        json.dump(config, f, indent=2)
+
+@app.route('/api/admin/cache/clear', methods=['POST'])
+def api_admin_clear_cache():
+    try:
+        cache.clear()
+        print("🧹 Cache cleared manually via API")
+        return jsonify({'success': True, 'message': 'Cache cleared successfully'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/admin/cache/settings', methods=['GET', 'POST'])
+def api_cache_settings():
+    if request.method == 'GET':
+        config = load_cache_config()
+        return jsonify({
+            'success': True,
+            'enabled': config['auto_reload'],
+            'time': config['reload_time'],
+            'timezone': config.get('timezone', 'US/Eastern')
+        })
+    
+    try:
+        data = request.get_json()
+        config = load_cache_config()
+        
+        if 'enabled' in data:
+            config['auto_reload'] = bool(data['enabled'])
+        if 'time' in data:
+            # Validate HH:MM format
+            t = data['time'].strip()
+            if len(t) == 5 and t[2] == ':' and t[:2].isdigit() and t[3:].isdigit():
+                config['reload_time'] = t
+        if 'timezone' in data:
+            config['timezone'] = data['timezone']
+            
+        save_cache_config(config)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+def cache_scheduler_loop():
+    print("⏰ Cache scheduler started")
+    last_run_date = None
+    
+    while True:
+        try:
+            config = load_cache_config()
+            if config['auto_reload']:
+                try:
+                    tz = pytz.timezone(config.get('timezone', 'US/Eastern'))
+                    local_now = datetime.datetime.now(tz)
+                except Exception:
+                    # Fallback to Eastern if timezone invalid
+                    tz = pytz.timezone('US/Eastern')
+                    local_now = datetime.datetime.now(tz)
+                
+                current_time_str = local_now.strftime("%H:%M")
+                current_date_str = local_now.strftime("%Y-%m-%d")
+                
+                # Check if it's time to reload and we haven't run today yet
+                if current_time_str == config['reload_time'] and last_run_date != current_date_str:
+                    print(f"⏰ Auto-reloading cache at {current_time_str} ({config.get('timezone', 'US/Eastern')})")
+                    with app.app_context():
+                        cache.clear()
+                    last_run_date = current_date_str
+                    
+            time.sleep(30) # Check every 30 seconds
+        except Exception as e:
+            print(f"❌ Cache scheduler error: {e}")
+            time.sleep(60)
+
 if __name__ == "__main__":
+    # Start Cache Scheduler
+    cache_thread = threading.Thread(target=cache_scheduler_loop, daemon=True)
+    cache_thread.start()
+
     # Start Flask in a thread
     flask_thread = threading.Thread(target=start_flask, daemon=True)
     flask_thread.start()

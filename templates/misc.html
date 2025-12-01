@@ -94,6 +94,41 @@
         <h3 style="margin:0 0 12px 0;font-size:1rem;color:#e74c3c;">⏳ Pending Zero-Quantity Deletions</h3>
         <div id="zeroQtyPendingList" style="font-size:0.95em;"></div>
     </div>
+
+    <hr style="margin:24px 0;">
+    <h2 style="margin:0 0 10px 0; font-size:1.1rem;">System & Cache Management</h2>
+    <div class="desc">Manage database caching and automated reloads.</div>
+
+    <div style="margin-bottom:20px;">
+        <button onclick="clearCacheNow()" style="background:#ff9800;width:100%;">
+            <i class="fas fa-sync-alt"></i> Clear Cache & Reload Databases Now
+        </button>
+        <div id="clearCacheStatus" style="margin-top:10px;color:#555;display:none;text-align:center;"></div>
+    </div>
+
+    <h3 style="margin:16px 0 10px 0; font-size:1rem;">Automated Reload Settings</h3>
+    <form id="cacheSettingsForm">
+        <label style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+            <input type="checkbox" id="autoReloadEnabled" style="width:auto;">
+            <span>Enable Automated Reload</span>
+        </label>
+
+        <label for="reloadTime">Reload Time (24h format):</label>
+        <input type="time" id="reloadTime" style="padding:8px;font-size:1em;margin-bottom:12px;border-radius:4px;border:1px solid #ccc;">
+        
+        <label for="reloadTimezone">Timezone:</label>
+        <select id="reloadTimezone" style="padding:8px;font-size:1em;margin-bottom:16px;border-radius:4px;width:100%;">
+            <option value="US/Eastern">US/Eastern</option>
+            <option value="US/Central">US/Central</option>
+            <option value="US/Mountain">US/Mountain</option>
+            <option value="US/Pacific">US/Pacific</option>
+            <option value="UTC">UTC</option>
+        </select>
+
+        <button type="submit" style="background:#2196F3;">Save Reload Settings</button>
+        <div id="cacheSettingsStatus" style="margin-top:10px;color:#555;display:none;"></div>
+    </form>
+
     <script>
         // Load settings from localStorage
         function loadSettings() {
@@ -156,7 +191,7 @@
         }
         
         // On page load, always show saved settings and grace period
-        document.addEventListener('DOMContentLoaded', function(){ loadSettings(); loadGrace(); loadZeroQtySettings(); });
+        document.addEventListener('DOMContentLoaded', function(){ loadSettings(); loadGrace(); loadZeroQtySettings(); loadCacheSettings(); });
         
         // Zero-Quantity Deletion Settings
         async function loadZeroQtySettings() {
@@ -352,6 +387,87 @@
             } else {
                 document.getElementById('zeroQtyPendingContainer').style.display = 'none';
             }
+        });
+
+        // Cache Management
+        async function clearCacheNow() {
+            if(!confirm('Are you sure you want to clear the cache and reload databases? This may take a few seconds.')) return;
+            
+            const el = document.getElementById('clearCacheStatus');
+            el.style.display = 'block';
+            el.style.color = '#2196F3';
+            el.textContent = 'Clearing cache and reloading...';
+            
+            try {
+                const r = await fetch('/api/admin/cache/clear', {method: 'POST'});
+                const j = await r.json();
+                
+                if (j.success) {
+                    el.style.color = '#388e3c';
+                    el.textContent = '✓ Cache cleared successfully!';
+                } else {
+                    el.style.color = '#e74c3c';
+                    el.textContent = 'Failed: ' + (j.error || 'Unknown error');
+                }
+            } catch(err) {
+                el.style.color = '#e74c3c';
+                el.textContent = 'Error: ' + err.message;
+            }
+            
+            setTimeout(() => { el.style.display = 'none'; }, 3000);
+        }
+
+        async function loadCacheSettings() {
+            try {
+                const r = await fetch('/api/admin/cache/settings');
+                const j = await r.json();
+                if (j.success) {
+                    document.getElementById('autoReloadEnabled').checked = j.enabled;
+                    document.getElementById('reloadTime').value = j.time;
+                    document.getElementById('reloadTimezone').value = j.timezone;
+                }
+            } catch(e) {
+                console.warn('Failed to load cache settings', e);
+            }
+        }
+
+        document.getElementById('cacheSettingsForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const enabled = document.getElementById('autoReloadEnabled').checked;
+            const time = document.getElementById('reloadTime').value;
+            const timezone = document.getElementById('reloadTimezone').value;
+            
+            const el = document.getElementById('cacheSettingsStatus');
+            el.style.display = 'block';
+            el.textContent = 'Saving...';
+            el.style.color = '#555';
+            
+            try {
+                const r = await fetch('/api/admin/cache/settings', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        enabled: enabled,
+                        time: time,
+                        timezone: timezone
+                    })
+                });
+                const j = await r.json();
+                
+                if (j.success) {
+                    el.style.color = '#388e3c';
+                    el.textContent = '✓ Settings saved!';
+                } else {
+                    el.style.color = '#e74c3c';
+                    el.textContent = 'Save failed: ' + (j.error || 'Unknown');
+                }
+            } catch(err) {
+                el.style.color = '#e74c3c';
+                el.textContent = 'Save failed: ' + err.message;
+            }
+            
+            setTimeout(() => { el.style.display = 'none'; }, 2000);
         });
     </script>
 </body>

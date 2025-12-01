@@ -363,7 +363,7 @@ const OrderManager = {
     currentDays: 2,
     cacheKey: 'soldOrders_cache',
     cacheTimestampKey: 'soldOrders_timestamp',
-    cacheDuration: 5 * 60 * 1000, // 5 minutes in milliseconds
+    cacheDuration: 60 * 60 * 1000, // 1 hour in milliseconds
     
     // Add or update order in cache (normalize ID to string)
     setOrder(order) {
@@ -395,7 +395,8 @@ const OrderManager = {
     // Save orders to localStorage
     saveToLocalStorage() {
         try {
-            const ordersArray = Array.from(this.orders.values());
+            // Only cache pending (Ready to Ship) orders
+            const ordersArray = Array.from(this.orders.values()).filter(o => !o.isHandled);
             localStorage.setItem(this.cacheKey, JSON.stringify(ordersArray));
             localStorage.setItem(this.cacheTimestampKey, Date.now().toString());
         } catch (e) {
@@ -753,7 +754,6 @@ async function fetchAndShowSoldOrders(days, forceRefresh = false) {
         if (cachedOrders && cachedOrders.length > 0) {
             console.log('Using cached orders - instant load!');
             renderSoldOrders(cachedOrders, true);
-            OrderManager.isLoading = false;
             
             // Show brief indicator that we're using cached data
             const badge = document.getElementById('pending-count');
@@ -767,11 +767,8 @@ async function fetchAndShowSoldOrders(days, forceRefresh = false) {
                 }, 2000);
             }
             
-            // Fetch fresh data in background to update cache (silent update)
-            setTimeout(() => {
-                fetchAndShowSoldOrders(days, true);
-            }, 100);
-            return;
+            // Continue to fetch fresh data to populate "Completed" tab and update "Pending"
+            // Do not return here
         }
     }
     
@@ -930,10 +927,32 @@ window.addEventListener('DOMContentLoaded', async function() {
     if (refreshBtn) {
         refreshBtn.addEventListener('click', async function() {
             const icon = this.querySelector('i');
+            // Add animation class
             icon.classList.add('fa-spin');
+            this.style.transition = 'transform 0.5s ease';
+            this.style.transform = 'rotate(180deg)';
+            
             const days = parseInt(document.getElementById('sold-orders-days').value) || 2;
+            
+            // Ensure animation plays for at least 500ms
+            const start = Date.now();
             await fetchAndShowSoldOrders(days, true); // Force refresh
-            icon.classList.remove('fa-spin');
+            const elapsed = Date.now() - start;
+            const remaining = Math.max(0, 500 - elapsed);
+            
+            setTimeout(() => {
+                icon.classList.remove('fa-spin');
+                this.style.transform = 'rotate(0deg)'; // Reset rotation
+                
+                // Flash success color
+                const originalBorder = this.style.borderColor;
+                this.style.borderColor = '#4caf50';
+                this.style.color = '#4caf50';
+                setTimeout(() => {
+                    this.style.borderColor = originalBorder || '#ddd';
+                    this.style.color = '';
+                }, 500);
+            }, remaining);
         });
     }
     

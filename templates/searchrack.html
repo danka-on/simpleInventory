@@ -53,12 +53,19 @@
     .inventory-dropdown.active{display:block}
     .inventory-dropdown button{display:block;width:100%;text-align:left;padding:10px 12px;border:none;background:none;cursor:pointer;border-radius:4px;font-size:0.95rem}
     .inventory-dropdown button:hover{background:#f0f0f0}
+    .location-card{background:#fff;border:1px solid #ddd;border-radius:8px;padding:16px;cursor:pointer;transition:all 0.2s;box-shadow:0 2px 4px rgba(0,0,0,0.05)}
+    .location-card:hover{box-shadow:0 4px 12px rgba(0,0,0,0.1);border-color:#0066cc;transform:translateY(-2px)}
+    .location-card.active{border-color:#0066cc;background:#f0f7ff}
+    .location-card-title{font-size:1.1rem;font-weight:600;color:#333;margin-bottom:8px}
+    .location-card-count{font-size:0.9rem;color:#666}
+    .location-card-quantity{font-size:1.2rem;font-weight:700;color:#0066cc;margin-top:4px}
+    .breadcrumb-separator{margin:0 8px;color:#999}
     </style>
 </head>
 <body>
     <div class="top">
         <div style="display:flex;gap:8px;align-items:center">
-            <a href="/" style="text-decoration:none"><button class="btn btn-danger">Back</button></a>
+            <a href="/" style="text-decoration:none" id="back-btn-link"><button class="btn btn-danger" id="main-back-btn">Back</button></a>
             
             <!-- Database and Store Selectors -->
             <div class="db-selector-group">
@@ -74,6 +81,13 @@
                 </label>
             </div>
             
+            <!-- ALL SEARCH moved to top section -->
+            <div style="display:flex; gap:8px; align-items:center; margin-left:auto; padding:8px 12px; background:#fff3e0; border:2px solid #ff6b35; border-radius:8px;">
+                <label style="font-weight:600; color:#ff6b35; white-space:nowrap; font-size:0.9rem;">🔍 ALL:</label>
+                <input type="text" id="all-search-input" placeholder="Search all databases..." style="width:200px; padding:6px 10px; font-size:0.95rem; border:1px solid #ff6b35; border-radius:4px;">
+                <button class="btn" id="all-search-btn" style="background:#ff6b35; color:#fff; border:none; padding:6px 16px; font-weight:600; font-size:0.9rem;">Go</button>
+            </div>
+
             <!-- Inventory Options Gear (only visible for Inventory database) -->
             <div style="position:relative;">
                 <button class="inventory-gear-btn" id="inventory-gear">⚙️</button>
@@ -83,13 +97,18 @@
                     <button id="automatic-cleanup-btn">🧹 Automatic Cleanup</button>
                 </div>
             </div>
+
+            <!-- Cache Clear Button -->
+            <button class="btn" id="header-clear-cache-btn" title="Clear Cache & Reload" style="background:#ff9800; color:#fff; padding:8px 12px; margin-left:8px;">
+                <i class="fas fa-sync-alt"></i> ↻
+            </button>
         </div>
         <div class="actions">
         </div>
     </div>
 
     <div class="search-row">
-        <input type="text" id="search-input" placeholder="Search by title, barcode, item id, ...">
+        <input type="text" id="search-input" placeholder="Search by title, barcode, item id, ..." style="border:2px solid #3498db;">
         <button class="btn btn-primary" id="search-btn">Search</button>
         <!-- LOT # filter (only visible when Macy BOL is selected) -->
         <div id="lot-filter-container" style="display:none; margin-left:8px;">
@@ -123,9 +142,55 @@
         <div id="pagination-controls" style="margin-left:auto"></div>
     </div>
 
-    <div style="margin-top:10px; font-size:0.95rem; color:#444">Showing: <span id="active-dbs">Inventory</span></div>
+    <div style="margin-top:10px; font-size:0.95rem; color:#444">Showing: <span id="active-dbs">Warehouse</span></div>
+
+    <!-- Location Browser (only visible for Inventory database) -->
+    <div id="location-browser" style="display:none; margin-top:12px; border:1px solid #ddd; border-radius:8px; padding:12px; background:#f9f9f9;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h3 style="margin:0; font-size:1.1rem; color:#333;">📍 Browse by Location</h3>
+            <div>
+                <button id="force-load-all-btn" class="btn btn-blue" style="padding:4px 8px; font-size:0.85rem; margin-right:8px;">Load All Items</button>
+                <button id="collapse-location-browser" class="btn btn-secondary" style="padding:4px 8px; font-size:0.85rem;">Hide</button>
+            </div>
+        </div>
+        
+        <!-- Breadcrumb Navigation -->
+        <div id="location-breadcrumb" style="margin-bottom:12px; font-size:0.9rem; color:#666;">
+            <span style="cursor:pointer; color:#0066cc;" id="breadcrumb-all">All Locations</span>
+        </div>
+        
+        <!-- Location Cards (for top-level groups) -->
+        <div id="location-cards" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(200px, 1fr)); gap:12px;">
+            <div style="text-align:center; padding:20px; color:#999;">
+                <i class="fas fa-spinner fa-spin" style="font-size:24px;"></i>
+                <p style="margin-top:8px;">Loading locations...</p>
+            </div>
+        </div>
+        
+        <!-- Shelf Selector and Image Preview (shown when location is selected) -->
+        <div id="shelf-selector-container" style="display:none; margin-top:16px;">
+            <div style="display:flex; gap:16px; align-items:flex-start;">
+                <div style="flex:0 0 250px;">
+                    <label style="display:block; margin-bottom:8px; font-weight:600; color:#333;">Select Shelf:</label>
+                    <select id="shelf-selector" style="width:100%; padding:10px; font-size:1rem; border:1px solid #ddd; border-radius:6px;">
+                        <option value="">-- Select a shelf --</option>
+                    </select>
+                </div>
+                <div style="flex:1;">
+                    <div id="shelf-image-preview" style="border:1px solid #ddd; border-radius:8px; padding:12px; background:#fff; min-height:200px; display:flex; align-items:center; justify-content:center;">
+                        <span style="color:#999;">Select a shelf to view image</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <div id="results"></div>
+
+    <!-- Pagination at bottom right -->
+    <div style="margin-top:20px; display:flex; justify-content:flex-end; padding:0 12px 20px;">
+        <div id="bottom-pagination-controls"></div>
+    </div>
 
     <!-- Loading Overlay -->
     <div id="loadingOverlay" class="loading-overlay">
@@ -174,10 +239,10 @@
 
 <script>
 console.log('searchrack v3.1-qty-debug loaded - timestamp: 2025-11-17-15:50');
-// Reordered: Inventory, Macy BOL, Sold, Returns, Archived (databases) + Amazon/Ebay (stores)
+// Reordered: Warehouse, Macy BOL, Sold, Returns, Archived (databases) + Amazon/Ebay (stores)
 const DATABASES = ['searchRack','bol','sold','returns','archived'];
 const STORES = ['amazonStore','ebayStore'];
-const DB_LABELS = {searchRack:'Inventory', ebayStore:'Ebay live', amazonStore:'Amazon live', bol:'Macy BOL', sold:'Sold', returns:'Returns', archived:'Archived'};
+const DB_LABELS = {searchRack:'Warehouse', ebayStore:'Ebay live', amazonStore:'Amazon live', bol:'Macy BOL', sold:'Sold', returns:'Returns', archived:'Archived'};
 const defaultChecked = {'searchRack':true};
 let _allResults = [];
 let _currentPage = 1;
@@ -235,14 +300,18 @@ function attachDBChangeHandlers(){
         const inventoryGearBtn = document.getElementById('inventory-gear');
         if(selectedDb === 'searchRack'){
             inventoryGearBtn.style.display = 'inline-block';
+            // Show location browser for Inventory
+            toggleLocationBrowser(true);
         } else {
             inventoryGearBtn.style.display = 'none';
             // Close dropdown if open
             document.getElementById('inventory-dropdown').classList.remove('active');
+            // Hide location browser
+            toggleLocationBrowser(false);
         }
         
         // run search when user explicitly changes selection
-        doSearch();
+        doSearch(false);
     });
     
     // Also attach handler for store selection
@@ -256,8 +325,11 @@ function attachDBChangeHandlers(){
             document.getElementById('inventory-gear').style.display = 'none';
             document.getElementById('inventory-dropdown').classList.remove('active');
             
+            // Hide location browser
+            toggleLocationBrowser(false);
+            
             // run search
-            doSearch();
+            doSearch(false);
         }
     });
 }
@@ -315,9 +387,17 @@ async function doSearch(clearInput = false){
     if(typeof clearInput !== 'boolean') clearInput = false;
     console.log('[SEARCH] doSearch called, clearInput:', clearInput);
     showLoading();
-    const q = document.getElementById('search-input').value.trim();
+    let q = document.getElementById('search-input').value.trim();
     const dbs = getActiveDBs();
-    console.log('[SEARCH] query:', q, 'databases:', dbs);
+    
+    console.log('[SEARCH] query:', q, 'databases:', dbs, 'locationGroupFilter:', _locationGroupFilter);
+    
+    // Update URL to reflect current state
+    const url = new URL(window.location);
+    if(dbs.length > 0) url.searchParams.set('db', dbs[0]);
+    if(q) url.searchParams.set('q', q);
+    else url.searchParams.delete('q');
+    window.history.replaceState({}, '', url);
     
     // Store the query for later clearing
     const searchQuery = q;
@@ -355,6 +435,10 @@ async function doSearch(clearInput = false){
                     const payload = {q: q, limit: wantAll ? 0 : 50};
                     if(db === 'bol' && selectedLot){
                         payload.lot_filter = selectedLot;
+                    }
+                    // Include location_group_id for searchRack if active
+                    if(db === 'searchRack' && _locationGroupFilter){
+                        payload.location_group_id = _locationGroupFilter;
                     }
                     const resp = await fetch('/api/search/'+db, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
                     j = await resp.json();
@@ -433,11 +517,18 @@ function renderPagedResults() {
 function renderPagination(total, page, limit){
     const totalPages = Math.ceil(total / limit);
     const container = document.getElementById('pagination-controls');
-    if(totalPages <= 1){ container.innerHTML = `<span class="small-muted">${total} results</span>`; return; }
+    const bottomContainer = document.getElementById('bottom-pagination-controls');
+    
+    if(totalPages <= 1){ 
+        const resultText = `<span class="small-muted">${total} results</span>`;
+        container.innerHTML = resultText;
+        bottomContainer.innerHTML = '';
+        return; 
+    }
     let html = '';
     
     // Prev button
-    if (page > 1) html += `<button class="btn" onclick="_currentPage=${page-1}; renderPagedResults()">Prev</button>`;
+    if (page > 1) html += `<button class="btn" onclick="_currentPage=${page-1}; renderPagedResults()" style="background:#dc3545; color:#fff;">Prev</button>`;
     
     // Always show page 1
     html += `<button class="btn" onclick="_currentPage=1; renderPagedResults()" style="${page===1? 'font-weight:bold; background:#ddd':''}"}>1</button>`;
@@ -465,9 +556,10 @@ function renderPagination(total, page, limit){
     }
     
     // Next button
-    if (page < totalPages) html += `<button class="btn" onclick="_currentPage=${page+1}; renderPagedResults()">Next</button>`;
+    if (page < totalPages) html += `<button class="btn" onclick="_currentPage=${page+1}; renderPagedResults()" style="background:#28a745; color:#fff;">Next</button>`;
     
     container.innerHTML = html;
+    bottomContainer.innerHTML = html;
 }
 
 document.getElementById('page-size').addEventListener('change', ()=>{ _pageSize = parseInt(document.getElementById('page-size').value,10); _currentPage = 1; renderPagedResults(); });
@@ -1043,7 +1135,12 @@ function onEdit(db, id){
     const title = tr.querySelector('.title-cell a')?.textContent || '';
     const barcode = tr.children[1].textContent;
     const itemid = tr.children[2].textContent;
-    const qty = tr.children[4].textContent;
+    
+    // Find the Qty column by looking for the <th>Qty</th> header
+    const table = tr.closest('table');
+    const headers = Array.from(table.querySelectorAll('thead th'));
+    const qtyColIndex = headers.findIndex(h => h.textContent.trim() === 'Qty');
+    const qty = qtyColIndex !== -1 ? tr.children[qtyColIndex].textContent : '';
     
     // Extract location from the location link (for searchRack)
     const locationLink = tr.querySelector('.location-link');
@@ -1179,6 +1276,74 @@ window.addEventListener('load', ()=>{
         // focus the input
         document.getElementById('search-input').focus();
 
+        // Check URL parameters for db and q
+        const params = new URLSearchParams(window.location.search);
+        const dbParam = params.get('db');
+        const qParam = params.get('q') || params.get('search');
+        
+        // Update back button based on unified search context
+        updateBackButton();
+        
+        // If URL params are present, use them and ignore session state
+        if(dbParam || qParam){
+            console.log('[LOAD] Found URL params - db:', dbParam, 'q:', qParam);
+            
+            // Set search input first so it's ready when search triggers
+            if(qParam){
+                document.getElementById('search-input').value = qParam;
+            }
+
+            if(dbParam){
+                // Check if it's a store or database
+                if(STORES.includes(dbParam)){
+                    console.log('[LOAD] Setting store:', dbParam);
+                    document.getElementById('store-select').value = dbParam;
+                    document.getElementById('db-select').value = DATABASES[0]; // Reset to first database
+                    
+                    // Manually update UI state to ensure it sticks
+                    document.getElementById('lot-filter-container').style.display = 'none';
+                    document.getElementById('inventory-gear').style.display = 'none';
+                    document.getElementById('inventory-dropdown').classList.remove('active');
+                    if(typeof toggleLocationBrowser === 'function') toggleLocationBrowser(false);
+                    
+                    doSearch();
+                    return;
+                } else if(DATABASES.includes(dbParam)){
+                    console.log('[LOAD] Setting database:', dbParam);
+                    document.getElementById('db-select').value = dbParam;
+                    document.getElementById('store-select').value = ''; // Clear store selection
+                    
+                    // Manually update UI state
+                    const lotFilterContainer = document.getElementById('lot-filter-container');
+                    if(dbParam === 'bol'){
+                        lotFilterContainer.style.display = 'block';
+                        populateLotFilter();
+                    } else {
+                        lotFilterContainer.style.display = 'none';
+                    }
+                    
+                    const inventoryGearBtn = document.getElementById('inventory-gear');
+                    if(dbParam === 'searchRack'){
+                        inventoryGearBtn.style.display = 'inline-block';
+                        if(typeof toggleLocationBrowser === 'function') toggleLocationBrowser(true);
+                    } else {
+                        inventoryGearBtn.style.display = 'none';
+                        document.getElementById('inventory-dropdown').classList.remove('active');
+                        if(typeof toggleLocationBrowser === 'function') toggleLocationBrowser(false);
+                    }
+                    
+                    doSearch();
+                    return;
+                } else {
+                    console.warn('[LOAD] Unknown db param:', dbParam);
+                }
+            }
+            
+            // Ensure search runs if not triggered above
+            doSearch();
+            return;
+        }
+
         // If returning from an edit flow, restore previous search state
         const st = sessionStorage.getItem('searchrack_return_state');
         if(st){
@@ -1187,18 +1352,15 @@ window.addEventListener('load', ()=>{
             if(s.pageSize) document.getElementById('page-size').value = s.pageSize;
             if(Array.isArray(s.checkedDBs) && s.checkedDBs.length){
                 const first = s.checkedDBs[0];
-                DBS.forEach(k=>{ const el = document.getElementById('chk-'+k); if(el) el.checked = (k === first); });
+                if(STORES.includes(first)){
+                    document.getElementById('store-select').value = first;
+                    document.getElementById('store-select').dispatchEvent(new Event('change'));
+                } else if(DATABASES.includes(first)){
+                    document.getElementById('db-select').value = first;
+                    document.getElementById('db-select').dispatchEvent(new Event('change'));
+                }
             }
             sessionStorage.removeItem('searchrack_return_state');
-            doSearch();
-            return;
-        }
-
-        // If ?q= is present in URL, prefill and search
-        const params = new URLSearchParams(window.location.search);
-        const qParam = params.get('q') || params.get('search');
-        if(qParam){
-            document.getElementById('search-input').value = qParam;
             doSearch();
             return;
         }
@@ -1338,6 +1500,300 @@ async function loadHistory() {
         document.getElementById('historyContent').innerHTML = `<div style="color:#e74c3c;padding:20px;">Error loading history: ${err.message}</div>`;
     }
 }
+
+// ============================================================================
+// LOCATION BROWSER FUNCTIONALITY
+// ============================================================================
+
+let _locationData = [];
+let _selectedLocation = null;
+let _selectedShelf = null;
+let _locationGroupFilter = null; // Store location group ID for filtering
+
+// Load location hierarchy from API
+async function loadLocationHierarchy() {
+    try {
+        const resp = await fetch('/api/location_hierarchy');
+        const data = await resp.json();
+        
+        if (data.success) {
+            _locationData = data.locations;
+            renderLocationBrowser();
+        } else {
+            console.error('Failed to load location hierarchy:', data.error);
+        }
+    } catch (err) {
+        console.error('Error loading location hierarchy:', err);
+    }
+}
+
+// Render location browser based on current selection
+function renderLocationBrowser() {
+    const cardsContainer = document.getElementById('location-cards');
+    const selectorContainer = document.getElementById('shelf-selector-container');
+    const breadcrumb = document.getElementById('location-breadcrumb');
+    
+    if (_selectedLocation === null) {
+        // Show all locations (groups)
+        cardsContainer.style.display = 'grid';
+        selectorContainer.style.display = 'none';
+        renderLocationGroups(cardsContainer);
+        breadcrumb.innerHTML = '<span style="cursor:pointer; color:#0066cc;" id="breadcrumb-all">All Locations</span>';
+    } else {
+        // Show shelf selector for selected location
+        cardsContainer.style.display = 'none';
+        selectorContainer.style.display = 'block';
+        renderShelfSelector(_selectedLocation);
+        const location = _locationData.find(l => l.id === _selectedLocation);
+        breadcrumb.innerHTML = `
+            <span style="cursor:pointer; color:#0066cc;" id="breadcrumb-all">All Locations</span>
+            <span class="breadcrumb-separator">›</span>
+            <span style="color:#333; font-weight:600;">${esc(location.name)}</span>
+        `;
+    }
+    
+    // Attach breadcrumb click handler
+    const breadcrumbAll = document.getElementById('breadcrumb-all');
+    if (breadcrumbAll) {
+        breadcrumbAll.addEventListener('click', () => {
+            _selectedLocation = null;
+            _selectedShelf = null;
+            renderLocationBrowser();
+            // Clear search input and refresh
+            document.getElementById('search-input').value = '';
+            doSearch(false);
+        });
+    }
+}
+
+// Render location groups (top-level)
+function renderLocationGroups(container) {
+    let html = '';
+    
+    // Calculate totals
+    let totalShelves = 0;
+    let totalItems = 0;
+    let totalQuantity = 0;
+    
+    _locationData.forEach(location => {
+        totalShelves += location.shelves.length;
+        totalItems += location.total_items;
+        totalQuantity += location.total_quantity;
+    });
+    
+    // Add "Total" card first (leftmost)
+    html += `
+        <div class="location-card" style="background:#0066cc; border:2px solid #0052a3;">
+            <div class="location-card-title" style="color:#fff;">📊 Total</div>
+            <div class="location-card-count" style="color:#e0f0ff;">${totalShelves} shelf(s) • ${totalItems} item(s)</div>
+            <div class="location-card-quantity" style="color:#fff;">${totalQuantity} qty</div>
+        </div>
+    `;
+    
+    _locationData.forEach(location => {
+        const hasItems = location.total_items > 0;
+        const cardClass = hasItems ? 'location-card' : 'location-card' ;
+        
+        html += `
+            <div class="${cardClass}" data-location-id="${location.id}" onclick="selectLocation(${location.id})">
+                <div class="location-card-title">${esc(location.name)}</div>
+                <div class="location-card-count">${location.shelves.length} shelf(s) • ${location.total_items} item(s)</div>
+                <div class="location-card-quantity">${location.total_quantity} qty</div>
+            </div>
+        `;
+    });
+    
+    if (html === '') {
+        html = '<div style="padding:20px;text-align:center;color:#999;">No locations found. <a href="/shelfmanager">Create shelves</a> to get started.</div>';
+    }
+    
+    container.innerHTML = html;
+}
+
+// Render shelf selector dropdown for a location
+function renderShelfSelector(locationId) {
+    const location = _locationData.find(l => l.id === locationId);
+    if (!location) {
+        return;
+    }
+    
+    const selector = document.getElementById('shelf-selector');
+    const preview = document.getElementById('shelf-image-preview');
+    
+    // Sort shelves by quantity descending
+    const sortedShelves = [...location.shelves].sort((a, b) => b.quantity - a.quantity);
+    
+    // Populate dropdown
+    let html = '<option value="">-- Select a shelf --</option>';
+    sortedShelves.forEach(shelf => {
+        const selected = _selectedShelf === shelf.code ? 'selected' : '';
+        html += `<option value="${esc(shelf.code)}" ${selected}>${esc(shelf.code)} (${shelf.quantity} items)</option>`;
+    });
+    selector.innerHTML = html;
+    
+    // Update preview if shelf is already selected
+    if (_selectedShelf) {
+        updateShelfPreview(_selectedShelf);
+    } else {
+        preview.innerHTML = '<span style="color:#999;">Select a shelf to view image</span>';
+    }
+    
+    // Attach change handler
+    selector.onchange = (e) => {
+        const shelfCode = e.target.value;
+        if (shelfCode) {
+            selectShelf(shelfCode);
+        } else {
+            _selectedShelf = null;
+            preview.innerHTML = '<span style="color:#999;">Select a shelf to view image</span>';
+        }
+    };
+}
+
+// Update shelf image preview
+function updateShelfPreview(shelfCode) {
+    const preview = document.getElementById('shelf-image-preview');
+    const imageUrl = `/static/shelves/${encodeURIComponent(shelfCode)}.png`;
+    
+    preview.innerHTML = `
+        <img src="${imageUrl}" 
+             alt="${esc(shelfCode)}" 
+             style="max-width:100%; max-height:400px; border-radius:4px;"
+             onerror="this.parentElement.innerHTML='<span style=\'color:#999;\'>No image available for ${esc(shelfCode)}</span>';">
+    `;
+}
+
+// Select a location (group) and search all items in that group
+function selectLocation(locationId) {
+    _selectedLocation = locationId;
+    _selectedShelf = null;
+    renderLocationBrowser();
+    
+    // Set the location filter and trigger search
+    _locationGroupFilter = locationId;
+    
+    // Clear the search input since we're filtering by location group
+    document.getElementById('search-input').value = '';
+    
+    // Trigger search with location group filter
+    doSearch(false);
+}
+
+// Select a shelf and filter results
+function selectShelf(shelfCode) {
+    _selectedShelf = shelfCode;
+    updateShelfPreview(shelfCode);
+    
+    // Clear location group filter and search for specific shelf
+    _locationGroupFilter = null;
+    
+    // Update search input with shelf code and trigger search
+    const searchInput = document.getElementById('search-input');
+    searchInput.value = shelfCode;
+    doSearch(false);
+}
+
+// Show/hide location browser when Inventory database is selected
+function toggleLocationBrowser(show) {
+    const browser = document.getElementById('location-browser');
+    if (show) {
+        browser.style.display = 'block';
+        loadLocationHierarchy();
+    } else {
+        browser.style.display = 'none';
+        _selectedLocation = null;
+        _selectedShelf = null;
+    }
+}
+
+// Collapse/expand location browser
+document.getElementById('collapse-location-browser').addEventListener('click', () => {
+    const browser = document.getElementById('location-browser');
+    const cardsContainer = document.getElementById('location-cards');
+    const breadcrumb = document.getElementById('location-breadcrumb');
+    const collapseBtn = document.getElementById('collapse-location-browser');
+    
+    if (cardsContainer.style.display === 'none') {
+        cardsContainer.style.display = 'grid';
+        breadcrumb.style.display = 'block';
+        collapseBtn.textContent = 'Hide';
+    } else {
+        cardsContainer.style.display = 'none';
+        breadcrumb.style.display = 'none';
+        collapseBtn.textContent = 'Show';
+    }
+});
+
+// Initialize location browser on page load if Inventory database is selected
+(function initLocationBrowser() {
+    const dbSelect = document.getElementById('db-select');
+    if (dbSelect && dbSelect.value === 'searchRack') {
+        toggleLocationBrowser(true);
+        // Force a search after a moment to ensure items load
+        setTimeout(() => {
+            console.log('Force triggering search for searchRack');
+            doSearch();
+        }, 500);
+    }
+})();
+
+// Force Load All Items button
+document.getElementById('force-load-all-btn').addEventListener('click', () => {
+    // Clear any location filters
+    _locationGroupFilter = null;
+    _selectedLocation = null;
+    _selectedShelf = null;
+    renderLocationBrowser(); // Reset browser UI
+    
+    // Clear search input
+    document.getElementById('search-input').value = '';
+    
+    // Trigger search
+    doSearch();
+});
+
+// ALL SEARCH functionality
+document.getElementById('all-search-btn').addEventListener('click', () => {
+    const query = document.getElementById('all-search-input').value.trim();
+    if (query) {
+        window.location.href = `/unified-search?q=${encodeURIComponent(query)}`;
+    }
+});
+
+document.getElementById('all-search-input').addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') {
+        const query = document.getElementById('all-search-input').value.trim();
+        if (query) {
+            window.location.href = `/unified-search?q=${encodeURIComponent(query)}`;
+        }
+    }
+});
+
+// Header Cache Clear Button
+document.getElementById('header-clear-cache-btn').addEventListener('click', async () => {
+    if(!confirm('Clear cache and reload databases?')) return;
+    
+    const btn = document.getElementById('header-clear-cache-btn');
+    const originalText = btn.innerHTML;
+    btn.innerHTML = '...';
+    btn.disabled = true;
+    
+    try {
+        const r = await fetch('/api/admin/cache/clear', {method: 'POST'});
+        const j = await r.json();
+        if(j.success) {
+            alert('Cache cleared!');
+            window.location.reload();
+        } else {
+            alert('Failed: ' + (j.error || 'Unknown'));
+        }
+    } catch(e) {
+        alert('Error: ' + e.message);
+    } finally {
+        btn.innerHTML = originalText;
+        btn.disabled = false;
+    }
+});
 
 </script>
 </body>

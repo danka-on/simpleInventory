@@ -30,6 +30,31 @@
     .dropdown-section{display:flex;flex-direction:column;gap:6px;margin-bottom:10px}
     .dropdown-section:last-child{margin-bottom:0}
     .gear-btn{background:#f0f0f0}
+    /* Loading Spinner */
+    #loading-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(255, 255, 255, 0.7);
+      z-index: 20000;
+      display: none;
+      justify-content: center;
+      align-items: center;
+    }
+    .spinner {
+      border: 8px solid #f3f3f3;
+      border-top: 8px solid #3498db;
+      border-radius: 50%;
+      width: 60px;
+      height: 60px;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
   </style>
 </head>
 <body>
@@ -43,6 +68,7 @@
       <input type="text" id="filter-q" placeholder="UPC or Title">
     </label>
     <button class="btn btn-primary" id="search-btn" style="margin-left:4px">Search</button>
+    <button class="btn" id="refresh-btn" style="margin-left:4px; background:#f0f0f0" title="Refresh List">🔄</button>
     <div style="position:relative">
       <button class="btn" id="status-filter-btn" style="background:#f0f0f0;min-width:120px;text-align:left;display:flex;justify-content:space-between;align-items:center">
         <span id="status-filter-label">Status</span>
@@ -340,6 +366,7 @@ document.getElementById('closeNotes').addEventListener('click', ()=>{ document.g
 // Auto-refresh on dropdown changes
 document.getElementById('filter-lot').addEventListener('change', loadItems);
 document.getElementById('sort-select').addEventListener('change', loadItems);
+document.getElementById('refresh-btn').addEventListener('click', loadItems);
 
 // Status checkbox dropdown toggle
 const statusBtn = document.getElementById('status-filter-btn');
@@ -609,7 +636,9 @@ loadLots().then(loadItems);
 // Focus the search input on load
 document.getElementById('filter-q').focus();
 // Back button navigates home; using button confines clickable area to the button
-document.getElementById('back-btn').addEventListener('click', ()=>{ window.location.href = '/'; });
+document.getElementById('back-btn').addEventListener('click', ()=>{ 
+  window.location.href = '/'; 
+});
 // Trigger load on Enter in search
 document.getElementById('filter-q').addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ e.preventDefault(); loadItems(); } });
 // Search button click handler
@@ -619,6 +648,7 @@ document.getElementById('search-btn').addEventListener('click', ()=>{ loadItems(
 let selectMode = false;
 let currentPage = 1;
 let currentLimit = 25;
+let lastRenderedResults = []; // Cache last results for re-rendering
 
 document.getElementById('select-btn').addEventListener('click', () => {
   selectMode = !selectMode;
@@ -626,7 +656,10 @@ document.getElementById('select-btn').addEventListener('click', () => {
   document.getElementById('delete-selected').style.display = selectMode ? 'inline-block' : 'none';
   document.getElementById('select-all-label').style.display = selectMode ? 'inline' : 'none';
   document.getElementById('select-all').checked = false;
-  loadItems();
+  // Re-render with cached results to show/hide checkboxes
+  if (lastRenderedResults.length > 0) {
+    render(lastRenderedResults);
+  }
 });
 
 document.getElementById('delete-selected').addEventListener('click', async () => {
@@ -705,7 +738,23 @@ function changePage(p) {
 }
 
 // Update loadItems to include page and limit
-async function loadItems(){
+async function loadItems(e){
+  const overlay = document.getElementById('loading-overlay');
+  if(overlay) overlay.style.display = 'flex';
+
+  // Check if this is a forced refresh (from refresh button)
+  const isRefresh = (e && e.currentTarget && e.currentTarget.id === 'refresh-btn');
+
+  // Fetch current data version to ensure cache validity
+  let dataVersion = 0;
+  try {
+    const vr = await fetch('/api/data_version');
+    if(vr.ok) {
+        const vj = await vr.json();
+        dataVersion = vj.version;
+    }
+  } catch(e) { console.error('Failed to fetch data version', e); }
+
   const lot = document.getElementById('filter-lot').value.trim();
   const q = document.getElementById('filter-q').value.trim();
   const sort = document.getElementById('sort-select').value;
@@ -724,6 +773,16 @@ async function loadItems(){
   if(listedVal === 'listed') params.set('listed', 'true');
   else if(listedVal === 'not_listed') params.set('not_listed', 'true');
   
+  // Use data version for cache busting (unless manual refresh which forces new)
+  if(isRefresh) {
+      params.set('_t', Date.now());
+  } else if(dataVersion) {
+      params.set('_v', dataVersion);
+  } else {
+      // Fallback: if version fetch failed, use timestamp to ensure we don't get stale data
+      params.set('_t', Date.now());
+  }
+
   // First, fetch ALL results for stats calculation (without pagination)
   let allResults = [];
   try {
@@ -747,7 +806,6 @@ async function loadItems(){
   // Now fetch paginated results for display
   params.set('page', currentPage);
   params.set('limit', currentLimit);
-  params.set('_t', Date.now()); // Cache buster
   let j = {results:[], total:0, page:1, limit:currentLimit};
   try{
     const resp = await fetch('/api/bol_items?'+params.toString());
@@ -782,11 +840,16 @@ async function loadItems(){
     summaryEl.textContent = `Results: ${filtered_count} items — ${filtered_unique_upcs} unique items — ${filtered_total_quantity} total quantity`;
   }
   
+  // Cache results for select mode re-rendering
+  lastRenderedResults = results;
+  
   render(results);
   // Use filtered_count for pagination instead of server total (which doesn't account for client-side filters)
   renderPagination(filtered_count, page, limit);
   // Auto-clear the search input after loading items
   document.getElementById('filter-q').value = '';
+  
+  if(overlay) overlay.style.display = 'none';
 }
 
 // per-page selector wiring
@@ -802,5 +865,8 @@ if (perPageSel) {
 
 
 </script>
+  <div id="loading-overlay">
+    <div class="spinner"></div>
+  </div>
 </body>
 </html>

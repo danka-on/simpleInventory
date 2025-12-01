@@ -41,6 +41,11 @@
 </head>
 <body>
   <div class="container">
+    <div style="margin-bottom: 15px;">
+        <a href="/" style="text-decoration: none;">
+            <button style="padding: 8px 16px; background: #e74c3c; color: white; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; font-weight: 600;">Back</button>
+        </a>
+    </div>
     <h1>🔍 Unified Search</h1>
     
     <div class="search-box">
@@ -174,15 +179,16 @@
     function viewFullResults(dbKey, query) {
       // Store search query and redirect to the specific database search page
       sessionStorage.setItem('searchQuery', query);
+      sessionStorage.setItem('unifiedSearchQuery', query);
       
       // Map db keys to their search pages
       const pageMap = {
-        'bol': '/searchbol_api?q=' + encodeURIComponent(query),
-        'processed': '/items-to-list?q=' + encodeURIComponent(query),
-        'shelves': '/searchrack?q=' + encodeURIComponent(query),
-        'sold': '/sold?q=' + encodeURIComponent(query),
-        'ebay': '/marketplace-stats?store=ebay&q=' + encodeURIComponent(query),
-        'amazon': '/marketplace-stats?store=amazon&q=' + encodeURIComponent(query)
+        'shelves': '/searchrack?db=searchRack&q=' + encodeURIComponent(query),
+        'processed': '/items-to-list?q=' + encodeURIComponent(query) + '&status=good,bad',
+        'bol': '/searchrack?db=bol&q=' + encodeURIComponent(query),
+        'sold': '/searchrack?db=sold&q=' + encodeURIComponent(query),
+        'amazon': '/searchrack?db=amazonStore&q=' + encodeURIComponent(query),
+        'ebay': '/searchrack?db=ebayStore&q=' + encodeURIComponent(query)
       };
       
       const url = pageMap[dbKey] || '/tools';
