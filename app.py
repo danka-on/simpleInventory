@@ -8122,10 +8122,11 @@ def update_item(db_type, item_id):
         conn.close()
 
 @app.route('/api/search/<db_key>', methods=['POST'])
-@cache.cached(timeout=300, query_string=False, unless=lambda: request.json and request.json.get('q'))
+# @cache.cached(timeout=300, query_string=False, unless=lambda: request.json and request.json.get('q'))
 def api_search_db(db_key):
     data = request.get_json() or {}
     q = (data.get('q') or '').strip()
+    print(f"DEBUG: api_search_db hit. db={db_key}, q='{q}'")
     # Strip leading zeros from barcode searches
     q_stripped = q.lstrip('0') if q and q.isdigit() else q
     # Accept limit from client. If limit is 0 or None, we will NOT apply a SQL LIMIT (i.e., return all rows).

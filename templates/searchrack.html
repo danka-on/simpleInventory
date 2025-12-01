@@ -286,7 +286,7 @@ async function populateLotFilter(){
 }
 
 // Attach LOT filter change handler
-document.getElementById('lot-filter').addEventListener('change', doSearch);
+document.getElementById('lot-filter').addEventListener('change', () => doSearch(false));
 
 function getActiveDBs(){
     // Check if a store is selected first
@@ -300,8 +300,8 @@ function getActiveDBs(){
     return dbSelect && dbSelect.value ? [dbSelect.value] : [];
 }
 
-document.getElementById('search-btn').addEventListener('click', doSearch);
-document.getElementById('search-input').addEventListener('keyup', (e)=>{ if(e.key==='Enter') doSearch(); });
+document.getElementById('search-btn').addEventListener('click', () => doSearch(true));
+document.getElementById('search-input').addEventListener('keyup', (e)=>{ if(e.key==='Enter') doSearch(true); });
 
 function showLoading(){
     document.getElementById('loadingOverlay').classList.add('active');
@@ -311,12 +311,17 @@ function hideLoading(){
     document.getElementById('loadingOverlay').classList.remove('active');
 }
 
-async function doSearch(){
-    console.log('[SEARCH] doSearch called');
+async function doSearch(clearInput = false){
+    if(typeof clearInput !== 'boolean') clearInput = false;
+    console.log('[SEARCH] doSearch called, clearInput:', clearInput);
     showLoading();
     const q = document.getElementById('search-input').value.trim();
     const dbs = getActiveDBs();
     console.log('[SEARCH] query:', q, 'databases:', dbs);
+    
+    // Store the query for later clearing
+    const searchQuery = q;
+    
     _allResults = [];
     let totalQty = 0;
     // If user requested fetch-all, send limit=0 to tell server to return all matches
@@ -353,13 +358,17 @@ async function doSearch(){
                     }
                     const resp = await fetch('/api/search/'+db, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
                     j = await resp.json();
+                    console.log(`[SEARCH] ${db} response:`, j);
                 }
                 if(j && j.results) {
+                    console.log(`[SEARCH] ${db} adding ${j.results.length} results`);
                     j.results.forEach(r=> _allResults.push(r));
                     // Accumulate total quantity if provided by backend
                     if(j.total_quantity !== undefined){
                         totalQty += j.total_quantity;
                     }
+                } else {
+                    console.warn(`[SEARCH] ${db} returned no results or invalid response:`, j);
                 }
             }catch(err){console.error('search err',err)}
         }
@@ -374,10 +383,15 @@ async function doSearch(){
     }
     document.getElementById('active-dbs').textContent = displayText;
     renderPagedResults();
-    // Auto-clear the search input after search completes
-    document.getElementById('search-input').value = '';
     
     hideLoading();
+    
+    // Auto-clear the search input ONLY if a search query was actually entered AND clearInput is true
+    if(clearInput && searchQuery && searchQuery !== ''){
+        setTimeout(() => {
+            document.getElementById('search-input').value = '';
+        }, 100);
+    }
 }
 
 function renderPagedResults() {
@@ -547,15 +561,14 @@ function renderResults(results){
             }
         }catch(e){ /* ignore parse errors */ }
     }
+    // Sanitize imgUrl - reject 'nan', 'undefined', 'null' strings
+    if (imgUrl === 'nan' || imgUrl === 'undefined' || imgUrl === 'null') {
+        imgUrl = '';
+    }
     const img = esc(imgUrl || '');
     // Only use pictureposition if there is no actual item image at all AND pictureposition is valid
-    const hasPicturePosition = !isArchived && r.pictureposition && String(r.pictureposition).trim() !== '' && String(r.pictureposition) !== 'undefined' && String(r.pictureposition) !== 'null';
+    const hasPicturePosition = !isArchived && r.pictureposition && String(r.pictureposition).trim() !== '' && String(r.pictureposition) !== 'undefined' && String(r.pictureposition) !== 'null' && String(r.pictureposition) !== 'nan';
     const thumb = (imgUrl && imgUrl.trim() && imgUrl.trim() !== '') ? img : (hasPicturePosition ? ('/static/pictureposition/'+r.pictureposition) : missingThumb());
-    
-    // Debug logging for nan issue
-    if (thumb === 'nan' || thumb.includes('nan') || thumb === '' || thumb === 'undefined') {
-        console.warn('[THUMB DEBUG]', {barcode: r.barcode, imgUrl, img, hasPicturePosition, pictureposition: r.pictureposition, thumb});
-    }
     
     // Strip leading zeros from barcode display
     const barcodeStripped = barcodeRaw && /^\d+$/.test(String(barcodeRaw)) ? String(barcodeRaw).replace(/^0+/, '') : barcodeRaw;
