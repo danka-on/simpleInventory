@@ -36,6 +36,10 @@
   .spinner{border:3px solid #f3f3f3;border-top:3px solid #00b894;border-radius:50%;width:24px;height:24px;animation:spin 1s linear infinite}
   @keyframes spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
   .btn:disabled{opacity:0.5;cursor:not-allowed}
+  /* Full-page loading overlay */
+  .page-loading-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:99999;align-items:center;justify-content:center}
+  .page-loading-overlay.active{display:flex}
+  .loading-spinner-large{border:4px solid #f3f3f3;border-top:4px solid #00b894;border-radius:50%;width:50px;height:50px;animation:spin 1s linear infinite}
   .qty-controls{display:flex;gap:12px;width:100%;align-items:center;justify-content:space-between}
   .qty-btn{font-size:2rem;font-weight:700;padding:12px 0;border:3px solid;border-radius:12px;cursor:pointer;background:#fff;transition:all 0.2s;flex:1;max-width:33vw}
     .qty-btn.plus{color:#00b894;border-color:#00b894}
@@ -151,9 +155,21 @@
     <div id="statusMsg" class="muted"></div>
   </div>
 
-
+  <!-- Full-Page Loading Overlay -->
+  <div id="pageLoadingOverlay" class="page-loading-overlay">
+    <div class="loading-spinner-large"></div>
+  </div>
 
   <script>
+    // Loading overlay helpers
+    function showPageLoading() {
+      document.getElementById('pageLoadingOverlay').classList.add('active');
+    }
+    
+    function hidePageLoading() {
+      document.getElementById('pageLoadingOverlay').classList.remove('active');
+    }
+    
     const video = document.getElementById('video');
     const scanMsg = document.getElementById('scanMsg');
     let reader = null;
@@ -475,8 +491,16 @@
     
     document.getElementById('goodBtn').onclick = async ()=>{
       if(!currentUpc) return;
+      
+      // Show loading overlay
+      showPageLoading();
+      
       const result = await setStatus(currentUpc, 'good', currentQty);
       const statusMsg = document.getElementById('statusMsg');
+      
+      // Hide loading overlay
+      hidePageLoading();
+      
       if(result && result.success){ 
         // Store for undo with action type
         lastEntry = {
@@ -498,6 +522,9 @@
 
     document.getElementById('badBtn').onclick = async ()=>{
       if(!currentUpc) return;
+      
+      // Show loading overlay
+      showPageLoading();
       
       // Call API to create temporary suffixed entry for Bad flow
       try {

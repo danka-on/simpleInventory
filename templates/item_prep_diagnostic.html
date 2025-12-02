@@ -48,6 +48,11 @@
   .reason-group{display:flex;gap:10px;flex-wrap:wrap;margin:8px 0}
   .reason-btn{padding:14px 18px;border-radius:999px;border:2px solid #ddd;background:#f9f9f9;cursor:pointer;font-size:1.05rem}
   .reason-btn.active{background:#00b894;color:#fff;border-color:#00b894}
+  /* Full-page loading overlay */
+  .page-loading-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:99999;align-items:center;justify-content:center}
+  .page-loading-overlay.active{display:flex}
+  .loading-spinner-large{border:4px solid #f3f3f3;border-top:4px solid #00b894;border-radius:50%;width:50px;height:50px;animation:spin 1s linear infinite}
+  @keyframes spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
     textarea[name=note]{font-size:1rem}
     /* Note bubbles */
     .note-bubble{display:flex;align-items:flex-start;gap:8px;padding:10px 12px;background:#f0f4f8;border-radius:10px;border:1px solid #e0e4e8;position:relative}
@@ -268,7 +273,21 @@
   <div id="imgModal" class="modal"><img id="modalImg" src="" alt=""></div>
   <div id="uploadOverlay"><div class="spinner" title="Uploading..."></div></div>
 
+  <!-- Full-Page Loading Overlay -->
+  <div id="pageLoadingOverlay" class="page-loading-overlay">
+    <div class="loading-spinner-large"></div>
+  </div>
+
   <script>
+  // Loading overlay helpers
+  function showPageLoading() {
+    document.getElementById('pageLoadingOverlay').classList.add('active');
+  }
+  
+  function hidePageLoading() {
+    document.getElementById('pageLoadingOverlay').classList.remove('active');
+  }
+  
   console.log('=== Diagnostic Edit Script Starting ===');
   // const photos = document.getElementById('photos'); // Not using file input anymore
     const preview = document.getElementById('preview');
@@ -459,6 +478,9 @@
     document.getElementById('completeBtn').onclick = async ()=>{
       // Check if button is disabled
       if(document.getElementById('completeBtn').disabled) return;
+      
+      // Show loading overlay
+      showPageLoading();
       
       // Auto-save note if there's text in the note input field (simulate clicking +Add)
       const noteInput = document.getElementById('newNoteInput');

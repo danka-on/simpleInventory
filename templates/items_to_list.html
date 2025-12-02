@@ -290,6 +290,8 @@ function render(results){
       // Allow selection of all items (base barcodes will be reset instead of deleted)
       html += `<td><input type="checkbox" class="item-checkbox" data-id="${r.id}" data-upc="${upc}"></td>`;
     }
+    const rowBg = (lstatus === 'listed') ? 'background:#d4edda' : '';
+    html += `<tr style="${rowBg}">`;
     html += `<td style="width:64px;text-align:center">${diagLink}</td>`+
       `<td><div style="display:flex;flex-direction:column;gap:4px;align-items:flex-start">`+
             `<div>${pill}</div>`+
@@ -318,7 +320,9 @@ function render(results){
   }
   document.querySelectorAll('.img-link').forEach(el=> el.addEventListener('click', onOpenImg));
   document.querySelectorAll('.diag-link, button.diag-link').forEach(el=> el.addEventListener('click', onOpenDiag));
-  document.querySelectorAll('.btn-list').forEach(el=> el.addEventListener('click', onMarkListed));
+  const btnListElements = document.querySelectorAll('.btn-list');
+  console.log('[render] Found', btnListElements.length, '.btn-list buttons, attaching listeners');
+  btnListElements.forEach(el=> el.addEventListener('click', onMarkListed));
   document.querySelectorAll('.btn-unlist').forEach(el=> el.addEventListener('click', onUnlist));
   document.querySelectorAll('.btn-copy').forEach(el=> el.addEventListener('click', onCopyUpc));
   // Wire pics-count handlers (now spans instead of buttons)
@@ -547,12 +551,25 @@ async function onOpenNotes(e){
 
 async function onMarkListed(e){
   e.preventDefault();
-  const upc = e.currentTarget.dataset.upc; if(!upc) return;
+  const upc = e.currentTarget.dataset.upc; 
+  if(!upc) return;
+  console.log('[onMarkListed] Marking UPC as listed:', upc);
   try{
     // Simply set list_status to 'listed' without deleting diagnostic photos
-    await fetch('/api/bol_items/list_status', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ upc, list_status: 'listed' })});
-  }catch(e){ /* ignore, refresh below */ }
-  loadItems();
+    const response = await fetch('/api/bol_items/list_status', {
+      method:'POST', 
+      headers:{'Content-Type':'application/json'}, 
+      body: JSON.stringify({ upc, list_status: 'listed' })
+    });
+    const result = await response.json();
+    console.log('[onMarkListed] API response:', result);
+    if(!result.success) {
+      console.error('[onMarkListed] API returned error:', result.error);
+    }
+  }catch(err){ 
+    console.error('[onMarkListed] Fetch error:', err);
+  }
+  await loadItems();
 }
 
 async function onUnlist(e){

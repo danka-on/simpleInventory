@@ -56,6 +56,13 @@
     .btn-secondary:hover {
       background: #7f8c8d;
     }
+    .btn-danger {
+      background: #e74c3c;
+      color: white;
+    }
+    .btn-danger:hover {
+      background: #c0392b;
+    }
     .stats-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
@@ -329,10 +336,12 @@
 <body>
   <div class="container">
     <div class="header">
+      <div>
+        <a href="/tools" class="btn btn-danger">← Back</a>
+      </div>
       <h1>Marketplace Statistics</h1>
       <div>
         <a href="/marketplace-sale" class="btn btn-primary">New Sale</a>
-        <a href="/tools" class="btn btn-secondary">Back</a>
       </div>
     </div>
 

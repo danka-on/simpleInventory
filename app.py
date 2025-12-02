@@ -4155,6 +4155,11 @@ def api_items_prep_diagnostic_add_photos(upc):
                 print('Failed to save diagnostic image (add):', se)
         conn.commit()
         conn.close()
+        
+        # Clear cache for this UPC to ensure fresh data on next lookup
+        cache_key = f"view//api/bol_lookup?upc={upc_n}"
+        cache.delete(cache_key)
+        
         return jsonify({'success': True, 'images': out})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -5239,6 +5244,8 @@ def api_bol_items_set_list_status():
         conn.commit()
         updated = cur.rowcount
         conn.close()
+        # Invalidate cache so changes are immediately visible
+        update_data_version()
         return jsonify({'success': True, 'updated': updated})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500

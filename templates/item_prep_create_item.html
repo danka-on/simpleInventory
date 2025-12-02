@@ -42,6 +42,15 @@
     .field-status { display:inline-block; margin-left:8px; font-size:12px; }
     .field-complete { color:#27ae60; }
     .field-incomplete { color:#e74c3c; }
+    .loading-spinner { display:inline-block; width:16px; height:16px; border:2px solid #f3f3f3; border-top:2px solid #00b894; border-radius:50%; animation:spin 1s linear infinite; margin-left:8px; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    .loading-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:99999; align-items:center; justify-content:center; }
+    .loading-overlay.active { display:flex; }
+    .loading-spinner-large { border:4px solid #f3f3f3; border-top:4px solid #00b894; border-radius:50%; width:50px; height:50px; animation:spin 1s linear infinite; }
+    .cam-wrap { position:relative; display:block; width:100%; max-width:420px; margin:0 auto; }
+    .cam-overlay-btn { position:absolute; bottom:18px; left:50%; transform:translateX(-50%); display:flex; gap:12px; align-items:center; justify-content:center; z-index:5; }
+    .cam-btn { background:rgba(255,255,255,0.18); backdrop-filter:blur(4px); border:1px solid rgba(255,255,255,0.24); color:#fff; padding:18px 22px; border-radius:999px; cursor:pointer; font-size:1.2rem; box-shadow:0 8px 20px rgba(0,0,0,0.22); transition:all 0.2s; }
+    .cam-btn:hover { background:rgba(255,255,255,0.28); transform:scale(1.05); }
   </style>
 </head>
 <body>
@@ -49,7 +58,7 @@
     <h1>➕ Create New Item</h1>
     
     <div class="card">
-      <a href="/item-prep-no-barcode"><button class="btn btn-danger">← Back</button></a>
+      <button class="btn btn-danger" id="backBtn">← Back</button>
       
       <div style="margin-top:24px">
         <div class="form-group">
@@ -75,15 +84,20 @@
             Thumbnail Image
             <span class="field-status field-incomplete" id="imageStatus">✗ Required</span>
           </label>
-          <div class="camera-container" id="cameraContainer">
-            <video id="video" autoplay playsinline></video>
+          <div class="cam-wrap hidden" id="cameraContainer">
+            <div class="camera-container">
+              <video id="video" autoplay playsinline></video>
+            </div>
+            <div class="cam-overlay-btn">
+              <button class="cam-btn hidden" id="captureBtn">📷</button>
+              <button class="cam-btn hidden" id="retakeBtn">🔄</button>
+            </div>
           </div>
           <canvas id="canvas"></canvas>
           <img id="preview" class="preview-image hidden" alt="Captured image">
           
           <div class="camera-controls">
-            <button class="btn btn-primary" id="captureBtn">📷 Capture Photo</button>
-            <button class="btn btn-gray hidden" id="retakeBtn">🔄 Retake Photo</button>
+            <button class="btn btn-primary" id="startCameraBtn">📷 Start Camera</button>
           </div>
         </div>
         
@@ -92,9 +106,10 @@
             Print Barcode
             <span class="field-status field-incomplete" id="printStatus">✗ Not Printed</span>
           </label>
-          <button class="btn btn-gray" id="printBarcodeBtn" style="width:100%; padding:24px; font-size:1.1rem; display:block;">🖨️ Print Barcode Label</button>
-          <button class="btn btn-primary" id="addToQueBtn" style="width:100%; padding:24px; font-size:1.1rem; display:block; margin-top:8px;">➕ Add to Print Que</button>
-          <button class="btn btn-orange" id="haveBarcodeBtn" style="width:100%; padding:24px; font-size:1.1rem; display:block; margin-top:8px;">✓ Have Barcode</button>
+          <button class="btn btn-gray" id="printBarcodeBtn" style="width:100%; padding:16px; font-size:1rem; display:block;">🖨️ Print Barcode Label</button>
+          <button class="btn btn-success" id="addToQueBtn" style="width:100%; padding:16px; font-size:1rem; display:none; margin-top:8px;">➕ Add to Print Que</button>
+          <button class="btn btn-success" id="haveBarcodeBtn" style="width:100%; padding:16px; font-size:1rem; display:none; margin-top:8px;">✓ Have Barcode</button>
+          <button class="btn btn-success" id="completeBtn" style="width:100%; padding:20px; font-size:1.1rem; font-weight:700; display:none; margin-top:8px;">✓ Complete</button>
       </div>
       <script>
         // Add to Print Que logic
@@ -113,22 +128,8 @@
         }
         
         async function updateAddToQueBtn() {
-          const title = itemTitle.value.trim();
-          const inQueue = await checkIfInQueue();
-          
-          if (inQueue) {
-            addToQueBtn.textContent = '➖ Remove from Print Que';
-            addToQueBtn.style.background = '#e74c3c';
-            addToQueBtn.onclick = removeFromQueueHandler;
-            isPrinted = true; // Mark as printed since it's in queue
-            updatePrintStatus();
-          } else {
-            addToQueBtn.textContent = '➕ Add to Print Que';
-            addToQueBtn.style.background = '#00b894';
-            addToQueBtn.onclick = addToQueueHandler;
-          }
-          
-          addToQueBtn.disabled = !(title && currentBarcode);
+          // No longer needed - Complete button handles this based on barcode type
+          return;
         }
         
         async function addToQueueHandler() {
@@ -204,21 +205,30 @@
         </div>
         
         <div id="statusMsg" class="hidden"></div>
-        
-        <div style="margin-top:32px; text-align:center">
-          <button class="btn btn-gray" id="completeBtn" disabled>
-            Complete & Continue to Prep
-          </button>
-        </div>
       </div>
     </div>
   </div>
 
+  <!-- Loading Overlay -->
+  <div id="loadingOverlay" class="loading-overlay">
+    <div class="loading-spinner-large"></div>
+  </div>
+
   <script>
+    // Loading overlay helpers
+    function showLoadingOverlay() {
+      document.getElementById('loadingOverlay').classList.add('active');
+    }
+    
+    function hideLoadingOverlay() {
+      document.getElementById('loadingOverlay').classList.remove('active');
+    }
+    
     let currentBarcode = '';
     let capturedImageData = null;
     let isPrinted = false;
     let stream = null;
+    let barcodeWasManual = false; // Track if barcode was manually entered
     
     const itemTitle = document.getElementById('itemTitle');
     const barcodeDisplay = document.getElementById('barcodeDisplay');
@@ -227,6 +237,7 @@
     const video = document.getElementById('video');
     const canvas = document.getElementById('canvas');
     const preview = document.getElementById('preview');
+    const startCameraBtn = document.getElementById('startCameraBtn');
     const captureBtn = document.getElementById('captureBtn');
     const retakeBtn = document.getElementById('retakeBtn');
     const printBarcodeBtn = document.getElementById('printBarcodeBtn');
@@ -237,6 +248,29 @@
     const titleStatus = document.getElementById('titleStatus');
     const imageStatus = document.getElementById('imageStatus');
     const printStatus = document.getElementById('printStatus');
+    
+    function updateButtonVisibility() {
+      // Show appropriate buttons based on whether barcode was manually entered
+      console.log('updateButtonVisibility called - barcodeWasManual:', barcodeWasManual, 'currentBarcode:', currentBarcode);
+      
+      if (barcodeWasManual) {
+        // Manual barcode: show Complete button (just completes, doesn't add to queue)
+        console.log('Setting up MANUAL barcode buttons');
+        addToQueBtn.style.display = 'none';
+        haveBarcodeBtn.style.display = 'none';
+        completeBtn.style.display = 'block';
+        completeBtn.textContent = '✓ Complete';
+        completeBtn.onclick = completeWithoutQueue; // Different handler for manual
+      } else {
+        // Auto-generated: Complete button adds to queue
+        console.log('Setting up AUTO-GENERATED barcode buttons');
+        addToQueBtn.style.display = 'none';
+        haveBarcodeBtn.style.display = 'none';
+        completeBtn.style.display = 'block';
+        completeBtn.textContent = '✓ Complete & Add to Print Queue';
+        completeBtn.onclick = completeWithQueue; // Handler that adds to queue
+      }
+    }
     
     function showStatus(message, type = 'success') {
       statusMsg.textContent = message;
@@ -261,8 +295,10 @@
         if (data.success) {
           currentBarcode = data.barcode;
           barcodeDisplay.textContent = currentBarcode;
+          barcodeWasManual = false; // Mark as auto-generated
           isPrinted = false;
           updatePrintStatus();
+          updateButtonVisibility();
           checkFormComplete();
           console.log('Barcode updated to:', currentBarcode);
         } else {
@@ -276,11 +312,19 @@
     
     async function startCamera() {
       try {
+        // Stop any existing stream first
+        stopCamera();
+        
         stream = await navigator.mediaDevices.getUserMedia({ 
           video: { facingMode: 'environment' },
           audio: false
         });
         video.srcObject = stream;
+        
+        // Show camera container and capture button, hide start button
+        document.getElementById('cameraContainer').classList.remove('hidden');
+        startCameraBtn.classList.add('hidden');
+        captureBtn.classList.remove('hidden');
       } catch (error) {
         showStatus('Camera access denied or unavailable: ' + error.message, 'error');
       }
@@ -313,6 +357,11 @@
       imageStatus.className = 'field-status field-complete';
       
       checkFormComplete();
+      
+      // Scroll to bottom to show completion buttons
+      setTimeout(() => {
+        window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+      }, 100);
     }
     
     function retakePhoto() {
@@ -325,6 +374,8 @@
       imageStatus.textContent = '✗ Required';
       imageStatus.className = 'field-status field-incomplete';
       
+      // Stop and restart camera to reset
+      stopCamera();
       startCamera();
       checkFormComplete();
     }
@@ -401,6 +452,11 @@
         return;
       }
       
+      // Add loading state to print button
+      const originalHTML = printBarcodeBtn.innerHTML;
+      printBarcodeBtn.disabled = true;
+      printBarcodeBtn.innerHTML = '🖨️ Printing... <span class="loading-spinner"></span>';
+      
       try {
         // Check printer configuration first
         const configResponse = await fetch('/api/printer/config');
@@ -413,21 +469,15 @@
             upc: currentBarcode,
             description: title
           });
+          // Restore button state
+          printBarcodeBtn.disabled = false;
+          printBarcodeBtn.innerHTML = originalHTML;
           // Mark as printed after a short delay (user initiated print)
           setTimeout(() => {
             isPrinted = true;
             updatePrintStatus();
-            showStatus('Print dialog opened! Complete printing to continue.', 'success');
+            showStatus('Print dialog opened! Mark as complete when ready.', 'success');
             checkFormComplete();
-            
-            // Auto-continue to prep if all fields are filled
-            const hasImage = !!capturedImageData;
-            if (title && currentBarcode && hasImage && isPrinted) {
-              showStatus('All fields complete! Continuing to prep...', 'success');
-              setTimeout(() => {
-                completeAndContinue();
-              }, 1000);
-            }
           }, 1000);
           return;
         }
@@ -451,20 +501,15 @@
           updatePrintStatus();
           showStatus('Barcode printed successfully!', 'success');
           checkFormComplete();
-          
-          // Auto-continue to prep if all fields are filled
-          const hasImage = !!capturedImageData;
-          if (title && currentBarcode && hasImage && isPrinted) {
-            showStatus('All fields complete! Continuing to prep...', 'success');
-            setTimeout(() => {
-              completeAndContinue();
-            }, 800);
-          }
         } else {
           showStatus('Print failed: ' + data.error + '. Check printer settings.', 'error');
         }
       } catch (error) {
         showStatus('Print error: ' + error.message, 'error');
+      } finally {
+        // Restore button state
+        printBarcodeBtn.disabled = false;
+        printBarcodeBtn.innerHTML = originalHTML;
       }
     }
     
@@ -473,50 +518,6 @@
       updatePrintStatus();
       showStatus('Marked as having barcode!', 'success');
       checkFormComplete();
-      
-      // Auto-continue to prep if all fields are filled
-      const title = itemTitle.value.trim();
-      const hasImage = !!capturedImageData;
-      if (title && currentBarcode && hasImage && isPrinted) {
-        showStatus('All fields complete! Continuing to prep...', 'success');
-        setTimeout(() => {
-          completeAndContinue();
-        }, 800);
-      }
-    }
-    
-    function markAsHaveBarcode() {
-      isPrinted = true;
-      updatePrintStatus();
-      showStatus('Marked as having barcode!', 'success');
-      checkFormComplete();
-      
-      // Auto-continue to prep if all fields are filled
-      const title = itemTitle.value.trim();
-      const hasImage = !!capturedImageData;
-      if (title && currentBarcode && hasImage && isPrinted) {
-        showStatus('All fields complete! Continuing to prep...', 'success');
-        setTimeout(() => {
-          completeAndContinue();
-        }, 800);
-      }
-    }
-    
-    function markAsHaveBarcode() {
-      isPrinted = true;
-      updatePrintStatus();
-      showStatus('Marked as having barcode!', 'success');
-      checkFormComplete();
-      
-      // Auto-continue to prep if all fields are filled
-      const title = itemTitle.value.trim();
-      const hasImage = !!capturedImageData;
-      if (title && currentBarcode && hasImage && isPrinted) {
-        showStatus('All fields complete! Continuing to prep...', 'success');
-        setTimeout(() => {
-          completeAndContinue();
-        }, 800);
-      }
     }
     
     function updatePrintStatus() {
@@ -541,13 +542,7 @@
       checkFormComplete();
     }
     
-    function scrollToBottom() {
-      // Scroll to show the Complete button at the bottom of the viewport
-      const completeBtn = document.getElementById('completeBtn');
-      if (completeBtn) {
-        completeBtn.scrollIntoView({ behavior: 'smooth', block: 'end' });
-      }
-    }
+    // scrollToBottom function removed - completeBtn no longer exists in UI
     
     function checkFormComplete() {
       const title = itemTitle.value.trim();
@@ -557,15 +552,16 @@
       
       const isComplete = title && hasBarcode && hasImage && hasPrinted;
       
-      if (isComplete) {
-        completeBtn.disabled = false;
-        completeBtn.className = 'btn btn-success';
-        completeBtn.style.cursor = 'pointer';
-      } else {
-        completeBtn.disabled = true;
-        completeBtn.className = 'btn btn-gray';
-        completeBtn.style.cursor = 'not-allowed';
-      }
+      // completeBtn UI element removed - auto-continue logic now handled in printBarcode
+      // if (isComplete) {
+      //   completeBtn.disabled = false;
+      //   completeBtn.className = 'btn btn-success';
+      //   completeBtn.style.cursor = 'pointer';
+      // } else {
+      //   completeBtn.disabled = true;
+      //   completeBtn.className = 'btn btn-gray';
+      //   completeBtn.style.cursor = 'not-allowed';
+      // }
     }
     
     async function completeAndContinue() {
@@ -581,6 +577,9 @@
         showStatus('Missing required fields: ' + missing.join(', '), 'error');
         return;
       }
+      
+      // Show loading overlay
+      showLoadingOverlay();
       
       try {
         // Store the new item temporarily
@@ -601,9 +600,11 @@
           sessionStorage.setItem('prepUpc', currentBarcode);
           window.location.href = '/item-prep';
         } else {
+          hideLoadingOverlay();
           showStatus('Failed to save item: ' + data.error, 'error');
         }
       } catch (error) {
+        hideLoadingOverlay();
         showStatus('Error: ' + error.message, 'error');
       }
     }
@@ -626,13 +627,19 @@
       if (manualBarcode) {
         currentBarcode = manualBarcode;
         barcodeDisplay.textContent = currentBarcode;
+        // Check if barcode is auto-generated (starts with 777) or manual
+        barcodeWasManual = !currentBarcode.startsWith('777');
+        console.log('Barcode input blur - barcode:', currentBarcode, 'barcodeWasManual:', barcodeWasManual);
         isPrinted = false; // Reset print status when barcode changes
         updatePrintStatus();
+        updateButtonVisibility(); // Update buttons based on manual vs auto-generated
         checkFormComplete();
         updateAddToQueBtn();
       }
       barcodeInput.classList.add('hidden');
       barcodeDisplay.classList.remove('hidden');
+      // Move focus to title after barcode entry
+      setTimeout(() => itemTitle.focus(), 100);
     });
     
     barcodeInput.addEventListener('keypress', (e) => {
@@ -646,17 +653,82 @@
       console.log('Regenerate button clicked');
       generateBarcode();
     });
+    startCameraBtn.addEventListener('click', startCamera);
     captureBtn.addEventListener('click', capturePhoto);
     retakeBtn.addEventListener('click', retakePhoto);
     printBarcodeBtn.addEventListener('click', printBarcode);
     haveBarcodeBtn.addEventListener('click', markAsHaveBarcode);
-    completeBtn.addEventListener('click', completeAndContinue);
+    
+    // Handler for manual barcode: just complete without adding to queue
+    async function completeWithoutQueue() {
+      // Just mark as having barcode and complete
+      isPrinted = true; // Mark as printed so validation passes
+      updatePrintStatus();
+      checkFormComplete();
+      
+      // Trigger completion
+      const title = itemTitle.value.trim();
+      const hasImage = !!capturedImageData;
+      if (title && currentBarcode && hasImage && isPrinted) {
+        showStatus('Completing...', 'success');
+        setTimeout(() => {
+          completeAndContinue();
+        }, 300);
+      }
+    }
+    
+    // Handler for auto-generated barcode: add to queue then complete
+    async function completeWithQueue() {
+      const title = itemTitle.value.trim();
+      if (!title || !currentBarcode) {
+        showStatus('Please fill in title and barcode first', 'warning');
+        return;
+      }
+      try {
+        showStatus('Adding to print queue...', 'warning');
+        const response = await fetch('/api/print-queue', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: title, barcode: currentBarcode })
+        });
+        const data = await response.json();
+        if (data.success) {
+          isPrinted = true;
+          updatePrintStatus();
+          showStatus('Added to print queue!', 'success');
+          checkFormComplete();
+          
+          // Auto-continue to prep if all fields are filled
+          const hasImage = !!capturedImageData;
+          if (title && currentBarcode && hasImage && isPrinted) {
+            showStatus('All fields complete! Continuing to prep...', 'success');
+            setTimeout(() => {
+              completeAndContinue();
+            }, 800);
+          }
+        } else {
+          showStatus('Failed to add to queue: ' + data.error, 'error');
+        }
+      } catch (error) {
+        console.error('Error adding to queue:', error);
+        showStatus('Failed to add to queue: ' + error.message, 'error');
+      }
+    }
+    
+    // Complete button will call appropriate handler based on updateButtonVisibility
+    completeBtn.addEventListener('click', async () => {
+      // This will be overridden by onclick in updateButtonVisibility
+    });
+    
     itemTitle.addEventListener('input', updateTitleStatus);
     
-    // Scroll on blur (when user exits the title input) or on Enter key
+    // Scroll to camera on blur (when user exits the title input) or on Enter key
     itemTitle.addEventListener('blur', () => {
       if (itemTitle.value.trim()) {
-        scrollToBottom();
+        // Scroll so camera is fully visible
+        setTimeout(() => {
+          document.getElementById('cameraContainer').scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 100);
       }
     });
     
@@ -668,7 +740,24 @@
     
     // Initialize
     generateBarcode();
-    startCamera();
+    
+    // Set up dynamic back button
+    const backBtn = document.getElementById('backBtn');
+    if (backBtn) {
+      const referrer = document.referrer;
+      console.log('Referrer:', referrer); // Debug log
+      // Check if coming from /item-prep (but not /item-prep-no-barcode)
+      if (referrer && (referrer.endsWith('/item-prep') || referrer.includes('/item-prep?') || referrer.includes('/item-prep#'))) {
+        backBtn.onclick = () => window.location.href = '/item-prep';
+      } else {
+        backBtn.onclick = () => window.location.href = '/item-prep-no-barcode';
+      }
+    }
+    
+    // Auto-focus barcode input on page load
+    setTimeout(() => {
+      barcodeDisplay.click(); // Activate manual entry mode
+    }, 500);
     
     // Cleanup on page unload
     window.addEventListener('beforeunload', stopCamera);
