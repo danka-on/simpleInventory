@@ -2843,9 +2843,8 @@ def save_temp_item():
             cur.execute('''
                 INSERT INTO bol_items (
                     upc, item_description, image_url, 
-                    quantity, good_qty, bad_qty, listed_qty,
-                    lot_number, bol_number, import_date, temporary
-                ) VALUES (?, ?, ?, 0, 0, 0, 0, NULL, 'CUSTOM', datetime('now'), 1)
+                    lot_number, bol_number, import_date
+                ) VALUES (?, ?, ?, NULL, 'CUSTOM', datetime('now'))
             ''', (upc, item_description, web_image_path))
         
         conn.commit()
@@ -8520,6 +8519,21 @@ def api_search_db(db_key):
                                 # If item_id missing, use upc as fallback
                                 item_out['item_id'] = item_out.get('item_id') or row_bol['upc']
                             bol_conn.close()
+                        except Exception:
+                            pass
+                    # if still missing, try bol.db (for custom items created via item_prep_create_item)
+                    if not item_out.get('title') or not item_out.get('image'):
+                        try:
+                            bol_main_conn = sqlite3.connect('bol.db')
+                            bol_main_conn.row_factory = sqlite3.Row
+                            bol_main_cur = bol_main_conn.cursor()
+                            bol_main_cur.execute('SELECT item_description, image_url, upc FROM bol_items WHERE upc = ? COLLATE NOCASE LIMIT 1', (base_barcode,))
+                            row_bol_main = bol_main_cur.fetchone()
+                            if row_bol_main:
+                                item_out['title'] = item_out.get('title') or row_bol_main['item_description']
+                                item_out['image'] = item_out.get('image') or row_bol_main['image_url']
+                                item_out['item_id'] = item_out.get('item_id') or row_bol_main['upc']
+                            bol_main_conn.close()
                         except Exception:
                             pass
                 # If this row comes from sold.db, the data should already be enriched during sync

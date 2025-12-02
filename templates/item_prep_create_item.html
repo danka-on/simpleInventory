@@ -16,9 +16,12 @@
     .btn-primary:hover { background:#00a383; }
     .btn-danger { background:#e74c3c; color:#fff; }
     .btn-danger:hover { background:#d63027; }
-    .btn-gray { background:#95a5a6; color:#fff; cursor:not-allowed; }
+    .btn-gray { background:#95a5a6; color:#fff; }
+    .btn-gray:not(:disabled):hover { background:#7f8c8d; cursor:pointer; }
     .btn-success { background:#27ae60; color:#fff; }
     .btn-success:hover { background:#229954; }
+    .btn-orange { background:#f39c12; color:#fff; }
+    .btn-orange:hover { background:#e67e22; }
     .form-group { margin-bottom:20px; }
     label { display:block; margin-bottom:8px; font-weight:600; color:#2c3e50; font-size:14px; }
     input[type="text"] { width:100%; padding:12px; border:1px solid #ddd; border-radius:8px; font-size:14px; }
@@ -89,8 +92,9 @@
             Print Barcode
             <span class="field-status field-incomplete" id="printStatus">✗ Not Printed</span>
           </label>
-          <button class="btn btn-primary" id="printBarcodeBtn" style="width:100%; padding:24px; font-size:1.1rem; display:block;">🖨️ Print Barcode Label</button>
+          <button class="btn btn-gray" id="printBarcodeBtn" style="width:100%; padding:24px; font-size:1.1rem; display:block;">🖨️ Print Barcode Label</button>
           <button class="btn btn-primary" id="addToQueBtn" style="width:100%; padding:24px; font-size:1.1rem; display:block; margin-top:8px;">➕ Add to Print Que</button>
+          <button class="btn btn-orange" id="haveBarcodeBtn" style="width:100%; padding:24px; font-size:1.1rem; display:block; margin-top:8px;">✓ Have Barcode</button>
       </div>
       <script>
         // Add to Print Que logic
@@ -226,6 +230,7 @@
     const captureBtn = document.getElementById('captureBtn');
     const retakeBtn = document.getElementById('retakeBtn');
     const printBarcodeBtn = document.getElementById('printBarcodeBtn');
+    const haveBarcodeBtn = document.getElementById('haveBarcodeBtn');
     const completeBtn = document.getElementById('completeBtn');
     const statusMsg = document.getElementById('statusMsg');
     
@@ -463,6 +468,57 @@
       }
     }
     
+    function markAsHaveBarcode() {
+      isPrinted = true;
+      updatePrintStatus();
+      showStatus('Marked as having barcode!', 'success');
+      checkFormComplete();
+      
+      // Auto-continue to prep if all fields are filled
+      const title = itemTitle.value.trim();
+      const hasImage = !!capturedImageData;
+      if (title && currentBarcode && hasImage && isPrinted) {
+        showStatus('All fields complete! Continuing to prep...', 'success');
+        setTimeout(() => {
+          completeAndContinue();
+        }, 800);
+      }
+    }
+    
+    function markAsHaveBarcode() {
+      isPrinted = true;
+      updatePrintStatus();
+      showStatus('Marked as having barcode!', 'success');
+      checkFormComplete();
+      
+      // Auto-continue to prep if all fields are filled
+      const title = itemTitle.value.trim();
+      const hasImage = !!capturedImageData;
+      if (title && currentBarcode && hasImage && isPrinted) {
+        showStatus('All fields complete! Continuing to prep...', 'success');
+        setTimeout(() => {
+          completeAndContinue();
+        }, 800);
+      }
+    }
+    
+    function markAsHaveBarcode() {
+      isPrinted = true;
+      updatePrintStatus();
+      showStatus('Marked as having barcode!', 'success');
+      checkFormComplete();
+      
+      // Auto-continue to prep if all fields are filled
+      const title = itemTitle.value.trim();
+      const hasImage = !!capturedImageData;
+      if (title && currentBarcode && hasImage && isPrinted) {
+        showStatus('All fields complete! Continuing to prep...', 'success');
+        setTimeout(() => {
+          completeAndContinue();
+        }, 800);
+      }
+    }
+    
     function updatePrintStatus() {
       if (isPrinted) {
         printStatus.textContent = '✓ Printed';
@@ -593,6 +649,7 @@
     captureBtn.addEventListener('click', capturePhoto);
     retakeBtn.addEventListener('click', retakePhoto);
     printBarcodeBtn.addEventListener('click', printBarcode);
+    haveBarcodeBtn.addEventListener('click', markAsHaveBarcode);
     completeBtn.addEventListener('click', completeAndContinue);
     itemTitle.addEventListener('input', updateTitleStatus);
     
