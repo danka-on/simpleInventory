@@ -10471,7 +10471,7 @@ def api_undelete(archive_id):
 
 @app.route('/api/location_duplicates', methods=['GET'])
 def api_location_duplicates():
-    """Return items that have the same barcode in multiple locations, grouped by barcode"""
+    """Return items that have the same barcode in multiple locations - ONE ROW per barcode with locations array"""
     try:
         conn = sqlite3.connect('searchRack.db')
         conn.row_factory = sqlite3.Row
@@ -10486,8 +10486,12 @@ def api_location_duplicates():
         cur.execute(f'''
             SELECT 
                 BARCODE,
-                TITLE,
-                GROUP_CONCAT(ID || ':' || ITEM_POSITION || ':' || {qty_col}, '|') as location_data
+                MAX(TITLE) as TITLE,
+                MAX(IMAGE) as IMAGE,
+                MAX(PICTUREPOSITION) as PICTUREPOSITION,
+                MAX(CREATED_AT) as CREATED_AT,
+                GROUP_CONCAT(ID || ':' || ITEM_POSITION || ':' || {qty_col} || ':' || COALESCE(PICTUREPOSITION, ''), '|') as location_data,
+                SUM(CAST({qty_col} AS INTEGER)) as total_quantity
             FROM SEARCHRACK
             WHERE BARCODE IS NOT NULL 
             AND TRIM(BARCODE) != ''
@@ -10506,64 +10510,49 @@ def api_location_duplicates():
         for group_row in grouped_rows:
             barcode = group_row['BARCODE']
             title = group_row['TITLE'] or 'Unknown'
+            image = group_row['IMAGE'] or ''
+            created_at = group_row['CREATED_AT']
             location_data = group_row['location_data']
+            group_total_qty = group_row['total_quantity'] or 0
             
-            # Parse location data: "id:location:qty|id:location:qty|..."
+            # Parse location data: "id:location:qty:picturepos|..."
             locations_list = []
-            group_total_qty = 0
             
             for loc_entry in location_data.split('|'):
                 parts = loc_entry.split(':')
                 if len(parts) >= 3:
-                    item_id, location, qty_str = parts[0], parts[1], parts[2]
+                    item_id = parts[0]
+                    location = parts[1]
+                    qty_str = parts[2]
+                    picturepos = parts[3] if len(parts) > 3 else ''
+                    
                     try:
                         qty = int(float(qty_str)) if qty_str else 0
                     except:
                         qty = 0
+                    
                     locations_list.append({
                         'id': item_id,
-                        'location': location,
-                        'quantity': qty
+                        'code': location,
+                        'quantity': qty,
+                        'image': picturepos if picturepos else location
                     })
-                    group_total_qty += qty
             
             total_qty += group_total_qty
             
-            # Create a result entry for each location (so they display as separate rows)
-            # but mark them with a group identifier
-            for idx, loc in enumerate(locations_list):
-                # Fetch full row data for each ID
-                cur.execute(f'SELECT * FROM SEARCHRACK WHERE ID = ?', (loc['id'],))
-                row = cur.fetchone()
-                if row:
-                    item = dict(row)
-                    # Add grouping metadata
-                    item['is_duplicate_group'] = True
-                    item['group_barcode'] = barcode
-                    item['group_index'] = idx
-                    item['group_size'] = len(locations_list)
-                    item['group_total_qty'] = group_total_qty
-                    item['other_locations'] = ', '.join([l['location'] for l in locations_list if l['location'] != loc['location']])
-                    
-                    # Normalize fields for frontend
-                    result = {
-                        'id': item.get('ID'),
-                        'barcode': barcode,
-                        'title': title,
-                        'quantity': loc['quantity'],
-                        'location': loc['location'],
-                        'created_at': item.get('CREATED_AT'),
-                        'image': item.get('IMAGE') or item.get('image') or '',
-                        'db': 'searchRack',
-                        'raw': item,
-                        'is_duplicate_group': True,
-                        'group_barcode': barcode,
-                        'group_index': idx,
-                        'group_size': len(locations_list),
-                        'group_total_qty': group_total_qty,
-                        'other_locations': item['other_locations']
-                    }
-                    results.append(result)
+            # Create ONE result entry per barcode with locations array
+            result = {
+                'id': locations_list[0]['id'] if locations_list else None,  # Use first ID as primary
+                'barcode': barcode,
+                'title': title,
+                'quantity': group_total_qty,
+                'locations': locations_list,  # Array of all locations
+                'created_at': created_at,
+                'image': image,
+                'source_db': 'searchRack',
+                'is_duplicate_group': True
+            }
+            results.append(result)
         
         conn.close()
         

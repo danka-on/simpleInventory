@@ -764,7 +764,45 @@ function renderResults(results){
         }
     }
     
-    const locationCell = (!hasEbayStore && !hasAmazonStore && !hasSold && !hasBol && !hasReturns) ? `<td>${ locDisplay ? `<a href="#" class=\"location-link\" data-src=\"${db}\" data-id=\"${r.id}\" data-barcode=\"${barcode}\" data-picture=\"${esc(r.pictureposition||'')}\" data-item_position=\"${esc((r.item_position||'').toLowerCase())}\">${esc(locDisplay)}</a>` : '' }</td>` : '';
+    let locationCell = '';
+    if (!hasEbayStore && !hasAmazonStore && !hasSold && !hasBol && !hasReturns) {
+        if (r.locations && Array.isArray(r.locations) && r.locations.length > 0) {
+            // Location duplicates - show grouped clickable location links
+            const groups = { hallway: [], office: [], garage: [], other: [] };
+            r.locations.forEach(loc => {
+                const code = (loc.code || '').toLowerCase();
+                if (code.startsWith('h')) {
+                    groups.hallway.push(loc);
+                } else if (code.startsWith('o')) {
+                    groups.office.push(loc);
+                } else if (code.startsWith('g')) {
+                    groups.garage.push(loc);
+                } else {
+                    groups.other.push(loc);
+                }
+            });
+            
+            let locHtml = '';
+            ['hallway', 'office', 'garage', 'other'].forEach(groupName => {
+                if (groups[groupName].length === 0) return;
+                const groupTitle = groupName.charAt(0).toUpperCase() + groupName.slice(1);
+                locHtml += `<div style="margin-bottom: 6px;"><strong>${groupTitle}:</strong> `;
+                groups[groupName].forEach((loc, idx) => {
+                    if (idx > 0) locHtml += ', ';
+                    locHtml += `<a href="#" class="location-multi-link" data-code="${esc(loc.code)}" data-image="${esc(loc.image)}" data-quantity="${loc.quantity}" style="color:#0984e3;text-decoration:underline;">${esc(loc.code)}</a> (${loc.quantity})`;
+                });
+                locHtml += '</div>';
+            });
+            locationCell = `<td style="font-size:0.9rem;">${locHtml}</td>`;
+        } else if (locDisplay) {
+            // Single location - original behavior
+            locationCell = `<td>${`<a href="#" class=\"location-link\" data-src=\"${db}\" data-id=\"${r.id}\" data-barcode=\"${barcode}\" data-picture=\"${esc(r.pictureposition||'')}\" data-item_position=\"${esc((r.item_position||'').toLowerCase())}\">${esc(locDisplay)}</a>`}</td>`;
+        } else {
+            locationCell = '<td></td>';
+        }
+    } else {
+        locationCell = '';
+    }
     
     // Date sold and date shipped cells (only for sold items)
     const dateSoldCell = hasSold ? (dbRaw === 'sold' && r.raw && r.raw.paid_time ? `<td>${fmtLocal(r.raw.paid_time)}</td>` : '<td></td>') : '';
@@ -817,6 +855,7 @@ function renderResults(results){
     container.innerHTML = html;
     document.querySelectorAll('.title-link').forEach(el=> el.addEventListener('click', onViewTitle));
     document.querySelectorAll('.location-link').forEach(el=> el.addEventListener('click', onViewLocation));
+    document.querySelectorAll('.location-multi-link').forEach(el=> el.addEventListener('click', onViewLocationMulti));
     document.querySelectorAll('.lot-link').forEach(el=> el.addEventListener('click', onViewLotDetails));
     // double-click to open archive action when in archived list
     document.querySelectorAll('tbody tr').forEach(tr=>{
@@ -1077,6 +1116,26 @@ async function onViewLocation(e){
             showViewModal('<div class="small-muted">No rack record found</div>');
         }
     }catch(err){ console.error(err); showViewModal('<div class="small-muted">Lookup failed</div>') }
+}
+
+function onViewLocationMulti(e){
+    e.preventDefault();
+    const el = e.currentTarget;
+    const code = el.dataset.code;
+    const image = el.dataset.image;
+    
+    if(!code){
+        showViewModal('<div class="small-muted">No location code</div>');
+        return;
+    }
+    
+    // Check if image is a picture position (jpg/png) or shelf code
+    if(image && image.match(/\.(jpg|jpeg|png)$/i)){
+        showViewModal(`<div><h4>Location: ${esc(code)}</h4><img src="/static/pictureposition/${image}?t=${Date.now()}" style="max-width:640px;max-height:60vh;" onerror="this.src='${missingThumb(720,480,'Image missing')}'"></div>`);
+    } else {
+        // Use code for shelf position
+        showViewModal(`<div><h4>Location: ${esc(code)}</h4><img src="/static/shelves/${code.toLowerCase()}.png?t=${Date.now()}" style="max-width:640px;max-height:60vh;" onerror="this.src='${missingThumb(720,480,'Image missing')}'"></div>`);
+    }
 }
 
 function onViewLotDetails(e){
