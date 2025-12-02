@@ -347,6 +347,10 @@
       document.getElementById('qtyDisplay').classList.remove('hidden');
       // Auto-clear the input after lookup completes
       document.getElementById('manualUpc').value = '';
+      // Scroll to the result section
+      setTimeout(() => {
+        resEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 100);
     }
 
     async function setStatus(upc, status, qty){
