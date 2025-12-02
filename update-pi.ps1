@@ -9,9 +9,7 @@ Write-Host "🚀 Deploying updates to $User@$HostName..." -ForegroundColor Cyan
 
 # Transfer updated files
 Write-Host "Transferring files..." -ForegroundColor Yellow
-scp .\templates\marketplace_sale.html "$User@$HostName`:$RemotePath/templates/"
-scp .\templates\marketplace_session.html "$User@$HostName`:$RemotePath/templates/"
-scp .\templates\marketplace_stats.html "$User@$HostName`:$RemotePath/templates/"
+# Add files here as changes are made
 
 Write-Host "✅ Files transferred!" -ForegroundColor Green
 

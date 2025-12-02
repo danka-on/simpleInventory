@@ -2799,6 +2799,9 @@ def save_temp_item():
         if not upc or not item_description or not image_data:
             return jsonify({'success': False, 'error': 'Missing required fields'})
         
+        # Normalize UPC for consistent storage and caching
+        upc_norm = _normalize_upc(upc)
+        
         # Save image to file
         import base64
         import uuid
@@ -2815,7 +2818,7 @@ def save_temp_item():
         os.makedirs(custom_dir, exist_ok=True)
         
         # Save with UPC as filename
-        image_filename = f"{upc}.jpg"
+        image_filename = f"{upc_norm}.jpg"
         image_path = os.path.join(custom_dir, image_filename)
         
         with open(image_path, 'wb') as f:
@@ -2826,7 +2829,7 @@ def save_temp_item():
         cur = conn.cursor()
         
         # Check if item already exists
-        cur.execute('SELECT upc FROM bol_items WHERE upc = ? COLLATE NOCASE', (upc,))
+        cur.execute('SELECT upc FROM bol_items WHERE upc = ? COLLATE NOCASE', (upc_norm,))
         exists = cur.fetchone()
         
         web_image_path = f"/static/custom_items/{image_filename}"
@@ -2837,7 +2840,7 @@ def save_temp_item():
                 UPDATE bol_items 
                 SET item_description = ?, image_url = ?
                 WHERE upc = ? COLLATE NOCASE
-            ''', (item_description, web_image_path, upc))
+            ''', (item_description, web_image_path, upc_norm))
         else:
             # Insert new item into bol_items
             cur.execute('''
@@ -2845,13 +2848,13 @@ def save_temp_item():
                     upc, item_description, image_url, 
                     lot_number, bol_number, import_date
                 ) VALUES (?, ?, ?, NULL, 'CUSTOM', datetime('now'))
-            ''', (upc, item_description, web_image_path))
+            ''', (upc_norm, item_description, web_image_path))
         
         conn.commit()
         conn.close()
         
-        # Clear cache for this UPC
-        cache_key = f"view//api/bol_lookup?upc={upc}"
+        # Clear cache for this UPC using normalized UPC
+        cache_key = f"view//api/bol_lookup?upc={upc_norm}"
         cache.delete(cache_key)
         
         return jsonify({'success': True, 'message': 'Custom item saved to inventory', 'image_url': web_image_path})
@@ -4763,8 +4766,11 @@ def api_bol_items():
         listed_flag = request.args.get('listed', '').strip().lower() == 'true'
         not_listed_flag = request.args.get('not_listed', '').strip().lower() == 'true'
         
+        # Get defect filter
+        defect_filter = (request.args.get('defect') or '').strip()
+        
         # Log request for debugging
-        print(f"[api_bol_items] Request: page={page}, limit={limit}, q={q_stripped}, status={status_filters}, _v={request.args.get('_v')}, _t={request.args.get('_t')}")
+        print(f"[api_bol_items] Request: page={page}, limit={limit}, q={q_stripped}, status={status_filters}, defect={defect_filter}, _v={request.args.get('_v')}, _t={request.args.get('_t')}")
         
         # DEBUG: Check specific UPC if present in query
         if q_stripped == '86279051523':
@@ -4821,6 +4827,11 @@ def api_bol_items():
             where.append("(b.list_status = 'listed')")
         elif not_listed_flag:
             where.append("(b.list_status IS NULL OR b.list_status = '' OR b.list_status != 'listed')")
+        
+        # Apply defect filter (filter by prep_reason column)
+        if defect_filter:
+            where.append('s.reason = ?')
+            params.append(defect_filter)
         
         # Build WHERE clause only when we actually have conditions
         where_sql = (' WHERE ' + ' AND '.join(where)) if where else ''

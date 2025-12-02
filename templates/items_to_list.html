@@ -793,11 +793,6 @@ async function loadItems(e){
     if(allResp.ok) {
       const allJson = await allResp.json();
       allResults = allJson.results || [];
-      // Apply same defect filter
-      if(defectFilter){
-        const df = defectFilter.toLowerCase();
-        allResults = allResults.filter(r => (r.defect||'').toString().toLowerCase() === df);
-      }
     }
   } catch(err) {
     console.error('Error fetching all items for stats:', err);
@@ -806,6 +801,8 @@ async function loadItems(e){
   // Now fetch paginated results for display
   params.set('page', currentPage);
   params.set('limit', currentLimit);
+  // Add defect filter to server request
+  if(defectFilter) params.set('defect', defectFilter);
   let j = {results:[], total:0, page:1, limit:currentLimit};
   try{
     const resp = await fetch('/api/bol_items?'+params.toString());
@@ -822,12 +819,6 @@ async function loadItems(e){
   // Sync per-page dropdown with the actual limit
   const perPageEl = document.getElementById('per-page-select');
   if (perPageEl) perPageEl.value = String(currentLimit);
-  
-  // Client-side defect filtering (server does not yet support defect filter)
-  if(defectFilter){
-    const df = defectFilter.toLowerCase();
-    results = results.filter(r => (r.defect||'').toString().toLowerCase() === df);
-  }
   
   // Calculate stats for ALL filtered results (already fetched earlier)
   const filtered_count = allResults.length;
