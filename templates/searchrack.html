@@ -63,6 +63,7 @@
     </style>
 </head>
 <body>
+    {% include '_testing_banner.html' %}
     <div class="top">
         <div style="display:flex;gap:8px;align-items:center">
             <a href="/" style="text-decoration:none" id="back-btn-link"><button class="btn btn-danger" id="main-back-btn">Back</button></a>
@@ -139,7 +140,7 @@
                 <option value="50">50</option>
             </select>
         </label>
-        <div id="pagination-controls" style="margin-left:auto"></div>
+        <div id="pagination-controls" style="margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap"></div>
     </div>
 
     <div style="margin-top:10px; font-size:0.95rem; color:#444">Showing: <span id="active-dbs">Warehouse</span></div>
@@ -188,8 +189,8 @@
     <div id="results"></div>
 
     <!-- Pagination at bottom right -->
-    <div style="margin-top:20px; display:flex; justify-content:flex-end; padding:0 12px 20px;">
-        <div id="bottom-pagination-controls"></div>
+    <div style="margin-top:24px; display:flex; justify-content:center; padding:0 12px 20px;">
+        <div id="bottom-pagination-controls" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"></div>
     </div>
 
     <!-- Loading Overlay -->
@@ -531,36 +532,45 @@ function renderPagination(total, page, limit){
     }
     let html = '';
     
-    // Prev button
-    if (page > 1) html += `<button class="btn" onclick="_currentPage=${page-1}; renderPagedResults()" style="background:#dc3545; color:#fff;">Prev</button>`;
+    // Prev button (red, rounded, with icon)
+    if (page > 1) {
+      html += `<button class="btn" style="background:#e74c3c;color:#fff;border-radius:8px;padding:8px 16px;font-weight:600;border:none;cursor:pointer;transition:all 0.2s;box-shadow:0 2px 4px rgba(0,0,0,0.1)" onmouseover="this.style.background='#c0392b'" onmouseout="this.style.background='#e74c3c'" onclick="_currentPage=${page-1}; renderPagedResults()">← Prev</button>`;
+    } else {
+      html += `<button class="btn" style="background:#ddd;color:#999;border-radius:8px;padding:8px 16px;font-weight:600;border:none;cursor:not-allowed;box-shadow:0 2px 4px rgba(0,0,0,0.05)" disabled>← Prev</button>`;
+    }
     
     // Always show page 1
-    html += `<button class="btn" onclick="_currentPage=1; renderPagedResults()" style="${page===1? 'font-weight:bold; background:#ddd':''}"}>1</button>`;
+    html += `<button class="btn" style="border-radius:8px;padding:8px 14px;min-width:42px;font-weight:${page===1?'700':'500'};border:${page===1?'none':'1px solid #ddd'};background:${page===1?'#3498db':'#fff'};color:${page===1?'#fff':'#333'};cursor:pointer;transition:all 0.2s;box-shadow:0 2px 4px rgba(0,0,0,${page===1?'0.15':'0.05'})" ${page!==1?`onmouseover="this.style.background='#f0f0f0'" onmouseout="this.style.background='#fff'"`:''} onclick="_currentPage=1; renderPagedResults()">1</button>`;
     
     // Show ellipsis if there's a gap between page 1 and the current range
     if (page > 4) {
-      html += `<span style="padding: 0 5px;">...</span>`;
+      html += `<span style="padding:0 4px;color:#999;font-size:1.2rem">⋯</span>`;
     }
     
     // Show pages around current (but not page 1 or last page, we handle those separately)
     for (let p = Math.max(2, page-2); p <= Math.min(totalPages-1, page+2); p++) {
-      // Skip if this is page 1 (already shown) or overlaps with page 1
       if (p === 1) continue;
-      html += `<button class="btn" onclick="_currentPage=${p}; renderPagedResults()" style="${p===page? 'font-weight:bold; background:#ddd':''}">${p}</button>`;
+      const isActive = p === page;
+      html += `<button class="btn" style="border-radius:8px;padding:8px 14px;min-width:42px;font-weight:${isActive?'700':'500'};border:${isActive?'none':'1px solid #ddd'};background:${isActive?'#3498db':'#fff'};color:${isActive?'#fff':'#333'};cursor:pointer;transition:all 0.2s;box-shadow:0 2px 4px rgba(0,0,0,${isActive?'0.15':'0.05'})" ${!isActive?`onmouseover="this.style.background='#f0f0f0'" onmouseout="this.style.background='#fff'"`:''} onclick="_currentPage=${p}; renderPagedResults()">${p}</button>`;
     }
     
     // Show ellipsis if there's a gap between current range and last page
     if (page < totalPages - 3) {
-      html += `<span style="padding: 0 5px;">...</span>`;
+      html += `<span style="padding:0 4px;color:#999;font-size:1.2rem">⋯</span>`;
     }
     
     // Always show last page (if more than 1 page)
     if (totalPages > 1) {
-      html += `<button class="btn" onclick="_currentPage=${totalPages}; renderPagedResults()" style="${page===totalPages? 'font-weight:bold; background:#ddd':''}">${totalPages}</button>`;
+      const isActive = page === totalPages;
+      html += `<button class="btn" style="border-radius:8px;padding:8px 14px;min-width:42px;font-weight:${isActive?'700':'500'};border:${isActive?'none':'1px solid #ddd'};background:${isActive?'#3498db':'#fff'};color:${isActive?'#fff':'#333'};cursor:pointer;transition:all 0.2s;box-shadow:0 2px 4px rgba(0,0,0,${isActive?'0.15':'0.05'})" ${!isActive?`onmouseover="this.style.background='#f0f0f0'" onmouseout="this.style.background='#fff'"`:''} onclick="_currentPage=${totalPages}; renderPagedResults()">${totalPages}</button>`;
     }
     
-    // Next button
-    if (page < totalPages) html += `<button class="btn" onclick="_currentPage=${page+1}; renderPagedResults()" style="background:#28a745; color:#fff;">Next</button>`;
+    // Next button (green, rounded, with icon)
+    if (page < totalPages) {
+      html += `<button class="btn" style="background:#2ecc71;color:#fff;border-radius:8px;padding:8px 16px;font-weight:600;border:none;cursor:pointer;transition:all 0.2s;box-shadow:0 2px 4px rgba(0,0,0,0.1)" onmouseover="this.style.background='#27ae60'" onmouseout="this.style.background='#2ecc71'" onclick="_currentPage=${page+1}; renderPagedResults()">Next →</button>`;
+    } else {
+      html += `<button class="btn" style="background:#ddd;color:#999;border-radius:8px;padding:8px 16px;font-weight:600;border:none;cursor:not-allowed;box-shadow:0 2px 4px rgba(0,0,0,0.05)" disabled>Next →</button>`;
+    }
     
     container.innerHTML = html;
     bottomContainer.innerHTML = html;

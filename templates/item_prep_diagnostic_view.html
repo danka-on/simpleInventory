@@ -142,6 +142,52 @@
     </div>
   </div>
 
+  <!-- Marketplace Listing Status -->
+  <div class="card">
+    <h3 style="margin:0 0 12px 0">🛒 Marketplace Listings</h3>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      {% if bol %}
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="width:80px;font-weight:600">Amazon:</span>
+          {% if bol.listed_amazon == 1 %}
+            <span style="color:#2ecc71;font-weight:600">✓ Listed</span>
+            {% if bol.listed_amazon_date %}
+              <span style="color:#7f8c8d;font-size:0.9rem">({{ bol.listed_amazon_date }})</span>
+            {% endif %}
+          {% else %}
+            <span style="color:#95a5a6">Not listed</span>
+          {% endif %}
+        </div>
+        
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="width:80px;font-weight:600">eBay:</span>
+          {% if bol.listed_ebay == 1 %}
+            <span style="color:#2ecc71;font-weight:600">✓ Listed</span>
+            {% if bol.listed_ebay_date %}
+              <span style="color:#7f8c8d;font-size:0.9rem">({{ bol.listed_ebay_date }})</span>
+            {% endif %}
+          {% else %}
+            <span style="color:#95a5a6">Not listed</span>
+          {% endif %}
+        </div>
+        
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="width:80px;font-weight:600">Facebook:</span>
+          {% if bol.listed_facebook == 1 %}
+            <span style="color:#2ecc71;font-weight:600">✓ Listed</span>
+            {% if bol.listed_facebook_date %}
+              <span style="color:#7f8c8d;font-size:0.9rem">({{ bol.listed_facebook_date }})</span>
+            {% endif %}
+          {% else %}
+            <span style="color:#95a5a6">Not listed</span>
+          {% endif %}
+        </div>
+      {% else %}
+        <div style="color:#95a5a6">Item not found in inventory</div>
+      {% endif %}
+    </div>
+  </div>
+
   <div class="card" id="photosSection">
     <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap">
       <h3 style="margin:0">Photos</h3>

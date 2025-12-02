@@ -58,6 +58,7 @@
   </style>
 </head>
 <body>
+  {% include '_testing_banner.html' %}
   <div class="top">
     <button class="btn btn-danger" id="back-btn" style="margin:0; justify-self:start">Back</button>
     <h2 style="margin:0; justify-self:center; text-align:center">Item Manager</h2>
@@ -146,6 +147,7 @@
 
   <div id="results-summary" style="margin:10px 0;padding:8px;background:#f0f0f0;border-radius:6px;font-size:0.95rem;color:#333"></div>
   <div id="results"></div>
+  <div id="bottom-pagination" style="display:flex; align-items:center; gap:8px; justify-content:center; margin:24px 0; flex-wrap:wrap"></div>
 
   <div id="imgModal" class="modal"><div class="card"><div style="text-align:right"><button id="closeImg">Close</button></div><div id="imgContent"></div></div></div>
 
@@ -249,7 +251,8 @@ function formatLastEdited(raw){
 function render(results){
   let html = '<table><thead><tr>';
   if (selectMode) html += '<th>Select</th>';
-  html += '<th>Info</th><th>Status</th><th>Notes</th><th>Foto</th><th>Defect</th><th>QTY</th><th>Title</th><th>UPC</th><th>Listed</th><th>Action</th><th>Last Edited</th></tr></thead><tbody>';
+  html += '<th>Info</th><th>Status</th><th>Notes</th><th>Foto</th><th>Defect</th><th>QTY</th><th>Title</th><th>UPC</th><th>Marketplaces</th><th>Last Edited</th></tr></thead><tbody>';
+  let rowIndex = 0;
   for (const r of results) {
     const title = esc(r.title||'');
     const img = esc(r.image||'');
@@ -268,12 +271,34 @@ function render(results){
     let pill = '<span class="status-box" title="Unchecked">unchecked</span>';
     if(status==='good') pill = '<span class="status-box" style="background:#2ecc71" title="Good">good</span>';
     if(status==='bad') pill = '<span class="status-box" style="background:#e74c3c" title="Bad">bad</span>';
-    const lstatus = (r.list_status||'').toLowerCase();
-    let lpill = '<span class="status-box" style="background:#9aa0a6" title="Not listed">not listed</span>';
-    if(lstatus==='listed') lpill = '<span class="status-box" style="background:#2ecc71" title="Listed">listed</span>';
-    const actionBtn = (lstatus==='listed')
-      ? `<button class="btn btn-danger btn-sm btn-unlist" data-upc="${upc}" title="Mark as not listed">✕</button>`
-      : `<button class="btn btn-primary btn-sm btn-list" data-upc="${upc}">Mark as Listed</button>`;
+    
+    // DEBUG: Log marketplace data for first item
+    if (rowIndex === 0) {
+      console.log('[RENDER] First item marketplace data:', {
+        upc: r.upc,
+        listed_amazon: r.listed_amazon,
+        listed_ebay: r.listed_ebay,
+        listed_facebook: r.listed_facebook,
+        listed_amazon_date: r.listed_amazon_date,
+        listed_ebay_date: r.listed_ebay_date,
+        listed_facebook_date: r.listed_facebook_date
+      });
+    }
+    
+    // Marketplace listing checkboxes
+    const listedAmazon = r.listed_amazon === 1;
+    const listedEbay = r.listed_ebay === 1;
+    const listedFacebook = r.listed_facebook === 1;
+    const isListedAnywhere = listedAmazon || listedEbay || listedFacebook;
+    
+    rowIndex++;
+    
+    const amazonCheckbox = `<label style="display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap" title="${listedAmazon && r.listed_amazon_date ? 'Listed: ' + r.listed_amazon_date : ''}"><input type="checkbox" class="marketplace-checkbox" data-upc="${upc}" data-marketplace="amazon" ${listedAmazon ? 'checked' : ''}><span style="font-size:0.85rem">Amazon</span></label>`;
+    const ebayCheckbox = `<label style="display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap" title="${listedEbay && r.listed_ebay_date ? 'Listed: ' + r.listed_ebay_date : ''}"><input type="checkbox" class="marketplace-checkbox" data-upc="${upc}" data-marketplace="ebay" ${listedEbay ? 'checked' : ''}><span style="font-size:0.85rem">eBay</span></label>`;
+    const fbCheckbox = `<label style="display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap" title="${listedFacebook && r.listed_facebook_date ? 'Listed: ' + r.listed_facebook_date : ''}"><input type="checkbox" class="marketplace-checkbox" data-upc="${upc}" data-marketplace="facebook" ${listedFacebook ? 'checked' : ''}><span style="font-size:0.85rem">Facebook</span></label>`;
+    
+    const actionBtn = `<div style="display:flex;flex-direction:column;gap:4px;align-items:flex-start">${amazonCheckbox}${ebayCheckbox}${fbCheckbox}</div>`;
+    
     // Diagnostic link moved into its own Info column (first column)
     const diagLink = `<button class="btn btn-sm diag-link" style="background:transparent;border:1px solid #0066cc;color:#0066cc;border-radius:6px;padding:6px 10px;cursor:pointer" data-upc="${upc}" data-lot="${esc(r.lot_number||'')}">Open</button>`;
     // Pics count — will be updated after fetching actual count. Start with "..." as loading indicator
@@ -285,13 +310,12 @@ function render(results){
     // Notes icon - show 📝 if note exists and make it clickable
     const hasNote = r.note && String(r.note).trim().length > 0;
     const noteCell = hasNote ? `<td style="text-align:center;font-size:1.2rem"><span class="note-icon" data-upc="${upc}" style="cursor:pointer" title="Click to view notes">📝</span></td>` : `<td style="text-align:center"></td>`;
-    html += `<tr>`;
+    const rowBg = isListedAnywhere ? 'background:#d4edda' : '';
+    html += `<tr style="${rowBg}">`;
     if (selectMode) {
       // Allow selection of all items (base barcodes will be reset instead of deleted)
       html += `<td><input type="checkbox" class="item-checkbox" data-id="${r.id}" data-upc="${upc}"></td>`;
     }
-    const rowBg = (lstatus === 'listed') ? 'background:#d4edda' : '';
-    html += `<tr style="${rowBg}">`;
     html += `<td style="width:64px;text-align:center">${diagLink}</td>`+
       `<td><div style="display:flex;flex-direction:column;gap:4px;align-items:flex-start">`+
             `<div>${pill}</div>`+
@@ -302,7 +326,6 @@ function render(results){
             qtyCell+
             `<td><div class="title-cell"><img class="thumb" src="${thumb}" onerror="this.src='${missingThumb(48,48,'No Img')}'"><a href="#" class="img-link" data-img="${img}" data-title="${title}">${title}</a></div></td>`+
             `<td><div style=\"display:flex;gap:6px;align-items:center\"><span>${upc}</span><button type=\"button\" class=\"btn btn-sm btn-copy\" data-upc=\"${baseUpc}\" title=\"Copy UPC\">Copy</button></div></td>`+
-          `<td>${lpill}</td>`+
             `<td>${actionBtn}</td>`+
             `<td class="last-edited-cell" data-raw="${last_edited}">${formatLastEdited(last_edited)}</td>`+
             `</tr>`;
@@ -320,10 +343,10 @@ function render(results){
   }
   document.querySelectorAll('.img-link').forEach(el=> el.addEventListener('click', onOpenImg));
   document.querySelectorAll('.diag-link, button.diag-link').forEach(el=> el.addEventListener('click', onOpenDiag));
-  const btnListElements = document.querySelectorAll('.btn-list');
-  console.log('[render] Found', btnListElements.length, '.btn-list buttons, attaching listeners');
-  btnListElements.forEach(el=> el.addEventListener('click', onMarkListed));
-  document.querySelectorAll('.btn-unlist').forEach(el=> el.addEventListener('click', onUnlist));
+  // Wire marketplace checkbox handlers
+  const marketplaceCheckboxes = document.querySelectorAll('.marketplace-checkbox');
+  console.log('[render] Found', marketplaceCheckboxes.length, 'marketplace checkboxes, attaching listeners');
+  marketplaceCheckboxes.forEach(el=> el.addEventListener('change', onMarketplaceToggle));
   document.querySelectorAll('.btn-copy').forEach(el=> el.addEventListener('click', onCopyUpc));
   // Wire pics-count handlers (now spans instead of buttons)
   document.querySelectorAll('.pics-count').forEach(el=> el.addEventListener('click', onOpenPics));
@@ -549,36 +572,65 @@ async function onOpenNotes(e){
   }
 }
 
-async function onMarkListed(e){
-  e.preventDefault();
-  const upc = e.currentTarget.dataset.upc; 
-  if(!upc) return;
-  console.log('[onMarkListed] Marking UPC as listed:', upc);
+async function onMarketplaceToggle(e){
+  const checkbox = e.currentTarget;
+  const upc = checkbox.dataset.upc;
+  const marketplace = checkbox.dataset.marketplace;
+  const listed = checkbox.checked;
+  
+  if(!upc || !marketplace) return;
+  
+  console.log(`[onMarketplaceToggle] ${listed ? 'Listing' : 'Unlisting'} ${upc} on ${marketplace}`);
+  
   try{
-    // Simply set list_status to 'listed' without deleting diagnostic photos
     const response = await fetch('/api/bol_items/list_status', {
       method:'POST', 
       headers:{'Content-Type':'application/json'}, 
-      body: JSON.stringify({ upc, list_status: 'listed' })
+      body: JSON.stringify({ upc, marketplace, listed })
     });
     const result = await response.json();
-    console.log('[onMarkListed] API response:', result);
+    console.log('[onMarketplaceToggle] API response:', result);
     if(!result.success) {
-      console.error('[onMarkListed] API returned error:', result.error);
+      console.error('[onMarketplaceToggle] API returned error:', result.error);
+      // Revert checkbox on error
+      checkbox.checked = !listed;
+      return;
     }
+    
+    // CRITICAL: Update all checkboxes with the ACTUAL database state
+    // Don't trust cached page data - use the freshly queried state from server
+    const row = checkbox.closest('tr');
+    if(row && result.current_state) {
+      const amazonCb = row.querySelector('.marketplace-checkbox[data-marketplace="amazon"]');
+      const ebayCb = row.querySelector('.marketplace-checkbox[data-marketplace="ebay"]');
+      const facebookCb = row.querySelector('.marketplace-checkbox[data-marketplace="facebook"]');
+      
+      if(amazonCb) amazonCb.checked = !!result.current_state.listed_amazon;
+      if(ebayCb) ebayCb.checked = !!result.current_state.listed_ebay;
+      if(facebookCb) facebookCb.checked = !!result.current_state.listed_facebook;
+      
+      // Update row background color based on whether ANY marketplace is checked
+      const anyChecked = result.current_state.listed_amazon || result.current_state.listed_ebay || result.current_state.listed_facebook;
+      if(anyChecked) {
+        row.style.background = '#d4edda';
+      } else {
+        row.style.background = '';
+      }
+    }
+    
+    // Update checkbox title with timestamp
+    if(listed) {
+      const now = new Date().toISOString();
+      checkbox.parentElement.title = `Listed: ${now}`;
+    } else {
+      checkbox.parentElement.title = '';
+    }
+    
   }catch(err){ 
-    console.error('[onMarkListed] Fetch error:', err);
+    console.error('[onMarketplaceToggle] Fetch error:', err);
+    // Revert checkbox on error
+    checkbox.checked = !listed;
   }
-  await loadItems();
-}
-
-async function onUnlist(e){
-  e.preventDefault();
-  const upc = e.currentTarget.dataset.upc; if(!upc) return;
-  try{
-    await fetch('/api/bol_items/list_status', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ upc, list_status: '' })});
-  }catch{}
-  loadItems();
 }
 
 // Copy UPC to clipboard
@@ -708,45 +760,64 @@ function renderPagination(total, page, limit) {
   const totalPages = Math.ceil(total / limit);
   let html = '';
   if (totalPages > 1) {
-    // Prev button
-    if (page > 1) html += `<button class="btn" onclick="changePage(${page-1})">Prev</button>`;
+    // Prev button (red, rounded, with icon)
+    if (page > 1) {
+      html += `<button class="btn" style="background:#e74c3c;color:#fff;border-radius:8px;padding:8px 16px;font-weight:600;border:none;cursor:pointer;transition:all 0.2s;box-shadow:0 2px 4px rgba(0,0,0,0.1)" onmouseover="this.style.background='#c0392b'" onmouseout="this.style.background='#e74c3c'" onclick="changePage(${page-1})">← Prev</button>`;
+    } else {
+      html += `<button class="btn" style="background:#ddd;color:#999;border-radius:8px;padding:8px 16px;font-weight:600;border:none;cursor:not-allowed;box-shadow:0 2px 4px rgba(0,0,0,0.05)" disabled>← Prev</button>`;
+    }
     
     // Always show page 1
-    html += `<button class="btn ${page===1?'btn-primary':''}" onclick="changePage(1)">1</button>`;
+    html += `<button class="btn ${page===1?'btn-primary':''}" style="border-radius:8px;padding:8px 14px;min-width:42px;font-weight:${page===1?'700':'500'};border:${page===1?'none':'1px solid #ddd'};background:${page===1?'#3498db':'#fff'};color:${page===1?'#fff':'#333'};cursor:pointer;transition:all 0.2s;box-shadow:0 2px 4px rgba(0,0,0,${page===1?'0.15':'0.05'})" ${page!==1?`onmouseover="this.style.background='#f0f0f0'" onmouseout="this.style.background='#fff'"`:''}  onclick="changePage(1)">1</button>`;
     
     // Show ellipsis if there's a gap between page 1 and the current range
     if (page > 4) {
-      html += `<span style="padding: 0 5px;">...</span>`;
+      html += `<span style="padding:0 4px;color:#999;font-size:1.2rem">⋯</span>`;
     }
     
     // Show pages around current (but not page 1 or last page, we handle those separately)
     for (let p = Math.max(2, page-2); p <= Math.min(totalPages-1, page+2); p++) {
       // Skip if this is page 1 (already shown) or overlaps with page 1
       if (p === 1) continue;
-      html += `<button class="btn ${p===page?'btn-primary':''}" onclick="changePage(${p})">${p}</button>`;
+      const isActive = p === page;
+      html += `<button class="btn" style="border-radius:8px;padding:8px 14px;min-width:42px;font-weight:${isActive?'700':'500'};border:${isActive?'none':'1px solid #ddd'};background:${isActive?'#3498db':'#fff'};color:${isActive?'#fff':'#333'};cursor:pointer;transition:all 0.2s;box-shadow:0 2px 4px rgba(0,0,0,${isActive?'0.15':'0.05'})" ${!isActive?`onmouseover="this.style.background='#f0f0f0'" onmouseout="this.style.background='#fff'"`:''}  onclick="changePage(${p})">${p}</button>`;
     }
     
     // Show ellipsis if there's a gap between current range and last page
     if (page < totalPages - 3) {
-      html += `<span style="padding: 0 5px;">...</span>`;
+      html += `<span style="padding:0 4px;color:#999;font-size:1.2rem">⋯</span>`;
     }
     
     // Always show last page (if more than 1 page)
     if (totalPages > 1) {
-      html += `<button class="btn ${page===totalPages?'btn-primary':''}" onclick="changePage(${totalPages})">${totalPages}</button>`;
+      const isActive = page === totalPages;
+      html += `<button class="btn" style="border-radius:8px;padding:8px 14px;min-width:42px;font-weight:${isActive?'700':'500'};border:${isActive?'none':'1px solid #ddd'};background:${isActive?'#3498db':'#fff'};color:${isActive?'#fff':'#333'};cursor:pointer;transition:all 0.2s;box-shadow:0 2px 4px rgba(0,0,0,${isActive?'0.15':'0.05'})" ${!isActive?`onmouseover="this.style.background='#f0f0f0'" onmouseout="this.style.background='#fff'"`:''}  onclick="changePage(${totalPages})">${totalPages}</button>`;
     }
     
-    // Next button
-    if (page < totalPages) html += `<button class="btn" onclick="changePage(${page+1})">Next</button>`;
+    // Next button (green, rounded, with icon)
+    if (page < totalPages) {
+      html += `<button class="btn" style="background:#2ecc71;color:#fff;border-radius:8px;padding:8px 16px;font-weight:600;border:none;cursor:pointer;transition:all 0.2s;box-shadow:0 2px 4px rgba(0,0,0,0.1)" onmouseover="this.style.background='#27ae60'" onmouseout="this.style.background='#2ecc71'" onclick="changePage(${page+1})">Next →</button>`;
+    } else {
+      html += `<button class="btn" style="background:#ddd;color:#999;border-radius:8px;padding:8px 16px;font-weight:600;border:none;cursor:not-allowed;box-shadow:0 2px 4px rgba(0,0,0,0.05)" disabled>Next →</button>`;
+    }
   }
+  
+  // Update top pagination
   let pagDiv = document.getElementById('top-pagination');
   if (!pagDiv) {
     pagDiv = document.createElement('div');
     pagDiv.id = 'top-pagination';
+    pagDiv.style.cssText = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap';
     const host = document.querySelector('.filters');
     if (host) host.appendChild(pagDiv);
   }
   pagDiv.innerHTML = html;
+  
+  // Update bottom pagination
+  const bottomPagDiv = document.getElementById('bottom-pagination');
+  if (bottomPagDiv) {
+    bottomPagDiv.innerHTML = html;
+  }
 }
 
 function changePage(p) {
@@ -806,7 +877,10 @@ async function loadItems(e){
     const allParams = new URLSearchParams(params);
     allParams.set('page', '1');
     allParams.set('limit', '10000'); // Get all items
-    const allResp = await fetch('/api/bol_items?'+allParams.toString());
+    allParams.set('_t', Date.now()); // Cache-busting timestamp
+    const allResp = await fetch('/api/bol_items?'+allParams.toString(), {
+      cache: 'no-store' // Disable browser cache
+    });
     if(allResp.ok) {
       const allJson = await allResp.json();
       allResults = allJson.results || [];
@@ -818,13 +892,29 @@ async function loadItems(e){
   // Now fetch paginated results for display
   params.set('page', currentPage);
   params.set('limit', currentLimit);
+  params.set('_t', Date.now()); // Cache-busting timestamp
   // Add defect filter to server request
   if(defectFilter) params.set('defect', defectFilter);
   let j = {results:[], total:0, page:1, limit:currentLimit};
   try{
-    const resp = await fetch('/api/bol_items?'+params.toString());
+    const resp = await fetch('/api/bol_items?'+params.toString(), {
+      cache: 'no-store' // Disable browser cache
+    });
     if(!resp.ok){ console.error('Failed to load items', resp.status); }
-    else { j = await resp.json(); }
+    else { 
+      j = await resp.json();
+      console.log('[LOAD_ITEMS] Fetched', j.results?.length, 'items from API');
+      // Log marketplace columns for UPC 777000000013 if present
+      const testItem = j.results?.find(r => r.upc === '777000000013');
+      if (testItem) {
+        console.log('[LOAD_ITEMS] UPC 777000000013 data:', {
+          listed_amazon: testItem.listed_amazon,
+          listed_ebay: testItem.listed_ebay,
+          listed_facebook: testItem.listed_facebook,
+          listed_amazon_date: testItem.listed_amazon_date
+        });
+      }
+    }
   }catch(err){ console.error('Error fetching /api/bol_items:', err); }
   let results = j.results||[];
   const total = j.total || 0;

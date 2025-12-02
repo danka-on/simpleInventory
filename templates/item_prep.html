@@ -76,7 +76,8 @@
   <script src="https://unpkg.com/@zxing/library@0.19.1/umd/index.min.js"></script>
 </head>
 <body>
-  <div class="top">
+{% include '_testing_banner.html' %}
+<div class="top">
   <a href="/"><button class="btn btn-danger">Back</button></a>
   <h2 style="margin:0 auto;text-align:center;flex:1">Preperation</h2>
   <a href="/barcode-print-que" style="text-decoration:none"><button class="btn btn-primary">🖨️ Print Que</button></a>
@@ -147,6 +148,7 @@
       </div>
       <div class="big-actions" id="actions">
         <button class="btn btn-primary" id="goodBtn">Good</button>
+        <button class="btn" id="returnBtn" style="background:#8b4513;color:#fff;width:100%;margin-top:8px">Return</button>
         <button class="btn btn-danger" id="badBtn">Bad → Diagnostic</button>
       </div>
       <div style="text-align:right;margin-top:8px"><button class="btn btn-gray" id="skipBtn" style="padding:8px 12px;border-radius:10px">Skip</button></div>
@@ -498,9 +500,6 @@
       const result = await setStatus(currentUpc, 'good', currentQty);
       const statusMsg = document.getElementById('statusMsg');
       
-      // Hide loading overlay
-      hidePageLoading();
-      
       if(result && result.success){ 
         // Store for undo with action type
         lastEntry = {
@@ -517,7 +516,58 @@
         console.error('Failed to mark good:', result);
         statusMsg.innerHTML='<span class="bad">Failed: ' + errorMsg + '</span>'; 
       }
-      setTimeout(()=>{ statusMsg.textContent=''; document.getElementById('result').classList.add('hidden'); document.getElementById('actions').classList.add('hidden'); document.getElementById('noBarcodeBtn').classList.remove('hidden'); document.getElementById('manualUpc').value=''; currentUpc = null; resetQtyDisplay(); setupDeviceMode(); }, 3000);
+      setTimeout(()=>{ hidePageLoading(); statusMsg.textContent=''; document.getElementById('result').classList.add('hidden'); document.getElementById('actions').classList.add('hidden'); document.getElementById('noBarcodeBtn').classList.remove('hidden'); document.getElementById('manualUpc').value=''; currentUpc = null; resetQtyDisplay(); setupDeviceMode(); }, 3000);
+    };
+
+    document.getElementById('returnBtn').onclick = async ()=>{
+      if(!currentUpc) return;
+      
+      // Show loading overlay
+      showPageLoading();
+      
+      // Create a suffixed entry with status "good" and reason "return"
+      try {
+        const res = await fetch('/api/items_prep/create_return_entry', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({upc: currentUpc, qty: currentQty})
+        });
+        const data = await res.json();
+        
+        if (data.success) {
+          const statusMsg = document.getElementById('statusMsg');
+          statusMsg.innerHTML='<span class="ok">Return entry created: ' + data.suffixed_upc + ' (Qty: '+currentQty+')</span>';
+          
+          // Store for undo
+          lastEntry = {
+            upc: data.suffixed_upc,
+            status: 'return', 
+            qty: currentQty,
+            action: 'return'
+          };
+          showUndoButton();
+        } else {
+          hidePageLoading();
+          alert('Error creating return entry: ' + (data.error || 'Unknown error'));
+        }
+      } catch(e) {
+        hidePageLoading();
+        console.error('Return button error:', e);
+        alert('Error creating return entry');
+      }
+      
+      setTimeout(()=>{ 
+        hidePageLoading();
+        const statusMsg = document.getElementById('statusMsg');
+        statusMsg.textContent=''; 
+        document.getElementById('result').classList.add('hidden'); 
+        document.getElementById('actions').classList.add('hidden'); 
+        document.getElementById('noBarcodeBtn').classList.remove('hidden'); 
+        document.getElementById('manualUpc').value=''; 
+        currentUpc = null; 
+        resetQtyDisplay(); 
+        setupDeviceMode(); 
+      }, 3000);
     };
 
     document.getElementById('badBtn').onclick = async ()=>{

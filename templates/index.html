@@ -106,6 +106,20 @@
             overflow: hidden;
             transition: all 0.5s ease;
         }
+        .testing-banner {
+            background: #ff9800;
+            color: #fff;
+            text-align: center;
+            padding: 12px 16px;
+            font-weight: 700;
+            font-size: 1.1rem;
+            position: sticky;
+            top: 0;
+            z-index: 10000;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+            letter-spacing: 0.5px;
+            border-bottom: 3px solid #f57c00;
+        }
         body {
             font-family: 'Segoe UI', Arial, sans-serif;
             background: var(--bg);
@@ -246,6 +260,11 @@
     </style>
 </head>
 <body>
+    {% if is_testing_server %}
+    <div class="testing-banner">
+        ⚠️ TESTING SERVER - {{ server_hostname }} ⚠️
+    </div>
+    {% endif %}
     <div class="container">
 
         <div class="main-actions" style="margin-bottom:12px;">

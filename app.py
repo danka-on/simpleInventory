@@ -243,6 +243,13 @@ def get_data_version():
 def api_data_version():
     return jsonify({'version': get_data_version()})
 
+@app.context_processor
+def inject_server_info():
+    """Inject server information into all templates"""
+    hostname = request.headers.get('Host', '')
+    is_testing = 'nexuscentralhq.org' in hostname and not hostname.startswith('pi.')
+    return dict(is_testing_server=is_testing, server_hostname=hostname)
+
 @app.after_request
 def add_no_cache_headers(response):
     try:
@@ -2253,20 +2260,26 @@ def _start_automatic_removal_thread():
 
 def _ensure_bol_list_status_column():
     """Ensure bol_items has list_status, temporary, and quantity tracking columns."""
+    print("[_ensure_bol_list_status_column] Starting migration check...")
     try:
         conn = sqlite3.connect('bol.db')
         cur = conn.cursor()
         cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='bol_items'")
         if not cur.fetchone():
+            print("[_ensure_bol_list_status_column] bol_items table not found")
             conn.close()
             return
         cur.execute("PRAGMA table_info(bol_items)")
-        cols = [r[1] for r in cur.fetchall()]
+        # Use lowercase for case-insensitive comparison
+        cols = [r[1].lower() for r in cur.fetchall()]
+        print(f"[_ensure_bol_list_status_column] Found {len(cols)} columns in bol_items")
         
         # Add list_status and temporary columns
         if 'list_status' not in cols:
+            print("[_ensure_bol_list_status_column] Adding list_status column")
             cur.execute("ALTER TABLE bol_items ADD COLUMN list_status TEXT")
         if 'temporary' not in cols:
+            print("[_ensure_bol_list_status_column] Adding temporary column")
             cur.execute("ALTER TABLE bol_items ADD COLUMN temporary INTEGER DEFAULT 0")
         
         # NEW: Add quantity tracking columns for robust prep workflow
@@ -2320,9 +2333,69 @@ def _ensure_bol_list_status_column():
                 WHERE unchecked_qty IS NULL
             ''')
         
+        # NEW: Add marketplace-specific listing columns with timestamps
+        if 'listed_amazon' not in cols:
+            print("🛒 Adding Amazon listing tracking columns...")
+            cur.execute("ALTER TABLE bol_items ADD COLUMN listed_amazon INTEGER DEFAULT 0")
+        else:
+            print("[_ensure_bol_list_status_column] listed_amazon column already exists")
+            
+        if 'listed_amazon_date' not in cols:
+            print("🛒 Adding Amazon listing date column...")
+            cur.execute("ALTER TABLE bol_items ADD COLUMN listed_amazon_date TEXT")
+        else:
+            print("[_ensure_bol_list_status_column] listed_amazon_date column already exists")
+            
+        if 'listed_ebay' not in cols:
+            print("🏷️ Adding eBay listing tracking columns...")
+            cur.execute("ALTER TABLE bol_items ADD COLUMN listed_ebay INTEGER DEFAULT 0")
+        else:
+            print("[_ensure_bol_list_status_column] listed_ebay column already exists")
+            
+        if 'listed_ebay_date' not in cols:
+            print("🏷️ Adding eBay listing date column...")
+            cur.execute("ALTER TABLE bol_items ADD COLUMN listed_ebay_date TEXT")
+        else:
+            print("[_ensure_bol_list_status_column] listed_ebay_date column already exists")
+            
+        if 'listed_facebook' not in cols:
+            print("📘 Adding Facebook listing tracking columns...")
+            cur.execute("ALTER TABLE bol_items ADD COLUMN listed_facebook INTEGER DEFAULT 0")
+        else:
+            print("[_ensure_bol_list_status_column] listed_facebook column already exists")
+            
+        if 'listed_facebook_date' not in cols:
+            print("📘 Adding Facebook listing date column...")
+            cur.execute("ALTER TABLE bol_items ADD COLUMN listed_facebook_date TEXT")
+        else:
+            print("[_ensure_bol_list_status_column] listed_facebook_date column already exists")
+        
+        # One-time migration: convert existing list_status='listed' to listed_amazon=1
+        # This runs even if columns already exist, but only for items that haven't been migrated
+        print("[_ensure_bol_list_status_column] Running migration for list_status='listed' items...")
+        try:
+            # Use case-insensitive check for 'listed'
+            cur.execute("""
+                UPDATE bol_items 
+                SET listed_amazon = 1, 
+                    listed_amazon_date = datetime('now')
+                WHERE (list_status = 'listed' OR list_status = 'Listed')
+                AND (listed_amazon IS NULL OR listed_amazon = 0)
+            """)
+            migrated = cur.rowcount
+            if migrated > 0:
+                print(f"📦 Migrated {migrated} items from list_status='listed' to listed_amazon=1")
+                # Force update data version if we migrated items
+                try:
+                    cur.execute('CREATE TABLE IF NOT EXISTS app_metadata (key TEXT PRIMARY KEY, value TEXT)')
+                    cur.execute('INSERT OR REPLACE INTO app_metadata (key, value) VALUES (?, ?)', ('data_version', str(int(time.time()))))
+                except: pass
+        except Exception as e:
+            print(f"Warning: Could not run marketplace migration: {e}")
+        
         conn.commit()
         conn.close()
-        print("✅ Quantity tracking columns migrated successfully")
+        # print("✅ Quantity tracking columns migrated successfully") # Reduce noise
     except Exception as e:
         print('Failed ensuring quantity columns in bol_items:', e)
         import traceback
@@ -2382,7 +2455,13 @@ def item_prep_diagnostic_view_page():
         status = dict(row) if row else None
         cur.execute("SELECT id, image_path, created_at FROM items_prep_images WHERE upc = ? COLLATE NOCASE AND (deleted_at IS NULL OR TRIM(COALESCE(deleted_at,'')) = '') ORDER BY created_at DESC, id DESC", (upc,))
         images = [dict(r) for r in cur.fetchall()]
-        cur.execute('SELECT id, upc, item_description, image_url, lot_number, bol_number, import_date, list_status, quantity FROM bol_items WHERE upc = ? COLLATE NOCASE LIMIT 1', (upc,))
+        cur.execute('''
+            SELECT id, upc, item_description, image_url, lot_number, bol_number, import_date, list_status, quantity,
+                   listed_amazon, listed_amazon_date, listed_ebay, listed_ebay_date, listed_facebook, listed_facebook_date
+            FROM bol_items 
+            WHERE upc = ? COLLATE NOCASE 
+            LIMIT 1
+        ''', (upc,))
         b = cur.fetchone()
         bol = dict(b) if b else None
         
@@ -3683,6 +3762,111 @@ def api_items_prep_create_bad_entry():
         traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
 
+@app.route('/api/items_prep/create_return_entry', methods=['POST'])
+def api_items_prep_create_return_entry():
+    """Create a suffixed entry with status 'good' and reason 'return' for items being returned to vendor.
+    Similar to bad flow but marks as good with return defect.
+    JSON: { upc, qty }
+    Returns: { success, suffixed_upc }
+    """
+    try:
+        data = request.get_json() or {}
+        upc = _normalize_upc(data.get('upc'))
+        qty = int(data.get('qty', 1))
+        
+        if not upc:
+            return jsonify({'success': False, 'error': 'Missing upc'}), 400
+        
+        # Strip leading zeros
+        if upc and '-' in upc:
+            parts = upc.split('-', 1)
+            base = parts[0].lstrip('0') if parts[0].isdigit() else parts[0]
+            upc = f"{base}-{parts[1]}"
+        else:
+            upc = upc.lstrip('0') if upc and upc.isdigit() else upc
+        
+        base_upc = upc.split('-')[0] if '-' in upc else upc
+        
+        conn = sqlite3.connect('bol.db')
+        cur = conn.cursor()
+        _ensure_items_prep_tables()
+        
+        # Find next available suffix for return items
+        suffix_num = 1
+        while True:
+            suffixed_upc = f"{base_upc}-{suffix_num}"
+            
+            # Check if exists in bol_items
+            cur.execute('SELECT upc FROM bol_items WHERE upc = ? COLLATE NOCASE', (suffixed_upc,))
+            if cur.fetchone():
+                suffix_num += 1
+                continue
+            
+            # Also check prep tables
+            cur.execute('SELECT upc FROM items_prep_status WHERE upc = ? COLLATE NOCASE LIMIT 1', (suffixed_upc,))
+            if cur.fetchone():
+                suffix_num += 1
+                continue
+            
+            cur.execute('SELECT upc FROM items_prep_images WHERE upc = ? COLLATE NOCASE LIMIT 1', (suffixed_upc,))
+            if cur.fetchone():
+                suffix_num += 1
+                continue
+            
+            # Suffix is available
+            break
+        
+        # Get base item details
+        cur.execute('''
+            SELECT item_description, image_url, lot_number, bol_number
+            FROM bol_items WHERE upc = ? COLLATE NOCASE
+        ''', (base_upc,))
+        base_item = cur.fetchone()
+        
+        if not base_item:
+            conn.close()
+            return jsonify({'success': False, 'error': f'Base UPC {base_upc} not found in bol_items'}), 404
+        
+        # Create suffixed entry in bol_items marked as temporary with good_qty
+        import datetime
+        import_date = datetime.datetime.now(datetime.UTC).isoformat()
+        
+        cur.execute('''
+            INSERT INTO bol_items (
+                upc, item_description, image_url, lot_number, bol_number, import_date, 
+                temporary, original_qty, unchecked_qty, good_qty, bad_qty, quantity
+            )
+            VALUES (?, ?, ?, ?, ?, ?, 1, ?, 0, ?, 0, ?)
+        ''', (suffixed_upc, base_item[0], base_item[1], base_item[2], base_item[3], import_date, 
+              qty, qty, qty))  # original_qty=qty, good_qty=qty, quantity=qty for this suffixed entry
+        
+        # Create items_prep_status entry with status 'good' and reason 'return'
+        ts = datetime.datetime.now(datetime.UTC).isoformat()
+        cur.execute('''
+            INSERT INTO items_prep_status (upc, status, reason, note, updated_at, quantity)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (suffixed_upc, 'good', 'return', '', ts, qty))
+        
+        conn.commit()
+        
+        print(f'[RETURN] Created suffixed return entry: {suffixed_upc} (status=good, reason=return, qty={qty})')
+        
+        conn.close()
+
+        # Update data version for cache invalidation
+        update_data_version()
+
+        return jsonify({
+            'success': True, 
+            'suffixed_upc': suffixed_upc, 
+            'base_upc': base_upc
+        })
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/api/items_prep/cleanup_temp', methods=['POST'])
 def api_items_prep_cleanup_temp():
     """Delete temporary entries when user skips. JSON: { upc }"""
@@ -4741,8 +4925,29 @@ def api_trash_purge_expired():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
+@app.route('/api/debug/db_check', methods=['GET'])
+def api_debug_db_check():
+    """Debug endpoint to check DB columns and sample data."""
+    try:
+        conn = sqlite3.connect('bol.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        
+        # Check columns
+        cur.execute("PRAGMA table_info(bol_items)")
+        cols = [dict(r) for r in cur.fetchall()]
+        
+        # Check sample listed item
+        cur.execute("SELECT upc, list_status, listed_amazon, listed_ebay, listed_facebook FROM bol_items WHERE list_status IS NOT NULL AND list_status != '' LIMIT 5")
+        rows = [dict(r) for r in cur.fetchall()]
+        
+        conn.close()
+        return jsonify({'columns': cols, 'sample_listed': rows})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/bol_items', methods=['GET'])
-@cache.cached(timeout=31536000, query_string=True)
+# NO CACHE - Items-to-list needs fresh data for marketplace checkboxes
 def api_bol_items():
     """Return BOL items with sorting and filters: lot (exact), import_date (exact), sort by date/name/qty."""
     try:
@@ -4795,6 +5000,13 @@ def api_bol_items():
         cols = [r[1] for r in cur.fetchall()]
         has_temporary = any(c.lower() == 'temporary' for c in cols)
         has_itemprepped = any(c.lower() == 'itemprepped' for c in cols)
+        
+        # DEBUG: Log columns to diagnose marketplace column issue
+        marketplace_cols = [c for c in cols if 'listed' in c.lower()]
+        if not marketplace_cols:
+            print(f"[api_bol_items] WARNING: No 'listed' columns found in bol_items table!")
+            print(f"[api_bol_items] Available columns: {cols}")
+        
         where = []
         params = []
         # Exclude itemprepped entries (internal prep tracking) from item manager
@@ -4870,6 +5082,16 @@ def api_bol_items():
         has_good_qty = any(c.lower() == 'good_qty' for c in cols)
         has_bad_qty = any(c.lower() == 'bad_qty' for c in cols)
         has_unchecked_qty = any(c.lower() == 'unchecked_qty' for c in cols)
+        has_listed_amazon = any(c.lower() == 'listed_amazon' for c in cols)
+        has_listed_ebay = any(c.lower() == 'listed_ebay' for c in cols)
+        has_listed_facebook = any(c.lower() == 'listed_facebook' for c in cols)
+        
+        # DEBUG: Log marketplace column detection
+        print(f"[api_bol_items] Marketplace column detection:")
+        print(f"  has_listed_amazon: {has_listed_amazon}")
+        print(f"  has_listed_ebay: {has_listed_ebay}")
+        print(f"  has_listed_facebook: {has_listed_facebook}")
+        print(f"  Actual columns: {[c for c in cols if 'listed' in c.lower()]}")
         
         sql = (
             'SELECT b.id, b.upc, b.item_description, b.image_url, b.lot_number, b.bol_number, b.import_date, b.list_status, b.quantity, ' +
@@ -4878,6 +5100,9 @@ def api_bol_items():
             ('b.good_qty, ' if has_good_qty else '') +
             ('b.bad_qty, ' if has_bad_qty else '') +
             ('b.unchecked_qty, ' if has_unchecked_qty else '') +
+            ('b.listed_amazon, b.listed_amazon_date, ' if has_listed_amazon else '') +
+            ('b.listed_ebay, b.listed_ebay_date, ' if has_listed_ebay else '') +
+            ('b.listed_facebook, b.listed_facebook_date, ' if has_listed_facebook else '') +
             's.status as prep_status, s.reason as prep_reason, s.note as prep_note, s.updated_at as prep_updated_at, s.quantity as prep_quantity '
             'FROM bol_items b '
             'LEFT JOIN items_prep_status s ON s.upc = b.upc '
@@ -4887,6 +5112,13 @@ def api_bol_items():
         params.extend([limit, offset])
         cur.execute(sql, params)
         rows = [dict(r) for r in cur.fetchall()]
+        
+        # DEBUG: Check if marketplace columns are in the first row
+        if rows and len(rows) > 0:
+            first_row = rows[0]
+            print(f"[api_bol_items] First row keys: {list(first_row.keys())}")
+            print(f"[api_bol_items] First row marketplace data: listed_amazon={first_row.get('listed_amazon')}, listed_ebay={first_row.get('listed_ebay')}, listed_facebook={first_row.get('listed_facebook')}")
+        
         conn.close()
         # Build a status map keyed by both raw UPC and normalized UPC to handle formats like '16094950.0'
         status_map = {}
@@ -4984,7 +5216,14 @@ def api_bol_items():
                 'list_status': (r.get('list_status') or ''),
                 'temporary': r.get('temporary'),
                 'quantity': display_qty,
-                'note': 'yes' if has_notes else ''
+                'note': 'yes' if has_notes else '',
+                # Marketplace listing columns
+                'listed_amazon': r.get('listed_amazon'),
+                'listed_amazon_date': r.get('listed_amazon_date'),
+                'listed_ebay': r.get('listed_ebay'),
+                'listed_ebay_date': r.get('listed_ebay_date'),
+                'listed_facebook': r.get('listed_facebook'),
+                'listed_facebook_date': r.get('listed_facebook_date')
             })
         return jsonify({'results': results, 'total': total, 'unique_items': unique_items, 'total_quantity': total_quantity, 'page': page, 'limit': limit})
     except Exception as e:
@@ -5225,29 +5464,147 @@ def api_bol_lots():
 
 @app.route('/api/bol_items/list_status', methods=['POST'])
 def api_bol_items_set_list_status():
-    """Set list_status for a BOL item by UPC. JSON: { upc, list_status } where list_status in ['listed', '']"""
+    """Set marketplace listing status for a BOL item by UPC. 
+    JSON: { upc, marketplace, listed } where marketplace in ['amazon', 'ebay', 'facebook'] and listed is boolean"""
     try:
         data = request.get_json() or {}
         upc = _normalize_upc(data.get('upc'))
-        list_status = (data.get('list_status') or '').strip().lower()
+        marketplace = (data.get('marketplace') or '').strip().lower()
+        listed = bool(data.get('listed', True))
+        
+        print(f"[list_status] UPC: {upc}, Marketplace: {marketplace}, Listed: {listed}")
+        
         if not upc:
             return jsonify({'success': False, 'error': 'Missing upc'}), 400
-        if list_status not in ('listed', ''):
-            return jsonify({'success': False, 'error': 'Invalid list_status'}), 400
+        if marketplace not in ('amazon', 'ebay', 'facebook'):
+            return jsonify({'success': False, 'error': 'Invalid marketplace. Must be amazon, ebay, or facebook'}), 400
+        
+        # Ensure columns exist before trying to update
         _ensure_bol_list_status_column()
+        
         conn = sqlite3.connect('bol.db')
         cur = conn.cursor()
-        if list_status:
-            cur.execute('UPDATE bol_items SET list_status=? WHERE upc = ? COLLATE NOCASE', (list_status, upc))
-        else:
-            cur.execute('UPDATE bol_items SET list_status=NULL WHERE upc = ? COLLATE NOCASE', (upc,))
+        
+        # Update marketplace-specific column and timestamp
+        if marketplace == 'amazon':
+            if listed:
+                cur.execute('UPDATE bol_items SET listed_amazon=1, listed_amazon_date=datetime("now") WHERE upc = ? COLLATE NOCASE', (upc,))
+                print(f"[list_status] Set listed_amazon=1 for {upc}")
+            else:
+                cur.execute('UPDATE bol_items SET listed_amazon=0, listed_amazon_date=NULL WHERE upc = ? COLLATE NOCASE', (upc,))
+                print(f"[list_status] Set listed_amazon=0 for {upc}")
+        elif marketplace == 'ebay':
+            if listed:
+                cur.execute('UPDATE bol_items SET listed_ebay=1, listed_ebay_date=datetime("now") WHERE upc = ? COLLATE NOCASE', (upc,))
+            else:
+                cur.execute('UPDATE bol_items SET listed_ebay=0, listed_ebay_date=NULL WHERE upc = ? COLLATE NOCASE', (upc,))
+        elif marketplace == 'facebook':
+            if listed:
+                cur.execute('UPDATE bol_items SET listed_facebook=1, listed_facebook_date=datetime("now") WHERE upc = ? COLLATE NOCASE', (upc,))
+            else:
+                cur.execute('UPDATE bol_items SET listed_facebook=0, listed_facebook_date=NULL WHERE upc = ? COLLATE NOCASE', (upc,))
+        
+        # Update legacy list_status column for backward compatibility
+        # Item is "listed" if listed on ANY marketplace
+        cur.execute('''
+            UPDATE bol_items 
+            SET list_status = CASE 
+                WHEN COALESCE(listed_amazon, 0) = 1 OR COALESCE(listed_ebay, 0) = 1 OR COALESCE(listed_facebook, 0) = 1 
+                THEN 'listed' 
+                ELSE NULL 
+            END
+            WHERE upc = ? COLLATE NOCASE
+        ''', (upc,))
+        
         conn.commit()
         updated = cur.rowcount
+        
+        # Fetch the updated state to return it
+        cur.execute('SELECT listed_amazon, listed_ebay, listed_facebook FROM bol_items WHERE upc = ? COLLATE NOCASE', (upc,))
+        row = cur.fetchone()
+        current_state = {
+            'listed_amazon': row[0] if row else 0,
+            'listed_ebay': row[1] if row else 0,
+            'listed_facebook': row[2] if row else 0
+        }
+        
         conn.close()
+        
+        print(f"[list_status] Updated {updated} rows, new state: {current_state}")
+        
+        # CRITICAL: Clear the cache for /api/bol_items to show new data immediately
+        # The 1-year cache was preventing checkbox states from persisting
+        cache.clear()
+        
         # Invalidate cache so changes are immediately visible
         update_data_version()
-        return jsonify({'success': True, 'updated': updated})
+        return jsonify({'success': True, 'updated': updated, 'current_state': current_state})
     except Exception as e:
+        print(f"[list_status] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/debug/migrate_listings', methods=['GET'])
+def api_debug_migrate_listings():
+    """Force run the listing migration and return results."""
+    try:
+        _ensure_bol_list_status_column()
+        update_data_version()
+        
+        # Check results
+        conn = sqlite3.connect('bol.db')
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM bol_items WHERE listed_amazon = 1")
+        amazon_count = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM bol_items WHERE list_status = 'listed'")
+        legacy_count = cur.fetchone()[0]
+        conn.close()
+        
+        return jsonify({
+            'success': True, 
+            'message': 'Migration ran. Check server logs for details.',
+            'amazon_listed_count': amazon_count,
+            'legacy_listed_count': legacy_count
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/debug/check_item/<upc>', methods=['GET'])
+def api_debug_check_item(upc):
+    """Check the current marketplace state of a specific item."""
+    try:
+        upc = _normalize_upc(upc)
+        conn = sqlite3.connect('bol.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute('''
+            SELECT upc, list_status, listed_amazon, listed_amazon_date, 
+                   listed_ebay, listed_ebay_date, listed_facebook, listed_facebook_date
+            FROM bol_items WHERE upc = ? COLLATE NOCASE
+        ''', (upc,))
+        row = cur.fetchone()
+        conn.close()
+        
+        if not row:
+            return jsonify({'success': False, 'error': 'Item not found'}), 404
+        
+        return jsonify({
+            'success': True,
+            'upc': row['upc'],
+            'list_status': row['list_status'],
+            'listed_amazon': row['listed_amazon'],
+            'listed_amazon_date': row['listed_amazon_date'],
+            'listed_ebay': row['listed_ebay'],
+            'listed_ebay_date': row['listed_ebay_date'],
+            'listed_facebook': row['listed_facebook'],
+            'listed_facebook_date': row['listed_facebook_date']
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/cleanup_temporary_entry', methods=['POST'])
