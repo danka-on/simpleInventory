@@ -8215,7 +8215,7 @@ def update_item(db_type, item_id):
         conn.close()
 
 @app.route('/api/search/<db_key>', methods=['POST'])
-@cache.cached(timeout=31536000, query_string=False, unless=lambda: request.json and request.json.get('q'))
+@cache.cached(timeout=31536000, make_cache_key=lambda *args, **kwargs: f"search_{kwargs.get('db_key')}_{hash(str(request.get_json()))}")
 def api_search_db(db_key):
     data = request.get_json() or {}
     q = (data.get('q') or '').strip()
@@ -11498,6 +11498,11 @@ def sync_debug():
 def marketplace_sale():
     """Marketplace sale entry page."""
     return render_template('marketplace_sale.html')
+
+@app.route('/marketplace-session')
+def marketplace_session():
+    """Marketplace bulk sale session page."""
+    return render_template('marketplace_session.html')
 
 @app.route('/marketplace-stats')
 def marketplace_stats():

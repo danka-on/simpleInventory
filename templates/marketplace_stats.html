@@ -200,6 +200,60 @@
       gap: 12px;
       margin-top: 24px;
     }
+    .filter-bar {
+      background: white;
+      padding: 20px 24px;
+      border-radius: 12px;
+      margin-bottom: 20px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .filter-bar input[type="text"],
+    .filter-bar input[type="date"] {
+      padding: 10px 14px;
+      border: 2px solid #e0e4e8;
+      border-radius: 8px;
+      font-size: 0.95rem;
+    }
+    .filter-bar input[type="text"] {
+      flex: 1;
+      min-width: 200px;
+    }
+    .filter-bar input[type="date"] {
+      width: 150px;
+    }
+    .filter-bar label {
+      font-weight: 600;
+      color: #2c3e50;
+      margin: 0;
+    }
+    .filter-bar .date-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .btn-clear {
+      background: #e74c3c;
+      color: white;
+      padding: 10px 20px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 0.95rem;
+      font-weight: 600;
+      transition: all 0.2s;
+    }
+    .btn-clear:hover {
+      background: #c0392b;
+    }
+    .results-info {
+      color: #7f8c8d;
+      font-size: 0.9rem;
+      padding: 0 4px;
+    }
     @media (max-width: 768px) {
       body {
         padding: 10px;
@@ -282,6 +336,20 @@
       </div>
     </div>
 
+    <div class="filter-bar">
+      <input type="text" id="searchInput" placeholder="Search by barcode or title...">
+      <div class="date-group">
+        <label>From:</label>
+        <input type="date" id="dateFrom">
+      </div>
+      <div class="date-group">
+        <label>To:</label>
+        <input type="date" id="dateTo">
+      </div>
+      <button class="btn-clear" onclick="clearFilters()">Clear</button>
+      <span class="results-info" id="resultsInfo"></span>
+    </div>
+
     <div class="stats-grid">
       <div class="stat-card">
         <div class="stat-label">Total Sales</div>
@@ -356,6 +424,88 @@
   <script>
     const editModal = document.getElementById('editModal');
     const editForm = document.getElementById('editForm');
+    let allSales = [];
+
+    // Setup filter event listeners
+    document.getElementById('searchInput').addEventListener('input', filterSales);
+    document.getElementById('dateFrom').addEventListener('change', filterSales);
+    document.getElementById('dateTo').addEventListener('change', filterSales);
+
+    function clearFilters() {
+      document.getElementById('searchInput').value = '';
+      document.getElementById('dateFrom').value = '';
+      document.getElementById('dateTo').value = '';
+      filterSales();
+    }
+
+    function filterSales() {
+      const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+      const dateFrom = document.getElementById('dateFrom').value;
+      const dateTo = document.getElementById('dateTo').value;
+
+      let filtered = allSales.filter(sale => {
+        // Search filter
+        const matchesSearch = !searchTerm || 
+          sale.barcode.toLowerCase().includes(searchTerm) ||
+          (sale.title && sale.title.toLowerCase().includes(searchTerm));
+
+        // Date filter
+        let matchesDate = true;
+        if (dateFrom || dateTo) {
+          const saleDate = sale.sale_date; // Format: YYYY-MM-DD
+          if (dateFrom && saleDate < dateFrom) matchesDate = false;
+          if (dateTo && saleDate > dateTo) matchesDate = false;
+        }
+
+        return matchesSearch && matchesDate;
+      });
+
+      displaySales(filtered);
+      updateStats(filtered);
+      
+      // Update results info
+      const resultsInfo = document.getElementById('resultsInfo');
+      if (filtered.length !== allSales.length) {
+        resultsInfo.textContent = `Showing ${filtered.length} of ${allSales.length} sales`;
+      } else {
+        resultsInfo.textContent = '';
+      }
+    }
+
+    function updateStats(sales) {
+      const total = sales.length;
+      const totalQuantity = sales.reduce((sum, sale) => sum + sale.quantity, 0);
+      const totalRevenue = sales.reduce((sum, sale) => sum + (sale.quantity * parseFloat(sale.price)), 0);
+
+      document.getElementById('totalSales').textContent = total;
+      document.getElementById('totalQuantity').textContent = totalQuantity;
+      document.getElementById('totalRevenue').textContent = '$' + totalRevenue.toFixed(2);
+    }
+
+    function displaySales(sales) {
+      const tbody = document.getElementById('salesBody');
+      
+      if (sales.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No sales found</td></tr>';
+      } else {
+        tbody.innerHTML = sales.map(sale => {
+          const titleEscaped = (sale.title || '').replace(/'/g, "\\\\'").replace(/"/g, '&quot;');
+          return `
+          <tr>
+            <td>${sale.sale_date}</td>
+            <td>${sale.barcode}</td>
+            <td>${sale.title || '-'}</td>
+            <td>${sale.quantity}</td>
+            <td>$${parseFloat(sale.price).toFixed(2)}</td>
+            <td class="actions">
+              <button class="btn-small btn-edit" onclick="editSale(${sale.id}, '${sale.barcode}', '${titleEscaped}', ${sale.quantity}, ${sale.price})">Edit</button>
+              <button class="btn-small btn-delete" onclick="deleteSale(${sale.id})">Delete</button>
+            </td>
+          </tr>
+        `;
+        }).join('');
+      }
+    }
 
     async function loadSales() {
       try {
@@ -363,31 +513,11 @@
         const data = await response.json();
 
         if (data.success) {
-          // Update stats
-          document.getElementById('totalSales').textContent = data.total;
-          document.getElementById('totalQuantity').textContent = data.total_quantity;
-          document.getElementById('totalRevenue').textContent = '$' + data.total_revenue.toFixed(2);
-
-          // Update table
-          const tbody = document.getElementById('salesBody');
+          // Store all sales for filtering
+          allSales = data.sales;
           
-          if (data.sales.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No sales recorded yet</td></tr>';
-          } else {
-            tbody.innerHTML = data.sales.map(sale => `
-              <tr>
-                <td>${sale.sale_date}</td>
-                <td>${sale.barcode}</td>
-                <td>${sale.title || '-'}</td>
-                <td>${sale.quantity}</td>
-                <td>$${parseFloat(sale.price).toFixed(2)}</td>
-                <td class="actions">
-                  <button class="btn-small btn-edit" onclick="editSale(${sale.id}, '${sale.barcode}', '${(sale.title || '').replace(/'/g, "\\'")}', ${sale.quantity}, ${sale.price})">Edit</button>
-                  <button class="btn-small btn-delete" onclick="deleteSale(${sale.id})">Delete</button>
-                </td>
-              </tr>
-            `).join('');
-          }
+          // Apply current filters
+          filterSales();
         }
       } catch (error) {
         console.error('Error loading sales:', error);

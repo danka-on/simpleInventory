@@ -383,11 +383,15 @@ function hideLoading(){
     document.getElementById('loadingOverlay').classList.remove('active');
 }
 
-async function doSearch(clearInput = false){
+async function doSearch(clearInput = false, explicitQuery = null){
     if(typeof clearInput !== 'boolean') clearInput = false;
-    console.log('[SEARCH] doSearch called, clearInput:', clearInput);
+    console.log('[SEARCH] doSearch called, clearInput:', clearInput, 'explicitQuery:', explicitQuery);
     showLoading();
-    let q = document.getElementById('search-input').value.trim();
+    let q = explicitQuery !== null ? explicitQuery : document.getElementById('search-input').value.trim();
+    // If explicit query provided, ensure input matches
+    if(explicitQuery !== null) {
+        document.getElementById('search-input').value = explicitQuery;
+    }
     const dbs = getActiveDBs();
     
     console.log('[SEARCH] query:', q, 'databases:', dbs, 'locationGroupFilter:', _locationGroupFilter);
@@ -1282,7 +1286,7 @@ window.addEventListener('load', ()=>{
         const qParam = params.get('q') || params.get('search');
         
         // Update back button based on unified search context
-        updateBackButton();
+        if(typeof updateBackButton === 'function') updateBackButton();
         
         // If URL params are present, use them and ignore session state
         if(dbParam || qParam){
@@ -1306,7 +1310,7 @@ window.addEventListener('load', ()=>{
                     document.getElementById('inventory-dropdown').classList.remove('active');
                     if(typeof toggleLocationBrowser === 'function') toggleLocationBrowser(false);
                     
-                    doSearch();
+                    doSearch(false, qParam || null);
                     return;
                 } else if(DATABASES.includes(dbParam)){
                     console.log('[LOAD] Setting database:', dbParam);
@@ -1332,7 +1336,7 @@ window.addEventListener('load', ()=>{
                         if(typeof toggleLocationBrowser === 'function') toggleLocationBrowser(false);
                     }
                     
-                    doSearch();
+                    doSearch(false, qParam || null);
                     return;
                 } else {
                     console.warn('[LOAD] Unknown db param:', dbParam);
@@ -1340,7 +1344,7 @@ window.addEventListener('load', ()=>{
             }
             
             // Ensure search runs if not triggered above
-            doSearch();
+            doSearch(false, qParam || null);
             return;
         }
 
@@ -1729,11 +1733,6 @@ document.getElementById('collapse-location-browser').addEventListener('click', (
     const dbSelect = document.getElementById('db-select');
     if (dbSelect && dbSelect.value === 'searchRack') {
         toggleLocationBrowser(true);
-        // Force a search after a moment to ensure items load
-        setTimeout(() => {
-            console.log('Force triggering search for searchRack');
-            doSearch();
-        }, 500);
     }
 })();
 

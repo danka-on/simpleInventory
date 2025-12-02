@@ -16,6 +16,7 @@ scp .\templates\misc.html "$User@$HostName`:$RemotePath/templates/"
 scp .\templates\tools.html "$User@$HostName`:$RemotePath/templates/"
 scp .\templates\items_to_list.html "$User@$HostName`:$RemotePath/templates/"
 scp .\templates\item_prep.html "$User@$HostName`:$RemotePath/templates/"
+scp .\templates\unified_search.html "$User@$HostName`:$RemotePath/templates/"
 
 Write-Host "✅ Files transferred!" -ForegroundColor Green
 
