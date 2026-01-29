@@ -11,6 +11,7 @@ import io, time, subprocess, os, requests, json, threading, sqlite3, sys, dateti
 import pytz
 import xml.etree.ElementTree as ET
 from dotenv import load_dotenv
+load_dotenv()
 import xml.dom.minidom as minidom
 import smtplib
 from email.mime.text import MIMEText
@@ -181,14 +182,11 @@ except ImportError:
     print("Warning: BOLextractor not available (pandas missing)")
 # manualMatcher removed: functionality deprecated and files deleted
 
-oldAuth_token = 'v^1.1#i^1#I^3#f^0#p^3#r^1#t^Ul4xMF82OkYwRjY2Q0VFOUY1QUM0MkEyMjkyMDY5Q0E5NjY0NjIxXzFfMSNFXjI2MA=='
-
-
 CLIENT_ID = os.getenv("EBAY_CLIENT_ID")
 CLIENT_SECRET = os.getenv("EBAY_CLIENT_SECRET")
 RUNAME = os.getenv("EBAY_RUNAME")
 app = Flask(__name__)
-app.secret_key = 'your-secret-key-change-in-production'  # Required for session management
+app.secret_key = os.getenv('FLASK_SECRET_KEY', 'dev-fallback-change-in-production')
 app.start_time = time.time()  # Track app startup time for uptime calculation
 # Production settings - optimized for Raspberry Pi deployment
 app.config['TEMPLATES_AUTO_RELOAD'] = False  # Disable template reloading for better performance
@@ -207,6 +205,19 @@ cache = Cache(app, config={
 
 # Initialize Flask-Compress for automatic gzip compression (70% smaller responses)
 Compress(app)
+
+# Debug mode flag - set DEBUG_MODE=true in .env to enable debug endpoints
+DEBUG_MODE = os.getenv('DEBUG_MODE', 'false').lower() == 'true'
+
+def require_debug_mode(f):
+    """Decorator to restrict endpoints to debug mode only."""
+    from functools import wraps
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not DEBUG_MODE:
+            return jsonify({'error': 'Not found'}), 404
+        return f(*args, **kwargs)
+    return decorated
 
 # Global Data Version for cache invalidation
 # Use database to ensure consistency across workers
@@ -5243,6 +5254,7 @@ def api_trash_purge_expired():
         return jsonify({'success': False, 'error': str(e)})
 
 @app.route('/api/debug/db_check', methods=['GET'])
+@require_debug_mode
 def api_debug_db_check():
     """Debug endpoint to check DB columns and sample data."""
     try:
@@ -5863,6 +5875,7 @@ def api_bol_items_set_list_status():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/debug/migrate_listings', methods=['GET'])
+@require_debug_mode
 def api_debug_migrate_listings():
     """Force run the listing migration and return results."""
     try:
@@ -5890,6 +5903,7 @@ def api_debug_migrate_listings():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/debug/check_item/<upc>', methods=['GET'])
+@require_debug_mode
 def api_debug_check_item(upc):
     """Check the current marketplace state of a specific item."""
     try:
@@ -5995,6 +6009,7 @@ def api_items_prep_diagnostic_photos_zip(upc):
         return jsonify({'error': str(e)}), 500
 
 @app.route("/token-status")
+@require_debug_mode
 def token_status():
     try:
         tokens = load_tokens()
@@ -6036,7 +6051,8 @@ def callback():
         return "Authorization failed or cancelled."
 
     # Step 5: exchange this code for an access token
-    return f"Authorization code: {code}"
+    from markupsafe import escape
+    return f"Authorization code: {escape(code)}"
 @app.route("/privacy")
 def privacy():
     return "<h1>Privacy Policy</h1><p>No user data is stored or shared. This app is for sandbox testing only.</p>"
@@ -12183,6 +12199,7 @@ def fix_amazon_barcodes():
         return jsonify({'success': False, 'message': str(e), 'error': error_details}), 500
 
 @app.route('/api/sync/debug', methods=['GET'])
+@require_debug_mode
 def sync_debug():
       return jsonify({
         'amazon_available': AMAZON_AVAILABLE,
