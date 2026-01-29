@@ -151,6 +151,7 @@
         <input name="for_diagnostic" type="hidden" id="for_diagnostic">
         <input name="return_url" type="hidden" id="return_url">
         <input name="upc" type="hidden" id="upc_field">
+        <input name="position_locked" type="hidden" id="position_locked_field" value="false">
     </form>
     <!-- Lock Shelf button (replaces checkbox) -->
     <div style="margin-top: 20px; text-align: center;">
@@ -181,6 +182,7 @@
       lockBtn.style.backgroundColor = '#43a047';
       lockIcon.className = 'fas fa-lock';
       lockText.textContent = 'LOCKED';
+      document.getElementById('position_locked_field').value = 'true';
     }
   }
 
@@ -191,6 +193,7 @@
       lockIcon.className = 'fas fa-lock';
       lockText.textContent = 'LOCKED - Multi Barcode';
       sessionStorage.setItem('positionLocked', 'true');
+      document.getElementById('position_locked_field').value = 'true';
       
       // Auto-focus on input field for immediate scanning
       const qrInput = document.getElementById('qrTextInput');
@@ -206,6 +209,7 @@
       lockIcon.className = 'fas fa-unlock';
       lockText.textContent = 'Lock Shelf - Multiple Barcode';
       sessionStorage.removeItem('positionLocked');
+      document.getElementById('position_locked_field').value = 'false';
       // Clear position when unlocking
       sessionStorage.removeItem('item_position');
       sessionStorage.removeItem('pictureposition_path');

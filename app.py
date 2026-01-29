@@ -571,7 +571,17 @@ def send_health_email():
         if not success:
             return jsonify({'success': False, 'error': error}), 500
         
-        print(f"✅ Health email sent to: {', '.join(emails)}")
+        # Clear power event counters after successful email send
+        try:
+            conn = sqlite3.connect('sync_settings.db')
+            cur = conn.cursor()
+            cur.execute('DELETE FROM power_events WHERE key IN (?, ?)', 
+                       ('undervoltage_count', 'throttle_count'))
+            conn.commit()
+            conn.close()
+            print(f"✅ Health email sent to: {', '.join(emails)} - Power event counters reset")
+        except:
+            print(f"✅ Health email sent to: {', '.join(emails)}")
         
         return jsonify({
             'success': True,
@@ -637,6 +647,7 @@ def send_inventory_alert_email():
 def collect_health_stats():
     """Collect all health statistics for the app"""
     import platform
+    import psutil
     
     stats = {}
     
@@ -656,6 +667,170 @@ def collect_health_stats():
     stats['python_version'] = platform.python_version()
     stats['timestamp'] = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     
+    # Memory usage
+    try:
+        memory = psutil.virtual_memory()
+        stats['memory_used_gb'] = round(memory.used / (1024**3), 2)
+        stats['memory_total_gb'] = round(memory.total / (1024**3), 2)
+        stats['memory_free_gb'] = round(memory.available / (1024**3), 2)
+        stats['memory_percent'] = round(memory.percent, 1)
+    except:
+        stats['memory_used_gb'] = 0
+        stats['memory_total_gb'] = 0
+        stats['memory_free_gb'] = 0
+        stats['memory_percent'] = 0
+    
+    # CPU usage
+    try:
+        # Current CPU usage (1 second sample)
+        stats['cpu_percent_current'] = round(psutil.cpu_percent(interval=1), 1)
+        # Average CPU usage (since boot or process start)
+        stats['cpu_percent_avg'] = round(psutil.cpu_percent(interval=0), 1)
+    except:
+        stats['cpu_percent_current'] = 0
+        stats['cpu_percent_avg'] = 0
+    
+    # CPU temperature (if available)
+    try:
+        temps = psutil.sensors_temperatures()
+        if temps:
+            # Try to get CPU temp from common sensor names
+            cpu_temp = None
+            for name in ['coretemp', 'cpu_thermal', 'cpu-thermal', 'k10temp']:
+                if name in temps and temps[name]:
+                    cpu_temp = temps[name][0].current
+                    break
+            
+            if cpu_temp:
+                stats['cpu_temp_current'] = round(cpu_temp, 1)
+                # Calculate average from all cores if available
+                all_temps = [sensor.current for sensors in temps.values() for sensor in sensors]
+                stats['cpu_temp_avg'] = round(sum(all_temps) / len(all_temps), 1) if all_temps else cpu_temp
+            else:
+                stats['cpu_temp_current'] = None
+                stats['cpu_temp_avg'] = None
+        else:
+            stats['cpu_temp_current'] = None
+            stats['cpu_temp_avg'] = None
+    except:
+        stats['cpu_temp_current'] = None
+        stats['cpu_temp_avg'] = None
+    
+    # Power status (battery/AC)
+    try:
+        battery = psutil.sensors_battery()
+        if battery:
+            stats['power_plugged'] = battery.power_plugged
+            stats['battery_percent'] = round(battery.percent, 1)
+            stats['battery_time_left'] = None
+            if not battery.power_plugged and battery.secsleft != psutil.POWER_TIME_UNLIMITED:
+                # Convert seconds to hours:minutes
+                hours = int(battery.secsleft // 3600)
+                minutes = int((battery.secsleft % 3600) // 60)
+                stats['battery_time_left'] = f"{hours}h {minutes}m"
+        else:
+            stats['power_plugged'] = None
+            stats['battery_percent'] = None
+            stats['battery_time_left'] = None
+    except:
+        stats['power_plugged'] = None
+        stats['battery_percent'] = None
+        stats['battery_time_left'] = None
+    
+    # Raspberry Pi undervoltage detection with persistent tracking
+    stats['undervoltage_detected'] = False
+    stats['undervoltage_now'] = False
+    stats['undervoltage_count'] = 0
+    stats['throttle_count'] = 0
+    stats['last_undervoltage_time'] = None
+    
+    try:
+        # Check for Raspberry Pi throttling status (includes undervoltage)
+        import subprocess
+        result = subprocess.run(['vcgencmd', 'get_throttled'], capture_output=True, text=True, timeout=2)
+        if result.returncode == 0:
+            # Parse throttled status (hex value)
+            throttled_hex = result.stdout.strip().split('=')[1]
+            throttled = int(throttled_hex, 16)
+            
+            # Bit 0: Undervoltage currently detected
+            # Bit 16: Undervoltage has occurred since boot
+            stats['undervoltage_now'] = bool(throttled & 0x1)
+            stats['undervoltage_detected'] = bool(throttled & 0x10000)
+            
+            # Store throttle status for detailed reporting
+            stats['throttle_status'] = {
+                'undervoltage_now': bool(throttled & 0x1),
+                'arm_frequency_capped_now': bool(throttled & 0x2),
+                'currently_throttled': bool(throttled & 0x4),
+                'soft_temp_limit_active': bool(throttled & 0x8),
+                'undervoltage_occurred': bool(throttled & 0x10000),
+                'arm_frequency_capped_occurred': bool(throttled & 0x20000),
+                'throttling_occurred': bool(throttled & 0x40000),
+                'soft_temp_limit_occurred': bool(throttled & 0x80000)
+            }
+            
+            # Track undervoltage events in database
+            try:
+                conn = sqlite3.connect('sync_settings.db')
+                cur = conn.cursor()
+                cur.execute('CREATE TABLE IF NOT EXISTS power_events (key TEXT PRIMARY KEY, value TEXT)')
+                
+                # Get last known state
+                cur.execute('SELECT value FROM power_events WHERE key = ?', ('last_throttle_state',))
+                row = cur.fetchone()
+                last_state = int(row[0]) if row else 0
+                
+                # Check if undervoltage state changed from off to on (new event)
+                if stats['undervoltage_now'] and not (last_state & 0x1):
+                    # Increment undervoltage counter
+                    cur.execute('SELECT value FROM power_events WHERE key = ?', ('undervoltage_count',))
+                    row = cur.fetchone()
+                    count = int(row[0]) if row else 0
+                    count += 1
+                    cur.execute('INSERT OR REPLACE INTO power_events (key, value) VALUES (?, ?)', 
+                               ('undervoltage_count', str(count)))
+                    cur.execute('INSERT OR REPLACE INTO power_events (key, value) VALUES (?, ?)', 
+                               ('last_undervoltage_time', datetime.datetime.now().isoformat()))
+                    stats['undervoltage_count'] = count
+                    stats['last_undervoltage_time'] = datetime.datetime.now().isoformat()
+                else:
+                    # Get existing count
+                    cur.execute('SELECT value FROM power_events WHERE key = ?', ('undervoltage_count',))
+                    row = cur.fetchone()
+                    stats['undervoltage_count'] = int(row[0]) if row else 0
+                    
+                    cur.execute('SELECT value FROM power_events WHERE key = ?', ('last_undervoltage_time',))
+                    row = cur.fetchone()
+                    stats['last_undervoltage_time'] = row[0] if row else None
+                
+                # Check if throttling state changed
+                if stats['throttle_status']['currently_throttled'] and not (last_state & 0x4):
+                    cur.execute('SELECT value FROM power_events WHERE key = ?', ('throttle_count',))
+                    row = cur.fetchone()
+                    count = int(row[0]) if row else 0
+                    count += 1
+                    cur.execute('INSERT OR REPLACE INTO power_events (key, value) VALUES (?, ?)', 
+                               ('throttle_count', str(count)))
+                    stats['throttle_count'] = count
+                else:
+                    cur.execute('SELECT value FROM power_events WHERE key = ?', ('throttle_count',))
+                    row = cur.fetchone()
+                    stats['throttle_count'] = int(row[0]) if row else 0
+                
+                # Update last known state
+                cur.execute('INSERT OR REPLACE INTO power_events (key, value) VALUES (?, ?)', 
+                           ('last_throttle_state', str(throttled)))
+                
+                conn.commit()
+                conn.close()
+            except Exception as e:
+                print(f"Error tracking power events: {e}")
+                pass
+    except:
+        # Not a Pi or vcgencmd not available
+        stats['throttle_status'] = None
+    
     # Disk space
     try:
         import shutil
@@ -670,13 +845,44 @@ def collect_health_stats():
     
     # Database sizes
     db_sizes = {}
-    for db_name in ['sold.db', 'bol.db', 'amazonStore.db', 'ebayStore.db', 'searchRack.db']:
+    for db_name in ['sold.db', 'bol.db', 'amazonStore.db', 'ebayStore.db', 'searchRack.db', 'rawbol.db']:
         try:
             size_bytes = os.path.getsize(db_name)
             db_sizes[db_name] = round(size_bytes / (1024**2), 2)  # MB
         except:
             db_sizes[db_name] = 0
     stats['db_sizes'] = db_sizes
+    
+    # Static folder size
+    try:
+        static_size = 0
+        for dirpath, dirnames, filenames in os.walk('static'):
+            for filename in filenames:
+                filepath = os.path.join(dirpath, filename)
+                static_size += os.path.getsize(filepath)
+        stats['static_folder_size_mb'] = round(static_size / (1024**2), 2)
+    except:
+        stats['static_folder_size_mb'] = 0
+    
+    # Picture position folder size and count
+    try:
+        picture_position_path = os.path.join('static', 'picture_position')
+        if os.path.exists(picture_position_path):
+            picture_size = 0
+            picture_count = 0
+            for dirpath, dirnames, filenames in os.walk(picture_position_path):
+                for filename in filenames:
+                    filepath = os.path.join(dirpath, filename)
+                    picture_size += os.path.getsize(filepath)
+                    picture_count += 1
+            stats['picture_position_size_mb'] = round(picture_size / (1024**2), 2)
+            stats['picture_position_count'] = picture_count
+        else:
+            stats['picture_position_size_mb'] = 0
+            stats['picture_position_count'] = 0
+    except:
+        stats['picture_position_size_mb'] = 0
+        stats['picture_position_count'] = 0
     
     # Sync status (last sync times from sync_settings.db)
     try:
@@ -709,6 +915,42 @@ def collect_health_stats():
     if stats['disk_percent'] > 90:
         warnings.append(f"⚠️ Low disk space: {stats['disk_percent']}% used")
     
+    # Check for high memory usage
+    if stats['memory_percent'] > 90:
+        warnings.append(f"⚠️ High memory usage: {stats['memory_percent']}% used")
+    
+    # Check for high CPU temperature
+    if stats['cpu_temp_current'] and stats['cpu_temp_current'] > 80:
+        warnings.append(f"⚠️ High CPU temperature: {stats['cpu_temp_current']}°C")
+    
+    # Check for power issues
+    if stats['power_plugged'] is False:
+        if stats['battery_percent'] and stats['battery_percent'] < 20:
+            warnings.append(f"🔋 CRITICAL: Battery low at {stats['battery_percent']}%! {stats['battery_time_left'] or 'Unknown time'} remaining")
+        elif stats['battery_percent'] and stats['battery_percent'] < 50:
+            warnings.append(f"🔋 WARNING: Running on battery - {stats['battery_percent']}% remaining")
+        else:
+            warnings.append(f"🔋 Running on battery power ({stats['battery_percent']}%)")
+    
+    # Check for Raspberry Pi undervoltage
+    if stats['undervoltage_now']:
+        count_text = f" (Event #{stats['undervoltage_count']})" if stats['undervoltage_count'] > 0 else ""
+        warnings.append(f"⚡ CRITICAL: Undervoltage detected NOW!{count_text} Power supply insufficient!")
+    elif stats['undervoltage_detected']:
+        if stats['undervoltage_count'] > 0:
+            warnings.append(f"⚡ WARNING: {stats['undervoltage_count']} undervoltage events detected - check power supply")
+        else:
+            warnings.append("⚡ WARNING: Undervoltage detected since boot - check power supply")
+    
+    # Check for other Pi throttling issues
+    if stats.get('throttle_status'):
+        ts = stats['throttle_status']
+        if ts['currently_throttled']:
+            throttle_text = f" ({stats['throttle_count']} events)" if stats['throttle_count'] > 0 else ""
+            warnings.append(f"🐌 Performance throttled{throttle_text} due to power/temperature issues")
+        if ts['soft_temp_limit_active']:
+            warnings.append("🌡️ Soft temperature limit active - system thermal throttling")
+    
     # Check for stale syncs (> 24 hours)
     for sync_key, sync_label in [
         ('ebay_orders_last', 'eBay Orders'),
@@ -740,7 +982,40 @@ def generate_health_email_html(stats):
         warnings_html = "<h3 style='color: #27ae60;'>✅ No Warnings</h3><p style='color: #7f8c8d;'>All systems operating normally</p>"
     
     disk_color = '#27ae60' if stats['disk_percent'] < 80 else ('#f39c12' if stats['disk_percent'] < 90 else '#e74c3c')
+    memory_color = '#27ae60' if stats['memory_percent'] < 80 else ('#f39c12' if stats['memory_percent'] < 90 else '#e74c3c')
+    cpu_color = '#27ae60' if stats['cpu_percent_current'] < 70 else ('#f39c12' if stats['cpu_percent_current'] < 90 else '#e74c3c')
     sync_status_color = '#27ae60' if stats['auto_sync_enabled'] else '#95a5a6'
+    
+    # CPU temperature display
+    cpu_temp_html = ""
+    if stats['cpu_temp_current'] is not None:
+        temp_color = '#27ae60' if stats['cpu_temp_current'] < 70 else ('#f39c12' if stats['cpu_temp_current'] < 80 else '#e74c3c')
+        cpu_temp_html = f"<div class='metric'><span class='label'>CPU Temperature:</span> <span class='value' style='color: {temp_color}; font-weight: bold;'>{stats['cpu_temp_current']}°C (avg: {stats['cpu_temp_avg']}°C)</span></div>"
+    
+    # Power status display
+    power_html = ""
+    if stats['power_plugged'] is not None:
+        if stats['power_plugged']:
+            power_html = "<div class='metric'><span class='label'>Power:</span> <span class='value' style='color: #27ae60; font-weight: bold;'>🔌 AC Power</span></div>"
+        else:
+            battery_color = '#e74c3c' if stats['battery_percent'] < 20 else ('#f39c12' if stats['battery_percent'] < 50 else '#27ae60')
+            time_left_text = f" ({stats['battery_time_left']} left)" if stats['battery_time_left'] else ""
+            power_html = f"<div class='metric'><span class='label'>Power:</span> <span class='value' style='color: {battery_color}; font-weight: bold;'>🔋 Battery {stats['battery_percent']}%{time_left_text}</span></div>"
+    
+    # Undervoltage status display (for Raspberry Pi)
+    undervoltage_html = ""
+    if stats.get('throttle_status'):
+        ts = stats['throttle_status']
+        if stats['undervoltage_now']:
+            count_badge = f" <span style='background: #c0392b; color: white; padding: 2px 6px; border-radius: 3px; font-size: 11px;'>×{stats['undervoltage_count']}</span>" if stats['undervoltage_count'] > 0 else ""
+            undervoltage_html = f"<div class='metric'><span class='label'>Voltage:</span> <span class='value' style='color: #e74c3c; font-weight: bold;'>⚡ UNDERVOLTAGE NOW!{count_badge}</span></div>"
+        elif stats['undervoltage_detected']:
+            if stats['undervoltage_count'] > 0:
+                undervoltage_html = f"<div class='metric'><span class='label'>Voltage:</span> <span class='value' style='color: #f39c12; font-weight: bold;'>⚡ {stats['undervoltage_count']} events detected</span></div>"
+            else:
+                undervoltage_html = "<div class='metric'><span class='label'>Voltage:</span> <span class='value' style='color: #f39c12; font-weight: bold;'>⚡ Undervoltage occurred</span></div>"
+        else:
+            undervoltage_html = "<div class='metric'><span class='label'>Voltage:</span> <span class='value' style='color: #27ae60; font-weight: bold;'>✓ Normal</span></div>"
     
     html = f"""
     <html>
@@ -767,6 +1042,11 @@ def generate_health_email_html(stats):
             <h2>🏥 SERVER HEALTH</h2>
             <div class='metric'><span class='label'>Uptime:</span> <span class='value'>{stats['uptime']}</span></div>
             <div class='metric'><span class='label'>Python Version:</span> <span class='value'>{stats['python_version']}</span></div>
+            <div class='metric'><span class='label'>Memory:</span> <span class='value' style='color: {memory_color}; font-weight: bold;'>{stats['memory_free_gb']} GB free ({stats['memory_used_gb']}/{stats['memory_total_gb']} GB used, {stats['memory_percent']}%)</span></div>
+            <div class='metric'><span class='label'>CPU Usage:</span> <span class='value' style='color: {cpu_color}; font-weight: bold;'>{stats['cpu_percent_current']}% current (avg: {stats['cpu_percent_avg']}%)</span></div>
+            {cpu_temp_html}
+            {power_html}
+            {undervoltage_html}
             <div class='metric'><span class='label'>Disk Space:</span> <span class='value' style='color: {disk_color}; font-weight: bold;'>{stats['disk_free_gb']} GB free ({100-stats['disk_percent']:.1f}% available)</span></div>
         </div>
         
@@ -787,6 +1067,11 @@ def generate_health_email_html(stats):
             <ul style='margin: 5px 0; padding-left: 20px;'>
                 {''.join([f"<li>{db}: <strong>{size} MB</strong></li>" for db, size in stats['db_sizes'].items()])}
             </ul>
+            <p style='margin: 15px 0 10px 0; font-weight: bold;'>📂 Folder Sizes:</p>
+            <ul style='margin: 5px 0; padding-left: 20px;'>
+                <li>Static Folder: <strong>{stats['static_folder_size_mb']} MB</strong></li>
+                <li>Picture Position: <strong>{stats['picture_position_size_mb']} MB</strong> ({stats['picture_position_count']} pictures)</li>
+            </ul>
         </div>
     </body>
     </html>
@@ -797,6 +1082,32 @@ def generate_health_email_plain(stats):
     """Generate plain text email body for health report"""
     warnings_text = "\n".join(stats['warnings']) if stats['warnings'] else "✅ None"
     
+    cpu_temp_text = ""
+    if stats['cpu_temp_current'] is not None:
+        cpu_temp_text = f"\n├─ CPU Temp: {stats['cpu_temp_current']}°C (avg: {stats['cpu_temp_avg']}°C)"
+    
+    power_text = ""
+    if stats['power_plugged'] is not None:
+        if stats['power_plugged']:
+            power_text = "\n├─ Power: 🔌 AC Power"
+        else:
+            time_left = f" ({stats['battery_time_left']} left)" if stats['battery_time_left'] else ""
+            power_text = f"\n├─ Power: 🔋 Battery {stats['battery_percent']}%{time_left}"
+    
+    # Undervoltage status (for Raspberry Pi)
+    voltage_text = ""
+    if stats.get('throttle_status'):
+        if stats['undervoltage_now']:
+            count_text = f" (×{stats['undervoltage_count']})" if stats['undervoltage_count'] > 0 else ""
+            voltage_text = f"\n├─ Voltage: ⚡ UNDERVOLTAGE NOW!{count_text}"
+        elif stats['undervoltage_detected']:
+            if stats['undervoltage_count'] > 0:
+                voltage_text = f"\n├─ Voltage: ⚡ {stats['undervoltage_count']} events detected"
+            else:
+                voltage_text = "\n├─ Voltage: ⚡ Undervoltage occurred"
+        else:
+            voltage_text = "\n├─ Voltage: ✓ Normal"
+    
     text = f"""
 📊 STORE APP HEALTH REPORT
 Generated: {stats['timestamp']}
@@ -804,6 +1115,8 @@ Generated: {stats['timestamp']}
 🏥 SERVER HEALTH
 ├─ Uptime: {stats['uptime']}
 ├─ Python: {stats['python_version']}
+├─ Memory: {stats['memory_free_gb']} GB free ({stats['memory_used_gb']}/{stats['memory_total_gb']} GB used, {stats['memory_percent']}%)
+├─ CPU Usage: {stats['cpu_percent_current']}% current (avg: {stats['cpu_percent_avg']}%){cpu_temp_text}{power_text}{voltage_text}
 └─ Disk: {stats['disk_free_gb']} GB free ({100-stats['disk_percent']:.1f}%)
 
 🔄 SYNC STATUS
@@ -815,8 +1128,12 @@ Generated: {stats['timestamp']}
 ⚠️ WARNINGS
 {warnings_text}
 
---
-Database Sizes: {', '.join([f"{db}: {size}MB" for db, size in stats['db_sizes'].items()])}
+📁 DATABASE SIZES
+{', '.join([f"{db}: {size}MB" for db, size in stats['db_sizes'].items()])}
+
+📂 FOLDER SIZES
+Static: {stats['static_folder_size_mb']} MB
+Picture Position: {stats['picture_position_size_mb']} MB ({stats['picture_position_count']} pictures)
 """
     return text
 
@@ -6226,14 +6543,20 @@ def process_position():
     global same_position
     position_code = request.form.get('scanned_result')
     pictureposition_path = request.form.get('pictureposition')
+    position_locked = request.form.get('position_locked', 'false') == 'true'
+    
     print("Received scanned code:", position_code)
     print("Received picture position path:", pictureposition_path)
-    print(f"DEBUG: same_position (shelf locked) = {same_position}")
+    print(f"DEBUG: position_locked from form = {position_locked}")
+    print(f"DEBUG: same_position (global) = {same_position}")
     
-    # Check if shelf is locked (same_position indicates locked state)
-    if same_position:
+    # Use form value as primary source, fall back to global variable
+    is_locked = position_locked or same_position
+    
+    # Check if shelf is locked
+    if is_locked:
         # Shelf is locked - go to multibarcode page
-        print("DEBUG: Redirecting to multibarcode.html")
+        print("DEBUG: Redirecting to multibarcode.html (locked)")
         return render_template("multibarcode.html")
     else:
         # Normal flow - go to barcode page

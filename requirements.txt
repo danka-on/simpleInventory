@@ -6,6 +6,9 @@ Flask-Compress==1.14
 # Environment
 python-dotenv==1.0.0
 
+# System monitoring
+psutil==5.9.6
+
 # HTTP
 requests==2.31.0
 
