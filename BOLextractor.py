@@ -296,19 +296,7 @@ def process_bol_excel(file, lot_number, import_date, shipping_cost=None):
                     err_msg += f' Debug file saved at: {debug_path}'
                 err_detail = f'Preview (first 32 bytes): {preview_text}'
                 return {'success': False, 'error': err_msg, 'detail': err_detail}
-                # If HTML parsing fails, provide the original error
-                preview = first_32
-                try:
-                    preview_text = preview.decode('utf-8', errors='replace')
-                except Exception:
-                    preview_text = str(preview)
-                print(f"DEBUG: HTML parsing failed: {html_e}")
-                err_msg = 'File appears to be HTML, not Excel. Please download the actual Excel file.'
-                if debug_path:
-                    err_msg += f' Debug file saved at: {debug_path}'
-                err_detail = f'Preview (first 32 bytes): {preview_text}'
-                return {'success': False, 'error': err_msg, 'detail': err_detail}
-        
+
         # Skip Excel processing if HTML was successfully parsed
         if not html_parsed:
             # Check for proper Excel file signatures

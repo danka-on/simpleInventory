@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from sp_api.api import Orders, Reports, CatalogItems, ListingsItems, Finances, MerchantFulfillment
 from sp_api.base import Marketplaces
 from sp_api.base.exceptions import SellingApiException
+from DBmanager import connect_db
 
 # Define base directory for cross-platform compatibility
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -464,223 +465,218 @@ class AmazonManager:
             return 0
         
         # Connect to sold.db (same as eBay uses)
-        conn = sqlite3.connect('sold.db')
-        cur = conn.cursor()
-        
-        # Ensure table exists with necessary columns
-        cur.execute('''
-            CREATE TABLE IF NOT EXISTS orders (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                order_id TEXT UNIQUE,
-                item_id TEXT,
-                barcode TEXT,
-                title TEXT,
-                quantity INTEGER,
-                price REAL,
-                shipped_time TEXT,
-                paid_time TEXT,
-                image TEXT,
-                rackupdated INTEGER DEFAULT 0,
-                removal_cancelled INTEGER DEFAULT 0,
-                store TEXT DEFAULT 'amazon'
-            )
-        ''')
-        
-        # Add store column if it doesn't exist
-        try:
-            cur.execute('ALTER TABLE orders ADD COLUMN store TEXT DEFAULT "amazon"')
-            conn.commit()
-        except:
-            pass
-        
-        synced_count = 0
-        order_items_api_calls = 0
-        orders_with_actual_fees = 0
-        orders_with_estimated_fees = 0
-        orders_with_shipping_costs = 0
-        
-        # Fetch financial events (fees, shipping, taxes) for these orders
-        print(f"\n📊 Fetching financial data (fees, shipping, taxes) - {financial_days_back} day window...")
-        financial_data = self.get_financial_events(days_back=financial_days_back)
-        
-        # Get all order IDs to fetch shipping costs
-        order_ids = [order.get('AmazonOrderId') for order in orders]
-        
-        # Fetch shipping costs from Buy Shipping API
-        print("\n🚚 Fetching shipping costs from Buy Shipping API...")
-        shipping_costs = self.get_shipping_costs(order_ids)
-        
-        for order in orders:
+        with connect_db('sold.db') as conn:
+            cur = conn.cursor()
+
+            # Ensure table exists with necessary columns
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS orders (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    order_id TEXT UNIQUE,
+                    item_id TEXT,
+                    barcode TEXT,
+                    title TEXT,
+                    quantity INTEGER,
+                    price REAL,
+                    shipped_time TEXT,
+                    paid_time TEXT,
+                    image TEXT,
+                    rackupdated INTEGER DEFAULT 0,
+                    removal_cancelled INTEGER DEFAULT 0,
+                    store TEXT DEFAULT 'amazon'
+                )
+            ''')
+
+            # Add store column if it doesn't exist
             try:
-                amazon_order_id = order.get('AmazonOrderId')
-                purchase_date = order.get('PurchaseDate')
-                last_update_date = order.get('LastUpdateDate')
-                order_status = order.get('OrderStatus')
-                
-                # Extract shipping address (limited by Amazon API - no name or street)
-                shipping_address = order.get('ShippingAddress', {})
-                shipping_city = shipping_address.get('City', '')
-                shipping_state = shipping_address.get('StateOrRegion', '')
-                shipping_postal = shipping_address.get('PostalCode', '')
-                shipping_country = shipping_address.get('CountryCode', '')
-                
-                # Amazon doesn't provide buyer name or street address for privacy
-                # We'll use "Amazon Buyer" as placeholder for shipping_name
-                shipping_name = "Amazon Buyer"
-                
-                # Skip pending/cancelled orders
-                if order_status in ['Pending', 'Canceled']:
-                    continue
-                
-                # Get order items
-                order_items_api_calls += 1
-                items = self.get_order_items(amazon_order_id)
-                
-                for item in items:
-                    asin = item.get('ASIN')
-                    sku = item.get('SellerSKU')
-                    title = item.get('Title')
-                    quantity = item.get('QuantityOrdered', 1)
-                    price = float(item.get('ItemPrice', {}).get('Amount', 0))
-                    
-                    # Get actual financial data from Financial Events API
-                    order_financial_data = financial_data.get(amazon_order_id, {})
-                    
-                    # Get actual shipping cost - Priority order:
-                    # 1. From Financial Events (PostageBilling_Postage adjustments)
-                    # 2. From Buy Shipping API
-                    # 3. From Orders API (customer's charge - often $0 for free shipping)
-                    shipping_cost = 0
-                    if order_financial_data and order_financial_data.get('shipping_cost', 0) > 0:
-                        shipping_cost = order_financial_data.get('shipping_cost', 0)
-                        orders_with_shipping_costs += 1
-                    elif shipping_costs.get(amazon_order_id, 0) > 0:
-                        shipping_cost = shipping_costs.get(amazon_order_id, 0)
-                        orders_with_shipping_costs += 1
-                    else:
-                        # Fallback to Orders API
-                        shipping_price = item.get('ShippingPrice', {})
-                        shipping_cost = float(shipping_price.get('Amount', 0)) if shipping_price else 0
-                    
-                    # Use actual fees and taxes from Financial Events API (or fallback to estimates)
-                    if order_financial_data:
-                        seller_fee = order_financial_data.get('seller_fee', 0)
-                        # Use Financial Events tax if available, otherwise Orders API
-                        taxes = order_financial_data.get('taxes', 0)
-                        if taxes == 0:
+                cur.execute('ALTER TABLE orders ADD COLUMN store TEXT DEFAULT "amazon"')
+                conn.commit()
+            except Exception:
+                pass
+
+            synced_count = 0
+            order_items_api_calls = 0
+            orders_with_actual_fees = 0
+            orders_with_estimated_fees = 0
+            orders_with_shipping_costs = 0
+
+            # Fetch financial events (fees, shipping, taxes) for these orders
+            print(f"\n📊 Fetching financial data (fees, shipping, taxes) - {financial_days_back} day window...")
+            financial_data = self.get_financial_events(days_back=financial_days_back)
+
+            # Get all order IDs to fetch shipping costs
+            order_ids = [order.get('AmazonOrderId') for order in orders]
+
+            # Fetch shipping costs from Buy Shipping API
+            print("\n🚚 Fetching shipping costs from Buy Shipping API...")
+            shipping_costs = self.get_shipping_costs(order_ids)
+
+            for order in orders:
+                try:
+                    amazon_order_id = order.get('AmazonOrderId')
+                    purchase_date = order.get('PurchaseDate')
+                    last_update_date = order.get('LastUpdateDate')
+                    order_status = order.get('OrderStatus')
+
+                    # Extract shipping address (limited by Amazon API - no name or street)
+                    shipping_address = order.get('ShippingAddress', {})
+                    shipping_city = shipping_address.get('City', '')
+                    shipping_state = shipping_address.get('StateOrRegion', '')
+                    shipping_postal = shipping_address.get('PostalCode', '')
+                    shipping_country = shipping_address.get('CountryCode', '')
+
+                    # Amazon doesn't provide buyer name or street address for privacy
+                    # We'll use "Amazon Buyer" as placeholder for shipping_name
+                    shipping_name = "Amazon Buyer"
+
+                    # Skip pending/cancelled orders
+                    if order_status in ['Pending', 'Canceled']:
+                        continue
+
+                    # Get order items
+                    order_items_api_calls += 1
+                    items = self.get_order_items(amazon_order_id)
+
+                    for item in items:
+                        asin = item.get('ASIN')
+                        sku = item.get('SellerSKU')
+                        title = item.get('Title')
+                        quantity = item.get('QuantityOrdered', 1)
+                        price = float(item.get('ItemPrice', {}).get('Amount', 0))
+
+                        # Get actual financial data from Financial Events API
+                        order_financial_data = financial_data.get(amazon_order_id, {})
+
+                        # Get actual shipping cost - Priority order:
+                        # 1. From Financial Events (PostageBilling_Postage adjustments)
+                        # 2. From Buy Shipping API
+                        # 3. From Orders API (customer's charge - often $0 for free shipping)
+                        shipping_cost = 0
+                        if order_financial_data and order_financial_data.get('shipping_cost', 0) > 0:
+                            shipping_cost = order_financial_data.get('shipping_cost', 0)
+                            orders_with_shipping_costs += 1
+                        elif shipping_costs.get(amazon_order_id, 0) > 0:
+                            shipping_cost = shipping_costs.get(amazon_order_id, 0)
+                            orders_with_shipping_costs += 1
+                        else:
+                            # Fallback to Orders API
+                            shipping_price = item.get('ShippingPrice', {})
+                            shipping_cost = float(shipping_price.get('Amount', 0)) if shipping_price else 0
+
+                        # Use actual fees and taxes from Financial Events API (or fallback to estimates)
+                        if order_financial_data:
+                            seller_fee = order_financial_data.get('seller_fee', 0)
+                            # Use Financial Events tax if available, otherwise Orders API
+                            taxes = order_financial_data.get('taxes', 0)
+                            if taxes == 0:
+                                item_tax = item.get('ItemTax', {})
+                                taxes = float(item_tax.get('Amount', 0)) if item_tax else 0
+                            orders_with_actual_fees += 1
+                            print(f"  💰 Using actual financial data for {amazon_order_id}: Fee=${seller_fee:.2f}, Ship=${shipping_cost:.2f}, Tax=${taxes:.2f}")
+                        else:
+                            # Fallback to estimates for fees
+                            seller_fee = price * 0.15
+
+                            # Get tax from Orders API
                             item_tax = item.get('ItemTax', {})
                             taxes = float(item_tax.get('Amount', 0)) if item_tax else 0
-                        orders_with_actual_fees += 1
-                        print(f"  💰 Using actual financial data for {amazon_order_id}: Fee=${seller_fee:.2f}, Ship=${shipping_cost:.2f}, Tax=${taxes:.2f}")
-                    else:
-                        # Fallback to estimates for fees
-                        seller_fee = price * 0.15
-                        
-                        # Get tax from Orders API
-                        item_tax = item.get('ItemTax', {})
-                        taxes = float(item_tax.get('Amount', 0)) if item_tax else 0
-                        
-                        orders_with_estimated_fees += 1
-                        print(f"  ⚠️  Using estimated fees for {amazon_order_id}: Fee=${seller_fee:.2f} (15% est), Ship=${shipping_cost:.2f}, Tax=${taxes:.2f}")
-                    
-                    # Try to find barcode and image from amazonStore.db
-                    barcode = None
-                    image = None
-                    try:
-                        store_conn = sqlite3.connect('amazonStore.db')
-                        store_cur = store_conn.cursor()
-                        store_cur.execute('SELECT UPC, IMAGE FROM ITEMS WHERE ASIN = ? OR SKU = ?', (asin, sku))
-                        result = store_cur.fetchone()
-                        if result:
-                            potential_barcode = result[0]
-                            # Only use this barcode if it's NOT an ASIN format
-                            # ASIN format: starts with B0 and is 10 characters (e.g., B0XXXXXXXXX)
-                            if potential_barcode and not (str(potential_barcode).startswith('B0') and len(str(potential_barcode)) == 10):
-                                barcode = potential_barcode
-                            # Get image from amazonStore if available
-                            if result[1] and str(result[1]).lower() not in ['none', 'null', '']:
-                                image = result[1]
-                        store_cur.close()
-                        store_conn.close()
-                    except:
-                        pass
-                    
-                    # Fallback to rawbol.db if we have barcode but no image yet
-                    if barcode and not image:
+
+                            orders_with_estimated_fees += 1
+                            print(f"  ⚠️  Using estimated fees for {amazon_order_id}: Fee=${seller_fee:.2f} (15% est), Ship=${shipping_cost:.2f}, Tax=${taxes:.2f}")
+
+                        # Try to find barcode and image from amazonStore.db
+                        barcode = None
+                        image = None
                         try:
-                            rawbol_conn = sqlite3.connect('rawbol.db')
-                            rawbol_cur = rawbol_conn.cursor()
-                            
-                            # Try exact match first
-                            rawbol_cur.execute('SELECT image_url FROM raw_bol_items WHERE upc = ?', (barcode,))
-                            result = rawbol_cur.fetchone()
-                            
-                            # If not found and barcode has leading zeros, try without them
-                            if not result and barcode.startswith('0'):
-                                barcode_no_zero = barcode.lstrip('0')
-                                rawbol_cur.execute('SELECT image_url FROM raw_bol_items WHERE upc = ?', (barcode_no_zero,))
-                                result = rawbol_cur.fetchone()
-                            
-                            if result and result[0]:
-                                # Skip 'nan' values
-                                img_val = str(result[0])
-                                if img_val.lower() not in ['nan', 'none', 'null', '']:
-                                    image = img_val
-                            rawbol_conn.close()
-                        except:
+                            with connect_db('amazonStore.db') as store_conn:
+                                store_cur = store_conn.cursor()
+                                store_cur.execute('SELECT UPC, IMAGE FROM ITEMS WHERE ASIN = ? OR SKU = ?', (asin, sku))
+                                result = store_cur.fetchone()
+                                if result:
+                                    potential_barcode = result[0]
+                                    # Only use this barcode if it's NOT an ASIN format
+                                    # ASIN format: starts with B0 and is 10 characters (e.g., B0XXXXXXXXX)
+                                    if potential_barcode and not (str(potential_barcode).startswith('B0') and len(str(potential_barcode)) == 10):
+                                        barcode = potential_barcode
+                                    # Get image from amazonStore if available
+                                    if result[1] and str(result[1]).lower() not in ['none', 'null', '']:
+                                        image = result[1]
+                        except Exception:
                             pass
-                    
-                    # Determine shipped time
-                    shipped_time = None
-                    if order_status == 'Shipped':
-                        shipped_time = last_update_date
-                    
-                    # Check if order already exists
-                    cur.execute('SELECT id, barcode FROM orders WHERE order_id = ?', (amazon_order_id,))
-                    existing = cur.fetchone()
-                    
-                    if existing:
-                        existing_barcode = existing[1]
-                        
-                        # Determine which barcode to use:
-                        # - If we found a new valid barcode (UPC), use it
-                        # - If no new barcode found but existing has one, keep existing
-                        # - If existing is an ASIN and we have nothing better, keep existing
-                        final_barcode = barcode if barcode else existing_barcode
-                        
-                        # Update existing order
-                        cur.execute('''
-                            UPDATE orders 
-                            SET barcode = ?, title = ?, quantity = ?, price = ?, 
-                                shipped_time = ?, paid_time = ?, image = ?, store = 'amazon',
-                                shipping_name = ?, shipping_city = ?, shipping_state = ?, 
-                                shipping_postal_code = ?, shipping_country = ?, 
-                                shipping_cost = ?, seller_fee = ?, taxes = ?
-                            WHERE order_id = ?
-                        ''', (final_barcode, title, quantity, price, shipped_time, purchase_date, image,
-                              shipping_name, shipping_city, shipping_state, shipping_postal, shipping_country,
-                              shipping_cost, seller_fee, taxes,
-                              amazon_order_id))
-                    else:
-                        # Insert new order
-                        cur.execute('''
-                            INSERT INTO orders 
-                            (order_id, item_id, barcode, title, quantity, price, shipped_time, paid_time, image, store,
-                             shipping_name, shipping_city, shipping_state, shipping_postal_code, shipping_country,
-                             shipping_cost, seller_fee, taxes)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'amazon', ?, ?, ?, ?, ?, ?, ?, ?)
-                        ''', (amazon_order_id, asin, barcode, title, quantity, price, shipped_time, purchase_date, image,
-                              shipping_name, shipping_city, shipping_state, shipping_postal, shipping_country,
-                              shipping_cost, seller_fee, taxes))
-                        synced_count += 1
-                
-                conn.commit()
-                
-            except Exception as e:
-                print(f"⚠️ Error syncing order {amazon_order_id}: {e}")
-                continue
-        
-        conn.close()
+
+                        # Fallback to rawbol.db if we have barcode but no image yet
+                        if barcode and not image:
+                            try:
+                                with connect_db('rawbol.db') as rawbol_conn:
+                                    rawbol_cur = rawbol_conn.cursor()
+
+                                    # Try exact match first
+                                    rawbol_cur.execute('SELECT image_url FROM raw_bol_items WHERE upc = ?', (barcode,))
+                                    result = rawbol_cur.fetchone()
+
+                                    # If not found and barcode has leading zeros, try without them
+                                    if not result and barcode.startswith('0'):
+                                        barcode_no_zero = barcode.lstrip('0')
+                                        rawbol_cur.execute('SELECT image_url FROM raw_bol_items WHERE upc = ?', (barcode_no_zero,))
+                                        result = rawbol_cur.fetchone()
+
+                                    if result and result[0]:
+                                        # Skip 'nan' values
+                                        img_val = str(result[0])
+                                        if img_val.lower() not in ['nan', 'none', 'null', '']:
+                                            image = img_val
+                            except Exception:
+                                pass
+
+                        # Determine shipped time
+                        shipped_time = None
+                        if order_status == 'Shipped':
+                            shipped_time = last_update_date
+
+                        # Check if order already exists
+                        cur.execute('SELECT id, barcode FROM orders WHERE order_id = ?', (amazon_order_id,))
+                        existing = cur.fetchone()
+
+                        if existing:
+                            existing_barcode = existing[1]
+
+                            # Determine which barcode to use:
+                            # - If we found a new valid barcode (UPC), use it
+                            # - If no new barcode found but existing has one, keep existing
+                            # - If existing is an ASIN and we have nothing better, keep existing
+                            final_barcode = barcode if barcode else existing_barcode
+
+                            # Update existing order
+                            cur.execute('''
+                                UPDATE orders
+                                SET barcode = ?, title = ?, quantity = ?, price = ?,
+                                    shipped_time = ?, paid_time = ?, image = ?, store = 'amazon',
+                                    shipping_name = ?, shipping_city = ?, shipping_state = ?,
+                                    shipping_postal_code = ?, shipping_country = ?,
+                                    shipping_cost = ?, seller_fee = ?, taxes = ?
+                                WHERE order_id = ?
+                            ''', (final_barcode, title, quantity, price, shipped_time, purchase_date, image,
+                                  shipping_name, shipping_city, shipping_state, shipping_postal, shipping_country,
+                                  shipping_cost, seller_fee, taxes,
+                                  amazon_order_id))
+                        else:
+                            # Insert new order
+                            cur.execute('''
+                                INSERT INTO orders
+                                (order_id, item_id, barcode, title, quantity, price, shipped_time, paid_time, image, store,
+                                 shipping_name, shipping_city, shipping_state, shipping_postal_code, shipping_country,
+                                 shipping_cost, seller_fee, taxes)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'amazon', ?, ?, ?, ?, ?, ?, ?, ?)
+                            ''', (amazon_order_id, asin, barcode, title, quantity, price, shipped_time, purchase_date, image,
+                                  shipping_name, shipping_city, shipping_state, shipping_postal, shipping_country,
+                                  shipping_cost, seller_fee, taxes))
+                            synced_count += 1
+
+                    conn.commit()
+
+                except Exception as e:
+                    print(f"⚠️ Error syncing order {amazon_order_id}: {e}")
+                    continue
         print(f"✅ Synced {synced_count} Amazon orders to database")
         if order_items_api_calls > 0:
             print(f"   Order Items API calls: {order_items_api_calls} (rate limited)")
@@ -871,220 +867,204 @@ class AmazonManager:
         print("🔄 Starting Amazon listings sync...\n")
         
         # Connect to amazonStore.db first to check last sync
-        conn = sqlite3.connect('amazonStore.db')
-        cur = conn.cursor()
-        
-        # Create table if it doesn't exist
-        cur.execute('''
-            CREATE TABLE IF NOT EXISTS ITEMS (
-                ID INTEGER PRIMARY KEY AUTOINCREMENT,
-                ASIN TEXT UNIQUE,
-                SKU TEXT,
-                TITLE TEXT,
-                PRICE REAL,
-                QUANTITY INTEGER,
-                STATUS TEXT,
-                IMAGE TEXT,
-                UPC TEXT,
-                CONDITION TEXT,
-                FULFILLMENT_CHANNEL TEXT,
-                LAST_UPDATED TEXT,
-                upc_fetch_attempted INTEGER DEFAULT 0,
-                upc_last_fetch_date TEXT
-            )
-        ''')
-        
-        # Create sync metadata table to track quota usage
-        cur.execute('''
-            CREATE TABLE IF NOT EXISTS sync_metadata (
-                key TEXT PRIMARY KEY,
-                value TEXT,
-                updated_at TEXT
-            )
-        ''')
-        conn.commit()
-        
-        # Check last successful sync time to avoid unnecessary API calls
-        cur.execute('SELECT value, updated_at FROM sync_metadata WHERE key = ?', ('last_listings_sync',))
-        last_sync_row = cur.fetchone()
-        
-        if last_sync_row:
-            last_sync_time = datetime.fromisoformat(last_sync_row[1])
-            time_since_sync = (datetime.now() - last_sync_time).total_seconds() / 3600  # hours
-            
-            # Only sync if it's been more than 4 hours (reduce quota usage)
-            if time_since_sync < 4:
-                print(f"ℹ️ Last sync was {time_since_sync:.1f} hours ago - skipping to preserve quota")
-                print(f"   Next sync available in {4 - time_since_sync:.1f} hours")
-                conn.close()
+        with connect_db('amazonStore.db') as conn:
+            cur = conn.cursor()
+
+            # Create table if it doesn't exist
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS ITEMS (
+                    ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ASIN TEXT UNIQUE,
+                    SKU TEXT,
+                    TITLE TEXT,
+                    PRICE REAL,
+                    QUANTITY INTEGER,
+                    STATUS TEXT,
+                    IMAGE TEXT,
+                    UPC TEXT,
+                    CONDITION TEXT,
+                    FULFILLMENT_CHANNEL TEXT,
+                    LAST_UPDATED TEXT,
+                    upc_fetch_attempted INTEGER DEFAULT 0,
+                    upc_last_fetch_date TEXT
+                )
+            ''')
+
+            # Create sync metadata table to track quota usage
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS sync_metadata (
+                    key TEXT PRIMARY KEY,
+                    value TEXT,
+                    updated_at TEXT
+                )
+            ''')
+            conn.commit()
+
+            # Check last successful sync time to avoid unnecessary API calls
+            cur.execute('SELECT value, updated_at FROM sync_metadata WHERE key = ?', ('last_listings_sync',))
+            last_sync_row = cur.fetchone()
+
+            if last_sync_row:
+                last_sync_time = datetime.fromisoformat(last_sync_row[1])
+                time_since_sync = (datetime.now() - last_sync_time).total_seconds() / 3600  # hours
+
+                # Only sync if it's been more than 4 hours (reduce quota usage)
+                if time_since_sync < 4:
+                    print(f"ℹ️ Last sync was {time_since_sync:.1f} hours ago - skipping to preserve quota")
+                    print(f"   Next sync available in {4 - time_since_sync:.1f} hours")
+                    return 0
+
+            # Fetch listings from Amazon
+            listings = self.get_active_listings()
+
+            # Handle quota exceeded
+            if listings is None:
+                print("⚠️ Amazon listings sync skipped due to quota limits")
+                # Record quota exceeded event
+                cur.execute('''
+                    INSERT OR REPLACE INTO sync_metadata (key, value, updated_at)
+                    VALUES (?, ?, ?)
+                ''', ('last_quota_exceeded', 'listings_report', datetime.utcnow().isoformat()))
+                conn.commit()
+                return -1  # Signal quota exceeded
+
+            if not listings:
+                print("ℹ️ No listings to sync")
                 return 0
         
-        # Fetch listings from Amazon
-        listings = self.get_active_listings()
+            synced_count = 0
+            updated_count = 0
+            skipped_count = 0
+            catalog_api_calls = 0  # Track Catalog API usage
+
+            for listing in listings:
+                try:
+                    asin = listing.get('asin', '').strip()
+                    sku = listing.get('sku', '').strip()
+
+                    if not asin:
+                        continue
+
+                    # Parse price and quantity
+                    try:
+                        price = float(listing.get('price', 0) or 0)
+                    except Exception:
+                        price = 0.0
+
+                    try:
+                        quantity = int(listing.get('quantity', 0) or 0)
+                    except Exception:
+                        quantity = 0
+
+                    # Get UPC - from product-id column
+                    upc_from_report = listing.get('upc', '').strip()
+
+                    # UPC PRESERVATION: Check existing UPC before overwriting
+                    # If we already have a valid UPC (not ASIN, status=3), preserve it
+                    cur.execute('SELECT UPC, upc_fetch_attempted FROM ITEMS WHERE ASIN = ?', (asin,))
+                    existing_item = cur.fetchone()
+                    existing_upc = existing_item[0] if existing_item else None
+                    existing_status = existing_item[1] if existing_item and len(existing_item) > 1 else None
+
+                    # Determine final UPC to use:
+                    # 1. If existing UPC is valid (not ASIN and successfully fetched), keep it
+                    # 2. Otherwise, use report UPC if it's valid (not ASIN)
+                    # 3. Otherwise, keep existing UPC or fallback to ASIN
+                    if existing_upc and existing_upc != asin and existing_status == 3:
+                        upc = existing_upc
+                    elif upc_from_report and upc_from_report != asin:
+                        upc = upc_from_report
+                    elif existing_upc:
+                        upc = existing_upc
+                    else:
+                        upc = asin
+
+                    # Get image: Try Amazon Catalog API first, then fallback to rawbol.db
+                    image_url = listing.get('image', '')
+                    if not image_url:
+                        try:
+                            catalog_api_calls += 1
+                            catalog_data = self.get_catalog_item(asin)
+                            if catalog_data and 'images' in catalog_data:
+                                for image_group in catalog_data['images']:
+                                    if 'images' in image_group:
+                                        for img in image_group['images']:
+                                            if img.get('variant') == 'MAIN' and img.get('height', 0) >= 500:
+                                                image_url = img.get('link', '')
+                                                break
+                                        if image_url:
+                                            break
+                        except Exception as e:
+                            print(f"Could not fetch Amazon image for {asin}: {e}")
+
+                    # Fallback to rawbol.db if still no image and we have a UPC
+                    if upc and not image_url:
+                        try:
+                            with connect_db('rawbol.db') as rawbol_conn:
+                                rawbol_cur = rawbol_conn.cursor()
+
+                                rawbol_cur.execute("SELECT image_url FROM raw_bol_items WHERE upc = ?", (upc,))
+                                rawbol_row = rawbol_cur.fetchone()
+
+                                if not rawbol_row and upc.startswith('0'):
+                                    upc_no_zero = upc.lstrip('0')
+                                    rawbol_cur.execute("SELECT image_url FROM raw_bol_items WHERE upc = ?", (upc_no_zero,))
+                                    rawbol_row = rawbol_cur.fetchone()
+
+                                if rawbol_row and rawbol_row[0]:
+                                    img_val = str(rawbol_row[0])
+                                    if img_val.lower() not in ['nan', 'none', '', 'null']:
+                                        image_url = img_val
+                        except Exception as e:
+                            print(f"Could not lookup image for UPC {upc}: {e}")
+
+                    # Check if listing exists
+                    cur.execute('SELECT ID FROM ITEMS WHERE ASIN = ?', (asin,))
+                    existing = cur.fetchone()
+
+                    current_time = datetime.utcnow().isoformat() + 'Z'
+
+                    if existing:
+                        cur.execute('''
+                            UPDATE ITEMS
+                            SET SKU = ?, TITLE = ?, PRICE = ?, QUANTITY = ?,
+                                STATUS = ?, IMAGE = ?, UPC = ?, CONDITION = ?,
+                                FULFILLMENT_CHANNEL = ?, LAST_UPDATED = ?
+                            WHERE ASIN = ?
+                        ''', (
+                            sku, listing.get('title', ''), price, quantity,
+                            listing.get('status', ''), image_url,
+                            upc, listing.get('condition', ''),
+                            listing.get('fulfillment_channel', ''), current_time,
+                            asin
+                        ))
+                        updated_count += 1
+                    else:
+                        cur.execute('''
+                            INSERT INTO ITEMS
+                            (ASIN, SKU, TITLE, PRICE, QUANTITY, STATUS, IMAGE, UPC, CONDITION, FULFILLMENT_CHANNEL, LAST_UPDATED)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (
+                            asin, sku, listing.get('title', ''), price, quantity,
+                            listing.get('status', ''), image_url,
+                            upc, listing.get('condition', ''),
+                            listing.get('fulfillment_channel', ''), current_time
+                        ))
+                        synced_count += 1
+
+                    conn.commit()
+
+                except Exception as e:
+                    print(f"Error syncing listing {listing.get('asin')}: {e}")
+                    continue
         
-        # Handle quota exceeded
-        if listings is None:
-            print("⚠️ Amazon listings sync skipped due to quota limits")
-            # Record quota exceeded event
+            # Record successful sync
             cur.execute('''
                 INSERT OR REPLACE INTO sync_metadata (key, value, updated_at)
                 VALUES (?, ?, ?)
-            ''', ('last_quota_exceeded', 'listings_report', datetime.utcnow().isoformat()))
+            ''', ('last_listings_sync', str(synced_count + updated_count), datetime.utcnow().isoformat()))
             conn.commit()
-            conn.close()
-            return -1  # Signal quota exceeded
-        
-        if not listings:
-            print("ℹ️ No listings to sync")
-            conn.close()
-            return 0
-        
-        synced_count = 0
-        updated_count = 0
-        skipped_count = 0
-        catalog_api_calls = 0  # Track Catalog API usage
-        
-        for listing in listings:
-            try:
-                asin = listing.get('asin', '').strip()
-                sku = listing.get('sku', '').strip()
-                
-                if not asin:
-                    continue
-                
-                # Parse price and quantity
-                try:
-                    price = float(listing.get('price', 0) or 0)
-                except:
-                    price = 0.0
-                
-                try:
-                    quantity = int(listing.get('quantity', 0) or 0)
-                except:
-                    quantity = 0
-                
-                # Get UPC - from product-id column
-                upc_from_report = listing.get('upc', '').strip()
-                
-                # 🛡️ UPC PRESERVATION: Check existing UPC before overwriting
-                # If we already have a valid UPC (not ASIN, status=3), preserve it
-                cur.execute('SELECT UPC, upc_fetch_attempted FROM ITEMS WHERE ASIN = ?', (asin,))
-                existing_item = cur.fetchone()
-                existing_upc = existing_item[0] if existing_item else None
-                existing_status = existing_item[1] if existing_item and len(existing_item) > 1 else None
-                
-                # Determine final UPC to use:
-                # 1. If existing UPC is valid (not ASIN and successfully fetched), keep it
-                # 2. Otherwise, use report UPC if it's valid (not ASIN)
-                # 3. Otherwise, keep existing UPC or fallback to ASIN
-                if existing_upc and existing_upc != asin and existing_status == 3:
-                    # Preserve successfully fetched UPC
-                    upc = existing_upc
-                elif upc_from_report and upc_from_report != asin:
-                    # Use report UPC if valid
-                    upc = upc_from_report
-                elif existing_upc:
-                    # Keep whatever was there before
-                    upc = existing_upc
-                else:
-                    # No valid UPC anywhere, use ASIN as fallback
-                    upc = asin
-                
-                # Get image: Try Amazon Catalog API first, then fallback to rawbol.db
-                image_url = listing.get('image', '')
-                if not image_url:
-                    try:
-                        # Fetch from Amazon Catalog API (rate limited)
-                        catalog_api_calls += 1
-                        catalog_data = self.get_catalog_item(asin)
-                        if catalog_data and 'images' in catalog_data:
-                            # Extract the MAIN variant image with largest size
-                            for image_group in catalog_data['images']:
-                                if 'images' in image_group:
-                                    for img in image_group['images']:
-                                        if img.get('variant') == 'MAIN' and img.get('height', 0) >= 500:
-                                            image_url = img.get('link', '')
-                                            break
-                                    if image_url:
-                                        break
-                    except Exception as e:
-                        print(f"⚠️ Could not fetch Amazon image for {asin}: {e}")
-                
-                # Fallback to rawbol.db if still no image and we have a UPC
-                if upc and not image_url:
-                    try:
-                        rawbol_conn = sqlite3.connect('rawbol.db')
-                        rawbol_cur = rawbol_conn.cursor()
-                        
-                        # Try exact match first
-                        rawbol_cur.execute("SELECT image_url FROM raw_bol_items WHERE upc = ?", (upc,))
-                        rawbol_row = rawbol_cur.fetchone()
-                        
-                        # If not found and UPC has leading zeros, try without them
-                        if not rawbol_row and upc.startswith('0'):
-                            upc_no_zero = upc.lstrip('0')
-                            rawbol_cur.execute("SELECT image_url FROM raw_bol_items WHERE upc = ?", (upc_no_zero,))
-                            rawbol_row = rawbol_cur.fetchone()
-                        
-                        if rawbol_row and rawbol_row[0]:
-                            # Skip if image_url is 'nan' string or similar invalid values
-                            img_val = str(rawbol_row[0])
-                            if img_val.lower() not in ['nan', 'none', '', 'null']:
-                                image_url = img_val
-                        rawbol_conn.close()
-                    except Exception as e:
-                        print(f"⚠️ Could not lookup image for UPC {upc}: {e}")
-                
-                # Check if listing exists
-                cur.execute('SELECT ID FROM ITEMS WHERE ASIN = ?', (asin,))
-                existing = cur.fetchone()
-                
-                current_time = datetime.utcnow().isoformat() + 'Z'
-                
-                if existing:
-                    # Update existing listing
-                    cur.execute('''
-                        UPDATE ITEMS 
-                        SET SKU = ?, TITLE = ?, PRICE = ?, QUANTITY = ?, 
-                            STATUS = ?, IMAGE = ?, UPC = ?, CONDITION = ?, 
-                            FULFILLMENT_CHANNEL = ?, LAST_UPDATED = ?
-                        WHERE ASIN = ?
-                    ''', (
-                        sku, listing.get('title', ''), price, quantity,
-                        listing.get('status', ''), image_url,
-                        upc, listing.get('condition', ''),
-                        listing.get('fulfillment_channel', ''), current_time,
-                        asin
-                    ))
-                    updated_count += 1
-                else:
-                    # Insert new listing
-                    cur.execute('''
-                        INSERT INTO ITEMS 
-                        (ASIN, SKU, TITLE, PRICE, QUANTITY, STATUS, IMAGE, UPC, CONDITION, FULFILLMENT_CHANNEL, LAST_UPDATED)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (
-                        asin, sku, listing.get('title', ''), price, quantity,
-                        listing.get('status', ''), image_url,
-                        upc, listing.get('condition', ''),
-                        listing.get('fulfillment_channel', ''), current_time
-                    ))
-                    synced_count += 1
-                
-                conn.commit()
-                
-            except Exception as e:
-                print(f"⚠️ Error syncing listing {listing.get('asin')}: {e}")
-                continue
-        
-        # Record successful sync
-        cur.execute('''
-            INSERT OR REPLACE INTO sync_metadata (key, value, updated_at)
-            VALUES (?, ?, ?)
-        ''', ('last_listings_sync', str(synced_count + updated_count), datetime.utcnow().isoformat()))
-        conn.commit()
-        conn.close()
-        
+
         print(f"\n✅ Amazon listings sync complete:")
         print(f"   - New: {synced_count} items")
         print(f"   - Updated: {updated_count} items")
@@ -1322,59 +1302,55 @@ class AmazonManager:
             print("ℹ️  No returns to sync")
             return 0
         
-        conn = sqlite3.connect('sold.db')
-        cur = conn.cursor()
-        
-        synced_count = 0
-        
-        for return_data in returns:
-            order_id = return_data['order_id']
-            
-            # Find original order in sold.db
-            cur.execute('''
-                SELECT id, barcode, title, price, shipping_cost, seller_fee, lot_number, location
-                FROM orders
-                WHERE order_id = ? AND store = 'amazon'
-            ''', (order_id,))
-            
-            original_order = cur.fetchone()
-            
-            if not original_order:
-                print(f"⚠️  Original order not found for return: {order_id}")
-                continue
-            
-            original_order_id, barcode, title, original_price, original_shipping, original_fee, lot_number, location = original_order
-            
-            # Calculate total return cost: refund + original shipping + return shipping
-            total_return_cost = (
-                return_data['refund_amount'] +
-                (original_shipping or 0) +
-                return_data['return_shipping_cost']
-            )
-            
-            # Insert or update return
-            cur.execute('''
-                INSERT OR REPLACE INTO returns (
-                    original_order_id, order_id, item_id, barcode, title, quantity,
-                    original_price, refund_amount, original_shipping_cost, return_shipping_cost,
-                    original_seller_fee, seller_fee_refund,
-                    return_date, store, lot_number, location
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                original_order_id, order_id, return_data['item_id'], barcode, title,
-                return_data['quantity'], original_price, return_data['refund_amount'],
-                original_shipping, return_data['return_shipping_cost'],
-                original_fee, return_data['seller_fee_refund'],
-                return_data['return_date'], 'amazon', lot_number, location
-            ))
-            
-            synced_count += 1
-            print(f"  ✅ {order_id}: ${total_return_cost:.2f} total return cost")
-        
-        conn.commit()
-        conn.close()
-        
-        print(f"\n✅ Synced {synced_count} returns to database")
+        with connect_db('sold.db') as conn:
+            cur = conn.cursor()
+
+            synced_count = 0
+
+            for return_data in returns:
+                order_id = return_data['order_id']
+
+                cur.execute('''
+                    SELECT id, barcode, title, price, shipping_cost, seller_fee, lot_number, location
+                    FROM orders
+                    WHERE order_id = ? AND store = 'amazon'
+                ''', (order_id,))
+
+                original_order = cur.fetchone()
+
+                if not original_order:
+                    print(f"Original order not found for return: {order_id}")
+                    continue
+
+                original_order_id, barcode, title, original_price, original_shipping, original_fee, lot_number, location = original_order
+
+                # Calculate total return cost: refund + original shipping + return shipping
+                total_return_cost = (
+                    return_data['refund_amount'] +
+                    (original_shipping or 0) +
+                    return_data['return_shipping_cost']
+                )
+
+                # Insert or update return
+                cur.execute('''
+                    INSERT OR REPLACE INTO returns (
+                        original_order_id, order_id, item_id, barcode, title, quantity,
+                        original_price, refund_amount, original_shipping_cost, return_shipping_cost,
+                        original_seller_fee, seller_fee_refund,
+                        return_date, store, lot_number, location
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    original_order_id, order_id, return_data['item_id'], barcode, title,
+                    return_data['quantity'], original_price, return_data['refund_amount'],
+                    original_shipping, return_data['return_shipping_cost'],
+                    original_fee, return_data['seller_fee_refund'],
+                    return_data['return_date'], 'amazon', lot_number, location
+                ))
+
+                synced_count += 1
+                print(f"  {order_id}: ${total_return_cost:.2f} total return cost")
+
+        print(f"\nSynced {synced_count} returns to database")
         return synced_count
 
     def sync_settlements_to_db(self, days_back=90):
@@ -1407,46 +1383,43 @@ class AmazonManager:
             print(f"📊 Found {len(groups)} settlements")
             
             # Connect to database
-            conn = sqlite3.connect('sold.db')
-            cur = conn.cursor()
-            
-            synced_count = 0
-            
-            for group in groups:
-                settlement_id = group.get('FinancialEventGroupId')
-                start_date = group.get('FinancialEventGroupStart')
-                end_date = group.get('FinancialEventGroupEnd')
-                status = group.get('ProcessingStatus', 'Unknown')
-                
-                # Get payout amount
-                original_total = group.get('OriginalTotal', {})
-                converted_total = group.get('ConvertedTotal', {})
-                
-                amount = float(converted_total.get('CurrencyAmount', original_total.get('CurrencyAmount', 0)))
-                currency = converted_total.get('CurrencyCode', original_total.get('CurrencyCode', 'USD'))
-                
-                # Determine payout date (use end_date for closed settlements)
-                payout_date = end_date if status == 'Closed' else None
-                
-                # Insert or update settlement
-                cur.execute('''
-                    INSERT INTO payouts (store, settlement_id, start_date, end_date, payout_date, amount, currency, status, synced_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                    ON CONFLICT(settlement_id) DO UPDATE SET
-                        end_date = excluded.end_date,
-                        payout_date = excluded.payout_date,
-                        amount = excluded.amount,
-                        status = excluded.status,
-                        synced_at = CURRENT_TIMESTAMP
-                ''', ('amazon', settlement_id, start_date, end_date, payout_date, amount, currency, status))
-                
-                synced_count += 1
-                print(f"  ✅ {settlement_id[:20]}...: {currency} ${amount:.2f} ({status})")
-            
-            conn.commit()
-            conn.close()
-            
-            print(f"\n✅ Synced {synced_count} settlements to database")
+            with connect_db('sold.db') as conn:
+                cur = conn.cursor()
+
+                synced_count = 0
+
+                for group in groups:
+                    settlement_id = group.get('FinancialEventGroupId')
+                    start_date = group.get('FinancialEventGroupStart')
+                    end_date = group.get('FinancialEventGroupEnd')
+                    status = group.get('ProcessingStatus', 'Unknown')
+
+                    # Get payout amount
+                    original_total = group.get('OriginalTotal', {})
+                    converted_total = group.get('ConvertedTotal', {})
+
+                    amount = float(converted_total.get('CurrencyAmount', original_total.get('CurrencyAmount', 0)))
+                    currency = converted_total.get('CurrencyCode', original_total.get('CurrencyCode', 'USD'))
+
+                    # Determine payout date (use end_date for closed settlements)
+                    payout_date = end_date if status == 'Closed' else None
+
+                    # Insert or update settlement
+                    cur.execute('''
+                        INSERT INTO payouts (store, settlement_id, start_date, end_date, payout_date, amount, currency, status, synced_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                        ON CONFLICT(settlement_id) DO UPDATE SET
+                            end_date = excluded.end_date,
+                            payout_date = excluded.payout_date,
+                            amount = excluded.amount,
+                            status = excluded.status,
+                            synced_at = CURRENT_TIMESTAMP
+                    ''', ('amazon', settlement_id, start_date, end_date, payout_date, amount, currency, status))
+
+                    synced_count += 1
+                    print(f"  {settlement_id[:20]}...: {currency} ${amount:.2f} ({status})")
+
+            print(f"\nSynced {synced_count} settlements to database")
             return synced_count
             
         except Exception as e:

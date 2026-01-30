@@ -9,6 +9,7 @@ import time
 from datetime import datetime, timedelta
 import requests
 from token_manager import get_access_token
+from DBmanager import connect_db
 
 class EbayManager:
     def __init__(self):
@@ -118,26 +119,23 @@ class EbayManager:
             print("ℹ️  No eBay fees to sync")
             return 0
         
-        conn = sqlite3.connect('sold.db')
-        cur = conn.cursor()
-        
-        updated_count = 0
-        
-        for order_id, fee_amount in fees_data.items():
-            # Update seller_fee for this order
-            cur.execute('''
-                UPDATE orders
-                SET seller_fee = ?
-                WHERE order_id = ? AND store = 'ebay'
-            ''', (fee_amount, order_id))
-            
-            if cur.rowcount > 0:
-                updated_count += 1
-                print(f"  ✅ {order_id}: ${fee_amount:.2f} seller fee")
-        
-        conn.commit()
-        conn.close()
-        
+        with connect_db('sold.db') as conn:
+            cur = conn.cursor()
+
+            updated_count = 0
+
+            for order_id, fee_amount in fees_data.items():
+                # Update seller_fee for this order
+                cur.execute('''
+                    UPDATE orders
+                    SET seller_fee = ?
+                    WHERE order_id = ? AND store = 'ebay'
+                ''', (fee_amount, order_id))
+
+                if cur.rowcount > 0:
+                    updated_count += 1
+                    print(f"  ✅ {order_id}: ${fee_amount:.2f} seller fee")
+
         print(f"\n✅ Updated {updated_count} eBay orders with seller fees")
         return updated_count
     
@@ -288,77 +286,66 @@ class EbayManager:
             print("ℹ️  No eBay returns to sync")
             return 0
         
-        conn = sqlite3.connect('sold.db')
-        cur = conn.cursor()
-        
-        synced_count = 0
-        matched_count = 0
-        unmatched_count = 0
-        
-        for return_data in returns:
-            order_id = return_data['order_id']
-            
-            # Try to find original order in sold.db
-            cur.execute('''
-                SELECT id, barcode, title, price, shipping_cost, seller_fee, lot_number, location
-                FROM orders
-                WHERE order_id = ? AND store = 'ebay'
-            ''', (order_id,))
-            
-            original_order = cur.fetchone()
-            
-            if original_order:
-                # Matched - use data from original order
-                original_order_id, barcode, orig_title, original_price, original_shipping, original_fee, lot_number, location = original_order
-                
-                # Use return title if original is missing
-                title = orig_title or return_data['title']
-                
-                matched_count += 1
-            else:
-                # Unmatched - use data from return API
-                original_order_id = None
-                barcode = None
-                title = return_data['title']
-                original_price = return_data['refund_amount']  # Best estimate
-                original_shipping = 0
-                original_fee = 0
-                lot_number = None
-                location = None
-                
-                unmatched_count += 1
-                print(f"  ⚠️  Unmatched return (no original order): {order_id} - ${return_data['refund_amount']:.2f}")
-            
-            # Calculate total return cost
-            total_return_cost = (
-                return_data['refund_amount'] +
-                (original_shipping or 0) +
-                return_data['return_shipping_cost']
-            )
-            
-            # Insert or update return
-            cur.execute('''
-                INSERT OR REPLACE INTO returns (
-                    original_order_id, order_id, item_id, barcode, title, quantity,
-                    original_price, refund_amount, original_shipping_cost, return_shipping_cost,
-                    original_seller_fee, seller_fee_refund,
-                    return_date, store, return_reason, lot_number, location
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                original_order_id, order_id, return_data['item_id'], barcode, title,
-                return_data['quantity'], original_price, return_data['refund_amount'],
-                original_shipping, return_data['return_shipping_cost'],
-                original_fee, 0,  # eBay doesn't provide fee refund separately
-                return_data['return_date'], 'ebay', return_data['return_reason'],
-                lot_number, location
-            ))
-            
-            synced_count += 1
-            if original_order:
-                print(f"  ✅ {order_id}: ${total_return_cost:.2f} total return cost")
-        
-        conn.commit()
-        conn.close()
+        with connect_db('sold.db') as conn:
+            cur = conn.cursor()
+
+            synced_count = 0
+            matched_count = 0
+            unmatched_count = 0
+
+            for return_data in returns:
+                order_id = return_data['order_id']
+
+                # Try to find original order in sold.db
+                cur.execute('''
+                    SELECT id, barcode, title, price, shipping_cost, seller_fee, lot_number, location
+                    FROM orders
+                    WHERE order_id = ? AND store = 'ebay'
+                ''', (order_id,))
+
+                original_order = cur.fetchone()
+
+                if original_order:
+                    original_order_id, barcode, orig_title, original_price, original_shipping, original_fee, lot_number, location = original_order
+                    title = orig_title or return_data['title']
+                    matched_count += 1
+                else:
+                    original_order_id = None
+                    barcode = None
+                    title = return_data['title']
+                    original_price = return_data['refund_amount']
+                    original_shipping = 0
+                    original_fee = 0
+                    lot_number = None
+                    location = None
+                    unmatched_count += 1
+                    print(f"  Unmatched return (no original order): {order_id} - ${return_data['refund_amount']:.2f}")
+
+                total_return_cost = (
+                    return_data['refund_amount'] +
+                    (original_shipping or 0) +
+                    return_data['return_shipping_cost']
+                )
+
+                cur.execute('''
+                    INSERT OR REPLACE INTO returns (
+                        original_order_id, order_id, item_id, barcode, title, quantity,
+                        original_price, refund_amount, original_shipping_cost, return_shipping_cost,
+                        original_seller_fee, seller_fee_refund,
+                        return_date, store, return_reason, lot_number, location
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    original_order_id, order_id, return_data['item_id'], barcode, title,
+                    return_data['quantity'], original_price, return_data['refund_amount'],
+                    original_shipping, return_data['return_shipping_cost'],
+                    original_fee, 0,
+                    return_data['return_date'], 'ebay', return_data['return_reason'],
+                    lot_number, location
+                ))
+
+                synced_count += 1
+                if original_order:
+                    print(f"  {order_id}: ${total_return_cost:.2f} total return cost")
         
         print(f"\n✅ Synced {synced_count} eBay returns to database")
         print(f"   • {matched_count} matched to original orders")
@@ -428,48 +415,39 @@ class EbayManager:
             print(f"📊 Found {len(all_payouts)} total eBay payouts")
             
             # Connect to database
-            conn = sqlite3.connect('sold.db')
-            cur = conn.cursor()
-            
-            synced_count = 0
-            
-            for payout in all_payouts:
-                payout_id = payout.get('payoutId')
-                payout_date = payout.get('payoutDate')
-                payout_status = payout.get('payoutStatus', 'UNKNOWN')
-                
-                # Get amount
-                amount_obj = payout.get('amount', {})
-                amount = float(amount_obj.get('value', 0))
-                currency = amount_obj.get('currency', 'USD')
-                
-                # Skip $0 payouts
-                if amount <= 0:
-                    continue
-                
-                # eBay payouts are single-day, use payout_date for all date fields
-                start_date = payout_date
-                end_date = payout_date
-                
-                # Map eBay status to our status
-                status = 'Closed' if payout_status == 'SUCCEEDED' else payout_status.title()
-                
-                # Insert or update payout
-                cur.execute('''
-                    INSERT INTO payouts (store, settlement_id, start_date, end_date, payout_date, amount, currency, status, synced_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                    ON CONFLICT(settlement_id) DO UPDATE SET
-                        payout_date = excluded.payout_date,
-                        amount = excluded.amount,
-                        status = excluded.status,
-                        synced_at = CURRENT_TIMESTAMP
-                ''', ('ebay', payout_id, start_date, end_date, payout_date, amount, currency, status))
-                
-                synced_count += 1
-                print(f"  ✅ {payout_id}: {currency} ${amount:.2f} ({status})")
-            
-            conn.commit()
-            conn.close()
+            with connect_db('sold.db') as conn:
+                cur = conn.cursor()
+
+                synced_count = 0
+
+                for payout in all_payouts:
+                    payout_id = payout.get('payoutId')
+                    payout_date = payout.get('payoutDate')
+                    payout_status = payout.get('payoutStatus', 'UNKNOWN')
+
+                    amount_obj = payout.get('amount', {})
+                    amount = float(amount_obj.get('value', 0))
+                    currency = amount_obj.get('currency', 'USD')
+
+                    if amount <= 0:
+                        continue
+
+                    start_date = payout_date
+                    end_date = payout_date
+                    status = 'Closed' if payout_status == 'SUCCEEDED' else payout_status.title()
+
+                    cur.execute('''
+                        INSERT INTO payouts (store, settlement_id, start_date, end_date, payout_date, amount, currency, status, synced_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                        ON CONFLICT(settlement_id) DO UPDATE SET
+                            payout_date = excluded.payout_date,
+                            amount = excluded.amount,
+                            status = excluded.status,
+                            synced_at = CURRENT_TIMESTAMP
+                    ''', ('ebay', payout_id, start_date, end_date, payout_date, amount, currency, status))
+
+                    synced_count += 1
+                    print(f"  {payout_id}: {currency} ${amount:.2f} ({status})")
             
             print(f"\n✅ Synced {synced_count} eBay payouts to database")
             return synced_count

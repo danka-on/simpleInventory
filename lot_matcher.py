@@ -8,6 +8,7 @@ Matches sold orders to LOTs based on:
 """
 import sqlite3
 from datetime import datetime
+from DBmanager import connect_db
 
 def match_sold_item_to_lot(barcode, sold_date):
     """
@@ -21,56 +22,55 @@ def match_sold_item_to_lot(barcode, sold_date):
         lot_number (str) - returns "lostlot" if no match found
     """
     try:
-        rawbol_conn = sqlite3.connect('rawbol.db')
-        rawbol_conn.row_factory = sqlite3.Row
-        rawbol_cur = rawbol_conn.cursor()
-        
-        # Normalize barcode - strip leading zeros for matching
-        # sold.db may have "088235725301" while rawbol.db has "88235725301"
-        barcode_normalized = barcode.lstrip('0') if barcode else barcode
-        
-        # Get all LOTs with this UPC, ordered by import_date DESC (newest first)
-        # Match both original and normalized barcode to handle leading zero variations
-        rawbol_cur.execute('''
-            SELECT 
-                lot_number,
-                import_date,
-                upc,
-                SUM(aftersale_quantity) as available_quantity
-            FROM raw_bol_items
-            WHERE (upc = ? COLLATE NOCASE OR upc = ? COLLATE NOCASE)
-            AND import_date IS NOT NULL
-            AND import_date != ''
-            GROUP BY lot_number, import_date, upc
-            HAVING available_quantity > 0
-            ORDER BY import_date DESC
-        ''', (barcode, barcode_normalized))
-        
-        available_lots = rawbol_cur.fetchall()
-        
-        if not available_lots:
-            rawbol_conn.close()
-            return "lostlot"
-        
-        # Use the first LOT with available quantity (newest LOT)
-        selected_lot = available_lots[0]
-        lot_number = selected_lot['lot_number']
-        upc = selected_lot['upc']
-        
-        # Decrement aftersale_quantity for this specific UPC in this LOT
-        rawbol_cur.execute('''
-            UPDATE raw_bol_items
-            SET aftersale_quantity = aftersale_quantity - 1
-            WHERE lot_number = ?
-            AND upc = ?
-            AND aftersale_quantity > 0
-        ''', (lot_number, upc))
-        
-        rawbol_conn.commit()
-        rawbol_conn.close()
-        
-        return lot_number
-        
+        with connect_db('rawbol.db') as rawbol_conn:
+            rawbol_conn.row_factory = sqlite3.Row
+            rawbol_cur = rawbol_conn.cursor()
+
+            # Acquire write lock before SELECT to prevent concurrent decrements
+            rawbol_cur.execute('BEGIN IMMEDIATE')
+
+            # Normalize barcode - strip leading zeros for matching
+            # sold.db may have "088235725301" while rawbol.db has "88235725301"
+            barcode_normalized = barcode.lstrip('0') if barcode else barcode
+
+            # Get all LOTs with this UPC, ordered by import_date DESC (newest first)
+            # Match both original and normalized barcode to handle leading zero variations
+            rawbol_cur.execute('''
+                SELECT
+                    lot_number,
+                    import_date,
+                    upc,
+                    SUM(aftersale_quantity) as available_quantity
+                FROM raw_bol_items
+                WHERE (upc = ? COLLATE NOCASE OR upc = ? COLLATE NOCASE)
+                AND import_date IS NOT NULL
+                AND import_date != ''
+                GROUP BY lot_number, import_date, upc
+                HAVING available_quantity > 0
+                ORDER BY import_date DESC
+            ''', (barcode, barcode_normalized))
+
+            available_lots = rawbol_cur.fetchall()
+
+            if not available_lots:
+                return "lostlot"
+
+            # Use the first LOT with available quantity (newest LOT)
+            selected_lot = available_lots[0]
+            lot_number = selected_lot['lot_number']
+            upc = selected_lot['upc']
+
+            # Decrement aftersale_quantity for this specific UPC in this LOT
+            rawbol_cur.execute('''
+                UPDATE raw_bol_items
+                SET aftersale_quantity = aftersale_quantity - 1
+                WHERE lot_number = ?
+                AND upc = ?
+                AND aftersale_quantity > 0
+            ''', (lot_number, upc))
+
+            return lot_number
+
     except Exception as e:
         print(f"Error matching LOT for barcode {barcode}: {e}")
         return "lostlot"
@@ -90,21 +90,17 @@ def enrich_sold_order_with_lot(order_id, barcode, sold_date):
     """
     try:
         lot_number = match_sold_item_to_lot(barcode, sold_date)
-        
-        sold_conn = sqlite3.connect('sold.db')
-        sold_cur = sold_conn.cursor()
-        
-        sold_cur.execute('''
-            UPDATE orders
-            SET lot_number = ?
-            WHERE id = ?
-        ''', (lot_number, order_id))
-        
-        sold_conn.commit()
-        sold_conn.close()
-        
+
+        with connect_db('sold.db') as sold_conn:
+            sold_cur = sold_conn.cursor()
+            sold_cur.execute('''
+                UPDATE orders
+                SET lot_number = ?
+                WHERE id = ?
+            ''', (lot_number, order_id))
+
         return {'success': True, 'lot_number': lot_number}
-            
+
     except Exception as e:
         return {'success': False, 'error': str(e)}
 
@@ -115,18 +111,13 @@ def reset_aftersale_quantities():
     Called before backfill to start fresh.
     """
     try:
-        rawbol_conn = sqlite3.connect('rawbol.db')
-        rawbol_cur = rawbol_conn.cursor()
-        
-        rawbol_cur.execute('''
-            UPDATE raw_bol_items
-            SET aftersale_quantity = quantity
-        ''')
-        
-        rawbol_conn.commit()
-        
-        rows_updated = rawbol_cur.rowcount
-        rawbol_conn.close()
+        with connect_db('rawbol.db') as rawbol_conn:
+            rawbol_cur = rawbol_conn.cursor()
+            rawbol_cur.execute('''
+                UPDATE raw_bol_items
+                SET aftersale_quantity = quantity
+            ''')
+            rows_updated = rawbol_cur.rowcount
         
         print(f"Reset {rows_updated} items: aftersale_quantity = quantity")
         return {'success': True, 'rows_updated': rows_updated}
@@ -149,42 +140,35 @@ def backfill_all_sold_orders():
     try:
         # Step 1: Reset all lot_number assignments
         print("Step 1: Resetting all existing lot_number assignments...")
-        sold_conn = sqlite3.connect('sold.db')
-        sold_cur = sold_conn.cursor()
-        
-        sold_cur.execute('''
-            UPDATE orders
-            SET lot_number = NULL
-            WHERE paid_time IS NOT NULL
-        ''')
-        
-        sold_conn.commit()
-        reset_count = sold_cur.rowcount
-        print(f"  Reset {reset_count} lot_number assignments")
-        
-        # Step 2: Reset aftersale_quantities
-        print("\nStep 2: Resetting aftersale_quantities in rawbol.db...")
-        reset_result = reset_aftersale_quantities()
-        if not reset_result['success']:
-            sold_conn.close()
-            return reset_result
-        
-        # Step 3: Get all sold orders ordered by paid_time ASC
-        print("\nStep 3: Processing orders chronologically...")
-        sold_conn.row_factory = sqlite3.Row
-        sold_cur = sold_conn.cursor()
-        
-        sold_cur.execute('''
-            SELECT id, barcode, paid_time
-            FROM orders
-            WHERE paid_time IS NOT NULL
-            AND barcode IS NOT NULL
-            AND barcode != ''
-            ORDER BY paid_time ASC
-        ''')
-        
-        orders = sold_cur.fetchall()
-        sold_conn.close()
+        with connect_db('sold.db') as sold_conn:
+            sold_cur = sold_conn.cursor()
+            sold_cur.execute('''
+                UPDATE orders
+                SET lot_number = NULL
+                WHERE paid_time IS NOT NULL
+            ''')
+            reset_count = sold_cur.rowcount
+            print(f"  Reset {reset_count} lot_number assignments")
+
+            # Step 2: Reset aftersale_quantities
+            print("\nStep 2: Resetting aftersale_quantities in rawbol.db...")
+            reset_result = reset_aftersale_quantities()
+            if not reset_result['success']:
+                return reset_result
+
+            # Step 3: Get all sold orders ordered by paid_time ASC
+            print("\nStep 3: Processing orders chronologically...")
+            sold_conn.row_factory = sqlite3.Row
+            sold_cur = sold_conn.cursor()
+            sold_cur.execute('''
+                SELECT id, barcode, paid_time
+                FROM orders
+                WHERE paid_time IS NOT NULL
+                AND barcode IS NOT NULL
+                AND barcode != ''
+                ORDER BY paid_time ASC
+            ''')
+            orders = sold_cur.fetchall()
         
         total_orders = len(orders)
         matched_count = 0
@@ -242,24 +226,20 @@ def enrich_new_orders(days_back=7):
         dict with statistics
     """
     try:
-        sold_conn = sqlite3.connect('sold.db')
-        sold_conn.row_factory = sqlite3.Row
-        sold_cur = sold_conn.cursor()
-        
-        # Get recent orders without lot_number
-        sold_cur.execute('''
-            SELECT id, barcode, paid_time
-            FROM orders
-            WHERE paid_time IS NOT NULL
-            AND barcode IS NOT NULL
-            AND barcode != ''
-            AND (lot_number IS NULL OR lot_number = '')
-            AND paid_time >= datetime('now', ? || ' days')
-            ORDER BY paid_time ASC
-        ''', (f'-{days_back}',))
-        
-        orders = sold_cur.fetchall()
-        sold_conn.close()
+        with connect_db('sold.db') as sold_conn:
+            sold_conn.row_factory = sqlite3.Row
+            sold_cur = sold_conn.cursor()
+            sold_cur.execute('''
+                SELECT id, barcode, paid_time
+                FROM orders
+                WHERE paid_time IS NOT NULL
+                AND barcode IS NOT NULL
+                AND barcode != ''
+                AND (lot_number IS NULL OR lot_number = '')
+                AND paid_time >= datetime('now', ? || ' days')
+                ORDER BY paid_time ASC
+            ''', (f'-{days_back}',))
+            orders = sold_cur.fetchall()
         
         matched_count = 0
         lostlot_count = 0

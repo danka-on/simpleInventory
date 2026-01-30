@@ -2,7 +2,14 @@
   "permissions": {
     "allow": [
       "Bash(ls:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(python:*)",
+      "Bash(git checkout:*)",
+      "Bash(echo:*)",
+      "Bash(set:*)",
+      "Bash(chcp 65001)",
+      "Bash(PYTHONIOENCODING=utf-8 python:*)",
+      "Bash(git stash:*)"
     ]
   }
 }

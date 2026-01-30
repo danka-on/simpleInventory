@@ -46,9 +46,9 @@ class PrinterManager:
         try:
             with open('/proc/device-tree/model', 'r') as f:
                 return 'raspberry pi' in f.read().lower()
-        except:
+        except Exception:
             return False
-    
+
     def detect_platform_type(self):
         """Detect what type of connection to use based on platform"""
         if self.platform == 'Windows':
@@ -62,10 +62,11 @@ class PrinterManager:
     
     def load_printer_config(self):
         """Load saved printer configuration from database"""
+        conn = None
         try:
             conn = sqlite3.connect(os.path.join(BASE_DIR, 'bol.db'))
             cur = conn.cursor()
-            
+
             # Create printer_config table if it doesn't exist
             cur.execute('''
                 CREATE TABLE IF NOT EXISTS printer_config (
@@ -83,32 +84,32 @@ class PrinterManager:
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
-            
+
             # Migrate existing table to add new columns if needed
             try:
                 cur.execute("PRAGMA table_info(printer_config)")
                 columns = [col[1] for col in cur.fetchall()]
-                
+
                 if 'network_ip' not in columns:
                     print("Migrating printer_config table: adding network_ip column")
                     cur.execute("ALTER TABLE printer_config ADD COLUMN network_ip TEXT")
-                
+
                 if 'network_port' not in columns:
                     print("Migrating printer_config table: adding network_port column")
                     cur.execute("ALTER TABLE printer_config ADD COLUMN network_port INTEGER DEFAULT 9100")
-                
+
                 if 'printer_mode' not in columns:
                     print("Migrating printer_config table: adding printer_mode column")
                     cur.execute("ALTER TABLE printer_config ADD COLUMN printer_mode TEXT DEFAULT 'thermal'")
-                
+
                 if 'print_method' not in columns:
                     print("Migrating printer_config table: adding print_method column")
                     cur.execute("ALTER TABLE printer_config ADD COLUMN print_method TEXT DEFAULT 'escpos'")
-                
+
                 conn.commit()
             except Exception as migrate_error:
                 print(f"Migration note: {migrate_error}")
-            
+
             # Get current config
             cur.execute('SELECT printer_type, printer_mode, print_method, bluetooth_address, network_ip, network_port FROM printer_config WHERE id = 1')
             row = cur.fetchone()
@@ -119,26 +120,28 @@ class PrinterManager:
                 self.printer_address = row[3]
                 self.network_ip = row[4]
                 self.network_port = row[5] if row[5] else 9100
-            
+
             conn.commit()
-            conn.close()
         except Exception as e:
             print(f"Error loading printer config: {e}")
+        finally:
+            if conn:
+                conn.close()
     
     def save_printer_config(self, printer_type, bluetooth_address, printer_name=None, network_ip=None, network_port=9100, printer_mode='thermal', print_method='escpos'):
         """Save printer configuration to database"""
+        conn = None
         try:
             conn = sqlite3.connect(os.path.join(BASE_DIR, 'bol.db'))
             cur = conn.cursor()
-            
+
             cur.execute('''
-                INSERT OR REPLACE INTO printer_config 
+                INSERT OR REPLACE INTO printer_config
                 (id, printer_type, printer_mode, print_method, bluetooth_address, printer_name, network_ip, network_port, updated_at)
                 VALUES (1, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ''', (printer_type, printer_mode, print_method, bluetooth_address, printer_name, network_ip, network_port))
-            
+
             conn.commit()
-            conn.close()
             
             self.printer_type = printer_type
             self.printer_mode = printer_mode
@@ -150,6 +153,9 @@ class PrinterManager:
         except Exception as e:
             print(f"Error saving printer config: {e}")
             return False
+        finally:
+            if conn:
+                conn.close()
     
     def connect_printer(self, address=None, ip=None, port=None):
         """Connect to printer (Bluetooth, Serial, USB, or Network)"""
@@ -255,7 +261,7 @@ class PrinterManager:
         if self.printer:
             try:
                 self.printer.close()
-            except:
+            except Exception:
                 pass
             self.printer = None
     
@@ -337,10 +343,10 @@ class PrinterManager:
                 draw = ImageDraw.Draw(new_img)
                 try:
                     font = ImageFont.truetype("arial.ttf", 14)
-                except:
+                except (IOError, OSError):
                     try:
                         font = ImageFont.truetype("Arial.ttf", 14)
-                    except:
+                    except (IOError, OSError):
                         font = ImageFont.load_default()
                 
                 # Truncate description if too long (wrap text)
@@ -461,7 +467,7 @@ class PrinterManager:
                             # Try to use cut if available, otherwise just feed paper
                             try:
                                 self.printer.cut()
-                            except:
+                            except Exception:
                                 self.printer.text('\n' * 5)  # Feed paper if cut not supported
                             break  # Success, exit retry loop
                         except Exception as print_error:
@@ -537,7 +543,7 @@ class PrinterManager:
                 # Try to cut, or feed paper if not supported
                 try:
                     self.printer.cut()
-                except:
+                except Exception:
                     self.printer.text('\n' * 3)
                 
                 return True  # Success!
@@ -630,7 +636,7 @@ class PrinterManager:
                             "address": f"0x{vid:04x}:0x{pid:04x}",
                             "name": f"USB: {name}"
                         })
-                    except:
+                    except Exception:
                         pass
             except Exception as e:
                 print(f"USB scan error: {e}")
