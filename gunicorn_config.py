@@ -1,5 +1,5 @@
 # Gunicorn configuration for Raspberry Pi 2
-bind = "0.0.0.0:5000"
+bind = "127.0.0.1:5000"
 workers = 1
 threads = 4  # Handle 4 concurrent requests without extra memory per worker
 worker_class = "gthread"
