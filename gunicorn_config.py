@@ -1,7 +1,8 @@
-# Gunicorn configuration for Raspberry Pi
+# Gunicorn configuration for Raspberry Pi 2
 bind = "0.0.0.0:5000"
 workers = 1
-worker_class = "sync"
+threads = 4  # Handle 4 concurrent requests without extra memory per worker
+worker_class = "gthread"
 timeout = 120
 keepalive = 5
 errorlog = "/opt/sweetshelves/logs/gunicorn-error.log"

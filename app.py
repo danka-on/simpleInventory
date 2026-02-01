@@ -6130,6 +6130,7 @@ def token_status():
         return jsonify({"error": _safe_error(e, 'token refresh')}), 500
 
 @app.route("/api/token-status")
+@cache.cached(timeout=600)  # Cache for 10 minutes - avoids expensive external API calls
 def api_token_status():
     """Check if eBay and Amazon tokens are valid/working."""
     status = {"ebay": "ok", "amazon": "ok"}
@@ -13684,7 +13685,6 @@ def delayed_start():
 
 # Initialize database and tables
 try:
-    enable_wal_mode()
     ensure_lifecycle_tables()
     ensure_shelf_groups_table()
     print("✅ Database initialization completed")
