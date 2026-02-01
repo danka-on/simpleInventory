@@ -6129,6 +6129,44 @@ def token_status():
     except Exception as e:
         return jsonify({"error": _safe_error(e, 'token refresh')}), 500
 
+@app.route("/api/token-status")
+def api_token_status():
+    """Check if eBay and Amazon tokens are valid/working."""
+    status = {"ebay": "ok", "amazon": "ok"}
+
+    # Check eBay token
+    try:
+        tokens = load_tokens()
+        if is_expired(tokens):
+            # Try to refresh
+            get_access_token()
+        # Quick validation: call a lightweight eBay endpoint matching our scopes
+        test_headers = {
+            "Authorization": f"Bearer {tokens.get('access_token', '')}",
+            "Content-Type": "application/json"
+        }
+        r = requests.get("https://api.ebay.com/sell/fulfillment/v1/order?limit=1", headers=test_headers, timeout=5)
+        if r.status_code == 401:
+            status["ebay"] = "expired"
+    except Exception as e:
+        status["ebay"] = "expired"
+
+    # Check Amazon token
+    try:
+        amazon = AmazonManager()
+        # Try a lightweight SP-API call
+        orders_api = Orders(credentials=amazon.credentials, marketplace=amazon.marketplace)
+        orders_api.get_orders(CreatedAfter=(datetime.datetime.utcnow() - datetime.timedelta(minutes=5)).isoformat(), MaxResultsPerPage=1)
+    except Exception as e:
+        err_str = str(e).lower()
+        if "unauthorized" in err_str or "invalid_grant" in err_str or "access denied" in err_str or "token" in err_str:
+            status["amazon"] = "expired"
+        else:
+            # Could be a rate limit or other transient error, don't flag as expired
+            pass
+
+    return jsonify(status)
+
 @app.route("/", methods=["GET", "POST"])
 def home():
     shelf = request.args.get("shelf")
@@ -7612,7 +7650,12 @@ def sold_orders():
                 except sqlite3.Error as e:
                     # If searchRack query fails, just skip location lookup for this order
                     print(f"Warning: Failed to lookup location for barcode {order_dict['barcode']}: {e}")
-            
+
+            # If still no location, flag for manual search via Finder page
+            if not order_dict.get('location') or order_dict.get('location', '').strip() == '':
+                if order_dict.get('title'):
+                    order_dict['location_search'] = order_dict['title']
+
             result.append(order_dict)
         
     except Exception as e:
@@ -7621,7 +7664,7 @@ def sold_orders():
         result = [dict(order) for order in orders]
     finally:
         rack_conn.close()
-    
+
     return jsonify(result)
 
 
@@ -8666,6 +8709,115 @@ def searchrack_page():
     response.headers['Pragma'] = 'no-cache'
     response.headers['Expires'] = '0'
     return response
+
+@app.route('/finder')
+def finder_page():
+    response = make_response(render_template('finder.html'))
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
+
+@app.route('/api/finder', methods=['POST'])
+def api_finder():
+    """Search searchRack and rawbol databases for item location."""
+    data = request.get_json() or {}
+    q = data.get('q', '').strip()
+    if not q:
+        return jsonify({'searchrack': [], 'rawbol': []})
+
+    q_stripped = q.lstrip('0') if q.isdigit() else q
+    # Split into words for multi-word fuzzy matching
+    words = [w for w in q_stripped.split() if len(w) >= 2]
+    if not words:
+        words = [q_stripped]
+
+    searchrack_results = []
+    rawbol_results = []
+
+    # Build WHERE clause: all words must match (AND) against TITLE, or any word matches BARCODE
+    def build_where(title_col, barcode_col, words):
+        clauses = []
+        params = []
+        # All words must appear in title
+        title_parts = [f"{title_col} LIKE ? COLLATE NOCASE" for _ in words]
+        clauses.append('(' + ' AND '.join(title_parts) + ')')
+        params.extend(f'%{w}%' for w in words)
+        # OR barcode matches any word
+        for w in words:
+            clauses.append(f"{barcode_col} LIKE ? COLLATE NOCASE")
+            params.append(f'%{w}%')
+        return ' OR '.join(clauses), params
+
+    # Search searchRack.db
+    try:
+        conn = sqlite3.connect(str(BASE_DIR / 'searchRack.db'))
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        where, params = build_where('TITLE', 'BARCODE', words)
+        cur.execute(f'''SELECT TITLE, BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION, QUANTITY, IMAGE, ITEMID
+                       FROM SEARCHRACK
+                       WHERE {where}
+                       LIMIT 20''', params)
+        for row in cur.fetchall():
+            searchrack_results.append({
+                'title': row['TITLE'],
+                'barcode': row['BARCODE'],
+                'item_position': row['ITEM_POSITION'],
+                'pictureposition': row['PICTUREPOSITION'],
+                'quantity': row['QUANTITY'],
+                'image': row['IMAGE'],
+                'itemid': row['ITEMID'],
+            })
+        conn.close()
+    except Exception as e:
+        print(f"Finder searchRack error: {e}")
+
+    # Search rawbol.db
+    try:
+        conn = sqlite3.connect(str(BASE_DIR / 'rawbol.db'))
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        where, params = build_where('item_description', 'upc', words)
+        cur.execute(f'''SELECT upc, item_description, image_url, lot_number
+                       FROM raw_bol_items
+                       WHERE {where}
+                       LIMIT 20''', params)
+        for row in cur.fetchall():
+            rawbol_results.append({
+                'upc': row['upc'],
+                'item_description': row['item_description'],
+                'image_url': row['image_url'],
+                'lot_number': row['lot_number'],
+            })
+        conn.close()
+    except Exception as e:
+        print(f"Finder rawbol error: {e}")
+
+    return jsonify({'searchrack': searchrack_results, 'rawbol': rawbol_results})
+
+@app.route('/api/finder/assign', methods=['POST'])
+def api_finder_assign():
+    """Assign a location to a sold order."""
+    data = request.get_json() or {}
+    order_id = data.get('order_id')
+    location = data.get('location', '').strip()
+    if not order_id or not location:
+        return jsonify({'error': 'Missing order_id or location'}), 400
+    try:
+        conn = sqlite3.connect(str(BASE_DIR / 'sold.db'))
+        cur = conn.cursor()
+        cur.execute('UPDATE orders SET location = ? WHERE id = ?', (location, order_id))
+        conn.commit()
+        conn.close()
+        # Clear the sold-orders cache so the change is visible immediately
+        try:
+            cache.delete_memoized(sold_orders)
+        except Exception:
+            pass
+        return jsonify({'ok': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/cleanup')
 def cleanup_page():

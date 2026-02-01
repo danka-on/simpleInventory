@@ -9,7 +9,9 @@
       "Bash(set:*)",
       "Bash(chcp 65001)",
       "Bash(PYTHONIOENCODING=utf-8 python:*)",
-      "Bash(git stash:*)"
+      "Bash(git stash:*)",
+      "Bash(.venv/Scripts/python:*)",
+      "Bash(curl:*)"
     ]
   }
 }

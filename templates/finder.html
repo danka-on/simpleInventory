@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Item Finder</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; background: #f5f7fa; padding: 20px; }
+    .container { max-width: 1000px; margin: 0 auto; }
+
+    .order-context {
+      background: #fff; padding: 16px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      margin-bottom: 16px; display: flex; align-items: center; gap: 16px;
+    }
+    .order-context img { width: 60px; height: 60px; object-fit: cover; border-radius: 8px; background: #f0f0f0; }
+    .order-context .info { flex: 1; }
+    .order-context .info h2 { font-size: 1rem; color: #2c3e50; margin-bottom: 4px; }
+    .order-context .info .meta { font-size: 0.85rem; color: #7f8c8d; }
+
+    .search-box { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); margin-bottom: 20px; }
+    .search-input-wrapper { display: flex; gap: 12px; }
+    .search-input { flex: 1; padding: 14px; font-size: 16px; border: 2px solid #e0e0e0; border-radius: 8px; transition: border-color 0.2s; }
+    .search-input:focus { outline: none; border-color: #3498db; }
+    .search-btn { padding: 14px 28px; background: #3498db; color: white; border: none; border-radius: 8px; font-size: 16px; cursor: pointer; }
+    .search-btn:hover { background: #2980b9; }
+
+    .panels { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    @media (max-width: 700px) { .panels { grid-template-columns: 1fr; } }
+
+    .panel { background: #fff; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); overflow: hidden; }
+    .panel-header { padding: 14px 16px; font-weight: 700; font-size: 0.95rem; color: #fff; display: flex; align-items: center; gap: 8px; }
+    .panel-header .count { background: rgba(255,255,255,0.3); padding: 2px 8px; border-radius: 10px; font-size: 0.8rem; }
+    .panel-warehouse .panel-header { background: #6c5ce7; }
+    .panel-rawbol .panel-header { background: #0984e3; }
+    .panel-body { padding: 12px; max-height: 60vh; overflow-y: auto; }
+
+    .result-card {
+      background: #f8f9fa; border-radius: 8px; padding: 12px; margin-bottom: 10px;
+      display: flex; align-items: flex-start; gap: 12px; transition: box-shadow 0.2s;
+    }
+    .result-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.12); }
+    .result-card img { width: 50px; height: 50px; object-fit: cover; border-radius: 6px; background: #e0e0e0; flex-shrink: 0; }
+    .result-card .details { flex: 1; min-width: 0; }
+    .result-card .title { font-weight: 600; font-size: 0.85rem; color: #2c3e50; margin-bottom: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .result-card .meta { font-size: 0.78rem; color: #7f8c8d; }
+    .result-card .meta span { margin-right: 10px; }
+    .result-card .loc-badge {
+      display: inline-block; background: #6c5ce7; color: #fff; padding: 2px 8px;
+      border-radius: 6px; font-weight: 700; font-size: 0.8rem; margin-top: 4px;
+    }
+    .result-card .loc-img { width: 80px; height: 60px; object-fit: cover; border-radius: 6px; margin-top: 6px; }
+
+    .assign-btn {
+      padding: 6px 14px; background: #00b894; color: #fff; border: none; border-radius: 6px;
+      font-size: 0.8rem; font-weight: 600; cursor: pointer; white-space: nowrap; flex-shrink: 0; align-self: center;
+    }
+    .assign-btn:hover { background: #00a381; }
+
+    .search-rack-btn {
+      padding: 6px 14px; background: #6c5ce7; color: #fff; border: none; border-radius: 6px;
+      font-size: 0.8rem; font-weight: 600; cursor: pointer; white-space: nowrap; flex-shrink: 0; align-self: center;
+    }
+    .search-rack-btn:hover { background: #5a4bd1; }
+
+    /* Token chips */
+    .token-bar {
+      background: #fff; padding: 14px 16px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      margin-bottom: 16px; display: none; flex-wrap: wrap; gap: 8px; align-items: center;
+    }
+    .token-bar .label { font-size: 0.8rem; color: #7f8c8d; font-weight: 600; margin-right: 4px; }
+    .token-chip {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 5px 12px; border-radius: 20px; font-size: 0.82rem; font-weight: 600;
+      cursor: pointer; transition: all 0.15s; border: 2px solid transparent; user-select: none;
+    }
+    .token-chip.active { background: #3498db; color: #fff; border-color: #3498db; }
+    .token-chip.inactive { background: #ecf0f1; color: #7f8c8d; border-color: #dfe6e9; }
+    .token-chip.inactive:hover { border-color: #3498db; color: #3498db; }
+    .token-chip.active:hover { background: #e74c3c; border-color: #e74c3c; }
+    .token-chip .x { font-size: 0.7rem; margin-left: 2px; }
+
+    /* Location popup overlay */
+    .loc-overlay {
+      display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.6); z-index: 9999; align-items: center; justify-content: center;
+    }
+    .loc-overlay.show { display: flex; }
+    .loc-popup {
+      background: #fff; border-radius: 14px; padding: 20px; max-width: 400px; width: 90%;
+      text-align: center; box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+    }
+    .loc-popup h3 { margin-bottom: 12px; color: #6c5ce7; font-size: 1.2rem; }
+    .loc-popup img { max-width: 100%; max-height: 50vh; border-radius: 10px; }
+    .loc-popup .close-btn {
+      margin-top: 14px; padding: 8px 24px; background: #e74c3c; color: #fff; border: none;
+      border-radius: 6px; font-size: 0.9rem; cursor: pointer; font-weight: 600;
+    }
+
+    .empty-state { text-align: center; padding: 30px; color: #95a5a6; font-size: 0.9rem; }
+    .loading { text-align: center; padding: 30px; color: #95a5a6; }
+    .spinner { border: 3px solid #f3f3f3; border-top: 3px solid #3498db; border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; margin: 0 auto 10px; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+    .success-banner {
+      background: #00b894; color: #fff; padding: 14px; border-radius: 8px; text-align: center;
+      font-weight: 700; margin-bottom: 16px; display: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div style="margin-bottom: 15px;">
+      <a href="/" style="text-decoration: none;">
+        <button style="padding: 8px 16px; background: #e74c3c; color: white; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; font-weight: 600;">Back</button>
+      </a>
+    </div>
+
+    <div class="success-banner" id="successBanner">Location assigned! You can close this tab.</div>
+
+    <div class="order-context" id="orderContext" style="display:none;">
+      <img id="orderImg" src="" onerror="this.style.display='none'">
+      <div class="info">
+        <h2 id="orderTitle"></h2>
+        <div class="meta">
+          <span id="orderBarcode"></span>
+          <span id="orderIdDisplay"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="search-box">
+      <div class="search-input-wrapper">
+        <input type="text" class="search-input" id="searchInput" placeholder="Search by title, barcode, UPC..." autofocus>
+        <button class="search-btn" id="searchBtn">Search</button>
+      </div>
+    </div>
+
+    <div class="token-bar" id="tokenBar">
+      <span class="label">Words:</span>
+    </div>
+
+    <!-- Location image popup -->
+    <div class="loc-overlay" id="locOverlay" onclick="closeLocPopup()">
+      <div class="loc-popup" onclick="event.stopPropagation()">
+        <h3 id="locPopupTitle"></h3>
+        <img id="locPopupImg" src="">
+        <br><button class="close-btn" onclick="closeLocPopup()">Close</button>
+      </div>
+    </div>
+
+    <div class="panels">
+      <div class="panel panel-warehouse">
+        <div class="panel-header">Warehouse (searchRack) <span class="count" id="warehouseCount">0</span></div>
+        <div class="panel-body" id="warehouseResults">
+          <div class="empty-state">Search to find items</div>
+        </div>
+      </div>
+      <div class="panel panel-rawbol">
+        <div class="panel-header">Macy BOL (rawbol) <span class="count" id="rawbolCount">0</span></div>
+        <div class="panel-body" id="rawbolResults">
+          <div class="empty-state">Search to find items</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+const params = new URLSearchParams(window.location.search);
+const orderId = params.get('order_id') || '';
+const orderTitle = params.get('title') || '';
+const orderBarcode = params.get('barcode') || '';
+
+// Token chip state: {word: string, active: boolean}
+let tokens = [];
+
+const searchInput = document.getElementById('searchInput');
+const searchBtn = document.getElementById('searchBtn');
+
+// Show order context if we have info
+if (orderTitle) {
+  document.getElementById('orderContext').style.display = 'flex';
+  document.getElementById('orderTitle').textContent = orderTitle;
+  if (orderBarcode) document.getElementById('orderBarcode').textContent = 'UPC: ' + orderBarcode;
+  if (orderId) document.getElementById('orderIdDisplay').textContent = ' | Order #' + orderId;
+
+  // Build token chips from title words (all start inactive for manual use)
+  const words = orderTitle.split(/\s+/).filter(w => w.length > 0);
+  tokens = words.map(w => ({word: w, active: false}));
+  renderTokens();
+}
+
+searchBtn.addEventListener('click', () => doSearch());
+searchInput.addEventListener('keyup', (e) => { if (e.key === 'Enter') doSearch(); });
+
+function renderTokens() {
+  const bar = document.getElementById('tokenBar');
+  if (!tokens.length) { bar.style.display = 'none'; return; }
+  bar.style.display = 'flex';
+  bar.innerHTML = '<span class="label">Words:</span>' + tokens.map((t, i) =>
+    `<span class="token-chip ${t.active ? 'active' : 'inactive'}" onclick="toggleToken(${i})">${esc(t.word)}${t.active ? ' <span class="x">&times;</span>' : ''}</span>`
+  ).join('');
+}
+
+function toggleToken(idx) {
+  tokens[idx].active = !tokens[idx].active;
+  renderTokens();
+  syncSearchFromTokens();
+  doSearch();
+}
+
+function syncSearchFromTokens() {
+  searchInput.value = tokens.filter(t => t.active).map(t => t.word).join(' ');
+}
+
+// Location popup
+function showLocPopup(locCode, picPos) {
+  document.getElementById('locPopupTitle').textContent = locCode;
+  const img = document.getElementById('locPopupImg');
+  if (picPos && picPos.match(/\.(jpg|jpeg|png)$/i)) {
+    img.src = '/static/pictureposition/' + picPos;
+    img.style.display = 'block';
+  } else {
+    img.style.display = 'none';
+  }
+  document.getElementById('locOverlay').classList.add('show');
+}
+function closeLocPopup() {
+  document.getElementById('locOverlay').classList.remove('show');
+}
+
+// Auto-search on load with full title, but leave search bar empty
+if (orderTitle) {
+  setTimeout(() => doSearch(orderTitle), 200);
+}
+
+function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+
+const missingImg = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="50" height="50"><rect width="100%" height="100%" fill="#f0f0f0"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#b0b0b0" font-size="8">No img</text></svg>');
+
+async function doSearch(overrideQuery) {
+  const q = (overrideQuery || searchInput.value).trim();
+  if (!q) return;
+
+  document.getElementById('warehouseResults').innerHTML = '<div class="loading"><div class="spinner"></div>Searching...</div>';
+  document.getElementById('rawbolResults').innerHTML = '<div class="loading"><div class="spinner"></div>Searching...</div>';
+
+  try {
+    const resp = await fetch('/api/finder', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({q: q})
+    });
+    const data = await resp.json();
+    renderWarehouse(data.searchrack || []);
+    renderRawbol(data.rawbol || []);
+  } catch (e) {
+    document.getElementById('warehouseResults').innerHTML = '<div class="empty-state">Error searching</div>';
+    document.getElementById('rawbolResults').innerHTML = '<div class="empty-state">Error searching</div>';
+  }
+}
+
+function renderWarehouse(items) {
+  const el = document.getElementById('warehouseResults');
+  document.getElementById('warehouseCount').textContent = items.length;
+
+  if (!items.length) {
+    el.innerHTML = '<div class="empty-state">No results found</div>';
+    return;
+  }
+
+  el.innerHTML = items.map(item => {
+    const imgSrc = item.image || missingImg;
+    const loc = esc(item.item_position || '');
+    const picPos = item.pictureposition || '';
+    const picPosEsc = esc(picPos);
+    const locBadgeHtml = loc
+      ? `<span class="loc-badge" style="cursor:pointer;" onclick="showLocPopup('${loc}','${picPosEsc}')">${loc}</span>`
+      : '';
+    const assignBtn = orderId
+      ? `<button class="assign-btn" onclick="assignLocation('${esc(loc)}')">Assign</button>`
+      : '';
+
+    return `<div class="result-card">
+      <img src="${esc(imgSrc)}" onerror="this.src='${missingImg}'">
+      <div class="details">
+        <div class="title">${esc(item.title)}</div>
+        <div class="meta">
+          <span>UPC: ${esc(item.barcode)}</span>
+          <span>Qty: ${item.quantity || '?'}</span>
+        </div>
+        ${locBadgeHtml}
+      </div>
+      ${assignBtn}
+    </div>`;
+  }).join('');
+}
+
+function renderRawbol(items) {
+  const el = document.getElementById('rawbolResults');
+  document.getElementById('rawbolCount').textContent = items.length;
+
+  if (!items.length) {
+    el.innerHTML = '<div class="empty-state">No results found</div>';
+    return;
+  }
+
+  el.innerHTML = items.map(item => {
+    const imgSrc = item.image_url || missingImg;
+    const upc = esc(item.upc || '');
+
+    return `<div class="result-card">
+      <img src="${esc(imgSrc)}" onerror="this.src='${missingImg}'">
+      <div class="details">
+        <div class="title">${esc(item.item_description)}</div>
+        <div class="meta">
+          <span>UPC: ${upc}</span>
+          <span>LOT: ${esc(item.lot_number)}</span>
+        </div>
+      </div>
+      <button class="search-rack-btn" onclick="searchWarehouse('${upc}')">Search Warehouse</button>
+    </div>`;
+  }).join('');
+}
+
+function searchWarehouse(upc) {
+  searchInput.value = upc;
+  doSearch();
+}
+
+async function assignLocation(loc) {
+  if (!orderId) return;
+  try {
+    const resp = await fetch('/api/finder/assign', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({order_id: orderId, location: loc})
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      document.getElementById('successBanner').style.display = 'block';
+      document.getElementById('successBanner').textContent = 'Location "' + loc + '" assigned! You can close this tab.';
+      // Disable all assign buttons
+      document.querySelectorAll('.assign-btn').forEach(b => { b.disabled = true; b.style.opacity = 0.5; });
+    } else {
+      alert('Failed to assign: ' + (data.error || 'Unknown error'));
+    }
+  } catch (e) {
+    alert('Error assigning location');
+  }
+}
+</script>
+</body>
+</html>

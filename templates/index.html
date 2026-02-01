@@ -106,6 +106,24 @@
             overflow: hidden;
             transition: all 0.5s ease;
         }
+        .token-banner {
+            background: #d32f2f;
+            color: #fff;
+            text-align: center;
+            padding: 14px 16px;
+            font-weight: 700;
+            font-size: 1.05rem;
+            position: sticky;
+            top: 0;
+            z-index: 10001;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+            border-bottom: 3px solid #b71c1c;
+            display: none;
+        }
+        .token-banner .token-item {
+            display: inline-block;
+            margin: 0 12px;
+        }
         .testing-banner {
             background: #ff9800;
             color: #fff;
@@ -260,6 +278,7 @@
     </style>
 </head>
 <body>
+    <div class="token-banner" id="tokenBanner"></div>
     {% if is_testing_server %}
     <div class="testing-banner">
         ⚠️ TESTING SERVER - {{ server_hostname }} ⚠️
@@ -503,8 +522,12 @@ function tdLocation(order) {
         return `<td class='sold-td-small'><a href="#" class="order-loc-link" data-order-id="${order.id}"><img src="${thumb}" style="max-width:60px;max-height:60px;border-radius:6px;" onerror="this.src='${missingDataUrl}'" loading="lazy"></a></td>`;
     }
     
-    // If no location, show placeholder
+    // If no location, show "Find" link if search data available, otherwise placeholder
     if (!locationText) {
+        if (order.location_search) {
+            const finderParams = new URLSearchParams({title: order.title || '', order_id: order.id || '', barcode: order.barcode || ''});
+            return `<td class='sold-td-small'><a href="/finder?${finderParams.toString()}" target="_blank" style="color:#e53935;font-weight:bold;font-size:0.75rem;text-decoration:none;padding:2px 6px;border:1px solid #e53935;border-radius:4px;">Find</a></td>`;
+        }
         return `<td class='sold-td-small' style="color:#999;font-style:italic;">—</td>`;
     }
     
@@ -1181,6 +1204,26 @@ window.OrderManager = OrderManager;
 window.showOrderPopup = showOrderPopup;
 window.fetchAndShowSoldOrders = fetchAndShowSoldOrders;
 
+})();
+</script>
+<script>
+(function checkTokenStatus() {
+    fetch('/api/token-status')
+        .then(r => r.json())
+        .then(data => {
+            const problems = [];
+            if (data.ebay === 'expired') problems.push('<span class="token-item">eBay token expired — re-authorize in Developer Portal</span>');
+            if (data.amazon === 'expired') problems.push('<span class="token-item">Amazon token expired — re-authorize in Seller Central</span>');
+            const banner = document.getElementById('tokenBanner');
+            if (problems.length) {
+                banner.innerHTML = '\u26a0\ufe0f ' + problems.join(' | ');
+                banner.style.display = 'block';
+            } else {
+                banner.style.display = 'none';
+            }
+        })
+        .catch(() => {});
+    setTimeout(checkTokenStatus, 5 * 60 * 1000);
 })();
 </script>
 </body>
