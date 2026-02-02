@@ -43,7 +43,7 @@
     .loading-spinner{border:4px solid #f3f3f3;border-top:4px solid #3498db;border-radius:50%;width:50px;height:50px;animation:spin 1s linear infinite}
     @keyframes spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
     /* Database select dropdown */
-    #db-select, #store-select{padding:10px 14px;border-radius:6px;border:2px solid #3498db;font-size:1rem;background:#fff;cursor:pointer;font-weight:500;min-width:160px}
+    #db-select{padding:10px 14px;border-radius:6px;border:2px solid #3498db;font-size:1rem;background:#fff;cursor:pointer;font-weight:500;min-width:160px}
     .db-selector-group{display:flex;gap:12px;align-items:center;margin-right:auto}
     .db-selector-group label{font-size:1rem;font-weight:600;color:#2c3e50;display:flex;align-items:center;gap:8px}
     /* Inventory options gear dropdown */
@@ -71,11 +71,6 @@
             <div class="db-selector-group">
                 <label>Database:
                     <select id="db-select">
-                        <!-- options inserted by JS -->
-                    </select>
-                </label>
-                <label>Stores:
-                    <select id="store-select">
                         <!-- options inserted by JS -->
                     </select>
                 </label>
@@ -250,30 +245,28 @@ let _pageSize = 10;
 let _sortMode = 'time_desc';
 
 function createFilters(){
-    // Populate Database dropdown
     const dbSelect = document.getElementById('db-select');
+    // Database options
+    const dbGroup = document.createElement('optgroup');
+    dbGroup.label = 'Databases';
     DATABASES.forEach(k=>{
         const option = document.createElement('option');
         option.value = k;
         option.textContent = DB_LABELS[k];
         if(defaultChecked[k]) option.selected = true;
-        dbSelect.appendChild(option);
+        dbGroup.appendChild(option);
     });
-    
-    // Populate Stores dropdown with "Select a store" placeholder
-    const storeSelect = document.getElementById('store-select');
-    const placeholderOption = document.createElement('option');
-    placeholderOption.value = '';
-    placeholderOption.textContent = 'Select a store...';
-    placeholderOption.selected = true;
-    storeSelect.appendChild(placeholderOption);
-    
+    dbSelect.appendChild(dbGroup);
+    // Store options
+    const storeGroup = document.createElement('optgroup');
+    storeGroup.label = 'Stores';
     STORES.forEach(k=>{
         const option = document.createElement('option');
         option.value = k;
         option.textContent = DB_LABELS[k];
-        storeSelect.appendChild(option);
+        storeGroup.appendChild(option);
     });
+    dbSelect.appendChild(storeGroup);
 }
 
 createFilters();
@@ -282,55 +275,29 @@ createFilters();
 function attachDBChangeHandlers(){
     document.getElementById('db-select').addEventListener('change', (e)=>{
         const selectedDb = e.target.value;
-        
-        // Clear store selection when database is changed
-        document.getElementById('store-select').value = '';
-        
+        const isStore = STORES.includes(selectedDb);
+
         // Show/hide LOT filter based on selected database
         const lotFilterContainer = document.getElementById('lot-filter-container');
         if(selectedDb === 'bol'){
             lotFilterContainer.style.display = 'block';
-            // Populate LOT dropdown
             populateLotFilter();
         } else {
             lotFilterContainer.style.display = 'none';
         }
-        
+
         // Show/hide Inventory gear button for searchRack
         const inventoryGearBtn = document.getElementById('inventory-gear');
         if(selectedDb === 'searchRack'){
             inventoryGearBtn.style.display = 'inline-block';
-            // Show location browser for Inventory
             toggleLocationBrowser(true);
         } else {
             inventoryGearBtn.style.display = 'none';
-            // Close dropdown if open
             document.getElementById('inventory-dropdown').classList.remove('active');
-            // Hide location browser
             toggleLocationBrowser(false);
         }
-        
-        // run search when user explicitly changes selection
+
         doSearch(false);
-    });
-    
-    // Also attach handler for store selection
-    document.getElementById('store-select').addEventListener('change', (e)=>{
-        const selectedStore = e.target.value;
-        if(selectedStore){
-            // Hide database-specific filters when store is selected
-            document.getElementById('lot-filter-container').style.display = 'none';
-            
-            // Hide inventory gear when store selected
-            document.getElementById('inventory-gear').style.display = 'none';
-            document.getElementById('inventory-dropdown').classList.remove('active');
-            
-            // Hide location browser
-            toggleLocationBrowser(false);
-            
-            // run search
-            doSearch(false);
-        }
     });
 }
 attachDBChangeHandlers();
@@ -361,13 +328,6 @@ async function populateLotFilter(){
 document.getElementById('lot-filter').addEventListener('change', () => doSearch(false));
 
 function getActiveDBs(){
-    // Check if a store is selected first
-    const storeSelect = document.getElementById('store-select');
-    if(storeSelect && storeSelect.value){
-        return [storeSelect.value];
-    }
-    
-    // Otherwise return the selected database
     const dbSelect = document.getElementById('db-select');
     return dbSelect && dbSelect.value ? [dbSelect.value] : [];
 }
@@ -996,6 +956,11 @@ function closeActionDropdownOnClick(event) {
 }
 
 // When editing location: save search state, then redirect to position page in edit mode
+async function clearCacheAndRefresh(){
+    try { await fetch('/api/admin/cache/clear', {method:'POST'}); } catch(e) { console.warn('Cache clear failed:', e); }
+    doSearch();
+}
+
 function onEditLocation(rackId, barcode){
     // save current search UI state so we can restore after returning
     const state = {
@@ -1268,7 +1233,7 @@ function onEdit(db, id){
         }
         const resp = await fetch(`/api/update/${db}/${id}`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
         const j = await resp.json();
-        if(j.success || j.ok){ alert('Saved'); document.getElementById('editModal').style.display='none'; doSearch(); } else alert('Save failed: '+(j.error||JSON.stringify(j)));
+        if(j.success || j.ok){ alert('Saved'); document.getElementById('editModal').style.display='none'; await clearCacheAndRefresh(); } else alert('Save failed: '+(j.error||JSON.stringify(j)));
     }
 }
 
@@ -1277,7 +1242,7 @@ async function onDelete(db,id){
     try{
         const resp = await fetch(`/api/delete/${db}/${id}`, {method:'POST'});
         const j = await resp.json();
-        if(j.success) { alert('Deleted and archived'); doSearch(); } else alert('Delete failed: '+(j.error||JSON.stringify(j)));
+        if(j.success) { alert('Deleted and archived'); await clearCacheAndRefresh(); } else alert('Delete failed: '+(j.error||JSON.stringify(j)));
     }catch(err){console.error(err); alert('Delete failed')}
 }
 
@@ -1286,7 +1251,7 @@ async function onRestore(archive_id){
     try{
         const resp = await fetch('/api/undelete/'+archive_id, {method:'POST'});
         const j = await resp.json();
-        if(j.success) { alert('Restored'); doSearch(); } else alert('Restore failed: '+(j.error||JSON.stringify(j)));
+        if(j.success) { alert('Restored'); await clearCacheAndRefresh(); } else alert('Restore failed: '+(j.error||JSON.stringify(j)));
     }catch(err){console.error(err); alert('Restore failed')}
 }
 
@@ -1295,7 +1260,7 @@ async function onDeleteArchive(archive_id){
     try{
         const resp = await fetch('/api/delete_archive/'+archive_id, {method:'POST'});
         const j = await resp.json();
-        if(j.success) { alert('Permanently deleted'); doSearch(); } else alert('Delete failed: '+(j.error||JSON.stringify(j)));
+        if(j.success) { alert('Permanently deleted'); await clearCacheAndRefresh(); } else alert('Delete failed: '+(j.error||JSON.stringify(j)));
     }catch(err){console.error(err); alert('Delete failed')}
 }
 
@@ -1332,7 +1297,7 @@ async function onDeleteArchiveMerged(idsJsonParam){
             alert(`Deleted ${successCount}, failed ${failedCount}`);
         }
         
-        doSearch();
+        await clearCacheAndRefresh();
     }catch(err){
         console.error(err);
         alert('Delete failed: ' + err);
@@ -1366,25 +1331,10 @@ window.addEventListener('load', ()=>{
             }
 
             if(dbParam){
-                // Check if it's a store or database
-                if(STORES.includes(dbParam)){
-                    console.log('[LOAD] Setting store:', dbParam);
-                    document.getElementById('store-select').value = dbParam;
-                    document.getElementById('db-select').value = DATABASES[0]; // Reset to first database
-                    
-                    // Manually update UI state to ensure it sticks
-                    document.getElementById('lot-filter-container').style.display = 'none';
-                    document.getElementById('inventory-gear').style.display = 'none';
-                    document.getElementById('inventory-dropdown').classList.remove('active');
-                    if(typeof toggleLocationBrowser === 'function') toggleLocationBrowser(false);
-                    
-                    doSearch(false, qParam || null);
-                    return;
-                } else if(DATABASES.includes(dbParam)){
-                    console.log('[LOAD] Setting database:', dbParam);
+                if(DATABASES.includes(dbParam) || STORES.includes(dbParam)){
+                    console.log('[LOAD] Setting db-select:', dbParam);
                     document.getElementById('db-select').value = dbParam;
-                    document.getElementById('store-select').value = ''; // Clear store selection
-                    
+
                     // Manually update UI state
                     const lotFilterContainer = document.getElementById('lot-filter-container');
                     if(dbParam === 'bol'){
@@ -1393,7 +1343,7 @@ window.addEventListener('load', ()=>{
                     } else {
                         lotFilterContainer.style.display = 'none';
                     }
-                    
+
                     const inventoryGearBtn = document.getElementById('inventory-gear');
                     if(dbParam === 'searchRack'){
                         inventoryGearBtn.style.display = 'inline-block';
@@ -1403,7 +1353,7 @@ window.addEventListener('load', ()=>{
                         document.getElementById('inventory-dropdown').classList.remove('active');
                         if(typeof toggleLocationBrowser === 'function') toggleLocationBrowser(false);
                     }
-                    
+
                     doSearch(false, qParam || null);
                     return;
                 } else {
@@ -1424,10 +1374,7 @@ window.addEventListener('load', ()=>{
             if(s.pageSize) document.getElementById('page-size').value = s.pageSize;
             if(Array.isArray(s.checkedDBs) && s.checkedDBs.length){
                 const first = s.checkedDBs[0];
-                if(STORES.includes(first)){
-                    document.getElementById('store-select').value = first;
-                    document.getElementById('store-select').dispatchEvent(new Event('change'));
-                } else if(DATABASES.includes(first)){
+                if(DATABASES.includes(first) || STORES.includes(first)){
                     document.getElementById('db-select').value = first;
                     document.getElementById('db-select').dispatchEvent(new Event('change'));
                 }

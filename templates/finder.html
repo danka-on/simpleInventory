@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Item Finder</title>
+  <title data-i18n="item_finder">Item Finder</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; background: #f5f7fa; padding: 20px; }
@@ -51,11 +51,38 @@
     }
     .result-card .loc-img { width: 80px; height: 60px; object-fit: cover; border-radius: 6px; margin-top: 6px; }
 
-    .assign-btn {
-      padding: 6px 14px; background: #00b894; color: #fff; border: none; border-radius: 6px;
+    .remove-btn {
+      padding: 6px 14px; background: #e74c3c; color: #fff; border: none; border-radius: 6px;
       font-size: 0.8rem; font-weight: 600; cursor: pointer; white-space: nowrap; flex-shrink: 0; align-self: center;
     }
-    .assign-btn:hover { background: #00a381; }
+    .remove-btn:hover { background: #c0392b; }
+
+    /* Image popup overlay */
+    .img-overlay {
+      display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.7); z-index: 9998; align-items: center; justify-content: center;
+    }
+    .img-overlay.show { display: flex; }
+    .img-overlay img { max-width: 90vw; max-height: 85vh; border-radius: 10px; box-shadow: 0 8px 30px rgba(0,0,0,0.4); }
+
+    /* Position picker popup */
+    .pick-overlay {
+      display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.6); z-index: 9999; align-items: center; justify-content: center;
+    }
+    .pick-overlay.show { display: flex; }
+    .pick-popup {
+      background: #fff; border-radius: 14px; padding: 20px; max-width: 400px; width: 90%;
+      box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+    }
+    .pick-popup h3 { margin-bottom: 12px; color: #e74c3c; font-size: 1.1rem; }
+    .pick-option {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 10px 12px; margin-bottom: 8px; background: #f8f9fa; border-radius: 8px; cursor: pointer;
+    }
+    .pick-option:hover { background: #fee; }
+    .pick-option .pos { font-weight: 700; color: #6c5ce7; }
+    .pick-option .qty { font-size: 0.85rem; color: #7f8c8d; }
 
     .search-rack-btn {
       padding: 6px 14px; background: #6c5ce7; color: #fff; border: none; border-radius: 6px;
@@ -80,10 +107,10 @@
     .token-chip.active:hover { background: #e74c3c; border-color: #e74c3c; }
     .token-chip .x { font-size: 0.7rem; margin-left: 2px; }
 
-    /* Location popup overlay */
+    /* Location popup overlay — z above pick-overlay */
     .loc-overlay {
       display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-      background: rgba(0,0,0,0.6); z-index: 9999; align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.6); z-index: 10001; align-items: center; justify-content: center;
     }
     .loc-overlay.show { display: flex; }
     .loc-popup {
@@ -106,13 +133,53 @@
       background: #00b894; color: #fff; padding: 14px; border-radius: 8px; text-align: center;
       font-weight: 700; margin-bottom: 16px; display: none;
     }
+    .success-banner .undo-btn {
+      display: inline-block; margin-left: 12px; padding: 6px 18px;
+      background: #fff; color: #e74c3c; border: 2px solid #fff; border-radius: 6px;
+      font-weight: 700; font-size: 0.9rem; cursor: pointer; vertical-align: middle;
+    }
+    .success-banner .undo-btn:hover { background: #ffeaea; border-color: #ffeaea; }
+
+    .result-card.removed {
+      opacity: 0.5; background: #ffeaea; position: relative;
+    }
+    .result-card.removed .details .title { text-decoration: line-through; }
+    .removed-badge {
+      display: inline-block; background: #e74c3c; color: #fff; padding: 2px 8px;
+      border-radius: 6px; font-weight: 700; font-size: 0.75rem; margin-left: 6px;
+    }
+
+    /* Confirm popup */
+    .confirm-overlay {
+      display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.5); z-index: 10002; align-items: center; justify-content: center;
+    }
+    .confirm-overlay.show { display: flex; }
+    .confirm-box {
+      background: #fff; border-radius: 14px; padding: 24px; max-width: 360px; width: 90%;
+      text-align: center; box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+    }
+    .confirm-box h3 { margin-bottom: 8px; color: #e74c3c; font-size: 1.1rem; }
+    .confirm-box p { font-size: 0.9rem; color: #555; margin-bottom: 18px; }
+    .confirm-box .btn-row { display: flex; gap: 10px; justify-content: center; }
+    .confirm-box .btn-yes {
+      padding: 10px 24px; background: #e74c3c; color: #fff; border: none; border-radius: 8px;
+      font-weight: 700; font-size: 0.95rem; cursor: pointer;
+    }
+    .confirm-box .btn-yes:hover { background: #c0392b; }
+    .confirm-box .btn-no {
+      padding: 10px 24px; background: #ecf0f1; color: #555; border: none; border-radius: 8px;
+      font-weight: 700; font-size: 0.95rem; cursor: pointer;
+    }
+    .confirm-box .btn-no:hover { background: #dfe6e9; }
   </style>
+  <script src="/static/i18n.js"></script>
 </head>
 <body>
   <div class="container">
     <div style="margin-bottom: 15px;">
       <a href="/" style="text-decoration: none;">
-        <button style="padding: 8px 16px; background: #e74c3c; color: white; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; font-weight: 600;">Back</button>
+        <button data-i18n="back" style="padding: 8px 16px; background: #e74c3c; color: white; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; font-weight: 600;">Back</button>
       </a>
     </div>
 
@@ -131,13 +198,39 @@
 
     <div class="search-box">
       <div class="search-input-wrapper">
-        <input type="text" class="search-input" id="searchInput" placeholder="Search by title, barcode, UPC..." autofocus>
-        <button class="search-btn" id="searchBtn">Search</button>
+        <input type="text" class="search-input" id="searchInput" data-i18n="search_by_title" placeholder="Search by title, barcode, UPC..." autofocus>
+        <button class="search-btn" id="searchBtn" data-i18n="search">Search</button>
       </div>
     </div>
 
     <div class="token-bar" id="tokenBar">
-      <span class="label">Words:</span>
+      <span class="label" data-i18n="words">Words:</span>
+    </div>
+
+    <!-- Confirm removal popup -->
+    <div class="confirm-overlay" id="confirmOverlay">
+      <div class="confirm-box">
+        <h3 data-i18n="remove_from_inventory">Remove from Inventory?</h3>
+        <p id="confirmMsg" data-i18n="reduce_qty_by_1">This will reduce the quantity by 1.</p>
+        <div class="btn-row">
+          <button class="btn-no" onclick="cancelConfirm()" data-i18n="cancel">Cancel</button>
+          <button class="btn-yes" id="confirmYesBtn" data-i18n="yes_remove">Yes, Remove</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Image popup -->
+    <div class="img-overlay" id="imgOverlay" onclick="closeImgPopup()">
+      <img id="imgPopupImg" src="" onclick="event.stopPropagation()">
+    </div>
+
+    <!-- Position picker popup -->
+    <div class="pick-overlay" id="pickOverlay" onclick="closePickPopup()">
+      <div class="pick-popup" onclick="event.stopPropagation()">
+        <h3 data-i18n="pick_position_to_remove">Pick position to remove from</h3>
+        <div id="pickOptions"></div>
+        <button class="close-btn" data-i18n="cancel" style="margin-top:10px;padding:8px 24px;background:#e74c3c;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600;" onclick="closePickPopup()">Cancel</button>
+      </div>
     </div>
 
     <!-- Location image popup -->
@@ -145,21 +238,21 @@
       <div class="loc-popup" onclick="event.stopPropagation()">
         <h3 id="locPopupTitle"></h3>
         <img id="locPopupImg" src="">
-        <br><button class="close-btn" onclick="closeLocPopup()">Close</button>
+        <br><button class="close-btn" data-i18n="close" onclick="closeLocPopup()">Close</button>
       </div>
     </div>
 
     <div class="panels">
       <div class="panel panel-warehouse">
-        <div class="panel-header">Warehouse (searchRack) <span class="count" id="warehouseCount">0</span></div>
+        <div class="panel-header"><span data-i18n="warehouse_searchrack">Warehouse (searchRack)</span> <span class="count" id="warehouseCount">0</span></div>
         <div class="panel-body" id="warehouseResults">
-          <div class="empty-state">Search to find items</div>
+          <div class="empty-state" data-i18n="search_to_find">Search to find items</div>
         </div>
       </div>
       <div class="panel panel-rawbol">
-        <div class="panel-header">Macy BOL (rawbol) <span class="count" id="rawbolCount">0</span></div>
+        <div class="panel-header"><span data-i18n="macy_bol">Macy BOL (rawbol)</span> <span class="count" id="rawbolCount">0</span></div>
         <div class="panel-body" id="rawbolResults">
-          <div class="empty-state">Search to find items</div>
+          <div class="empty-state" data-i18n="search_to_find">Search to find items</div>
         </div>
       </div>
     </div>
@@ -197,8 +290,8 @@ function renderTokens() {
   const bar = document.getElementById('tokenBar');
   if (!tokens.length) { bar.style.display = 'none'; return; }
   bar.style.display = 'flex';
-  bar.innerHTML = '<span class="label">Words:</span>' + tokens.map((t, i) =>
-    `<span class="token-chip ${t.active ? 'active' : 'inactive'}" onclick="toggleToken(${i})">${esc(t.word)}${t.active ? ' <span class="x">&times;</span>' : ''}</span>`
+  bar.innerHTML = '<span class="label">' + t('words') + '</span>' + tokens.map((tk, i) =>
+    `<span class="token-chip ${tk.active ? 'active' : 'inactive'}" onclick="toggleToken(${i})">${esc(tk.word)}${tk.active ? ' <span class="x">&times;</span>' : ''}</span>`
   ).join('');
 }
 
@@ -217,9 +310,15 @@ function syncSearchFromTokens() {
 function showLocPopup(locCode, picPos) {
   document.getElementById('locPopupTitle').textContent = locCode;
   const img = document.getElementById('locPopupImg');
-  if (picPos && picPos.match(/\.(jpg|jpeg|png)$/i)) {
-    img.src = '/static/pictureposition/' + picPos;
+  // DEPRECATED: pictureposition field — images now live in /static/shelves/
+  // picPos kept for backwards compat; fall back to locCode as filename
+  const raw = (picPos && picPos.trim()) ? picPos.trim() : locCode;
+  // Shelf images are lowercase .png files named after the position code
+  const filename = raw ? raw.toLowerCase().replace(/\.png$/i, '') + '.png' : '';
+  if (filename) {
+    img.src = '/static/shelves/' + filename + '?t=' + Date.now();
     img.style.display = 'block';
+    img.onerror = function() { this.style.display = 'none'; };
   } else {
     img.style.display = 'none';
   }
@@ -242,8 +341,8 @@ async function doSearch(overrideQuery) {
   const q = (overrideQuery || searchInput.value).trim();
   if (!q) return;
 
-  document.getElementById('warehouseResults').innerHTML = '<div class="loading"><div class="spinner"></div>Searching...</div>';
-  document.getElementById('rawbolResults').innerHTML = '<div class="loading"><div class="spinner"></div>Searching...</div>';
+  document.getElementById('warehouseResults').innerHTML = '<div class="loading"><div class="spinner"></div>' + t('searching') + '</div>';
+  document.getElementById('rawbolResults').innerHTML = '<div class="loading"><div class="spinner"></div>' + t('searching') + '</div>';
 
   try {
     const resp = await fetch('/api/finder', {
@@ -255,8 +354,8 @@ async function doSearch(overrideQuery) {
     renderWarehouse(data.searchrack || []);
     renderRawbol(data.rawbol || []);
   } catch (e) {
-    document.getElementById('warehouseResults').innerHTML = '<div class="empty-state">Error searching</div>';
-    document.getElementById('rawbolResults').innerHTML = '<div class="empty-state">Error searching</div>';
+    document.getElementById('warehouseResults').innerHTML = '<div class="empty-state">' + t('error_searching') + '</div>';
+    document.getElementById('rawbolResults').innerHTML = '<div class="empty-state">' + t('error_searching') + '</div>';
   }
 }
 
@@ -265,33 +364,34 @@ function renderWarehouse(items) {
   document.getElementById('warehouseCount').textContent = items.length;
 
   if (!items.length) {
-    el.innerHTML = '<div class="empty-state">No results found</div>';
+    el.innerHTML = '<div class="empty-state">' + t('no_results_found') + '</div>';
     return;
   }
 
-  el.innerHTML = items.map(item => {
+  // Store items for position picker logic
+  window._warehouseItems = items;
+
+  el.innerHTML = items.map((item, idx) => {
     const imgSrc = item.image || missingImg;
     const loc = esc(item.item_position || '');
-    const picPos = item.pictureposition || '';
+    const picPos = item.pictureposition || ''; // DEPRECATED: pictureposition field
     const picPosEsc = esc(picPos);
     const locBadgeHtml = loc
-      ? `<span class="loc-badge" style="cursor:pointer;" onclick="showLocPopup('${loc}','${picPosEsc}')">${loc}</span>`
+      ? `<span class="loc-badge" style="cursor:pointer;" data-loc="${loc}" data-pic="${picPosEsc}" onclick="showLocPopup(this.dataset.loc, this.dataset.pic)">${loc}</span>`
       : '';
-    const assignBtn = orderId
-      ? `<button class="assign-btn" onclick="assignLocation('${esc(loc)}')">Assign</button>`
-      : '';
+    const removeBtn = `<button class="remove-btn" data-idx="${idx}" onclick="handleRemove(${item.id}, '${esc(item.barcode)}', this)">${t('remove')}</button>`;
 
-    return `<div class="result-card">
-      <img src="${esc(imgSrc)}" onerror="this.src='${missingImg}'">
+    return `<div class="result-card" id="wh-card-${item.id}">
+      <img src="${esc(imgSrc)}" onerror="this.src='${missingImg}'" style="cursor:pointer" onclick="showImgPopup(this.src)">
       <div class="details">
         <div class="title">${esc(item.title)}</div>
         <div class="meta">
           <span>UPC: ${esc(item.barcode)}</span>
-          <span>Qty: ${item.quantity || '?'}</span>
+          <span class="qty-display" data-id="${item.id}">Qty: ${item.quantity || '?'}</span>
         </div>
         ${locBadgeHtml}
       </div>
-      ${assignBtn}
+      ${removeBtn}
     </div>`;
   }).join('');
 }
@@ -301,7 +401,7 @@ function renderRawbol(items) {
   document.getElementById('rawbolCount').textContent = items.length;
 
   if (!items.length) {
-    el.innerHTML = '<div class="empty-state">No results found</div>';
+    el.innerHTML = '<div class="empty-state">' + t('no_results_found') + '</div>';
     return;
   }
 
@@ -310,7 +410,7 @@ function renderRawbol(items) {
     const upc = esc(item.upc || '');
 
     return `<div class="result-card">
-      <img src="${esc(imgSrc)}" onerror="this.src='${missingImg}'">
+      <img src="${esc(imgSrc)}" onerror="this.src='${missingImg}'" style="cursor:pointer" onclick="showImgPopup(this.src)">
       <div class="details">
         <div class="title">${esc(item.item_description)}</div>
         <div class="meta">
@@ -318,7 +418,7 @@ function renderRawbol(items) {
           <span>LOT: ${esc(item.lot_number)}</span>
         </div>
       </div>
-      <button class="search-rack-btn" onclick="searchWarehouse('${upc}')">Search Warehouse</button>
+      <button class="search-rack-btn" onclick="searchWarehouse('${upc}')">${t('search_warehouse')}</button>
     </div>`;
   }).join('');
 }
@@ -328,28 +428,152 @@ function searchWarehouse(upc) {
   doSearch();
 }
 
-async function assignLocation(loc) {
-  if (!orderId) return;
+// Image popup
+function showImgPopup(src) {
+  if (!src || src.includes('data:image/svg')) return;
+  document.getElementById('imgPopupImg').src = src;
+  document.getElementById('imgOverlay').classList.add('show');
+}
+function closeImgPopup() {
+  document.getElementById('imgOverlay').classList.remove('show');
+}
+
+// Position picker popup
+function closePickPopup() {
+  document.getElementById('pickOverlay').classList.remove('show');
+}
+
+// Confirm removal state
+let _pendingRemoveId = null;
+
+function handleRemove(searchrackId, barcode, btnEl) {
+  const sameBarcode = (window._warehouseItems || []).filter(i => i.barcode === barcode);
+  if (sameBarcode.length > 1) {
+    // Show position picker
+    const opts = document.getElementById('pickOptions');
+    opts.innerHTML = sameBarcode.map(i => {
+      const pos = esc(i.item_position || t('no_position'));
+      const pp = esc(i.pictureposition || ''); // DEPRECATED: pictureposition field
+      return `<div class="pick-option">
+        <span class="pos" style="cursor:pointer;text-decoration:underline;" data-loc="${pos}" data-pic="${pp}" onclick="event.stopPropagation();showLocPopup(this.dataset.loc, this.dataset.pic)">${pos}</span>
+        <span class="qty">Qty: ${i.quantity || '?'}</span>
+        <button class="remove-btn" style="padding:4px 10px;font-size:0.75rem;" onclick="confirmRemove(${i.id})">${t('remove')}</button>
+      </div>`;
+    }).join('');
+    document.getElementById('pickOverlay').classList.add('show');
+  } else {
+    confirmRemove(searchrackId);
+  }
+}
+
+function confirmRemove(searchrackId) {
+  _pendingRemoveId = searchrackId;
+  const item = (window._warehouseItems || []).find(i => i.id === searchrackId);
+  const msg = item
+    ? `${t('remove_1_from')} "${item.title}"${item.item_position ? ' ' + t('at_position') + ' ' + item.item_position : ''}? (${t('current_qty')}: ${item.quantity || '?'})`
+    : t('remove_1_from_this');
+  document.getElementById('confirmMsg').textContent = msg;
+  document.getElementById('confirmOverlay').classList.add('show');
+  document.getElementById('confirmYesBtn').onclick = () => { doRemove(searchrackId); };
+}
+
+function cancelConfirm() {
+  _pendingRemoveId = null;
+  document.getElementById('confirmOverlay').classList.remove('show');
+}
+
+// Last removal info for undo
+let _lastRemoval = null;
+
+async function doRemove(searchrackId) {
+  document.getElementById('confirmOverlay').classList.remove('show');
+  closePickPopup();
   try {
-    const resp = await fetch('/api/finder/assign', {
+    const resp = await fetch('/api/finder/remove', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({order_id: orderId, location: loc})
+      body: JSON.stringify({searchrack_id: searchrackId, order_id: orderId || null, qty: 1})
     });
     const data = await resp.json();
     if (data.ok) {
-      document.getElementById('successBanner').style.display = 'block';
-      document.getElementById('successBanner').textContent = 'Location "' + loc + '" assigned! You can close this tab.';
-      // Disable all assign buttons
-      document.querySelectorAll('.assign-btn').forEach(b => { b.disabled = true; b.style.opacity = 0.5; });
+      // Store undo info
+      _lastRemoval = {searchrack_id: data.searchrack_id, old_qty: data.old_qty, order_id: data.order_id};
+
+      // Update qty display
+      const qtyEl = document.querySelector(`.qty-display[data-id="${searchrackId}"]`);
+      if (qtyEl) qtyEl.textContent = 'Qty: ' + data.new_qty;
+
+      // Mark card as removed
+      const card = document.getElementById('wh-card-' + searchrackId);
+      if (card) {
+        card.classList.add('removed');
+        // Add removed badge next to qty
+        if (qtyEl && !qtyEl.parentElement.querySelector('.removed-badge')) {
+          qtyEl.insertAdjacentHTML('afterend', '<span class="removed-badge">' + t('removed') + '</span>');
+        }
+        // Disable remove button on this card
+        const btn = card.querySelector('.remove-btn');
+        if (btn) { btn.disabled = true; btn.style.opacity = 0.4; }
+      }
+
+      // Also update the cached _warehouseItems so further interactions reflect new qty
+      const wItem = (window._warehouseItems || []).find(i => i.id === searchrackId);
+      if (wItem) wItem.quantity = data.new_qty;
+
+      // Show banner with undo
+      const banner = document.getElementById('successBanner');
+      banner.innerHTML = t('removed_1_from_inventory') + (orderId ? ' — ' + t('order_marked_processed') : '') + '. ' + t('new_qty') + ': ' + data.new_qty
+        + '<button class="undo-btn" onclick="undoRemove()">' + t('undo') + '</button>';
+      banner.style.display = 'block';
+      banner.style.background = '#e74c3c';
     } else {
-      alert('Failed to assign: ' + (data.error || 'Unknown error'));
+      alert(t('remove_failed') + ': ' + (data.error || 'Unknown'));
     }
   } catch (e) {
-    alert('Error assigning location');
+    alert(t('error_removing'));
+  }
+}
+
+async function undoRemove() {
+  if (!_lastRemoval) return;
+  try {
+    const resp = await fetch('/api/finder/undo-remove', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(_lastRemoval)
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      const id = _lastRemoval.searchrack_id;
+      // Restore qty display
+      const qtyEl = document.querySelector(`.qty-display[data-id="${id}"]`);
+      if (qtyEl) qtyEl.textContent = 'Qty: ' + data.restored_qty;
+      // Remove the removed state
+      const card = document.getElementById('wh-card-' + id);
+      if (card) {
+        card.classList.remove('removed');
+        const badge = card.querySelector('.removed-badge');
+        if (badge) badge.remove();
+        const btn = card.querySelector('.remove-btn');
+        if (btn) { btn.disabled = false; btn.style.opacity = 1; }
+      }
+      // Update cached item
+      const wItem = (window._warehouseItems || []).find(i => i.id == id);
+      if (wItem) wItem.quantity = data.restored_qty;
+
+      // Update banner
+      const banner = document.getElementById('successBanner');
+      banner.innerHTML = t('removal_undone') + ' ' + data.restored_qty;
+      banner.style.background = '#00b894';
+      _lastRemoval = null;
+      setTimeout(() => { banner.style.display = 'none'; }, 3000);
+    } else {
+      alert(t('undo_failed') + ': ' + (data.error || 'Unknown'));
+    }
+  } catch (e) {
+    alert(t('error_undoing'));
   }
 }
 </script>
-<script src="/static/i18n.js"></script>
 </body>
 </html>

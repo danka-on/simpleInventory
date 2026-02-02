@@ -8756,12 +8756,13 @@ def api_finder():
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         where, params = build_where('TITLE', 'BARCODE', words)
-        cur.execute(f'''SELECT TITLE, BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION, QUANTITY, IMAGE, ITEMID
+        cur.execute(f'''SELECT ID, TITLE, BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION, QUANTITY, IMAGE, ITEMID
                        FROM SEARCHRACK
                        WHERE {where}
                        LIMIT 20''', params)
         for row in cur.fetchall():
             searchrack_results.append({
+                'id': row['ID'],
                 'title': row['TITLE'],
                 'barcode': row['BARCODE'],
                 'item_position': row['ITEM_POSITION'],
@@ -8819,6 +8820,94 @@ def api_finder_assign():
         return jsonify({'ok': True})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/finder/remove', methods=['POST'])
+def api_finder_remove():
+    """Remove 1 (or sold qty) from inventory for a specific searchRack row."""
+    import datetime as _dt
+    data = request.get_json() or {}
+    searchrack_id = data.get('searchrack_id')
+    order_id = data.get('order_id')  # optional — sold order context
+    qty_to_remove = int(data.get('qty', 1))
+    if not searchrack_id:
+        return jsonify({'ok': False, 'error': 'Missing searchrack_id'}), 400
+    try:
+        r_conn = sqlite3.connect(str(BASE_DIR / 'searchRack.db'))
+        r_conn.row_factory = sqlite3.Row
+        r_cur = r_conn.cursor()
+        r_cur.execute('SELECT ID, TITLE, BARCODE, QUANTITY, ITEM_POSITION FROM SEARCHRACK WHERE ID = ?', (searchrack_id,))
+        row = r_cur.fetchone()
+        if not row:
+            r_conn.close()
+            return jsonify({'ok': False, 'error': 'Item not found'}), 404
+        current_qty = int(row['QUANTITY'] or 0)
+        new_qty = max(0, current_qty - qty_to_remove)
+        r_cur.execute('UPDATE SEARCHRACK SET QUANTITY = ? WHERE ID = ?', (new_qty, searchrack_id))
+        r_conn.commit()
+
+        # Log to rackhistory.db
+        rem_conn = sqlite3.connect(str(BASE_DIR / 'rackhistory.db'))
+        rem_cur = rem_conn.cursor()
+        rem_cur.execute('''
+            CREATE TABLE IF NOT EXISTS removed (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT, barcode TEXT, qty INTEGER,
+                time_removed TEXT, undone_at TEXT
+            )
+        ''')
+        rem_cur.execute(
+            'INSERT INTO removed (name, barcode, qty, time_removed) VALUES (?,?,?,?)',
+            (row['TITLE'] or '', row['BARCODE'] or '', qty_to_remove, _dt.datetime.now().isoformat())
+        )
+        _ensure_removed_items_table(rem_cur)
+        rem_cur.execute('''
+            INSERT INTO removed_items
+            (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (order_id or '', row['BARCODE'] or '', row['TITLE'] or '', qty_to_remove,
+              _dt.datetime.now().isoformat(), searchrack_id, current_qty, new_qty, 'finder_removal', row['ITEM_POSITION']))
+        rem_conn.commit()
+        rem_conn.close()
+
+        # If order context, mark order as rackupdated
+        if order_id:
+            s_conn = sqlite3.connect(str(BASE_DIR / 'sold.db'))
+            s_cur = s_conn.cursor()
+            s_cur.execute('UPDATE orders SET rackupdated = 1 WHERE id = ?', (order_id,))
+            s_conn.commit()
+            s_conn.close()
+
+        r_conn.close()
+        return jsonify({'ok': True, 'new_qty': new_qty, 'old_qty': current_qty, 'searchrack_id': searchrack_id, 'order_id': order_id or None})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': _safe_error(e)}), 500
+
+@app.route('/api/finder/undo-remove', methods=['POST'])
+def api_finder_undo_remove():
+    """Undo a finder removal — restore quantity and optionally unmark the sold order."""
+    data = request.get_json() or {}
+    searchrack_id = data.get('searchrack_id')
+    old_qty = data.get('old_qty')
+    order_id = data.get('order_id')
+    if not searchrack_id or old_qty is None:
+        return jsonify({'ok': False, 'error': 'Missing searchrack_id or old_qty'}), 400
+    try:
+        r_conn = sqlite3.connect(str(BASE_DIR / 'searchRack.db'))
+        r_cur = r_conn.cursor()
+        r_cur.execute('UPDATE SEARCHRACK SET QUANTITY = ? WHERE ID = ?', (int(old_qty), int(searchrack_id)))
+        r_conn.commit()
+        r_conn.close()
+
+        if order_id:
+            s_conn = sqlite3.connect(str(BASE_DIR / 'sold.db'))
+            s_cur = s_conn.cursor()
+            s_cur.execute('UPDATE orders SET rackupdated = 0 WHERE id = ?', (order_id,))
+            s_conn.commit()
+            s_conn.close()
+
+        return jsonify({'ok': True, 'restored_qty': int(old_qty)})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': _safe_error(e)}), 500
 
 @app.route('/cleanup')
 def cleanup_page():
