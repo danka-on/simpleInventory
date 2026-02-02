@@ -41,18 +41,18 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>📊 BOL Statistics</h1>
+            <h1>📊 <span data-i18n="bol_statistics">BOL Statistics</span></h1>
             <div class="header-actions">
                 <button id="enrich-btn" class="enrich-btn" onclick="enrichSoldOrders()">
-                    🔄 Match Sold Items to LOTs
+                    🔄 <span data-i18n="match_sold_to_lots">Match Sold Items to LOTs</span>
                 </button>
                 <a href="/tools" class="back-btn">
-                    ← Back to Tools
+                    ← <span data-i18n="back_to_tools">Back to Tools</span>
                 </a>
             </div>
         </div>
         
-        <div id="loading" class="loading">Loading statistics...</div>
+        <div id="loading" class="loading" data-i18n="loading_statistics">Loading statistics...</div>
         <div id="error" class="error" style="display:none"></div>
         <div id="stats-container" class="stats-grid" style="display:none"></div>
     </div>
@@ -212,5 +212,6 @@
     // Load stats on page load
     loadStats();
     </script>
+    <script src="/static/i18n.js"></script>
 </body>
 </html>

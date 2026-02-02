@@ -54,7 +54,7 @@
 </head>
 <body>
 <div style="text-align: center;">
-    <h1 style="margin-bottom: 30px;">Add Item to Inventory</h1>
+    <h1 style="margin-bottom: 30px;" data-i18n="add_item_to_inventory">Add Item to Inventory</h1>
 
 
     <div id="checklist" style="margin: 30px 0;">
@@ -75,18 +75,18 @@
             <div id="autoSubmitTimer" style="font-size:1.5em; color:#1976d2; margin-bottom: 12px; display:none;"></div>
             <!-- Add Item button (larger, more pronounced) -->
             <button id="addItemBtn" type="submit" form="addItemForm" style="background-color: #43a047; color: white; border: none; padding: 28px 0; border-radius: 10px; cursor: pointer; font-size: 2em; width: 100%; margin-bottom: 32px; display: flex; align-items: center; justify-content: center; gap: 14px; box-shadow: 0 4px 16px rgba(67,160,71,0.12); font-weight: bold; letter-spacing: 1px;">
-                <i class="fas fa-plus" style="font-size:1.2em;"></i> Add Item
+                <i class="fas fa-plus" style="font-size:1.2em;"></i> <span data-i18n="add_item">Add Item</span>
             </button>
             <!-- Clear button below Add Item, with extra space above -->
             <button id="clearBtn" type="button" style="background-color: #ff4444; color: white; border: none; padding: 14px; border-radius: 6px; cursor: pointer; font-size: 1.1em; width: 100%; margin-bottom: 18px; margin-top: 18px; display: flex; align-items: center; justify-content: center; gap: 8px;">
-                <i class="fas fa-trash"></i> Clear
+                <i class="fas fa-trash"></i> <span data-i18n="clear">Clear</span>
             </button>
             <!-- Divider -->
             <div style="width: 100%; height: 1px; background: #eee; margin: 10px 0 18px 0;"></div>
             <!-- Navigation button: Exit only -->
             <div style="width: 100%; display: flex; justify-content: center;">
                 <button id="exitBtn" type="button" style="background-color: #ff4444; color: white; border: none; padding: 10px 0; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 1em; width: 100%; max-width: 120px;">
-                    <i class="fas fa-times"></i> Exit
+                    <i class="fas fa-times"></i> <span data-i18n="exit">Exit</span>
                 </button>
             </div>
         </div>
@@ -292,3 +292,4 @@
         window.location.href = '/';
     });
 </script>
+<script src="/static/i18n.js"></script>

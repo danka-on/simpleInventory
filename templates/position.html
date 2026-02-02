@@ -109,10 +109,10 @@
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;gap:12px;">
         <a id="backBtn" href="/" style="text-decoration:none;">
             <button style="background:#e74c3c;color:#fff;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;display:flex;align-items:center;gap:8px;">
-                <i class="fas fa-arrow-left"></i> Back
+                <i class="fas fa-arrow-left"></i> <span data-i18n="back">Back</span>
             </button>
         </a>
-        <h1 style="margin: 0;">Location</h1>
+        <h1 style="margin: 0;" data-i18n="location">Location</h1>
         <img src="/static/qrcode.jpg" alt="QR Code" style="width:50px; height:50px; object-fit:contain; border:2px solid #000; background:#fff;" />
     </div>
     
@@ -136,14 +136,11 @@
     <!-- Input with camera button -->
     <div style="display: flex; gap: 10px; align-items: center; margin-top: 20px;">
         <input type="text" id="qrTextInput" name="qrTextInput" placeholder="Scan or enter QR code" style="flex: 1; font-size:1.2em; padding:10px; display:none;" autocomplete="off" />
-        <button id="picturePositionBtn" type="button" style="background-color: #2196F3; color: white; border: none; padding: 12px; cursor: pointer; font-size: 1.5em; display: flex; align-items: center; justify-content: center; width: 50px; height: 50px; border-radius: 6px; box-shadow: 0 4px 12px rgba(33,150,243,0.3);">
-            <i class="fas fa-camera"></i>
-        </button>
     </div>
 
     <div style="margin: 20px 0; display: flex; flex-direction: column; gap: 15px; width: 100%; max-width: 300px;">
         <button id="restartScannerBtn" onclick="restartScanner()" style="background-color: #2196F3; color: white; border: none; padding: 12px; border-radius: 6px; cursor: pointer; font-size: 1.1em; display: flex; align-items: center; justify-content: center; gap: 8px;">
-            <i class="fas fa-sync-alt"></i> Restart Scanner
+            <i class="fas fa-sync-alt"></i> <span data-i18n="restart_scanner">Restart Scanner</span>
         </button>
     </div>
     <form id="scan_form" action="/submitposition" method="POST" style="display: none;">
@@ -476,30 +473,6 @@
         }
     });
 
-    document.getElementById('picturePositionBtn').addEventListener('click', function() {
-        const params = new URLSearchParams(window.location.search);
-        const editId = params.get('edit_rack_id');
-        const moveQty = params.get('move_qty');
-        const forDiagnostic = params.get('for_diagnostic');
-        const returnUrl = params.get('return');
-        if(editId){
-            // forward the edit id and move_qty so pictureposition.html knows to persist PICTUREPOSITION for this searchRack row
-            let url = '/pictureposition?edit_rack_id=' + encodeURIComponent(editId);
-            if(moveQty){
-                url += '&move_qty=' + encodeURIComponent(moveQty);
-            }
-            window.location.href = url;
-        } else if(forDiagnostic){
-            // forward diagnostic parameters
-            let url = '/pictureposition?for_diagnostic=' + encodeURIComponent(forDiagnostic);
-            if(returnUrl){
-                url += '&return=' + encodeURIComponent(returnUrl);
-            }
-            window.location.href = url;
-        } else {
-            window.location.href = '/pictureposition';
-        }
-    });
 
     function getDeviceType() {
         const ua = navigator.userAgent;
@@ -514,55 +487,26 @@
         var qrInput = document.getElementById('qrTextInput');
         var readerDiv = document.getElementById('reader');
         var restartBtn = document.getElementById('restartScannerBtn');
-        var pictureBtn = document.getElementById('picturePositionBtn');
-        
         // Check for scanner mode override
         const scannerMode = localStorage.getItem('scannerMode');
         const forceHandheld = scannerMode === 'handheld';
         
-        if (deviceType === 'iPad' || deviceType === 'Android Tablet' || forceHandheld) {
-            // Hide camera/QR scanner, show QR input
-            if (readerDiv) readerDiv.style.display = 'none';
-            if (qrInput) {
-                qrInput.style.display = '';
-                qrInput.value = '';
-                requestAnimationFrame(function() {
-                    qrInput.focus();
-                });
-            }
-            // Hide overlay and camera controls
-            var overlay = document.getElementById('qrOverlay');
-            if (overlay) overlay.style.display = 'none';
-            document.getElementById('flashBtn').style.display = 'none';
-            document.getElementById('flashMsg').style.display = 'none';
-            // Prevent scanner from starting
-            window.startScanner = function(){};
-            // If scanner was already running, stop it
-            stopScanner();
-            // Hide Restart Scanner button in tablet mode
-            if (restartBtn) restartBtn.style.display = 'none';
-            // Picture Position button: camera icon only
-            if (pictureBtn) {
-                pictureBtn.style.backgroundColor = '#2196F3';
-                pictureBtn.textContent = '';
-                var icon = document.createElement('i');
-                icon.className = 'fas fa-camera';
-                pictureBtn.appendChild(icon);
-            }
-        } else {
-            // Mobile or desktop: keep camera, hide QR input
-            if (readerDiv) readerDiv.style.display = '';
-            if (qrInput) qrInput.style.display = 'none';
-            if (restartBtn) restartBtn.style.display = '';
-            // Picture Position button: camera icon only
-            if (pictureBtn) {
-                pictureBtn.style.backgroundColor = '#ff4444';
-                pictureBtn.textContent = '';
-                var icon = document.createElement('i');
-                icon.className = 'fas fa-camera';
-                pictureBtn.appendChild(icon);
-            }
+        // Always use scanner/handheld mode (no camera)
+        if (readerDiv) readerDiv.style.display = 'none';
+        if (qrInput) {
+            qrInput.style.display = '';
+            qrInput.value = '';
+            requestAnimationFrame(function() {
+                qrInput.focus();
+            });
         }
+        var overlay = document.getElementById('qrOverlay');
+        if (overlay) overlay.style.display = 'none';
+        document.getElementById('flashBtn').style.display = 'none';
+        document.getElementById('flashMsg').style.display = 'none';
+        window.startScanner = function(){};
+        stopScanner();
+        if (restartBtn) restartBtn.style.display = 'none';
     }
 
     window.addEventListener('DOMContentLoaded', setupDeviceMode);
@@ -752,5 +696,6 @@
         }
     });
     </script>
+    <script src="/static/i18n.js"></script>
 </body>
 </html>

@@ -10,14 +10,14 @@
 </head>
 <body>
     <div class="container">
-        <h1><i class="fas fa-box"></i> Shelf Manager</h1>
+        <h1><i class="fas fa-box"></i> <span data-i18n="shelf_manager">Shelf Manager</span></h1>
         
         <!-- List View -->
         <div id="list-view" class="view active">
             <div class="action-bar">
                 <div class="action-left">
                     <button class="back-btn btn btn-exit" id="back-btn">
-                        <i class="fas fa-arrow-left"></i> <span id="back-btn-text">Exit</span>
+                        <i class="fas fa-arrow-left"></i> <span id="back-btn-text" data-i18n="exit">Exit</span>
                     </button>
                     <button class="btn btn-primary" id="print-qr-btn" style="display: none;">
                         <i class="fas fa-qrcode"></i> Print QR (<span id="selected-count">0</span>)
@@ -33,7 +33,7 @@
                     </button>
                 </div>
                 <div style="flex:1; text-align:center; display:flex; align-items:center; justify-content:center; gap:8px;">
-                    <h2 id="view-title" style="margin:0; font-size:1.2rem; color:#333;">Groups</h2>
+                    <h2 id="view-title" style="margin:0; font-size:1.2rem; color:#333;" data-i18n="groups">Groups</h2>
                 </div>
                 <div class="action-right">
                     <div id="sort-controls" style="display:none; align-items:center; gap:5px;">
@@ -62,10 +62,10 @@
         <!-- Add/Edit View -->
         <div id="add-view" class="view">
             <div class="form-card">
-                <h2 id="form-title">Add New Shelf</h2>
+                <h2 id="form-title" data-i18n="add_new_shelf">Add New Shelf</h2>
                 
                 <div class="form-group">
-                    <label for="shelf-code">Shelf Code</label>
+                    <label for="shelf-code" data-i18n="shelf_code">Shelf Code</label>
                     <input type="text" id="shelf-code" placeholder="e.g., gr1s1, or2s3" autocomplete="off">
                     <div id="code-validation" class="validation-message"></div>
                 </div>
@@ -159,9 +159,9 @@
     <!-- Modal for Creating Group -->
     <div id="create-group-modal" class="modal">
         <div class="modal-content" style="max-width: 400px;">
-            <h3>Create New Group</h3>
+            <h3 data-i18n="create_new_group">Create New Group</h3>
             <div class="form-group">
-                <label for="new-group-name">Group Name</label>
+                <label for="new-group-name" data-i18n="group_name">Group Name</label>
                 <input type="text" id="new-group-name" placeholder="e.g., Aisle 1, Warehouse B">
             </div>
             <div class="modal-actions">
@@ -174,7 +174,7 @@
     <!-- Modal for Moving Shelves -->
     <div id="move-group-modal" class="modal">
         <div class="modal-content" style="max-width: 400px;">
-            <h3>Move to Group</h3>
+            <h3 data-i18n="move_to_group">Move to Group</h3>
             <p>Select a destination group for <span id="move-count">0</span> shelves:</p>
             <div class="form-group">
                 <select id="move-group-select" style="width:100%; padding:10px; font-size:1.1rem;">
@@ -189,5 +189,6 @@
     </div>
     
     <script src="{{ url_for('static', filename='shelf-creator.js') }}?v=7"></script>
+    <script src="/static/i18n.js"></script>
 </body>
 </html>

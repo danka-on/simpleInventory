@@ -106,6 +106,53 @@
             overflow: hidden;
             transition: all 0.5s ease;
         }
+
+        /* Loading overlay */
+        .page-loading-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:99999;align-items:center;justify-content:center}
+        .page-loading-overlay.active{display:flex}
+        .loading-spinner-large{border:4px solid #f3f3f3;border-top:4px solid #00b894;border-radius:50%;width:50px;height:50px;animation:spin 1s linear infinite}
+
+        /* Refresh button */
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .refresh-btn {
+            width: 32px; height: 32px; border-radius: 50%; border: none;
+            background: #f0f0f0; cursor: pointer; display: flex;
+            align-items: center; justify-content: center; transition: background 0.2s;
+        }
+        .refresh-btn:hover { background: #e0e0e0; }
+        .refresh-btn.spinning i { animation: spin 0.8s linear; }
+
+        /* Days confirm button */
+        .days-confirm-btn {
+            width: 26px; height: 26px; border-radius: 50%; border: none;
+            background: var(--success); color: #fff; cursor: pointer;
+            display: none; align-items: center; justify-content: center;
+            font-size: 0.75rem; transition: opacity 0.2s, transform 0.2s;
+        }
+        .days-confirm-btn.visible { display: inline-flex; }
+        .days-confirm-btn:hover { transform: scale(1.1); }
+
+        /* Status buttons */
+        .status-btn {
+            border: none; color: #fff; padding: 6px 14px; border-radius: 20px;
+            font-size: 0.8rem; cursor: pointer; transition: all 0.2s;
+            display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+        }
+        .status-btn:hover { filter: brightness(1.1); transform: scale(1.05); }
+        .status-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+        .status-btn-done { background: var(--success); }
+        .status-btn-undo { background: #ff9800; }
+
+        /* Table header class */
+        .orders-th {
+            padding: 8px; border-bottom: 2px solid #e0e0e0; font-size: 0.85rem;
+        }
+
+        /* Completed tab styling */
+        #completed-orders-table thead tr { background: #e8f5e9 !important; }
+        #completed-orders-table tbody tr {
+            border-left: 3px solid var(--success);
+        }
         .token-banner {
             background: #d32f2f;
             color: #fff;
@@ -284,12 +331,13 @@
         ⚠️ TESTING SERVER - {{ server_hostname }} ⚠️
     </div>
     {% endif %}
+    <div id="pageLoadingOverlay" class="page-loading-overlay"><div class="loading-spinner-large"></div></div>
     <div class="container">
 
         <div class="main-actions" style="margin-bottom:12px;">
             <a href="/items-to-list" style="text-decoration:none; width: 100%;">
                 <button type="button" class="btn-lighten" style="width: 100%; font-size:1.2rem; padding:18px 0; background:var(--primary); color:#fff; border:none; border-radius:var(--radius); box-shadow:0 2px 8px rgba(0,0,0,0.04); display:flex;align-items:center;justify-content:center;gap:8px; margin-bottom:8px;">
-                    <i class="fas fa-list"></i> Item Manager
+                    <i class="fas fa-list"></i> <span data-i18n="item_manager">Item Manager</span>
                 </button>
             </a>
         </div>
@@ -297,16 +345,17 @@
         <div class="section-card" style="overflow-x: auto;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
                 <div style="display: flex; gap: 10px; align-items: center;">
-                    <button class="tab-button active" data-tab="pending">Ready to Ship</button>
-                    <button class="tab-button" data-tab="completed">Completed</button>
+                    <button class="tab-button active" data-tab="pending" data-i18n="ready_to_ship">Ready to Ship</button>
+                    <button class="tab-button" data-tab="completed" data-i18n="completed">Completed</button>
                     <span id="pending-count" style="background: #4caf50; color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; font-weight: bold;">0</span>
                 </div>
                 <div style="display: flex; align-items: center; gap: 8px;">
-                    <button id="refresh-orders-btn" title="Refresh orders" style="background: none; border: 1px solid #ddd; padding: 4px 8px; border-radius: 4px; cursor: pointer; display: flex; align-items: center;">
-                        <i class="fas fa-sync-alt" style="font-size: 0.85rem; color: #666;"></i>
+                    <button id="refresh-orders-btn" class="refresh-btn" title="Refresh orders">
+                        <i class="fas fa-arrows-rotate" style="font-size: 0.85rem; color: #666;"></i>
                     </button>
-                    <label for="sold-orders-days" style="font-size:0.9rem; white-space: nowrap;">Days:</label>
+                    <label for="sold-orders-days" style="font-size:0.9rem; white-space: nowrap;" data-i18n="days">Days:</label>
                     <input type="number" id="sold-orders-days" value="2" min="1" max="120" style="width: 50px; padding: 4px; border: 1px solid #ddd; border-radius: 4px;">
+                    <button id="days-confirm-btn" class="days-confirm-btn" title="Apply"><i class="fas fa-check"></i></button>
                 </div>
             </div>
             <div class="tab-content active" id="pending-orders">
@@ -314,40 +363,40 @@
                     <table id="sold-orders-table" style="width: 100%; border-collapse: collapse;">
                         <thead>
                             <tr style="background:#f5f5f5; position: sticky; top: 0; z-index: 10;">
-                                <th style="padding: 8px; text-align: left; border-bottom: 2px solid #e0e0e0; font-size: 0.85rem;">Title</th>
-                                <th style="padding: 8px; text-align: left; border-bottom: 2px solid #e0e0e0; font-size: 0.85rem;">Info</th>
-                                <th style="padding: 8px; text-align: center; border-bottom: 2px solid #e0e0e0; font-size: 0.85rem; width: 60px;">Loc</th>
-                                <th style="padding: 8px; text-align: center; border-bottom: 2px solid #e0e0e0; font-size: 0.85rem; width: 40px;">#</th>
-                                <th style="padding: 8px; text-align: center; border-bottom: 2px solid #e0e0e0; font-size: 0.85rem; width: 80px;">Status</th>
+                                <th class="orders-th" style="text-align: left;" data-i18n="title">Title</th>
+                                <th class="orders-th" style="text-align: left;" data-i18n="info">Info</th>
+                                <th class="orders-th" style="text-align: center; width: 60px;" data-i18n="loc">Loc</th>
+                                <th class="orders-th" style="text-align: center; width: 40px;">#</th>
+                                <th class="orders-th" style="text-align: center; width: 80px;" data-i18n="status">Status</th>
                             </tr>
                         </thead>
                         <tbody style="font-size: 0.85rem;">
                             <tr class="loading-row">
                                 <td colspan="5" style="text-align: center; padding: 20px; color: #666;">
-                                    <i class="fas fa-spinner fa-spin"></i> Loading orders...
+                                    <i class="fas fa-spinner fa-spin"></i> <span data-i18n="loading_orders">Loading orders...</span>
                                 </td>
                             </tr>
                         </tbody>
                     </table>
                 </div>
             </div>
-            
+
             <div class="tab-content" id="completed-orders">
                 <div style="max-height: 400px; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 6px; min-height: 100px;">
                     <table id="completed-orders-table" style="width: 100%; border-collapse: collapse;">
                         <thead>
-                            <tr style="background:#f5f5f5; position: sticky; top: 0; z-index: 10;">
-                                <th style="padding: 8px; text-align: left; border-bottom: 2px solid #e0e0e0; font-size: 0.85rem;">Title</th>
-                                <th style="padding: 8px; text-align: left; border-bottom: 2px solid #e0e0e0; font-size: 0.85rem;">Info</th>
-                                <th style="padding: 8px; text-align: center; border-bottom: 2px solid #e0e0e0; font-size: 0.85rem; width: 60px;">Loc</th>
-                                <th style="padding: 8px; text-align: center; border-bottom: 2px solid #e0e0e0; font-size: 0.85rem; width: 40px;">#</th>
-                                <th style="padding: 8px; text-align: center; border-bottom: 2px solid #e0e0e0; font-size: 0.85rem; width: 80px;">Status</th>
+                            <tr style="position: sticky; top: 0; z-index: 10;">
+                                <th class="orders-th" style="text-align: left;" data-i18n="title">Title</th>
+                                <th class="orders-th" style="text-align: left;" data-i18n="info">Info</th>
+                                <th class="orders-th" style="text-align: center; width: 60px;" data-i18n="loc">Loc</th>
+                                <th class="orders-th" style="text-align: center; width: 40px;">#</th>
+                                <th class="orders-th" style="text-align: center; width: 80px;" data-i18n="status">Status</th>
                             </tr>
                         </thead>
                         <tbody style="font-size: 0.85rem;">
                             <tr class="loading-row">
                                 <td colspan="5" style="text-align: center; padding: 20px; color: #666;">
-                                    <i class="fas fa-spinner fa-spin"></i> Loading orders...
+                                    <i class="fas fa-spinner fa-spin"></i> <span data-i18n="loading_orders">Loading orders...</span>
                                 </td>
                             </tr>
                         </tbody>
@@ -359,13 +408,13 @@
         <div class="main-actions" style="margin-top: 18px;">
             <form method="GET" action="/position" style="margin:0; width: 100%;">
                 <button type="submit" class="btn-lighten" style="background:#27ae60; width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px;">
-                    <i class="fas fa-plus-circle"></i> Add Item to Shelf
+                    <i class="fas fa-plus-circle"></i> <span data-i18n="add_item_to_shelf">Add Item to Shelf</span>
                 </button>
             </form>
 
             <a href="/searchrack" style="text-decoration:none; width: 100%;">
                 <button type="button" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px;">
-                    <i class="fas fa-search"></i> Search Warehouse
+                    <i class="fas fa-search"></i> <span data-i18n="search_warehouse">Search Warehouse</span>
                 </button>
             </a>
 
@@ -373,7 +422,7 @@
 
             <a href="/item-prep" style="text-decoration:none; width: 100%;">
                 <button type="button" class="btn-lighten" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; background: #7B3F00;">
-                    <i class="fas fa-diagnoses"></i> Preperation
+                    <i class="fas fa-diagnoses"></i> <span data-i18n="preperation">Preperation</span>
                 </button>
             </a>
         </div>
@@ -381,7 +430,7 @@
         <div class="main-actions" style="margin-top: 20px;">
             <a href="/tools" style="text-decoration:none; width: 100%;">
                 <button type="button" class="btn-darken" style="width: 100%; background: #95a5a6; color: #fff; margin: 0;">
-                    <i class="fas fa-tools" style="margin-right: 8px;"></i> Tools
+                    <i class="fas fa-tools" style="margin-right: 8px;"></i> <span data-i18n="tools">Tools</span>
                 </button>
             </a>
         </div>
@@ -547,15 +596,11 @@ function createOrderRow(order, isCompleted = false) {
     tr.style.transition = 'all 0.3s ease';
     
     const buttonHtml = isCompleted
-        ? `<button class="handle-btn undo-btn" 
-                data-id="${order.id}" 
-                style="background:#ff9800;color:white;border:none;padding:8px 12px;border-radius:20px;font-size:14px;cursor:pointer;transition:all 0.3s ease;width:60px;display:inline-flex;align-items:center;justify-content:center;gap:4px;">
-            <span style="font-size:16px;">↩</span>
+        ? `<button class="handle-btn undo-btn status-btn status-btn-undo" data-id="${order.id}">
+            <i class="fas fa-rotate-left"></i>
         </button>`
-        : `<button class="handle-btn" 
-                data-id="${order.id}" 
-                style="background:#4caf50;color:white;border:none;padding:8px 12px;border-radius:20px;font-size:14px;cursor:pointer;transition:all 0.3s ease;width:60px;display:inline-flex;align-items:center;justify-content:center;gap:4px;">
-            <span style="font-size:16px;">✓</span>
+        : `<button class="handle-btn status-btn status-btn-done" data-id="${order.id}">
+            <i class="fas fa-check"></i>
         </button>`;
     
     tr.innerHTML = tdTitle(order) + tdInfo(order) + tdLocation(order) + tdQuantity(order) + 
@@ -964,48 +1009,62 @@ window.addEventListener('DOMContentLoaded', async function() {
     
     setupTabs();
     
-    // Set up refresh button - force refresh to get latest data
+    // Set up refresh button
     const refreshBtn = document.getElementById('refresh-orders-btn');
     if (refreshBtn) {
         refreshBtn.addEventListener('click', async function() {
-            const icon = this.querySelector('i');
-            // Add animation class
-            icon.classList.add('fa-spin');
-            this.style.transition = 'transform 0.5s ease';
-            this.style.transform = 'rotate(180deg)';
-            
+            if (this.classList.contains('spinning')) return;
+            this.classList.add('spinning');
+
             const days = parseInt(document.getElementById('sold-orders-days').value) || 2;
-            
-            // Ensure animation plays for at least 500ms
             const start = Date.now();
-            await fetchAndShowSoldOrders(days, true); // Force refresh
+            await fetchAndShowSoldOrders(days, true);
             const elapsed = Date.now() - start;
-            const remaining = Math.max(0, 500 - elapsed);
-            
+
             setTimeout(() => {
-                icon.classList.remove('fa-spin');
-                this.style.transform = 'rotate(0deg)'; // Reset rotation
-                
-                // Flash success color
-                const originalBorder = this.style.borderColor;
-                this.style.borderColor = '#4caf50';
-                this.style.color = '#4caf50';
+                this.classList.remove('spinning');
+                // Show green checkmark briefly
+                const icon = this.querySelector('i');
+                icon.className = 'fas fa-check';
+                icon.style.color = 'var(--success)';
                 setTimeout(() => {
-                    this.style.borderColor = originalBorder || '#ddd';
-                    this.style.color = '';
-                }, 500);
-            }, remaining);
+                    icon.className = 'fas fa-arrows-rotate';
+                    icon.style.color = '#666';
+                }, 800);
+            }, Math.max(0, 800 - elapsed));
         });
     }
-    
-    // Set up days input change handler - force refresh when days change
+
+    // Days input — show confirm checkmark when value changes
     const soldOrdersDays = document.getElementById('sold-orders-days');
-    if (soldOrdersDays) {
-        soldOrdersDays.addEventListener('change', function() {
-            const days = parseInt(this.value) || 2;
-            OrderManager.clearCache(); // Clear cache when changing days
-            fetchAndShowSoldOrders(days, true);
+    const daysConfirmBtn = document.getElementById('days-confirm-btn');
+    let loadedDays = 2; // track what's currently loaded
+
+    async function applyDaysChange() {
+        const days = parseInt(soldOrdersDays.value) || 2;
+        loadedDays = days;
+        daysConfirmBtn.classList.remove('visible');
+        OrderManager.clearCache();
+        document.getElementById('pageLoadingOverlay').classList.add('active');
+        await fetchAndShowSoldOrders(days, true);
+        document.getElementById('pageLoadingOverlay').classList.remove('active');
+    }
+
+    if (soldOrdersDays && daysConfirmBtn) {
+        soldOrdersDays.addEventListener('input', function() {
+            const val = parseInt(this.value) || 2;
+            if (val !== loadedDays) {
+                daysConfirmBtn.classList.add('visible');
+            } else {
+                daysConfirmBtn.classList.remove('visible');
+            }
         });
+
+        soldOrdersDays.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') { e.preventDefault(); applyDaysChange(); }
+        });
+
+        daysConfirmBtn.addEventListener('click', applyDaysChange);
     }
     
     // Initial load - non-blocking, page shows immediately
@@ -1226,5 +1285,6 @@ window.fetchAndShowSoldOrders = fetchAndShowSoldOrders;
     setTimeout(checkTokenStatus, 10 * 60 * 1000);
 })();
 </script>
+<script src="/static/i18n.js"></script>
 </body>
 </html>

@@ -77,9 +77,9 @@
 </head>
 <body>
 <div class="top">
-  <a href="/"><button class="btn btn-danger">Back</button></a>
-  <h2 style="margin:0 auto;text-align:center;flex:1">Preperation</h2>
-  <a href="/barcode-print-que" style="text-decoration:none"><button class="btn btn-primary">🖨️ Print Que</button></a>
+  <a href="/"><button class="btn btn-danger" data-i18n="back">Back</button></a>
+  <h2 style="margin:0 auto;text-align:center;flex:1" data-i18n="preperation">Preperation</h2>
+  <a href="/barcode-print-que" style="text-decoration:none"><button class="btn btn-primary">🖨️ <span data-i18n="print_que">Print Que</span></button></a>
   </div>
   
   <div class="card" style="margin-top:12px;padding:12px;">
@@ -743,5 +743,6 @@
       }catch(e){}
     });
   </script>
+  <script src="/static/i18n.js"></script>
 </body>
 </html>

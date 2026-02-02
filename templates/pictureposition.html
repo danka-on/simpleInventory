@@ -17,18 +17,18 @@
     </style>
 </head>
 <body>
-    <h1>Take Picture of Location</h1>
+    <h1 data-i18n="take_picture_location">Take Picture of Location</h1>
     <div id="camera-container">
         <video id="video" autoplay playsinline></video>
         <img id="preview-img" style="display:none;" />
     </div>
     <div id="controls">
-        <button id="capture-btn">Capture</button>
-        <button id="confirm-btn" style="display:none;">Confirm</button>
-        <button id="retake-btn" style="display:none;">Retake</button>
-        <button id="abort-btn" style="display:none;background:#d32f2f;color:#fff;">Abort</button>
-        <a href="/barcode" id="skip-link"><button id="skip-btn" type="button">Skip</button></a>
-        <a href="/position" id="back-link"><button id="back-btn" type="button" style="background:#eee;color:#222;">Back</button></a>
+        <button id="capture-btn" data-i18n="capture">Capture</button>
+        <button id="confirm-btn" style="display:none;" data-i18n="confirm">Confirm</button>
+        <button id="retake-btn" style="display:none;" data-i18n="retake">Retake</button>
+        <button id="abort-btn" style="display:none;background:#d32f2f;color:#fff;" data-i18n="abort">Abort</button>
+        <a href="/barcode" id="skip-link"><button id="skip-btn" type="button" data-i18n="skip">Skip</button></a>
+        <a href="/position" id="back-link"><button id="back-btn" type="button" style="background:#eee;color:#222;" data-i18n="back">Back</button></a>
     </div>
     <div id="status"></div>
     <div id="progress-container" style="width:100%;max-width:350px;margin-top:12px;display:none;">
@@ -279,5 +279,6 @@
         }
     });
     </script>
+    <script src="/static/i18n.js"></script>
 </body>
 </html>
