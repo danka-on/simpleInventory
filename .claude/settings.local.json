@@ -11,7 +11,8 @@
       "Bash(PYTHONIOENCODING=utf-8 python:*)",
       "Bash(git stash:*)",
       "Bash(.venv/Scripts/python:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(cd:*)"
     ]
   }
 }

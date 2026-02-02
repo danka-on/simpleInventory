@@ -21,17 +21,19 @@ sudo journalctl -u sweetshelves.service -f
 
 ## Deploying to Pi
 
-Pi host: `manager@sweetshelves.local`, app directory: `/opt/sweetshelves`
+Pi host: `manager@superinventory.local`, app directory: `/opt/sweetshelves`
 
 ```powershell
 # Scripted deploy (hardcoded subset of files — update script when adding new files)
 .\deploy-to-pi.ps1
 
 # Manual SCP for specific files
-scp .\app.py manager@sweetshelves.local:/opt/sweetshelves/
-scp .\templates\*.html manager@sweetshelves.local:/opt/sweetshelves/templates/
-scp .\static\i18n.js manager@sweetshelves.local:/opt/sweetshelves/static/
+scp .\app.py manager@superinventory.local:/opt/sweetshelves/
+scp .\templates\*.html manager@superinventory.local:/opt/sweetshelves/templates/
+scp .\static\i18n.js manager@superinventory.local:/opt/sweetshelves/static/
 ```
+
+**Never SCP database files (.db) from PC to Pi.** The Pi has its own live databases. Only transfer code, templates, and static assets.
 
 After deploying, restart the service on the Pi: `sudo systemctl restart sweetshelves.service`
 
