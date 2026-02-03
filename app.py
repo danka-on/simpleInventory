@@ -8543,9 +8543,11 @@ def api_inventory_history():
     try:
         search = (request.args.get('search') or '').strip().lower()
         sort_order = request.args.get('sort', 'desc')  # 'asc' or 'desc'
-        
+        method_filter = (request.args.get('method') or '').strip()  # Filter by removal method
+
         history_items = []
-        
+        total_count = 0
+
         # Get removal history from rackhistory.db (removed_items table has more detail)
         try:
             rem_conn = sqlite3.connect('rackhistory.db')
@@ -8562,28 +8564,50 @@ def api_inventory_history():
                     rem_cur.execute('ALTER TABLE removed_items ADD COLUMN item_position TEXT')
                     rem_conn.commit()
                 
-                rem_cur.execute('''
-                    SELECT 
+                # Build query with optional search filter in SQL for better performance
+                params = []
+                where_clauses = []
+
+                if search:
+                    where_clauses.append("(LOWER(COALESCE(title, '')) LIKE ? OR LOWER(COALESCE(barcode, '')) LIKE ? OR LOWER(COALESCE(item_position, '')) LIKE ?)")
+                    params.extend([f'%{search}%', f'%{search}%', f'%{search}%'])
+
+                if method_filter:
+                    where_clauses.append("removal_type = ?")
+                    params.append(method_filter)
+
+                where_sql = ''
+                if where_clauses:
+                    where_sql = ' WHERE ' + ' AND '.join(where_clauses)
+
+                # Get total count (before LIMIT)
+                count_query = 'SELECT COUNT(*) FROM removed_items' + where_sql
+                rem_cur.execute(count_query, params)
+                total_count = rem_cur.fetchone()[0]
+
+                # Main data query
+                query = '''
+                    SELECT
                         id, order_id, barcode, title, quantity_removed,
                         removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position
                     FROM removed_items
-                    ORDER BY removed_at DESC
-                    LIMIT 1000
-                ''')
-                
+                ''' + where_sql + ' ORDER BY removed_at DESC LIMIT 1000'
+
+                rem_cur.execute(query, params)
+
                 for row in rem_cur.fetchall():
                     title = row['title'] or 'Unknown'
                     barcode = row['barcode'] or ''
                     location = row['item_position'] or ''
-                    
-                    if search and search not in title.lower() and search not in barcode.lower() and search not in location.lower():
-                        continue
-                    
+
+                    # For manual_edit type, show as addition or removal based on qty_change
+                    removal_type = row['removal_type'] or 'unknown'
+
                     # Determine if this is addition or removal based on old/new quantity
                     old_qty = row['old_quantity'] or 0
                     new_qty = row['new_quantity'] or 0
                     qty_change = new_qty - old_qty
-                    
+
                     # Normalize timestamp for display (convert UTC to local time)
                     display_timestamp = row['removed_at']
                     try:
@@ -8596,9 +8620,6 @@ def api_inventory_history():
                             display_timestamp = dt.isoformat()
                     except Exception:
                         pass  # Keep original if parsing fails
-                    
-                    # For manual_edit type, show as addition or removal based on qty_change
-                    removal_type = row['removal_type'] or 'unknown'
                     
                     # Check if barcode has a suffix (diagnostic flow)
                     is_diagnostic = '-' in barcode and barcode.split('-')[-1].isdigit()
@@ -8691,7 +8712,7 @@ def api_inventory_history():
         
         history_items.sort(key=lambda x: parse_timestamp_for_sort(x['timestamp']), reverse=(sort_order == 'desc'))
         
-        return jsonify({'success': True, 'items': history_items[:500]})  # Limit to 500 for performance
+        return jsonify({'success': True, 'items': history_items[:500], 'total_count': total_count})  # Limit to 500 for performance
         
     except Exception as e:
         import traceback
@@ -9908,11 +9929,70 @@ def api_search_db(db_key):
 
                     # Compute inv_status for sold items
                     try:
-                        rackupdated = item.get('rackupdated') or 0
                         shipped_time = item.get('shipped_time') or ''
                         removal_cancelled = item.get('removal_cancelled') or 0
+                        order_id_val = item.get('order_id') or ''
+                        barcode_val = item.get('barcode') or ''
 
-                        if rackupdated == 1:
+                        # Check if there's an automatic removal record in rackhistory.db
+                        # Must match: barcode + removal_type='automatic' + date within expected window
+                        has_removal_record = False
+                        if barcode_val and shipped_time:
+                            try:
+                                from datetime import datetime, timedelta
+                                # Parse shipped time for date comparison
+                                if 'T' in shipped_time:
+                                    if shipped_time.endswith('Z'):
+                                        shipped_dt = datetime.fromisoformat(shipped_time.replace('Z', '+00:00'))
+                                    else:
+                                        shipped_dt = datetime.fromisoformat(shipped_time)
+                                    shipped_dt = shipped_dt.replace(tzinfo=None)
+                                else:
+                                    shipped_dt = datetime.strptime(shipped_time, '%Y-%m-%d %H:%M:%S')
+
+                                # Get grace period setting
+                                grace_conn = sqlite3.connect('sold.db')
+                                grace_cur = grace_conn.cursor()
+                                grace_cur.execute("SELECT value FROM settings WHERE key = 'removal_grace_hours'")
+                                grace_row = grace_cur.fetchone()
+                                grace_hours = float(grace_row[0]) if grace_row and str(grace_row[0]).strip() else 48
+                                grace_conn.close()
+
+                                # Expected removal window: shipped + grace_period to shipped + grace_period + 24h buffer
+                                removal_window_start = shipped_dt + timedelta(hours=grace_hours - 1)  # 1h before grace
+                                removal_window_end = shipped_dt + timedelta(hours=grace_hours + 24)  # 24h after grace
+
+                                hist_conn = sqlite3.connect('rackhistory.db')
+                                hist_cur = hist_conn.cursor()
+                                # Only count automatic removals within the expected date window
+                                hist_cur.execute("""
+                                    SELECT id, removed_at FROM removed_items
+                                    WHERE barcode = ?
+                                    AND removal_type = 'automatic'
+                                    AND COALESCE(old_quantity, 0) > COALESCE(new_quantity, 0)
+                                    ORDER BY removed_at DESC
+                                """, (str(barcode_val),))
+
+                                for row in hist_cur.fetchall():
+                                    removed_at = row[1]
+                                    if removed_at:
+                                        try:
+                                            if 'T' in str(removed_at):
+                                                removed_dt = datetime.fromisoformat(str(removed_at).replace('Z', '+00:00'))
+                                                removed_dt = removed_dt.replace(tzinfo=None)
+                                            else:
+                                                removed_dt = datetime.fromisoformat(str(removed_at))
+                                            # Check if removal is within expected window
+                                            if removal_window_start <= removed_dt <= removal_window_end:
+                                                has_removal_record = True
+                                                break
+                                        except Exception:
+                                            pass
+                                hist_conn.close()
+                            except Exception:
+                                pass
+
+                        if has_removal_record:
                             item_out['inv_status'] = 'COMPLETE'
                         elif shipped_time and not removal_cancelled:
                             # Check if within grace period

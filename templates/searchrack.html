@@ -390,6 +390,17 @@
                     <option value="desc">Date (newest first)</option>
                     <option value="asc">Date (oldest first)</option>
                 </select>
+                <select id="history-method" style="padding:8px;border-radius:6px;border:1px solid #ddd;">
+                    <option value="">All Methods</option>
+                    <option value="automatic">🤖 Automatic Removal</option>
+                    <option value="manual_sold_removal">🛒 Manual Sold Removal</option>
+                    <option value="manual">🗑️ Manual Deletion</option>
+                    <option value="manual_edit">✏️ Manual Edit</option>
+                    <option value="add_to_shelf">📦 Add to Shelf</option>
+                    <option value="location_edit">📍 Location Change</option>
+                    <option value="locationmoved">🔄 Location Move</option>
+                    <option value="manual_multidb_delete">🔧 Multi-DB Delete</option>
+                </select>
                 <button class="btn btn-primary" id="history-search-btn">Search</button>
             </div>
             <div id="historyContent" style="overflow:auto;max-height:calc(90vh - 180px);"></div>
@@ -423,6 +434,7 @@ function createFilters(){
         option.value = k;
         option.textContent = DB_LABELS[k];
         if(defaultChecked[k]) option.selected = true;
+        if(k === 'sold') { option.style.color = '#e74c3c'; option.style.fontWeight = '600'; }
         dbGroup.appendChild(option);
     });
     dbSelect.appendChild(dbGroup);
@@ -1713,13 +1725,17 @@ document.getElementById('history-search').addEventListener('keypress', (e) => {
     if (e.key === 'Enter') loadHistory();
 });
 document.getElementById('history-sort').addEventListener('change', loadHistory);
+document.getElementById('history-method').addEventListener('change', loadHistory);
 
 async function loadHistory() {
     const search = document.getElementById('history-search').value;
     const sort = document.getElementById('history-sort').value;
+    const method = document.getElementById('history-method').value;
 
     try {
-        const resp = await fetch(`/api/inventory/history?search=${encodeURIComponent(search)}&sort=${sort}`);
+        let url = `/api/inventory/history?search=${encodeURIComponent(search)}&sort=${sort}`;
+        if (method) url += `&method=${encodeURIComponent(method)}`;
+        const resp = await fetch(url);
         const data = await resp.json();
 
         if (!data.success) {
@@ -1728,13 +1744,15 @@ async function loadHistory() {
         }
         
         const items = data.items || [];
-        
+        const totalCount = data.total_count || items.length;
+
         if (items.length === 0) {
             document.getElementById('historyContent').innerHTML = '<div style="color:#999;padding:20px;text-align:center;">No history found</div>';
             return;
         }
-        
-        let html = '<table style="width:100%;border-collapse:collapse;font-size:0.9rem;">';
+
+        let html = `<div style="margin-bottom:8px;color:#666;font-size:0.9rem;">Total: <strong>${totalCount.toLocaleString()}</strong> logs${items.length < totalCount ? ` (showing ${items.length})` : ''}</div>`;
+        html += '<table style="width:100%;border-collapse:collapse;font-size:0.9rem;">';
         html += '<thead><tr style="background:#f0f0f0;">';
         html += '<th style="padding:8px;border:1px solid #ddd;">Date/Time</th>';
         html += '<th style="padding:8px;border:1px solid #ddd;">Action</th>';
