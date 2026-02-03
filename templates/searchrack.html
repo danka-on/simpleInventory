@@ -60,6 +60,164 @@
     .location-card-count{font-size:0.9rem;color:#666}
     .location-card-quantity{font-size:1.2rem;font-weight:700;color:#0066cc;margin-top:4px}
     .breadcrumb-separator{margin:0 8px;color:#999}
+
+    /* Mobile responsive styles */
+    @media (max-width: 768px) {
+        body { padding: 10px; }
+
+        /* Top header - wraps: Row 1: Back | Database | Gear, Row 2: Unified Search */
+        .top { flex-direction: column; align-items: stretch; gap: 10px; }
+        .top > div:first-child {
+            flex-wrap: wrap;
+            gap: 8px;
+            justify-content: flex-start;
+            align-items: center;
+        }
+
+        /* Back button first */
+        #back-btn-link { order: 0; flex-shrink: 0; }
+
+        /* Database selector in middle - compact */
+        .db-selector-group {
+            order: 1;
+            flex: 1;
+            margin-right: 0;
+        }
+        .db-selector-group label {
+            flex-direction: row;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.85rem;
+        }
+        .db-selector-group label::before { content: none; }
+        #db-select {
+            width: auto;
+            flex: 1;
+            min-width: 0;
+            padding: 8px;
+            font-size: 0.85rem;
+        }
+
+        /* Inventory gear on first row */
+        .inventory-gear-btn { order: 2; margin-left: 0 !important; flex-shrink: 0; }
+
+        /* Unified search - full width on second row (between top row and search bar) */
+        .unified-search-box {
+            flex: 1 1 100% !important;
+            order: 10;
+            margin-left: 0 !important;
+            margin-top: 0;
+        }
+        .unified-search-box input {
+            width: 100% !important;
+            flex: 1;
+            min-width: 0;
+        }
+
+        /* Search row - search bar + button, then sort below */
+        .search-row {
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .search-row input[type=text] { flex: 1; min-width: 0; }
+        #search-btn {
+            width: auto;
+            padding: 8px 14px;
+            flex-shrink: 0;
+        }
+        #lot-filter-container {
+            margin-left: 0 !important;
+            width: 100%;
+            flex: 1 1 100%;
+        }
+        #lot-filter-container label {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            width: 100%;
+        }
+        #lot-filter { width: 100%; margin-left: 0 !important; }
+
+        /* Sort - full width below search */
+        .search-row > div:last-child {
+            flex: 1 1 100%;
+            margin-left: 0 !important;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .search-row > div:last-child label {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.9rem;
+            width: 100%;
+        }
+        #sort-select {
+            flex: 1;
+            padding: 8px;
+            font-size: 0.9rem;
+            margin-left: 0 !important;
+        }
+
+        /* Hide location browser and browse button on mobile */
+        #location-browser { display: none !important; }
+        #show-location-browser-btn { display: none !important; }
+
+        /* Showing line - simplified: just db name and page on mobile */
+        .results-count,
+        .qty-count { display: none !important; }
+        .showing-line {
+            font-size: 0.85rem !important;
+        }
+
+        /* Showing line - keep on one line, smaller text */
+        .showing-line {
+            font-size: 0.8rem !important;
+            flex-wrap: nowrap !important;
+            white-space: nowrap;
+            overflow-x: auto;
+        }
+
+        /* Bottom pagination - keep all controls on same line */
+        #bottom-pagination-controls {
+            flex-wrap: nowrap !important;
+            overflow-x: auto;
+        }
+        #bottom-pagination-controls .btn {
+            padding: 6px 10px !important;
+            font-size: 0.85rem !important;
+            min-width: auto !important;
+        }
+
+        /* Table adjustments */
+        table { font-size: 0.85rem; }
+        th, td { padding: 6px 4px; }
+        .thumb { width: 40px; height: 40px; margin-right: 6px; }
+        .title-cell { flex-direction: column; align-items: flex-start; gap: 4px; }
+
+        /* Buttons */
+        .btn { padding: 10px 12px; font-size: 0.9rem; }
+    }
+
+    @media (max-width: 480px) {
+        body { padding: 8px; }
+
+        /* Even smaller screens */
+        .db-selector-group label { font-size: 0.9rem; }
+        #db-select { font-size: 0.9rem; padding: 8px 10px; }
+
+        .unified-search-box label { font-size: 0.8rem !important; }
+        .unified-search-box input { font-size: 0.9rem !important; padding: 8px !important; }
+        .unified-search-box button { padding: 8px 12px !important; font-size: 0.85rem !important; }
+
+        table { font-size: 0.8rem; }
+        th, td { padding: 4px 3px; }
+        .thumb { width: 36px; height: 36px; }
+
+        /* Hide some columns on very small screens */
+        .hide-mobile { display: none !important; }
+    }
     </style>
 </head>
 <body>
@@ -77,9 +235,9 @@
             </div>
             
             <!-- ALL SEARCH moved to top section -->
-            <div style="display:flex; gap:8px; align-items:center; margin-left:auto; padding:8px 12px; background:#fff3e0; border:2px solid #ff6b35; border-radius:8px;">
+            <div class="unified-search-box" style="display:flex; gap:8px; align-items:center; margin-left:auto; padding:8px 12px; background:#fff3e0; border:2px solid #ff6b35; border-radius:8px;">
                 <label style="font-weight:600; color:#ff6b35; white-space:nowrap; font-size:0.9rem;">🔍 ALL:</label>
-                <input type="text" id="all-search-input" placeholder="Search all databases..." style="width:200px; padding:6px 10px; font-size:0.95rem; border:1px solid #ff6b35; border-radius:4px;">
+                <input type="text" id="all-search-input" placeholder="Search all databases..." style="flex:1; min-width:120px; padding:6px 10px; font-size:0.95rem; border:1px solid #ff6b35; border-radius:4px;">
                 <button class="btn" id="all-search-btn" style="background:#ff6b35; color:#fff; border:none; padding:6px 16px; font-weight:600; font-size:0.9rem;">Go</button>
             </div>
 
@@ -93,8 +251,8 @@
                 </div>
             </div>
 
-            <!-- Cache Clear Button -->
-            <button class="btn" id="header-clear-cache-btn" title="Clear Cache & Reload" style="background:#ff9800; color:#fff; padding:8px 12px; margin-left:8px;">
+            <!-- Orange Reset Button (cache clear) - hidden, use id="header-clear-cache-btn" to restore -->
+            <button class="btn" id="header-clear-cache-btn" title="Clear Cache & Reload" style="display:none; background:#ff9800; color:#fff; padding:8px 12px; margin-left:8px;">
                 <i class="fas fa-sync-alt"></i> ↻
             </button>
         </div>
@@ -126,18 +284,13 @@
         </div>
     </div>
 
-    <div style="margin-top:10px; display:flex; gap:12px; align-items:center;">
-        <label style="font-size:0.95rem; color:#444">Page size:
-            <select id="page-size" style="margin-left:6px;padding:6px;border-radius:6px;border:1px solid #ddd">
-                <option value="10">10</option>
-                <option value="25">25</option>
-                <option value="50">50</option>
-            </select>
-        </label>
-        <div id="pagination-controls" style="margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap"></div>
+    <div class="showing-line" style="margin-top:10px; font-size:0.95rem; color:#444; display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+        <span>Showing: <span id="active-dbs">Warehouse</span> <span id="page-indicator" style="color:#00b894; font-weight:600;"></span></span>
+        <button id="show-location-browser-btn" class="btn" style="padding:4px 10px; font-size:0.85rem; background:#f0f0f0; border:1px solid #ddd; display:none;">📍 Browse Locations</button>
     </div>
 
-    <div style="margin-top:10px; font-size:0.95rem; color:#444">Showing: <span id="active-dbs">Warehouse</span></div>
+    <!-- Hidden pagination placeholder for JS compatibility -->
+    <div id="pagination-controls" style="display:none;"></div>
 
     <!-- Location Browser (only visible for Inventory database) -->
     <div id="location-browser" style="display:none; margin-top:12px; border:1px solid #ddd; border-radius:8px; padding:12px; background:#f9f9f9;">
@@ -182,8 +335,15 @@
 
     <div id="results"></div>
 
-    <!-- Pagination at bottom right -->
-    <div style="margin-top:24px; display:flex; justify-content:center; padding:0 12px 20px;">
+    <!-- Pagination at bottom -->
+    <div style="margin-top:24px; display:flex; justify-content:center; align-items:center; gap:12px; padding:0 12px 20px; flex-wrap:wrap;">
+        <label style="font-size:0.95rem; color:#444; display:flex; align-items:center; gap:6px;">Page size:
+            <select id="page-size" style="padding:6px;border-radius:6px;border:1px solid #ddd">
+                <option value="10">10</option>
+                <option value="25">25</option>
+                <option value="50">50</option>
+            </select>
+        </label>
         <div id="bottom-pagination-controls" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"></div>
     </div>
 
@@ -424,12 +584,14 @@ async function doSearch(clearInput = false, explicitQuery = null){
     _currentPage = 1;
     _pageSize = parseInt(document.getElementById('page-size').value || '10', 10);
     // Update the 'Showing' label to include total result count and quantity
+    // Wrap counts in spans so CSS can hide them on mobile
     const activeLabel = dbs.map(d=>DB_LABELS[d]).join(', ');
-    let displayText = `${activeLabel} — ${_allResults.length} results`;
+    let displayHTML = `${activeLabel}`;
+    displayHTML += `<span class="results-count"> — ${_allResults.length} results</span>`;
     if(totalQty > 0){
-        displayText += ` — ${totalQty} total quantity`;
+        displayHTML += `<span class="qty-count"> — ${totalQty} total quantity</span>`;
     }
-    document.getElementById('active-dbs').textContent = displayText;
+    document.getElementById('active-dbs').innerHTML = displayHTML;
     renderPagedResults();
     
     hideLoading();
@@ -482,12 +644,22 @@ function renderPagination(total, page, limit){
     const totalPages = Math.ceil(total / limit);
     const container = document.getElementById('pagination-controls');
     const bottomContainer = document.getElementById('bottom-pagination-controls');
-    
-    if(totalPages <= 1){ 
+    const pageIndicator = document.getElementById('page-indicator');
+
+    // Update page indicator in the Showing line
+    if (pageIndicator) {
+        if (totalPages > 1) {
+            pageIndicator.textContent = `— Page ${page} of ${totalPages}`;
+        } else {
+            pageIndicator.textContent = '';
+        }
+    }
+
+    if(totalPages <= 1){
         const resultText = `<span class="small-muted">${total} results</span>`;
         container.innerHTML = resultText;
         bottomContainer.innerHTML = '';
-        return; 
+        return;
     }
     let html = '';
     
@@ -1715,39 +1887,38 @@ function selectShelf(shelfCode) {
 // Show/hide location browser when Inventory database is selected
 function toggleLocationBrowser(show) {
     const browser = document.getElementById('location-browser');
+    const showBtn = document.getElementById('show-location-browser-btn');
     if (show) {
         browser.style.display = 'block';
+        if (showBtn) showBtn.style.display = 'none';
         loadLocationHierarchy();
     } else {
         browser.style.display = 'none';
+        // Show the "Browse Locations" button when browser is hidden (only for Inventory db)
+        const dbSelect = document.getElementById('db-select');
+        if (showBtn && dbSelect && dbSelect.value === 'searchRack') {
+            showBtn.style.display = 'inline-block';
+        }
         _selectedLocation = null;
         _selectedShelf = null;
     }
 }
 
-// Collapse/expand location browser
-document.getElementById('collapse-location-browser').addEventListener('click', () => {
-    const browser = document.getElementById('location-browser');
-    const cardsContainer = document.getElementById('location-cards');
-    const breadcrumb = document.getElementById('location-breadcrumb');
-    const collapseBtn = document.getElementById('collapse-location-browser');
-    
-    if (cardsContainer.style.display === 'none') {
-        cardsContainer.style.display = 'grid';
-        breadcrumb.style.display = 'block';
-        collapseBtn.textContent = 'Hide';
-    } else {
-        cardsContainer.style.display = 'none';
-        breadcrumb.style.display = 'none';
-        collapseBtn.textContent = 'Show';
-    }
+// "Browse Locations" button click handler
+document.getElementById('show-location-browser-btn').addEventListener('click', () => {
+    toggleLocationBrowser(true);
 });
 
-// Initialize location browser on page load if Inventory database is selected
+// Collapse/expand location browser (Hide button hides the whole browser)
+document.getElementById('collapse-location-browser').addEventListener('click', () => {
+    toggleLocationBrowser(false);
+});
+
+// Initialize location browser on page load - default to hidden
 (function initLocationBrowser() {
     const dbSelect = document.getElementById('db-select');
     if (dbSelect && dbSelect.value === 'searchRack') {
-        toggleLocationBrowser(true);
+        toggleLocationBrowser(false);
     }
 })();
 

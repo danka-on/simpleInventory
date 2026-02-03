@@ -55,6 +55,95 @@
       0% { transform: rotate(0deg); }
       100% { transform: rotate(360deg); }
     }
+
+    /* Mobile responsive styles */
+    @media (max-width: 768px) {
+      body { padding: 10px; }
+
+      /* Top header */
+      .top { grid-template-columns: auto 1fr; gap: 8px; }
+      .top h2 { font-size: 1.1rem; justify-self: start; }
+      .top > div:last-child { display: none; }
+
+      /* Filters - wrap nicely */
+      .filters {
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      /* Row 1: Search input + small search button inline */
+      .filters > label:first-of-type {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        gap: 0;
+      }
+      .filters > label:first-of-type input {
+        flex: 1;
+        min-width: 0;
+        border-radius: 6px 0 0 6px;
+      }
+      #search-btn {
+        order: 1;
+        padding: 8px 12px;
+        font-size: 0.85rem;
+        border-radius: 0 6px 6px 0;
+        margin-left: -1px;
+      }
+      #refresh-btn { display: none; }
+
+      /* Row 2: Gear (first), Status, Select (last) */
+      .filters > div[style*="position:relative"] { order: 3; } /* Status dropdown */
+      #filter-gear {
+        order: 2;
+        padding: 8px 10px;
+        font-size: 0.9rem;
+      }
+      #status-filter-btn {
+        min-width: 90px !important;
+        padding: 8px 10px;
+      }
+
+      /* Select controls on same row */
+      .filters > div[style*="margin-left:auto"] {
+        order: 4;
+        margin-left: 0 !important;
+        flex: 0 0 auto;
+      }
+      #select-btn {
+        padding: 8px 12px;
+        font-size: 0.85rem;
+      }
+      #select-all-label { display: none !important; }
+      #delete-selected {
+        margin-left: 8px;
+        padding: 8px 10px;
+        font-size: 0.85rem;
+      }
+
+      /* Table adjustments */
+      table { font-size: 0.85rem; }
+      th, td { padding: 6px 4px; }
+      .thumb { width: 40px; height: 40px; margin-right: 6px; }
+      .title-cell { flex-direction: column; align-items: flex-start; gap: 4px; }
+
+      /* Buttons */
+      .btn { padding: 10px 12px; font-size: 0.9rem; }
+
+      /* Bottom pagination */
+      #bottom-pagination { gap: 6px; }
+    }
+
+    @media (max-width: 480px) {
+      body { padding: 8px; }
+      .top h2 { font-size: 1rem; }
+
+      table { font-size: 0.8rem; }
+      th, td { padding: 4px 3px; }
+      .thumb { width: 36px; height: 36px; }
+
+      .btn { padding: 8px 10px; font-size: 0.85rem; }
+    }
   </style>
 </head>
 <body>
@@ -133,20 +222,21 @@
       <button class="btn" id="select-btn">Select</button>
       <label id="select-all-label" style="display:none"><input type="checkbox" id="select-all"> Select All</label>
       <button class="btn btn-danger" id="delete-selected" style="display:none">Delete Selected</button>
-      <div id="top-pagination" style="display:flex; align-items:center; gap:6px"></div>
-      <label style="display:flex; align-items:center; gap:6px">Per page:
-        <select id="per-page-select">
-          <option value="25" selected>25</option>
-          <option value="50">50</option>
-          <option value="100">100</option>
-        </select>
-      </label>
     </div>
   </div>
 
   <div id="results-summary" style="margin:10px 0;padding:8px;background:#f0f0f0;border-radius:6px;font-size:0.95rem;color:#333"></div>
   <div id="results"></div>
-  <div id="bottom-pagination" style="display:flex; align-items:center; gap:8px; justify-content:center; margin:24px 0; flex-wrap:wrap"></div>
+  <div style="display:flex; align-items:center; gap:12px; justify-content:center; margin:24px 0; flex-wrap:wrap">
+    <label style="display:flex; align-items:center; gap:6px; font-size:0.95rem;">Per page:
+      <select id="per-page-select" style="padding:6px; border-radius:6px; border:1px solid #ddd;">
+        <option value="25" selected>25</option>
+        <option value="50">50</option>
+        <option value="100">100</option>
+      </select>
+    </label>
+    <div id="bottom-pagination" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap"></div>
+  </div>
 
   <div id="imgModal" class="modal"><div class="card"><div style="text-align:right"><button id="closeImg">Close</button></div><div id="imgContent"></div></div></div>
 
