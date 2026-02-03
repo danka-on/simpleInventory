@@ -7874,6 +7874,294 @@ def trigger_automatic_removal():
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
 
+@app.route('/api/sold/removal-history/<int:order_id>', methods=['GET'])
+def get_sold_removal_history(order_id):
+    """Get removal history from rackhistory.db for a specific sold order"""
+    try:
+        # First get the order details from sold.db
+        sold_conn = sqlite3.connect('sold.db')
+        sold_conn.row_factory = sqlite3.Row
+        sold_cur = sold_conn.cursor()
+        sold_cur.execute('SELECT * FROM orders WHERE id = ?', (order_id,))
+        order = sold_cur.fetchone()
+        sold_conn.close()
+
+        if not order:
+            return jsonify({'success': False, 'error': 'Order not found'}), 404
+
+        order_dict = dict(order)
+        order_id_str = order_dict.get('order_id') or ''
+        barcode = order_dict.get('barcode') or ''
+
+        # Get removal history from rackhistory.db
+        history_conn = sqlite3.connect('rackhistory.db')
+        history_conn.row_factory = sqlite3.Row
+        history_cur = history_conn.cursor()
+
+        # Search by order_id or barcode
+        history_cur.execute('''
+            SELECT * FROM removed_items
+            WHERE order_id = ? OR (barcode = ? AND barcode != '')
+            ORDER BY removed_at DESC
+        ''', (order_id_str, barcode))
+        history_rows = [dict(r) for r in history_cur.fetchall()]
+        history_conn.close()
+
+        return jsonify({
+            'success': True,
+            'order': order_dict,
+            'history': history_rows
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': _safe_error(e)}), 500
+
+@app.route('/api/sold/remove-now/<int:order_id>', methods=['POST'])
+def remove_sold_now(order_id):
+    """Immediately remove inventory for a sold order (skip grace period)"""
+    try:
+        from datetime import datetime
+
+        sold_conn = sqlite3.connect('sold.db')
+        sold_conn.row_factory = sqlite3.Row
+        sold_cur = sold_conn.cursor()
+
+        # Get order details
+        sold_cur.execute('SELECT * FROM orders WHERE id = ?', (order_id,))
+        order = sold_cur.fetchone()
+
+        if not order:
+            sold_conn.close()
+            return jsonify({'success': False, 'error': 'Order not found'}), 404
+
+        if order['rackupdated'] == 1:
+            sold_conn.close()
+            return jsonify({'success': False, 'error': 'Already removed from inventory'}), 400
+
+        barcode = order['barcode']
+        if not barcode:
+            sold_conn.close()
+            return jsonify({'success': False, 'error': 'No barcode on order'}), 400
+
+        sold_qty = order['quantity'] or 1
+
+        # Search searchRack for matching item
+        searchrack_conn = sqlite3.connect('searchRack.db')
+        searchrack_cur = searchrack_conn.cursor()
+
+        # Try exact match first, then stripped zeros
+        searchrack_cur.execute('SELECT ID, QUANTITY, ITEM_POSITION, TITLE FROM SEARCHRACK WHERE BARCODE = ? COLLATE NOCASE', (barcode,))
+        row = searchrack_cur.fetchone()
+
+        if not row and barcode.isdigit():
+            barcode_stripped = barcode.lstrip('0')
+            searchrack_cur.execute('SELECT ID, QUANTITY, ITEM_POSITION, TITLE FROM SEARCHRACK WHERE BARCODE = ? COLLATE NOCASE', (barcode_stripped,))
+            row = searchrack_cur.fetchone()
+
+        if not row and barcode.isdigit():
+            barcode_padded = barcode.zfill(12)
+            searchrack_cur.execute('SELECT ID, QUANTITY, ITEM_POSITION, TITLE FROM SEARCHRACK WHERE BARCODE = ? COLLATE NOCASE', (barcode_padded,))
+            row = searchrack_cur.fetchone()
+
+        inventory_found = row is not None
+        item_id = row[0] if row else None
+        current_qty = row[1] if row else 0
+        item_location = row[2] if row else ''
+        item_title = row[3] if row else order['title']
+
+        if inventory_found:
+            new_qty = max(0, current_qty - sold_qty)
+            searchrack_cur.execute('UPDATE SEARCHRACK SET QUANTITY = ? WHERE ID = ?', (new_qty, item_id))
+            searchrack_conn.commit()
+        else:
+            new_qty = 0
+
+        # Log to rackhistory.db
+        removed_conn = sqlite3.connect('rackhistory.db')
+        removed_cur = removed_conn.cursor()
+        _ensure_removed_items_table(removed_cur)
+        removed_cur.execute('''
+            INSERT INTO removed_items
+            (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (order['order_id'], barcode, item_title or order['title'], sold_qty, datetime.now().isoformat(),
+              item_id, current_qty, new_qty, 'manual_immediate', item_location))
+        removed_conn.commit()
+        removed_conn.close()
+
+        # Mark order as processed
+        sold_cur.execute('UPDATE orders SET rackupdated = 1 WHERE id = ?', (order_id,))
+        sold_conn.commit()
+        sold_conn.close()
+        searchrack_conn.close()
+
+        return jsonify({
+            'success': True,
+            'inventory_found': inventory_found,
+            'old_qty': current_qty,
+            'new_qty': new_qty,
+            'item_id': item_id
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': _safe_error(e)}), 500
+
+@app.route('/api/sold/find-inventory/<int:order_id>', methods=['GET'])
+def find_inventory_for_sold(order_id):
+    """Find matching inventory items in searchRack for a sold order by UPC/barcode"""
+    try:
+        # Get order details
+        sold_conn = sqlite3.connect('sold.db')
+        sold_conn.row_factory = sqlite3.Row
+        sold_cur = sold_conn.cursor()
+        sold_cur.execute('SELECT * FROM orders WHERE id = ?', (order_id,))
+        order = sold_cur.fetchone()
+        sold_conn.close()
+
+        if not order:
+            return jsonify({'success': False, 'error': 'Order not found'}), 404
+
+        barcode = order['barcode'] or ''
+
+        if not barcode:
+            return jsonify({
+                'success': True,
+                'order': dict(order),
+                'matches': [],
+                'message': 'No barcode on order - use finder.html for manual search'
+            })
+
+        # Search searchRack for all matching items
+        searchrack_conn = sqlite3.connect('searchRack.db')
+        searchrack_conn.row_factory = sqlite3.Row
+        searchrack_cur = searchrack_conn.cursor()
+
+        matches = []
+
+        # Try exact match
+        searchrack_cur.execute('''
+            SELECT ID, TITLE, BARCODE, ITEM_POSITION, PICTUREPOSITION, QUANTITY, IMAGE
+            FROM SEARCHRACK
+            WHERE BARCODE = ? COLLATE NOCASE AND QUANTITY > 0
+        ''', (barcode,))
+        matches.extend([dict(r) for r in searchrack_cur.fetchall()])
+
+        # Try stripped zeros
+        if barcode.isdigit():
+            barcode_stripped = barcode.lstrip('0')
+            if barcode_stripped != barcode:
+                searchrack_cur.execute('''
+                    SELECT ID, TITLE, BARCODE, ITEM_POSITION, PICTUREPOSITION, QUANTITY, IMAGE
+                    FROM SEARCHRACK
+                    WHERE BARCODE = ? COLLATE NOCASE AND QUANTITY > 0
+                ''', (barcode_stripped,))
+                for r in searchrack_cur.fetchall():
+                    if not any(m['ID'] == r['ID'] for m in matches):
+                        matches.append(dict(r))
+
+            # Try padded version
+            barcode_padded = barcode.zfill(12)
+            if barcode_padded != barcode:
+                searchrack_cur.execute('''
+                    SELECT ID, TITLE, BARCODE, ITEM_POSITION, PICTUREPOSITION, QUANTITY, IMAGE
+                    FROM SEARCHRACK
+                    WHERE BARCODE = ? COLLATE NOCASE AND QUANTITY > 0
+                ''', (barcode_padded,))
+                for r in searchrack_cur.fetchall():
+                    if not any(m['ID'] == r['ID'] for m in matches):
+                        matches.append(dict(r))
+
+        searchrack_conn.close()
+
+        return jsonify({
+            'success': True,
+            'order': dict(order),
+            'matches': matches
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': _safe_error(e)}), 500
+
+@app.route('/api/sold/manual-remove/<int:order_id>', methods=['POST'])
+def manual_remove_sold_inventory(order_id):
+    """Manually remove inventory from a specific searchRack item for a sold order"""
+    try:
+        from datetime import datetime
+
+        data = request.get_json() or {}
+        searchrack_id = data.get('searchrack_id')
+        qty_to_remove = int(data.get('qty', 1))
+
+        if not searchrack_id:
+            return jsonify({'success': False, 'error': 'searchrack_id required'}), 400
+
+        # Get order details
+        sold_conn = sqlite3.connect('sold.db')
+        sold_conn.row_factory = sqlite3.Row
+        sold_cur = sold_conn.cursor()
+        sold_cur.execute('SELECT * FROM orders WHERE id = ?', (order_id,))
+        order = sold_cur.fetchone()
+
+        if not order:
+            sold_conn.close()
+            return jsonify({'success': False, 'error': 'Order not found'}), 404
+
+        if order['rackupdated'] == 1:
+            sold_conn.close()
+            return jsonify({'success': False, 'error': 'Already removed from inventory'}), 400
+
+        # Get searchRack item
+        searchrack_conn = sqlite3.connect('searchRack.db')
+        searchrack_conn.row_factory = sqlite3.Row
+        searchrack_cur = searchrack_conn.cursor()
+        searchrack_cur.execute('SELECT ID, TITLE, BARCODE, ITEM_POSITION, QUANTITY FROM SEARCHRACK WHERE ID = ?', (searchrack_id,))
+        rack_item = searchrack_cur.fetchone()
+
+        if not rack_item:
+            searchrack_conn.close()
+            sold_conn.close()
+            return jsonify({'success': False, 'error': 'SearchRack item not found'}), 404
+
+        current_qty = rack_item['QUANTITY'] or 0
+        new_qty = max(0, current_qty - qty_to_remove)
+
+        # Update quantity
+        searchrack_cur.execute('UPDATE SEARCHRACK SET QUANTITY = ? WHERE ID = ?', (new_qty, searchrack_id))
+        searchrack_conn.commit()
+
+        # Log to rackhistory.db
+        removed_conn = sqlite3.connect('rackhistory.db')
+        removed_cur = removed_conn.cursor()
+        _ensure_removed_items_table(removed_cur)
+        removed_cur.execute('''
+            INSERT INTO removed_items
+            (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (order['order_id'], rack_item['BARCODE'], rack_item['TITLE'] or order['title'], qty_to_remove,
+              datetime.now().isoformat(), searchrack_id, current_qty, new_qty, 'manual_sold_selection', rack_item['ITEM_POSITION']))
+        removed_conn.commit()
+        removed_conn.close()
+
+        # Mark order as processed
+        sold_cur.execute('UPDATE orders SET rackupdated = 1 WHERE id = ?', (order_id,))
+        sold_conn.commit()
+        sold_conn.close()
+        searchrack_conn.close()
+
+        return jsonify({
+            'success': True,
+            'old_qty': current_qty,
+            'new_qty': new_qty,
+            'searchrack_id': searchrack_id
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': _safe_error(e)}), 500
+
 # Grace period settings endpoints
 @app.route('/api/grace_period', methods=['GET'])
 def api_get_grace_period():
@@ -8798,6 +9086,71 @@ def api_finder():
 
     return jsonify({'searchrack': searchrack_results, 'rawbol': rawbol_results})
 
+@app.route('/api/lookup-image-by-barcode', methods=['GET'])
+def api_lookup_image_by_barcode():
+    """Lookup image URL from rawbol.db by barcode with comprehensive matching"""
+    barcode = request.args.get('barcode', '').strip()
+    if not barcode:
+        return jsonify({'success': False, 'error': 'No barcode provided'})
+
+    # Clean barcode - remove .0 suffix if present (SQLite numeric artifact)
+    if barcode.endswith('.0'):
+        barcode = barcode[:-2]
+
+    try:
+        conn = sqlite3.connect('rawbol.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+
+        row = None
+        barcode_stripped = barcode.lstrip('0') if barcode.isdigit() else barcode
+
+        # Try exact match first
+        cur.execute('SELECT image_url FROM raw_bol_items WHERE upc = ? COLLATE NOCASE LIMIT 1', (barcode,))
+        row = cur.fetchone()
+
+        # Try stripped zeros version
+        if not row and barcode_stripped != barcode:
+            cur.execute('SELECT image_url FROM raw_bol_items WHERE upc = ? COLLATE NOCASE LIMIT 1', (barcode_stripped,))
+            row = cur.fetchone()
+
+        # Try padded to 12 digits
+        if not row and barcode.isdigit():
+            padded = barcode.zfill(12)
+            if padded != barcode:
+                cur.execute('SELECT image_url FROM raw_bol_items WHERE upc = ? COLLATE NOCASE LIMIT 1', (padded,))
+                row = cur.fetchone()
+
+        # Try padded to 13 digits (EAN)
+        if not row and barcode.isdigit():
+            padded13 = barcode.zfill(13)
+            if padded13 != barcode:
+                cur.execute('SELECT image_url FROM raw_bol_items WHERE upc = ? COLLATE NOCASE LIMIT 1', (padded13,))
+                row = cur.fetchone()
+
+        # Try suffix match - find rawbol UPC that ends with our barcode (rawbol has more leading zeros)
+        if not row and barcode_stripped and len(barcode_stripped) >= 8:
+            cur.execute("SELECT image_url FROM raw_bol_items WHERE REPLACE(upc, '.0', '') LIKE ? COLLATE NOCASE LIMIT 1", ('%' + barcode_stripped,))
+            row = cur.fetchone()
+
+        # Try finding where rawbol's stripped UPC matches our stripped barcode
+        if not row and barcode_stripped and len(barcode_stripped) >= 8:
+            cur.execute("""
+                SELECT image_url FROM raw_bol_items
+                WHERE CAST(CAST(REPLACE(upc, '.0', '') AS INTEGER) AS TEXT) = ?
+                COLLATE NOCASE LIMIT 1
+            """, (barcode_stripped,))
+            row = cur.fetchone()
+
+        conn.close()
+
+        if row and row['image_url']:
+            return jsonify({'success': True, 'image_url': row['image_url']})
+        else:
+            return jsonify({'success': False, 'error': 'No image found'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e)})
+
 @app.route('/api/finder/assign', methods=['POST'])
 def api_finder_assign():
     """Assign a location to a sold order."""
@@ -9468,8 +9821,62 @@ def api_search_db(db_key):
                             bol_conn = sqlite3.connect('rawbol.db')
                             bol_conn.row_factory = sqlite3.Row
                             bol_cur = bol_conn.cursor()
-                            bol_cur.execute('SELECT item_description, image_url FROM raw_bol_items WHERE upc = ? COLLATE NOCASE LIMIT 1', (item_out['barcode'],))
+
+                            barcode_to_lookup = item_out['barcode']
+                            # Normalize barcode (strip .0 artifacts, ensure string)
+                            if barcode_to_lookup is None:
+                                barcode_to_lookup = ''
+                            elif isinstance(barcode_to_lookup, float):
+                                try:
+                                    barcode_to_lookup = str(int(barcode_to_lookup))
+                                except Exception:
+                                    barcode_to_lookup = str(barcode_to_lookup)
+                            else:
+                                barcode_to_lookup = str(barcode_to_lookup).strip()
+                                if barcode_to_lookup.endswith('.0') and barcode_to_lookup.replace('.0', '').isdigit():
+                                    barcode_to_lookup = barcode_to_lookup[:-2]
+                            barcode_stripped = barcode_to_lookup.lstrip('0') if barcode_to_lookup.isdigit() else barcode_to_lookup
+                            row_bol = None
+
+                            # Try exact match first
+                            bol_cur.execute('SELECT item_description, image_url FROM raw_bol_items WHERE upc = ? COLLATE NOCASE LIMIT 1', (barcode_to_lookup,))
                             row_bol = bol_cur.fetchone()
+
+                            # Try stripped zeros if no match
+                            if not row_bol and barcode_to_lookup.isdigit():
+                                stripped = barcode_stripped
+                                if stripped != barcode_to_lookup:
+                                    bol_cur.execute('SELECT item_description, image_url FROM raw_bol_items WHERE upc = ? COLLATE NOCASE LIMIT 1', (stripped,))
+                                    row_bol = bol_cur.fetchone()
+
+                            # Try padded to 12 digits if no match
+                            if not row_bol and barcode_to_lookup.isdigit():
+                                padded = barcode_to_lookup.zfill(12)
+                                if padded != barcode_to_lookup:
+                                    bol_cur.execute('SELECT item_description, image_url FROM raw_bol_items WHERE upc = ? COLLATE NOCASE LIMIT 1', (padded,))
+                                    row_bol = bol_cur.fetchone()
+
+                            # Try padded to 13 digits (EAN) if no match
+                            if not row_bol and barcode_to_lookup.isdigit():
+                                padded13 = barcode_to_lookup.zfill(13)
+                                if padded13 != barcode_to_lookup:
+                                    bol_cur.execute('SELECT item_description, image_url FROM raw_bol_items WHERE upc = ? COLLATE NOCASE LIMIT 1', (padded13,))
+                                    row_bol = bol_cur.fetchone()
+
+                            # Try suffix match (rawbol UPC has extra leading zeros)
+                            if not row_bol and barcode_stripped and barcode_stripped.isdigit() and len(barcode_stripped) >= 8:
+                                bol_cur.execute("SELECT item_description, image_url FROM raw_bol_items WHERE REPLACE(upc, '.0', '') LIKE ? COLLATE NOCASE LIMIT 1", ('%' + barcode_stripped,))
+                                row_bol = bol_cur.fetchone()
+
+                            # Try integer-cast comparison to normalize leading zeros
+                            if not row_bol and barcode_stripped and barcode_stripped.isdigit() and len(barcode_stripped) >= 8:
+                                bol_cur.execute("""
+                                    SELECT item_description, image_url FROM raw_bol_items
+                                    WHERE CAST(CAST(REPLACE(upc, '.0', '') AS INTEGER) AS TEXT) = ?
+                                    COLLATE NOCASE LIMIT 1
+                                """, (barcode_stripped,))
+                                row_bol = bol_cur.fetchone()
+
                             if row_bol:
                                 if not item_out.get('title') and row_bol['item_description']:
                                     item_out['title'] = row_bol['item_description']
@@ -9480,6 +9887,58 @@ def api_search_db(db_key):
                             pass
                         finally:
                             bol_conn.close()
+
+                    # Compute inv_status for sold items
+                    try:
+                        rackupdated = item.get('rackupdated') or 0
+                        shipped_time = item.get('shipped_time') or ''
+                        removal_cancelled = item.get('removal_cancelled') or 0
+
+                        if rackupdated == 1:
+                            item_out['inv_status'] = 'COMPLETE'
+                        elif shipped_time and not removal_cancelled:
+                            # Check if within grace period
+                            from datetime import datetime, timedelta
+                            try:
+                                # Get grace period setting
+                                grace_conn = sqlite3.connect('sold.db')
+                                grace_cur = grace_conn.cursor()
+                                grace_cur.execute("SELECT value FROM settings WHERE key = 'removal_grace_hours'")
+                                grace_row = grace_cur.fetchone()
+                                grace_hours = float(grace_row[0]) if grace_row and str(grace_row[0]).strip() else 48
+                                grace_conn.close()
+
+                                # Parse shipped time
+                                if 'T' in shipped_time:
+                                    if shipped_time.endswith('Z'):
+                                        shipped_dt = datetime.fromisoformat(shipped_time.replace('Z', '+00:00'))
+                                    else:
+                                        shipped_dt = datetime.fromisoformat(shipped_time)
+                                    shipped_dt = shipped_dt.replace(tzinfo=None)
+                                else:
+                                    shipped_dt = datetime.strptime(shipped_time, '%Y-%m-%d %H:%M:%S')
+
+                                grace_deadline = shipped_dt + timedelta(hours=grace_hours)
+                                now = datetime.now()
+
+                                if now < grace_deadline:
+                                    # Still within grace period - calculate time remaining
+                                    remaining = grace_deadline - now
+                                    remaining_mins = int(remaining.total_seconds() / 60)
+                                    item_out['inv_status'] = 'PENDING'
+                                    item_out['inv_status_remaining_mins'] = remaining_mins
+                                    item_out['inv_status_grace_deadline'] = grace_deadline.isoformat()
+                                else:
+                                    # Past grace period but not processed - should have been auto-removed
+                                    item_out['inv_status'] = 'NOT_REMOVED'
+                            except Exception as e:
+                                print(f"Debug: grace period calc error: {e}")
+                                item_out['inv_status'] = 'NOT_REMOVED'
+                        else:
+                            item_out['inv_status'] = 'NOT_REMOVED'
+                    except Exception as e:
+                        print(f"Debug: inv_status error: {e}")
+                        item_out['inv_status'] = 'NOT_REMOVED'
             except Exception:
                 pass
             results.append(item_out)
@@ -13905,6 +14364,30 @@ def api_admin_clear_cache():
         print("🧹 Cache cleared manually via API")
         return jsonify({'success': True, 'message': 'Cache cleared successfully'})
     except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e)}), 500
+
+@app.route('/api/enrich-sold-db', methods=['POST'])
+def api_enrich_sold_db():
+    """Run sold.db enrichment to fill in missing images and titles from rawbol"""
+    try:
+        from enrich_sold_db import enrich_sold_db, enrich_sold_db_image
+
+        print("🔄 Starting sold.db enrichment via API...")
+
+        # Run main enrichment (barcodes, titles, images)
+        enrich_sold_db()
+
+        # Run image-only enrichment for items that have barcodes but missing images
+        enrich_sold_db_image()
+
+        # Clear cache so new images show up
+        cache.clear()
+
+        print("✅ Sold.db enrichment completed via API")
+        return jsonify({'success': True, 'message': 'Enrichment completed. Cache cleared.'})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
 
 @app.route('/api/admin/cache/settings', methods=['GET', 'POST'])

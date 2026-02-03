@@ -11,12 +11,13 @@
 
     .order-context {
       background: #fff; padding: 16px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-      margin-bottom: 16px; display: flex; align-items: center; gap: 16px;
+      margin-bottom: 16px; display: flex; align-items: flex-start; gap: 16px;
     }
-    .order-context img { width: 60px; height: 60px; object-fit: cover; border-radius: 8px; background: #f0f0f0; }
+    .order-context img { width: 140px; height: 140px; object-fit: cover; border-radius: 10px; background: #f0f0f0; cursor: pointer; transition: transform 0.2s; }
+    .order-context img:hover { transform: scale(1.05); }
     .order-context .info { flex: 1; }
-    .order-context .info h2 { font-size: 1rem; color: #2c3e50; margin-bottom: 4px; }
-    .order-context .info .meta { font-size: 0.85rem; color: #7f8c8d; }
+    .order-context .info h2 { font-size: 1.1rem; color: #2c3e50; margin-bottom: 6px; }
+    .order-context .info .meta { font-size: 0.9rem; color: #7f8c8d; }
 
     .search-box { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); margin-bottom: 20px; }
     .search-input-wrapper { display: flex; gap: 12px; }
@@ -263,6 +264,7 @@ const params = new URLSearchParams(window.location.search);
 const orderId = params.get('order_id') || '';
 const orderTitle = params.get('title') || '';
 const orderBarcode = params.get('barcode') || '';
+const orderImage = params.get('image') || '';
 
 // Token chip state: {word: string, active: boolean}
 let tokens = [];
@@ -276,6 +278,30 @@ if (orderTitle) {
   document.getElementById('orderTitle').textContent = orderTitle;
   if (orderBarcode) document.getElementById('orderBarcode').textContent = 'UPC: ' + orderBarcode;
   if (orderId) document.getElementById('orderIdDisplay').textContent = ' | Order #' + orderId;
+
+  // Set order image if provided, otherwise try to fetch from rawbol using barcode
+  const orderImgEl = document.getElementById('orderImg');
+  if (orderImage) {
+    orderImgEl.src = orderImage;
+    orderImgEl.style.display = 'block';
+    orderImgEl.onclick = () => showImgPopup(orderImage);
+  } else if (orderBarcode) {
+    // Try to fetch image from rawbol.db using barcode
+    fetch('/api/lookup-image-by-barcode?barcode=' + encodeURIComponent(orderBarcode))
+      .then(r => r.json())
+      .then(data => {
+        if (data.success && data.image_url) {
+          orderImgEl.src = data.image_url;
+          orderImgEl.style.display = 'block';
+          orderImgEl.onclick = () => showImgPopup(data.image_url);
+        } else {
+          orderImgEl.style.display = 'none';
+        }
+      })
+      .catch(() => { orderImgEl.style.display = 'none'; });
+  } else {
+    orderImgEl.style.display = 'none';
+  }
 
   // Build token chips from title words (all start inactive for manual use)
   const words = orderTitle.split(/\s+/).filter(w => w.length > 0);

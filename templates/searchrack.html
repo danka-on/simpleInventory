@@ -267,6 +267,13 @@
                 </select>
             </label>
         </div>
+        <!-- Not Removed filter (only visible when Sold is selected) -->
+        <div id="not-removed-filter-container" style="display:none; margin-left:8px;">
+            <label style="font-size:0.95rem; color:#444; display:flex; align-items:center; gap:6px; cursor:pointer; background:#fee; padding:6px 12px; border-radius:6px; border:2px solid #e74c3c;">
+                <input type="checkbox" id="not-removed-filter" style="width:16px; height:16px; cursor:pointer;">
+                <span style="color:#e74c3c; font-weight:600;">Not Removed Only</span>
+            </label>
+        </div>
         <div style="margin-left:auto; display:flex; gap:8px; align-items:center">
             <label>Sort:
                 <select id="sort-select" style="margin-left:6px;padding:6px;border-radius:6px;border:1px solid #ddd">
@@ -442,6 +449,15 @@ function attachDBChangeHandlers(){
             lotFilterContainer.style.display = 'none';
         }
 
+        // Show/hide Not Removed filter for sold database
+        const notRemovedFilterContainer = document.getElementById('not-removed-filter-container');
+        if(selectedDb === 'sold'){
+            notRemovedFilterContainer.style.display = 'block';
+        } else {
+            notRemovedFilterContainer.style.display = 'none';
+            document.getElementById('not-removed-filter').checked = false;
+        }
+
         // Show/hide Inventory gear button for searchRack
         const inventoryGearBtn = document.getElementById('inventory-gear');
         if(selectedDb === 'searchRack'){
@@ -482,6 +498,9 @@ async function populateLotFilter(){
 
 // Attach LOT filter change handler
 document.getElementById('lot-filter').addEventListener('change', () => doSearch(false));
+
+// Attach Not Removed filter change handler
+document.getElementById('not-removed-filter').addEventListener('change', () => doSearch(false));
 
 function getActiveDBs(){
     const dbSelect = document.getElementById('db-select');
@@ -625,6 +644,24 @@ function renderPagedResults() {
         function q(x) { const s = String(x || '').trim(); if (/^\d+$/.test(s)) return parseInt(s, 10); if (/^[0-9]+\.0$/.test(s)) return parseInt(parseFloat(s)); const f = parseFloat(s); return Number.isFinite(f) ? Math.trunc(f) : 0; }
         sorted.sort((a, b) => q(a.quantity) - q(b.quantity));
     }
+
+    // Apply "Not Removed Only" filter for sold items
+    const notRemovedOnly = document.getElementById('not-removed-filter').checked;
+    if (notRemovedOnly) {
+        sorted = sorted.filter(r => r.source_db === 'sold' && r.inv_status === 'NOT_REMOVED');
+
+        // Update the showing line to reflect filtered count
+        const filteredQty = sorted.reduce((sum, r) => sum + (parseInt(r.quantity) || 1), 0);
+        const resultsCountEl = document.querySelector('.results-count');
+        const qtyCountEl = document.querySelector('.qty-count');
+        if (resultsCountEl) {
+            resultsCountEl.textContent = ` — ${sorted.length} not removed`;
+        }
+        if (qtyCountEl) {
+            qtyCountEl.textContent = ` — ${filteredQty} total quantity`;
+        }
+    }
+
     // Do not merge on the client; rely on server to handle merging per location
     const total = sorted.length;
     const pages = Math.max(1, Math.ceil(total / _pageSize));
@@ -733,6 +770,7 @@ function renderResults(results){
     const locationHeader = (!hasEbayStore && !hasAmazonStore && !hasSold && !hasBol && !hasReturns) ? '<th>Location</th>' : ''; // Hide location for ebay/amazon live, sold, bol, and returns
     const dateSoldHeader = hasSold ? '<th>Date Sold</th>' : '';
     const dateShippedHeader = hasSold ? '<th>Date Shipped</th>' : '';
+    const invStatusHeader = hasSold ? '<th>Inv Status</th>' : '';
     const storeHeader = (hasSold || hasReturns) ? '<th>Store</th>' : '';
     // Returns-specific headers
     const returnDateHeader = hasReturns ? '<th>Return Date</th>' : '';
@@ -741,7 +779,7 @@ function renderResults(results){
     const returnShippingHeader = hasReturns ? '<th>Return Ship</th>' : '';
     const totalReturnCostHeader = hasReturns ? '<th>Total Cost</th>' : '';
     
-    let html = `<table><thead><tr><th>Title</th><th>Barcode</th>${itemIdHeader}${lotHeader}${locationHeader}<th>Qty</th>${dateAddedHeader}${dateSoldHeader}${dateShippedHeader}${storeHeader}${returnDateHeader}${refundAmountHeader}${originalShippingHeader}${returnShippingHeader}${totalReturnCostHeader}<th>DB</th><th>Actions</th></tr></thead><tbody>`;
+    let html = `<table><thead><tr><th>Title</th><th>Barcode</th>${itemIdHeader}${lotHeader}${locationHeader}<th>Qty</th>${dateAddedHeader}${dateSoldHeader}${dateShippedHeader}${invStatusHeader}${storeHeader}${returnDateHeader}${refundAmountHeader}${originalShippingHeader}${returnShippingHeader}${totalReturnCostHeader}<th>DB</th><th>Actions</th></tr></thead><tbody>`;
     let lastGroupBarcode = null;
     results.forEach((r, idx)=>{
     // Add visual separator between different duplicate groups
@@ -944,7 +982,28 @@ function renderResults(results){
     // Date sold and date shipped cells (only for sold items)
     const dateSoldCell = hasSold ? (dbRaw === 'sold' && r.raw && r.raw.paid_time ? `<td>${fmtLocal(r.raw.paid_time)}</td>` : '<td></td>') : '';
     const dateShippedCell = hasSold ? (dbRaw === 'sold' && r.raw && r.raw.shipped_time ? `<td>${fmtLocal(r.raw.shipped_time)}</td>` : '<td></td>') : '';
-    
+
+    // Inv Status cell for sold items
+    let invStatusCell = '';
+    if (hasSold && dbRaw === 'sold') {
+        const invStatus = r.inv_status || 'NOT_REMOVED';
+        const orderId = r.id;
+        const remainingMins = r.inv_status_remaining_mins || 0;
+
+        if (invStatus === 'COMPLETE') {
+            invStatusCell = `<td><button class="inv-status-btn inv-status-complete" onclick="showCompleteHistory(${orderId})" style="background:#27ae60;color:white;border:none;padding:4px 8px;border-radius:4px;font-size:0.8rem;font-weight:600;cursor:pointer;">COMPLETE-REMOVED</button></td>`;
+        } else if (invStatus === 'PENDING') {
+            const hrs = Math.floor(remainingMins / 60);
+            const mins = remainingMins % 60;
+            const timeStr = hrs > 0 ? `${hrs}h ${mins}m` : `${mins}m`;
+            invStatusCell = `<td><button class="inv-status-btn inv-status-pending" onclick="showPendingRemoval(${orderId}, ${remainingMins})" style="background:#f39c12;color:white;border:none;padding:4px 8px;border-radius:4px;font-size:0.8rem;font-weight:600;cursor:pointer;">PENDING (${timeStr})</button></td>`;
+        } else {
+            invStatusCell = `<td><button class="inv-status-btn inv-status-not-removed" onclick="showNotRemoved(${orderId})" style="background:#e74c3c;color:white;border:none;padding:4px 8px;border-radius:4px;font-size:0.8rem;font-weight:600;cursor:pointer;">not removed</button></td>`;
+        }
+    } else if (hasSold) {
+        invStatusCell = '<td></td>';
+    }
+
     // Store badge for sold items and returns
     const storeCell = (hasSold || hasReturns) ? ((dbRaw === 'sold' || dbRaw === 'returns') && r.raw && r.raw.store ? 
         (() => {
@@ -978,6 +1037,7 @@ function renderResults(results){
                 dateCell +
                 dateSoldCell +
                 dateShippedCell +
+                invStatusCell +
                 storeCell +
                 returnDateCell +
                 refundAmountCell +
@@ -1512,6 +1572,14 @@ window.addEventListener('load', ()=>{
                         lotFilterContainer.style.display = 'none';
                     }
 
+                    // Show Not Removed filter for sold database
+                    const notRemovedFilterContainer = document.getElementById('not-removed-filter-container');
+                    if(dbParam === 'sold'){
+                        notRemovedFilterContainer.style.display = 'block';
+                    } else {
+                        notRemovedFilterContainer.style.display = 'none';
+                    }
+
                     const inventoryGearBtn = document.getElementById('inventory-gear');
                     if(dbParam === 'searchRack'){
                         inventoryGearBtn.style.display = 'inline-block';
@@ -1996,6 +2064,274 @@ document.getElementById('reset-cache-btn').addEventListener('click', async () =>
         alert('Error: ' + e.message);
     }
 });
+
+// ============================================================================
+// INV STATUS POPUP FUNCTIONS
+// ============================================================================
+
+// Show COMPLETE-REMOVED history popup
+async function showCompleteHistory(orderId) {
+    try {
+        const resp = await fetch(`/api/sold/removal-history/${orderId}`);
+        const data = await resp.json();
+
+        if (!data.success) {
+            alert('Error: ' + (data.error || 'Unknown'));
+            return;
+        }
+
+        const order = data.order || {};
+        const history = data.history || [];
+
+        let historyHtml = '';
+        if (history.length === 0) {
+            historyHtml = '<div style="color:#7f8c8d;text-align:center;padding:20px;">No removal history found</div>';
+        } else {
+            historyHtml = '<div style="max-height:300px;overflow-y:auto;">';
+            history.forEach(h => {
+                const removedAt = h.removed_at ? new Date(h.removed_at).toLocaleString() : 'Unknown';
+                const typeLabel = {
+                    'automatic': 'Auto Removal',
+                    'manual': 'Manual Delete',
+                    'manual_immediate': 'Immediate Removal',
+                    'manual_sold_removal': 'Manual Sold Removal',
+                    'manual_sold_selection': 'Manual Selection',
+                    'finder_removal': 'Finder Removal',
+                    'manual_edit': 'Manual Edit'
+                }[h.removal_type] || h.removal_type || 'Unknown';
+
+                historyHtml += `
+                    <div style="background:#f8f9fa;padding:12px;border-radius:8px;margin-bottom:8px;">
+                        <div style="font-weight:600;color:#27ae60;margin-bottom:4px;">${typeLabel}</div>
+                        <div style="font-size:0.9rem;color:#555;">
+                            <div><strong>When:</strong> ${removedAt}</div>
+                            <div><strong>Location:</strong> ${h.item_position || 'N/A'}</div>
+                            <div><strong>Qty Removed:</strong> ${h.quantity_removed || 0}</div>
+                            <div><strong>Old Qty:</strong> ${h.old_quantity || 0} → <strong>New Qty:</strong> ${h.new_quantity || 0}</div>
+                        </div>
+                    </div>`;
+            });
+            historyHtml += '</div>';
+        }
+
+        const html = `
+            <div style="padding:10px;">
+                <h3 style="color:#27ae60;margin-bottom:15px;">✅ COMPLETE - Inventory Removed</h3>
+                <div style="background:#d4edda;padding:12px;border-radius:8px;margin-bottom:15px;">
+                    <div><strong>Order ID:</strong> ${order.order_id || 'N/A'}</div>
+                    <div><strong>Title:</strong> ${esc(order.title || 'N/A')}</div>
+                    <div><strong>Barcode:</strong> ${order.barcode || 'N/A'}</div>
+                </div>
+                <h4 style="margin-bottom:10px;">Removal History</h4>
+                ${historyHtml}
+                <button onclick="document.getElementById('viewModal').style.display='none'"
+                        style="margin-top:15px;padding:10px 20px;background:#27ae60;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:600;">
+                    Close
+                </button>
+            </div>`;
+
+        showViewModal(html);
+    } catch (e) {
+        alert('Error loading history: ' + e.message);
+    }
+}
+
+// Show PENDING-REMOVAL popup with timer and remove now button
+async function showPendingRemoval(orderId, remainingMins) {
+    try {
+        const resp = await fetch(`/api/sold/removal-history/${orderId}`);
+        const data = await resp.json();
+
+        if (!data.success) {
+            alert('Error: ' + (data.error || 'Unknown'));
+            return;
+        }
+
+        const order = data.order || {};
+        const hrs = Math.floor(remainingMins / 60);
+        const mins = remainingMins % 60;
+        const timeStr = hrs > 0 ? `${hrs} hours ${mins} minutes` : `${mins} minutes`;
+
+        const html = `
+            <div style="padding:10px;">
+                <h3 style="color:#f39c12;margin-bottom:15px;">⏳ PENDING - Awaiting Automatic Removal</h3>
+                <div style="background:#fff3cd;padding:12px;border-radius:8px;margin-bottom:15px;">
+                    <div><strong>Order ID:</strong> ${order.order_id || 'N/A'}</div>
+                    <div><strong>Title:</strong> ${esc(order.title || 'N/A')}</div>
+                    <div><strong>Barcode:</strong> ${order.barcode || 'N/A'}</div>
+                    <div><strong>Shipped:</strong> ${order.shipped_time ? new Date(order.shipped_time).toLocaleString() : 'N/A'}</div>
+                </div>
+                <div style="background:#ffeaa7;padding:15px;border-radius:8px;text-align:center;margin-bottom:15px;">
+                    <div style="font-size:1.2rem;font-weight:700;color:#d35400;">⏱️ ${timeStr} remaining</div>
+                    <div style="font-size:0.9rem;color:#7f8c8d;margin-top:4px;">until automatic inventory removal</div>
+                </div>
+                <div style="display:flex;gap:10px;justify-content:center;">
+                    <button onclick="removeNow(${orderId})"
+                            style="padding:12px 24px;background:#e74c3c;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:600;font-size:1rem;">
+                        🚀 Remove Now
+                    </button>
+                    <button onclick="document.getElementById('viewModal').style.display='none'"
+                            style="padding:12px 24px;background:#95a5a6;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:600;font-size:1rem;">
+                        Cancel
+                    </button>
+                </div>
+            </div>`;
+
+        showViewModal(html);
+    } catch (e) {
+        alert('Error loading order: ' + e.message);
+    }
+}
+
+// Remove inventory immediately (skip grace period)
+async function removeNow(orderId) {
+    if (!confirm('Remove inventory for this order now? This will skip the grace period.')) return;
+
+    try {
+        const resp = await fetch(`/api/sold/remove-now/${orderId}`, { method: 'POST' });
+        const data = await resp.json();
+
+        if (data.success) {
+            const msg = data.inventory_found
+                ? `Inventory removed! Qty: ${data.old_qty} → ${data.new_qty}`
+                : 'Order marked as processed. No matching inventory found.';
+            alert(msg);
+            document.getElementById('viewModal').style.display = 'none';
+            doSearch(); // Refresh results
+        } else {
+            alert('Error: ' + (data.error || 'Unknown'));
+        }
+    } catch (e) {
+        alert('Error: ' + e.message);
+    }
+}
+
+// Show NOT REMOVED popup with finder-like UPC matching
+async function showNotRemoved(orderId) {
+    try {
+        const resp = await fetch(`/api/sold/find-inventory/${orderId}`);
+        const data = await resp.json();
+
+        if (!data.success) {
+            alert('Error: ' + (data.error || 'Unknown'));
+            return;
+        }
+
+        const order = data.order || {};
+        const matches = data.matches || [];
+
+        let matchesHtml = '';
+        if (matches.length === 0) {
+            matchesHtml = `
+                <div style="background:#fee;padding:15px;border-radius:8px;text-align:center;">
+                    <div style="font-size:1.1rem;color:#e74c3c;font-weight:600;margin-bottom:8px;">No matching inventory found</div>
+                    <div style="font-size:0.9rem;color:#7f8c8d;margin-bottom:12px;">Use Item Finder for manual search</div>
+                    <a href="/finder?order_id=${orderId}&title=${encodeURIComponent(order.title || '')}&barcode=${encodeURIComponent(order.barcode || '')}&image=${encodeURIComponent(order.image || '')}"
+                       style="display:inline-block;padding:10px 20px;background:#6c5ce7;color:white;text-decoration:none;border-radius:6px;font-weight:600;">
+                        Open Item Finder
+                    </a>
+                </div>`;
+        } else {
+            matchesHtml = '<div style="max-height:300px;overflow-y:auto;">';
+            matches.forEach(m => {
+                const loc = m.ITEM_POSITION || m.PICTUREPOSITION || 'No Location';
+                const locLower = (m.ITEM_POSITION || '').toLowerCase();
+                matchesHtml += `
+                    <div style="background:#f8f9fa;padding:12px;border-radius:8px;margin-bottom:8px;display:flex;align-items:center;gap:12px;">
+                        <img src="${m.IMAGE || ''}" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2250%22 height=%2250%22><rect fill=%22%23f0f0f0%22 width=%22100%25%22 height=%22100%25%22/></svg>'"
+                             style="width:50px;height:50px;object-fit:cover;border-radius:6px;">
+                        <div style="flex:1;">
+                            <div style="font-weight:600;font-size:0.9rem;">${esc(m.TITLE || 'Unknown')}</div>
+                            <div style="font-size:0.85rem;color:#7f8c8d;">
+                                <span style="background:#6c5ce7;color:white;padding:2px 8px;border-radius:4px;cursor:pointer;"
+                                      onclick="showLocPopupFromInvStatus('${loc}', '${locLower}')">${loc}</span>
+                                <span style="margin-left:8px;">Qty: ${m.QUANTITY || 0}</span>
+                            </div>
+                        </div>
+                        <button onclick="selectInventoryToRemove(${orderId}, ${m.ID})"
+                                style="padding:8px 16px;background:#e74c3c;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:600;">
+                            Remove
+                        </button>
+                    </div>`;
+            });
+            matchesHtml += '</div>';
+        }
+
+        const html = `
+            <div style="padding:10px;">
+                <h3 style="color:#e74c3c;margin-bottom:15px;">❌ NOT REMOVED - Select Inventory</h3>
+                <div style="background:#fee;padding:12px;border-radius:8px;margin-bottom:15px;">
+                    <div><strong>Order ID:</strong> ${order.order_id || 'N/A'}</div>
+                    <div><strong>Title:</strong> ${esc(order.title || 'N/A')}</div>
+                    <div><strong>Barcode:</strong> ${order.barcode || 'N/A'}</div>
+                    <div><strong>Qty Sold:</strong> ${order.quantity || 1}</div>
+                </div>
+                <h4 style="margin-bottom:10px;">Matching Inventory Items</h4>
+                ${matchesHtml}
+                <button onclick="document.getElementById('viewModal').style.display='none'"
+                        style="margin-top:15px;padding:10px 20px;background:#95a5a6;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:600;">
+                    Cancel
+                </button>
+            </div>`;
+
+        showViewModal(html);
+    } catch (e) {
+        alert('Error: ' + e.message);
+    }
+}
+
+// Helper to show location popup from inv status modal
+function showLocPopupFromInvStatus(locCode, locLower) {
+    // Try to show shelf image
+    const filename = locLower ? locLower.replace(/\.png$/i, '') + '.png' : '';
+    if (filename) {
+        const html = `
+            <div style="text-align:center;padding:10px;">
+                <h4 style="margin-bottom:10px;">${locCode}</h4>
+                <img src="/static/shelves/${filename}?t=${Date.now()}"
+                     style="max-width:100%;max-height:60vh;border-radius:10px;"
+                     onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22400%22 height=%22300%22><rect fill=%22%23f0f0f0%22 width=%22100%25%22 height=%22100%25%22/><text x=%2250%25%22 y=%2250%25%22 text-anchor=%22middle%22 fill=%22%237f8c8d%22>No Image</text></svg>'">
+                <br>
+                <button onclick="document.getElementById('viewModal').innerHTML='';showNotRemoved(window._lastNotRemovedOrderId)"
+                        style="margin-top:15px;padding:10px 20px;background:#e74c3c;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:600;">
+                    Back
+                </button>
+            </div>`;
+        showViewModal(html);
+    }
+}
+
+// Select specific inventory item to remove for a sold order
+async function selectInventoryToRemove(orderId, searchrackId) {
+    if (!confirm('Remove inventory from this location?')) return;
+
+    try {
+        const resp = await fetch(`/api/sold/manual-remove/${orderId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ searchrack_id: searchrackId, qty: 1 })
+        });
+        const data = await resp.json();
+
+        if (data.success) {
+            alert(`Inventory removed! Qty: ${data.old_qty} → ${data.new_qty}`);
+            document.getElementById('viewModal').style.display = 'none';
+            doSearch(); // Refresh results
+        } else {
+            alert('Error: ' + (data.error || 'Unknown'));
+        }
+    } catch (e) {
+        alert('Error: ' + e.message);
+    }
+}
+
+// Store last order ID for back navigation
+window._lastNotRemovedOrderId = null;
+const _origShowNotRemoved = showNotRemoved;
+showNotRemoved = async function(orderId) {
+    window._lastNotRemovedOrderId = orderId;
+    return _origShowNotRemoved(orderId);
+};
 
 </script>
 <script src="/static/i18n.js"></script>

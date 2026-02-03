@@ -129,6 +129,17 @@
         <div id="cacheSettingsStatus" style="margin-top:10px;color:#555;display:none;"></div>
     </form>
 
+    <hr style="margin:24px 0;">
+    <h2 style="margin:0 0 10px 0; font-size:1.1rem;">Data Enrichment</h2>
+    <div class="desc">Enrich sold orders with missing images and titles from rawbol database.</div>
+
+    <div style="margin-bottom:20px;">
+        <button onclick="enrichSoldDb()" style="background:#9b59b6;width:100%;">
+            <i class="fas fa-magic"></i> Enrich Sold Orders (Images & Titles)
+        </button>
+        <div id="enrichStatus" style="margin-top:10px;color:#555;display:none;text-align:center;"></div>
+    </div>
+
     <script>
         // Load settings from localStorage
         function loadSettings() {
@@ -469,6 +480,32 @@
             
             setTimeout(() => { el.style.display = 'none'; }, 2000);
         });
+
+        // Data Enrichment
+        async function enrichSoldDb() {
+            const el = document.getElementById('enrichStatus');
+            el.style.display = 'block';
+            el.style.color = '#2196F3';
+            el.textContent = 'Enriching sold orders... This may take a moment.';
+
+            try {
+                const r = await fetch('/api/enrich-sold-db', {method: 'POST'});
+                const j = await r.json();
+
+                if (j.success) {
+                    el.style.color = '#388e3c';
+                    el.textContent = `✓ Enrichment complete! ${j.message || ''}`;
+                } else {
+                    el.style.color = '#e74c3c';
+                    el.textContent = 'Failed: ' + (j.error || 'Unknown error');
+                }
+            } catch(err) {
+                el.style.color = '#e74c3c';
+                el.textContent = 'Error: ' + err.message;
+            }
+
+            setTimeout(() => { el.style.display = 'none'; }, 5000);
+        }
     </script>
 </body>
 </html>
