@@ -248,13 +248,9 @@
                     <button id="location-duplicates-btn">📍 Location Duplicates</button>
                     <button id="rack-history-btn">📋 Rack History</button>
                     <button id="automatic-cleanup-btn">🧹 Automatic Cleanup</button>
+                    <button id="reset-cache-btn" style="color:#ff6b00;">🔄 Reset Cache</button>
                 </div>
             </div>
-
-            <!-- Orange Reset Button (cache clear) - hidden, use id="header-clear-cache-btn" to restore -->
-            <button class="btn" id="header-clear-cache-btn" title="Clear Cache & Reload" style="display:none; background:#ff9800; color:#fff; padding:8px 12px; margin-left:8px;">
-                <i class="fas fa-sync-alt"></i> ↻
-            </button>
         </div>
         <div class="actions">
         </div>
@@ -1638,11 +1634,11 @@ document.getElementById('history-sort').addEventListener('change', loadHistory);
 async function loadHistory() {
     const search = document.getElementById('history-search').value;
     const sort = document.getElementById('history-sort').value;
-    
+
     try {
         const resp = await fetch(`/api/inventory/history?search=${encodeURIComponent(search)}&sort=${sort}`);
         const data = await resp.json();
-        
+
         if (!data.success) {
             document.getElementById('historyContent').innerHTML = `<div style="color:#e74c3c;padding:20px;">Error: ${data.error}</div>`;
             return;
@@ -1977,6 +1973,27 @@ document.getElementById('header-clear-cache-btn').addEventListener('click', asyn
     } finally {
         btn.innerHTML = originalText;
         btn.disabled = false;
+    }
+});
+
+// Reset Cache button in gear dropdown
+document.getElementById('reset-cache-btn').addEventListener('click', async () => {
+    // Close dropdown first
+    document.getElementById('inventory-dropdown').classList.remove('show');
+
+    if(!confirm('Clear cache and reload databases?')) return;
+
+    try {
+        const r = await fetch('/api/admin/cache/clear', {method: 'POST'});
+        const j = await r.json();
+        if(j.success) {
+            alert('Cache cleared!');
+            window.location.reload();
+        } else {
+            alert('Failed: ' + (j.error || 'Unknown'));
+        }
+    } catch(e) {
+        alert('Error: ' + e.message);
     }
 });
 
