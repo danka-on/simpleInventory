@@ -290,6 +290,7 @@
     <div class="showing-line" style="margin-top:10px; font-size:0.95rem; color:#444; display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
         <span>Showing: <span id="active-dbs">Warehouse</span> <span id="page-indicator" style="color:#00b894; font-weight:600;"></span></span>
         <button id="show-location-browser-btn" class="btn" style="padding:4px 10px; font-size:0.85rem; background:#f0f0f0; border:1px solid #ddd; display:none;">📍 Browse Locations</button>
+        <button id="move-location-btn" class="btn" style="padding:4px 10px; font-size:0.85rem; background:#2d98da; color:#fff; border:1px solid #1b7fc2; display:none;"><span data-i18n="move_items_location">Move Items to Another Location</span></button>
     </div>
 
     <!-- Hidden pagination placeholder for JS compatibility -->
@@ -406,6 +407,11 @@ let _allResults = [];
 let _currentPage = 1;
 let _pageSize = 10;
 let _sortMode = 'time_desc';
+// Location browser globals (must be initialized before any use)
+let _locationData = [];
+let _selectedLocation = null;
+let _selectedShelf = null;
+let _locationGroupFilter = null; // Store location group ID for filtering
 
 function createFilters(){
     const dbSelect = document.getElementById('db-select');
@@ -460,11 +466,14 @@ function attachDBChangeHandlers(){
 
         // Show/hide Inventory gear button for searchRack
         const inventoryGearBtn = document.getElementById('inventory-gear');
+        const moveLocationBtn = document.getElementById('move-location-btn');
         if(selectedDb === 'searchRack'){
             inventoryGearBtn.style.display = 'inline-block';
-            toggleLocationBrowser(true);
+            if (moveLocationBtn) moveLocationBtn.style.display = 'inline-block';
+            toggleLocationBrowser(false);
         } else {
             inventoryGearBtn.style.display = 'none';
+            if (moveLocationBtn) moveLocationBtn.style.display = 'none';
             document.getElementById('inventory-dropdown').classList.remove('active');
             toggleLocationBrowser(false);
         }
@@ -1581,11 +1590,14 @@ window.addEventListener('load', ()=>{
                     }
 
                     const inventoryGearBtn = document.getElementById('inventory-gear');
+                    const moveLocationBtn = document.getElementById('move-location-btn');
                     if(dbParam === 'searchRack'){
                         inventoryGearBtn.style.display = 'inline-block';
-                        if(typeof toggleLocationBrowser === 'function') toggleLocationBrowser(true);
+                        if (moveLocationBtn) moveLocationBtn.style.display = 'inline-block';
+                        if(typeof toggleLocationBrowser === 'function') toggleLocationBrowser(false);
                     } else {
                         inventoryGearBtn.style.display = 'none';
+                        if (moveLocationBtn) moveLocationBtn.style.display = 'none';
                         document.getElementById('inventory-dropdown').classList.remove('active');
                         if(typeof toggleLocationBrowser === 'function') toggleLocationBrowser(false);
                     }
@@ -1630,6 +1642,9 @@ window.addEventListener('load', ()=>{
     const dbSelect = document.getElementById('db-select');
     if (dbSelect && dbSelect.value === 'searchRack') {
         document.getElementById('inventory-gear').style.display = 'inline-block';
+        const moveLocationBtn = document.getElementById('move-location-btn');
+        if (moveLocationBtn) moveLocationBtn.style.display = 'inline-block';
+        if (typeof toggleLocationBrowser === 'function') toggleLocationBrowser(false);
     }
 })();
 
@@ -1759,11 +1774,6 @@ async function loadHistory() {
 // ============================================================================
 // LOCATION BROWSER FUNCTIONALITY
 // ============================================================================
-
-let _locationData = [];
-let _selectedLocation = null;
-let _selectedShelf = null;
-let _locationGroupFilter = null; // Store location group ID for filtering
 
 // Load location hierarchy from API
 async function loadLocationHierarchy() {
@@ -1973,6 +1983,24 @@ document.getElementById('show-location-browser-btn').addEventListener('click', (
     toggleLocationBrowser(true);
 });
 
+// Ensure location browser stays hidden unless explicitly opened (handles back/forward cache)
+window.addEventListener('pageshow', () => {
+    try{
+        const dbSelect = document.getElementById('db-select');
+        if(dbSelect && dbSelect.value === 'searchRack'){
+            if(typeof toggleLocationBrowser === 'function') toggleLocationBrowser(false);
+        }
+    }catch(e){}
+});
+
+// "Move Location" button click handler
+const moveLocationBtn = document.getElementById('move-location-btn');
+if (moveLocationBtn) {
+    moveLocationBtn.addEventListener('click', () => {
+        window.location.href = '/movelocation';
+    });
+}
+
 // Collapse/expand location browser (Hide button hides the whole browser)
 document.getElementById('collapse-location-browser').addEventListener('click', () => {
     toggleLocationBrowser(false);
@@ -2018,36 +2046,39 @@ document.getElementById('all-search-input').addEventListener('keypress', (e) => 
     }
 });
 
-// Header Cache Clear Button
-document.getElementById('header-clear-cache-btn').addEventListener('click', async () => {
-    if(!confirm('Clear cache and reload databases?')) return;
-    
-    const btn = document.getElementById('header-clear-cache-btn');
-    const originalText = btn.innerHTML;
-    btn.innerHTML = '...';
-    btn.disabled = true;
-    
-    try {
-        const r = await fetch('/api/admin/cache/clear', {method: 'POST'});
-        const j = await r.json();
-        if(j.success) {
-            alert('Cache cleared!');
-            window.location.reload();
-        } else {
-            alert('Failed: ' + (j.error || 'Unknown'));
+// Header Cache Clear Button (optional element)
+const headerClearBtn = document.getElementById('header-clear-cache-btn');
+if (headerClearBtn) {
+    headerClearBtn.addEventListener('click', async () => {
+        if(!confirm('Clear cache and reload databases?')) return;
+        
+        const btn = headerClearBtn;
+        const originalText = btn.innerHTML;
+        btn.innerHTML = '...';
+        btn.disabled = true;
+        
+        try {
+            const r = await fetch('/api/admin/cache/clear', {method: 'POST'});
+            const j = await r.json();
+            if(j.success) {
+                alert('Cache cleared!');
+                window.location.reload();
+            } else {
+                alert('Failed: ' + (j.error || 'Unknown'));
+            }
+        } catch(e) {
+            alert('Error: ' + e.message);
+        } finally {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
         }
-    } catch(e) {
-        alert('Error: ' + e.message);
-    } finally {
-        btn.innerHTML = originalText;
-        btn.disabled = false;
-    }
-});
+    });
+}
 
 // Reset Cache button in gear dropdown
 document.getElementById('reset-cache-btn').addEventListener('click', async () => {
     // Close dropdown first
-    document.getElementById('inventory-dropdown').classList.remove('show');
+    document.getElementById('inventory-dropdown').classList.remove('active');
 
     if(!confirm('Clear cache and reload databases?')) return;
 

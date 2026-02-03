@@ -49,15 +49,26 @@ const translations = {
 
   // ===== position.html =====
   location: { en: 'Location', lt: 'Vieta' },
+  location_step_title: { en: 'Location QR (step 1/2)', lt: 'Vieta QR (1/2 žingsnis)' },
+  location_qr: { en: 'Location QR', lt: 'Vieta QR' },
+  qr: { en: 'QR', lt: 'QR' },
+  step_1_2: { en: '(step 1/2)', lt: '(1/2 žingsnis)' },
   restart_scanner: { en: 'Restart Scanner', lt: 'Paleisti skaitytuvą iš naujo' },
-  lock_shelf_multi: { en: 'Lock Shelf - Multiple Barcode', lt: 'Užrakinti lentyną - Keli brūkšniniai kodai' },
-  locked_multi: { en: 'LOCKED - Multi Barcode', lt: 'UŽRAKINTA - Keli kodai' },
+  lock_shelf_multi: { en: 'Scan Multiple Barcodes (Same Shelf)', lt: 'Skenuoti kelias prekes (ta pati lentyna)' },
+  locked_multi: { en: 'Scan Multiple Barcodes (Same Shelf)', lt: 'Skenuoti kelias prekes (ta pati lentyna)' },
   locked: { en: 'LOCKED', lt: 'UŽRAKINTA' },
+  single_item: { en: 'Single Item (SCAN QR CODE)', lt: 'Viena prekė (SKENUOKITE QR KODĄ)' },
+  invalid_location_title: { en: 'Invalid Shelf Code', lt: 'Neteisingas lentynos kodas' },
+  invalid_location_body: { en: 'This is not a valid shelf/location code. Please scan a shelf QR code.', lt: 'Tai nėra galiojantis lentynos/vietos kodas. Prašome nuskenuoti lentynos QR kodą.' },
   scan_or_enter_qr: { en: 'Scan or enter QR code', lt: 'Nuskenuokite arba įveskite QR kodą' },
   edit_mode_moving: { en: 'EDIT MODE: Moving', lt: 'REDAGAVIMO REŽIMAS: Perkeliama' },
   items: { en: 'items', lt: 'prekių' },
+  move_items_location: { en: 'Move Items to Another Location', lt: 'Perkelti prekes į kitą vietą' },
+  lock_shelf_info: { en: 'Scan several barcodes in a row for the SAME shelf. This is helpful when you have multiple items to add before moving to the next step.', lt: 'Nuskenuokite kelis brūkšninius kodus iš eilės TAI pačiai lentynai. Tai patogu, kai turite kelias prekes įdėti prieš pereidami prie kito žingsnio.' },
+  move_items_location_info: { en: 'Move items from one shelf/location to another in bulk. Pick the start and destination shelves, then move items (full or partial quantities) before completing.', lt: 'Perkelkite prekes iš vienos lentynos/vietos į kitą vienu kartu. Pasirinkite pradžios ir paskirties lentynas, tada perkelkite prekes (pilnai arba dalimis) ir užbaikite.' },
 
   // ===== barcode.html =====
+  barcode_step_title: { en: 'Barcode (step 2/2)', lt: 'Brūkšninis kodas (2/2 žingsnis)' },
   barcode_will_appear: { en: 'BARCODE will appear here', lt: 'Čia bus rodomas BRŪKŠNINIS KODAS' },
   scan_or_enter_barcode: { en: 'Scan or enter barcode', lt: 'Nuskenuokite arba įveskite brūkšninį kodą' },
   loading_video: { en: 'Loading video...', lt: 'Kraunamas vaizdas...' },
@@ -67,6 +78,8 @@ const translations = {
   auto_submit_in: { en: 'Auto-submit in', lt: 'Automatinis pateikimas po' },
   scan_multiple: { en: 'Scan multiple barcodes...', lt: 'Skenuokite kelis brūkšninius kodus...' },
   invalid_barcode: { en: 'INVALID BARCODE', lt: 'NETINKAMAS BRŪKŠNINIS KODAS' },
+  invalid_barcode_title: { en: 'Invalid Barcode', lt: 'Netinkamas brūkšninis kodas' },
+  invalid_barcode_body: { en: 'This barcode format is not valid. Please scan a valid barcode.', lt: 'Šio brūkšninio kodo formatas neteisingas. Prašome nuskenuoti galiojantį brūkšninį kodą.' },
   uploading_picture: { en: 'Uploading picture...', lt: 'Įkeliamas paveikslėlis...' },
   restarting_camera: { en: 'Restarting camera...', lt: 'Paleidžiama kamera iš naujo...' },
 
@@ -107,6 +120,30 @@ const translations = {
   return_item: { en: 'Return', lt: 'Grąžinimas' },
   undo_last_entry: { en: 'Undo Last Entry', lt: 'Atšaukti paskutinį įrašą' },
   print_que: { en: 'Print Que', lt: 'Spausdinimo eilė' },
+
+  // ===== item_prep_create_item.html =====
+  create_new_item_prep_title: { en: 'Create New Item - Prep', lt: 'Sukurti naują prekę - Paruošimas' },
+  print_barcode_label: { en: 'Print Barcode Label', lt: 'Spausdinti brūkšninio kodo etiketę' },
+  have_barcode: { en: 'Have Barcode', lt: 'Turiu brūkšninį kodą' },
+  complete_add_to_print_que: { en: 'Complete & Add to Print Queue', lt: 'Užbaigti ir pridėti į spausdinimo eilę' },
+  not_printed: { en: 'Not Printed', lt: 'Neatspausdinta' },
+  printed_status: { en: 'Printed', lt: 'Atspausdinta' },
+  captured: { en: 'Captured', lt: 'Nufotografuota' },
+
+  // ===== item_prep_no_barcode.html =====
+  item_prep_no_barcode_title: { en: 'Item Prep - No Barcode', lt: 'Prekių paruošimas - be brūkšninio kodo' },
+  back_to_prep: { en: 'Back to Prep', lt: 'Atgal į paruošimą' },
+  search_items_placeholder: { en: 'Search by item name or UPC code...', lt: 'Ieškoti pagal prekės pavadinimą arba UPC kodą...' },
+  selected_item: { en: 'Selected Item', lt: 'Pasirinkta prekė' },
+  print_barcode: { en: 'Print Barcode', lt: 'Spausdinti brūkšninį kodą' },
+  add_to_print_que: { en: 'Add to Print Que', lt: 'Pridėti į spausdinimo eilę' },
+  no_item_found_create_new: { en: 'No Item Found - Create New', lt: 'Prekė nerasta - sukurti naują' },
+  prev: { en: 'Prev', lt: 'Ankstesnis' },
+  next: { en: 'Next', lt: 'Kitas' },
+  added: { en: 'Added!', lt: 'Pridėta!' },
+  printing: { en: 'Printing...', lt: 'Spausdinama...' },
+  printed: { en: 'Printed!', lt: 'Atspausdinta!' },
+  print_dialog_opened: { en: 'Print Dialog Opened!', lt: 'Atidarytas spausdinimo langas!' },
 
   // ===== item_prep_create_item.html =====
   create_new_item_title: { en: 'Create New Item', lt: 'Sukurti naują prekę' },
@@ -344,20 +381,41 @@ function applyTranslations() {
 // Create language toggle widget
 function createLangToggle() {
   const lang = getLang();
+  if (!document.getElementById('lang-toggle-style')) {
+    const style = document.createElement('style');
+    style.id = 'lang-toggle-style';
+    style.textContent = `
+      #lang-toggle { margin:0; }
+      #lang-toggle button {
+        margin:0 !important;
+        padding:0 12px !important;
+        min-height:26px !important;
+        height:26px !important;
+        font-size:12px !important;
+        line-height:1 !important;
+        border-radius:999px !important;
+        appearance:none;
+        -webkit-appearance:none;
+        box-shadow:none !important;
+      }
+      #lang-toggle button:focus { outline: none; }
+    `;
+    document.head.appendChild(style);
+  }
   const toggle = document.createElement('div');
   toggle.id = 'lang-toggle';
-  toggle.style.cssText = 'position:fixed;top:8px;right:8px;z-index:99999;display:flex;border-radius:20px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.15);font-size:12px;font-weight:600;font-family:Segoe UI,Arial,sans-serif;';
+  toggle.style.cssText = 'position:fixed;top:10px;right:10px;z-index:99999;display:flex;align-items:center;gap:4px;padding:3px;border-radius:999px;background:rgba(255,255,255,0.96);border:1px solid #dfe6e9;box-shadow:0 6px 16px rgba(0,0,0,0.12);font-size:12px;font-weight:700;font-family:Segoe UI,Arial,sans-serif;margin:0;';
 
   const btnEn = document.createElement('button');
   btnEn.textContent = 'ENG';
   btnEn.id = 'lang-btn-en';
-  btnEn.style.cssText = 'border:none;padding:6px 12px;cursor:pointer;transition:all 0.2s;font-size:12px;font-weight:600;';
+  btnEn.style.cssText = 'border:none;min-width:44px;height:26px;padding:0 12px;border-radius:999px;cursor:pointer;transition:all 0.2s;display:flex;align-items:center;justify-content:center;line-height:1;font-size:12px;font-weight:700;margin:0;';
   btnEn.onclick = () => setLang('en');
 
   const btnLt = document.createElement('button');
   btnLt.textContent = 'LT';
   btnLt.id = 'lang-btn-lt';
-  btnLt.style.cssText = 'border:none;padding:6px 12px;cursor:pointer;transition:all 0.2s;font-size:12px;font-weight:600;';
+  btnLt.style.cssText = 'border:none;min-width:38px;height:26px;padding:0 12px;border-radius:999px;cursor:pointer;transition:all 0.2s;display:flex;align-items:center;justify-content:center;line-height:1;font-size:12px;font-weight:700;margin:0;';
   btnLt.onclick = () => setLang('lt');
 
   toggle.appendChild(btnEn);
@@ -372,12 +430,12 @@ function updateToggleUI() {
   const btnLt = document.getElementById('lang-btn-lt');
   if (!btnEn || !btnLt) return;
   if (lang === 'en') {
-    btnEn.style.background = '#0984e3';
+    btnEn.style.background = '#00b894';
     btnEn.style.color = '#fff';
     btnLt.style.background = '#fff';
     btnLt.style.color = '#333';
   } else {
-    btnLt.style.background = '#0984e3';
+    btnLt.style.background = '#00b894';
     btnLt.style.color = '#fff';
     btnEn.style.background = '#fff';
     btnEn.style.color = '#333';

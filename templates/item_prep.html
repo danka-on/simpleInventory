@@ -84,9 +84,9 @@
   
   <div class="card" style="margin-top:12px;padding:12px;">
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-      <label style="font-weight:600;color:#2c3e50;white-space:nowrap;">Working LOT:</label>
+      <label style="font-weight:600;color:#2c3e50;white-space:nowrap;" data-i18n="working_lot">Working LOT:</label>
       <select id="lotSelector" style="flex:1;min-width:200px;padding:8px 12px;border:2px solid #00b894;border-radius:8px;font-size:1rem;background:#fff;cursor:pointer;">
-        <option value="">Loading lots...</option>
+        <option value="" data-i18n="loading_lots">Loading lots...</option>
       </select>
       <div id="lotDate" style="color:#666;font-size:0.9rem;white-space:nowrap;"></div>
     </div>
@@ -95,26 +95,26 @@
   <div class="card">
     <div id="scanner" style="max-width:320px">
       <video id="video" playsinline style="width:100%;aspect-ratio:1/1;background:#222;border-radius:8px"></video>
-      <div id="scanMsg" class="muted">Initializing camera...</div>
+      <div id="scanMsg" class="muted" data-i18n="initializing_camera">Initializing camera...</div>
     </div>
 
     <div class="row" style="align-items:center;margin-top:12px">
-  <input type="text" id="manualUpc" placeholder="Enter/scan UPC" autofocus style="padding:8px;border:1px solid #ddd;border-radius:6px;flex:1;min-width:200px">
-      <button class="btn" id="lookupBtn">Lookup</button>
+  <input type="text" id="manualUpc" placeholder="Enter/scan UPC" data-i18n="enter_scan_upc" autofocus style="padding:8px;border:1px solid #ddd;border-radius:6px;flex:1;min-width:200px">
+      <button class="btn" id="lookupBtn" data-i18n="lookup">Lookup</button>
     </div>
     
     <div id="noBarcodeBtn" style="margin-top:48px">
       <a href="/item-prep-no-barcode" style="text-decoration:none;display:block">
         <button class="btn" style="padding:36px 64px;border-radius:12px;background:#3498db;border:none;color:#fff;font-size:1.2rem;width:100%;box-shadow:0 2px 8px rgba(52,152,219,0.3);transition:all 0.2s" onmouseover="this.style.background='#2980b9'" onmouseout="this.style.background='#3498db'">
-          <span style="font-size:1.4rem;margin-right:8px">✕</span> No Barcode
+          <span style="font-size:1.4rem;margin-right:8px">✕</span> <span data-i18n="no_barcode_btn">No Barcode</span>
         </button>
       </a>
       <a href="/item-prep-create-item" style="text-decoration:none;display:block;margin-top:16px">
         <button class="btn" style="padding:36px 64px;border-radius:12px;background:#27ae60;border:none;color:#fff;font-size:1.2rem;width:100%;box-shadow:0 2px 8px rgba(39,174,96,0.3);transition:all 0.2s" onmouseover="this.style.background='#229954'" onmouseout="this.style.background='#27ae60'">
-          <span style="font-size:1.4rem;margin-right:8px">➕</span> Create NEW Item
+          <span style="font-size:1.4rem;margin-right:8px">➕</span> <span data-i18n="create_new_item">Create NEW Item</span>
         </button>
       </a>
-      <button class="btn undo-btn hidden" id="undoBtn">↶ Undo Last Entry</button>
+      <button class="btn undo-btn hidden" id="undoBtn"><span aria-hidden="true">↶</span> <span data-i18n="undo_last_entry">Undo Last Entry</span></button>
     </div>
 
     <div id="result" class="hidden" style="margin-top:12px">
@@ -123,7 +123,7 @@
           <img id="thumb" class="thumb" src="" alt="thumb">
           <button id="addThumbBtn" class="btn" style="display:none;position:absolute;top:0;left:0;right:0;bottom:0;background:#00b894;color:#fff;padding:12px;font-size:0.85rem;border:none;cursor:pointer;border-radius:12px;z-index:2;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px">
             <span style="font-size:1.8rem">📷</span>
-            <span style="font-weight:600;letter-spacing:0.5px">TAKE PHOTO</span>
+            <span style="font-weight:600;letter-spacing:0.5px" data-i18n="take_photo">TAKE PHOTO</span>
           </button>
           <div id="thumbLoadingOverlay" class="loading-overlay" style="display:none">
             <div class="spinner"></div>
@@ -138,7 +138,7 @@
       <img id="hero" class="hero" src="" alt="item image" onerror="this.style.display='none'" style="margin-top:10px">
       <div id="prepSummary" class="muted" style="margin-top:8px"></div>
       <div id="qtyDisplay" class="qty-display hidden">
-        <div class="qty-label">Quantity</div>
+        <div class="qty-label" data-i18n="quantity">Quantity</div>
         <div class="qty-controls">
           <button class="qty-btn minus" id="qtyMinusBtn">&#8722;</button>
           <span class="qty-number" id="qtyNumber">1</span>
@@ -146,11 +146,11 @@
         </div>
       </div>
       <div class="big-actions" id="actions">
-        <button class="btn btn-primary" id="goodBtn">Good</button>
-        <button class="btn" id="returnBtn" style="background:#8b4513;color:#fff;width:100%;margin-top:8px">Return</button>
-        <button class="btn btn-danger" id="badBtn">Bad → Diagnostic</button>
+        <button class="btn btn-primary" id="goodBtn" data-i18n="good">Good</button>
+        <button class="btn" id="returnBtn" style="background:#8b4513;color:#fff;width:100%;margin-top:8px" data-i18n="return_item">Return</button>
+        <button class="btn btn-danger" id="badBtn" data-i18n="bad_diagnostic">Bad → Diagnostic</button>
       </div>
-      <div style="text-align:right;margin-top:8px"><button class="btn btn-gray" id="skipBtn" style="padding:8px 12px;border-radius:10px">Skip</button></div>
+      <div style="text-align:right;margin-top:8px"><button class="btn btn-gray" id="skipBtn" style="padding:8px 12px;border-radius:10px" data-i18n="skip">Skip</button></div>
     </div>
 
     <div id="statusMsg" class="muted"></div>
@@ -743,6 +743,6 @@
       }catch(e){}
     });
   </script>
-  <script src="/static/i18n.js"></script>
+  <script src="/static/i18n.js?v=20260203c"></script>
 </body>
 </html>

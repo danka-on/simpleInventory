@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Location</title>
+    <title data-i18n="location_step_title">Location QR (step 1/2)</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <style>
     /* Green screen overlay */
@@ -103,17 +103,96 @@
         50.001% { top: calc(100% - 2px); }
         100% { top: 0; }
     }
+
+    .img-highlight {
+        outline: 4px solid #2ecc71;
+        outline-offset: 3px;
+        box-shadow: 0 0 0 2px rgba(46, 204, 113, 0.25);
+    }
+    .title-line {
+        display: flex;
+        align-items: baseline;
+        gap: 6px;
+    }
+    .title-main {
+        color: #222;
+        font-weight: 600;
+    }
+    .title-qr {
+        color: #2ecc71;
+        font-weight: 800;
+    }
+    .title-step {
+        color: #555;
+        font-weight: 600;
+        font-size: 0.85em;
+    }
+
+    .invalid-modal {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,0.55);
+        z-index: 99999;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+    }
+    .invalid-card {
+        background: #fff;
+        border-radius: 12px;
+        padding: 18px 20px 16px;
+        width: 92%;
+        max-width: 420px;
+        box-shadow: 0 12px 30px rgba(0,0,0,0.25);
+        border: 1px solid #e6e6e6;
+        position: relative;
+    }
+    .invalid-accent {
+        height: 6px;
+        border-radius: 6px;
+        background: linear-gradient(90deg, #e74c3c, #f39c12);
+        margin: -18px -20px 14px;
+    }
+    .invalid-title {
+        margin: 0 0 8px;
+        font-size: 1.05rem;
+        font-weight: 700;
+        color: #2c3e50;
+    }
+    .invalid-text {
+        margin: 0 0 12px;
+        font-size: 0.98rem;
+        color: #333;
+        line-height: 1.45;
+    }
+    .invalid-close {
+        background: #e74c3c;
+        color: #fff;
+        border: none;
+        border-radius: 8px;
+        padding: 8px 12px;
+        cursor: pointer;
+        font-weight: 600;
+    }
+
     </style>
 </head>
 <body>
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;gap:12px;">
-        <a id="backBtn" href="/" style="text-decoration:none;">
-            <button style="background:#e74c3c;color:#fff;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;display:flex;align-items:center;gap:8px;">
-                <i class="fas fa-arrow-left"></i> <span data-i18n="back">Back</span>
-            </button>
-        </a>
-        <h1 style="margin: 0;" data-i18n="location">Location</h1>
-        <img src="/static/qrcode.jpg" alt="QR Code" style="width:50px; height:50px; object-fit:contain; border:2px solid #000; background:#fff;" />
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;gap:12px;width:100%;">
+        <div style="width:120px;"></div>
+        <div style="display:flex;flex-direction:column;align-items:center;gap:6px;">
+            <h1 style="margin: 0 0 8px 0; display:flex; flex-direction:column; align-items:center; gap:4px;">
+                <span class="title-line">
+                    <span class="title-main" data-i18n="location">Location</span>
+                    <span class="title-qr" data-i18n="qr">QR</span>
+                </span>
+                <span class="title-step" data-i18n="step_1_2">(step 1/2)</span>
+            </h1>
+            <img id="singleBarcodeImg" class="img-highlight" src="/static/singlebarcodeexample.png?v=20260203" alt="QR Code" style="width:180px; height:180px; object-fit:contain; border:2px solid #000; background:#fff; margin-bottom:10px;" />
+            <button id="singleModeBtn" type="button" data-i18n="single_item" style="margin-top:4px;background:#2ecc71;color:#fff;border:none;padding:10px 14px;border-radius:8px;cursor:pointer;font-size:1.05em;font-weight:700;min-width:180px;">Single Item (SCAN QR CODE)</button>
+        </div>
+        <div style="width:120px;"></div>
     </div>
     
     <!-- Edit Mode Banner -->
@@ -151,16 +230,42 @@
         <input name="position_locked" type="hidden" id="position_locked_field" value="false">
     </form>
     <!-- Lock Shelf button (replaces checkbox) -->
-    <div style="margin-top: 20px; text-align: center;">
-        <button id="lockPositionBtn" type="button" style="background-color: #757575; color: white; border: none; padding: 16px 24px; border-radius: 8px; cursor: pointer; font-size: 1.2em; display: inline-flex; align-items: center; justify-content: center; gap: 10px; font-weight: bold; transition: background 0.3s;">
-            <i class="fas fa-unlock" id="lockIcon"></i>
-            <span id="lockText">Lock Shelf - Multiple Barcode</span>
-        </button>
+    <div style="margin-top: 20px; text-align: center; display:flex; flex-direction:column; align-items:center; gap:10px;">
+        <div style="display:flex; align-items:center; gap:8px; width:100%; max-width:360px; justify-content:center;">
+            <div style="display:flex; flex-direction:column; align-items:center; gap:6px; width:100%;">
+                <img id="multiBarcodeImg" src="/static/multibarcodeexample.png?v=20260203" alt="Multi barcode example" style="width:158px;height:158px;object-fit:contain;background:#fff;border-radius:6px;border:1px solid #d0d0d0;box-shadow:0 2px 6px rgba(0,0,0,0.08);">
+                <button id="lockPositionBtn" type="button" style="background-color: #757575; color: white; border: none; padding: 16px 24px; border-radius: 8px; cursor: pointer; font-size: 1.2em; display: inline-flex; align-items: center; justify-content: center; gap: 10px; font-weight: bold; transition: background 0.3s; width:100%;">
+                    <i class="fas fa-unlock" id="lockIcon"></i>
+                    <span id="lockText" data-i18n="lock_shelf_multi">Scan Multiple Barcodes (Same Shelf)</span>
+                </button>
+            </div>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px; width:100%; max-width:360px; justify-content:center;">
+            <div style="display:flex; flex-direction:column; align-items:center; gap:6px; width:100%;">
+                <img src="/static/movelocationexample.png?v=20260203" alt="Move items example" style="width:158px;height:158px;object-fit:contain;background:#fff;border-radius:6px;border:1px solid #d0d0d0;box-shadow:0 2px 6px rgba(0,0,0,0.08);">
+                <a href="/movelocation" style="text-decoration:none; width:100%;">
+                    <button style="background:#2d98da;color:#fff;border:none;padding:12px 18px;border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;font-size:1.05em;font-weight:600;width:100%;">
+                        <i class="fas fa-exchange-alt"></i> <span data-i18n="move_items_location">Move Items to Another Location</span>
+                    </button>
+                </a>
+            </div>
+        </div>
     </div>
     <button id="flashBtn" type="button" style="display:none">Turn On Flashlight</button>
     <div id="flashMsg" style="color:red; display:none; font-size:0.9em;"></div>
     <div id="green-screen">
         <i class="fas fa-check-circle checkmark"></i>
+    </div>
+
+    <div id="invalidModal" class="invalid-modal">
+        <div class="invalid-card">
+            <div class="invalid-accent"></div>
+            <h3 class="invalid-title" id="invalidModalTitle" data-i18n="invalid_location_title">Invalid Shelf Code</h3>
+            <p class="invalid-text" id="invalidModalBody" data-i18n="invalid_location_body">This is not a valid shelf/location code. Please scan a shelf QR code.</p>
+            <div style="text-align:right;">
+                <button class="invalid-close" id="invalidModalClose" data-i18n="close">Close</button>
+            </div>
+        </div>
     </div>
 
     <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
@@ -170,28 +275,62 @@
   const lockBtn = document.getElementById('lockPositionBtn');
   const lockIcon = document.getElementById('lockIcon');
   const lockText = document.getElementById('lockText');
-
-  // Load lock state from sessionStorage on page load
-  function loadLockState() {
-    const stored = sessionStorage.getItem('positionLocked');
-    if (stored === 'true') {
-      positionLocked = true;
-      lockBtn.style.backgroundColor = '#43a047';
-      lockIcon.className = 'fas fa-lock';
-      lockText.textContent = 'LOCKED';
-      document.getElementById('position_locked_field').value = 'true';
+  const singleBarcodeImg = document.getElementById('singleBarcodeImg');
+  const multiBarcodeImg = document.getElementById('multiBarcodeImg');
+  const singleModeBtn = document.getElementById('singleModeBtn');
+  const invalidModal = document.getElementById('invalidModal');
+  const invalidModalClose = document.getElementById('invalidModalClose');
+  let invalidModalOpen = false;
+  const t = (key, fallback) => (window.i18n && window.i18n.t) ? window.i18n.t(key) : fallback;
+  function setLockText(key, fallback) {
+    if (lockText) {
+      lockText.setAttribute('data-i18n', key);
+      lockText.textContent = t(key, fallback);
+    }
+  }
+  function updateImageHighlight() {
+    if (!singleBarcodeImg || !multiBarcodeImg) return;
+    if (positionLocked) {
+      singleBarcodeImg.classList.remove('img-highlight');
+      multiBarcodeImg.classList.add('img-highlight');
+    } else {
+      multiBarcodeImg.classList.remove('img-highlight');
+      singleBarcodeImg.classList.add('img-highlight');
+    }
+    if (singleModeBtn) {
+      singleModeBtn.style.backgroundColor = positionLocked ? '#9e9e9e' : '#2ecc71';
+      singleModeBtn.style.color = '#fff';
     }
   }
 
-  lockBtn.addEventListener('click', function () {
-    positionLocked = !positionLocked;
+  function showInvalidModal() {
+    if (!invalidModal || invalidModalOpen) return;
+    invalidModalOpen = true;
+    invalidModal.style.display = 'flex';
+  }
+
+  function closeInvalidModal() {
+    if (!invalidModal) return;
+    invalidModalOpen = false;
+    invalidModal.style.display = 'none';
+  }
+
+  if (invalidModalClose) invalidModalClose.addEventListener('click', closeInvalidModal);
+  if (invalidModal) {
+    invalidModal.addEventListener('click', (e) => {
+      if (e.target === invalidModal) closeInvalidModal();
+    });
+  }
+
+  function setLockState(locked, notifyServer = true) {
+    positionLocked = !!locked;
     if (positionLocked) {
       lockBtn.style.backgroundColor = '#43a047'; // Green when locked
       lockIcon.className = 'fas fa-lock';
-      lockText.textContent = 'LOCKED - Multi Barcode';
+      setLockText('locked_multi', 'Scan Multiple Barcodes (Same Shelf)');
       sessionStorage.setItem('positionLocked', 'true');
       document.getElementById('position_locked_field').value = 'true';
-      
+
       // Auto-focus on input field for immediate scanning
       const qrInput = document.getElementById('qrTextInput');
       if (qrInput && qrInput.style.display !== 'none') {
@@ -204,27 +343,50 @@
     } else {
       lockBtn.style.backgroundColor = '#757575'; // Gray when unlocked
       lockIcon.className = 'fas fa-unlock';
-      lockText.textContent = 'Lock Shelf - Multiple Barcode';
+      setLockText('lock_shelf_multi', 'Scan Multiple Barcodes (Same Shelf)');
       sessionStorage.removeItem('positionLocked');
       document.getElementById('position_locked_field').value = 'false';
       // Clear position when unlocking
       sessionStorage.removeItem('item_position');
       sessionStorage.removeItem('pictureposition_path');
     }
-    // Send to server
-    fetch('/toggle', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ checked: positionLocked })
-    })
-    .then(response => response.json())
-    .then(data => {
-      console.log("Server says:", data.message);
-    })
-    .catch(error => console.error('Error:', error));
+    updateImageHighlight();
+
+    if (notifyServer) {
+      fetch('/toggle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ checked: positionLocked })
+      })
+      .then(response => response.json())
+      .then(data => {
+        console.log("Server says:", data.message);
+      })
+      .catch(error => console.error('Error:', error));
+    }
+  }
+
+  // Load lock state from sessionStorage on page load
+  function loadLockState() {
+    const stored = sessionStorage.getItem('positionLocked');
+    setLockState(stored === 'true', false);
+  }
+
+  lockBtn.addEventListener('click', function () {
+    setLockState(!positionLocked, true);
   });
+
+  if (singleBarcodeImg) {
+    singleBarcodeImg.style.cursor = 'pointer';
+    singleBarcodeImg.addEventListener('click', () => setLockState(false, true));
+  }
+  if (multiBarcodeImg) {
+    multiBarcodeImg.style.cursor = 'pointer';
+    multiBarcodeImg.addEventListener('click', () => setLockState(true, true));
+  }
+  if (singleModeBtn) {
+    singleModeBtn.addEventListener('click', () => setLockState(false, true));
+  }
 
   // Load state on page load
   loadLockState();
@@ -331,7 +493,10 @@
                 // Also allow legacy codes if they match regex
                 if (!isValid && code.match(/^(gr[1-5]|or[1-3])s[2-6]$/i)) isValid = true;
                 
-                if (!isValid) return;
+                if (!isValid) {
+                    showInvalidModal();
+                    return;
+                }
                 
                 const posCode = code;
                 document.getElementById("scanned_result").value = posCode;
@@ -576,18 +741,10 @@
                     // Auto-clear the input after processing
                     inputEl.value = '';
                 } else {
-                    // Only show error if it's a substantial input (e.g. > 3 chars) to avoid flashing on first char
+                    // Only show error if it's a substantial input (e.g. > 3 chars)
                     if (code.length > 3) {
-                        if (flashMsg) {
-                            flashMsg.textContent = 'Invalid Shelf Code';
-                            flashMsg.style.display = '';
-                            flashMsg.style.background = '#ffdddd';
-                            flashMsg.style.color = '#d32f2f';
-                            flashMsg.style.fontWeight = 'bold';
-                            flashMsg.style.padding = '8px';
-                            flashMsg.style.borderRadius = '6px';
-                            flashMsg.style.transition = 'background 0.2s';
-                        }
+                        if (flashMsg) flashMsg.style.display = 'none';
+                        showInvalidModal();
                         // Play error beep
                         try {
                             var ctx = window.audioCtx || new (window.AudioContext || window.webkitAudioContext)();
@@ -608,8 +765,7 @@
                         } catch(e) {}
                         setTimeout(function() {
                             inputEl.value = '';
-                            if (flashMsg) flashMsg.style.display = 'none';
-                        }, 1000);
+                        }, 300);
                     }
                 }
             }, 500); // 0.5s delay
@@ -696,6 +852,6 @@
         }
     });
     </script>
-    <script src="/static/i18n.js"></script>
+    <script src="/static/i18n.js?v=20260203d"></script>
 </body>
 </html>

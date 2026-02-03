@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Move Location</title>
+    <style>
+        body { font-family: Segoe UI, Arial, sans-serif; background:#f7f7f8; margin:0; padding:18px; }
+        .top { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:14px; }
+        .btn { padding:8px 14px; border-radius:6px; border:none; cursor:pointer; }
+        .btn-danger{ background:#e74c3c; color:#fff; }
+        .btn-primary{ background:#00b894; color:#fff; }
+        .btn-blue{ background:#2d98da; color:#fff; }
+        .btn-gray{ background:#8e8e8e; color:#fff; }
+        .page-wrap { display:grid; grid-template-columns: 1fr auto 1fr; gap:16px; align-items:start; }
+        .panel { background:#fff; border:1px solid #ddd; border-radius:10px; padding:14px; box-shadow:0 2px 6px rgba(0,0,0,0.05); }
+        .panel h2 { margin:0 0 10px; font-size:1.1rem; color:#333; }
+        .input-row { display:flex; gap:8px; align-items:center; margin-bottom:6px; }
+        .input-row input { flex:1; padding:10px; border:1px solid #ccc; border-radius:6px; font-size:1rem; }
+        .status { font-size:0.9rem; color:#666; min-height:20px; margin-bottom:10px; }
+        .status.ok { color:#00b894; font-weight:600; }
+        .status.err { color:#e74c3c; font-weight:600; }
+        .items-table { width:100%; border-collapse:collapse; font-size:0.9rem; }
+        .items-table th, .items-table td { border:1px solid #e6e6e6; padding:6px; text-align:left; }
+        .items-table th { background:#f0f0f0; }
+        .items-table .move-btn { padding:4px 8px; border:none; border-radius:4px; background:#00b894; color:#fff; cursor:pointer; }
+        .items-table .move-btn:hover { background:#019170; }
+        .qty-high { color:#e74c3c; font-weight:700; }
+        .incoming { background:#eafaf7; }
+        .tag { display:inline-block; padding:2px 6px; border-radius:10px; background:#e0f2ff; color:#2d98da; font-size:0.75rem; margin-left:6px; }
+        .center-controls { display:flex; flex-direction:column; gap:10px; align-items:center; justify-content:center; }
+        .scan-row { margin-top:14px; display:flex; gap:8px; align-items:center; }
+        .scan-row input { flex:1; padding:10px; border:1px solid #ccc; border-radius:6px; font-size:1rem; }
+        .small-muted { color:#777; font-size:0.9rem; }
+
+        .modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:9999; align-items:center; justify-content:center; }
+        .modal .card { background:#fff; border-radius:8px; padding:16px; max-width:520px; width:92%; }
+        .modal img { max-width:100%; height:auto; border-radius:6px; border:1px solid #ddd; }
+
+        @media (max-width: 900px) {
+            .page-wrap { grid-template-columns: 1fr; }
+            .center-controls { flex-direction:row; justify-content:flex-start; }
+        }
+    </style>
+</head>
+<body>
+    <div class="top">
+        <a href="/" id="backBtn" style="text-decoration:none;"><button class="btn btn-danger">Back</button></a>
+        <h1 style="margin:0;">Move Location</h1>
+        <div style="width:84px"></div>
+    </div>
+
+    <div class="page-wrap">
+        <div class="panel">
+            <h2>Start Location</h2>
+            <div class="input-row">
+                <input id="start-location-input" type="text" placeholder="Scan or enter start shelf code" autocomplete="off" autocapitalize="off" spellcheck="false">
+            </div>
+            <div id="start-status" class="status">Waiting for start location scan...</div>
+            <table class="items-table" id="start-table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Barcode</th>
+                        <th>Qty</th>
+                        <th>Move</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+
+        <div class="center-controls">
+            <button id="move-all-btn" class="btn btn-blue">Move All -></button>
+            <button id="complete-btn" class="btn btn-primary">Complete</button>
+            <div id="complete-status" class="status"></div>
+        </div>
+
+        <div class="panel">
+            <h2>Destination</h2>
+            <div class="input-row">
+                <input id="dest-location-input" type="text" placeholder="Scan or enter destination shelf code" autocomplete="off" autocapitalize="off" spellcheck="false">
+            </div>
+            <div id="dest-status" class="status">Waiting for destination scan...</div>
+            <table class="items-table" id="dest-table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Barcode</th>
+                        <th>Qty</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="panel" style="margin-top:14px;">
+        <div style="font-weight:600; margin-bottom:6px;">Scan item barcode to move</div>
+        <div class="scan-row">
+            <input id="item-scan-input" type="text" placeholder="Scan item barcode..." autocomplete="off" autocapitalize="off" spellcheck="false">
+            <button id="clear-scan-btn" class="btn btn-gray">Clear</button>
+        </div>
+        <div id="scan-status" class="status"></div>
+    </div>
+
+    <div id="imageModal" class="modal">
+        <div class="card">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                <div id="imageTitle" style="font-weight:600;"></div>
+                <button id="closeImage" class="btn btn-gray">Close</button>
+            </div>
+            <div id="imageBody"></div>
+        </div>
+    </div>
+
+    <script>
+        const startInput = document.getElementById('start-location-input');
+        const destInput = document.getElementById('dest-location-input');
+        const scanInput = document.getElementById('item-scan-input');
+        const startStatus = document.getElementById('start-status');
+        const destStatus = document.getElementById('dest-status');
+        const scanStatus = document.getElementById('scan-status');
+        const moveAllBtn = document.getElementById('move-all-btn');
+        const completeBtn = document.getElementById('complete-btn');
+        const completeStatus = document.getElementById('complete-status');
+
+        let validShelves = [];
+        let startLocation = '';
+        let destLocation = '';
+        let startItemsAll = [];
+        let destItems = [];
+        let movedQtyById = {};
+
+        function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+        function normalizeBarcode(val){
+            if(val === null || val === undefined) return '';
+            let s = String(val).trim();
+            if(s.endsWith('.0') && s.replace('.0','').match(/^\\d+$/)) s = s.slice(0, -2);
+            return s;
+        }
+
+        function barcodesMatch(a, b){
+            const aa = normalizeBarcode(a);
+            const bb = normalizeBarcode(b);
+            if(!aa || !bb) return false;
+            if(aa === bb) return true;
+            if(aa.match(/^\\d+$/) && bb.match(/^\\d+$/)){
+                return aa.replace(/^0+/, '') === bb.replace(/^0+/, '');
+            }
+            return false;
+        }
+
+        function isValidShelf(code){
+            if(!code) return false;
+            const c = code.toLowerCase();
+            if(validShelves.length && validShelves.includes(c)) return true;
+            return /^(gr[1-5]|or[1-3])s[2-6]$/i.test(code);
+        }
+
+        async function loadValidShelves(){
+            try{
+                const resp = await fetch('/api/valid_shelves');
+                const data = await resp.json();
+                if(data.success && Array.isArray(data.codes)){
+                    validShelves = data.codes.map(c => String(c).toLowerCase());
+                }
+            }catch(e){}
+        }
+
+        function setStatus(el, ok, msg){
+            el.classList.remove('ok','err');
+            if(ok === true) el.classList.add('ok');
+            if(ok === false) el.classList.add('err');
+            el.textContent = msg || '';
+        }
+
+        async function fetchLocationItems(location){
+            const resp = await fetch('/api/location_items?location=' + encodeURIComponent(location));
+            const data = await resp.json();
+            if(!data.success) throw new Error(data.error || 'Failed to load');
+            return data.items || [];
+        }
+
+        function clearMoves(){
+            movedQtyById = {};
+        }
+
+        function getMovedQty(id){
+            return movedQtyById[id] ? parseInt(movedQtyById[id], 10) : 0;
+        }
+
+        function getRemainingQty(item){
+            const remaining = (item.quantity || 0) - getMovedQty(item.id);
+            return remaining > 0 ? remaining : 0;
+        }
+
+        function renderTables(){
+            const startBody = document.querySelector('#start-table tbody');
+            const destBody = document.querySelector('#dest-table tbody');
+            startBody.innerHTML = '';
+            destBody.innerHTML = '';
+
+            const remaining = startItemsAll.filter(it => getRemainingQty(it) > 0);
+            if(remaining.length === 0){
+                startBody.innerHTML = '<tr><td colspan="4" class="small-muted">No items at start location</td></tr>';
+            } else {
+                remaining.forEach(it => {
+                    const remainingQty = getRemainingQty(it);
+                    const qtyClass = remainingQty > 1 ? 'qty-high' : '';
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td><a href="#" data-id="${it.id}" class="name-link">${esc(it.title || it.barcode || 'Item')}</a></td>
+                        <td>${esc(it.barcode)}</td>
+                        <td class="${qtyClass}">${esc(remainingQty)}</td>
+                        <td><button class="move-btn" data-id="${it.id}">Move -></button></td>
+                    `;
+                    startBody.appendChild(tr);
+                });
+            }
+
+            const movedList = startItemsAll
+                .filter(it => getMovedQty(it.id) > 0)
+                .map(it => Object.assign({}, it, { quantity: getMovedQty(it.id), _incoming: true }));
+
+            const combinedDest = [...destItems];
+            movedList.forEach(it => combinedDest.push(it));
+            if(combinedDest.length === 0){
+                destBody.innerHTML = '<tr><td colspan="3" class="small-muted">No items at destination</td></tr>';
+            } else {
+                combinedDest.forEach(it => {
+                    const qtyClass = (it.quantity || 0) > 1 ? 'qty-high' : '';
+                    const tr = document.createElement('tr');
+                    if(it._incoming) tr.classList.add('incoming');
+                    tr.innerHTML = `
+                        <td><a href="#" data-id="${it.id}" class="name-link">${esc(it.title || it.barcode || 'Item')}${it._incoming ? '<span class="tag">moving</span>' : ''}</a></td>
+                        <td>${esc(it.barcode)}</td>
+                        <td class="${qtyClass}">${esc(it.quantity)}</td>
+                    `;
+                    destBody.appendChild(tr);
+                });
+            }
+
+            document.querySelectorAll('.move-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const id = e.currentTarget.getAttribute('data-id');
+                    const item = startItemsAll.find(it => String(it.id) === String(id));
+                    if(!item) return;
+                    const remainingQty = getRemainingQty(item);
+                    if(remainingQty <= 0) return;
+                    let qtyToMove = 1;
+                    if(remainingQty > 1){
+                        const resp = prompt(`Move how many? (1-${remainingQty})`, '1');
+                        if(resp === null) return;
+                        if(String(resp).trim().toLowerCase() === 'all'){
+                            qtyToMove = remainingQty;
+                        } else {
+                            const parsed = parseInt(resp, 10);
+                            if(!parsed || parsed < 1 || parsed > remainingQty){
+                                setStatus(scanStatus, false, 'Invalid quantity');
+                                return;
+                            }
+                            qtyToMove = parsed;
+                        }
+                    }
+                    moveItemById(id, qtyToMove);
+                });
+            });
+
+            document.querySelectorAll('.name-link').forEach(link => {
+                link.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    const id = e.currentTarget.getAttribute('data-id');
+                    const item = startItemsAll.find(i => String(i.id) === String(id)) ||
+                                 destItems.find(i => String(i.id) === String(id));
+                    if(item) showImageModal(item);
+                });
+            });
+        }
+
+        function moveItemById(id, qty){
+            const item = startItemsAll.find(it => String(it.id) === String(id));
+            if(!item) return false;
+            const remainingQty = getRemainingQty(item);
+            const qtyToMove = qty || 1;
+            if(qtyToMove < 1 || qtyToMove > remainingQty) return false;
+            movedQtyById[item.id] = getMovedQty(item.id) + qtyToMove;
+            renderTables();
+            return true;
+        }
+
+        function moveByBarcode(code){
+            const remaining = startItemsAll.filter(it => getRemainingQty(it) > 0);
+            for(const it of remaining){
+                if(barcodesMatch(code, it.barcode)){
+                    moveItemById(it.id, 1);
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        function handleStartInput(){
+            const code = startInput.value.trim();
+            if(!code) return;
+            if(!isValidShelf(code)){
+                setStatus(startStatus, false, 'Invalid shelf code');
+                return;
+            }
+            if(code.toLowerCase() === startLocation.toLowerCase()) return;
+            startLocation = code;
+            clearMoves();
+            setStatus(scanStatus, null, '');
+            setStatus(completeStatus, null, '');
+            setStatus(startStatus, true, 'Loading items...');
+            fetchLocationItems(code).then(items => {
+                startItemsAll = items;
+                setStatus(startStatus, true, `Loaded ${items.length} items`);
+                renderTables();
+                destInput.focus();
+                destInput.select();
+            }).catch(err => {
+                setStatus(startStatus, false, err.message || 'Failed to load start items');
+            });
+        }
+
+        function handleDestInput(){
+            const code = destInput.value.trim();
+            if(!code) return;
+            if(!isValidShelf(code)){
+                setStatus(destStatus, false, 'Invalid shelf code');
+                return;
+            }
+            if(startLocation && code.toLowerCase() === startLocation.toLowerCase()){
+                setStatus(destStatus, false, 'Destination must be different from start');
+                return;
+            }
+            if(code.toLowerCase() === destLocation.toLowerCase()) return;
+            destLocation = code;
+            clearMoves();
+            setStatus(scanStatus, null, '');
+            setStatus(completeStatus, null, '');
+            setStatus(destStatus, true, 'Loading items...');
+            fetchLocationItems(code).then(items => {
+                destItems = items;
+                setStatus(destStatus, true, `Loaded ${items.length} items`);
+                renderTables();
+                scanInput.focus();
+                scanInput.select();
+            }).catch(err => {
+                setStatus(destStatus, false, err.message || 'Failed to load destination items');
+            });
+        }
+
+        let startDebounce = null;
+        let destDebounce = null;
+
+        startInput.addEventListener('input', () => {
+            clearTimeout(startDebounce);
+            startDebounce = setTimeout(handleStartInput, 200);
+        });
+        destInput.addEventListener('input', () => {
+            clearTimeout(destDebounce);
+            destDebounce = setTimeout(handleDestInput, 200);
+        });
+        startInput.addEventListener('keydown', (e) => {
+            if(e.key === 'Enter') handleStartInput();
+        });
+        destInput.addEventListener('keydown', (e) => {
+            if(e.key === 'Enter') handleDestInput();
+        });
+
+        function processScan(code){
+            if(!code) return;
+            if(!startLocation || !destLocation){
+                setStatus(scanStatus, false, 'Scan start and destination locations first');
+                return;
+            }
+            const moved = moveByBarcode(code);
+            if(moved){
+                setStatus(scanStatus, true, `Moved ${code}`);
+            } else {
+                setStatus(scanStatus, false, `Barcode not found in start location: ${code}`);
+            }
+        }
+
+        let scanDebounce = null;
+        scanInput.addEventListener('input', () => {
+            clearTimeout(scanDebounce);
+            scanDebounce = setTimeout(() => {
+                const code = scanInput.value.trim();
+                if(code){
+                    scanInput.value = '';
+                    processScan(code);
+                }
+            }, 250);
+        });
+
+        scanInput.addEventListener('keydown', (e) => {
+            if(e.key === 'Enter'){
+                clearTimeout(scanDebounce);
+                const code = scanInput.value.trim();
+                scanInput.value = '';
+                processScan(code);
+            }
+        });
+
+        document.getElementById('clear-scan-btn').addEventListener('click', () => {
+            scanInput.value = '';
+            scanInput.focus();
+            setStatus(scanStatus, null, '');
+        });
+
+        moveAllBtn.addEventListener('click', () => {
+            movedQtyById = {};
+            startItemsAll.forEach(it => {
+                movedQtyById[it.id] = it.quantity || 0;
+            });
+            renderTables();
+        });
+
+        completeBtn.addEventListener('click', async () => {
+            if(!startLocation || !destLocation){
+                setStatus(completeStatus, false, 'Scan start and destination locations first');
+                return;
+            }
+            const payloadItems = startItemsAll
+                .map(it => ({ id: it.id, qty: getMovedQty(it.id) }))
+                .filter(it => it.qty && it.qty > 0);
+            const totalUnits = payloadItems.reduce((sum, it) => sum + it.qty, 0);
+            if(payloadItems.length === 0){
+                setStatus(completeStatus, false, 'No items moved');
+                return;
+            }
+            if(!confirm(`Move ${totalUnits} units (${payloadItems.length} items) from ${startLocation} to ${destLocation}?`)) return;
+
+            try{
+                completeBtn.disabled = true;
+                completeStatus.textContent = 'Moving items...';
+                const payload = {
+                    from_location: startLocation,
+                    to_location: destLocation,
+                    item_ids: payloadItems
+                };
+                const resp = await fetch('/api/move_location', {
+                    method:'POST',
+                    headers:{'Content-Type':'application/json'},
+                    body: JSON.stringify(payload)
+                });
+                const data = await resp.json();
+                if(!data.success){
+                    setStatus(completeStatus, false, data.error || 'Move failed');
+                    completeBtn.disabled = false;
+                    return;
+                }
+                setStatus(completeStatus, true, `Moved ${totalUnits} units (${data.moved} items, ${data.skipped} skipped)`);
+                setTimeout(() => {
+                    const url = `/searchrack?db=searchRack&q=${encodeURIComponent(destLocation)}&refresh=${Date.now()}`;
+                    window.location.href = url;
+                }, 600);
+            }catch(err){
+                setStatus(completeStatus, false, err.message || 'Move failed');
+                completeBtn.disabled = false;
+            }
+        });
+
+        function showImageModal(item){
+            const modal = document.getElementById('imageModal');
+            const title = document.getElementById('imageTitle');
+            const body = document.getElementById('imageBody');
+            title.textContent = item.title || item.barcode || 'Item';
+            if(item.image){
+                body.innerHTML = `<img src="${esc(item.image)}" alt="Item image">`;
+            } else {
+                body.innerHTML = '<div class="small-muted">No image available</div>';
+            }
+            modal.style.display = 'flex';
+        }
+
+        document.getElementById('closeImage').addEventListener('click', () => {
+            document.getElementById('imageModal').style.display = 'none';
+        });
+
+        document.getElementById('imageModal').addEventListener('click', (e) => {
+            if(e.target.id === 'imageModal') document.getElementById('imageModal').style.display = 'none';
+        });
+
+        // Init
+        loadValidShelves();
+        startInput.focus();
+        document.getElementById('backBtn').addEventListener('click', (e) => {
+            e.preventDefault();
+            if (window.history.length > 1) {
+                window.history.back();
+            } else {
+                window.location.href = '/';
+            }
+        });
+    </script>
+</body>
+</html>

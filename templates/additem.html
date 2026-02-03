@@ -104,6 +104,7 @@
     });
     
     function updateChecklist() {
+        const t = (key, fallback) => (window.i18n && window.i18n.t) ? window.i18n.t(key) : (fallback || key);
         // If both are set, prefer picturePosition (picture takes precedence)
         const itemPosition = sessionStorage.getItem('item_position');
         const picturePosition = sessionStorage.getItem('pictureposition_path');
@@ -111,16 +112,16 @@
         // Position logic
         let posText = '', posColor = '', posGoto = '';
         if (picturePosition) {
-            posText = `Position set - picture <i class=\"fas fa-pen edit-icon\"></i>`;
+            posText = `${t('position_set_picture', 'Position set - picture')} <i class=\"fas fa-pen edit-icon\"></i>`;
             posColor = '#2ecc71'; // new green
             posGoto = '/position'; // Always go to position.html
             sessionStorage.removeItem('item_position');
         } else if (itemPosition) {
-            posText = `Position set - ${itemPosition} <i class=\"fas fa-pen edit-icon\"></i>`;
+            posText = `${t('position_set', 'Position set')} - ${itemPosition} <i class=\"fas fa-pen edit-icon\"></i>`;
             posColor = '#2ecc71';
             posGoto = '/position';
         } else {
-            posText = 'Position NOT set';
+            posText = t('position_not_set', 'Position NOT set');
             posColor = '#d32f2f';
             posGoto = '/position?error=noposition';
         }
@@ -131,14 +132,14 @@
             // Check if multiple barcodes (comma-separated)
             const barcodes = barcode.split(',');
             if (barcodes.length > 1) {
-                barText = `Barcodes set (${barcodes.length}) <i class=\"fas fa-pen edit-icon\"></i>`;
+                barText = `${t('barcodes_set', 'Barcodes set')} (${barcodes.length}) <i class=\"fas fa-pen edit-icon\"></i>`;
             } else {
-                barText = `Barcode set - ${barcode} <i class=\"fas fa-pen edit-icon\"></i>`;
+                barText = `${t('barcode_set', 'Barcode set')} - ${barcode} <i class=\"fas fa-pen edit-icon\"></i>`;
             }
             barColor = '#2ecc71';
             barGoto = isLocked ? '/multibarcode' : '/barcode';
         } else {
-            barText = 'Barcode NOT set';
+            barText = t('barcode_not_set', 'Barcode NOT set');
             barColor = '#d32f2f';
             barGoto = isLocked ? '/multibarcode' : '/barcode';
         }

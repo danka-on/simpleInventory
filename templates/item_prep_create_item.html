@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Create New Item - Prep</title>
+  <title data-i18n="create_new_item_prep_title">Create New Item - Prep</title>
   <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
   <style>
     * { margin:0; padding:0; box-sizing:border-box; }
@@ -55,34 +55,35 @@
 </head>
 <body>
   <div class="container">
-    <h1>➕ Create New Item</h1>
+    <h1>➕ <span data-i18n="create_new_item_title">Create New Item</span></h1>
     
     <div class="card">
-      <button class="btn btn-danger" id="backBtn">← Back</button>
+      <button class="btn btn-danger" id="backBtn">← <span data-i18n="back">Back</span></button>
       
       <div style="margin-top:24px">
         <div class="form-group">
           <label>
-            Item Title / Description
-            <span class="field-status field-incomplete" id="titleStatus">✗ Required</span>
+            <span data-i18n="item_title_desc">Item Title / Description</span>
+            <span class="field-status field-incomplete" id="titleStatus">✗ <span data-i18n="required">Required</span></span>
           </label>
-          <input type="text" id="itemTitle" placeholder="Enter item description...">
+          <input type="text" id="itemTitle" placeholder="Enter item description..." data-i18n="enter_item_desc">
         </div>
         
         <div class="form-group">
           <label>
-            Barcode (Auto-Generated) <span style="color:#666;font-size:0.85em;font-weight:400;">- Click to edit manually</span>
-            <span class="field-status field-complete" id="barcodeStatus">✓ Generated</span>
+            <span data-i18n="barcode_auto">Barcode (Auto-Generated)</span>
+            <span style="color:#666;font-size:0.85em;font-weight:400;" data-i18n="click_to_edit">- Click to edit manually</span>
+            <span class="field-status field-complete" id="barcodeStatus">✓ <span data-i18n="generated">Generated</span></span>
           </label>
-          <div class="barcode-display" id="barcodeDisplay">Loading...</div>
-          <input type="text" class="barcode-input hidden" id="barcodeInput" placeholder="Enter barcode manually...">
-          <button class="btn btn-primary" id="regenerateBtn">🔄 Regenerate Barcode</button>
+          <div class="barcode-display" id="barcodeDisplay" data-i18n="loading">Loading...</div>
+          <input type="text" class="barcode-input hidden" id="barcodeInput" placeholder="Enter barcode manually..." data-i18n="enter_barcode_manually">
+          <button class="btn btn-primary" id="regenerateBtn">🔄 <span data-i18n="regenerate_barcode">Regenerate Barcode</span></button>
         </div>
         
         <div class="form-group">
           <label>
-            Thumbnail Image
-            <span class="field-status field-incomplete" id="imageStatus">✗ Required</span>
+            <span data-i18n="thumbnail_image">Thumbnail Image</span>
+            <span class="field-status field-incomplete" id="imageStatus">✗ <span data-i18n="required">Required</span></span>
           </label>
           <div class="cam-wrap hidden" id="cameraContainer">
             <div class="camera-container">
@@ -97,19 +98,19 @@
           <img id="preview" class="preview-image hidden" alt="Captured image">
           
           <div class="camera-controls">
-            <button class="btn btn-primary" id="startCameraBtn">📷 Start Camera</button>
+            <button class="btn btn-primary" id="startCameraBtn">📷 <span data-i18n="start_camera">Start Camera</span></button>
           </div>
         </div>
         
         <div class="form-group">
           <label>
-            Print Barcode
-            <span class="field-status field-incomplete" id="printStatus">✗ Not Printed</span>
+            <span data-i18n="print_barcode">Print Barcode</span>
+            <span class="field-status field-incomplete" id="printStatus">✗ <span data-i18n="not_printed">Not Printed</span></span>
           </label>
-          <button class="btn btn-gray" id="printBarcodeBtn" style="width:100%; padding:16px; font-size:1rem; display:block;">🖨️ Print Barcode Label</button>
-          <button class="btn btn-success" id="addToQueBtn" style="width:100%; padding:16px; font-size:1rem; display:none; margin-top:8px;">➕ Add to Print Que</button>
-          <button class="btn btn-success" id="haveBarcodeBtn" style="width:100%; padding:16px; font-size:1rem; display:none; margin-top:8px;">✓ Have Barcode</button>
-          <button class="btn btn-success" id="completeBtn" style="width:100%; padding:20px; font-size:1.1rem; font-weight:700; display:none; margin-top:8px;">✓ Complete</button>
+          <button class="btn btn-gray" id="printBarcodeBtn" style="width:100%; padding:16px; font-size:1rem; display:block;">🖨️ <span data-i18n="print_barcode_label">Print Barcode Label</span></button>
+          <button class="btn btn-success" id="addToQueBtn" style="width:100%; padding:16px; font-size:1rem; display:none; margin-top:8px;">➕ <span data-i18n="add_to_print_que">Add to Print Que</span></button>
+          <button class="btn btn-success" id="haveBarcodeBtn" style="width:100%; padding:16px; font-size:1rem; display:none; margin-top:8px;">✓ <span data-i18n="have_barcode">Have Barcode</span></button>
+          <button class="btn btn-success" id="completeBtn" style="width:100%; padding:20px; font-size:1.1rem; font-weight:700; display:none; margin-top:8px;">✓ <span data-i18n="complete">Complete</span></button>
       </div>
       <script>
         // Add to Print Que logic
@@ -224,6 +225,8 @@
       document.getElementById('loadingOverlay').classList.remove('active');
     }
     
+    const t = (key, fallback) => (window.i18n && window.i18n.t) ? window.i18n.t(key) : fallback;
+    
     let currentBarcode = '';
     let capturedImageData = null;
     let isPrinted = false;
@@ -259,7 +262,7 @@
         addToQueBtn.style.display = 'none';
         haveBarcodeBtn.style.display = 'none';
         completeBtn.style.display = 'block';
-        completeBtn.textContent = '✓ Complete';
+        completeBtn.textContent = '✓ ' + t('complete', 'Complete');
         completeBtn.onclick = completeWithoutQueue; // Different handler for manual
       } else {
         // Auto-generated: Complete button adds to queue
@@ -267,7 +270,7 @@
         addToQueBtn.style.display = 'none';
         haveBarcodeBtn.style.display = 'none';
         completeBtn.style.display = 'block';
-        completeBtn.textContent = '✓ Complete & Add to Print Queue';
+        completeBtn.textContent = '✓ ' + t('complete_add_to_print_que', 'Complete & Add to Print Queue');
         completeBtn.onclick = completeWithQueue; // Handler that adds to queue
       }
     }
@@ -353,7 +356,7 @@
       
       stopCamera();
       
-      imageStatus.textContent = '✓ Captured';
+      imageStatus.textContent = '✓ ' + t('captured', 'Captured');
       imageStatus.className = 'field-status field-complete';
       
       checkFormComplete();
@@ -371,7 +374,7 @@
       captureBtn.classList.remove('hidden');
       retakeBtn.classList.add('hidden');
       
-      imageStatus.textContent = '✗ Required';
+      imageStatus.textContent = '✗ ' + t('required', 'Required');
       imageStatus.className = 'field-status field-incomplete';
       
       // Stop and restart camera to reset
@@ -455,7 +458,7 @@
       // Add loading state to print button
       const originalHTML = printBarcodeBtn.innerHTML;
       printBarcodeBtn.disabled = true;
-      printBarcodeBtn.innerHTML = '🖨️ Printing... <span class="loading-spinner"></span>';
+      printBarcodeBtn.innerHTML = '🖨️ ' + t('printing', 'Printing...') + ' <span class="loading-spinner"></span>';
       
       try {
         // Check printer configuration first
@@ -522,10 +525,10 @@
     
     function updatePrintStatus() {
       if (isPrinted) {
-        printStatus.textContent = '✓ Printed';
+        printStatus.textContent = '✓ ' + t('printed_status', 'Printed');
         printStatus.className = 'field-status field-complete';
       } else {
-        printStatus.textContent = '✗ Not Printed';
+        printStatus.textContent = '✗ ' + t('not_printed', 'Not Printed');
         printStatus.className = 'field-status field-incomplete';
       }
     }
@@ -533,10 +536,10 @@
     function updateTitleStatus() {
       const title = itemTitle.value.trim();
       if (title) {
-        titleStatus.textContent = '✓ Complete';
+        titleStatus.textContent = '✓ ' + t('complete', 'Complete');
         titleStatus.className = 'field-status field-complete';
       } else {
-        titleStatus.textContent = '✗ Required';
+        titleStatus.textContent = '✗ ' + t('required', 'Required');
         titleStatus.className = 'field-status field-incomplete';
       }
       checkFormComplete();
@@ -762,6 +765,6 @@
     // Cleanup on page unload
     window.addEventListener('beforeunload', stopCamera);
   </script>
-  <script src="/static/i18n.js"></script>
+  <script src="/static/i18n.js?v=20260203c"></script>
 </body>
 </html>

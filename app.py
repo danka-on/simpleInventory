@@ -6461,6 +6461,14 @@ def position_page():
     return response
 
 
+@app.route("/movelocation")
+def movelocation_page():
+    response = make_response(render_template("movelocation.html"))
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
+
 @app.route('/position/diagnostic', methods=['POST'])
 def position_diagnostic():
     """Handle position submission from diagnostic pages."""
@@ -8621,6 +8629,16 @@ def api_inventory_history():
                         else:
                             action = 'Removed'
                             source = 'Location Change (Moved Away)'
+                    elif removal_type == 'locationmoved':
+                        if qty_change > 0:
+                            action = 'Added'
+                            source = 'Location Move (Moved Here)'
+                        elif qty_change < 0:
+                            action = 'Removed'
+                            source = 'Location Move (Moved Away)'
+                        else:
+                            action = 'Moved'
+                            source = 'Location Move'
                     elif removal_type == 'automatic':
                         action = 'Removed'
                         source = 'Automatic Removal'
@@ -11707,6 +11725,236 @@ def api_location_hierarchy():
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
     finally:
         conn.close()
+
+
+@app.route('/api/location_items', methods=['GET'])
+def api_location_items():
+    """Get items for a specific shelf/location from searchRack.db"""
+    try:
+        location = (request.args.get('location') or '').strip()
+        if not location:
+            return jsonify({'success': False, 'error': 'Missing location'}), 400
+
+        conn = sqlite3.connect('searchRack.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute('''
+            SELECT ID, TITLE, BARCODE, QUANTITY, IMAGE, IMAGES
+            FROM SEARCHRACK
+            WHERE LOWER(TRIM(ITEM_POSITION)) = LOWER(TRIM(?))
+            ORDER BY TITLE
+        ''', (location,))
+        items = []
+        for row in cur.fetchall():
+            qty_val = row['QUANTITY'] if 'QUANTITY' in row.keys() else None
+            try:
+                qty = int(qty_val) if qty_val is not None and str(qty_val).strip() != '' else 1
+            except Exception:
+                qty = 1
+            image_val = row['IMAGE'] or ''
+            if not image_val:
+                images_raw = row['IMAGES'] if 'IMAGES' in row.keys() else ''
+                try:
+                    if images_raw and str(images_raw).strip().startswith('['):
+                        parsed = json.loads(images_raw)
+                        if isinstance(parsed, list) and parsed:
+                            image_val = parsed[0]
+                except Exception:
+                    pass
+            items.append({
+                'id': row['ID'],
+                'title': row['TITLE'] or '',
+                'barcode': row['BARCODE'] or '',
+                'quantity': qty,
+                'image': image_val or row['IMAGES'] or ''
+            })
+        return jsonify({'success': True, 'items': items})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e)}), 500
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+@app.route('/api/move_location', methods=['POST'])
+def api_move_location():
+    """Move searchRack items from one location to another and log history"""
+    data = request.get_json() or {}
+    from_location = (data.get('from_location') or '').strip()
+    to_location = (data.get('to_location') or '').strip()
+    item_ids = data.get('item_ids') or []
+
+    if not from_location or not to_location or not item_ids:
+        return jsonify({'success': False, 'error': 'Missing from_location, to_location, or item_ids'}), 400
+    if not isinstance(item_ids, list):
+        return jsonify({'success': False, 'error': 'item_ids must be a list'}), 400
+    if from_location.lower() == to_location.lower():
+        return jsonify({'success': False, 'error': 'Start and destination locations are the same'}), 400
+
+    moved = 0
+    skipped = 0
+
+    try:
+        conn = sqlite3.connect('searchRack.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+
+        # Determine PK and picture column names
+        cur.execute("PRAGMA table_info('SEARCHRACK')")
+        cols = [r[1] for r in cur.fetchall()]
+        id_col = 'ID' if 'ID' in cols else ('id' if 'id' in cols else 'rowid')
+        pic_col = 'PICTUREPOSITION' if 'PICTUREPOSITION' in cols else None
+        if not pic_col:
+            for c in cols:
+                if c.lower() == 'pictureposition':
+                    pic_col = c
+                    break
+
+        # History logging
+        rem_conn = sqlite3.connect('rackhistory.db')
+        rem_cur = rem_conn.cursor()
+        _ensure_removed_items_table(rem_cur)
+        # Ensure item_position column exists for older schemas
+        try:
+            rem_cur.execute("PRAGMA table_info(removed_items)")
+            rem_cols = [c[1] for c in rem_cur.fetchall()]
+            if 'item_position' not in rem_cols:
+                rem_cur.execute('ALTER TABLE removed_items ADD COLUMN item_position TEXT')
+                rem_conn.commit()
+        except Exception:
+            pass
+
+        def _parse_qty(row_dict):
+            for qc in ['QUANTITY', 'Quantity', 'quantity', 'Qty', 'QTY']:
+                if qc in row_dict and row_dict.get(qc) is not None:
+                    try:
+                        return int(row_dict.get(qc))
+                    except Exception:
+                        return 1
+            return 1
+
+        def _find_qty_col():
+            for qc in ['QUANTITY', 'Quantity', 'quantity', 'Qty', 'QTY']:
+                if qc in cols:
+                    return qc
+            return None
+
+        from_norm = from_location.strip().lower()
+
+        from datetime import datetime
+        qty_col_name = _find_qty_col()
+        for raw_entry in item_ids:
+            try:
+                move_qty = None
+                raw_id = raw_entry
+                if isinstance(raw_entry, dict):
+                    raw_id = raw_entry.get('id') or raw_entry.get('item_id') or raw_entry.get('ID')
+                    move_qty = raw_entry.get('qty') if raw_entry.get('qty') is not None else raw_entry.get('quantity')
+                if raw_id is None or raw_id == '':
+                    skipped += 1
+                    continue
+
+                cur.execute(f"SELECT * FROM SEARCHRACK WHERE {id_col} = ?", (raw_id,))
+                row = cur.fetchone()
+                if not row:
+                    skipped += 1
+                    continue
+
+                row_dict = dict(row)
+                row_loc = (row_dict.get('ITEM_POSITION') or row_dict.get('item_position') or '').strip()
+                if row_loc.lower() != from_norm:
+                    skipped += 1
+                    continue
+
+                barcode = row_dict.get('BARCODE') or row_dict.get('barcode') or ''
+                title = row_dict.get('TITLE') or row_dict.get('title') or ''
+                qty = _parse_qty(row_dict)
+                try:
+                    move_qty_int = int(move_qty) if move_qty is not None else qty
+                except Exception:
+                    move_qty_int = qty
+                if move_qty_int < 1 or move_qty_int > qty:
+                    skipped += 1
+                    continue
+                now = datetime.now().isoformat()
+
+                if move_qty_int < qty and qty_col_name:
+                    # Partial move: decrement original qty and insert new row at destination
+                    new_qty = qty - move_qty_int
+                    cur.execute(f"UPDATE SEARCHRACK SET {qty_col_name} = ? WHERE {id_col} = ?", (new_qty, raw_id))
+
+                    # Build new row from existing with updated quantity and location
+                    col_names = [c for c in cols if c not in (id_col, 'id', 'ID', 'Id', 'rowid')]
+                    placeholders = ','.join('?' for _ in col_names)
+                    vals = []
+                    for c in col_names:
+                        val = row_dict.get(c)
+                        if c == qty_col_name:
+                            val = move_qty_int
+                        if c.lower() == 'pictureposition':
+                            val = ''
+                        if c.lower() == 'item_position' or c == 'ITEM_POSITION' or c.lower() == 'itemposition':
+                            val = to_location
+                        vals.append(val)
+                    cur.execute(f"INSERT INTO SEARCHRACK ({', '.join(col_names)}) VALUES ({placeholders})", tuple(vals))
+                    new_id = cur.lastrowid
+
+                    # Log as a location move (removed from old + added to new)
+                    rem_cur.execute('''
+                        INSERT INTO removed_items
+                        (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (None, barcode, title, move_qty_int, now, raw_id, qty, new_qty, 'locationmoved', from_location))
+
+                    rem_cur.execute('''
+                        INSERT INTO removed_items
+                        (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (None, barcode, title, move_qty_int, now, new_id, 0, move_qty_int, 'locationmoved', to_location))
+                else:
+                    # Full move: update row location (clear pictureposition if present)
+                    if pic_col:
+                        cur.execute(f"UPDATE SEARCHRACK SET ITEM_POSITION = ?, {pic_col} = ? WHERE {id_col} = ?", (to_location, '', raw_id))
+                    else:
+                        cur.execute(f"UPDATE SEARCHRACK SET ITEM_POSITION = ? WHERE {id_col} = ?", (to_location, raw_id))
+
+                    # Log as a location move (removed from old + added to new)
+                    rem_cur.execute('''
+                        INSERT INTO removed_items
+                        (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (None, barcode, title, qty, now, raw_id, qty, 0, 'locationmoved', from_location))
+
+                    rem_cur.execute('''
+                        INSERT INTO removed_items
+                        (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (None, barcode, title, qty, now, raw_id, 0, qty, 'locationmoved', to_location))
+
+                moved += 1
+            except Exception:
+                skipped += 1
+
+        conn.commit()
+        rem_conn.commit()
+
+        # Update data version for cache invalidation
+        update_data_version()
+
+        return jsonify({'success': True, 'moved': moved, 'skipped': skipped})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e)}), 500
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+        try:
+            rem_conn.close()
+        except Exception:
+            pass
 
 
 @app.route('/api/delete/<db_key>/<int:item_id>', methods=['POST'])
