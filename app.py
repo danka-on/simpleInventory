@@ -2501,23 +2501,49 @@ def _process_automatic_inventory_removals():
                 if hours_since_shipped < grace_period_hours:
                     continue
                 
-                # Get barcode and try to find in searchRack
+                # Get barcode and try to find in searchRack with flexible matching
                 barcode = order['barcode']
-                
-                # Try original barcode first (searchRack may store without leading zeros)
+                item_row = None
+
+                # Helper to clean barcode for comparisons
+                barcode_stripped = barcode.lstrip('0') if barcode and barcode.isdigit() else barcode
+
+                # 1. Try exact match first
                 searchrack_cur.execute('SELECT ID, QUANTITY FROM SEARCHRACK WHERE BARCODE = ?', (barcode,))
                 item_row = searchrack_cur.fetchone()
-                
-                # If not found, try with zero-padding (for items that have leading zeros)
-                if not item_row:
-                    barcode_padded = barcode.zfill(12) if barcode and barcode.isdigit() else barcode
-                    searchrack_cur.execute('SELECT ID, QUANTITY FROM SEARCHRACK WHERE BARCODE = ?', (barcode_padded,))
+
+                # 2. Try with zero-padding to 12 digits (UPC-A)
+                if not item_row and barcode and barcode.isdigit():
+                    barcode_padded = barcode.zfill(12)
+                    if barcode_padded != barcode:
+                        searchrack_cur.execute('SELECT ID, QUANTITY FROM SEARCHRACK WHERE BARCODE = ?', (barcode_padded,))
+                        item_row = searchrack_cur.fetchone()
+
+                # 3. Try with zero-padding to 13 digits (EAN)
+                if not item_row and barcode and barcode.isdigit():
+                    barcode_padded13 = barcode.zfill(13)
+                    if barcode_padded13 != barcode:
+                        searchrack_cur.execute('SELECT ID, QUANTITY FROM SEARCHRACK WHERE BARCODE = ?', (barcode_padded13,))
+                        item_row = searchrack_cur.fetchone()
+
+                # 4. Try stripped leading zeros
+                if not item_row and barcode_stripped and barcode_stripped != barcode:
+                    searchrack_cur.execute('SELECT ID, QUANTITY FROM SEARCHRACK WHERE BARCODE = ?', (barcode_stripped,))
                     item_row = searchrack_cur.fetchone()
-                
+
+                # 5. Try matching by stripping zeros from searchRack barcode (handles both directions)
+                if not item_row and barcode_stripped and len(barcode_stripped) >= 8:
+                    searchrack_cur.execute('''
+                        SELECT ID, QUANTITY FROM SEARCHRACK
+                        WHERE CAST(CAST(BARCODE AS INTEGER) AS TEXT) = ?
+                        LIMIT 1
+                    ''', (barcode_stripped,))
+                    item_row = searchrack_cur.fetchone()
+
                 if not item_row:
-                    # Item not found in searchRack, mark as handled anyway
-                    sold_cur.execute('UPDATE orders SET rackupdated = 1 WHERE id = ?', (order['id'],))
-                    print(f"  ℹ️  Order {order['order_id']}: Item not found in searchRack (barcode: {barcode})")
+                    # Item not found in searchRack - DO NOT mark as processed
+                    # This allows retry when barcode is enriched or item is added later
+                    print(f"  ⏭️  Order {order['order_id']}: Item not in inventory yet (barcode: {barcode}) - will retry later")
                     continue
                 
                 item_id, current_qty = item_row
@@ -7882,6 +7908,169 @@ def trigger_automatic_removal():
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
 
+@app.route('/api/sold/repair-missing-removals', methods=['POST'])
+def repair_missing_removals():
+    """
+    Repair orders marked as rackupdated=1 but have no removal record.
+    Checks inventory and properly removes items that are still in stock.
+    """
+    from datetime import datetime
+
+    try:
+        results = {
+            'total_checked': 0,
+            'removed_from_inventory': 0,
+            'already_removed_or_no_stock': 0,
+            'no_barcode': 0,
+            'reset_for_retry': 0,
+            'details': []
+        }
+
+        # Connect to databases
+        sold_conn = sqlite3.connect('sold.db')
+        sold_conn.row_factory = sqlite3.Row
+        sold_cur = sold_conn.cursor()
+
+        hist_conn = sqlite3.connect('rackhistory.db')
+        hist_conn.row_factory = sqlite3.Row
+        hist_cur = hist_conn.cursor()
+        _ensure_removed_items_table(hist_cur)
+
+        rack_conn = sqlite3.connect('searchRack.db')
+        rack_conn.row_factory = sqlite3.Row
+        rack_cur = rack_conn.cursor()
+
+        # Find all orders with rackupdated=1 and a barcode
+        sold_cur.execute('''
+            SELECT id, order_id, barcode, quantity, title, shipped_time
+            FROM orders
+            WHERE rackupdated = 1
+            AND barcode IS NOT NULL AND barcode != ''
+            AND COALESCE(removal_cancelled, 0) = 0
+        ''')
+        orders = sold_cur.fetchall()
+
+        for order in orders:
+            results['total_checked'] += 1
+            barcode = order['barcode']
+            order_id = order['order_id']
+            sold_qty = order['quantity'] or 1
+
+            # Check if this order already has a removal record
+            hist_cur.execute('''
+                SELECT COUNT(*) FROM removed_items
+                WHERE (order_id = ? OR barcode = ?)
+                AND removal_type IN ('automatic', 'manual_sold_removal', 'manual_immediate', 'manual_sold_selection', 'finder_removal')
+                AND old_quantity > new_quantity
+            ''', (order_id, barcode))
+            has_removal = hist_cur.fetchone()[0] > 0
+
+            if has_removal:
+                # Already has removal record - skip
+                results['already_removed_or_no_stock'] += 1
+                continue
+
+            # Try to find item in searchRack with flexible matching
+            barcode_stripped = barcode.lstrip('0') if barcode.isdigit() else barcode
+            item_row = None
+
+            # Try exact match
+            rack_cur.execute('SELECT ID, QUANTITY, TITLE, ITEM_POSITION FROM SEARCHRACK WHERE BARCODE = ?', (barcode,))
+            item_row = rack_cur.fetchone()
+
+            # Try padded to 12
+            if not item_row and barcode.isdigit():
+                rack_cur.execute('SELECT ID, QUANTITY, TITLE, ITEM_POSITION FROM SEARCHRACK WHERE BARCODE = ?', (barcode.zfill(12),))
+                item_row = rack_cur.fetchone()
+
+            # Try padded to 13
+            if not item_row and barcode.isdigit():
+                rack_cur.execute('SELECT ID, QUANTITY, TITLE, ITEM_POSITION FROM SEARCHRACK WHERE BARCODE = ?', (barcode.zfill(13),))
+                item_row = rack_cur.fetchone()
+
+            # Try stripped zeros
+            if not item_row and barcode_stripped != barcode:
+                rack_cur.execute('SELECT ID, QUANTITY, TITLE, ITEM_POSITION FROM SEARCHRACK WHERE BARCODE = ?', (barcode_stripped,))
+                item_row = rack_cur.fetchone()
+
+            # Try integer comparison
+            if not item_row and barcode_stripped and len(barcode_stripped) >= 8:
+                rack_cur.execute('''
+                    SELECT ID, QUANTITY, TITLE, ITEM_POSITION FROM SEARCHRACK
+                    WHERE CAST(CAST(BARCODE AS INTEGER) AS TEXT) = ?
+                    LIMIT 1
+                ''', (barcode_stripped,))
+                item_row = rack_cur.fetchone()
+
+            if not item_row:
+                # Item not in inventory - reset rackupdated so it can retry later if item is added
+                sold_cur.execute('UPDATE orders SET rackupdated = 0 WHERE id = ?', (order['id'],))
+                results['reset_for_retry'] += 1
+                results['details'].append({
+                    'order_id': order_id,
+                    'barcode': barcode,
+                    'action': 'reset_for_retry',
+                    'reason': 'Item not in searchRack'
+                })
+                continue
+
+            # Item found - check quantity and remove
+            item_id = item_row['ID']
+            current_qty = item_row['QUANTITY'] or 0
+            item_title = item_row['TITLE'] or order['title'] or ''
+            item_location = item_row['ITEM_POSITION'] or ''
+
+            if current_qty <= 0:
+                # Already at zero quantity
+                results['already_removed_or_no_stock'] += 1
+                results['details'].append({
+                    'order_id': order_id,
+                    'barcode': barcode,
+                    'action': 'skipped',
+                    'reason': f'Already at 0 quantity (searchRack ID: {item_id})'
+                })
+                continue
+
+            # Perform the removal
+            new_qty = max(0, current_qty - sold_qty)
+            rack_cur.execute('UPDATE SEARCHRACK SET QUANTITY = ? WHERE ID = ?', (new_qty, item_id))
+
+            # Log to rackhistory
+            hist_cur.execute('''
+                INSERT INTO removed_items
+                (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (order_id, barcode, item_title, sold_qty, datetime.now().isoformat(), item_id, current_qty, new_qty, 'repair_removal', item_location))
+
+            results['removed_from_inventory'] += 1
+            results['details'].append({
+                'order_id': order_id,
+                'barcode': barcode,
+                'action': 'removed',
+                'old_qty': current_qty,
+                'new_qty': new_qty,
+                'location': item_location
+            })
+
+        # Commit all changes
+        sold_conn.commit()
+        rack_conn.commit()
+        hist_conn.commit()
+
+        sold_conn.close()
+        rack_conn.close()
+        hist_conn.close()
+
+        return jsonify({
+            'success': True,
+            'results': results
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': _safe_error(e)}), 500
+
 @app.route('/api/sold/removal-history/<int:order_id>', methods=['GET'])
 def get_sold_removal_history(order_id):
     """Get removal history from rackhistory.db for a specific sold order"""
@@ -9964,17 +10153,25 @@ def api_search_db(db_key):
 
                                 hist_conn = sqlite3.connect('rackhistory.db')
                                 hist_cur = hist_conn.cursor()
-                                # Only count automatic removals within the expected date window
+                                # Count valid removal types - automatic must be in window, others count anytime
                                 hist_cur.execute("""
-                                    SELECT id, removed_at FROM removed_items
+                                    SELECT id, removed_at, removal_type FROM removed_items
                                     WHERE barcode = ?
-                                    AND removal_type = 'automatic'
+                                    AND removal_type IN ('automatic', 'repair_removal', 'manual_sold_removal', 'manual_immediate', 'manual_sold_selection', 'finder_removal')
                                     AND COALESCE(old_quantity, 0) > COALESCE(new_quantity, 0)
                                     ORDER BY removed_at DESC
                                 """, (str(barcode_val),))
 
                                 for row in hist_cur.fetchall():
                                     removed_at = row[1]
+                                    removal_type = row[2]
+
+                                    # Non-automatic removals (manual, repair, finder) count regardless of timing
+                                    if removal_type != 'automatic':
+                                        has_removal_record = True
+                                        break
+
+                                    # Automatic removals must be within expected date window
                                     if removed_at:
                                         try:
                                             if 'T' in str(removed_at):
