@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title data-i18n="store_listing_helper">Store Listing Helper</title>
+  <style>
+    body{font-family:Segoe UI,Arial,sans-serif;background:#f7f7f8;margin:0;padding:18px}
+    .top{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:10px;margin-bottom:18px}
+    .btn{padding:8px 14px;border-radius:6px;border:none;cursor:pointer}
+    .btn-sm{padding:6px 10px;font-size:0.85rem}
+    .btn-primary{background:#00b894;color:#fff}
+    .btn-secondary{background:#6c757d;color:#fff}
+    .btn-danger{background:#e74c3c;color:#fff}
+    .tabs{display:flex;gap:4px;border-bottom:2px solid #e0e0e0;margin-bottom:18px}
+    .tab{padding:12px 20px;cursor:pointer;border:none;background:none;font-size:1rem;color:#666;border-bottom:3px solid transparent;margin-bottom:-2px;position:relative}
+    .tab.active{color:#00b894;border-bottom-color:#00b894;font-weight:600}
+    .tab .badge{position:absolute;top:4px;right:4px;min-width:18px;height:18px;border-radius:50%;font-size:0.7rem;display:flex;align-items:center;justify-content:center;color:#fff}
+    .badge-red{background:#e74c3c}
+    .badge-yellow{background:#f1c40f;color:#333}
+    .badge-gray{background:#95a5a6}
+    .tab-content{display:none}
+    .tab-content.active{display:block}
+    .alert-card{background:#fff;border-radius:8px;padding:14px;margin-bottom:12px;border-left:4px solid #ccc;box-shadow:0 1px 3px rgba(0,0,0,0.06)}
+    .alert-card.red{border-left-color:#e74c3c}
+    .alert-card.yellow{border-left-color:#f1c40f}
+    .alert-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+    .alert-upc{font-weight:600;font-size:1.1rem;font-family:monospace}
+    .alert-severity{padding:3px 8px;border-radius:4px;font-size:0.75rem;font-weight:600;text-transform:uppercase}
+    .alert-severity.red{background:#ffe0e0;color:#c0392b}
+    .alert-severity.yellow{background:#fff8dc;color:#7f8c00}
+    .alert-details{color:#666;font-size:0.9rem;margin-bottom:10px}
+    .listing-list{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+    .listing-item{display:flex;align-items:center;gap:8px;background:#f8f9fa;padding:8px 12px;border-radius:6px;font-size:0.85rem}
+    .listing-item img{width:36px;height:36px;object-fit:cover;border-radius:4px;cursor:pointer}
+    .listing-item .store-badge{padding:2px 6px;border-radius:4px;font-size:0.7rem;font-weight:600;text-transform:uppercase}
+    .listing-item .listing-num{font-size:0.72rem;color:#666;background:#eef1f4;border-radius:4px;padding:2px 6px}
+    .store-badge.ebay{background:#0064d2;color:#fff}
+    .store-badge.amazon{background:#ff9900;color:#000}
+    .listing-qty{font-weight:600;color:#27ae60}
+    .btn-dismiss{background:#f0f0f0;color:#666;font-size:0.8rem;padding:6px 12px}
+    .btn-dismiss:hover{background:#e0e0e0}
+    .finder-btn{background:#8e44ad;color:#fff;text-decoration:none;padding:8px 14px;border-radius:6px;font-size:0.9rem;font-weight:600;display:inline-flex;align-items:center}
+    .finder-btn:hover{background:#7a3a9a}
+    .warehouse-label{font-weight:700;font-size:0.95rem}
+    .warehouse-qty{font-weight:700}
+    .warehouse-qty.zero{color:#e74c3c}
+    .empty-state{text-align:center;padding:40px;color:#888}
+    .empty-state i{font-size:3rem;margin-bottom:12px;display:block}
+    .summary-cards{display:grid;grid-template-columns:repeat(auto-fit, minmax(140px, 1fr));gap:12px;margin-bottom:18px}
+    .summary-card{background:#fff;padding:14px;border-radius:8px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,0.06)}
+    .summary-card .count{font-size:2rem;font-weight:700}
+    .summary-card .label{font-size:0.8rem;color:#666;text-transform:uppercase}
+    .summary-card.red .count{color:#e74c3c}
+    .summary-card.yellow .count{color:#f1c40f}
+    #loading{text-align:center;padding:40px;color:#666}
+    .spinner{border:4px solid #f3f3f3;border-top:4px solid #00b894;border-radius:50%;width:40px;height:40px;animation:spin 1s linear infinite;margin:0 auto 12px}
+    @keyframes spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
+    @media(max-width:600px){
+      body{padding:10px}
+      .top{gap:8px}
+      .top h2{font-size:1rem}
+      .tabs{overflow-x:auto;gap:2px}
+      .tab{padding:8px 10px;font-size:0.8rem;white-space:nowrap}
+      .summary-cards{grid-template-columns:repeat(2,1fr);gap:8px}
+      .summary-card{padding:10px}
+      .summary-card .count{font-size:1.5rem}
+      .summary-card .label{font-size:0.7rem}
+      .alert-card{padding:10px}
+      .alert-header{flex-wrap:wrap;gap:6px}
+      .alert-upc{font-size:0.95rem}
+      .listing-list{gap:6px}
+      .listing-item{padding:6px 8px;font-size:0.8rem}
+      .listing-item img{width:28px;height:28px}
+      .listing-item span[style*="max-width"]{max-width:100px !important}
+    }
+    @media(max-width:400px){
+      .summary-cards{grid-template-columns:repeat(2,1fr)}
+      .tab{padding:6px 8px;font-size:0.75rem}
+      .tab .badge{min-width:14px;height:14px;font-size:0.6rem;top:2px;right:2px}
+    }
+    .img-modal{position:fixed;inset:0;background:rgba(0,0,0,0.6);display:none;align-items:center;justify-content:center;z-index:9999;padding:16px}
+    .img-modal .card{background:#fff;border-radius:8px;padding:12px;max-width:90vw;max-height:90vh;overflow:auto;box-shadow:0 4px 16px rgba(0,0,0,0.2)}
+    .img-modal img{max-width:100%;height:auto;border-radius:6px;display:block}
+    .img-modal .title{font-weight:600;margin-bottom:8px}
+  </style>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+
+<div class="top">
+  <a href="/items-to-list" class="btn btn-danger btn-sm" data-i18n="back"><i class="fas fa-arrow-left"></i></a>
+  <h2 style="margin:0;text-align:center" data-i18n="store_listing_helper">Store Listing Helper</h2>
+  <button class="btn btn-primary btn-sm" onclick="scanAlerts()" style="justify-self:end;margin-right:96px"><i class="fas fa-sync"></i> <span data-i18n="scan">Scan</span></button>
+</div>
+
+<div class="summary-cards">
+  <div class="summary-card red">
+    <div class="count" id="count-no-warehouse">-</div>
+    <div class="label" data-i18n="no_warehouse">No Warehouse</div>
+  </div>
+  <div class="summary-card yellow">
+    <div class="count" id="count-cross-store">-</div>
+    <div class="label" data-i18n="cross_store">Cross-Store</div>
+  </div>
+  <div class="summary-card red">
+    <div class="count" id="count-same-store">-</div>
+    <div class="label" data-i18n="same_store_dup">Same-Store Dup</div>
+  </div>
+  <div class="summary-card red">
+    <div class="count" id="count-qty-mismatch">-</div>
+    <div class="label" data-i18n="qty_mismatch">Qty Mismatch</div>
+  </div>
+</div>
+
+<div class="tabs">
+  <button class="tab active" data-tab="no_warehouse">
+    <span data-i18n="no_warehouse">No Warehouse</span>
+    <span class="badge badge-red" id="badge-no-warehouse" style="display:none">0</span>
+  </button>
+  <button class="tab" data-tab="cross_store">
+    <span data-i18n="cross_store">Cross-Store</span>
+    <span class="badge badge-yellow" id="badge-cross-store" style="display:none">0</span>
+  </button>
+  <button class="tab" data-tab="same_store_dup">
+    <span data-i18n="same_store_dup">Same-Store Dup</span>
+    <span class="badge badge-red" id="badge-same-store" style="display:none">0</span>
+  </button>
+  <button class="tab" data-tab="qty_mismatch">
+    <span data-i18n="qty_mismatch">Qty Mismatch</span>
+    <span class="badge badge-red" id="badge-qty-mismatch" style="display:none">0</span>
+  </button>
+  <button class="tab" data-tab="dismissed">
+    <span data-i18n="marked_fixed">Marked Fixed</span>
+    <span class="badge badge-gray" id="badge-dismissed" style="display:none">0</span>
+  </button>
+</div>
+
+<div id="loading" style="display:none">
+  <div class="spinner"></div>
+  <span data-i18n="scanning_listings">Scanning listings...</span>
+</div>
+
+<div class="tab-content active" id="content-no_warehouse"></div>
+<div class="tab-content" id="content-cross_store"></div>
+<div class="tab-content" id="content-same_store_dup"></div>
+<div class="tab-content" id="content-qty_mismatch"></div>
+<div class="tab-content" id="content-dismissed"></div>
+
+<div id="imgModal" class="img-modal">
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <div id="imgModalTitle" class="title"></div>
+      <button class="btn btn-secondary btn-sm" onclick="closeImgModal()" data-i18n="close">Close</button>
+    </div>
+    <img id="imgModalImg" src="" alt="">
+  </div>
+</div>
+
+<script>
+function t(key){ return (window.i18n && window.i18n.t) ? window.i18n.t(key) : key; }
+function storeLabel(store) {
+  const s = String(store || '').toLowerCase();
+  if (s === 'ebay') return t('ebay');
+  if (s === 'amazon') return t('amazon');
+  return store || '';
+}
+function missingImgSvg(){
+  const label = t('no_image');
+  return 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36"><rect width="100%" height="100%" fill="#f0f0f0"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#b0b0b0" font-size="6">'+label+'</text></svg>');
+}
+
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = s || '';
+  return d.innerHTML;
+}
+
+// Tab switching
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('content-' + tab.dataset.tab).classList.add('active');
+  });
+});
+
+let alertsData = null;
+
+async function scanAlerts() {
+  document.getElementById('loading').style.display = 'block';
+  document.querySelectorAll('.tab-content').forEach(c => c.innerHTML = '');
+
+  try {
+    const resp = await fetch('/api/listing-helper/scan');
+    const data = await resp.json();
+
+    if (!data.success) {
+      alert(t('scan_failed') + ': ' + (data.error || t('unknown')));
+      return;
+    }
+
+    alertsData = data.alerts;
+    const counts = data.counts;
+
+    // Update counts
+    document.getElementById('count-no-warehouse').textContent = counts.no_warehouse;
+    document.getElementById('count-cross-store').textContent = counts.cross_store;
+    document.getElementById('count-same-store').textContent = counts.same_store_dup;
+    document.getElementById('count-qty-mismatch').textContent = counts.qty_mismatch;
+
+    // Update badges
+    updateBadge('badge-no-warehouse', counts.no_warehouse);
+    updateBadge('badge-cross-store', counts.cross_store);
+    updateBadge('badge-same-store', counts.same_store_dup);
+    updateBadge('badge-qty-mismatch', counts.qty_mismatch);
+
+    // Render alerts
+    renderNoWarehouse(alertsData.no_warehouse);
+    renderCrossStore(alertsData.cross_store);
+    renderSameStoreDup(alertsData.same_store_dup);
+    renderQtyMismatch(alertsData.qty_mismatch);
+
+  } catch (e) {
+    alert(t('error_scanning') + ': ' + e.message);
+  } finally {
+    document.getElementById('loading').style.display = 'none';
+  }
+}
+
+function updateBadge(id, count) {
+  const badge = document.getElementById(id);
+  if (count > 0) {
+    badge.textContent = count;
+    badge.style.display = 'flex';
+  } else {
+    badge.style.display = 'none';
+  }
+}
+
+function renderListings(listings) {
+  return listings.map((l, idx) => `
+    <div class="listing-item">
+      <img src="${esc(l.image || '') || missingImgSvg()}" data-img="${encodeURIComponent(l.image || '')}" data-title="${encodeURIComponent(l.title || '')}" onclick="openListingImg(this)" onerror="this.src='${missingImgSvg()}'">
+      <span class="listing-num">${esc(t('listing'))} ${idx + 1}</span>
+      <span class="store-badge ${l.store}">${esc(storeLabel(l.store))}</span>
+      <span style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(l.title)}">${esc(l.title || t('untitled'))}</span>
+      <span class="listing-qty">x${l.qty}</span>
+    </div>
+  `).join('');
+}
+
+function renderNoWarehouse(alerts) {
+  const el = document.getElementById('content-no_warehouse');
+  if (!alerts.length) {
+    el.innerHTML = `<div class="empty-state"><i class="fas fa-check-circle" style="color:#27ae60"></i>${esc(t('all_listings_have_stock'))}</div>`;
+    return;
+  }
+  el.innerHTML = alerts.map(a => {
+    const first = (a.listings && a.listings.length) ? a.listings[0] : {};
+    const finderParams = new URLSearchParams({
+      title: first.title || '',
+      barcode: a.upc || '',
+      image: first.image || '',
+      return: '/store-listing-helper'
+    }).toString();
+    const finderHref = `/finder?${finderParams}`;
+    return `
+    <div class="alert-card ${a.severity}">
+      <div class="alert-header">
+        <span class="alert-upc">${esc(a.upc)}</span>
+        <span class="alert-severity ${a.severity}">${a.severity === 'red' ? esc(t('multi_store')) : esc(t('single_store'))}</span>
+      </div>
+      <div class="alert-details">
+        ${esc(t('listed_on'))}: <strong>${a.stores.map(s => esc(storeLabel(s))).join(', ')}</strong> | ${esc(t('no_matching_upc'))}
+      </div>
+      <div class="listing-list">${renderListings(a.listings)}</div>
+      <div style="margin-top:10px;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
+        <a class="finder-btn" href="${esc(finderHref)}" target="_blank" rel="noopener">${esc(t('finder'))}</a>
+        <button class="btn btn-dismiss" onclick="dismissAlert('no_warehouse', '${a.hash}', '${esc(a.upc)}')">
+          <i class="fas fa-check"></i> ${esc(t('mark_fixed'))}
+        </button>
+      </div>
+    </div>
+  `}).join('');
+}
+
+function renderCrossStore(alerts) {
+  const el = document.getElementById('content-cross_store');
+  if (!alerts.length) {
+    el.innerHTML = `<div class="empty-state"><i class="fas fa-check-circle" style="color:#27ae60"></i>${esc(t('no_cross_store_dups'))}</div>`;
+    return;
+  }
+  el.innerHTML = alerts.map(a => {
+    const warehouseQty = a.warehouse_qty || 0;
+    const warehouseQtyClass = warehouseQty === 0 ? 'warehouse-qty zero' : 'warehouse-qty';
+    return `
+    <div class="alert-card yellow">
+      <div class="alert-header">
+        <span class="alert-upc">${esc(a.upc)}</span>
+        <span class="alert-severity yellow">${esc(t('cross_store'))}</span>
+      </div>
+      <div class="alert-details">
+        ${esc(t('same_upc_both_stores'))} | <span class="warehouse-label">${esc(t('warehouse'))}:</span> <span class="${warehouseQtyClass}">${warehouseQty}</span>
+      </div>
+      <div style="margin-bottom:6px"><strong>${esc(t('ebay'))}:</strong></div>
+      <div class="listing-list">${renderListings(a.ebay_listings)}</div>
+      <div style="margin:6px 0"><strong>${esc(t('amazon'))}:</strong></div>
+      <div class="listing-list">${renderListings(a.amazon_listings)}</div>
+      <div style="margin-top:10px;text-align:right">
+        <button class="btn btn-dismiss" onclick="dismissAlert('cross_store', '${a.hash}', '${esc(a.upc)}')">
+          <i class="fas fa-check"></i> ${esc(t('acknowledge'))}
+        </button>
+      </div>
+    </div>
+  `}).join('');
+}
+
+function renderSameStoreDup(alerts) {
+  const el = document.getElementById('content-same_store_dup');
+  if (!alerts.length) {
+    el.innerHTML = `<div class="empty-state"><i class="fas fa-check-circle" style="color:#27ae60"></i>${esc(t('no_same_store_dups'))}</div>`;
+    return;
+  }
+  el.innerHTML = alerts.map(a => `
+    <div class="alert-card red">
+      <div class="alert-header">
+        <span class="alert-upc">${esc(a.upc)}</span>
+        <span class="alert-severity red">${a.count} ${esc(t('listings_on'))} ${esc(storeLabel(a.store))}</span>
+      </div>
+      <div class="alert-details">
+        ${esc(t('same_upc_listed'))} <strong>${a.count}</strong> ${esc(t('times_on'))} <strong>${esc(storeLabel(a.store))}</strong>
+      </div>
+      <div class="listing-list">${renderListings(a.listings)}</div>
+      <div style="margin-top:10px;text-align:right">
+        <button class="btn btn-dismiss" onclick="dismissAlert('same_store_dup', '${a.hash}', '${esc(a.upc)}', '${a.store}')">
+          <i class="fas fa-check"></i> ${esc(t('mark_fixed'))}
+        </button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function renderQtyMismatch(alerts) {
+  const el = document.getElementById('content-qty_mismatch');
+  if (!alerts.length) {
+    el.innerHTML = `<div class="empty-state"><i class="fas fa-check-circle" style="color:#27ae60"></i>${esc(t('all_quantities_match'))}</div>`;
+    return;
+  }
+  el.innerHTML = alerts.map(a => {
+    const warehouseQty = a.warehouse_qty || 0;
+    const warehouseQtyClass = warehouseQty === 0 ? 'warehouse-qty zero' : 'warehouse-qty';
+    return `
+    <div class="alert-card red">
+      <div class="alert-header">
+        <span class="alert-upc">${esc(a.upc)}</span>
+        <span class="alert-severity red">${esc(t('oversold_by'))} ${a.overage}</span>
+      </div>
+      <div class="alert-details">
+        ${esc(t('listing_total'))}: <strong>${a.listing_qty}</strong> | <span class="warehouse-label">${esc(t('warehouse'))}:</span> <span class="${warehouseQtyClass}">${warehouseQty}</span> | ${esc(t('overage'))}: <strong style="color:#e74c3c">+${a.overage}</strong>
+      </div>
+      <div class="listing-list">${renderListings(a.listings)}</div>
+      <div style="margin-top:10px;text-align:right">
+        <button class="btn btn-dismiss" onclick="dismissAlert('qty_mismatch', '${a.hash}', '${esc(a.upc)}')">
+          <i class="fas fa-check"></i> ${esc(t('mark_fixed'))}
+        </button>
+      </div>
+    </div>
+  `}).join('');
+}
+
+function formatDismissedAt(raw) {
+  if (!raw) return '';
+  try {
+    let s = String(raw).trim();
+    if (/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(s) && !s.includes('T')) {
+      s = s.replace(' ', 'T') + 'Z';
+    }
+    const d = new Date(s);
+    if (!isNaN(d.getTime())) return d.toLocaleString();
+  } catch (e) {}
+  return raw;
+}
+
+function renderDismissed(items) {
+  const el = document.getElementById('content-dismissed');
+  if (!el) return;
+  if (!items.length) {
+    el.innerHTML = `<div class="empty-state"><i class="fas fa-check-circle" style="color:#27ae60"></i>${esc(t('no_marked_fixed'))}</div>`;
+    return;
+  }
+  el.innerHTML = items.map(d => {
+    let listingIds = [];
+    try { listingIds = JSON.parse(d.listing_ids || '[]'); } catch (e) {}
+    const typeLabel = t(d.alert_type) || d.alert_type || '';
+    const storeLabelText = d.store ? storeLabel(d.store) : '';
+    const dismissedAt = formatDismissedAt(d.dismissed_at);
+    return `
+      <div class="alert-card">
+        <div class="alert-header">
+          <span class="alert-upc">${esc(d.upc || '')}</span>
+          <span class="alert-severity yellow">${esc(typeLabel)}</span>
+        </div>
+        <div class="alert-details">
+          <strong>${esc(t('alert_type'))}:</strong> ${esc(typeLabel)}
+          ${storeLabelText ? ` | <strong>${esc(t('store'))}:</strong> ${esc(storeLabelText)}` : ''}
+          ${listingIds.length ? ` | <strong>${esc(t('listings'))}:</strong> ${listingIds.length}` : ''}
+          ${dismissedAt ? ` | <strong>${esc(t('dismissed_at'))}:</strong> ${esc(dismissedAt)}` : ''}
+        </div>
+        <div style="margin-top:10px;text-align:right">
+          <button class="btn btn-dismiss" onclick="undismissAlert('${d.snapshot_hash}')">
+            <i class="fas fa-undo"></i> ${esc(t('undo'))}
+          </button>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+async function loadDismissed() {
+  try {
+    const resp = await fetch('/api/listing-helper/dismissed');
+    const data = await resp.json();
+    if (!data.success) {
+      return;
+    }
+    const rows = Array.isArray(data.dismissed) ? data.dismissed : [];
+    updateBadge('badge-dismissed', rows.length);
+    renderDismissed(rows);
+  } catch (e) {}
+}
+
+function openListingImg(el) {
+  if (!el) return;
+  const img = decodeURIComponent(el.getAttribute('data-img') || '');
+  const title = decodeURIComponent(el.getAttribute('data-title') || '');
+  const modal = document.getElementById('imgModal');
+  const imgEl = document.getElementById('imgModalImg');
+  const titleEl = document.getElementById('imgModalTitle');
+  if (!modal || !imgEl || !titleEl) return;
+  imgEl.src = img || missingImgSvg();
+  titleEl.textContent = title || t('listing');
+  modal.style.display = 'flex';
+}
+
+function closeImgModal() {
+  const modal = document.getElementById('imgModal');
+  if (modal) modal.style.display = 'none';
+}
+
+async function dismissAlert(alertType, hash, upc, store = '') {
+  try {
+    const resp = await fetch('/api/listing-helper/dismiss', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({alert_type: alertType, hash: hash, upc: upc, store: store})
+    });
+    const data = await resp.json();
+    if (data.success) {
+      // Re-scan to update UI
+      scanAlerts();
+      loadDismissed();
+    } else {
+      alert(t('failed_to_dismiss') + ': ' + (data.error || t('unknown')));
+    }
+  } catch (e) {
+    alert(t('error') + ': ' + e.message);
+  }
+}
+
+async function undismissAlert(hash) {
+  try {
+    const resp = await fetch('/api/listing-helper/undismiss', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({hash})
+    });
+    const data = await resp.json();
+    if (data.success) {
+      scanAlerts();
+      loadDismissed();
+    } else {
+      alert(t('error') + ': ' + (data.error || t('unknown')));
+    }
+  } catch (e) {
+    alert(t('error') + ': ' + e.message);
+  }
+}
+
+function hookLangToggle() {
+  if (window.i18n && window.i18n.setLang && !window._listingHelperLangHooked) {
+    const originalSetLang = window.i18n.setLang;
+    window.i18n.setLang = function(lang) {
+      originalSetLang(lang);
+      scanAlerts();
+      loadDismissed();
+    };
+    window._listingHelperLangHooked = true;
+  }
+}
+
+// Auto-scan on load
+window.addEventListener('load', () => {
+  if (window.i18n && window.i18n.applyTranslations) {
+    window.i18n.applyTranslations();
+  }
+  hookLangToggle();
+  scanAlerts();
+  loadDismissed();
+});
+
+// Close image modal when clicking outside
+document.getElementById('imgModal').addEventListener('click', function(e) {
+  if (e.target === this) closeImgModal();
+});
+</script>
+<script src="/static/i18n.js"></script>
+</body>
+</html>

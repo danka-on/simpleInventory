@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Facebook Marketplace Listings</title>
+  <style>
+    body { font-family: "Segoe UI", Arial, sans-serif; background: #f7f7f8; margin: 0; padding: 18px; color: #333; }
+    .top { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; margin-bottom: 14px; }
+    .btn { padding: 8px 14px; border-radius: 6px; border: none; cursor: pointer; }
+    .btn-sm { padding: 6px 10px; font-size: 0.85rem; }
+    .btn-primary { background: #1877f2; color: #fff; }
+    .btn-danger { background: #e74c3c; color: #fff; }
+    .filters { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+    .card { background: #fff; border-radius: 8px; padding: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    .muted { color: #666; font-size: 0.9rem; }
+    input[type="text"], input[type="number"] { padding: 6px 8px; border: 1px solid #ddd; border-radius: 6px; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    th, td { padding: 8px; border-bottom: 1px solid #eee; }
+    th { background: #f0f0f0; text-align: left; }
+    .badge { padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; color: #fff; display: inline-block; }
+    .badge.active { background: #27ae60; }
+    .badge.unlisted { background: #95a5a6; }
+    .actions { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
+    .img-thumb { width: 40px; height: 40px; object-fit: cover; border-radius: 4px; }
+    .row-zero { background: #fdeaea; }
+    .wh-zero { color: #e74c3c; font-weight: 700; }
+    .wh-link { color: #e74c3c; font-weight: 700; text-decoration: underline; }
+    @media (max-width: 640px) {
+      body { padding: 12px; }
+      .top h2 { font-size: 1rem; }
+      th:nth-child(3), td:nth-child(3) { max-width: 140px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="top">
+    <a href="/items-to-list" class="btn btn-danger btn-sm" data-i18n="back">Back</a>
+    <h2 style="margin:0;text-align:center" data-i18n="fb_listings_title">Facebook Marketplace Listings</h2>
+    <button class="btn btn-primary btn-sm" id="fb-listings-refresh" data-i18n="refresh" style="margin-right:96px">Refresh</button>
+  </div>
+
+  <div class="filters">
+    <input id="fb-listings-search" type="text" data-i18n="fb_listings_search_placeholder" placeholder="Search UPC or Title" style="flex:1;min-width:200px">
+  </div>
+
+  <div id="fb-listings-content" class="card">
+    <div class="muted" data-i18n="loading">Loading...</div>
+  </div>
+
+<script>
+function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+const missingImg = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><rect width="100%" height="100%" fill="#f0f0f0"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#bbb" font-size="8">No img</text></svg>');
+
+let fbListingsData = [];
+
+function filterFbListings() {
+  const input = document.getElementById('fb-listings-search');
+  const q = (input ? input.value : '').toLowerCase().trim();
+  if (!q) return fbListingsData.slice();
+  return fbListingsData.filter(item => {
+    const upc = String(item.upc || '').toLowerCase();
+    const title = String(item.title || '').toLowerCase();
+    return upc.includes(q) || title.includes(q);
+  });
+}
+
+function renderFbListings(listings) {
+  const content = document.getElementById('fb-listings-content');
+  if (!content) return;
+  const t = (window.i18n && window.i18n.t) ? window.i18n.t : (key => key);
+
+  if (!fbListingsData || fbListingsData.length === 0) {
+    const emptyTitle = t('fb_listings_empty');
+    const emptyHelp = t('fb_listings_empty_help');
+    content.innerHTML = `<div style="text-align:center;padding:20px;color:#888">${esc(emptyTitle)}<br><small>${esc(emptyHelp)}</small></div>`;
+    return;
+  }
+
+  if (!listings || listings.length === 0) {
+    const noMatches = t('fb_listings_no_matches');
+    content.innerHTML = `<div style="text-align:center;padding:20px;color:#888">${esc(noMatches)}</div>`;
+    return;
+  }
+
+  const showingText = (listings.length === fbListingsData.length)
+    ? `Total: ${listings.length} listing(s)`
+    : `Showing ${listings.length} of ${fbListingsData.length} listing(s)`;
+
+  const warehouseLabel = t('fb_listings_warehouse_stock') || 'Warehouse Stock';
+  let html = `<div class="muted" style="margin-bottom:10px">${showingText}</div>`;
+  html += '<table>';
+  html += `<thead><tr><th>Image</th><th>UPC</th><th>Title</th><th style="text-align:center">Qty</th><th style="text-align:center">${esc(warehouseLabel)}</th><th>Listed</th><th style="text-align:center">Status</th><th style="text-align:center">Actions</th></tr></thead>`;
+  html += '<tbody>';
+
+  for (const item of listings) {
+    const statusBadge = item.is_active
+      ? '<span class="badge active">Active</span>'
+      : '<span class="badge unlisted">Unlisted</span>';
+    const imgSrc = item.image || missingImg;
+    const qtyVal = (item.quantity || 1);
+    const warehouseQty = (item.warehouse_qty ?? 0);
+    const isZero = Number(warehouseQty) === 0;
+    const finderParams = new URLSearchParams({
+      title: item.title || '',
+      barcode: item.upc || '',
+      image: item.image || '',
+      return: '/fb-listings'
+    }).toString();
+    const finderHref = `/finder?${finderParams}`;
+    const warehouseCell = isZero
+      ? `<a class="wh-link" href="${esc(finderHref)}" target="_blank" rel="noopener">0</a>`
+      : `<span class="warehouse-qty">${warehouseQty}</span>`;
+
+    html += `<tr class="${isZero ? 'row-zero' : ''}">
+      <td><img src="${esc(imgSrc)}" class="img-thumb" onerror="this.src='${missingImg}'"></td>
+      <td style="font-family:monospace">${esc(item.upc || '')}</td>
+      <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(item.title || '')}">${esc(item.title || '-')}</td>
+      <td style="text-align:center">
+        <div style="display:flex;gap:6px;align-items:center;justify-content:center">
+          <input type="number" min="1" class="fb-qty-input" value="${qtyVal}" data-original="${qtyVal}" style="width:70px;text-align:center">
+          <button class="btn btn-sm fb-qty-save" data-upc="${esc(item.upc || '')}" style="background:#27ae60;color:#fff;display:none;width:30px;height:30px;align-items:center;justify-content:center" title="Save Qty">✓</button>
+        </div>
+      </td>
+      <td style="text-align:center" class="${isZero ? 'wh-zero' : ''}">${warehouseCell}</td>
+      <td style="font-size:0.8rem;color:#666">${item.listed_at ? new Date(item.listed_at).toLocaleDateString() : '-'}</td>
+      <td style="text-align:center">${statusBadge}</td>
+      <td style="text-align:center">
+        <div class="actions">
+          <button class="btn btn-sm fb-unlist" data-upc="${esc(item.upc || '')}" style="background:#e74c3c;color:#fff;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:1rem" title="Delete listing">×</button>
+        </div>
+      </td>
+    </tr>`;
+  }
+
+  html += '</tbody></table>';
+  content.innerHTML = html;
+
+  content.querySelectorAll('.fb-qty-save').forEach(btn => btn.addEventListener('click', onFbQtySave));
+  content.querySelectorAll('.fb-unlist').forEach(btn => btn.addEventListener('click', onFbUnlist));
+  content.querySelectorAll('.fb-qty-input').forEach(input => {
+    input.addEventListener('input', onFbQtyInputChange);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        const row = e.currentTarget.closest('tr');
+        const btn = row ? row.querySelector('.fb-qty-save') : null;
+        if (btn && btn.style.display !== 'none') btn.click();
+      }
+    });
+  });
+}
+
+async function loadFbListings() {
+  const content = document.getElementById('fb-listings-content');
+  if (!content) return;
+  const t = (window.i18n && window.i18n.t) ? window.i18n.t : (key => key);
+  content.innerHTML = `<div class="muted">${esc(t('loading'))}</div>`;
+
+  try {
+    const resp = await fetch('/api/fb/listings');
+    const data = await resp.json();
+
+    if (!data.success) {
+      content.innerHTML = `<div style="color:#e74c3c;padding:10px">Error: ${data.error || 'Unknown'}</div>`;
+      return;
+    }
+
+    fbListingsData = Array.isArray(data.listings) ? data.listings : [];
+    renderFbListings(filterFbListings());
+  } catch (e) {
+    content.innerHTML = `<div style="color:#e74c3c;padding:10px">Error loading: ${e.message}</div>`;
+  }
+}
+
+function onFbQtyInputChange(e) {
+  const input = e.currentTarget;
+  const row = input.closest('tr');
+  const btn = row ? row.querySelector('.fb-qty-save') : null;
+  if (!btn) return;
+  const original = parseInt(input.dataset.original || '', 10);
+  const current = parseInt(input.value, 10);
+  const changed = !isNaN(current) && current >= 1 && current !== original;
+  btn.style.display = changed ? 'inline-flex' : 'none';
+}
+
+async function onFbQtySave(e) {
+  e.preventDefault();
+  const btn = e.currentTarget;
+  const upc = btn.dataset.upc;
+  const row = btn.closest('tr');
+  const input = row ? row.querySelector('.fb-qty-input') : null;
+  if (!upc || !input) return;
+  const qty = parseInt(input.value, 10);
+  if (isNaN(qty) || qty < 1) {
+    alert('Quantity must be at least 1');
+    return;
+  }
+  const originalText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '...';
+  try {
+    const response = await fetch('/api/fb/listings/quantity', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ upc, quantity: qty })
+    });
+    const result = await response.json();
+    if (!result.success) {
+      alert('Error: ' + (result.error || 'Unknown'));
+    } else {
+      if (input) {
+        input.dataset.original = String(qty);
+      }
+      btn.style.display = 'none';
+    }
+  } catch (err) {
+    alert('Error: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = originalText;
+  }
+}
+
+async function onFbUnlist(e) {
+  e.preventDefault();
+  const btn = e.currentTarget;
+  const upc = btn.dataset.upc;
+  if (!upc) return;
+  if (!confirm('Unlist this item from Facebook?')) return;
+  const originalText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '...';
+  try {
+    const response = await fetch('/api/fb/listings/unlist', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ upc })
+    });
+    const result = await response.json();
+    if (!result.success) {
+      alert('Error: ' + (result.error || 'Unknown'));
+    } else {
+      loadFbListings();
+    }
+  } catch (err) {
+    alert('Error: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = originalText;
+  }
+}
+
+const fbSearchInput = document.getElementById('fb-listings-search');
+if (fbSearchInput) {
+  fbSearchInput.addEventListener('input', () => {
+    renderFbListings(filterFbListings());
+  });
+}
+const fbRefreshBtn = document.getElementById('fb-listings-refresh');
+if (fbRefreshBtn) {
+  fbRefreshBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    loadFbListings();
+  });
+}
+
+loadFbListings();
+</script>
+<script src="/static/i18n.js"></script>
+</body>
+</html>

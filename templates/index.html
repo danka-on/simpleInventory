@@ -337,7 +337,7 @@
         <div class="main-actions" style="margin-bottom:12px;">
             <a href="/items-to-list" style="text-decoration:none; width: 100%;">
                 <button type="button" class="btn-lighten" style="width: 100%; font-size:1.2rem; padding:18px 0; background:var(--primary); color:#fff; border:none; border-radius:var(--radius); box-shadow:0 2px 8px rgba(0,0,0,0.04); display:flex;align-items:center;justify-content:center;gap:8px; margin-bottom:8px;">
-                    <i class="fas fa-list"></i> <span data-i18n="item_manager">Item Manager</span>
+                    <i class="fas fa-list"></i> <span data-i18n="list_manager">List Manager</span>
                 </button>
             </a>
         </div>
@@ -574,7 +574,7 @@ function tdLocation(order) {
     // If no location, show "Find" link if search data available, otherwise placeholder
     if (!locationText) {
         if (order.location_search) {
-            const finderParams = new URLSearchParams({title: order.title || '', order_id: order.id || '', barcode: order.barcode || ''});
+            const finderParams = new URLSearchParams({title: order.title || '', order_id: order.id || '', barcode: order.barcode || '', image: order.image || ''});
             return `<td class='sold-td-small'><a href="/finder?${finderParams.toString()}" target="_blank" style="color:#e53935;font-weight:bold;font-size:0.75rem;text-decoration:none;padding:2px 6px;border:1px solid #e53935;border-radius:4px;">Find</a></td>`;
         }
         return `<td class='sold-td-small' style="color:#999;font-style:italic;">—</td>`;
@@ -860,6 +860,9 @@ async function fetchAndShowSoldOrders(days, forceRefresh = false) {
     }
     
     try {
+        // Cache-busting timestamp for forced refresh
+        const cacheBust = forceRefresh ? `&_t=${Date.now()}` : '';
+
         // Parallel fetch for better performance
         const [fetchResponse, ordersResponse] = await Promise.all([
             fetch('/get-sold-orders', {
@@ -867,7 +870,7 @@ async function fetchAndShowSoldOrders(days, forceRefresh = false) {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ days })
             }),
-            fetch(`/sold-orders?days=${days}`)
+            fetch(`/sold-orders?days=${days}${cacheBust}`)
         ]);
         
         const [fetchData, orders] = await Promise.all([
@@ -1073,6 +1076,43 @@ window.addEventListener('DOMContentLoaded', async function() {
             console.error('Error during initial load:', error);
         });
     }, 0);
+});
+
+// Listen for refresh signals from other tabs (e.g., finder.html after barcode match)
+function triggerSoldOrdersRefresh(source) {
+    console.log('Received refresh signal from ' + source + ', triggering refresh...');
+    OrderManager.clearCache();
+    // Small delay to ensure server cache is invalidated
+    setTimeout(() => {
+        const refreshBtn = document.getElementById('refresh-orders-btn');
+        if (refreshBtn && !refreshBtn.classList.contains('spinning')) {
+            console.log('Clicking refresh button...');
+            refreshBtn.click();
+        } else {
+            // Fallback: direct fetch if button is busy
+            const days = parseInt(document.getElementById('sold-orders-days')?.value) || 2;
+            window.fetchAndShowSoldOrders(days, true);
+        }
+    }, 100);
+}
+
+// Method 1: BroadcastChannel (most reliable for same-origin tabs)
+try {
+    const bc = new BroadcastChannel('sold_orders_channel');
+    bc.onmessage = function(e) {
+        if (e.data && e.data.type === 'refresh') {
+            triggerSoldOrdersRefresh('BroadcastChannel');
+        }
+    };
+} catch (e) {
+    console.log('BroadcastChannel not supported');
+}
+
+// Method 2: localStorage event (fallback)
+window.addEventListener('storage', function(e) {
+    if (e.key === 'sold_orders_refresh') {
+        triggerSoldOrdersRefresh('localStorage');
+    }
 });
 
 // ============================================================================

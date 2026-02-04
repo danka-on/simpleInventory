@@ -179,7 +179,7 @@
 <body>
   <div class="container">
     <div style="margin-bottom: 15px;">
-      <a href="/" style="text-decoration: none;">
+      <a id="backLink" href="/" style="text-decoration: none;">
         <button data-i18n="back" style="padding: 8px 16px; background: #e74c3c; color: white; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; font-weight: 600;">Back</button>
       </a>
     </div>
@@ -265,6 +265,12 @@ const orderId = params.get('order_id') || '';
 const orderTitle = params.get('title') || '';
 const orderBarcode = params.get('barcode') || '';
 const orderImage = params.get('image') || '';
+const returnTo = params.get('return') || params.get('return_to') || params.get('from') || '';
+
+const backLink = document.getElementById('backLink');
+if (backLink) {
+  backLink.href = (returnTo && returnTo.startsWith('/')) ? returnTo : '/';
+}
 
 // Token chip state: {word: string, active: boolean}
 let tokens = [];
@@ -304,7 +310,13 @@ if (orderTitle) {
   }
 
   // Build token chips from title words (all start inactive for manual use)
-  const words = orderTitle.split(/\s+/).filter(w => w.length > 0);
+  // Filter out punctuation, filler words, and numbers
+  const fillerWords = new Set(['a', 'an', 'the', 'for', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'of', 'with', 'by', 'from', 'as', 'is', 'it', 'its', 'be', 'are', 'was', 'were', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'must', 'shall', 'can', 'this', 'that', 'these', 'those', 'am', 'if', 'then', 'so', 'up', 'out', 'no', 'not', 'only', 'own', 'into', 'over', 'after', 'before', 'between', 'under', 'again', 'further', 'once']);
+  const words = orderTitle.split(/\s+/)
+    .map(w => w.replace(/[,.\-()]+/g, '').trim())  // Remove commas, periods, hyphens, parentheses
+    .filter(w => w.length > 0)
+    .filter(w => !fillerWords.has(w.toLowerCase()))  // Remove filler words
+    .filter(w => !/^\d+$/.test(w));  // Remove pure numbers
   tokens = words.map(w => ({word: w, active: false}));
   renderTokens();
 }
@@ -354,9 +366,17 @@ function closeLocPopup() {
   document.getElementById('locOverlay').classList.remove('show');
 }
 
-// Auto-search on load with full title, but leave search bar empty
-if (orderTitle) {
-  setTimeout(() => doSearch(orderTitle), 200);
+// Auto-search on load with cleaned words (no fillers/numbers), show in search bar as gray
+if (orderTitle && tokens.length) {
+  const cleanedQuery = tokens.map(t => t.word).join(' ');
+  searchInput.value = cleanedQuery;
+  searchInput.style.color = '#999';
+  // Revert to normal color when user interacts
+  searchInput.addEventListener('focus', function onFocus() {
+    searchInput.style.color = '';
+    searchInput.removeEventListener('focus', onFocus);
+  }, {once: true});
+  setTimeout(() => doSearch(cleanedQuery), 200);
 }
 
 function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
@@ -405,7 +425,10 @@ function renderWarehouse(items) {
     const locBadgeHtml = loc
       ? `<span class="loc-badge" style="cursor:pointer;" data-loc="${loc}" data-pic="${picPosEsc}" onclick="showLocPopup(this.dataset.loc, this.dataset.pic)">${loc}</span>`
       : '';
-    const removeBtn = `<button class="remove-btn" data-idx="${idx}" onclick="handleRemove(${item.id}, '${esc(item.barcode)}', this)">${t('remove')}</button>`;
+    // Show "Match" button if we have an order_id (from ready-to-ship), otherwise "Remove"
+    const actionBtn = orderId
+      ? `<button class="search-rack-btn" data-idx="${idx}" onclick="handleMatch(${item.id}, '${esc(item.barcode)}', '${loc}', this)">${t('match') || 'Match'}</button>`
+      : `<button class="remove-btn" data-idx="${idx}" onclick="handleRemove(${item.id}, '${esc(item.barcode)}', this)">${t('remove')}</button>`;
 
     return `<div class="result-card" id="wh-card-${item.id}">
       <img src="${esc(imgSrc)}" onerror="this.src='${missingImg}'" style="cursor:pointer" onclick="showImgPopup(this.src)">
@@ -417,7 +440,7 @@ function renderWarehouse(items) {
         </div>
         ${locBadgeHtml}
       </div>
-      ${removeBtn}
+      ${actionBtn}
     </div>`;
   }).join('');
 }
@@ -598,6 +621,150 @@ async function undoRemove() {
     }
   } catch (e) {
     alert(t('error_undoing'));
+  }
+}
+
+// Last match info for undo
+let _lastMatch = null;
+
+// Match barcode and location to sold order (when accessed from ready-to-ship)
+async function handleMatch(searchrackId, barcode, location, btnEl) {
+  if (!orderId) {
+    alert('No order ID - cannot match');
+    return;
+  }
+
+  try {
+    const resp = await fetch(`/api/sold/match-barcode/${orderId}`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({barcode: barcode, location: location})
+    });
+    const data = await resp.json();
+
+    if (data.success) {
+      // Store for undo
+      _lastMatch = {
+        order_id: orderId,
+        old_barcode: data.old_barcode,
+        old_location: data.old_location,
+        new_barcode: barcode,
+        new_location: location,
+        searchrack_id: searchrackId,
+        btnEl: btnEl
+      };
+
+      // Mark card as matched
+      const card = document.getElementById('wh-card-' + searchrackId);
+      if (card) {
+        card.style.background = '#e8f5e9';
+        card.style.border = '2px solid #4caf50';
+        // Disable button and change text
+        if (btnEl) {
+          btnEl.disabled = true;
+          btnEl.textContent = t('matched') || 'Matched ✓';
+          btnEl.style.background = '#4caf50';
+        }
+      }
+
+      // Show success banner with undo button
+      const banner = document.getElementById('successBanner');
+      const locText = location ? ` | Loc: ${location}` : '';
+      banner.innerHTML = `${t('barcode_matched') || 'Matched!'} UPC: ${barcode}${locText}
+        <button class="undo-btn" onclick="undoMatch()">${t('undo') || 'Undo'}</button>`;
+      banner.style.display = 'block';
+      banner.style.background = '#4caf50';
+
+      // Refresh opener window (ready-to-ship) if available
+      refreshOpenerWindow();
+    } else {
+      alert((t('match_failed') || 'Match failed') + ': ' + (data.error || 'Unknown'));
+    }
+  } catch (e) {
+    alert(t('error_matching') || 'Error matching barcode');
+  }
+}
+
+// Undo the last match
+async function undoMatch() {
+  if (!_lastMatch) return;
+
+  try {
+    const resp = await fetch(`/api/sold/match-barcode/${_lastMatch.order_id}`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({barcode: _lastMatch.old_barcode || '', location: _lastMatch.old_location || ''})
+    });
+    const data = await resp.json();
+
+    if (data.success) {
+      // Restore card appearance
+      const card = document.getElementById('wh-card-' + _lastMatch.searchrack_id);
+      if (card) {
+        card.style.background = '';
+        card.style.border = '';
+      }
+      // Restore button
+      if (_lastMatch.btnEl) {
+        _lastMatch.btnEl.disabled = false;
+        _lastMatch.btnEl.textContent = t('match') || 'Match';
+        _lastMatch.btnEl.style.background = '';
+      }
+
+      // Update banner
+      const banner = document.getElementById('successBanner');
+      banner.innerHTML = t('match_undone') || 'Match undone';
+      banner.style.background = '#00b894';
+      _lastMatch = null;
+      setTimeout(() => { banner.style.display = 'none'; }, 3000);
+
+      // Refresh opener window
+      refreshOpenerWindow();
+    } else {
+      alert((t('undo_failed') || 'Undo failed') + ': ' + (data.error || 'Unknown'));
+    }
+  } catch (e) {
+    alert(t('error_undoing') || 'Error undoing match');
+  }
+}
+
+// Refresh the opener window (ready-to-ship) to show updated data
+function refreshOpenerWindow() {
+  // Method 1: BroadcastChannel (most reliable for same-origin tabs)
+  try {
+    const bc = new BroadcastChannel('sold_orders_channel');
+    bc.postMessage({type: 'refresh', ts: Date.now()});
+    bc.close();
+    console.log('Sent BroadcastChannel refresh message');
+  } catch (e) {
+    console.log('BroadcastChannel not available:', e);
+  }
+
+  // Method 2: localStorage event (fallback)
+  try {
+    const ts = Date.now().toString();
+    localStorage.setItem('sold_orders_refresh', ts);
+    console.log('Set localStorage sold_orders_refresh =', ts);
+  } catch (e) {
+    console.log('localStorage not available:', e);
+  }
+
+  // Method 3: Direct opener access (fallback)
+  try {
+    if (window.opener && !window.opener.closed) {
+      // Clear cache and re-fetch orders
+      if (window.opener.OrderManager && window.opener.OrderManager.clearCache) {
+        window.opener.OrderManager.clearCache();
+      }
+      // Click the refresh button if it exists
+      const refreshBtn = window.opener.document.getElementById('refresh-orders-btn');
+      if (refreshBtn) {
+        refreshBtn.click();
+      }
+      console.log('Triggered refresh via window.opener');
+    }
+  } catch (e) {
+    console.log('Could not refresh opener window directly:', e);
   }
 }
 </script>

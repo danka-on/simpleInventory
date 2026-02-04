@@ -788,7 +788,7 @@ function renderResults(results){
     const dateAddedHeader = hasSearchRack ? '<th>Date Added</th>' : '';
     const itemIdHeader = (hasEbayStore || hasAmazonStore) ? '<th>Item ID</th>' : '';
     const lotHeader = hasBol ? '<th>LOT #</th>' : '';
-    const locationHeader = (!hasEbayStore && !hasAmazonStore && !hasSold && !hasBol && !hasReturns) ? '<th>Location</th>' : ''; // Hide location for ebay/amazon live, sold, bol, and returns
+    const locationHeader = (!hasEbayStore && !hasAmazonStore && !hasBol && !hasReturns) ? '<th>Location</th>' : ''; // Show location for warehouse and sold
     const dateSoldHeader = hasSold ? '<th>Date Sold</th>' : '';
     const dateShippedHeader = hasSold ? '<th>Date Shipped</th>' : '';
     const invStatusHeader = hasSold ? '<th>Inv Status</th>' : '';
@@ -961,7 +961,10 @@ function renderResults(results){
     }
     
     let locationCell = '';
-    if (!hasEbayStore && !hasAmazonStore && !hasSold && !hasBol && !hasReturns) {
+    if (!hasEbayStore && !hasAmazonStore && !hasBol && !hasReturns) {
+        // For sold items, get location from raw.location (stored directly on sold order)
+        const soldLocation = (dbRaw === 'sold' && r.raw && r.raw.location) ? r.raw.location : '';
+
         if (r.locations && Array.isArray(r.locations) && r.locations.length > 0) {
             // Location duplicates - show grouped clickable location links
             const groups = { hallway: [], office: [], garage: [], other: [] };
@@ -977,7 +980,7 @@ function renderResults(results){
                     groups.other.push(loc);
                 }
             });
-            
+
             let locHtml = '';
             ['hallway', 'office', 'garage', 'other'].forEach(groupName => {
                 if (groups[groupName].length === 0) return;
@@ -990,8 +993,11 @@ function renderResults(results){
                 locHtml += '</div>';
             });
             locationCell = `<td style="font-size:0.9rem;">${locHtml}</td>`;
+        } else if (soldLocation) {
+            // Sold item with location from finder match
+            locationCell = `<td><span style="color:#27ae60;font-weight:600;">${esc(soldLocation)}</span></td>`;
         } else if (locDisplay) {
-            // Single location - original behavior
+            // Single location - original behavior for warehouse items
             locationCell = `<td>${`<a href="#" class=\"location-link\" data-src=\"${db}\" data-id=\"${r.id}\" data-barcode=\"${barcode}\" data-picture=\"${esc(r.pictureposition||'')}\" data-item_position=\"${esc((r.item_position||'').toLowerCase())}\">${esc(locDisplay)}</a>`}</td>`;
         } else {
             locationCell = '<td></td>';

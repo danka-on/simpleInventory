@@ -32,6 +32,59 @@ const translations = {
   clear: { en: 'Clear', lt: 'Išvalyti' },
 
   // ===== index.html =====
+  list_manager: { en: 'List Manager', lt: 'Sąrašų tvarkyklė' },
+  store_listing_helper: { en: 'Store Listing Helper', lt: 'Parduotuvės pagalbininkas' },
+  store_helper: { en: 'Store Helper', lt: 'Pagalbininkas' },
+  fb_listings: { en: 'FB Listings', lt: 'FB skelbimai' },
+  fb_listings_title: { en: 'Facebook Marketplace Listings', lt: 'Facebook Marketplace skelbimai' },
+  fb_listings_empty: { en: 'No Facebook listings yet.', lt: 'Dar nėra Facebook skelbimų.' },
+  fb_listings_empty_help: { en: 'Check the Facebook checkbox on items to track them here.', lt: 'Pažymėkite Facebook langelį prie prekių, kad čia jas matytumėte.' },
+  fb_listings_search_placeholder: { en: 'Search UPC or Title', lt: 'Ieškoti UPC arba pavadinimo' },
+  fb_listings_update: { en: 'Update', lt: 'Atnaujinti' },
+  fb_listings_unlist: { en: 'Unlist', lt: 'Nuimti' },
+  fb_listings_no_matches: { en: 'No matches found.', lt: 'Nerasta atitikmenų.' },
+  fb_listings_warehouse_stock: { en: 'Warehouse Stock', lt: 'Sandėlio likutis' },
+  scan: { en: 'Scan', lt: 'Skenuoti' },
+  no_warehouse: { en: 'No Warehouse', lt: 'Nėra sandėlyje' },
+  cross_store: { en: 'Cross-Store', lt: 'Tarp parduotuvių' },
+  same_store_dup: { en: 'Same-Store Dup', lt: 'Tos pačios dublikatai' },
+  qty_mismatch: { en: 'Qty Mismatch', lt: 'Kiekio neatitikimas' },
+  mark_fixed: { en: 'Mark Fixed', lt: 'Pažymėti ištaisyta' },
+  acknowledge: { en: 'Acknowledge', lt: 'Patvirtinti' },
+  multi_store: { en: 'Multi-Store', lt: 'Kelios parduotuvės' },
+  single_store: { en: 'Single Store', lt: 'Viena parduotuvė' },
+  warehouse: { en: 'Warehouse', lt: 'Sandėlis' },
+  overage: { en: 'Overage', lt: 'Perteklius' },
+  listing_total: { en: 'Listing total', lt: 'Skelbimų suma' },
+  all_listings_have_stock: { en: 'All listings have warehouse stock', lt: 'Visi skelbimai turi atsargas sandėlyje' },
+  no_cross_store_dups: { en: 'No cross-store duplicates', lt: 'Nėra dublikatų tarp parduotuvių' },
+  no_same_store_dups: { en: 'No same-store duplicates', lt: 'Nėra dublikatų toje pačioje parduotuvėje' },
+  all_quantities_match: { en: 'All quantities match', lt: 'Visi kiekiai sutampa' },
+  listed_on: { en: 'Listed on', lt: 'Skelbta' },
+  no_matching_upc: { en: 'No matching UPC in warehouse', lt: 'Nėra atitinkančio UPC sandėlyje' },
+  finder: { en: 'Finder', lt: 'Ieškiklis' },
+  same_upc_both_stores: { en: 'Same UPC listed on both eBay and Amazon', lt: 'Tas pats UPC skelbiamas ir eBay, ir Amazon' },
+  ebay: { en: 'eBay', lt: 'eBay' },
+  amazon: { en: 'Amazon', lt: 'Amazon' },
+  listings_on: { en: 'Listings on', lt: 'Skelbimai parduotuvėje' },
+  same_upc_listed: { en: 'Same UPC listed', lt: 'Tas pats UPC skelbiamas' },
+  times_on: { en: 'times on', lt: 'kartų parduotuvėje' },
+  oversold_by: { en: 'Oversold by', lt: 'Perparduota per' },
+  listing: { en: 'Listing', lt: 'Skelbimas' },
+  marked_fixed: { en: 'Marked Fixed', lt: 'Pažymėta ištaisyta' },
+  no_marked_fixed: { en: 'No marked fixed items', lt: 'Nėra pažymėtų ištaisytų' },
+  alert_type: { en: 'Type', lt: 'Tipas' },
+  store: { en: 'Store', lt: 'Parduotuvė' },
+  listings: { en: 'Listings', lt: 'Skelbimai' },
+  dismissed_at: { en: 'Dismissed at', lt: 'Pažymėta' },
+  scan_failed: { en: 'Scan failed', lt: 'Skenavimas nepavyko' },
+  error_scanning: { en: 'Error scanning', lt: 'Klaida skenuojant' },
+  failed_to_dismiss: { en: 'Failed to dismiss', lt: 'Nepavyko pažymėti' },
+  error: { en: 'Error', lt: 'Klaida' },
+  unknown: { en: 'Unknown', lt: 'Nežinoma' },
+  untitled: { en: 'Untitled', lt: 'Be pavadinimo' },
+  no_image: { en: 'No img', lt: 'Nėra foto' },
+  scanning_listings: { en: 'Scanning listings...', lt: 'Skenuojami skelbimai...' },
   item_manager: { en: 'Item Manager', lt: 'Prekių tvarkyklė' },
   ready_to_ship: { en: 'Ready to Ship', lt: 'Paruošta siųsti' },
   completed: { en: 'Completed', lt: 'Užbaigta' },
@@ -385,6 +438,8 @@ function createLangToggle() {
     const style = document.createElement('style');
     style.id = 'lang-toggle-style';
     style.textContent = `
+      :root { --lang-toggle-offset: 96px; }
+      .lang-safe-right { margin-right: var(--lang-toggle-offset, 96px) !important; }
       #lang-toggle { margin:0; }
       #lang-toggle button {
         margin:0 !important;
@@ -456,3 +511,4 @@ window.applyTranslations = applyTranslations;
 window.i18n = { t, setLang, getLang, applyTranslations, translations };
 
 })();
+

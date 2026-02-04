@@ -74,7 +74,7 @@ def db_connection(db_name, row_factory=True):
 # Enable WAL mode for SQLite databases for better concurrent performance
 def enable_wal_mode():
     """Enable Write-Ahead Logging for all SQLite databases"""
-    databases = ['sold.db', 'bol.db', 'searchRack.db', 'ebayStore.db', 'amazonStore.db', 'rawbol.db', 'rackhistory.db', 'deleted.db']
+    databases = ['sold.db', 'bol.db', 'searchRack.db', 'ebayStore.db', 'amazonStore.db', 'rawbol.db', 'rackhistory.db', 'deleted.db', 'listing_alerts.db', 'fbstore.db']
     for db_name in databases:
         try:
             db_path = BASE_DIR / db_name
@@ -247,6 +247,100 @@ def _ensure_removed_items_table(cur):
             item_position TEXT
         )
     ''')
+
+def _ensure_listing_alerts_tables():
+    """Create listing_alerts.db tables if they don't exist."""
+    try:
+        conn = sqlite3.connect('listing_alerts.db')
+        cur = conn.cursor()
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS dismissed_alerts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                alert_type TEXT NOT NULL,
+                upc TEXT NOT NULL,
+                store TEXT,
+                listing_ids TEXT,
+                dismissed_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                snapshot_hash TEXT NOT NULL,
+                UNIQUE(alert_type, snapshot_hash)
+            )
+        ''')
+        cur.execute('CREATE INDEX IF NOT EXISTS idx_dismissed_hash ON dismissed_alerts(alert_type, snapshot_hash)')
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Error initializing listing_alerts.db: {e}")
+
+# Initialize listing alerts db on startup
+_ensure_listing_alerts_tables()
+
+def _ensure_fbstore_tables():
+    """Create fbstore.db tables for Facebook Marketplace tracking."""
+    try:
+        conn = sqlite3.connect('fbstore.db')
+        cur = conn.cursor()
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS fb_listings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                upc TEXT NOT NULL,
+                title TEXT,
+                image TEXT,
+                quantity INTEGER DEFAULT 1,
+                listed_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                unlisted_at TEXT,
+                is_active INTEGER DEFAULT 1,
+                notes TEXT
+            )
+        ''')
+        cur.execute('CREATE INDEX IF NOT EXISTS idx_fb_upc ON fb_listings(upc)')
+        cur.execute('CREATE INDEX IF NOT EXISTS idx_fb_active ON fb_listings(is_active)')
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Error initializing fbstore.db: {e}")
+
+# Initialize fbstore db on startup
+_ensure_fbstore_tables()
+
+def _track_fb_listing(upc, quantity=1, listed=True, title=None, image=None):
+    """Track Facebook Marketplace listing in fbstore.db"""
+    try:
+        _ensure_fbstore_tables()
+        conn = sqlite3.connect('fbstore.db')
+        cur = conn.cursor()
+
+        if listed:
+            # Get title/image from bol.db if not provided
+            if not title or not image:
+                bol_conn = sqlite3.connect('bol.db')
+                bol_conn.row_factory = sqlite3.Row
+                bol_cur = bol_conn.cursor()
+                bol_cur.execute('SELECT title, image FROM bol_items WHERE upc = ? COLLATE NOCASE LIMIT 1', (upc,))
+                row = bol_cur.fetchone()
+                if row:
+                    title = title or row['title']
+                    image = image or row['image']
+                bol_conn.close()
+
+            # Insert new listing record
+            cur.execute('''
+                INSERT INTO fb_listings (upc, title, image, quantity, listed_at, is_active)
+                VALUES (?, ?, ?, ?, datetime("now"), 1)
+            ''', (upc, title, image, quantity))
+            print(f"[fbstore] Added FB listing: UPC={upc}, Qty={quantity}")
+        else:
+            # Mark most recent active listing as unlisted
+            cur.execute('''
+                UPDATE fb_listings
+                SET is_active = 0, unlisted_at = datetime("now")
+                WHERE upc = ? COLLATE NOCASE AND is_active = 1
+            ''', (upc,))
+            print(f"[fbstore] Marked FB listing unlisted: UPC={upc}")
+
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Error tracking FB listing: {e}")
 
 # Global Data Version for cache invalidation
 # Use database to ensure consistency across workers
@@ -2777,6 +2871,20 @@ def _ensure_bol_list_status_column():
         else:
             print("[_ensure_bol_list_status_column] listed_facebook_date column already exists")
         
+        if 'listed_facebook_qty' not in cols:
+            print("📘 Adding Facebook listing quantity column...")
+            cur.execute("ALTER TABLE bol_items ADD COLUMN listed_facebook_qty INTEGER")
+            # Backfill quantity for existing FB listings
+            try:
+                cur.execute('''
+                    UPDATE bol_items
+                    SET listed_facebook_qty = COALESCE(quantity, 1)
+                    WHERE COALESCE(listed_facebook, 0) = 1
+                    AND listed_facebook_qty IS NULL
+                ''')
+            except Exception:
+                pass
+        
         # One-time migration: convert existing list_status='listed' to listed_amazon=1
         # This runs even if columns already exist, but only for items that haven't been migrated
         print("[_ensure_bol_list_status_column] Running migration for list_status='listed' items...")
@@ -5225,6 +5333,425 @@ def api_items_prep_reset():
 def items_to_list_page():
     return render_template('items_to_list.html')
 
+@app.route('/fb-listings')
+def fb_listings_page():
+    return render_template('fb_listings.html')
+
+@app.route('/store-listing-helper')
+def store_listing_helper_page():
+    return render_template('store_listing_helper.html')
+
+@app.route('/api/listing-helper/scan', methods=['GET'])
+def api_listing_helper_scan():
+    """Scan for listing issues: no warehouse match, duplicates, qty mismatch"""
+    import hashlib
+    import json as json_module
+
+    alerts = {
+        'no_warehouse': [],      # Listings with UPC not in warehouse
+        'cross_store': [],       # Same UPC on both stores
+        'same_store_dup': [],    # Same UPC multiple times on one store
+        'qty_mismatch': []       # Listing qty > warehouse qty
+    }
+
+    try:
+        # Get dismissed alerts
+        alerts_conn = sqlite3.connect('listing_alerts.db')
+        alerts_cur = alerts_conn.cursor()
+        _ensure_listing_alerts_tables()
+        alerts_cur.execute('SELECT alert_type, snapshot_hash FROM dismissed_alerts')
+        dismissed = {(r[0], r[1]) for r in alerts_cur.fetchall()}
+        alerts_conn.close()
+
+        # Get warehouse stock (sum qty by UPC/Barcode)
+        warehouse_stock = {}
+        try:
+            sr_conn = sqlite3.connect('searchRack.db')
+            sr_conn.row_factory = sqlite3.Row
+            sr_cur = sr_conn.cursor()
+            sr_cur.execute('PRAGMA table_info(SEARCHRACK)')
+            sr_cols = [c[1].lower() for c in sr_cur.fetchall()]
+            upc_col = 'UPC' if 'upc' in sr_cols else ('BARCODE' if 'barcode' in sr_cols else None)
+            qty_col = 'QUANTITY' if 'quantity' in sr_cols else ('QTY' if 'qty' in sr_cols else None)
+            if upc_col and qty_col:
+                sr_cur.execute(f'''
+                    SELECT {upc_col} AS UPC, SUM({qty_col}) as total_qty
+                    FROM SEARCHRACK
+                    WHERE {upc_col} IS NOT NULL AND {upc_col} != ""
+                    GROUP BY {upc_col} COLLATE NOCASE
+                ''')
+                for row in sr_cur.fetchall():
+                    upc = (row['UPC'] or '').strip()
+                    if upc:
+                        warehouse_stock[upc.lower()] = int(row['total_qty'] or 0)
+            else:
+                print("Error reading searchRack: missing UPC/BARCODE or QUANTITY columns")
+            sr_conn.close()
+        except Exception as e:
+            print(f"Error reading searchRack: {e}")
+
+        # Helper to safely get an ID from a sqlite Row
+        def _row_id(row):
+            if row is None:
+                return None
+            keys = row.keys() if hasattr(row, 'keys') else []
+            if 'ID' in keys:
+                return row['ID']
+            if 'rowid' in keys:
+                return row['rowid']
+            try:
+                return row[0]
+            except Exception:
+                return None
+
+        def _safe_int(val, default=1):
+            try:
+                if val is None:
+                    return default
+                if isinstance(val, str):
+                    s = val.strip().lower()
+                    if s in ('', 'n/a', 'na', 'null'):
+                        return default
+                return int(float(val))
+            except Exception:
+                return default
+
+        # Get eBay active listings
+        ebay_listings = {}  # upc -> [{id, title, qty, image}, ...]
+        try:
+            eb_conn = sqlite3.connect('ebayStore.db')
+            eb_conn.row_factory = sqlite3.Row
+            eb_cur = eb_conn.cursor()
+            eb_cur.execute('SELECT ID, ItemID, Title, UPC, Quantity, Image FROM INVENTORY WHERE UPC IS NOT NULL AND UPC != "" AND (Quantity > 0 OR Quantity IS NULL)')
+            for row in eb_cur.fetchall():
+                upc = (row['UPC'] or '').strip()
+                if upc and upc.lower() not in ['null', 'n/a', 'does not apply']:
+                    upc_key = upc.lower()
+                    if upc_key not in ebay_listings:
+                        ebay_listings[upc_key] = []
+                    ebay_listings[upc_key].append({
+                        'id': _row_id(row),
+                        'item_id': row['ItemID'],
+                        'title': row['Title'],
+                        'qty': _safe_int(row['Quantity'], 1),
+                        'image': row['Image'],
+                        'store': 'ebay',
+                        'upc': upc
+                    })
+            eb_conn.close()
+        except Exception as e:
+            print(f"Error reading ebayStore: {e}")
+
+        # Get Amazon active listings
+        amazon_listings = {}  # upc -> [{id, title, qty, image}, ...]
+        try:
+            am_conn = sqlite3.connect('amazonStore.db')
+            am_conn.row_factory = sqlite3.Row
+            am_cur = am_conn.cursor()
+            am_cur.execute('SELECT ID, ASIN, TITLE, UPC, QUANTITY, IMAGE FROM ITEMS WHERE UPC IS NOT NULL AND UPC != "" AND (QUANTITY > 0 OR QUANTITY IS NULL)')
+            for row in am_cur.fetchall():
+                upc = (row['UPC'] or '').strip()
+                if upc and upc.lower() not in ['null', 'n/a', 'does not apply']:
+                    upc_key = upc.lower()
+                    if upc_key not in amazon_listings:
+                        amazon_listings[upc_key] = []
+                    amazon_listings[upc_key].append({
+                        'id': _row_id(row),
+                        'asin': row['ASIN'],
+                        'title': row['TITLE'],
+                        'qty': _safe_int(row['QUANTITY'], 1),
+                        'image': row['IMAGE'],
+                        'store': 'amazon',
+                        'upc': upc
+                    })
+            am_conn.close()
+        except Exception as e:
+            print(f"Error reading amazonStore: {e}")
+
+        # Helper to create hash for dismissal tracking
+        def make_hash(alert_type, upc, listing_ids):
+            data = f"{alert_type}:{upc.lower()}:{','.join(sorted(str(x) for x in listing_ids))}"
+            return hashlib.md5(data.encode()).hexdigest()
+
+        all_upcs = set(ebay_listings.keys()) | set(amazon_listings.keys())
+
+        for upc_key in all_upcs:
+            ebay_items = ebay_listings.get(upc_key, [])
+            amazon_items = amazon_listings.get(upc_key, [])
+            warehouse_qty = warehouse_stock.get(upc_key, 0)
+
+            all_listings = ebay_items + amazon_items
+            listing_ids = [f"{l['store']}:{l['id']}" for l in all_listings]
+
+            # 1. No warehouse match
+            if warehouse_qty == 0 and all_listings:
+                stores_with_listing = []
+                if ebay_items:
+                    stores_with_listing.append('ebay')
+                if amazon_items:
+                    stores_with_listing.append('amazon')
+
+                snap_hash = make_hash('no_warehouse', upc_key, listing_ids)
+                if ('no_warehouse', snap_hash) not in dismissed:
+                    # Red if 2 stores, yellow if 1
+                    severity = 'red' if len(stores_with_listing) >= 2 else 'yellow'
+                    alerts['no_warehouse'].append({
+                        'upc': all_listings[0]['upc'],  # Use original case
+                        'stores': stores_with_listing,
+                        'listings': all_listings,
+                        'severity': severity,
+                        'hash': snap_hash
+                    })
+
+            # 2. Cross-store duplicate (same UPC on both stores)
+            if ebay_items and amazon_items:
+                snap_hash = make_hash('cross_store', upc_key, listing_ids)
+                if ('cross_store', snap_hash) not in dismissed:
+                    alerts['cross_store'].append({
+                        'upc': all_listings[0]['upc'],
+                        'ebay_listings': ebay_items,
+                        'amazon_listings': amazon_items,
+                        'warehouse_qty': warehouse_qty,
+                        'severity': 'yellow',
+                        'hash': snap_hash
+                    })
+
+            # 3. Same-store duplicate (multiple listings of same UPC on one store)
+            for store, items in [('ebay', ebay_items), ('amazon', amazon_items)]:
+                if len(items) > 1:
+                    store_listing_ids = [f"{store}:{l['id']}" for l in items]
+                    snap_hash = make_hash('same_store_dup', upc_key, store_listing_ids)
+                    if ('same_store_dup', snap_hash) not in dismissed:
+                        alerts['same_store_dup'].append({
+                            'upc': items[0]['upc'],
+                            'store': store,
+                            'listings': items,
+                            'count': len(items),
+                            'severity': 'red',
+                            'hash': snap_hash
+                        })
+
+            # 4. Quantity mismatch (total listing qty > warehouse qty)
+            if warehouse_qty > 0:
+                total_listing_qty = sum(l['qty'] for l in all_listings)
+                if total_listing_qty > warehouse_qty:
+                    snap_hash = make_hash('qty_mismatch', upc_key, listing_ids)
+                    if ('qty_mismatch', snap_hash) not in dismissed:
+                        alerts['qty_mismatch'].append({
+                            'upc': all_listings[0]['upc'],
+                            'warehouse_qty': warehouse_qty,
+                            'listing_qty': total_listing_qty,
+                            'listings': all_listings,
+                            'overage': total_listing_qty - warehouse_qty,
+                            'severity': 'red',
+                            'hash': snap_hash
+                        })
+
+        # Count totals
+        counts = {
+            'no_warehouse': len(alerts['no_warehouse']),
+            'cross_store': len(alerts['cross_store']),
+            'same_store_dup': len(alerts['same_store_dup']),
+            'qty_mismatch': len(alerts['qty_mismatch']),
+            'total': sum(len(v) for v in alerts.values())
+        }
+
+        return jsonify({'success': True, 'alerts': alerts, 'counts': counts})
+
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'listing-helper-scan')}), 500
+
+@app.route('/api/listing-helper/dismiss', methods=['POST'])
+def api_listing_helper_dismiss():
+    """Dismiss an alert by storing its hash"""
+    try:
+        data = request.get_json() or {}
+        alert_type = data.get('alert_type')
+        snap_hash = data.get('hash')
+        upc = data.get('upc', '')
+        store = data.get('store', '')
+        listing_ids = data.get('listing_ids', [])
+
+        if not alert_type or not snap_hash:
+            return jsonify({'success': False, 'error': 'alert_type and hash required'}), 400
+
+        _ensure_listing_alerts_tables()
+        conn = sqlite3.connect('listing_alerts.db')
+        cur = conn.cursor()
+
+        import json as json_module
+        cur.execute('''
+            INSERT OR REPLACE INTO dismissed_alerts (alert_type, upc, store, listing_ids, snapshot_hash)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (alert_type, upc, store, json_module.dumps(listing_ids), snap_hash))
+        conn.commit()
+        conn.close()
+
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'listing-helper-dismiss')}), 500
+
+@app.route('/api/listing-helper/undismiss', methods=['POST'])
+def api_listing_helper_undismiss():
+    """Remove a dismissal to re-show an alert"""
+    try:
+        data = request.get_json() or {}
+        snap_hash = data.get('hash')
+
+        if not snap_hash:
+            return jsonify({'success': False, 'error': 'hash required'}), 400
+
+        conn = sqlite3.connect('listing_alerts.db')
+        cur = conn.cursor()
+        cur.execute('DELETE FROM dismissed_alerts WHERE snapshot_hash = ?', (snap_hash,))
+        conn.commit()
+        conn.close()
+
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'listing-helper-undismiss')}), 500
+
+@app.route('/api/listing-helper/dismissed', methods=['GET'])
+def api_listing_helper_dismissed():
+    """Get list of dismissed alerts"""
+    try:
+        _ensure_listing_alerts_tables()
+        conn = sqlite3.connect('listing_alerts.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute('SELECT * FROM dismissed_alerts ORDER BY dismissed_at DESC')
+        rows = [dict(r) for r in cur.fetchall()]
+        conn.close()
+        return jsonify({'success': True, 'dismissed': rows})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'listing-helper-dismissed')}), 500
+
+@app.route('/api/fb/listings', methods=['GET'])
+def api_fb_listings():
+    """Get current Facebook Marketplace listings (from bol.db list status)."""
+    try:
+        _ensure_bol_list_status_column()
+        conn = sqlite3.connect('bol.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+
+        # Simple: show items currently marked as listed on Facebook
+        cur.execute('''
+            SELECT upc,
+                   item_description AS title,
+                   image_url AS image,
+                   COALESCE(listed_facebook_qty, quantity, 1) AS quantity,
+                   listed_facebook_date AS listed_at
+            FROM bol_items
+            WHERE COALESCE(listed_facebook, 0) = 1
+            ORDER BY listed_facebook_date DESC
+        ''')
+        listings = []
+        for row in cur.fetchall():
+            item = dict(row)
+            item['is_active'] = 1
+            listings.append(item)
+        conn.close()
+
+        # Attach warehouse availability (searchRack)
+        try:
+            warehouse_stock = {}
+            sr_conn = sqlite3.connect('searchRack.db')
+            sr_conn.row_factory = sqlite3.Row
+            sr_cur = sr_conn.cursor()
+            sr_cur.execute('PRAGMA table_info(SEARCHRACK)')
+            sr_cols = [c[1].lower() for c in sr_cur.fetchall()]
+            upc_col = 'UPC' if 'upc' in sr_cols else ('BARCODE' if 'barcode' in sr_cols else None)
+            qty_col = 'QUANTITY' if 'quantity' in sr_cols else ('QTY' if 'qty' in sr_cols else None)
+            if upc_col and qty_col:
+                sr_cur.execute(f'''
+                    SELECT {upc_col} AS UPC, SUM({qty_col}) as total_qty
+                    FROM SEARCHRACK
+                    WHERE {upc_col} IS NOT NULL AND {upc_col} != ""
+                    GROUP BY {upc_col} COLLATE NOCASE
+                ''')
+                for row in sr_cur.fetchall():
+                    upc = (row['UPC'] or '').strip()
+                    if upc:
+                        warehouse_stock[upc.lower()] = int(row['total_qty'] or 0)
+            sr_conn.close()
+            for item in listings:
+                upc_key = (str(item.get('upc') or '').strip()).lower()
+                item['warehouse_qty'] = warehouse_stock.get(upc_key, 0)
+        except Exception as e:
+            print(f"Error reading searchRack for fb listings: {e}")
+
+        return jsonify({'success': True, 'listings': listings})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'fb-listings')}), 500
+
+@app.route('/api/fb/listings/quantity', methods=['POST'])
+def api_fb_listings_quantity():
+    """Update Facebook listing quantity for a UPC."""
+    try:
+        data = request.get_json() or {}
+        upc = _normalize_upc(data.get('upc'))
+        qty = int(data.get('quantity', 1))
+        if not upc:
+            return jsonify({'success': False, 'error': 'Missing upc'}), 400
+        if qty < 1:
+            return jsonify({'success': False, 'error': 'Quantity must be at least 1'}), 400
+
+        _ensure_bol_list_status_column()
+        conn = sqlite3.connect('bol.db')
+        cur = conn.cursor()
+        cur.execute('SELECT COALESCE(listed_facebook,0) FROM bol_items WHERE upc = ? COLLATE NOCASE', (upc,))
+        row = cur.fetchone()
+        if not row:
+            conn.close()
+            return jsonify({'success': False, 'error': 'UPC not found'}), 404
+        if row[0] != 1:
+            conn.close()
+            return jsonify({'success': False, 'error': 'Item is not listed on Facebook'}), 400
+
+        cur.execute('UPDATE bol_items SET listed_facebook_qty=? WHERE upc = ? COLLATE NOCASE', (qty, upc))
+        conn.commit()
+        conn.close()
+        cache.clear()
+        update_data_version()
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'fb-listings-quantity')}), 500
+
+@app.route('/api/fb/listings/unlist', methods=['POST'])
+def api_fb_listings_unlist():
+    """Unlist a Facebook Marketplace item for a UPC."""
+    try:
+        data = request.get_json() or {}
+        upc = _normalize_upc(data.get('upc'))
+        if not upc:
+            return jsonify({'success': False, 'error': 'Missing upc'}), 400
+
+        _ensure_bol_list_status_column()
+        conn = sqlite3.connect('bol.db')
+        cur = conn.cursor()
+        cur.execute('UPDATE bol_items SET listed_facebook=0, listed_facebook_date=NULL, listed_facebook_qty=NULL WHERE upc = ? COLLATE NOCASE', (upc,))
+        updated = cur.rowcount
+
+        # Update legacy list_status column for backward compatibility
+        cur.execute('''
+            UPDATE bol_items
+            SET list_status = CASE
+                WHEN COALESCE(listed_amazon, 0) = 1 OR COALESCE(listed_ebay, 0) = 1 OR COALESCE(listed_facebook, 0) = 1
+                THEN 'listed'
+                ELSE NULL
+            END
+            WHERE upc = ? COLLATE NOCASE
+        ''', (upc,))
+
+        conn.commit()
+        conn.close()
+        cache.clear()
+        update_data_version()
+        return jsonify({'success': True, 'updated': updated})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'fb-listings-unlist')}), 500
+
 @app.route('/trash-manager')
 def trash_manager_page():
     return render_template('trash_manager.html')
@@ -5916,27 +6443,28 @@ def api_bol_lots():
 
 @app.route('/api/bol_items/list_status', methods=['POST'])
 def api_bol_items_set_list_status():
-    """Set marketplace listing status for a BOL item by UPC. 
-    JSON: { upc, marketplace, listed } where marketplace in ['amazon', 'ebay', 'facebook'] and listed is boolean"""
+    """Set marketplace listing status for a BOL item by UPC.
+    JSON: { upc, marketplace, listed, quantity (for facebook) } where marketplace in ['amazon', 'ebay', 'facebook'] and listed is boolean"""
     try:
         data = request.get_json() or {}
         upc = _normalize_upc(data.get('upc'))
         marketplace = (data.get('marketplace') or '').strip().lower()
         listed = bool(data.get('listed', True))
-        
-        print(f"[list_status] UPC: {upc}, Marketplace: {marketplace}, Listed: {listed}")
-        
+        quantity = int(data.get('quantity', 1)) if data.get('quantity') else 1
+
+        print(f"[list_status] UPC: {upc}, Marketplace: {marketplace}, Listed: {listed}, Qty: {quantity}")
+
         if not upc:
             return jsonify({'success': False, 'error': 'Missing upc'}), 400
         if marketplace not in ('amazon', 'ebay', 'facebook'):
             return jsonify({'success': False, 'error': 'Invalid marketplace. Must be amazon, ebay, or facebook'}), 400
-        
+
         # Ensure columns exist before trying to update
         _ensure_bol_list_status_column()
-        
+
         conn = sqlite3.connect('bol.db')
         cur = conn.cursor()
-        
+
         # Update marketplace-specific column and timestamp
         if marketplace == 'amazon':
             if listed:
@@ -5952,9 +6480,13 @@ def api_bol_items_set_list_status():
                 cur.execute('UPDATE bol_items SET listed_ebay=0, listed_ebay_date=NULL WHERE upc = ? COLLATE NOCASE', (upc,))
         elif marketplace == 'facebook':
             if listed:
-                cur.execute('UPDATE bol_items SET listed_facebook=1, listed_facebook_date=datetime("now") WHERE upc = ? COLLATE NOCASE', (upc,))
+                cur.execute('UPDATE bol_items SET listed_facebook=1, listed_facebook_date=datetime("now"), listed_facebook_qty=? WHERE upc = ? COLLATE NOCASE', (quantity, upc))
+                # Track in fbstore.db
+                _track_fb_listing(upc, quantity, listed=True)
             else:
-                cur.execute('UPDATE bol_items SET listed_facebook=0, listed_facebook_date=NULL WHERE upc = ? COLLATE NOCASE', (upc,))
+                cur.execute('UPDATE bol_items SET listed_facebook=0, listed_facebook_date=NULL, listed_facebook_qty=NULL WHERE upc = ? COLLATE NOCASE', (upc,))
+                # Mark as unlisted in fbstore.db
+                _track_fb_listing(upc, quantity, listed=False)
         
         # Update legacy list_status column for backward compatibility
         # Item is "listed" if listed on ANY marketplace
@@ -6165,8 +6697,9 @@ def api_token_status():
     try:
         tokens = load_tokens()
         if is_expired(tokens):
-            # Try to refresh
+            # Try to refresh and reload tokens
             get_access_token()
+            tokens = load_tokens()  # Reload after refresh to get new access_token
         # Quick validation: call a lightweight eBay endpoint matching our scopes
         test_headers = {
             "Authorization": f"Bearer {tokens.get('access_token', '')}",
@@ -6175,8 +6708,16 @@ def api_token_status():
         r = requests.get("https://api.ebay.com/sell/fulfillment/v1/order?limit=1", headers=test_headers, timeout=5)
         if r.status_code == 401:
             status["ebay"] = "expired"
+    except requests.exceptions.RequestException as e:
+        # Network/timeout error - don't flag as expired, could be transient
+        print(f"eBay token check network error (transient): {e}")
     except Exception as e:
-        status["ebay"] = "expired"
+        # Only flag as expired for auth-related errors
+        err_str = str(e).lower()
+        if "unauthorized" in err_str or "invalid" in err_str or "expired" in err_str:
+            status["ebay"] = "expired"
+        else:
+            print(f"eBay token check error (transient): {e}")
 
     # Check Amazon token
     try:
@@ -7960,7 +8501,7 @@ def repair_missing_removals():
             hist_cur.execute('''
                 SELECT COUNT(*) FROM removed_items
                 WHERE (order_id = ? OR barcode = ?)
-                AND removal_type IN ('automatic', 'manual_sold_removal', 'manual_immediate', 'manual_sold_selection', 'finder_removal')
+                AND removal_type IN ('automatic', 'repair_removal', 'manual_sold_removal', 'manual_immediate', 'manual_sold_selection', 'finder_removal')
                 AND old_quantity > new_quantity
             ''', (order_id, barcode))
             has_removal = hist_cur.fetchone()[0] > 0
@@ -8281,6 +8822,122 @@ def find_inventory_for_sold(order_id):
         import traceback
         traceback.print_exc()
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
+
+@app.route('/api/sold/match-barcode/<int:order_id>', methods=['POST'])
+def match_barcode_to_sold(order_id):
+    """Match/link an inventory barcode and location to a sold order. Pass empty string to clear."""
+    try:
+        data = request.get_json() or {}
+
+        # Allow empty string (for undo/clear), but key must be present
+        if 'barcode' not in data:
+            return jsonify({'success': False, 'error': 'barcode required'}), 400
+        barcode = data.get('barcode') or ''  # Normalize None to empty string
+        location = data.get('location') or ''  # Location from searchRack ITEM_POSITION
+
+        # Get order details
+        sold_conn = sqlite3.connect('sold.db')
+        sold_conn.row_factory = sqlite3.Row
+        sold_cur = sold_conn.cursor()
+        sold_cur.execute('SELECT * FROM orders WHERE id = ?', (order_id,))
+        order = sold_cur.fetchone()
+
+        if not order:
+            sold_conn.close()
+            return jsonify({'success': False, 'error': 'Order not found'}), 404
+
+        old_barcode = order['barcode'] or ''
+        old_location = order['location'] or ''
+
+        # Update the order's barcode AND location directly
+        sold_cur.execute('UPDATE orders SET barcode = ?, location = ? WHERE id = ?', (barcode, location, order_id))
+        sold_conn.commit()
+        sold_conn.close()
+
+        # Invalidate sold-orders cache
+        for days in [1, 2, 3, 5, 7, 14, 30, 60, 90, 120]:
+            cache.delete(f'view//sold-orders?days={days}')
+        print(f"✅ Matched order {order_id}: barcode={barcode}, location={location}")
+
+        return jsonify({
+            'success': True,
+            'order_id': order_id,
+            'old_barcode': old_barcode,
+            'new_barcode': barcode,
+            'old_location': old_location,
+            'new_location': location
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': _safe_error(e)}), 500
+
+@app.route('/api/sold/debug-order/<int:order_id>', methods=['GET'])
+def debug_sold_order(order_id):
+    """Debug endpoint to check order state"""
+    try:
+        sold_conn = sqlite3.connect('sold.db')
+        sold_conn.row_factory = sqlite3.Row
+        sold_cur = sold_conn.cursor()
+        sold_cur.execute('SELECT id, order_id, title, barcode, location, rackupdated FROM orders WHERE id = ?', (order_id,))
+        order = sold_cur.fetchone()
+        sold_conn.close()
+
+        if not order:
+            return jsonify({'success': False, 'error': 'Order not found'}), 404
+
+        return jsonify({
+            'success': True,
+            'order': dict(order)
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/sold/debug-by-barcode/<barcode>', methods=['GET'])
+def debug_sold_order_by_barcode(barcode):
+    """Debug endpoint to check orders by barcode"""
+    try:
+        sold_conn = sqlite3.connect('sold.db')
+        sold_conn.row_factory = sqlite3.Row
+        sold_cur = sold_conn.cursor()
+        sold_cur.execute('SELECT id, order_id, title, barcode, location, rackupdated FROM orders WHERE barcode = ? COLLATE NOCASE ORDER BY id DESC LIMIT 10', (barcode,))
+        orders = [dict(row) for row in sold_cur.fetchall()]
+        sold_conn.close()
+
+        # Also check searchRack for this barcode
+        rack_conn = sqlite3.connect('searchRack.db')
+        rack_conn.row_factory = sqlite3.Row
+        rack_cur = rack_conn.cursor()
+        rack_cur.execute('SELECT ID, TITLE, BARCODE, ITEM_POSITION, QUANTITY FROM SEARCHRACK WHERE BARCODE = ? COLLATE NOCASE', (barcode,))
+        rack_items = [dict(row) for row in rack_cur.fetchall()]
+        rack_conn.close()
+
+        return jsonify({
+            'success': True,
+            'barcode': barcode,
+            'sold_orders': orders,
+            'searchrack_items': rack_items
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/sold/reset-order/<int:order_id>', methods=['POST'])
+def reset_sold_order(order_id):
+    """Reset order's barcode and location to force fresh lookup"""
+    try:
+        sold_conn = sqlite3.connect('sold.db')
+        sold_cur = sold_conn.cursor()
+        sold_cur.execute('UPDATE orders SET location = NULL WHERE id = ?', (order_id,))
+        sold_conn.commit()
+        sold_conn.close()
+
+        # Clear cache
+        for days in [1, 2, 3, 5, 7, 14, 30, 60, 90, 120]:
+            cache.delete(f'view//sold-orders?days={days}')
+
+        return jsonify({'success': True, 'message': f'Reset location for order {order_id}'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/sold/manual-remove/<int:order_id>', methods=['POST'])
 def manual_remove_sold_inventory(order_id):
