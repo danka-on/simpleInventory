@@ -141,7 +141,10 @@
     }
     .child-row {
       display: none;
-      background: #fff;
+      background: #f0f2f5;
+    }
+    .child-row td:first-child {
+      padding-left: 48px;
     }
     .btn-small {
       padding: 6px 12px;
@@ -354,7 +357,7 @@
   <div class="container">
     <div class="header">
       <div>
-        <a href="/tools" class="btn btn-danger">← Back</a>
+        <a href="/marketplace-session" class="btn btn-danger">← Back</a>
       </div>
       <h1>Marketplace Statistics</h1>
       <div>
@@ -551,13 +554,15 @@
           `);
           items.forEach(sale => {
             const titleEscaped = (sale.title || '').replace(/'/g, "\\\\'").replace(/"/g, '&quot;');
+            const priceAuto = sale.price_auto === 1 || sale.price_auto === true;
+            const priceStyle = priceAuto ? 'font-style:italic;color:#7f8c8d' : '';
             allRows.push(`
               <tr class="child-row ${rowId}">
-                <td>${sale.sale_date}</td>
+                <td><span style="color:#95a5a6;margin-right:4px">└</span>${sale.sale_date}</td>
                 <td>${sale.barcode}</td>
                 <td>${sale.title || '-'}</td>
                 <td>${sale.quantity}</td>
-                <td>$${parseFloat(sale.price).toFixed(2)}</td>
+                <td style="${priceStyle}">$${parseFloat(sale.price).toFixed(2)}</td>
                 <td class="actions">
                   <button class="btn-small btn-edit" onclick="editSale(${sale.id}, '${sale.barcode}', '${titleEscaped}', ${sale.quantity}, ${sale.price})">Edit</button>
                   <button class="btn-small btn-delete" onclick="deleteSale(${sale.id})">Delete</button>

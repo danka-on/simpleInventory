@@ -312,11 +312,11 @@ if (orderTitle) {
   // Build token chips from title words (all start inactive for manual use)
   // Filter out punctuation, filler words, and numbers
   const fillerWords = new Set(['a', 'an', 'the', 'for', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'of', 'with', 'by', 'from', 'as', 'is', 'it', 'its', 'be', 'are', 'was', 'were', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'must', 'shall', 'can', 'this', 'that', 'these', 'those', 'am', 'if', 'then', 'so', 'up', 'out', 'no', 'not', 'only', 'own', 'into', 'over', 'after', 'before', 'between', 'under', 'again', 'further', 'once']);
-  const words = orderTitle.split(/\s+/)
-    .map(w => w.replace(/[,.\-()]+/g, '').trim())  // Remove commas, periods, hyphens, parentheses
+  const words = orderTitle.split(/[\s,]+/)  // Split by whitespace OR commas (handles "14.29,White" -> ["14.29", "White"])
+    .map(w => w.replace(/[.\-()]+/g, '').trim())  // Remove periods, hyphens, parentheses
     .filter(w => w.length > 0)
     .filter(w => !fillerWords.has(w.toLowerCase()))  // Remove filler words
-    .filter(w => !/^\d+$/.test(w));  // Remove pure numbers
+    .filter(w => !/^\d+$/.test(w));  // Remove pure numbers (e.g., "1429" from "14.29")
   tokens = words.map(w => ({word: w, active: false}));
   renderTokens();
 }
@@ -366,12 +366,21 @@ function closeLocPopup() {
   document.getElementById('locOverlay').classList.remove('show');
 }
 
-// Auto-search on load with cleaned words (no fillers/numbers), show in search bar as gray
-if (orderTitle && tokens.length) {
+// Auto-search on load: prioritize UPC/barcode over title words
+if (orderBarcode) {
+  // Use barcode/UPC as the default search (most accurate)
+  searchInput.value = orderBarcode;
+  searchInput.style.color = '#999';
+  searchInput.addEventListener('focus', function onFocus() {
+    searchInput.style.color = '';
+    searchInput.removeEventListener('focus', onFocus);
+  }, {once: true});
+  setTimeout(() => doSearch(orderBarcode), 200);
+} else if (orderTitle && tokens.length) {
+  // Fallback to cleaned title words if no barcode available
   const cleanedQuery = tokens.map(t => t.word).join(' ');
   searchInput.value = cleanedQuery;
   searchInput.style.color = '#999';
-  // Revert to normal color when user interacts
   searchInput.addEventListener('focus', function onFocus() {
     searchInput.style.color = '';
     searchInput.removeEventListener('focus', onFocus);

@@ -5509,7 +5509,7 @@ def api_listing_helper_scan():
             eb_conn = sqlite3.connect('ebayStore.db')
             eb_conn.row_factory = sqlite3.Row
             eb_cur = eb_conn.cursor()
-            eb_cur.execute('SELECT ID, ItemID, Title, UPC, Quantity, Image FROM INVENTORY WHERE UPC IS NOT NULL AND UPC != "" AND (Quantity > 0 OR Quantity IS NULL)')
+            eb_cur.execute('SELECT ID, ItemID, Title, UPC, Quantity, Image FROM INVENTORY WHERE UPC IS NOT NULL AND UPC != "" AND (Quantity > 0 OR Quantity IS NULL) AND List_State = "Active"')
             for row in eb_cur.fetchall():
                 upc = (row['UPC'] or '').strip()
                 if upc and upc.lower() not in ['null', 'n/a', 'does not apply']:
@@ -5535,7 +5535,7 @@ def api_listing_helper_scan():
             am_conn = sqlite3.connect('amazonStore.db')
             am_conn.row_factory = sqlite3.Row
             am_cur = am_conn.cursor()
-            am_cur.execute('SELECT ID, ASIN, TITLE, UPC, QUANTITY, IMAGE FROM ITEMS WHERE UPC IS NOT NULL AND UPC != "" AND (QUANTITY > 0 OR QUANTITY IS NULL)')
+            am_cur.execute('SELECT ID, ASIN, TITLE, UPC, QUANTITY, IMAGE FROM ITEMS WHERE UPC IS NOT NULL AND UPC != "" AND (QUANTITY > 0 OR QUANTITY IS NULL) AND STATUS = "Active"')
             for row in am_cur.fetchall():
                 upc = (row['UPC'] or '').strip()
                 if upc and upc.lower() not in ['null', 'n/a', 'does not apply']:
@@ -5591,7 +5591,8 @@ def api_listing_helper_scan():
                     })
 
             # 2. Cross-store duplicate (same UPC on both stores)
-            if ebay_items and amazon_items:
+            # Only show if item HAS warehouse stock (no_warehouse takes priority)
+            if ebay_items and amazon_items and warehouse_qty > 0:
                 snap_hash = make_hash('cross_store', upc_key, listing_ids)
                 if ('cross_store', snap_hash) not in dismissed:
                     alerts['cross_store'].append({
@@ -5604,19 +5605,21 @@ def api_listing_helper_scan():
                     })
 
             # 3. Same-store duplicate (multiple listings of same UPC on one store)
-            for store, items in [('ebay', ebay_items), ('amazon', amazon_items)]:
-                if len(items) > 1:
-                    store_listing_ids = [f"{store}:{l['id']}" for l in items]
-                    snap_hash = make_hash('same_store_dup', upc_key, store_listing_ids)
-                    if ('same_store_dup', snap_hash) not in dismissed:
-                        alerts['same_store_dup'].append({
-                            'upc': items[0]['upc'],
-                            'store': store,
-                            'listings': items,
-                            'count': len(items),
-                            'severity': 'red',
-                            'hash': snap_hash
-                        })
+            # Only show if item HAS warehouse stock (no_warehouse takes priority)
+            if warehouse_qty > 0:
+                for store, items in [('ebay', ebay_items), ('amazon', amazon_items)]:
+                    if len(items) > 1:
+                        store_listing_ids = [f"{store}:{l['id']}" for l in items]
+                        snap_hash = make_hash('same_store_dup', upc_key, store_listing_ids)
+                        if ('same_store_dup', snap_hash) not in dismissed:
+                            alerts['same_store_dup'].append({
+                                'upc': items[0]['upc'],
+                                'store': store,
+                                'listings': items,
+                                'count': len(items),
+                                'severity': 'red',
+                                'hash': snap_hash
+                            })
 
             # 4. Quantity mismatch (total listing qty > warehouse qty)
             if warehouse_qty > 0:
@@ -14792,12 +14795,13 @@ def api_marketplace_sale():
         quantity = int(data.get('quantity', 1))
         price = float(data.get('price', 0))
         session_id = (data.get('session_id') or '').strip() or None
-        
+        price_auto = data.get('price_auto', False)
+
         if not barcode:
             return jsonify({'success': False, 'error': 'Missing barcode'}), 400
-        
+
         # Add to marketplace.db
-        result = add_marketplace_sale(barcode, title, quantity, price, session_id=session_id)
+        result = add_marketplace_sale(barcode, title, quantity, price, session_id=session_id, price_auto=price_auto)
         if not result['success']:
             return jsonify(result), 500
         

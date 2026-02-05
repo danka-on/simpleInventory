@@ -56,93 +56,274 @@
       100% { transform: rotate(360deg); }
     }
 
-    /* Mobile responsive styles */
-    @media (max-width: 768px) {
-      body { padding: 10px; }
-
-      /* Top header */
-      .top { grid-template-columns: auto 1fr; gap: 8px; }
-      .top h2 { font-size: 1.1rem; justify-self: start; }
-      .top > div:last-child { display: none; }
-
-      /* Filters - wrap nicely */
-      .filters {
+    /* iPad/Tablet responsive styles */
+    @media (max-width: 1024px) and (min-width: 769px) {
+      /* Top header - back left, title center, buttons right */
+      .top {
+        display: flex !important;
         flex-wrap: wrap;
-        gap: 8px;
+        align-items: center;
+        gap: 10px;
+      }
+      .top #back-btn {
+        order: 0;
+        margin: 0 !important;
+        justify-self: auto !important;
+      }
+      .top h2 {
+        order: 1;
+        flex: 1;
+        text-align: center;
+        margin: 0;
+      }
+      .top > div:last-child {
+        order: 2;
+        margin-right: 70px !important;
       }
 
-      /* Row 1: Search input + small search button inline */
+      /* Filters reorganization */
+      .filters {
+        display: grid !important;
+        grid-template-columns: 1fr auto auto;
+        grid-template-rows: auto auto auto;
+        gap: 10px;
+        align-items: center;
+      }
+
+      /* Row 1: Search + button */
       .filters > label:first-of-type {
-        flex: 1;
-        min-width: 0;
+        grid-column: 1 / 2;
+        grid-row: 1;
         display: flex;
         gap: 0;
       }
       .filters > label:first-of-type input {
         flex: 1;
-        min-width: 0;
-        border-radius: 6px 0 0 6px;
+        border-radius: 8px 0 0 8px;
       }
       #search-btn {
-        order: 1;
-        padding: 8px 12px;
-        font-size: 0.85rem;
-        border-radius: 0 6px 6px 0;
-        margin-left: -1px;
+        grid-column: 2 / 3;
+        grid-row: 1;
+        border-radius: 0 8px 8px 0;
+        margin-left: -1px !important;
       }
       #refresh-btn { display: none; }
 
-      /* Row 2: Gear (first), Status, Select (last) */
-      .filters > div[style*="position:relative"] { order: 3; } /* Status dropdown */
-      #filter-gear {
-        order: 2;
-        padding: 8px 10px;
-        font-size: 0.9rem;
-      }
-      #status-filter-btn {
-        min-width: 90px !important;
-        padding: 8px 10px;
+      /* Row 2: Pagination (moved from bottom) */
+      .filters::before {
+        content: '';
+        grid-column: 1 / -1;
+        grid-row: 2;
       }
 
-      /* Select controls on same row */
+      /* Row 3: Status + Gear on same line */
+      .filters > div[style*="position:relative"] {
+        grid-column: 1 / 2;
+        grid-row: 3;
+      }
+      #filter-gear {
+        grid-column: 2 / 3;
+        grid-row: 3;
+      }
+
+      /* Row 4: Select controls */
+      .filters > div[style*="margin-left:auto"] {
+        grid-column: 1 / -1;
+        grid-row: 4;
+        margin-left: 0 !important;
+        justify-content: flex-start;
+      }
+    }
+
+    /* Mobile responsive styles */
+    @media (max-width: 768px) {
+      body { padding: 10px; }
+
+      /* Top header - back top left, buttons same row */
+      .top {
+        display: flex !important;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: center;
+      }
+      .top h2 {
+        font-size: 1.2rem;
+        text-align: center;
+        order: 2;
+        width: 100%;
+        margin: 8px 0 0 0;
+      }
+      .top #back-btn {
+        order: 0;
+        width: auto;
+        text-align: center;
+        margin: 0 !important;
+        justify-self: auto !important;
+      }
+      .top > div:last-child {
+        order: 1;
+        display: flex;
+        gap: 8px;
+        margin-left: auto;
+        margin-right: 0 !important;
+      }
+      .top > div:last-child .btn {
+        justify-content: center;
+        padding: 8px 12px;
+        font-size: 0.9rem;
+      }
+
+      /* Filters - organized rows */
+      .filters {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        padding: 0;
+      }
+
+      /* Search row: full width input with button */
+      .filters > label:first-of-type {
+        display: flex;
+        width: 100%;
+        gap: 0;
+        order: 1;
+      }
+      .filters > label:first-of-type input {
+        flex: 1;
+        border-radius: 8px 0 0 8px;
+        padding: 12px;
+        font-size: 1rem;
+      }
+      #search-btn {
+        order: 1;
+        padding: 12px 16px;
+        font-size: 1rem;
+        border-radius: 0 8px 8px 0;
+        margin-left: -1px;
+        white-space: nowrap;
+      }
+      #refresh-btn { display: none; }
+
+      /* Status and Gear on same row */
+      .filters > div[style*="position:relative"],
+      #filter-gear {
+        order: 3;
+      }
+
+      /* Create a button row container effect */
+      .filters::after {
+        content: '';
+        display: block;
+        clear: both;
+      }
+
+      /* Select controls - full width row at bottom */
       .filters > div[style*="margin-left:auto"] {
         order: 4;
         margin-left: 0 !important;
-        flex: 0 0 auto;
+        width: 100%;
+        display: flex;
+        gap: 10px;
+        justify-content: space-between;
+        flex-wrap: wrap;
       }
       #select-btn {
-        padding: 8px 12px;
-        font-size: 0.85rem;
+        flex: 1;
+        min-width: 100px;
+        padding: 12px 16px;
+        font-size: 1rem;
+        text-align: center;
       }
       #select-all-label { display: none !important; }
       #delete-selected {
-        margin-left: 8px;
-        padding: 8px 10px;
-        font-size: 0.85rem;
+        flex: 1;
+        min-width: 120px;
+        margin-left: 0;
+        padding: 12px 16px;
+        font-size: 1rem;
+        text-align: center;
       }
 
       /* Table adjustments */
-      table { font-size: 0.85rem; }
-      th, td { padding: 6px 4px; }
+      table { font-size: 0.85rem; display: block; overflow-x: auto; }
+      th, td { padding: 8px 6px; white-space: nowrap; }
       .thumb { width: 40px; height: 40px; margin-right: 6px; }
       .title-cell { flex-direction: column; align-items: flex-start; gap: 4px; }
 
       /* Buttons */
-      .btn { padding: 10px 12px; font-size: 0.9rem; }
+      .btn { padding: 12px 16px; font-size: 1rem; border-radius: 8px; }
+      .btn-sm { padding: 10px 14px; font-size: 0.9rem; }
 
       /* Bottom pagination */
-      #bottom-pagination { gap: 6px; }
+      #bottom-pagination {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        justify-content: center;
+      }
+      #bottom-pagination .btn {
+        padding: 10px 14px;
+        min-width: 44px;
+      }
+
+      /* Results summary */
+      #results-summary {
+        font-size: 0.9rem;
+        text-align: center;
+      }
     }
 
     @media (max-width: 480px) {
       body { padding: 8px; }
-      .top h2 { font-size: 1rem; }
+      .top h2 { font-size: 1.1rem; }
+      .top > div:last-child .btn {
+        min-width: 100px;
+        font-size: 0.85rem;
+        padding: 10px 12px;
+      }
+
+      .filters > label:first-of-type input {
+        padding: 10px;
+        font-size: 0.95rem;
+      }
+      #search-btn {
+        padding: 10px 12px;
+        font-size: 0.95rem;
+      }
 
       table { font-size: 0.8rem; }
-      th, td { padding: 4px 3px; }
+      th, td { padding: 6px 4px; }
       .thumb { width: 36px; height: 36px; }
 
-      .btn { padding: 8px 10px; font-size: 0.85rem; }
+      .btn { padding: 10px 14px; font-size: 0.95rem; }
+      .btn-sm { padding: 8px 12px; font-size: 0.85rem; }
+
+      #select-btn, #delete-selected {
+        padding: 10px 14px;
+        font-size: 0.95rem;
+      }
+
+      #bottom-pagination .btn {
+        padding: 8px 10px;
+        min-width: 38px;
+        font-size: 0.85rem;
+      }
+    }
+
+    @media (max-width: 380px) {
+      body { padding: 6px; }
+      .top h2 { font-size: 1rem; }
+      .top > div:last-child {
+        flex-direction: column;
+      }
+      .top > div:last-child .btn {
+        max-width: 100%;
+        width: 100%;
+      }
+
+      .btn { padding: 10px 12px; font-size: 0.9rem; }
+      th, td { padding: 5px 3px; font-size: 0.75rem; }
+      .thumb { width: 32px; height: 32px; }
     }
   </style>
 </head>
@@ -155,7 +336,7 @@
         <span style="font-size:1rem">📘</span> <span data-i18n="fb_listings">FB Listings</span>
       </a>
       <a href="/store-listing-helper" class="btn" style="background:#f39c12; color:#fff; text-decoration:none; display:flex; align-items:center; gap:6px">
-        <span style="font-size:1.1rem">🩺</span> <span data-i18n="store_helper">Listing Doctor</span>
+        <span style="font-size:1.1rem">🩺</span> <span data-i18n="store_helper">Store Doctor</span>
       </a>
     </div>
   </div>

@@ -101,17 +101,26 @@
         /* Inventory gear on first row */
         .inventory-gear-btn { order: 2; margin-left: 0 !important; flex-shrink: 0; }
 
-        /* Unified search - full width on second row (between top row and search bar) */
+        /* Unified search - stay on top row at half width */
         .unified-search-box {
-            flex: 1 1 100% !important;
-            order: 10;
-            margin-left: 0 !important;
+            flex: 0 0 45% !important;
+            order: 3;
+            margin-left: auto !important;
             margin-top: 0;
+            padding: 6px 8px !important;
+        }
+        .unified-search-box label {
+            display: none !important;  /* Hide "ALL:" label on mobile */
         }
         .unified-search-box input {
-            width: 100% !important;
             flex: 1;
             min-width: 0;
+            padding: 6px 8px !important;
+            font-size: 0.85rem !important;
+        }
+        .unified-search-box button {
+            padding: 6px 10px !important;
+            font-size: 0.8rem !important;
         }
 
         /* Search row - search bar + button, then sort below */
@@ -207,9 +216,10 @@
         .db-selector-group label { font-size: 0.9rem; }
         #db-select { font-size: 0.9rem; padding: 8px 10px; }
 
-        .unified-search-box label { font-size: 0.8rem !important; }
-        .unified-search-box input { font-size: 0.9rem !important; padding: 8px !important; }
-        .unified-search-box button { padding: 8px 12px !important; font-size: 0.85rem !important; }
+        /* Unified search even smaller on tiny screens */
+        .unified-search-box { flex: 0 0 40% !important; padding: 4px 6px !important; }
+        .unified-search-box input { font-size: 0.8rem !important; padding: 5px 6px !important; }
+        .unified-search-box button { padding: 5px 8px !important; font-size: 0.75rem !important; }
 
         table { font-size: 0.8rem; }
         th, td { padding: 4px 3px; }

@@ -6,278 +6,510 @@
   <title>Marketplace Session</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   <style>
+    * { box-sizing: border-box; }
     body {
       font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
-      background: #f5f7fa;
+      background: #1a1a2e;
+      min-height: 100vh;
       margin: 0;
-      padding: 20px;
-      color: #2c3e50;
+      padding: 0;
+      color: #eee;
     }
-    .container {
-      max-width: 1000px;
-      margin: 0 auto;
-    }
-    .card {
-      background: #fff;
-      border-radius: 12px;
-      padding: 24px;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-      margin-bottom: 16px;
-    }
-    .layout {
-      display: grid;
-      grid-template-columns: 1.6fr 1fr;
-      gap: 16px;
-    }
-    .left-col, .right-col { min-width: 0; }
-    .header-row {
+
+    /* Top Navigation Bar */
+    .navbar {
+      background: rgba(255,255,255,0.05);
+      backdrop-filter: blur(10px);
+      padding: 12px 20px;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 12px;
-      margin-bottom: 16px;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+      position: sticky;
+      top: 0;
+      z-index: 100;
     }
-    h1 { margin: 0; font-size: 1.8rem; }
-    .btn {
-      padding: 12px 24px;
-      border: none;
-      border-radius: 8px;
-      font-size: 1rem;
-      cursor: pointer;
+    .navbar h1 {
+      margin: 0;
+      font-size: 1.3rem;
+      font-weight: 600;
+      color: #fff;
+    }
+    .nav-links {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+    .nav-link {
+      color: rgba(255,255,255,0.7);
       text-decoration: none;
-      display: inline-block;
+      font-size: 0.9rem;
+      padding: 8px 14px;
+      border-radius: 8px;
       transition: all 0.2s;
     }
-    .btn-danger { background: #e74c3c; color: #fff; }
-    .btn-success { background: #27ae60; color: #fff; }
-    .btn-secondary { background: #95a5a6; color: #fff; }
-    .scan-row {
-      display: flex;
-      gap: 12px;
-      align-items: center;
-      flex-wrap: wrap;
+    .nav-link:hover { background: rgba(255,255,255,0.1); color: #fff; }
+    .nav-link.back { background: rgba(231,76,60,0.2); color: #e74c3c; }
+    .nav-link.back:hover { background: rgba(231,76,60,0.3); }
+
+    /* Main Content */
+    .main-content {
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+      padding-bottom: 200px; /* Space for sticky footer */
     }
-    .scan-row input {
-      flex: 1;
-      min-width: 220px;
-      padding: 12px;
-      border: 2px solid #e0e4e8;
+
+    /* Hero Scan Section */
+    .scan-hero {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      border-radius: 20px;
+      padding: 30px;
+      margin-bottom: 20px;
+      text-align: center;
+    }
+    .scan-hero h2 {
+      margin: 0 0 20px 0;
+      font-size: 1.1rem;
+      font-weight: 500;
+      color: rgba(255,255,255,0.9);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    .scan-input-wrap {
+      position: relative;
+      max-width: 500px;
+      margin: 0 auto;
+    }
+    .scan-input {
+      width: 100%;
+      padding: 18px 24px;
+      font-size: 1.2rem;
+      border: none;
+      border-radius: 12px;
+      background: rgba(255,255,255,0.95);
+      color: #333;
+      text-align: center;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+    }
+    .scan-input:focus {
+      outline: none;
+      box-shadow: 0 4px 30px rgba(0,0,0,0.3), 0 0 0 3px rgba(255,255,255,0.3);
+    }
+    .scan-input::placeholder { color: #999; }
+
+    /* Search Toggle */
+    .search-toggle {
+      margin-top: 16px;
+    }
+    .search-toggle-btn {
+      background: rgba(255,255,255,0.2);
+      border: none;
+      color: #fff;
+      padding: 10px 20px;
       border-radius: 8px;
-      font-size: 1rem;
+      cursor: pointer;
+      font-size: 0.9rem;
+      transition: all 0.2s;
     }
+    .search-toggle-btn:hover { background: rgba(255,255,255,0.3); }
+    .search-panel {
+      display: none;
+      margin-top: 16px;
+      background: rgba(255,255,255,0.1);
+      border-radius: 12px;
+      padding: 16px;
+    }
+    .search-panel.open { display: block; }
     .search-row {
       display: flex;
-      gap: 12px;
-      align-items: center;
-      flex-wrap: wrap;
-      margin-top: 12px;
+      gap: 10px;
     }
     .search-row input {
       flex: 1;
-      min-width: 200px;
-      padding: 12px;
-      border: 2px solid #e0e4e8;
+      padding: 12px 16px;
+      border: none;
       border-radius: 8px;
       font-size: 1rem;
+      background: rgba(255,255,255,0.9);
+      color: #333;
     }
+    .search-row input:focus { outline: none; }
+    .search-row button {
+      padding: 12px 20px;
+      border: none;
+      border-radius: 8px;
+      background: #fff;
+      color: #764ba2;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .search-row button:hover { transform: scale(1.02); }
     .search-results {
-      margin-top: 10px;
-      max-height: 260px;
+      margin-top: 12px;
+      max-height: 200px;
       overflow: auto;
-      border: 1px solid #e0e4e8;
-      border-radius: 10px;
+      background: rgba(255,255,255,0.95);
+      border-radius: 8px;
     }
-    .search-results table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
-    .search-results th, .search-results td { padding: 8px; border-bottom: 1px solid #eef1f3; }
-    .search-results th { background: #f5f7fa; text-align: left; }
-    .thumb-sm { width: 36px; height: 36px; border-radius: 6px; object-fit: cover; background: #f0f0f0; }
+    .search-results table { width: 100%; border-collapse: collapse; font-size: 0.85rem; color: #333; }
+    .search-results th, .search-results td { padding: 10px; border-bottom: 1px solid #eee; text-align: left; }
+    .search-results th { background: #f5f5f5; font-weight: 600; }
+    .search-results .btn-add {
+      background: #27ae60;
+      color: #fff;
+      border: none;
+      padding: 6px 14px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    .thumb-sm { width: 36px; height: 36px; border-radius: 6px; object-fit: cover; cursor: pointer; }
+    .thumb-placeholder {
+      width: 36px; height: 36px; border-radius: 6px;
+      background: rgba(102,126,234,0.2); color: #667eea;
+      display: inline-flex; align-items: center; justify-content: center;
+      font-size: 0.7rem; font-weight: 600; cursor: pointer;
+    }
+    .img-modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.85);
+      z-index: 2000;
+      align-items: center;
+      justify-content: center;
+    }
+    .img-modal.open { display: flex; }
+    .img-modal img { max-width: 90%; max-height: 90%; border-radius: 12px; }
+    .img-modal .close-btn {
+      position: absolute; top: 20px; right: 20px;
+      background: rgba(255,255,255,0.2); color: #fff;
+      border: none; border-radius: 50%;
+      width: 40px; height: 40px;
+      font-size: 1.5rem; cursor: pointer;
+    }
+
+    /* Message */
+    .message {
+      display: none;
+      padding: 14px 18px;
+      border-radius: 10px;
+      margin-bottom: 16px;
+      font-weight: 500;
+    }
+    .message.success { display: block; background: #d4edda; color: #155724; }
+    .message.error { display: block; background: #f8d7da; color: #721c24; }
+
+    /* Items Section */
+    .items-section {
+      background: rgba(255,255,255,0.05);
+      border-radius: 16px;
+      padding: 20px;
+    }
+    .items-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+    .items-header h3 {
+      margin: 0;
+      font-size: 1rem;
+      color: rgba(255,255,255,0.7);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    .clear-btn {
+      background: rgba(231,76,60,0.2);
+      color: #e74c3c;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      transition: all 0.2s;
+    }
+    .clear-btn:hover { background: rgba(231,76,60,0.3); }
+
     .items-list {
       display: flex;
       flex-direction: column;
-      gap: 10px;
+      gap: 12px;
     }
-    .item-row {
-      display: grid;
-      grid-template-columns: 56px 1fr 180px 140px 110px;
-      gap: 10px;
-      align-items: center;
-      padding: 10px;
-      border: 1px solid #e0e4e8;
-      border-radius: 10px;
-      background: #fafbfc;
-      box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+    .empty-state {
+      text-align: center;
+      color: rgba(255,255,255,0.4);
+      padding: 40px 20px;
+      font-size: 1rem;
     }
-    .thumb {
-      width: 56px;
-      height: 56px;
-      border-radius: 8px;
-      object-fit: cover;
-      background: #f0f0f0;
-    }
-    .item-title input {
-      width: 100%;
-      padding: 8px 10px;
-      border: 1px solid #dfe6e9;
-      border-radius: 6px;
-      font-size: 0.95rem;
-    }
-    .item-barcode {
-      font-family: monospace;
-      color: #7f8c8d;
-      font-size: 0.85rem;
-      margin-top: 4px;
-    }
-    .price-input input {
-      width: 100%;
-      padding: 8px 10px;
-      border: 1px solid #dfe6e9;
-      border-radius: 6px;
-      font-size: 0.95rem;
-    }
-    .qty-control {
+
+    /* Item Card - Simplified */
+    .item-card {
       display: flex;
       align-items: center;
-      gap: 6px;
-      justify-content: center;
+      gap: 14px;
+      background: rgba(255,255,255,0.08);
+      border-radius: 12px;
+      padding: 14px;
+      transition: all 0.2s;
+    }
+    .item-card:hover { background: rgba(255,255,255,0.12); }
+    .item-thumb {
+      width: 56px;
+      height: 56px;
+      border-radius: 10px;
+      object-fit: cover;
+      background: rgba(255,255,255,0.1);
+      flex-shrink: 0;
+    }
+    .item-info {
+      flex: 1;
+      min-width: 0;
+    }
+    .item-title-input {
+      width: 100%;
+      background: transparent;
+      border: none;
+      border-bottom: 1px solid rgba(255,255,255,0.2);
+      color: #fff;
+      font-size: 0.95rem;
+      padding: 4px 0;
+      margin-bottom: 4px;
+    }
+    .item-title-input:focus { outline: none; border-bottom-color: #667eea; }
+    .item-title-input::placeholder { color: rgba(255,255,255,0.4); }
+    .item-barcode {
+      font-family: monospace;
+      color: rgba(255,255,255,0.5);
+      font-size: 0.8rem;
+    }
+    .item-price {
+      width: 90px;
+    }
+    .item-price input {
+      width: 100%;
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 8px;
+      color: #fff;
+      padding: 10px;
+      text-align: center;
+      font-size: 0.95rem;
+    }
+    .item-price input:focus { outline: none; border-color: #667eea; }
+    .item-price input::placeholder { color: rgba(255,255,255,0.4); }
+    .item-qty {
+      display: flex;
+      align-items: center;
+      gap: 8px;
     }
     .qty-btn {
-      width: 30px;
-      height: 30px;
+      width: 32px;
+      height: 32px;
       border: none;
-      border-radius: 6px;
-      background: #3498db;
+      border-radius: 8px;
+      background: rgba(255,255,255,0.15);
       color: #fff;
       cursor: pointer;
-      font-weight: 700;
+      font-size: 1.1rem;
+      font-weight: 600;
+      transition: all 0.2s;
     }
+    .qty-btn:hover { background: rgba(255,255,255,0.25); }
     .qty-value {
-      min-width: 30px;
+      min-width: 28px;
       text-align: center;
       font-weight: 700;
+      font-size: 1.1rem;
+      color: #fff;
     }
     .remove-btn {
-      background: #e74c3c;
-      color: #fff;
+      width: 32px;
+      height: 32px;
       border: none;
-      border-radius: 6px;
-      padding: 6px 10px;
+      border-radius: 8px;
+      background: rgba(231,76,60,0.2);
+      color: #e74c3c;
       cursor: pointer;
+      font-size: 1rem;
+      transition: all 0.2s;
     }
-    .summary {
-      display: grid;
-      grid-template-columns: 1fr 1fr 1fr;
-      gap: 12px;
-      align-items: end;
+    .remove-btn:hover { background: rgba(231,76,60,0.4); }
+
+    /* Sticky Footer Summary */
+    .summary-footer {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: rgba(26,26,46,0.95);
+      backdrop-filter: blur(20px);
+      border-top: 1px solid rgba(255,255,255,0.1);
+      padding: 16px 20px;
+      z-index: 100;
     }
-    .summary .box {
-      background: #f7f9fb;
-      border-radius: 10px;
-      padding: 12px;
-      border: 1px solid #e0e4e8;
+    .summary-inner {
+      max-width: 800px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
     }
-    .summary label {
-      font-weight: 600;
-      display: block;
-      margin-bottom: 6px;
+    .summary-stats {
+      display: flex;
+      gap: 24px;
     }
-    .summary input {
-      width: 100%;
-      padding: 8px 10px;
-      border: 1px solid #dfe6e9;
-      border-radius: 6px;
+    .stat {
+      text-align: center;
     }
-    .totals {
-      font-size: 1.1rem;
+    .stat-label {
+      font-size: 0.75rem;
+      color: rgba(255,255,255,0.5);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 4px;
+    }
+    .stat-value {
+      font-size: 1.4rem;
       font-weight: 700;
       color: #27ae60;
     }
-    .message {
-      display: none;
-      margin-top: 10px;
-      padding: 10px 12px;
+    .stat-value.qty { color: #3498db; }
+    .override-input {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .override-input label {
+      font-size: 0.8rem;
+      color: rgba(255,255,255,0.6);
+    }
+    .override-input input {
+      width: 100px;
+      padding: 10px;
+      border: 1px solid rgba(255,255,255,0.2);
       border-radius: 8px;
-      font-size: 0.95rem;
-    }
-    .message.success { background: #d4edda; color: #155724; display: block; }
-    .message.error { background: #f8d7da; color: #721c24; display: block; }
-    .empty-state {
+      background: rgba(255,255,255,0.1);
+      color: #fff;
       text-align: center;
-      color: #95a5a6;
-      padding: 20px;
+      font-size: 1rem;
     }
-    @media (max-width: 900px) {
-      .layout { grid-template-columns: 1fr; }
-      .item-row {
-        grid-template-columns: 56px 1fr 1fr;
-        grid-template-areas:
-          "thumb title title"
-          "thumb price qty"
-          "thumb remove remove";
-      }
-      .item-title { grid-area: title; }
-      .price-input { grid-area: price; }
-      .qty-control { grid-area: qty; justify-content: flex-start; }
-      .remove-wrap { grid-area: remove; }
+    .override-input input:focus { outline: none; border-color: #667eea; }
+    .override-input input::placeholder { color: rgba(255,255,255,0.3); }
+    .submit-btn {
+      background: linear-gradient(135deg, #27ae60, #1e8449);
+      color: #fff;
+      border: none;
+      padding: 14px 32px;
+      border-radius: 10px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      box-shadow: 0 4px 15px rgba(39,174,96,0.3);
     }
-    @media (max-width: 640px) {
-      body { padding: 12px; }
-      .summary { grid-template-columns: 1fr; }
+    .submit-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(39,174,96,0.4); }
+    .submit-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+    /* Responsive */
+    @media (max-width: 700px) {
+      .main-content { padding: 16px; padding-bottom: 220px; }
+      .scan-hero { padding: 24px 20px; }
+      .scan-input { font-size: 1.1rem; padding: 16px 20px; }
+      .item-card { flex-wrap: wrap; }
+      .item-info { width: 100%; order: 1; }
+      .item-thumb { order: 0; }
+      .item-price { order: 2; flex: 1; }
+      .item-qty { order: 3; }
+      .remove-btn { order: 4; }
+      .summary-inner { flex-direction: column; gap: 12px; }
+      .summary-stats { width: 100%; justify-content: space-around; }
+      .override-input { width: 100%; justify-content: center; }
+      .submit-btn { width: 100%; }
     }
-    .recent-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
-    .recent-table th, .recent-table td { padding: 8px; border-bottom: 1px solid #eef1f3; text-align:left; }
-    .recent-table th { background: #f5f7fa; }
-    .recent-controls { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:10px; }
+    @media (max-width: 480px) {
+      .navbar h1 { font-size: 1.1rem; }
+      .nav-link { padding: 6px 10px; font-size: 0.8rem; }
+      .scan-hero h2 { font-size: 0.95rem; }
+      .stat-value { font-size: 1.2rem; }
+    }
   </style>
 </head>
 <body>
-  <div class="container">
-    <div class="card">
-      <div class="header-row">
-        <a href="/tools" class="btn btn-danger" data-i18n="back">← Back</a>
-        <h1 data-i18n="marketplace_session">Marketplace Session</h1>
-        <a href="/marketplace-stats" class="btn btn-secondary" data-i18n="marketplace_recent_sales">📊 Recent Sales</a>
+  <!-- Top Navigation -->
+  <nav class="navbar">
+    <a href="/" class="nav-link back">← Home</a>
+    <h1 data-i18n="marketplace_session">Marketplace Sale</h1>
+    <div class="nav-links" style="margin-right: 120px;">
+      <a href="/marketplace-stats" class="nav-link">📊 History</a>
+    </div>
+  </nav>
+
+  <div class="main-content">
+    <!-- Hero Scan Area -->
+    <div class="scan-hero">
+      <h2 data-i18n="marketplace_scan_barcode">Scan Barcode to Add Item</h2>
+      <div class="scan-input-wrap">
+        <input id="scanInput" type="text" class="scan-input" placeholder="Scan or type barcode..." autofocus>
       </div>
-      <div class="scan-row">
-        <input id="scanInput" type="text" data-i18n="marketplace_scan_barcode" placeholder="Scan barcode..." autofocus>
-        <button class="btn btn-secondary" id="clearSession" data-i18n="clear">Clear</button>
-        <button class="btn btn-success" id="submitSession" disabled data-i18n="marketplace_submit_session">Submit Session</button>
+      <div class="search-toggle">
+        <button class="search-toggle-btn" id="toggleSearch">🔍 Search by Name</button>
       </div>
-      <div class="search-row">
-        <input id="searchName" type="text" data-i18n="marketplace_search_name" placeholder="Search by name">
-        <button class="btn btn-secondary" id="searchBtn" data-i18n="search">Search</button>
+      <div class="search-panel" id="searchPanel">
+        <div class="search-row">
+          <input id="searchName" type="text" placeholder="Enter product name...">
+          <button id="searchBtn">Search</button>
+        </div>
+        <div id="searchResults" class="search-results" style="display:none"></div>
       </div>
-      <div id="searchResults" class="search-results" style="display:none"></div>
-      <div id="message" class="message"></div>
     </div>
 
-    <div class="layout">
-      <div class="left-col">
-        <div class="card">
-          <div class="items-list" id="itemsList">
-            <div class="empty-state" data-i18n="marketplace_empty">Scan items to start a session.</div>
-          </div>
-        </div>
-      </div>
-      <div class="right-col">
-        <div class="card">
-          <div class="summary">
-            <div class="box">
-              <label data-i18n="marketplace_total_qty">Total Quantity</label>
-              <div id="totalQty" class="totals">0</div>
-            </div>
-            <div class="box">
-              <label data-i18n="marketplace_auto_total">Auto Total</label>
-              <div id="autoTotal" class="totals">$0.00</div>
-            </div>
-            <div class="box">
-              <label data-i18n="marketplace_final_total">Final Total (optional override)</label>
-              <input id="finalTotalInput" type="number" min="0" step="0.01" data-i18n="marketplace_final_total_placeholder" placeholder="Leave blank to use auto total">
-              <div id="finalTotal" class="totals" style="margin-top:8px">$0.00</div>
-            </div>
-          </div>
-        </div>
+    <div id="message" class="message"></div>
 
+    <!-- Items List -->
+    <div class="items-section">
+      <div class="items-header">
+        <h3>Session Items</h3>
+        <button class="clear-btn" id="clearSession">Clear All</button>
       </div>
+      <div class="items-list" id="itemsList">
+        <div class="empty-state" data-i18n="marketplace_empty">Scan items to start a session</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Image Popup Modal -->
+  <div class="img-modal" id="imgModal">
+    <button class="close-btn" onclick="closeImgModal()">×</button>
+    <img id="imgModalImg" src="" alt="Preview">
+  </div>
+
+  <!-- Sticky Footer Summary -->
+  <div class="summary-footer">
+    <div class="summary-inner">
+      <div class="summary-stats">
+        <div class="stat">
+          <div class="stat-label">Items</div>
+          <div class="stat-value qty" id="totalQty">0</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Auto Total</div>
+          <div class="stat-value" id="autoTotal">$0.00</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Final</div>
+          <div class="stat-value" id="finalTotal">$0.00</div>
+        </div>
+      </div>
+      <div class="override-input">
+        <label>Override $</label>
+        <input id="finalTotalInput" type="number" min="0" step="0.01" placeholder="—">
+      </div>
+      <button class="submit-btn" id="submitSession" disabled>Submit Sale</button>
     </div>
   </div>
 
@@ -292,6 +524,14 @@
     const finalTotalInput = document.getElementById('finalTotalInput');
     const submitBtn = document.getElementById('submitSession');
     const clearBtn = document.getElementById('clearSession');
+    const toggleSearch = document.getElementById('toggleSearch');
+    const searchPanel = document.getElementById('searchPanel');
+
+    // Toggle search panel
+    toggleSearch.addEventListener('click', () => {
+      searchPanel.classList.toggle('open');
+      toggleSearch.textContent = searchPanel.classList.contains('open') ? '✕ Close Search' : '🔍 Search by Name';
+    });
 
     function fmtMoney(v) {
       const n = isNaN(v) ? 0 : v;
@@ -321,35 +561,41 @@
     async function searchByName(q) {
       const resultsEl = document.getElementById('searchResults');
       if (!q) return;
-        resultsEl.style.display = 'block';
-        resultsEl.innerHTML = '<div class="empty-state" data-i18n="loading">Loading...</div>';
+      resultsEl.style.display = 'block';
+      resultsEl.innerHTML = '<div style="padding:20px;text-align:center;color:#666">Searching...</div>';
       try {
         const resp = await fetch(`/api/marketplace/search?q=${encodeURIComponent(q)}`);
         const data = await resp.json();
         if (!data.success) {
-          resultsEl.innerHTML = '<div class="empty-state" data-i18n="marketplace_search_error">Search failed</div>';
+          resultsEl.innerHTML = '<div style="padding:20px;text-align:center;color:#e74c3c">Search failed</div>';
           return;
         }
         const rows = data.results || [];
         if (rows.length === 0) {
-          resultsEl.innerHTML = '<div class="empty-state" data-i18n="fb_listings_search_empty">No matches found.</div>';
+          resultsEl.innerHTML = '<div style="padding:20px;text-align:center;color:#666">No matches found</div>';
           return;
         }
-        const t = (window.i18n && window.i18n.t) ? window.i18n.t : (k => k);
-        let html = '<table><thead><tr><th>' + t('image_label') + '</th><th>' + t('upc_label') + '</th><th>' + t('title') + '</th><th style="text-align:center">' + t('actions') + '</th></tr></thead><tbody>';
-        for (const r of rows) {
+        let html = '<table><thead><tr><th></th><th>UPC</th><th>Title</th><th></th></tr></thead><tbody>';
+        const noImgSvg = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36"><rect width="100%" height="100%" fill="#f0f0f0"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#bbb" font-size="8">No img</text></svg>');
+        rows.forEach((r, idx) => {
           const img = r.image_url || '';
-          const thumb = img ? img : 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36"><rect width="100%" height="100%" fill="#f0f0f0"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#bbb" font-size="8">No img</text></svg>');
+          const thumb = img || noImgSvg;
+          // First 3 rows show thumbnail, rest show "show" placeholder
+          let imgCell;
+          if (idx < 3) {
+            imgCell = `<img class="thumb-sm" src="${thumb}" data-full="${img}" onclick="openSearchImg(this)" onerror="this.src='${noImgSvg}'">`;
+          } else {
+            imgCell = `<span class="thumb-placeholder" data-img="${img}" onclick="revealThumb(this)">show</span>`;
+          }
           html += `<tr>
-            <td><img class="thumb-sm" src="${thumb}" onerror="this.src='${thumb}'"></td>
-            <td style="font-family:monospace">${r.upc || ''}</td>
-            <td>${r.item_description || ''}</td>
-            <td style="text-align:center"><button class="btn btn-secondary btn-add" data-upc="${r.upc || ''}">+</button></td>
+            <td>${imgCell}</td>
+            <td style="font-family:monospace;font-size:0.8rem">${r.upc || ''}</td>
+            <td style="word-break:break-word">${r.item_description || ''}</td>
+            <td><button class="btn-add" data-upc="${r.upc || ''}">+ Add</button></td>
           </tr>`;
-        }
+        });
         html += '</tbody></table>';
         resultsEl.innerHTML = html;
-        if (window.i18n && window.i18n.applyTranslations) window.i18n.applyTranslations();
         resultsEl.querySelectorAll('.btn-add').forEach(btn => {
           btn.addEventListener('click', () => {
             const upc = btn.dataset.upc || '';
@@ -357,10 +603,9 @@
           });
         });
       } catch (e) {
-        resultsEl.innerHTML = '<div class="empty-state">Search failed</div>';
+        resultsEl.innerHTML = '<div style="padding:20px;text-align:center;color:#e74c3c">Search failed</div>';
       }
     }
-
 
     async function addScan(barcode) {
       if (!barcode) return;
@@ -384,33 +629,30 @@
 
     function renderItems() {
       if (items.size === 0) {
-        itemsList.innerHTML = '<div class="empty-state" data-i18n="marketplace_empty">Scan items to start a session.</div>';
+        itemsList.innerHTML = '<div class="empty-state" data-i18n="marketplace_empty">Scan items to start a session</div>';
         submitBtn.disabled = true;
         updateSummary();
-        if (window.i18n && window.i18n.applyTranslations) window.i18n.applyTranslations();
         return;
       }
       const html = [];
       for (const item of items.values()) {
-        const thumb = item.image ? item.image : 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="56" height="56"><rect width="100%" height="100%" fill="#f0f0f0"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#bbb" font-size="8">No img</text></svg>');
+        const thumb = item.image ? item.image : 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="56" height="56"><rect width="100%" height="100%" fill="rgba(255,255,255,0.1)"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="rgba(255,255,255,0.3)" font-size="8">No img</text></svg>');
         html.push(`
-          <div class="item-row" data-barcode="${item.barcode}">
-            <img class="thumb" src="${thumb}" onerror="this.src='${thumb}'">
-            <div class="item-title">
-              <input type="text" class="title-input" value="${item.title || ''}" placeholder="Item name (optional)" data-i18n="marketplace_item_name_optional">
+          <div class="item-card" data-barcode="${item.barcode}">
+            <img class="item-thumb" src="${thumb}" onerror="this.src='${thumb}'">
+            <div class="item-info">
+              <input type="text" class="item-title-input title-input" value="${item.title || ''}" placeholder="Item name (optional)">
               <div class="item-barcode">${item.barcode}</div>
             </div>
-            <div class="price-input">
-              <input type="number" class="price-input-field" min="0" step="0.01" placeholder="Price (optional)" data-i18n="marketplace_price_optional" value="${item.price}">
+            <div class="item-price">
+              <input type="number" class="price-input-field" min="0" step="0.01" placeholder="$0.00" value="${item.price}">
             </div>
-            <div class="qty-control">
-              <button class="qty-btn qty-minus">-</button>
+            <div class="item-qty">
+              <button class="qty-btn qty-minus">−</button>
               <div class="qty-value">${item.qty}</div>
               <button class="qty-btn qty-plus">+</button>
             </div>
-            <div class="remove-wrap">
-              <button class="remove-btn">X</button>
-            </div>
+            <button class="remove-btn">✕</button>
           </div>
         `);
       }
@@ -418,11 +660,10 @@
       attachRowHandlers();
       submitBtn.disabled = false;
       updateSummary();
-      if (window.i18n && window.i18n.applyTranslations) window.i18n.applyTranslations();
     }
 
     function attachRowHandlers() {
-      document.querySelectorAll('.item-row').forEach(row => {
+      document.querySelectorAll('.item-card').forEach(row => {
         const barcode = row.dataset.barcode;
         const item = items.get(barcode);
         const titleInput = row.querySelector('.title-input');
@@ -510,7 +751,7 @@
 
     clearBtn.addEventListener('click', () => {
       const t = (window.i18n && window.i18n.t) ? window.i18n.t : (k => k);
-      if (confirm(t('marketplace_clear_confirm'))) {
+      if (confirm(t('marketplace_clear_confirm') || 'Clear all items?')) {
         items.clear();
         renderItems();
       }
@@ -519,6 +760,7 @@
     submitBtn.addEventListener('click', async () => {
       if (items.size === 0) return;
       submitBtn.disabled = true;
+      submitBtn.textContent = 'Submitting...';
       hideMessage();
       const sessionId = 'session-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
       const { totalQty, autoTotal } = getTotals();
@@ -527,23 +769,33 @@
 
       const itemList = Array.from(items.values());
       let priceMap = new Map();
+      let priceAutoMap = new Map();  // Track if price was auto-calculated
       if (totalQty > 0) {
         if (!isNaN(override) && override >= 0) {
+          // Override was used - prices are auto-calculated
           if (autoTotal > 0) {
             const ratio = finalTotal / autoTotal;
             itemList.forEach(i => {
               const p = parseFloat(i.price || 0);
               const unit = isNaN(p) ? 0 : p * ratio;
               priceMap.set(i.barcode, unit);
+              // Auto if ratio != 1 (override changed prices) or item had no manual price
+              priceAutoMap.set(i.barcode, Math.abs(ratio - 1) > 0.001 || !i.price);
             });
           } else {
+            // No individual prices, split evenly - definitely auto
             const unit = finalTotal / totalQty;
-            itemList.forEach(i => priceMap.set(i.barcode, unit));
+            itemList.forEach(i => {
+              priceMap.set(i.barcode, unit);
+              priceAutoMap.set(i.barcode, true);
+            });
           }
         } else {
+          // No override - use manual prices (not auto)
           itemList.forEach(i => {
             const p = parseFloat(i.price || 0);
             priceMap.set(i.barcode, isNaN(p) ? 0 : p);
+            priceAutoMap.set(i.barcode, false);
           });
         }
       }
@@ -552,6 +804,7 @@
       let fail = 0;
       for (const item of itemList) {
         const unitPrice = priceMap.get(item.barcode) || 0;
+        const priceAuto = priceAutoMap.get(item.barcode) || false;
         for (let i = 0; i < item.qty; i++) {
           try {
             const resp = await fetch('/api/marketplace/sale', {
@@ -562,7 +815,8 @@
                 title: item.title || '',
                 quantity: 1,
                 price: unitPrice,
-                session_id: sessionId
+                session_id: sessionId,
+                price_auto: priceAuto
               })
             });
             const data = await resp.json();
@@ -574,14 +828,15 @@
         }
       }
 
+      submitBtn.textContent = 'Submit Sale';
       if (fail === 0) {
-        showMessage((window.i18n && window.i18n.t) ? window.i18n.t('marketplace_submit_success') : 'Session submitted successfully.', 'success');
+        showMessage((window.i18n && window.i18n.t) ? window.i18n.t('marketplace_submit_success') : 'Sale submitted successfully!', 'success');
         items.clear();
         finalTotalInput.value = '';
         renderItems();
       } else {
         const t = (window.i18n && window.i18n.t) ? window.i18n.t : (k => k);
-        const msg = t('marketplace_submit_partial')
+        const msg = (t('marketplace_submit_partial') || 'Submitted {success}, failed {fail}')
           .replace('{success}', success)
           .replace('{fail}', fail);
         showMessage(msg, 'error');
@@ -591,6 +846,39 @@
     });
 
     renderItems();
+
+    // Auto-focus scan input on page load
+    setTimeout(() => {
+      scanInput.focus();
+      scanInput.select();
+    }, 100);
+
+    // Image modal functions
+    function openSearchImg(imgEl) {
+      const fullSrc = imgEl.dataset.full || imgEl.src;
+      if (!fullSrc || fullSrc.startsWith('data:')) return;
+      document.getElementById('imgModalImg').src = fullSrc;
+      document.getElementById('imgModal').classList.add('open');
+    }
+    function closeImgModal() {
+      document.getElementById('imgModal').classList.remove('open');
+      document.getElementById('imgModalImg').src = '';
+    }
+    function revealThumb(placeholder) {
+      const img = placeholder.dataset.img || '';
+      const noImgSvg = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36"><rect width="100%" height="100%" fill="#f0f0f0"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#bbb" font-size="8">No img</text></svg>');
+      const thumb = img || noImgSvg;
+      const imgEl = document.createElement('img');
+      imgEl.className = 'thumb-sm';
+      imgEl.src = thumb;
+      imgEl.dataset.full = img;
+      imgEl.onclick = function() { openSearchImg(this); };
+      imgEl.onerror = function() { this.src = noImgSvg; };
+      placeholder.replaceWith(imgEl);
+    }
+    document.getElementById('imgModal').addEventListener('click', function(e) {
+      if (e.target === this) closeImgModal();
+    });
   </script>
   <script src="/static/i18n.js"></script>
 </body>

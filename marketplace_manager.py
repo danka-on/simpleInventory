@@ -25,29 +25,35 @@ def ensure_marketplace_db():
         cur.execute("SELECT session_id FROM marketplace_sales LIMIT 1")
     except sqlite3.OperationalError:
         cur.execute("ALTER TABLE marketplace_sales ADD COLUMN session_id TEXT")
-    
+
+    # Migration: add price_auto flag (1 = auto-split from session total, 0 = manually entered)
+    try:
+        cur.execute("SELECT price_auto FROM marketplace_sales LIMIT 1")
+    except sqlite3.OperationalError:
+        cur.execute("ALTER TABLE marketplace_sales ADD COLUMN price_auto INTEGER DEFAULT 0")
+
     conn.commit()
     conn.close()
 
-def add_marketplace_sale(barcode, title, quantity, price, session_id=None):
+def add_marketplace_sale(barcode, title, quantity, price, session_id=None, price_auto=False):
     """Add a marketplace sale entry."""
     try:
         ensure_marketplace_db()
         conn = sqlite3.connect('marketplace.db')
         cur = conn.cursor()
-        
+
         sale_date = datetime.datetime.now().strftime('%Y-%m-%d')
         created_at = datetime.datetime.utcnow().isoformat()
-        
-        cur.execute('''INSERT INTO marketplace_sales 
-            (barcode, title, quantity, price, sale_date, created_at, session_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?)''',
-            (barcode, title, quantity, price, sale_date, created_at, session_id))
-        
+
+        cur.execute('''INSERT INTO marketplace_sales
+            (barcode, title, quantity, price, sale_date, created_at, session_id, price_auto)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+            (barcode, title, quantity, price, sale_date, created_at, session_id, 1 if price_auto else 0))
+
         sale_id = cur.lastrowid
         conn.commit()
         conn.close()
-        
+
         return {'success': True, 'id': sale_id}
     except Exception as e:
         return {'success': False, 'error': str(e)}

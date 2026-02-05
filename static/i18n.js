@@ -34,7 +34,7 @@ const translations = {
   // ===== index.html =====
   list_manager: { en: 'List Manager', lt: 'Sąrašų tvarkyklė' },
   store_listing_helper: { en: 'Store Listing Helper', lt: 'Parduotuvės pagalbininkas' },
-  store_helper: { en: 'Listing Doctor', lt: 'Skelbimų daktaras' },
+  store_helper: { en: 'Store Doctor', lt: 'Parduotuvės daktaras' },
   fb_listings: { en: 'FB Listings', lt: 'FB skelbimai' },
   fb_listings_title: { en: 'Facebook Marketplace Listings', lt: 'Facebook Marketplace skelbimai' },
   fb_listings_empty: { en: 'No Facebook listings yet.', lt: 'Dar nėra Facebook skelbimų.' },

@@ -3,155 +3,522 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title data-i18n="store_listing_helper">Store Listing Helper</title>
+  <title data-i18n="store_listing_helper">Store Doctor</title>
   <style>
-    body{font-family:Segoe UI,Arial,sans-serif;background:#f7f7f8;margin:0;padding:18px}
-    .top{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:10px;margin-bottom:18px}
-    .btn{padding:8px 14px;border-radius:6px;border:none;cursor:pointer}
-    .btn-sm{padding:6px 10px;font-size:0.85rem}
-    .btn-primary{background:#00b894;color:#fff}
-    .btn-secondary{background:#6c757d;color:#fff}
-    .btn-danger{background:#e74c3c;color:#fff}
-    .tabs{display:flex;gap:4px;border-bottom:2px solid #e0e0e0;margin-bottom:18px}
-    .tab{padding:12px 20px;cursor:pointer;border:none;background:none;font-size:1rem;color:#666;border-bottom:3px solid transparent;margin-bottom:-2px;position:relative}
-    .tab.active{color:#00b894;border-bottom-color:#00b894;font-weight:600}
-    .tab .badge{position:absolute;top:4px;right:4px;min-width:18px;height:18px;border-radius:50%;font-size:0.7rem;display:flex;align-items:center;justify-content:center;color:#fff}
-    .badge-red{background:#e74c3c}
-    .badge-yellow{background:#f1c40f;color:#333}
-    .badge-gray{background:#95a5a6}
-    .tab-content{display:none}
-    .tab-content.active{display:block}
-    .alert-card{background:#fff;border-radius:8px;padding:14px;margin-bottom:12px;border-left:4px solid #ccc;box-shadow:0 1px 3px rgba(0,0,0,0.06)}
-    .alert-card.red{border-left-color:#e74c3c}
-    .alert-card.yellow{border-left-color:#f1c40f}
-    .alert-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
-    .alert-upc{font-weight:600;font-size:1.1rem;font-family:monospace}
-    .alert-severity{padding:3px 8px;border-radius:4px;font-size:0.75rem;font-weight:600;text-transform:uppercase}
-    .alert-severity.red{background:#ffe0e0;color:#c0392b}
-    .alert-severity.yellow{background:#fff8dc;color:#7f8c00}
-    .alert-details{color:#666;font-size:0.9rem;margin-bottom:10px}
-    .listing-list{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
-    .listing-item{display:flex;align-items:center;gap:8px;background:#f8f9fa;padding:8px 12px;border-radius:6px;font-size:0.85rem}
-    .listing-item img{width:36px;height:36px;object-fit:cover;border-radius:4px;cursor:pointer}
-    .listing-item .store-badge{padding:2px 6px;border-radius:4px;font-size:0.7rem;font-weight:600;text-transform:uppercase}
-    .listing-item .listing-num{font-size:0.72rem;color:#666;background:#eef1f4;border-radius:4px;padding:2px 6px}
-    .store-badge.ebay{background:#0064d2;color:#fff}
-    .store-badge.amazon{background:#ff9900;color:#000}
-    .listing-qty{font-weight:600;color:#27ae60}
-    .btn-dismiss{background:#f0f0f0;color:#666;font-size:0.8rem;padding:6px 12px}
-    .btn-dismiss:hover{background:#e0e0e0}
-    .finder-btn{background:#8e44ad;color:#fff;text-decoration:none;padding:8px 14px;border-radius:6px;font-size:0.9rem;font-weight:600;display:inline-flex;align-items:center}
-    .finder-btn:hover{background:#7a3a9a}
-    .warehouse-label{font-weight:700;font-size:0.95rem}
-    .warehouse-qty{font-weight:700}
-    .warehouse-qty.zero{color:#e74c3c}
-    .empty-state{text-align:center;padding:40px;color:#888}
-    .empty-state i{font-size:3rem;margin-bottom:12px;display:block}
-    .summary-cards{display:grid;grid-template-columns:repeat(auto-fit, minmax(140px, 1fr));gap:12px;margin-bottom:18px}
-    .summary-card{background:#fff;padding:14px;border-radius:8px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,0.06)}
-    .summary-card .count{font-size:2rem;font-weight:700}
-    .summary-card .label{font-size:0.8rem;color:#666;text-transform:uppercase}
-    .summary-card.red .count{color:#e74c3c}
-    .summary-card.yellow .count{color:#f1c40f}
-    #loading{text-align:center;padding:40px;color:#666}
-    .spinner{border:4px solid #f3f3f3;border-top:4px solid #00b894;border-radius:50%;width:40px;height:40px;animation:spin 1s linear infinite;margin:0 auto 12px}
-    @keyframes spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
-    @media(max-width:600px){
-      body{padding:10px}
-      .top{gap:8px}
-      .top h2{font-size:1rem}
-      .tabs{overflow-x:auto;gap:2px}
-      .tab{padding:8px 10px;font-size:0.8rem;white-space:nowrap}
-      .summary-cards{grid-template-columns:repeat(2,1fr);gap:8px}
-      .summary-card{padding:10px}
-      .summary-card .count{font-size:1.5rem}
-      .summary-card .label{font-size:0.7rem}
-      .alert-card{padding:10px}
-      .alert-header{flex-wrap:wrap;gap:6px}
-      .alert-upc{font-size:0.95rem}
-      .listing-list{gap:6px}
-      .listing-item{padding:6px 8px;font-size:0.8rem}
-      .listing-item img{width:28px;height:28px}
-      .listing-item span[style*="max-width"]{max-width:100px !important}
+    * { box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      margin: 0;
+      padding: 20px;
     }
-    @media(max-width:400px){
-      .summary-cards{grid-template-columns:repeat(2,1fr)}
-      .tab{padding:6px 8px;font-size:0.75rem}
-      .tab .badge{min-width:14px;height:14px;font-size:0.6rem;top:2px;right:2px}
+    .container {
+      max-width: 1100px;
+      margin: 0 auto;
     }
-    .img-modal{position:fixed;inset:0;background:rgba(0,0,0,0.6);display:none;align-items:center;justify-content:center;z-index:9999;padding:16px}
-    .img-modal .card{background:#fff;border-radius:8px;padding:12px;max-width:90vw;max-height:90vh;overflow:auto;box-shadow:0 4px 16px rgba(0,0,0,0.2)}
-    .img-modal img{max-width:100%;height:auto;border-radius:6px;display:block}
-    .img-modal .title{font-weight:600;margin-bottom:8px}
+
+    /* Header */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .header h1 {
+      color: #fff;
+      margin: 0;
+      font-size: 1.8rem;
+      font-weight: 700;
+      text-shadow: 0 2px 4px rgba(0,0,0,0.2);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .header h1 .icon { font-size: 1.6rem; }
+    .btn {
+      padding: 10px 18px;
+      border-radius: 10px;
+      border: none;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 0.95rem;
+      transition: all 0.2s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .btn:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
+    .btn:active { transform: translateY(0); }
+    .btn-back {
+      background: rgba(255,255,255,0.15);
+      color: #fff;
+      backdrop-filter: blur(10px);
+    }
+    .btn-back:hover { background: rgba(255,255,255,0.25); }
+    .btn-scan {
+      background: linear-gradient(135deg, #00b894, #00cec9);
+      color: #fff;
+      box-shadow: 0 4px 15px rgba(0,184,148,0.3);
+      margin-right: 80px;
+    }
+    .btn-scan:hover { box-shadow: 0 6px 20px rgba(0,184,148,0.4); }
+
+    /* Summary Cards */
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .summary-card {
+      background: rgba(255,255,255,0.95);
+      border-radius: 16px;
+      padding: 20px;
+      text-align: center;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+      transition: transform 0.2s ease;
+    }
+    .summary-card:hover { transform: translateY(-4px); }
+    .summary-card .icon {
+      font-size: 2rem;
+      margin-bottom: 8px;
+      display: block;
+    }
+    .summary-card .count {
+      font-size: 2.5rem;
+      font-weight: 800;
+      line-height: 1;
+      margin-bottom: 4px;
+    }
+    .summary-card .label {
+      font-size: 0.8rem;
+      color: #666;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .summary-card.danger .count { color: #e74c3c; }
+    .summary-card.danger .icon { color: #e74c3c; }
+    .summary-card.warning .count { color: #f39c12; }
+    .summary-card.warning .icon { color: #f39c12; }
+
+    /* Main Content Card */
+    .main-card {
+      background: #fff;
+      border-radius: 20px;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.15);
+      overflow: hidden;
+    }
+
+    /* Tabs */
+    .tabs {
+      display: flex;
+      background: #f8f9fa;
+      padding: 8px;
+      gap: 4px;
+      overflow-x: auto;
+      border-bottom: 1px solid #e9ecef;
+    }
+    .tab {
+      padding: 12px 20px;
+      border: none;
+      background: transparent;
+      border-radius: 10px;
+      cursor: pointer;
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: #666;
+      transition: all 0.2s ease;
+      white-space: nowrap;
+      position: relative;
+    }
+    .tab:hover { background: rgba(102,126,234,0.1); color: #667eea; }
+    .tab.active {
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      color: #fff;
+      box-shadow: 0 4px 12px rgba(102,126,234,0.3);
+    }
+    .tab .badge {
+      position: absolute;
+      top: 4px;
+      right: 4px;
+      min-width: 20px;
+      height: 20px;
+      border-radius: 10px;
+      font-size: 0.7rem;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+    }
+    .badge-red { background: #e74c3c; }
+    .badge-yellow { background: #f39c12; }
+    .badge-gray { background: #95a5a6; }
+
+    /* Tab Content */
+    .tab-content {
+      display: none;
+      padding: 24px;
+      min-height: 300px;
+    }
+    .tab-content.active { display: block; }
+
+    /* Alert Cards */
+    .alert-card {
+      background: #fff;
+      border-radius: 16px;
+      padding: 20px;
+      margin-bottom: 16px;
+      border: 1px solid #e9ecef;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+      transition: all 0.2s ease;
+    }
+    .alert-card:hover {
+      box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+      transform: translateY(-2px);
+    }
+    .alert-card.red { border-left: 4px solid #e74c3c; }
+    .alert-card.yellow { border-left: 4px solid #f39c12; }
+
+    .alert-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .alert-upc {
+      font-weight: 700;
+      font-size: 1.2rem;
+      font-family: 'SF Mono', Monaco, monospace;
+      color: #2c3e50;
+      background: #f8f9fa;
+      padding: 6px 12px;
+      border-radius: 8px;
+    }
+    .alert-severity {
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .alert-severity.red { background: linear-gradient(135deg, #ffe0e0, #ffcdd2); color: #c0392b; }
+    .alert-severity.yellow { background: linear-gradient(135deg, #fff8e1, #ffecb3); color: #f57c00; }
+
+    .alert-details {
+      color: #666;
+      font-size: 0.95rem;
+      margin-bottom: 16px;
+      padding: 12px 16px;
+      background: #f8f9fa;
+      border-radius: 10px;
+      line-height: 1.6;
+    }
+
+    /* Listing Items */
+    .listing-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 12px;
+    }
+    .listing-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 14px;
+      background: linear-gradient(135deg, #f8f9fa, #fff);
+      padding: 14px 16px;
+      border-radius: 12px;
+      font-size: 0.9rem;
+      flex-wrap: wrap;
+      border: 1px solid #e9ecef;
+      transition: all 0.2s ease;
+    }
+    .listing-item:hover {
+      border-color: #667eea;
+      box-shadow: 0 4px 12px rgba(102,126,234,0.1);
+    }
+    .listing-item img {
+      width: 48px;
+      height: 48px;
+      object-fit: cover;
+      border-radius: 10px;
+      cursor: pointer;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      transition: transform 0.2s ease;
+    }
+    .listing-item img:hover { transform: scale(1.1); }
+
+    .listing-num {
+      font-size: 0.7rem;
+      color: #666;
+      background: #e9ecef;
+      border-radius: 6px;
+      padding: 4px 8px;
+      font-weight: 600;
+    }
+    .store-badge {
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 0.7rem;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    .store-badge.ebay { background: linear-gradient(135deg, #0064d2, #0052a8); color: #fff; }
+    .store-badge.amazon { background: linear-gradient(135deg, #ff9900, #ffad33); color: #000; }
+    .listing-qty {
+      font-weight: 700;
+      color: #27ae60;
+      background: rgba(39,174,96,0.1);
+      padding: 4px 10px;
+      border-radius: 6px;
+    }
+    .listing-title {
+      flex: 1 1 100%;
+      margin-top: 8px;
+      color: #333;
+      line-height: 1.5;
+      font-size: 0.9rem;
+    }
+
+    /* Action Buttons */
+    .alert-actions {
+      margin-top: 16px;
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+      flex-wrap: wrap;
+    }
+    .btn-finder {
+      background: linear-gradient(135deg, #9b59b6, #8e44ad);
+      color: #fff;
+      text-decoration: none;
+      padding: 10px 18px;
+      border-radius: 10px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      box-shadow: 0 4px 12px rgba(155,89,182,0.3);
+      transition: all 0.2s ease;
+    }
+    .btn-finder:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(155,89,182,0.4); }
+    .btn-dismiss {
+      background: #f0f0f0;
+      color: #666;
+      font-size: 0.9rem;
+      padding: 10px 18px;
+      border-radius: 10px;
+      border: none;
+      cursor: pointer;
+      font-weight: 600;
+      transition: all 0.2s ease;
+    }
+    .btn-dismiss:hover { background: #e0e0e0; transform: translateY(-2px); }
+
+    /* Warehouse */
+    .warehouse-label { font-weight: 700; }
+    .warehouse-qty { font-weight: 700; color: #27ae60; }
+    .warehouse-qty.zero { color: #e74c3c; }
+
+    /* Empty State */
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: #888;
+    }
+    .empty-state .icon {
+      font-size: 4rem;
+      margin-bottom: 16px;
+      display: block;
+      color: #27ae60;
+    }
+    .empty-state p {
+      font-size: 1.1rem;
+      margin: 0;
+    }
+
+    /* Loading */
+    #loading {
+      text-align: center;
+      padding: 60px;
+      color: #666;
+    }
+    .spinner {
+      width: 50px;
+      height: 50px;
+      border: 4px solid #f0f0f0;
+      border-top: 4px solid #667eea;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin: 0 auto 16px;
+    }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+    /* Image Modal */
+    .img-modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.8);
+      backdrop-filter: blur(8px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+      padding: 20px;
+    }
+    .img-modal .modal-content {
+      background: #fff;
+      border-radius: 20px;
+      padding: 20px;
+      max-width: 90vw;
+      max-height: 90vh;
+      overflow: auto;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    }
+    .img-modal .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid #e9ecef;
+    }
+    .img-modal .title {
+      font-weight: 700;
+      font-size: 1.1rem;
+      color: #2c3e50;
+    }
+    .img-modal img {
+      max-width: 100%;
+      height: auto;
+      border-radius: 12px;
+      display: block;
+    }
+    .btn-close {
+      background: #f0f0f0;
+      color: #666;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 600;
+      transition: all 0.2s ease;
+    }
+    .btn-close:hover { background: #e0e0e0; }
+
+    /* Responsive */
+    @media (max-width: 900px) {
+      .summary-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+    @media (max-width: 600px) {
+      body { padding: 12px; }
+      .header { gap: 10px; }
+      .header h1 { font-size: 1.3rem; }
+      .btn-scan { margin-right: 0; }
+      .summary-grid { gap: 10px; }
+      .summary-card { padding: 14px; }
+      .summary-card .icon { font-size: 1.5rem; }
+      .summary-card .count { font-size: 1.8rem; }
+      .summary-card .label { font-size: 0.7rem; }
+      .tabs { padding: 6px; }
+      .tab { padding: 10px 14px; font-size: 0.8rem; }
+      .tab-content { padding: 16px; }
+      .alert-card { padding: 14px; }
+      .alert-upc { font-size: 1rem; padding: 4px 10px; }
+      .listing-item { padding: 10px 12px; }
+      .listing-item img { width: 40px; height: 40px; }
+    }
+    @media (max-width: 400px) {
+      .summary-card .count { font-size: 1.5rem; }
+      .tab { padding: 8px 10px; font-size: 0.75rem; }
+      .tab .badge { min-width: 16px; height: 16px; font-size: 0.6rem; }
+    }
   </style>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 <body>
 
-<div class="top">
-  <a href="/items-to-list" class="btn btn-danger btn-sm" data-i18n="back"><i class="fas fa-arrow-left"></i></a>
-  <h2 style="margin:0;text-align:center" data-i18n="store_listing_helper">Store Listing Helper</h2>
-  <button class="btn btn-primary btn-sm" onclick="scanAlerts()" style="justify-self:end;margin-right:96px"><i class="fas fa-sync"></i> <span data-i18n="scan">Scan</span></button>
-</div>
-
-<div class="summary-cards">
-  <div class="summary-card red">
-    <div class="count" id="count-no-warehouse">-</div>
-    <div class="label" data-i18n="no_warehouse">No Warehouse</div>
+<div class="container">
+  <div class="header">
+    <a href="/items-to-list" class="btn btn-back"><i class="fas fa-arrow-left"></i> <span data-i18n="back">Back</span></a>
+    <h1><span class="icon">🩺</span> <span data-i18n="store_listing_helper">Store Doctor</span></h1>
+    <button class="btn btn-scan" onclick="scanAlerts()"><i class="fas fa-stethoscope"></i> <span data-i18n="scan">Diagnose</span></button>
   </div>
-  <div class="summary-card yellow">
-    <div class="count" id="count-cross-store">-</div>
-    <div class="label" data-i18n="cross_store">Cross-Store</div>
+
+  <div class="summary-grid">
+    <div class="summary-card danger">
+      <span class="icon"><i class="fas fa-warehouse"></i></span>
+      <div class="count" id="count-no-warehouse">-</div>
+      <div class="label" data-i18n="no_warehouse">No Warehouse</div>
+    </div>
+    <div class="summary-card warning">
+      <span class="icon"><i class="fas fa-clone"></i></span>
+      <div class="count" id="count-cross-store">-</div>
+      <div class="label" data-i18n="cross_store">Cross-Store</div>
+    </div>
+    <div class="summary-card danger">
+      <span class="icon"><i class="fas fa-copy"></i></span>
+      <div class="count" id="count-same-store">-</div>
+      <div class="label" data-i18n="same_store_dup">Same-Store Dup</div>
+    </div>
+    <div class="summary-card danger">
+      <span class="icon"><i class="fas fa-balance-scale-right"></i></span>
+      <div class="count" id="count-qty-mismatch">-</div>
+      <div class="label" data-i18n="qty_mismatch">Qty Mismatch</div>
+    </div>
   </div>
-  <div class="summary-card red">
-    <div class="count" id="count-same-store">-</div>
-    <div class="label" data-i18n="same_store_dup">Same-Store Dup</div>
-  </div>
-  <div class="summary-card red">
-    <div class="count" id="count-qty-mismatch">-</div>
-    <div class="label" data-i18n="qty_mismatch">Qty Mismatch</div>
+
+  <div class="main-card">
+    <div class="tabs">
+      <button class="tab active" data-tab="no_warehouse">
+        <i class="fas fa-warehouse" style="margin-right:6px"></i><span data-i18n="no_warehouse">No Warehouse</span>
+        <span class="badge badge-red" id="badge-no-warehouse" style="display:none">0</span>
+      </button>
+      <button class="tab" data-tab="cross_store">
+        <i class="fas fa-clone" style="margin-right:6px"></i><span data-i18n="cross_store">Cross-Store</span>
+        <span class="badge badge-yellow" id="badge-cross-store" style="display:none">0</span>
+      </button>
+      <button class="tab" data-tab="same_store_dup">
+        <i class="fas fa-copy" style="margin-right:6px"></i><span data-i18n="same_store_dup">Same-Store Dup</span>
+        <span class="badge badge-red" id="badge-same-store" style="display:none">0</span>
+      </button>
+      <button class="tab" data-tab="qty_mismatch">
+        <i class="fas fa-balance-scale-right" style="margin-right:6px"></i><span data-i18n="qty_mismatch">Qty Mismatch</span>
+        <span class="badge badge-red" id="badge-qty-mismatch" style="display:none">0</span>
+      </button>
+      <button class="tab" data-tab="dismissed">
+        <i class="fas fa-check-circle" style="margin-right:6px"></i><span data-i18n="marked_fixed">Marked Fixed</span>
+        <span class="badge badge-gray" id="badge-dismissed" style="display:none">0</span>
+      </button>
+    </div>
+
+    <div id="loading" style="display:none">
+      <div class="spinner"></div>
+      <span data-i18n="scanning_listings">Running diagnostics...</span>
+    </div>
+
+    <div class="tab-content active" id="content-no_warehouse"></div>
+    <div class="tab-content" id="content-cross_store"></div>
+    <div class="tab-content" id="content-same_store_dup"></div>
+    <div class="tab-content" id="content-qty_mismatch"></div>
+    <div class="tab-content" id="content-dismissed"></div>
   </div>
 </div>
-
-<div class="tabs">
-  <button class="tab active" data-tab="no_warehouse">
-    <span data-i18n="no_warehouse">No Warehouse</span>
-    <span class="badge badge-red" id="badge-no-warehouse" style="display:none">0</span>
-  </button>
-  <button class="tab" data-tab="cross_store">
-    <span data-i18n="cross_store">Cross-Store</span>
-    <span class="badge badge-yellow" id="badge-cross-store" style="display:none">0</span>
-  </button>
-  <button class="tab" data-tab="same_store_dup">
-    <span data-i18n="same_store_dup">Same-Store Dup</span>
-    <span class="badge badge-red" id="badge-same-store" style="display:none">0</span>
-  </button>
-  <button class="tab" data-tab="qty_mismatch">
-    <span data-i18n="qty_mismatch">Qty Mismatch</span>
-    <span class="badge badge-red" id="badge-qty-mismatch" style="display:none">0</span>
-  </button>
-  <button class="tab" data-tab="dismissed">
-    <span data-i18n="marked_fixed">Marked Fixed</span>
-    <span class="badge badge-gray" id="badge-dismissed" style="display:none">0</span>
-  </button>
-</div>
-
-<div id="loading" style="display:none">
-  <div class="spinner"></div>
-  <span data-i18n="scanning_listings">Scanning listings...</span>
-</div>
-
-<div class="tab-content active" id="content-no_warehouse"></div>
-<div class="tab-content" id="content-cross_store"></div>
-<div class="tab-content" id="content-same_store_dup"></div>
-<div class="tab-content" id="content-qty_mismatch"></div>
-<div class="tab-content" id="content-dismissed"></div>
 
 <div id="imgModal" class="img-modal">
-  <div class="card">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+  <div class="modal-content">
+    <div class="modal-header">
       <div id="imgModalTitle" class="title"></div>
-      <button class="btn btn-secondary btn-sm" onclick="closeImgModal()" data-i18n="close">Close</button>
+      <button class="btn-close" onclick="closeImgModal()" data-i18n="close">Close</button>
     </div>
     <img id="imgModalImg" src="" alt="">
   </div>
@@ -167,7 +534,7 @@ function storeLabel(store) {
 }
 function missingImgSvg(){
   const label = t('no_image');
-  return 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36"><rect width="100%" height="100%" fill="#f0f0f0"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#b0b0b0" font-size="6">'+label+'</text></svg>');
+  return 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48"><rect width="100%" height="100%" fill="#f0f0f0" rx="8"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#b0b0b0" font-size="8">'+label+'</text></svg>');
 }
 
 function esc(s) {
@@ -243,10 +610,10 @@ function renderListings(listings) {
   return listings.map((l, idx) => `
     <div class="listing-item">
       <img src="${esc(l.image || '') || missingImgSvg()}" data-img="${encodeURIComponent(l.image || '')}" data-title="${encodeURIComponent(l.title || '')}" onclick="openListingImg(this)" onerror="this.src='${missingImgSvg()}'">
-      <span class="listing-num">${esc(t('listing'))} ${idx + 1}</span>
+      <span class="listing-num">#${idx + 1}</span>
       <span class="store-badge ${l.store}">${esc(storeLabel(l.store))}</span>
-      <span style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(l.title)}">${esc(l.title || t('untitled'))}</span>
-      <span class="listing-qty">x${l.qty}</span>
+      <span class="listing-qty">×${l.qty}</span>
+      <div class="listing-title">${esc(l.title || t('untitled'))}</div>
     </div>
   `).join('');
 }
@@ -254,7 +621,7 @@ function renderListings(listings) {
 function renderNoWarehouse(alerts) {
   const el = document.getElementById('content-no_warehouse');
   if (!alerts.length) {
-    el.innerHTML = `<div class="empty-state"><i class="fas fa-check-circle" style="color:#27ae60"></i>${esc(t('all_listings_have_stock'))}</div>`;
+    el.innerHTML = `<div class="empty-state"><span class="icon"><i class="fas fa-check-circle"></i></span><p>${esc(t('all_listings_have_stock'))}</p></div>`;
     return;
   }
   el.innerHTML = alerts.map(a => {
@@ -270,15 +637,17 @@ function renderNoWarehouse(alerts) {
     <div class="alert-card ${a.severity}">
       <div class="alert-header">
         <span class="alert-upc">${esc(a.upc)}</span>
-        <span class="alert-severity ${a.severity}">${a.severity === 'red' ? esc(t('multi_store')) : esc(t('single_store'))}</span>
+        <span class="alert-severity ${a.severity}">${a.severity === 'red' ? '<i class="fas fa-exclamation-triangle"></i> ' + esc(t('multi_store')) : '<i class="fas fa-info-circle"></i> ' + esc(t('single_store'))}</span>
       </div>
       <div class="alert-details">
-        ${esc(t('listed_on'))}: <strong>${a.stores.map(s => esc(storeLabel(s))).join(', ')}</strong> | ${esc(t('no_matching_upc'))}
+        <i class="fas fa-store" style="margin-right:6px;color:#667eea"></i>${esc(t('listed_on'))}: <strong>${a.stores.map(s => esc(storeLabel(s))).join(', ')}</strong>
+        <span style="margin:0 12px;color:#ddd">|</span>
+        <i class="fas fa-warehouse" style="margin-right:6px;color:#e74c3c"></i>${esc(t('no_matching_upc'))}
       </div>
       <div class="listing-list">${renderListings(a.listings)}</div>
-      <div style="margin-top:10px;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
-        <a class="finder-btn" href="${esc(finderHref)}" target="_blank" rel="noopener">${esc(t('finder'))}</a>
-        <button class="btn btn-dismiss" onclick="dismissAlert('no_warehouse', '${a.hash}', '${esc(a.upc)}')">
+      <div class="alert-actions">
+        <a class="btn-finder" href="${esc(finderHref)}" target="_blank" rel="noopener"><i class="fas fa-search"></i> ${esc(t('finder'))}</a>
+        <button class="btn-dismiss" onclick="dismissAlert('no_warehouse', '${a.hash}', '${esc(a.upc)}')">
           <i class="fas fa-check"></i> ${esc(t('mark_fixed'))}
         </button>
       </div>
@@ -289,7 +658,7 @@ function renderNoWarehouse(alerts) {
 function renderCrossStore(alerts) {
   const el = document.getElementById('content-cross_store');
   if (!alerts.length) {
-    el.innerHTML = `<div class="empty-state"><i class="fas fa-check-circle" style="color:#27ae60"></i>${esc(t('no_cross_store_dups'))}</div>`;
+    el.innerHTML = `<div class="empty-state"><span class="icon"><i class="fas fa-check-circle"></i></span><p>${esc(t('no_cross_store_dups'))}</p></div>`;
     return;
   }
   el.innerHTML = alerts.map(a => {
@@ -299,17 +668,19 @@ function renderCrossStore(alerts) {
     <div class="alert-card yellow">
       <div class="alert-header">
         <span class="alert-upc">${esc(a.upc)}</span>
-        <span class="alert-severity yellow">${esc(t('cross_store'))}</span>
+        <span class="alert-severity yellow"><i class="fas fa-clone"></i> ${esc(t('cross_store'))}</span>
       </div>
       <div class="alert-details">
-        ${esc(t('same_upc_both_stores'))} | <span class="warehouse-label">${esc(t('warehouse'))}:</span> <span class="${warehouseQtyClass}">${warehouseQty}</span>
+        <i class="fas fa-info-circle" style="margin-right:6px;color:#f39c12"></i>${esc(t('same_upc_both_stores'))}
+        <span style="margin:0 12px;color:#ddd">|</span>
+        <span class="warehouse-label"><i class="fas fa-warehouse" style="margin-right:4px"></i>${esc(t('warehouse'))}:</span> <span class="${warehouseQtyClass}">${warehouseQty}</span>
       </div>
-      <div style="margin-bottom:6px"><strong>${esc(t('ebay'))}:</strong></div>
+      <div style="margin-bottom:8px;font-weight:600;color:#0064d2"><i class="fab fa-ebay" style="margin-right:6px"></i>${esc(t('ebay'))}</div>
       <div class="listing-list">${renderListings(a.ebay_listings)}</div>
-      <div style="margin:6px 0"><strong>${esc(t('amazon'))}:</strong></div>
+      <div style="margin:12px 0 8px;font-weight:600;color:#ff9900"><i class="fab fa-amazon" style="margin-right:6px"></i>${esc(t('amazon'))}</div>
       <div class="listing-list">${renderListings(a.amazon_listings)}</div>
-      <div style="margin-top:10px;text-align:right">
-        <button class="btn btn-dismiss" onclick="dismissAlert('cross_store', '${a.hash}', '${esc(a.upc)}')">
+      <div class="alert-actions">
+        <button class="btn-dismiss" onclick="dismissAlert('cross_store', '${a.hash}', '${esc(a.upc)}')">
           <i class="fas fa-check"></i> ${esc(t('acknowledge'))}
         </button>
       </div>
@@ -320,21 +691,21 @@ function renderCrossStore(alerts) {
 function renderSameStoreDup(alerts) {
   const el = document.getElementById('content-same_store_dup');
   if (!alerts.length) {
-    el.innerHTML = `<div class="empty-state"><i class="fas fa-check-circle" style="color:#27ae60"></i>${esc(t('no_same_store_dups'))}</div>`;
+    el.innerHTML = `<div class="empty-state"><span class="icon"><i class="fas fa-check-circle"></i></span><p>${esc(t('no_same_store_dups'))}</p></div>`;
     return;
   }
   el.innerHTML = alerts.map(a => `
     <div class="alert-card red">
       <div class="alert-header">
         <span class="alert-upc">${esc(a.upc)}</span>
-        <span class="alert-severity red">${a.count} ${esc(t('listings_on'))} ${esc(storeLabel(a.store))}</span>
+        <span class="alert-severity red"><i class="fas fa-copy"></i> ${a.count} ${esc(t('listings_on'))} ${esc(storeLabel(a.store))}</span>
       </div>
       <div class="alert-details">
-        ${esc(t('same_upc_listed'))} <strong>${a.count}</strong> ${esc(t('times_on'))} <strong>${esc(storeLabel(a.store))}</strong>
+        <i class="fas fa-exclamation-triangle" style="margin-right:6px;color:#e74c3c"></i>${esc(t('same_upc_listed'))} <strong>${a.count}</strong> ${esc(t('times_on'))} <strong>${esc(storeLabel(a.store))}</strong>
       </div>
       <div class="listing-list">${renderListings(a.listings)}</div>
-      <div style="margin-top:10px;text-align:right">
-        <button class="btn btn-dismiss" onclick="dismissAlert('same_store_dup', '${a.hash}', '${esc(a.upc)}', '${a.store}')">
+      <div class="alert-actions">
+        <button class="btn-dismiss" onclick="dismissAlert('same_store_dup', '${a.hash}', '${esc(a.upc)}', '${a.store}')">
           <i class="fas fa-check"></i> ${esc(t('mark_fixed'))}
         </button>
       </div>
@@ -345,7 +716,7 @@ function renderSameStoreDup(alerts) {
 function renderQtyMismatch(alerts) {
   const el = document.getElementById('content-qty_mismatch');
   if (!alerts.length) {
-    el.innerHTML = `<div class="empty-state"><i class="fas fa-check-circle" style="color:#27ae60"></i>${esc(t('all_quantities_match'))}</div>`;
+    el.innerHTML = `<div class="empty-state"><span class="icon"><i class="fas fa-check-circle"></i></span><p>${esc(t('all_quantities_match'))}</p></div>`;
     return;
   }
   el.innerHTML = alerts.map(a => {
@@ -355,14 +726,18 @@ function renderQtyMismatch(alerts) {
     <div class="alert-card red">
       <div class="alert-header">
         <span class="alert-upc">${esc(a.upc)}</span>
-        <span class="alert-severity red">${esc(t('oversold_by'))} ${a.overage}</span>
+        <span class="alert-severity red"><i class="fas fa-exclamation-circle"></i> ${esc(t('oversold_by'))} ${a.overage}</span>
       </div>
       <div class="alert-details">
-        ${esc(t('listing_total'))}: <strong>${a.listing_qty}</strong> | <span class="warehouse-label">${esc(t('warehouse'))}:</span> <span class="${warehouseQtyClass}">${warehouseQty}</span> | ${esc(t('overage'))}: <strong style="color:#e74c3c">+${a.overage}</strong>
+        <i class="fas fa-list-ol" style="margin-right:6px;color:#667eea"></i>${esc(t('listing_total'))}: <strong>${a.listing_qty}</strong>
+        <span style="margin:0 12px;color:#ddd">|</span>
+        <span class="warehouse-label"><i class="fas fa-warehouse" style="margin-right:4px"></i>${esc(t('warehouse'))}:</span> <span class="${warehouseQtyClass}">${warehouseQty}</span>
+        <span style="margin:0 12px;color:#ddd">|</span>
+        <i class="fas fa-arrow-up" style="margin-right:4px;color:#e74c3c"></i>${esc(t('overage'))}: <strong style="color:#e74c3c">+${a.overage}</strong>
       </div>
       <div class="listing-list">${renderListings(a.listings)}</div>
-      <div style="margin-top:10px;text-align:right">
-        <button class="btn btn-dismiss" onclick="dismissAlert('qty_mismatch', '${a.hash}', '${esc(a.upc)}')">
+      <div class="alert-actions">
+        <button class="btn-dismiss" onclick="dismissAlert('qty_mismatch', '${a.hash}', '${esc(a.upc)}')">
           <i class="fas fa-check"></i> ${esc(t('mark_fixed'))}
         </button>
       </div>
@@ -387,7 +762,7 @@ function renderDismissed(items) {
   const el = document.getElementById('content-dismissed');
   if (!el) return;
   if (!items.length) {
-    el.innerHTML = `<div class="empty-state"><i class="fas fa-check-circle" style="color:#27ae60"></i>${esc(t('no_marked_fixed'))}</div>`;
+    el.innerHTML = `<div class="empty-state"><span class="icon"><i class="fas fa-clipboard-check"></i></span><p>${esc(t('no_marked_fixed'))}</p></div>`;
     return;
   }
   el.innerHTML = items.map(d => {
@@ -400,16 +775,16 @@ function renderDismissed(items) {
       <div class="alert-card">
         <div class="alert-header">
           <span class="alert-upc">${esc(d.upc || '')}</span>
-          <span class="alert-severity yellow">${esc(typeLabel)}</span>
+          <span class="alert-severity yellow"><i class="fas fa-check"></i> ${esc(typeLabel)}</span>
         </div>
         <div class="alert-details">
-          <strong>${esc(t('alert_type'))}:</strong> ${esc(typeLabel)}
-          ${storeLabelText ? ` | <strong>${esc(t('store'))}:</strong> ${esc(storeLabelText)}` : ''}
-          ${listingIds.length ? ` | <strong>${esc(t('listings'))}:</strong> ${listingIds.length}` : ''}
-          ${dismissedAt ? ` | <strong>${esc(t('dismissed_at'))}:</strong> ${esc(dismissedAt)}` : ''}
+          <i class="fas fa-tag" style="margin-right:6px;color:#667eea"></i><strong>${esc(t('alert_type'))}:</strong> ${esc(typeLabel)}
+          ${storeLabelText ? `<span style="margin:0 12px;color:#ddd">|</span><i class="fas fa-store" style="margin-right:4px"></i><strong>${esc(t('store'))}:</strong> ${esc(storeLabelText)}` : ''}
+          ${listingIds.length ? `<span style="margin:0 12px;color:#ddd">|</span><i class="fas fa-list" style="margin-right:4px"></i><strong>${esc(t('listings'))}:</strong> ${listingIds.length}` : ''}
+          ${dismissedAt ? `<span style="margin:0 12px;color:#ddd">|</span><i class="fas fa-clock" style="margin-right:4px"></i><strong>${esc(t('dismissed_at'))}:</strong> ${esc(dismissedAt)}` : ''}
         </div>
-        <div style="margin-top:10px;text-align:right">
-          <button class="btn btn-dismiss" onclick="undismissAlert('${d.snapshot_hash}')">
+        <div class="alert-actions">
+          <button class="btn-dismiss" onclick="undismissAlert('${d.snapshot_hash}')">
             <i class="fas fa-undo"></i> ${esc(t('undo'))}
           </button>
         </div>
@@ -422,9 +797,7 @@ async function loadDismissed() {
   try {
     const resp = await fetch('/api/listing-helper/dismissed');
     const data = await resp.json();
-    if (!data.success) {
-      return;
-    }
+    if (!data.success) return;
     const rows = Array.isArray(data.dismissed) ? data.dismissed : [];
     updateBadge('badge-dismissed', rows.length);
     renderDismissed(rows);
@@ -458,7 +831,6 @@ async function dismissAlert(alertType, hash, upc, store = '') {
     });
     const data = await resp.json();
     if (data.success) {
-      // Re-scan to update UI
       scanAlerts();
       loadDismissed();
     } else {
