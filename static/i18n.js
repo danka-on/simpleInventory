@@ -280,6 +280,8 @@ const translations = {
   print_queued_barcodes: { en: 'Print queued barcodes', lt: 'Spausdinti eilėje esančius kodus' },
   bol_extract: { en: 'BOL Extract', lt: 'BOL išrašas' },
   extract_bol_data: { en: 'Extract BOL data from Excel files', lt: 'Išrašyti BOL duomenis iš Excel failų' },
+  listing_agent: { en: 'Listing Agent', lt: 'Skelbimų agentas' },
+  listing_agent_desc: { en: 'Draft and publish listings from UPCs', lt: 'Kurti ir publikuoti skelbimus pagal UPC' },
   sync_manager: { en: 'Sync Manager', lt: 'Sinchronizavimo tvarkyklė' },
   manage_syncing: { en: 'Manage eBay & Amazon syncing', lt: 'Valdyti eBay ir Amazon sinchronizavimą' },
   statistics: { en: 'Statistics', lt: 'Statistika' },
@@ -425,6 +427,7 @@ const translations = {
   bol_statistics: { en: 'BOL Statistics', lt: 'BOL statistika' },
   match_sold_to_lots: { en: 'Match Sold Items to LOTs', lt: 'Susieti parduotas prekes su LOT' },
   back_to_tools: { en: 'Back to Tools', lt: 'Grįžti į įrankius' },
+  back: { en: 'Back', lt: 'Atgal' },
   loading_statistics: { en: 'Loading statistics...', lt: 'Kraunama statistika...' },
   no_lot_data: { en: 'No LOT data available', lt: 'Nėra LOT duomenų' },
 

@@ -65,6 +65,28 @@
         margin-top: 10px;
     }
 
+    .back-fixed{
+        position: fixed;
+        top: 12px;
+        left: 12px;
+        z-index: 10000;
+        background: #e74c3c;
+        color: #fff;
+        border: none;
+        padding: 10px 14px;
+        border-radius: 10px;
+        cursor: pointer;
+        font-size: 16px;
+        font-weight: 800;
+        box-shadow: 0 8px 18px rgba(0,0,0,0.18);
+        margin: 0;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+    }
+    .back-fixed:hover{ filter: brightness(1.02); }
+    .back-fixed:active{ transform: translateY(1px); }
+
     /* Simple scanning line animation */
     .qr-overlay {
         position: fixed;
@@ -179,6 +201,9 @@
     </style>
 </head>
 <body>
+    <a href="/" style="text-decoration:none;">
+        <button type="button" class="back-fixed"><i class="fas fa-arrow-left"></i><span data-i18n="back">Back</span></button>
+    </a>
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;gap:12px;width:100%;">
         <div style="width:120px;"></div>
         <div style="display:flex;flex-direction:column;align-items:center;gap:6px;">
@@ -828,7 +853,8 @@
         if (skipBtn) {
             skipBtn.addEventListener('click', function(e) {
                 e.preventDefault();
-                var isLocked = sessionStorage.getItem('positionLocked') === 'true';
+                // Use the in-memory state (drives the UI highlight) to avoid any stale sessionStorage edge cases.
+                var isLocked = (typeof positionLocked !== 'undefined') ? !!positionLocked : (sessionStorage.getItem('positionLocked') === 'true');
                 window.location.href = isLocked ? '/multibarcode' : '/barcode';
             });
         }

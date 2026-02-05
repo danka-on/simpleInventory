@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Prep Log</title>
+  <style>
+    body{font-family:Segoe UI,Arial,sans-serif;background:#f7fafc;margin:0;padding:18px}
+    .top{display:flex;align-items:center;gap:10px;justify-content:space-between}
+    .btn{padding:12px 16px;border-radius:12px;border:none;cursor:pointer;font-size:1.05rem}
+    .btn-danger{background:#e74c3c;color:#fff}
+    .btn-gray{background:#95a5a6;color:#fff}
+    .btn-small{padding:10px 14px;font-size:0.95rem;border-radius:10px}
+    .btn:disabled{opacity:0.55;cursor:not-allowed}
+    .card{background:#fff;border:1px solid #e8e8e8;border-radius:14px;padding:16px;margin-top:14px}
+    .row{display:flex;gap:10px;flex-wrap:wrap}
+    .muted{color:#666;font-size:0.95rem}
+    .pill{display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border-radius:999px;background:#f0f0f0;font-size:0.9rem}
+    .badge{display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border-radius:999px;font-weight:700;font-size:0.9rem}
+    .badge-good{background:rgba(0,184,148,0.12);color:#00b894;border:1px solid rgba(0,184,148,0.25)}
+    .badge-bad{background:rgba(231,76,60,0.12);color:#e74c3c;border:1px solid rgba(231,76,60,0.25)}
+    .badge-return{background:rgba(52,152,219,0.12);color:#2980b9;border:1px solid rgba(52,152,219,0.25)}
+    .logRow{border:1px solid #eee;border-radius:14px;padding:12px 12px;margin-top:12px;background:#fff}
+    .logRow.undone{opacity:0.55}
+    .logTop{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}
+    .logLeft{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+    .noteBox{margin-top:10px;padding:10px 12px;border-radius:12px;border:1px dashed #ddd;background:#fcfcfc;white-space:pre-wrap;line-height:1.35}
+    .bad{color:#e74c3c}
+    .ok{color:#00b894}
+    input[type="checkbox"]{width:18px;height:18px}
+  </style>
+</head>
+<body>
+  <div class="top">
+    <a href="/item-prep" style="text-decoration:none"><button class="btn btn-danger">Back</button></a>
+    <h2 style="margin:0 auto;text-align:center;flex:1">Prep Log</h2>
+    <div style="display:flex;gap:10px;align-items:center;">
+      <button class="btn btn-gray" id="refreshBtn">Refresh</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row" style="align-items:center;justify-content:space-between;">
+      <div class="muted" id="summary">Loading...</div>
+      <label class="muted" style="display:flex;gap:10px;align-items:center;">
+        <input type="checkbox" id="hideUndone" checked>
+        Hide undone
+      </label>
+    </div>
+    <div id="list"></div>
+    <div class="muted" id="err" style="margin-top:12px;"></div>
+  </div>
+
+  <script>
+    function esc(s){
+      return String(s ?? '').replace(/[&<>\"']/g, c => ({
+        '&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#039;'
+      })[c] || c);
+    }
+
+    function fmtTime(iso){
+      const s = String(iso ?? '').trim();
+      if(!s) return '';
+      try{
+        const d = new Date(s);
+        if(Number.isNaN(d.getTime())) return s;
+        return d.toLocaleString([], {year:'numeric', month:'short', day:'2-digit', hour:'2-digit', minute:'2-digit'});
+      }catch(e){
+        return s;
+      }
+    }
+
+    async function apiGet(url){
+      const r = await fetch(url, {headers:{'Accept':'application/json'}});
+      const j = await r.json().catch(()=> ({}));
+      if(!r.ok || j.success === false) throw new Error(j.error || ('HTTP '+r.status));
+      return j;
+    }
+
+    async function apiPost(url, payload){
+      const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json','Accept':'application/json'}, body: JSON.stringify(payload ?? {})});
+      const j = await r.json().catch(()=> ({}));
+      if(!r.ok || j.success === false) throw new Error(j.error || ('HTTP '+r.status));
+      return j;
+    }
+
+    function statusLabel(st){
+      const s = String(st ?? '').toLowerCase().trim();
+      if(s === 'return') return 'RETURN';
+      if(s === 'bad') return 'BAD';
+      return 'GOOD';
+    }
+
+    function statusClass(st){
+      const s = String(st ?? '').toLowerCase().trim();
+      if(s === 'return') return 'badge-return';
+      if(s === 'bad') return 'badge-bad';
+      return 'badge-good';
+    }
+
+    async function undoEntry(id){
+      if(!confirm('Undo this prep entry?')) return;
+      const btn = document.querySelector(`[data-undo-id=\"${id}\"]`);
+      if(btn) btn.disabled = true;
+      try{
+        await apiPost('/api/preplog/undo', {id});
+        await loadLog();
+      }catch(e){
+        alert('Undo failed: ' + e.message);
+        if(btn) btn.disabled = false;
+      }
+    }
+
+    async function loadLog(){
+      const list = document.getElementById('list');
+      const summary = document.getElementById('summary');
+      const err = document.getElementById('err');
+      err.textContent = '';
+      list.innerHTML = '<div class=\"muted\" style=\"margin-top:10px;\">Loading...</div>';
+
+      const hideUndone = document.getElementById('hideUndone').checked;
+      const qs = new URLSearchParams();
+      qs.set('limit', '300');
+      qs.set('include_undone', hideUndone ? '0' : '1');
+
+      try{
+        const data = await apiGet('/api/preplog/recent?' + qs.toString());
+        const items = Array.isArray(data.items) ? data.items : [];
+        summary.textContent = `${items.length} entries`;
+
+        list.innerHTML = '';
+        if(items.length === 0){
+          list.innerHTML = '<div class=\"muted\" style=\"margin-top:10px;\">No prep log entries yet.</div>';
+          return;
+        }
+
+        for(const it of items){
+          const id = it.id;
+          const st = String(it.status ?? '').toLowerCase().trim();
+          const qty = (it.quantity ?? it.qty ?? 1);
+          const upc = String(it.upc ?? '').trim();
+          const note = String(it.note ?? '').trim();
+          const reason = String(it.reason ?? '').trim();
+          const undone = !!it.undone;
+          const undoneAt = String(it.undone_at ?? '').trim();
+          const undoErr = String(it.undo_error ?? '').trim();
+
+          const row = document.createElement('div');
+          row.className = 'logRow' + (undone ? ' undone' : '');
+          row.innerHTML = `
+            <div class=\"logTop\">
+              <div class=\"logLeft\">
+                <span class=\"pill\">#${esc(id)}</span>
+                <span class=\"pill\">${esc(fmtTime(it.created_at))}</span>
+                <span class=\"badge ${esc(statusClass(st))}\">${esc(statusLabel(st))}</span>
+                <span class=\"pill\">Qty ${esc(qty)}</span>
+                <span class=\"pill\">UPC ${esc(upc)}</span>
+                ${reason ? `<span class=\"pill\">${esc(reason)}</span>` : ''}
+                ${undone && undoneAt ? `<span class=\"pill\">Undone ${esc(fmtTime(undoneAt))}</span>` : ''}
+              </div>
+              <div style=\"display:flex;gap:10px;align-items:center;\">
+                <button class=\"btn btn-danger btn-small\" data-undo-id=\"${esc(id)}\" ${undone ? 'disabled' : ''}>Undo</button>
+              </div>
+            </div>
+            ${note ? `<div class=\"noteBox\"><strong>NOTE:</strong> ${esc(note)}</div>` : ''}
+            ${undoErr ? `<div class=\"muted\" style=\"margin-top:10px;\"><span class=\"bad\">Undo error:</span> ${esc(undoErr)}</div>` : ''}
+          `;
+
+          const undoBtn = row.querySelector('button[data-undo-id]');
+          if(undoBtn){
+            undoBtn.onclick = () => undoEntry(id);
+          }
+
+          list.appendChild(row);
+        }
+
+      }catch(e){
+        list.innerHTML = '';
+        summary.textContent = '—';
+        err.innerHTML = `<span class=\"bad\">Failed to load log:</span> ${esc(e.message)}`;
+      }
+    }
+
+    document.getElementById('refreshBtn').onclick = loadLog;
+    document.getElementById('hideUndone').onchange = loadLog;
+    loadLog();
+  </script>
+</body>
+</html>
+

@@ -1,0 +1,647 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.ico') }}">
+  <title>Listing Agent - Mobile Photos</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <style>
+    :root{
+      --ink:#0f172a;
+      --muted:#6b7280;
+      --bg:#f6f7fb;
+      --card: rgba(255,255,255,0.92);
+      --border: rgba(15,23,42,0.12);
+      --shadow: 0 14px 34px rgba(15, 23, 42, 0.10);
+      --radius: 18px;
+      --blue:#0064d2;
+      --green:#16a34a;
+      --danger:#e11d48;
+    }
+    *{ box-sizing:border-box; }
+    body{
+      margin:0;
+      font-family:"Space Grotesk","Segoe UI",sans-serif;
+      color:var(--ink);
+      background:
+        radial-gradient(900px 520px at 12% -20%, rgba(0,100,210,0.20), transparent 55%),
+        radial-gradient(700px 420px at 112% 18%, rgba(22,163,74,0.12), transparent 55%),
+        linear-gradient(180deg, var(--bg), #ffffff 55%, #f7f8fa);
+      min-height:100vh;
+    }
+    .wrap{
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 16px 14px 40px;
+    }
+    .top{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      margin-bottom:12px;
+    }
+    .back{
+      text-decoration:none;
+      color:var(--ink);
+      border:1px solid var(--border);
+      background:rgba(255,255,255,0.70);
+      padding:10px 12px;
+      border-radius:999px;
+      font-weight:700;
+      box-shadow: 0 2px 10px rgba(15, 23, 42, 0.06);
+    }
+    .pill{
+      font-size:0.78rem;
+      padding:4px 10px;
+      border-radius:999px;
+      background:rgba(0,100,210,0.12);
+      border:1px solid rgba(0,100,210,0.18);
+      color:#08468a;
+      font-weight:800;
+      letter-spacing:.08em;
+      text-transform:uppercase;
+      white-space:nowrap;
+    }
+    .card{
+      background:var(--card);
+      border:1px solid rgba(15,23,42,0.10);
+      border-radius:var(--radius);
+      box-shadow:var(--shadow);
+      overflow:hidden;
+    }
+    .head{
+      padding:14px 16px;
+      border-bottom:1px solid rgba(15,23,42,0.06);
+      background: linear-gradient(180deg, rgba(255,255,255,0.94), rgba(255,255,255,0.76));
+    }
+    h1{
+      margin:0;
+      font-size:1.15rem;
+      letter-spacing:-0.02em;
+    }
+    .sub{
+      margin:6px 0 0 0;
+      color:var(--muted);
+      font-size:0.95rem;
+      line-height:1.25;
+    }
+    .body{ padding:14px 16px 16px; }
+    .meta{
+      display:flex;
+      flex-wrap:wrap;
+      gap:8px;
+      margin:10px 0 12px;
+      color:rgba(15,23,42,0.72);
+      font-size:0.92rem;
+    }
+    .badge{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      padding:6px 10px;
+      border-radius:999px;
+      border:1px solid rgba(15,23,42,0.12);
+      background: rgba(255,255,255,0.78);
+      font-weight:700;
+    }
+    .badgeBlue{
+      background: rgba(0,100,210,0.10);
+      border-color: rgba(0,100,210,0.18);
+      color:#08468a;
+    }
+    .titleBox{
+      border:1px solid rgba(15,23,42,0.10);
+      background: rgba(255,255,255,0.78);
+      border-radius: 14px;
+      padding: 10px 12px;
+      font-weight:700;
+      letter-spacing:-0.01em;
+    }
+    .row{
+      display:flex;
+      gap:10px;
+      align-items:center;
+      flex-wrap:wrap;
+      margin-top:12px;
+    }
+    button{
+      appearance:none;
+      border:none;
+      padding: 11px 14px;
+      border-radius: 14px;
+      cursor:pointer;
+      font-weight:800;
+      letter-spacing:.2px;
+    }
+    .btnGhost{
+      border: 1px solid rgba(15,23,42,0.12);
+      background: rgba(255,255,255,0.80);
+      color: rgba(15,23,42,0.86);
+    }
+    .btnPrimary{
+      background: linear-gradient(135deg, rgba(0,100,210,0.96), rgba(0,70,160,0.96));
+      color:#fff;
+    }
+    .btnPrimary:disabled{
+      opacity: .55;
+      cursor: not-allowed;
+    }
+    .btnComplete{
+      background: linear-gradient(135deg, rgba(22,163,74,0.96), rgba(11,120,62,0.96));
+      color:#fff;
+    }
+    .btnComplete:disabled{
+      opacity: .55;
+      cursor: not-allowed;
+    }
+    .btnDanger{
+      background: rgba(225,29,72,0.10);
+      color: var(--danger);
+      border: 1px solid rgba(225,29,72,0.22);
+    }
+    .hint{
+      margin-top:10px;
+      color:var(--muted);
+      font-size:0.92rem;
+      line-height:1.25;
+    }
+    .status{
+      margin-top:12px;
+      font-weight:800;
+      font-size:0.95rem;
+    }
+    .statusOk{ color: var(--green); }
+    .statusBad{ color: var(--danger); }
+    .grid{
+      margin-top:12px;
+      display:grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap:10px;
+    }
+    @media (max-width: 460px){
+      .grid{ grid-template-columns: repeat(2, 1fr); }
+    }
+    .thumb{
+      aspect-ratio:1/1;
+      width:100%;
+      border-radius: 16px;
+      border:1px solid rgba(15,23,42,0.10);
+      background:#fff;
+      overflow:hidden;
+      display:grid;
+      place-items:center;
+      position: relative;
+      cursor: pointer;
+    }
+    .thumb img{
+      width:100%;
+      height:100%;
+      object-fit:cover;
+      display:block;
+    }
+    .thumb .x{
+      position:absolute;
+      top:8px;
+      right:8px;
+      width:34px;
+      height:34px;
+      border-radius:999px;
+      border: 1px solid rgba(15,23,42,0.10);
+      background: rgba(255,255,255,0.86);
+      color: rgba(15,23,42,0.86);
+      display:grid;
+      place-items:center;
+      font-size: 1.25rem;
+      line-height: 1;
+      cursor:pointer;
+      box-shadow: 0 10px 24px rgba(15,23,42,0.14);
+    }
+    .thumbPlus{
+      border: 1px dashed rgba(15,23,42,0.18);
+      background: rgba(255,255,255,0.72);
+      display:grid;
+      place-items:center;
+      font-weight:900;
+      font-size: 2.2rem;
+      color: rgba(0,100,210,0.92);
+    }
+    .thumbPlusBig{
+      grid-column: 1 / -1;
+      aspect-ratio: 16 / 7;
+      font-size: 3.4rem;
+      background: linear-gradient(135deg, rgba(0,100,210,0.10), rgba(22,163,74,0.10));
+      border-color: rgba(0,100,210,0.25);
+    }
+
+    /* Image modal */
+    .imgModal{
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      display: none;
+      place-items: center;
+      padding: 14px;
+      background: rgba(15, 23, 42, 0.62);
+      backdrop-filter: blur(8px);
+    }
+    .imgModalInner{
+      width: min(920px, 96vw);
+      max-height: 92vh;
+      border-radius: 18px;
+      border: 1px solid rgba(255,255,255,0.18);
+      background: rgba(255,255,255,0.92);
+      box-shadow: 0 30px 80px rgba(15, 23, 42, 0.38);
+      overflow: hidden;
+      position: relative;
+      display: grid;
+      grid-template-rows: 1fr auto;
+    }
+    .imgModalInner img{
+      width: 100%;
+      height: 100%;
+      max-height: 78vh;
+      object-fit: contain;
+      background: rgba(15, 23, 42, 0.04);
+    }
+    .imgModalCaption{
+      padding: 10px 12px 12px;
+      font-size: 0.86rem;
+      color: rgba(15, 23, 42, 0.72);
+      border-top: 1px solid rgba(15, 23, 42, 0.08);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .imgModalClose{
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      width: 44px;
+      height: 44px;
+      border-radius: 999px;
+      border: 1px solid rgba(15, 23, 42, 0.16);
+      background: rgba(255,255,255,0.86);
+      color: rgba(15, 23, 42, 0.80);
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+      font-size: 1.5rem;
+      line-height: 1;
+      box-shadow: 0 10px 24px rgba(15, 23, 42, 0.16);
+    }
+    .imgModalNav{
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 46px;
+      height: 46px;
+      border-radius: 999px;
+      border: 1px solid rgba(15, 23, 42, 0.16);
+      background: rgba(255,255,255,0.80);
+      color: rgba(15, 23, 42, 0.86);
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+      font-size: 1.45rem;
+      line-height: 1;
+      box-shadow: 0 10px 24px rgba(15, 23, 42, 0.14);
+      transition: opacity .12s ease;
+      user-select: none;
+    }
+    .imgModalNav:disabled{
+      opacity: 0.35;
+      cursor: not-allowed;
+    }
+    .imgModalPrev{ left: 10px; }
+    .imgModalNext{ right: 10px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <a class="back" href="/listingagent">Back</a>
+      <span class="pill">Mobile Upload</span>
+    </div>
+
+    <div class="card">
+      <div class="head">
+        <h1>Take Photos For Listing</h1>
+      </div>
+      <div class="body">
+        <div class="meta">
+          <span class="badge badgeBlue">UPC: <span id="upcText">{{ upc }}</span></span>
+          <span class="badge" id="pendingBadge" style="display:none;">Pending: <span id="pendingCount">0</span></span>
+        </div>
+
+        <div id="titleBox" class="titleBox">Loading item…</div>
+
+        <div class="row">
+          <button id="btnComplete" class="btnComplete" type="button" disabled>Complete</button>
+          <button id="btnShowUploaded" class="btnGhost" type="button">Show Uploaded</button>
+          <input id="photoInput" type="file" accept="image/*" capture="environment" multiple style="display:none;" />
+        </div>
+
+        <div id="status" class="status"></div>
+
+        <div style="margin-top:12px;font-weight:900;letter-spacing:.02em;">Pending Photos</div>
+        <div id="pendingGrid" class="grid"></div>
+
+        <div id="uploadedWrap" style="display:none;margin-top:16px;">
+          <div style="font-weight:900;letter-spacing:.02em;">Uploaded Photos</div>
+          <div id="grid" class="grid"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Image lightbox -->
+  <div id="imgModal" class="imgModal" role="dialog" aria-modal="true" aria-label="Image preview">
+    <div class="imgModalInner" id="imgModalInner">
+      <button class="imgModalClose" id="imgModalClose" type="button" aria-label="Close">&times;</button>
+      <button class="imgModalNav imgModalPrev" id="imgModalPrev" type="button" aria-label="Previous">&#x2190;</button>
+      <button class="imgModalNav imgModalNext" id="imgModalNext" type="button" aria-label="Next">&#x2192;</button>
+      <img id="imgModalImg" alt="Preview" src="" />
+      <div class="imgModalCaption" id="imgModalCaption"></div>
+    </div>
+  </div>
+
+  <script>
+    const UPC = {{ (upc or '')|tojson }};
+    const $ = (id) => document.getElementById(id);
+
+    function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+    function setStatus(msg, ok=true){
+      const el = $('status');
+      el.textContent = msg || '';
+      el.className = 'status ' + (ok ? 'statusOk' : 'statusBad');
+    }
+
+    function renderGrid(urls){
+      const grid = $('grid');
+      grid.innerHTML = '';
+      if(!urls || urls.length === 0){
+        grid.innerHTML = '<div class="hint" style="grid-column:1/-1;">No uploaded photos yet.</div>';
+        return;
+      }
+      urls.forEach((u, idx) => {
+        const d = document.createElement('div');
+        d.className = 'thumb';
+        d.innerHTML = `<img src="${esc(u)}" alt="" />`;
+        d.addEventListener('click', () => openImageModalFromList(uploadedUrls, idx));
+        grid.appendChild(d);
+      });
+    }
+
+    const pending = [];
+    let uploadedUrls = [];
+
+    let isUploading = false;
+
+    let modalList = [];
+    let modalIndex = 0;
+
+    function _renderImageModal(){
+      const modal = $('imgModal');
+      const img = $('imgModalImg');
+      if(!modal || !img) return;
+
+      const list = Array.isArray(modalList) ? modalList : [];
+      const len = list.length || 0;
+      if(len <= 0){
+        closeImageModal();
+        return;
+      }
+      let idx = Number(modalIndex || 0);
+      if(!Number.isFinite(idx)) idx = 0;
+      idx = ((idx % len) + len) % len;
+      modalIndex = idx;
+
+      const url = String(list[idx] || '');
+      img.src = url;
+      const cap = $('imgModalCaption');
+      if(cap) cap.textContent = len > 1 ? `${idx + 1} / ${len} — ${url}` : url;
+
+      const prev = $('imgModalPrev');
+      const next = $('imgModalNext');
+      const showNav = len > 1;
+      if(prev) prev.style.display = showNav ? 'grid' : 'none';
+      if(next) next.style.display = showNav ? 'grid' : 'none';
+      if(prev) prev.disabled = !showNav;
+      if(next) next.disabled = !showNav;
+    }
+
+    function openImageModalFromList(list, idx){
+      const arr = Array.isArray(list) ? list.filter(Boolean).map(x => String(x)) : [];
+      if(!arr.length) return;
+      modalList = arr;
+      modalIndex = Number(idx || 0);
+      _renderImageModal();
+      const modal = $('imgModal');
+      if(modal) modal.style.display = 'grid';
+      try{ document.body.style.overflow = 'hidden'; }catch(e){}
+    }
+
+    function imageModalPrev(){
+      if(!modalList || modalList.length <= 1) return;
+      modalIndex = (Number(modalIndex || 0) - 1 + modalList.length) % modalList.length;
+      _renderImageModal();
+    }
+
+    function imageModalNext(){
+      if(!modalList || modalList.length <= 1) return;
+      modalIndex = (Number(modalIndex || 0) + 1) % modalList.length;
+      _renderImageModal();
+    }
+
+    function closeImageModal(){
+      const modal = $('imgModal');
+      if(!modal) return;
+      modal.style.display = 'none';
+      const img = $('imgModalImg');
+      if(img) img.src = '';
+      const cap = $('imgModalCaption');
+      if(cap) cap.textContent = '';
+      modalList = [];
+      modalIndex = 0;
+      try{ document.body.style.overflow = ''; }catch(e){}
+    }
+
+    function addPendingFiles(files){
+      const list = Array.from(files || []).filter(f => f && f.size > 0);
+      if(!list.length) return;
+      for(const f of list){
+        const url = URL.createObjectURL(f);
+        pending.push({file: f, url, name: (f && f.name) ? f.name : ''});
+      }
+      renderPending();
+    }
+
+    function removePending(idx){
+      const it = pending[idx];
+      if(!it) return;
+      try{ URL.revokeObjectURL(it.url); }catch(e){}
+      pending.splice(idx, 1);
+      renderPending();
+    }
+
+    function renderPending(){
+      const grid = $('pendingGrid');
+      grid.innerHTML = '';
+
+      const badge = $('pendingBadge');
+      const cnt = pending.length;
+      if(badge){
+        badge.style.display = cnt ? 'inline-flex' : 'none';
+      }
+      if($('pendingCount')) $('pendingCount').textContent = String(cnt);
+
+      $('btnComplete').disabled = cnt === 0;
+
+      if(cnt !== 0){
+        pending.forEach((it, idx) => {
+          const d = document.createElement('div');
+          d.className = 'thumb';
+          d.innerHTML = `<img src="${esc(it.url)}" alt="" /><button class="x" type="button" aria-label="Remove">&times;</button>`;
+          d.addEventListener('click', () => openImageModalFromList(pending.map(p => p.url), idx));
+          const x = d.querySelector('button.x');
+          if(x){
+            x.addEventListener('click', (e) => { e.stopPropagation(); removePending(idx); });
+          }
+          grid.appendChild(d);
+        });
+      }
+
+      // Always show a + tile to add another photo
+      const plus = document.createElement('div');
+      plus.className = 'thumb thumbPlus';
+      if(cnt === 0) plus.classList.add('thumbPlusBig');
+      plus.textContent = '+';
+      plus.addEventListener('click', () => takePhoto());
+      grid.appendChild(plus);
+    }
+
+    async function loadItem(){
+      if(!UPC) return;
+      try{
+        const res = await fetch(`/api/listingagent/upc/${encodeURIComponent(UPC)}`);
+        const j = await res.json();
+        if(!res.ok || !j || !j.success) throw new Error(j && j.error ? j.error : `HTTP ${res.status}`);
+        const item = j.item || {};
+        const title = (item.title || (item.bol && item.bol.description) || '(no title)').toString().trim();
+        $('titleBox').textContent = title;
+      }catch(e){
+        $('titleBox').textContent = 'Item title unavailable';
+      }
+    }
+
+    async function loadPhotos(){
+      if(!UPC) return;
+      try{
+        const res = await fetch(`/api/listingagent/photos?upc=${encodeURIComponent(UPC)}&limit=30`);
+        const j = await res.json();
+        if(!res.ok || !j || !j.success) throw new Error(j && j.error ? j.error : `HTTP ${res.status}`);
+        uploadedUrls = Array.isArray(j.images) ? j.images : [];
+        renderGrid(uploadedUrls);
+        if(j.images && j.images.length){
+          setStatus(`Uploaded photos: ${j.images.length}`, true);
+        } else {
+          setStatus('', true);
+        }
+      }catch(e){
+        setStatus('Error loading photos: ' + e.message, false);
+      }
+    }
+
+    function openFilePicker(){
+      const input = $('photoInput');
+      if(!input) return;
+      try{ input.value = ''; }catch(e){}
+      input.click();
+    }
+
+    async function takePhoto(){
+      if(isUploading) return;
+      openFilePicker();
+    }
+
+    async function completeUpload(){
+      if(!UPC){ setStatus('Missing UPC in URL.', false); return; }
+      if(pending.length === 0){ setStatus('Take at least one photo first.', false); return; }
+
+      $('btnComplete').disabled = true;
+      $('btnShowUploaded').disabled = true;
+      isUploading = true;
+      const n = pending.length;
+      setStatus(`Uploading ${n} photo${n===1?'':'s'}...`, true);
+      try{
+        const fd = new FormData();
+        fd.append('upc', UPC);
+        pending.forEach(it => fd.append('photos[]', it.file, it.name || (it.file && it.file.name) || 'photo.jpg'));
+        const res = await fetch('/api/listingagent/photos/upload', {method:'POST', body: fd});
+        const j = await res.json();
+        if(!res.ok || !j || !j.success) throw new Error(j && j.error ? j.error : `HTTP ${res.status}`);
+
+        // Clear pending list on success.
+        while(pending.length){
+          const it = pending.pop();
+          try{ URL.revokeObjectURL(it.url); }catch(e){}
+        }
+        renderPending();
+
+        const saved = j.saved_count || (j.saved ? j.saved.length : 0) || 0;
+        setStatus(`Uploaded ${saved} photo${saved===1?'':'s'}.`, true);
+        $('uploadedWrap').style.display = 'block';
+        await loadPhotos();
+      }catch(e){
+        setStatus('Upload failed: ' + e.message, false);
+      }finally{
+        $('btnComplete').disabled = pending.length === 0;
+        $('btnShowUploaded').disabled = false;
+        isUploading = false;
+      }
+    }
+
+    // Modal wiring
+    $('imgModal').addEventListener('click', (e) => { if(e.target === $('imgModal')) closeImageModal(); });
+    $('imgModalInner').addEventListener('click', (e) => e.stopPropagation());
+    $('imgModalClose').addEventListener('click', (e) => { e.preventDefault(); closeImageModal(); });
+    if($('imgModalPrev')) $('imgModalPrev').addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); imageModalPrev(); });
+    if($('imgModalNext')) $('imgModalNext').addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); imageModalNext(); });
+    document.addEventListener('keydown', (e) => {
+      if(e.key === 'Escape') closeImageModal();
+      if(($('imgModal')?.style.display || 'none') === 'none') return;
+      if(e.key === 'ArrowLeft') imageModalPrev();
+      if(e.key === 'ArrowRight') imageModalNext();
+    });
+
+    // Buttons + input wiring
+    $('btnComplete').addEventListener('click', completeUpload);
+    $('btnShowUploaded').addEventListener('click', async () => {
+      const wrap = $('uploadedWrap');
+      const open = wrap && wrap.style.display !== 'none';
+      if(wrap) wrap.style.display = open ? 'none' : 'block';
+      if(!open) await loadPhotos();
+    });
+    $('photoInput').addEventListener('change', (e) => addPendingFiles(e.target.files));
+
+    loadItem();
+    renderPending();
+
+    // Best-effort: open the native camera immediately on first load (some browsers block without a gesture).
+    setTimeout(() => {
+      if(pending.length === 0){
+        try{
+          openFilePicker();
+        }catch(e){}
+      }
+    }, 450);
+  </script>
+</body>
+</html>

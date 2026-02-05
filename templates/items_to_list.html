@@ -557,7 +557,7 @@ function formatLastEdited(raw){
 function render(results){
   let html = '<table><thead><tr>';
   if (selectMode) html += '<th>Select</th>';
-  html += '<th>Info</th><th>Status</th><th>Notes</th><th>Foto</th><th>Defect</th><th>QTY</th><th>Title</th><th>UPC</th><th>Marketplaces</th><th>Last Edited</th></tr></thead><tbody>';
+  html += '<th>Info</th><th>Status</th><th>Notes</th><th>Foto</th><th>Defect</th><th>QTY</th><th>Title</th><th>UPC</th><th>+ Listing Agent</th><th>Marketplaces</th><th>Last Edited</th></tr></thead><tbody>';
   let rowIndex = 0;
   for (const r of results) {
     const title = esc(r.title||'');
@@ -572,8 +572,12 @@ function render(results){
     const upc = esc(upcPadded);
     // Extract base UPC without suffix for copy button (with padding)
     const baseUpc = upc.includes('-') ? upc.split('-')[0] : upc;
+    // Listing Agent queue should use the raw base UPC (no padding) so /api/listingagent/upc/<upc> matches DB rows.
+    const queueUpc = (upcRaw || '').toString().trim().includes('-') ? (upcRaw || '').toString().trim().split('-')[0] : (upcRaw || '').toString().trim();
+    const queueTitleEnc = encodeURIComponent((r.title || '').toString());
     const last_edited = esc(r.last_edited||'');
     const status = (r.status||'').toLowerCase();
+    const queueBtn = `<button type="button" class="btn btn-sm btn-primary btn-listagent-queue" data-upc="${queueUpc}" data-title="${queueTitleEnc}" data-item-status="${esc(status)}" title="Add to Listing Agent queue">+</button>`;
     let pill = '<span class="status-box" title="Unchecked">unchecked</span>';
     if(status==='good') pill = '<span class="status-box" style="background:#2ecc71" title="Good">good</span>';
     if(status==='bad') pill = '<span class="status-box" style="background:#e74c3c" title="Bad">bad</span>';
@@ -629,12 +633,13 @@ function render(results){
             noteCell+
             `<td style="text-align:center">${picsBtn}</td>`+
             `<td>${esc(r.defect||'')}</td>`+
-            qtyCell+
-            `<td><div class="title-cell"><img class="thumb" src="${thumb}" onerror="this.src='${missingThumb(48,48,'No Img')}'"><a href="#" class="img-link" data-img="${img}" data-title="${title}">${title}</a></div></td>`+
-            `<td><div style=\"display:flex;gap:6px;align-items:center\"><span>${upc}</span><button type=\"button\" class=\"btn btn-sm btn-copy\" data-upc=\"${baseUpc}\" title=\"Copy UPC\">Copy</button></div></td>`+
-            `<td>${actionBtn}</td>`+
-            `<td class="last-edited-cell" data-raw="${last_edited}">${formatLastEdited(last_edited)}</td>`+
-            `</tr>`;
+             qtyCell+
+             `<td><div class="title-cell"><img class="thumb" src="${thumb}" onerror="this.src='${missingThumb(48,48,'No Img')}'"><a href="#" class="img-link" data-img="${img}" data-title="${title}">${title}</a></div></td>`+
+             `<td><div style=\"display:flex;gap:6px;align-items:center\"><span>${upc}</span><button type=\"button\" class=\"btn btn-sm btn-copy\" data-upc=\"${baseUpc}\" title=\"Copy UPC\">Copy</button></div></td>`+
+             `<td style="text-align:center;white-space:nowrap">${queueBtn}</td>`+
+             `<td>${actionBtn}</td>`+
+             `<td class="last-edited-cell" data-raw="${last_edited}">${formatLastEdited(last_edited)}</td>`+
+             `</tr>`;
   }
   html += '</tbody></table>';
   const container = document.getElementById('results');
@@ -654,6 +659,7 @@ function render(results){
   console.log('[render] Found', marketplaceCheckboxes.length, 'marketplace checkboxes, attaching listeners');
   marketplaceCheckboxes.forEach(el=> el.addEventListener('change', onMarketplaceToggle));
   document.querySelectorAll('.btn-copy').forEach(el=> el.addEventListener('click', onCopyUpc));
+  document.querySelectorAll('.btn-listagent-queue').forEach(el=> el.addEventListener('click', onAddToListingAgentQueue));
   // Wire pics-count handlers (now spans instead of buttons)
   document.querySelectorAll('.pics-count').forEach(el=> el.addEventListener('click', onOpenPics));
   // Wire note icon handlers
@@ -1005,6 +1011,42 @@ async function onCopyUpc(e){
     btn.classList.remove('btn-copied'); 
     btn.disabled = false; 
   }, 1200);
+}
+
+// Add UPC to Listing Agent queue (for /listingagent bubbles)
+async function onAddToListingAgentQueue(e){
+  e.preventDefault();
+  const btn = e.currentTarget;
+  const upc = (btn.dataset.upc || '').toString().trim();
+  if(!upc) return;
+
+  const oldText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '...';
+
+  try{
+    const title = btn.dataset.title ? decodeURIComponent(btn.dataset.title) : '';
+    const item_status = (btn.dataset.itemStatus || '').toString().trim();
+    const resp = await fetch('/api/listingagent/queue/add', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({upc, title, source: 'list_manager', item_status})
+    });
+    const j = await resp.json().catch(()=> ({}));
+    if(resp.ok && j && j.success){
+      btn.textContent = j.added ? 'Queued' : 'In queue';
+      btn.title = 'In Listing Agent queue';
+      btn.classList.add('btn-copied');
+      return;
+    }
+    btn.textContent = oldText;
+    btn.disabled = false;
+    alert('Error: ' + ((j && j.error) ? j.error : ('HTTP ' + resp.status)));
+  }catch(err){
+    btn.textContent = oldText;
+    btn.disabled = false;
+    alert('Error: ' + err);
+  }
 }
 
 // Populate lot dropdown with newest-first lots and import dates

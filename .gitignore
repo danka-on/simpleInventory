@@ -3,6 +3,14 @@ license\ type\ file
 tokens.json
 .env
 venv/
+.venv/
 ebayStore.db
+listagent.db
+listinglog.db
+preplog.db
 __pycache__/
 *.pyc
+*.db-wal
+*.db-shm
+*.db-journal
+static/listingagent_uploads/

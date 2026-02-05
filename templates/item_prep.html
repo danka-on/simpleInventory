@@ -79,10 +79,14 @@
 <div class="top">
   <a href="/"><button class="btn btn-danger" data-i18n="back">Back</button></a>
   <h2 style="margin:0 auto;text-align:center;flex:1" data-i18n="preperation">Preperation</h2>
-  <a href="/barcode-print-que" style="text-decoration:none"><button class="btn btn-primary">🖨️ <span data-i18n="print_que">Print Que</span></button></a>
+  <div style="display:flex;gap:10px;align-items:center;">
+    <a href="/barcode-print-que" style="text-decoration:none"><button class="btn btn-primary">🖨️ <span data-i18n="print_que">Print Que</span></button></a>
+    <a href="/item-prep/log" style="text-decoration:none"><button class="btn btn-gray">LOG</button></a>
+  </div>
   </div>
   
-  <div class="card" style="margin-top:12px;padding:12px;">
+  <!-- Working LOT selector (kept for session/default behavior, hidden to reduce UI clutter) -->
+  <div class="card" style="margin-top:12px;padding:12px;display:none;">
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
       <label style="font-weight:600;color:#2c3e50;white-space:nowrap;" data-i18n="working_lot">Working LOT:</label>
       <select id="lotSelector" style="flex:1;min-width:200px;padding:8px 12px;border:2px solid #00b894;border-radius:8px;font-size:1rem;background:#fff;cursor:pointer;">

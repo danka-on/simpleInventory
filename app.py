@@ -7,7 +7,7 @@ from flask_caching import Cache
 from flask_compress import Compress
 from werkzeug.exceptions import RequestEntityTooLarge
 from PIL import Image, ImageDraw
-import io, time, subprocess, os, requests, json, threading, sqlite3, sys, datetime
+import io, time, subprocess, os, requests, json, threading, sqlite3, sys, datetime, base64
 import pytz
 import xml.etree.ElementTree as ET
 from dotenv import load_dotenv
@@ -74,7 +74,7 @@ def db_connection(db_name, row_factory=True):
 # Enable WAL mode for SQLite databases for better concurrent performance
 def enable_wal_mode():
     """Enable Write-Ahead Logging for all SQLite databases"""
-    databases = ['sold.db', 'bol.db', 'searchRack.db', 'ebayStore.db', 'amazonStore.db', 'rawbol.db', 'rackhistory.db', 'deleted.db', 'listing_alerts.db', 'fbstore.db']
+    databases = ['sold.db', 'bol.db', 'searchRack.db', 'ebayStore.db', 'amazonStore.db', 'rawbol.db', 'rackhistory.db', 'deleted.db', 'listing_alerts.db', 'fbstore.db', 'listagent.db', 'listinglog.db', 'preplog.db']
     for db_name in databases:
         try:
             db_path = BASE_DIR / db_name
@@ -93,20 +93,26 @@ def create_database_indexes():
     
     # Index definitions: {database: [(table, column), ...]}
     index_configs = {
+        'bol.db': [
+            ('bol_items', 'upc'),
+            ('bol_items', 'item_description'),
+            ('bol_items', 'lot_number')
+        ],
         'rawbol.db': [
             ('raw_bol_items', 'upc'),
             ('raw_bol_items', 'item_description'),
             ('raw_bol_items', 'lot_number')
         ],
         'searchRack.db': [
-            ('SEARCHRACK', 'UPC'),
+            ('SEARCHRACK', 'BARCODE'),
+            ('SEARCHRACK', 'TITLE'),
             ('SEARCHRACK', 'item_position'),
             ('SEARCHRACK', 'CREATED_AT')
         ],
         'sold.db': [
-            ('sold_items', 'UPC'),
-            ('sold_items', 'barcode'),
-            ('sold_items', 'OrderID'),
+            ('orders', 'barcode'),
+            ('orders', 'order_id'),
+            ('orders', 'store'),
             ('returns', 'upc'),
             ('returns', 'order_id')
         ],
@@ -596,6 +602,2659 @@ def send_email_smtp(to_emails, subject, body, html_body=None):
 @app.route('/tools')
 def tools():
     return render_template('tools.html')
+
+@app.route('/listingagent')
+def listingagent():
+    """Experimental: assisted listing page (start with eBay)."""
+    return render_template('listingagent.html')
+
+@app.route('/listingagent/mobile')
+def listingagent_mobile():
+    """Mobile helper: camera upload page for Listing Agent photos."""
+    upc = (request.args.get('upc') or '').strip()
+    if not upc:
+        return "Missing upc", 400
+    return render_template('listingagent_mobile.html', upc=upc)
+
+def _listingagent_init_settings_table(cur):
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS listing_agent_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT,
+            updated_at TEXT
+        )
+    ''')
+
+def _listingagent_get_settings():
+    try:
+        with db_connection('sync_settings.db') as conn:
+            cur = conn.cursor()
+            _listingagent_init_settings_table(cur)
+            cur.execute('SELECT key, value FROM listing_agent_settings')
+            rows = cur.fetchall()
+            return {r['key']: r['value'] for r in rows}
+    except Exception:
+        return {}
+
+def _listingagent_upsert_settings(settings: dict):
+    now = datetime.datetime.now().isoformat()
+    with db_connection('sync_settings.db') as conn:
+        cur = conn.cursor()
+        _listingagent_init_settings_table(cur)
+        for k, v in (settings or {}).items():
+            if not k:
+                continue
+            cur.execute('''
+                INSERT INTO listing_agent_settings (key, value, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET
+                    value = excluded.value,
+                    updated_at = excluded.updated_at
+            ''', (str(k), None if v is None else str(v), now))
+
+def _listingagent_parse_float(val, default=None):
+    try:
+        if val is None:
+            return default
+        if isinstance(val, (int, float)):
+            return float(val)
+        s = str(val).strip()
+        if s == '':
+            return default
+        return float(s)
+    except Exception:
+        return default
+
+def _listingagent_parse_int(val, default=None):
+    try:
+        if val is None:
+            return default
+        if isinstance(val, bool):
+            return default
+        if isinstance(val, int):
+            return int(val)
+        s = str(val).strip()
+        if s == '':
+            return default
+        return int(float(s))
+    except Exception:
+        return default
+
+# -----------------------------
+# Listing Agent - Listing Queue (listagent.db)
+# -----------------------------
+
+def _listagent_init_tables(cur):
+    # listagent.db might be created after startup; ensure WAL gets enabled.
+    try:
+        cur.execute('PRAGMA journal_mode=WAL')
+    except Exception:
+        pass
+
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS listing_queue (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            upc TEXT NOT NULL,
+            title TEXT,
+            source TEXT,
+            item_status TEXT,
+            status TEXT NOT NULL DEFAULT 'queued',
+            added_at TEXT NOT NULL,
+            listed_at TEXT,
+            listed_platform TEXT,
+            listed_listing_id TEXT,
+            listed_offer_id TEXT,
+            listed_sku TEXT,
+            listed_asin TEXT,
+            listed_url TEXT,
+            listed_ebay_at TEXT,
+            listed_amazon_at TEXT,
+            removed_at TEXT
+        )
+    ''')
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_listing_queue_status_added_at ON listing_queue(status, added_at)')
+    try:
+        # Enforce only one active (queued) entry per UPC.
+        cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_listing_queue_active_upc ON listing_queue(upc) WHERE status='queued'")
+    except Exception:
+        # Partial indexes require newer SQLite; degrade gracefully.
+        pass
+    try:
+        # Keep done entries unique too (so queue stays clean).
+        cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_listing_queue_done_upc ON listing_queue(upc) WHERE status='done'")
+    except Exception:
+        pass
+
+    # Schema migration: add item_status for queue provenance (e.g., good/bad from list manager)
+    try:
+        cur.execute('PRAGMA table_info(listing_queue)')
+        cols = []
+        for r in cur.fetchall() or []:
+            try:
+                cols.append((r['name'] or '').lower())
+            except Exception:
+                try:
+                    cols.append((r[1] or '').lower())
+                except Exception:
+                    pass
+        if 'item_status' not in cols:
+            cur.execute('ALTER TABLE listing_queue ADD COLUMN item_status TEXT')
+        if 'listed_ebay_at' not in cols:
+            cur.execute('ALTER TABLE listing_queue ADD COLUMN listed_ebay_at TEXT')
+        if 'listed_amazon_at' not in cols:
+            cur.execute('ALTER TABLE listing_queue ADD COLUMN listed_amazon_at TEXT')
+        if 'removed_at' not in cols:
+            cur.execute('ALTER TABLE listing_queue ADD COLUMN removed_at TEXT')
+    except Exception:
+        pass
+
+    # Uploaded listing photos (mobile -> desktop)
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS listing_photos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            upc TEXT NOT NULL,
+            image_path TEXT NOT NULL,
+            original_filename TEXT,
+            size_bytes INTEGER,
+            created_at TEXT NOT NULL
+        )
+    ''')
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_listing_photos_upc_created_at ON listing_photos(upc, created_at, id)')
+
+def _listagent_row_to_dict(row):
+    if not row:
+        return None
+    try:
+        return {k: row[k] for k in row.keys()}
+    except Exception:
+        try:
+            return dict(row)
+        except Exception:
+            return None
+
+def _listagent_now_iso():
+    return datetime.datetime.now().isoformat()
+
+# -----------------------------
+# Listing Log (listinglog.db)
+# -----------------------------
+
+def _listinglog_init_tables(cur):
+    # listinglog.db might be created after startup; ensure WAL gets enabled.
+    try:
+        cur.execute('PRAGMA journal_mode=WAL')
+    except Exception:
+        pass
+
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS listing_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            upc TEXT NOT NULL,
+            platform TEXT NOT NULL,
+            action TEXT NOT NULL,
+            source TEXT,
+            marketplace_id TEXT,
+            listing_id TEXT,
+            offer_id TEXT,
+            sku TEXT,
+            asin TEXT,
+            url TEXT,
+            title TEXT,
+            price REAL,
+            quantity INTEGER,
+            success INTEGER NOT NULL DEFAULT 1,
+            error TEXT,
+            meta_json TEXT
+        )
+    ''')
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_listing_log_upc_created_at ON listing_log(upc, created_at, id)')
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_listing_log_platform_created_at ON listing_log(platform, created_at, id)')
+
+def _listinglog_add_entry(*,
+                          upc,
+                          platform,
+                          action='listed',
+                          source='listingagent',
+                          created_at=None,
+                          marketplace_id=None,
+                          listing_id=None,
+                          offer_id=None,
+                          sku=None,
+                          asin=None,
+                          url=None,
+                          title=None,
+                          price=None,
+                          quantity=None,
+                          success=True,
+                          error=None,
+                          meta=None):
+    upc = (upc or '').strip()
+    if not upc:
+        raise ValueError('upc is required')
+
+    platform = (platform or 'unknown').strip().lower() or 'unknown'
+    action = (action or 'listed').strip().lower() or 'listed'
+    source = (source or '').strip() or None
+    created_at = (created_at or _listagent_now_iso()).strip()
+
+    meta_json = None
+    try:
+        if meta is not None:
+            meta_json = json.dumps(meta, ensure_ascii=False)
+    except Exception:
+        meta_json = None
+
+    with db_connection('listinglog.db') as conn:
+        cur = conn.cursor()
+        _listinglog_init_tables(cur)
+        cur.execute('''
+            INSERT INTO listing_log (
+                created_at, upc, platform, action, source, marketplace_id,
+                listing_id, offer_id, sku, asin, url, title, price, quantity,
+                success, error, meta_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            created_at, upc, platform, action, source, (marketplace_id or None),
+            (listing_id or None), (offer_id or None), (sku or None), (asin or None),
+            (url or None), (title or None), price, quantity,
+            1 if success else 0, (error or None), meta_json
+        ))
+        rid = cur.lastrowid
+        cur.execute('SELECT * FROM listing_log WHERE id = ? LIMIT 1', (rid,))
+        return _listagent_row_to_dict(cur.fetchone())
+
+# -----------------------------
+# Prep Log (preplog.db)
+# -----------------------------
+
+def _preplog_init_tables(cur):
+    # preplog.db might be created after startup; ensure WAL gets enabled.
+    try:
+        cur.execute('PRAGMA journal_mode=WAL')
+    except Exception:
+        pass
+
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS prep_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            upc TEXT NOT NULL,
+            base_upc TEXT,
+            status TEXT NOT NULL,
+            quantity INTEGER,
+            note TEXT,
+            reason TEXT,
+            source TEXT,
+            meta_json TEXT,
+            undone INTEGER NOT NULL DEFAULT 0,
+            undone_at TEXT,
+            undo_error TEXT
+        )
+    ''')
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_prep_log_created_at ON prep_log(created_at, id)')
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_prep_log_upc_created_at ON prep_log(upc, created_at, id)')
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_prep_log_undone_created_at ON prep_log(undone, created_at, id)')
+
+def _preplog_add_entry(*,
+                       upc,
+                       status,
+                       quantity=1,
+                       created_at=None,
+                       base_upc=None,
+                       note=None,
+                       reason=None,
+                       source='item-prep',
+                       meta=None,
+                       dedupe=False):
+    upc = (upc or '').strip()
+    if not upc:
+        raise ValueError('upc is required')
+
+    status = (status or '').strip().lower()
+    if status not in ('good', 'bad', 'unchecked', 'return'):
+        raise ValueError('status must be good/bad/unchecked/return')
+
+    created_at = (created_at or _listagent_now_iso()).strip()
+    base_upc = (base_upc or '').strip() or None
+    note = (note or '').strip() or None
+    reason = (reason or '').strip() or None
+    source = (source or '').strip() or None
+
+    meta_json = None
+    try:
+        if meta is not None:
+            meta_json = json.dumps(meta, ensure_ascii=False)
+    except Exception:
+        meta_json = None
+
+    try:
+        quantity = int(quantity) if quantity is not None else None
+    except Exception:
+        quantity = None
+
+    with db_connection('preplog.db') as conn:
+        cur = conn.cursor()
+        _preplog_init_tables(cur)
+
+        if dedupe:
+            cur.execute('''
+                SELECT id
+                FROM prep_log
+                WHERE upc = ? COLLATE NOCASE
+                  AND status = ?
+                  AND undone = 0
+                ORDER BY id DESC
+                LIMIT 1
+            ''', (upc, status))
+            existing = cur.fetchone()
+            if existing and (existing[0] is not None):
+                rid = int(existing[0])
+                cur.execute('''
+                    UPDATE prep_log
+                    SET created_at=?,
+                        base_upc=COALESCE(?, base_upc),
+                        quantity=COALESCE(?, quantity),
+                        note=COALESCE(?, note),
+                        reason=COALESCE(?, reason),
+                        source=COALESCE(?, source),
+                        meta_json=COALESCE(?, meta_json),
+                        undo_error=NULL
+                    WHERE id = ?
+                ''', (created_at, base_upc, quantity, note, reason, source, meta_json, rid))
+                cur.execute('SELECT * FROM prep_log WHERE id = ? LIMIT 1', (rid,))
+                return _listagent_row_to_dict(cur.fetchone())
+
+        cur.execute('''
+            INSERT INTO prep_log (
+                created_at, upc, base_upc, status, quantity, note, reason, source, meta_json, undone
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+        ''', (created_at, upc, base_upc, status, quantity, note, reason, source, meta_json))
+        rid = cur.lastrowid
+        cur.execute('SELECT * FROM prep_log WHERE id = ? LIMIT 1', (rid,))
+        return _listagent_row_to_dict(cur.fetchone())
+
+def _preplog_recent(*, limit=200, include_undone=True):
+    limit = int(limit or 200)
+    limit = max(1, min(limit, 2000))
+    with db_connection('preplog.db') as conn:
+        cur = conn.cursor()
+        _preplog_init_tables(cur)
+
+        sql = 'SELECT * FROM prep_log WHERE 1=1'
+        params = []
+        if not include_undone:
+            sql += ' AND undone = 0'
+        sql += ' ORDER BY created_at DESC, id DESC LIMIT ?'
+        params.append(limit)
+
+        cur.execute(sql, params)
+        return [_listagent_row_to_dict(r) for r in cur.fetchall()]
+
+def _preplog_mark_undone(log_id: int, *, undone_at=None, undo_error=None):
+    log_id = int(log_id)
+    undone_at = (undone_at or _listagent_now_iso()).strip()
+    undo_error = (undo_error or '').strip() or None
+
+    with db_connection('preplog.db') as conn:
+        cur = conn.cursor()
+        _preplog_init_tables(cur)
+        cur.execute('''
+            UPDATE prep_log
+            SET undone = 1,
+                undone_at = ?,
+                undo_error = ?
+            WHERE id = ?
+        ''', (undone_at, undo_error, log_id))
+        cur.execute('SELECT * FROM prep_log WHERE id = ? LIMIT 1', (log_id,))
+        return _listagent_row_to_dict(cur.fetchone())
+
+def _preplog_set_undo_error(log_id: int, error: str):
+    log_id = int(log_id)
+    error = (error or '').strip() or None
+    with db_connection('preplog.db') as conn:
+        cur = conn.cursor()
+        _preplog_init_tables(cur)
+        cur.execute('UPDATE prep_log SET undo_error = ? WHERE id = ?', (error, log_id))
+        cur.execute('SELECT * FROM prep_log WHERE id = ? LIMIT 1', (log_id,))
+        return _listagent_row_to_dict(cur.fetchone())
+
+def _listagent_add_to_queue(upc, *, title=None, source=None, item_status=None):
+    upc = (upc or '').strip()
+    if not upc:
+        raise ValueError('upc is required')
+
+    now = _listagent_now_iso()
+    title = (title or '').strip() or None
+    source = (source or '').strip() or None
+    item_status = (item_status or '').strip().lower() or None
+
+    with db_connection('listagent.db') as conn:
+        cur = conn.cursor()
+        _listagent_init_tables(cur)
+
+        # If it already exists in the active list (queued or done), keep it and just fill metadata.
+        cur.execute('''
+            SELECT *
+            FROM listing_queue
+            WHERE upc = ? AND status IN ('queued', 'done')
+            ORDER BY added_at DESC, id DESC
+            LIMIT 1
+        ''', (upc,))
+        row = cur.fetchone()
+        if row:
+            qid = row['id']
+            if title or source or item_status:
+                cur.execute('''
+                    UPDATE listing_queue
+                    SET
+                        title = COALESCE(NULLIF(title, ''), ?),
+                        source = COALESCE(NULLIF(source, ''), ?),
+                        item_status = COALESCE(?, item_status)
+                    WHERE id = ?
+                ''', (title, source, item_status, qid))
+            cur.execute('SELECT * FROM listing_queue WHERE id = ? LIMIT 1', (qid,))
+            return _listagent_row_to_dict(cur.fetchone()), False
+
+        # If it was removed before, revive it (and clear any previous "listed" flags).
+        cur.execute('''
+            SELECT id
+            FROM listing_queue
+            WHERE upc = ? AND status = 'removed'
+            ORDER BY removed_at DESC, id DESC
+            LIMIT 1
+        ''', (upc,))
+        removed = cur.fetchone()
+        if removed:
+            qid = removed['id']
+            cur.execute('''
+                UPDATE listing_queue
+                SET
+                    status = 'queued',
+                    added_at = ?,
+                    removed_at = NULL,
+                    title = COALESCE(?, title),
+                    source = COALESCE(?, source),
+                    item_status = COALESCE(?, item_status),
+                    listed_at = NULL,
+                    listed_platform = NULL,
+                    listed_listing_id = NULL,
+                    listed_offer_id = NULL,
+                    listed_sku = NULL,
+                    listed_asin = NULL,
+                    listed_url = NULL,
+                    listed_ebay_at = NULL,
+                    listed_amazon_at = NULL
+                WHERE id = ?
+            ''', (now, title, source, item_status, qid))
+            cur.execute('SELECT * FROM listing_queue WHERE id = ? LIMIT 1', (qid,))
+            return _listagent_row_to_dict(cur.fetchone()), True
+
+        # Fresh insert
+        cur.execute('''
+            INSERT INTO listing_queue (upc, title, source, item_status, status, added_at)
+            VALUES (?, ?, ?, ?, 'queued', ?)
+        ''', (upc, title, source, item_status, now))
+        qid = cur.lastrowid
+        cur.execute('SELECT * FROM listing_queue WHERE id = ? LIMIT 1', (qid,))
+        return _listagent_row_to_dict(cur.fetchone()), True
+
+def _listagent_get_queue(*, limit=50):
+    limit = int(limit or 50)
+    limit = max(1, min(limit, 200))
+    with db_connection('listagent.db') as conn:
+        cur = conn.cursor()
+        _listagent_init_tables(cur)
+        cur.execute('''
+            SELECT *
+            FROM listing_queue
+            WHERE status IN ('queued', 'done')
+            ORDER BY CASE WHEN status = 'done' THEN 1 ELSE 0 END, added_at DESC, id DESC
+            LIMIT ?
+        ''', (limit,))
+        return [_listagent_row_to_dict(r) for r in cur.fetchall()]
+
+def _listagent_mark_listed(upc, *, platform=None, listing_id=None, offer_id=None, sku=None, asin=None, url=None,
+                           marketplace_id=None, title=None, price=None, quantity=None,
+                           source='listingagent', action='listed', success=True, error=None, meta=None):
+    upc = (upc or '').strip()
+    if not upc:
+        raise ValueError('upc is required')
+
+    now = _listagent_now_iso()
+    platform = (platform or '').strip().lower() or None
+    updated_item = None
+
+    with db_connection('listagent.db') as conn:
+        cur = conn.cursor()
+        _listagent_init_tables(cur)
+
+        cur.execute('''
+            SELECT *
+            FROM listing_queue
+            WHERE upc = ? AND status IN ('queued', 'done')
+            ORDER BY added_at DESC, id DESC
+            LIMIT 1
+        ''', (upc,))
+        row = cur.fetchone()
+
+        if row and bool(success):
+            qid = row['id']
+
+            # Persist per-platform completion (queue stays visible until both platforms are done).
+            cur.execute('''
+                UPDATE listing_queue
+                SET
+                    listed_at = ?,
+                    listed_platform = ?,
+                    listed_listing_id = ?,
+                    listed_offer_id = ?,
+                    listed_sku = ?,
+                    listed_asin = ?,
+                    listed_url = ?,
+                    listed_ebay_at = CASE WHEN ? = 'ebay' THEN ? ELSE listed_ebay_at END,
+                    listed_amazon_at = CASE WHEN ? = 'amazon' THEN ? ELSE listed_amazon_at END
+                WHERE id = ?
+            ''', (
+                now, platform, listing_id, offer_id, sku, asin, url,
+                platform, now,
+                platform, now,
+                qid
+            ))
+
+            # If both platforms are listed, mark the queue item as done.
+            cur.execute('SELECT listed_ebay_at, listed_amazon_at FROM listing_queue WHERE id = ? LIMIT 1', (qid,))
+            st = cur.fetchone()
+            ebay_at = (st['listed_ebay_at'] if st else None)
+            amazon_at = (st['listed_amazon_at'] if st else None)
+            new_status = 'done' if (ebay_at and amazon_at) else 'queued'
+            cur.execute('UPDATE listing_queue SET status = ? WHERE id = ?', (new_status, qid))
+
+            cur.execute('SELECT * FROM listing_queue WHERE id = ? LIMIT 1', (qid,))
+            updated_item = _listagent_row_to_dict(cur.fetchone())
+
+    # Best-effort persistent listing log (separate DB; never blocks listing flow)
+    try:
+        _listinglog_add_entry(
+            upc=upc,
+            platform=platform,
+            action=action or 'listed',
+            source=source or 'listingagent',
+            created_at=now,
+            marketplace_id=marketplace_id,
+            listing_id=listing_id,
+            offer_id=offer_id,
+            sku=sku,
+            asin=asin,
+            url=url,
+            title=title,
+            price=price,
+            quantity=quantity,
+            success=bool(success),
+            error=error,
+            meta=meta
+        )
+    except Exception:
+        pass
+
+    return updated_item
+
+def _listagent_remove_from_queue(upc):
+    upc = (upc or '').strip()
+    if not upc:
+        raise ValueError('upc is required')
+    now = _listagent_now_iso()
+    with db_connection('listagent.db') as conn:
+        cur = conn.cursor()
+        _listagent_init_tables(cur)
+        cur.execute('''
+            UPDATE listing_queue
+            SET status = 'removed', removed_at = ?
+            WHERE upc = ? AND status IN ('queued', 'done')
+        ''', (now, upc))
+        changed = bool(cur.rowcount and cur.rowcount > 0)
+        cur.execute('''
+            SELECT *
+            FROM listing_queue
+            WHERE upc = ?
+            ORDER BY removed_at DESC, id DESC
+            LIMIT 1
+        ''', (upc,))
+        return _listagent_row_to_dict(cur.fetchone()), changed
+
+def _listagent_add_photo(upc, *, image_path, original_filename=None, size_bytes=None):
+    upc = (upc or '').strip()
+    if not upc:
+        raise ValueError('upc is required')
+    image_path = (image_path or '').strip()
+    if not image_path:
+        raise ValueError('image_path is required')
+
+    now = _listagent_now_iso()
+    with db_connection('listagent.db') as conn:
+        cur = conn.cursor()
+        _listagent_init_tables(cur)
+        cur.execute('''
+            INSERT INTO listing_photos (upc, image_path, original_filename, size_bytes, created_at)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (upc, image_path, (original_filename or None), size_bytes, now))
+        pid = cur.lastrowid
+        cur.execute('SELECT * FROM listing_photos WHERE id = ? LIMIT 1', (pid,))
+        return _listagent_row_to_dict(cur.fetchone())
+
+def _listagent_get_photos(upc, *, limit=30):
+    upc = (upc or '').strip()
+    if not upc:
+        raise ValueError('upc is required')
+    limit = int(limit or 30)
+    limit = max(1, min(limit, 200))
+    with db_connection('listagent.db') as conn:
+        cur = conn.cursor()
+        _listagent_init_tables(cur)
+        cur.execute('''
+            SELECT *
+            FROM listing_photos
+            WHERE upc = ? COLLATE NOCASE
+            ORDER BY created_at DESC, id DESC
+            LIMIT ?
+        ''', (upc, limit))
+        return [_listagent_row_to_dict(r) for r in cur.fetchall()]
+
+def _listagent_search_live_listings(q, *, limit=60):
+    q = (q or '').strip()
+    limit = int(limit or 60)
+    limit = max(1, min(limit, 200))
+    like = f"%{q}%"
+
+    results = []
+
+    # eBay live listings (from ebayStore.db)
+    try:
+        with db_connection('ebayStore.db') as conn:
+            cur = conn.cursor()
+            cur.execute('''
+                SELECT Title, ItemID, SKU, Price, Quantity, Image, URL, List_State, UPC, List_Date
+                FROM INVENTORY
+                WHERE List_State = 'Active'
+                  AND (? = '' OR UPC LIKE ? OR Title LIKE ? OR SKU LIKE ? OR ItemID LIKE ?)
+                ORDER BY List_Date DESC
+                LIMIT ?
+            ''', (q, like, like, like, like, limit))
+            for r in cur.fetchall():
+                results.append({
+                    'platform': 'ebay',
+                    'upc': (r['UPC'] or '').strip(),
+                    'title': r['Title'] or '',
+                    'sku': r['SKU'] or '',
+                    'item_id': r['ItemID'] or '',
+                    'price': r['Price'] or '',
+                    'quantity': r['Quantity'] or '',
+                    'image': r['Image'] or '',
+                    'url': r['URL'] or '',
+                    'state': r['List_State'] or '',
+                    'last_updated': r['List_Date'] or '',
+                })
+    except Exception:
+        pass
+
+    # Amazon live listings (from amazonStore.db)
+    try:
+        with db_connection('amazonStore.db') as conn:
+            cur = conn.cursor()
+            cur.execute('''
+                SELECT ASIN, SKU, TITLE, PRICE, QUANTITY, STATUS, IMAGE, UPC, LAST_UPDATED
+                FROM ITEMS
+                WHERE STATUS = 'Active'
+                  AND (? = '' OR UPC LIKE ? OR TITLE LIKE ? OR SKU LIKE ? OR ASIN LIKE ?)
+                ORDER BY LAST_UPDATED DESC
+                LIMIT ?
+            ''', (q, like, like, like, like, limit))
+            for r in cur.fetchall():
+                asin = (r['ASIN'] or '').strip()
+                results.append({
+                    'platform': 'amazon',
+                    'upc': (r['UPC'] or '').strip(),
+                    'title': r['TITLE'] or '',
+                    'sku': r['SKU'] or '',
+                    'asin': asin,
+                    'price': r['PRICE'],
+                    'quantity': r['QUANTITY'],
+                    'image': r['IMAGE'] or '',
+                    'url': f"https://www.amazon.com/dp/{asin}" if asin else '',
+                    'state': r['STATUS'] or '',
+                    'last_updated': r['LAST_UPDATED'] or '',
+                })
+    except Exception:
+        pass
+
+    # Prefer matches that have UPC and tighter match on UPC, then title.
+    ql = q.lower()
+    def score(it):
+        upc = (it.get('upc') or '').lower()
+        title = (it.get('title') or '').lower()
+        if not q:
+            return (0, it.get('platform') or '', upc, title)
+        if upc and upc.startswith(ql):
+            return (0, it.get('platform') or '', upc, title)
+        if upc and ql in upc:
+            return (1, it.get('platform') or '', upc, title)
+        if title and ql in title:
+            return (2, it.get('platform') or '', upc, title)
+        return (3, it.get('platform') or '', upc, title)
+
+    results = sorted(results, key=score)[:limit]
+    return results
+
+@app.route('/api/listingagent/settings', methods=['GET'])
+def api_listingagent_get_settings():
+    try:
+        return jsonify({'success': True, 'settings': _listingagent_get_settings()})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'listingagent:get_settings')}), 500
+
+@app.route('/api/listingagent/settings', methods=['POST'])
+def api_listingagent_save_settings():
+    try:
+        payload = request.json or {}
+        settings = payload.get('settings', payload)
+        if not isinstance(settings, dict):
+            return jsonify({'success': False, 'error': 'settings must be an object'}), 400
+        _listingagent_upsert_settings(settings)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'listingagent:save_settings')}), 500
+
+@app.route('/api/listingagent/queue', methods=['GET'])
+def api_listingagent_queue():
+    """Get the Listing Agent queue (queued + done; excludes removed)."""
+    try:
+        limit = _listingagent_parse_int(request.args.get('limit'), 60) or 60
+        items = _listagent_get_queue(limit=limit)
+        return jsonify({'success': True, 'items': items})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'listingagent:queue_get')}), 500
+
+@app.route('/api/listingagent/queue/add', methods=['POST'])
+def api_listingagent_queue_add():
+    """Add a UPC to the Listing Agent queue."""
+    try:
+        data = request.json or {}
+        upc = (data.get('upc') or '').strip()
+        if not upc:
+            return jsonify({'success': False, 'error': 'upc is required'}), 400
+        title = (data.get('title') or '').strip()
+        source = (data.get('source') or '').strip()
+        item_status = (data.get('item_status') or data.get('itemStatus') or '').strip()
+
+        item, added = _listagent_add_to_queue(upc, title=title, source=source, item_status=item_status)
+        return jsonify({'success': True, 'added': added, 'item': item})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'listingagent:queue_add')}), 500
+
+@app.route('/api/listingagent/queue/mark_listed', methods=['POST'])
+def api_listingagent_queue_mark_listed():
+    """Mark a queued UPC as listed on a platform (and record where/when)."""
+    try:
+        data = request.json or {}
+        upc = (data.get('upc') or '').strip()
+        if not upc:
+            return jsonify({'success': False, 'error': 'upc is required'}), 400
+
+        platform = (data.get('platform') or '').strip()
+        listing_id = (data.get('listingId') or data.get('listing_id') or '').strip() or None
+        offer_id = (data.get('offerId') or data.get('offer_id') or '').strip() or None
+        sku = (data.get('sku') or '').strip() or None
+        asin = (data.get('asin') or '').strip() or None
+        url = (data.get('url') or '').strip() or None
+
+        item = _listagent_mark_listed(
+            upc,
+            platform=platform,
+            listing_id=listing_id,
+            offer_id=offer_id,
+            sku=sku,
+            asin=asin,
+            url=url
+        )
+        return jsonify({'success': True, 'item': item})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'listingagent:queue_mark_listed')}), 500
+
+@app.route('/api/listingagent/queue/remove', methods=['POST'])
+def api_listingagent_queue_remove():
+    """Remove a UPC from the Listing Agent queue (soft remove; keeps history)."""
+    try:
+        data = request.json or {}
+        upc = (data.get('upc') or '').strip()
+        if not upc:
+            return jsonify({'success': False, 'error': 'upc is required'}), 400
+        item, removed = _listagent_remove_from_queue(upc)
+        return jsonify({'success': True, 'removed': removed, 'item': item})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'listingagent:queue_remove')}), 500
+
+@app.route('/api/listinglog/recent', methods=['GET'])
+def api_listinglog_recent():
+    """Recent listing events (listinglog.db)."""
+    try:
+        upc = (request.args.get('upc') or '').strip()
+        platform = (request.args.get('platform') or '').strip().lower()
+        limit = _listingagent_parse_int(request.args.get('limit'), 200) or 200
+        limit = max(1, min(limit, 1000))
+
+        with db_connection('listinglog.db') as conn:
+            cur = conn.cursor()
+            _listinglog_init_tables(cur)
+
+            sql = 'SELECT * FROM listing_log WHERE 1=1'
+            params = []
+            if upc:
+                sql += ' AND upc = ? COLLATE NOCASE'
+                params.append(upc)
+            if platform:
+                sql += ' AND platform = ?'
+                params.append(platform)
+            sql += ' ORDER BY created_at DESC, id DESC LIMIT ?'
+            params.append(limit)
+
+            cur.execute(sql, params)
+            rows = [_listagent_row_to_dict(r) for r in cur.fetchall()]
+
+        return jsonify({'success': True, 'items': rows})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'listinglog:recent')}), 500
+
+@app.route('/api/preplog/recent', methods=['GET'])
+def api_preplog_recent():
+    """Recent item-prep events (preplog.db)."""
+    try:
+        limit = _listingagent_parse_int(request.args.get('limit'), 200) or 200
+        limit = max(1, min(limit, 2000))
+        include_undone = (request.args.get('include_undone') or '1').strip().lower() in ('1', 'true', 'yes', 'y')
+        items = _preplog_recent(limit=limit, include_undone=include_undone)
+        return jsonify({'success': True, 'items': items})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'preplog:recent')}), 500
+
+@app.route('/api/preplog/undo', methods=['POST'])
+def api_preplog_undo():
+    """Undo a prep log entry (and mark it undone in preplog.db). JSON: { id }"""
+    try:
+        data = request.get_json() or {}
+        log_id = data.get('id')
+        if log_id is None:
+            return jsonify({'success': False, 'error': 'Missing id'}), 400
+        try:
+            log_id = int(log_id)
+        except Exception:
+            return jsonify({'success': False, 'error': 'Invalid id'}), 400
+
+        # Fetch entry
+        with db_connection('preplog.db') as conn:
+            cur = conn.cursor()
+            _preplog_init_tables(cur)
+            cur.execute('SELECT * FROM prep_log WHERE id = ? LIMIT 1', (log_id,))
+            row = cur.fetchone()
+            entry = _listagent_row_to_dict(row)
+
+        if not entry:
+            return jsonify({'success': False, 'error': 'Log entry not found'}), 404
+        if entry.get('undone'):
+            return jsonify({'success': False, 'error': 'Already undone'}), 400
+
+        upc = (entry.get('upc') or '').strip()
+        status = (entry.get('status') or '').strip().lower()
+        qty = entry.get('quantity') if entry.get('quantity') is not None else 1
+        base_upc = (entry.get('base_upc') or '').strip() or None
+
+        ok, err, code = _items_prep_undo_core(upc=upc, status=status, qty=qty, base_upc=base_upc)
+        if not ok:
+            try:
+                _preplog_set_undo_error(log_id, err)
+            except Exception:
+                pass
+            return jsonify({'success': False, 'error': err or 'Undo failed'}), (code or 400)
+
+        updated = _preplog_mark_undone(log_id, undone_at=_listagent_now_iso(), undo_error=None)
+        return jsonify({'success': True, 'item': updated})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'preplog:undo')}), 500
+
+@app.route('/api/listingagent/photos', methods=['GET'])
+def api_listingagent_photos_get():
+    """Get uploaded listing photos for a UPC (from listagent.db)."""
+    try:
+        upc = (request.args.get('upc') or '').strip()
+        if not upc:
+            return jsonify({'success': False, 'error': 'upc is required'}), 400
+        limit = _listingagent_parse_int(request.args.get('limit'), 30) or 30
+
+        rows = _listagent_get_photos(upc, limit=limit)
+        base = (request.url_root or '').rstrip('/')
+        images = []
+        items = []
+        for r in rows:
+            rel = (r.get('image_path') or '').strip()
+            if not rel:
+                continue
+            url = f"{base}{url_for('static', filename=rel)}"
+            images.append(url)
+            items.append({
+                'url': url,
+                'created_at': r.get('created_at') or '',
+                'original_filename': r.get('original_filename') or '',
+                'size_bytes': r.get('size_bytes'),
+            })
+
+        return jsonify({'success': True, 'upc': upc, 'images': images, 'items': items})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'listingagent:photos_get')}), 500
+
+@app.route('/api/listingagent/photos/upload', methods=['POST'])
+def api_listingagent_photos_upload():
+    """Upload listing photos for a UPC. form-data: upc, files: photos[]"""
+    try:
+        upc = (request.form.get('upc') or request.args.get('upc') or '').strip()
+        if not upc:
+            return jsonify({'success': False, 'error': 'upc is required'}), 400
+
+        from werkzeug.utils import secure_filename
+        import uuid
+
+        files = request.files.getlist('photos[]') or request.files.getlist('photos') or ([] if 'photo' not in request.files else [request.files['photo']])
+        if not files:
+            return jsonify({'success': False, 'error': 'No files uploaded'}), 400
+
+        save_dir = os.path.join(app.root_path, 'static', 'listingagent_uploads')
+        os.makedirs(save_dir, exist_ok=True)
+
+        base = (request.url_root or '').rstrip('/')
+        saved_urls = []
+        saved_count = 0
+        safe_upc = secure_filename(_normalize_upc(upc)) or 'upc'
+
+        for f in files:
+            if not f or not getattr(f, 'filename', None):
+                continue
+            fn = secure_filename(f.filename)
+            name, ext = os.path.splitext(fn)
+            ext = (ext or '').lower()
+            if ext not in ('.jpg', '.jpeg', '.png', '.webp', '.gif', '.heic', '.heif'):
+                ext = '.jpg'
+            # Keep filenames stable-ish but unique (UPC + timestamp + random).
+            unique = f"{safe_upc}_{int(time.time()*1000)}_{uuid.uuid4().hex[:10]}{ext}"
+            abs_path = os.path.join(save_dir, unique)
+            f.save(abs_path)
+
+            rel = f"listingagent_uploads/{unique}"
+            size_bytes = None
+            try:
+                size_bytes = os.path.getsize(abs_path)
+            except Exception:
+                size_bytes = None
+
+            _listagent_add_photo(upc, image_path=rel, original_filename=fn, size_bytes=size_bytes)
+
+            url = f"{base}{url_for('static', filename=rel)}"
+            saved_urls.append(url)
+            saved_count += 1
+
+        return jsonify({'success': True, 'upc': upc, 'saved': saved_urls, 'saved_count': saved_count})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'listingagent:photos_upload')}), 500
+
+@app.route('/api/listingagent/live_listings/search', methods=['GET'])
+def api_listingagent_live_listings_search():
+    """Search live eBay/Amazon listings from local store DBs."""
+    try:
+        q = (request.args.get('q') or '').strip()
+        limit = _listingagent_parse_int(request.args.get('limit'), 60) or 60
+        results = _listagent_search_live_listings(q, limit=limit)
+        return jsonify({'success': True, 'results': results})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'listingagent:live_listings_search')}), 500
+
+@app.route('/api/listingagent/upc/search', methods=['GET'])
+def api_listingagent_upc_search():
+    """Typeahead for UPCs from searchRack.db and bol.db."""
+    try:
+        q = (request.args.get('q') or '').strip()
+        limit = _listingagent_parse_int(request.args.get('limit'), 20) or 20
+        limit = max(1, min(limit, 50))
+
+        results_by_upc = {}
+
+        like = f"%{q}%"
+        with db_connection('searchRack.db') as conn:
+            cur = conn.cursor()
+            cur.execute('''
+                SELECT
+                    TRIM(BARCODE) AS upc,
+                    MAX(TITLE) AS title,
+                    SUM(COALESCE(QUANTITY, 1)) AS quantity,
+                    MAX(CREATED_AT) AS last_seen,
+                    MAX(IMAGE) AS image
+                FROM SEARCHRACK
+                WHERE BARCODE IS NOT NULL AND TRIM(BARCODE) != ''
+                  AND (? = '' OR BARCODE LIKE ? OR TITLE LIKE ?)
+                GROUP BY TRIM(BARCODE)
+                ORDER BY MAX(CREATED_AT) DESC
+                LIMIT ?
+            ''', (q, like, like, limit))
+
+            for row in cur.fetchall():
+                upc = (row['upc'] or '').strip()
+                if not upc:
+                    continue
+                results_by_upc[upc] = {
+                    'upc': upc,
+                    'title': row['title'] or '',
+                    'quantity': int(row['quantity'] or 0),
+                    'image': row['image'] or '',
+                    'source': 'searchRack'
+                }
+
+        with db_connection('bol.db') as conn:
+            cur = conn.cursor()
+            cur.execute('''
+                SELECT
+                    TRIM(upc) AS upc,
+                    MAX(item_description) AS title,
+                    MAX(image_url) AS image,
+                    MAX(COALESCE(good_qty, quantity, original_qty, 1)) AS quantity,
+                    MAX(import_date) AS last_seen
+                FROM bol_items
+                WHERE upc IS NOT NULL AND TRIM(upc) != ''
+                  AND (? = '' OR upc LIKE ? OR item_description LIKE ?)
+                GROUP BY TRIM(upc)
+                ORDER BY MAX(import_date) DESC
+                LIMIT ?
+            ''', (q, like, like, limit))
+            for row in cur.fetchall():
+                upc = (row['upc'] or '').strip()
+                if not upc:
+                    continue
+                if upc in results_by_upc:
+                    # Fill missing title/image from BOL
+                    if not results_by_upc[upc].get('title') and row['title']:
+                        results_by_upc[upc]['title'] = row['title'] or ''
+                    if not results_by_upc[upc].get('image') and row['image']:
+                        results_by_upc[upc]['image'] = row['image'] or ''
+                    continue
+                results_by_upc[upc] = {
+                    'upc': upc,
+                    'title': row['title'] or '',
+                    'quantity': int(row['quantity'] or 0),
+                    'image': row['image'] or '',
+                    'source': 'bol'
+                }
+
+        # Basic ordering: prioritize UPC prefix matches, then title matches
+        def score(item):
+            if not q:
+                return (0, item.get('upc', ''))
+            upc = item.get('upc', '')
+            title = (item.get('title') or '').lower()
+            ql = q.lower()
+            if upc.startswith(q):
+                return (0, upc)
+            if q in upc:
+                return (1, upc)
+            if ql in title:
+                return (2, upc)
+            return (3, upc)
+
+        results = sorted(results_by_upc.values(), key=score)[:limit]
+        return jsonify({'success': True, 'results': results})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'listingagent:upc_search')}), 500
+
+@app.route('/api/listingagent/upc/<upc>', methods=['GET'])
+def api_listingagent_upc_detail(upc):
+    """Aggregate item info by UPC across local DBs to help auto-fill listings."""
+    try:
+        upc = (upc or '').strip()
+        if not upc:
+            return jsonify({'success': False, 'error': 'UPC is required'}), 400
+
+        item = {
+            'upc': upc,
+            'title': '',
+            'images': [],
+            'inventory': {
+                'total_quantity': 0,
+                'rows': [],
+                'positions': []
+            },
+            'bol': None,
+            'ebay_store': {
+                'listings': []
+            },
+            'amazon_store': {
+                'listings': []
+            },
+            'sold_stats': None
+        }
+
+        # searchRack inventory
+        with db_connection('searchRack.db') as conn:
+            cur = conn.cursor()
+            cur.execute('''
+                SELECT ID, TITLE, ITEM_POSITION, PICTUREPOSITION, QUANTITY, IMAGE, IMAGES, ITEMID, CREATED_AT
+                FROM SEARCHRACK
+                WHERE TRIM(BARCODE) = ? COLLATE NOCASE
+                ORDER BY CREATED_AT DESC
+            ''', (upc,))
+            rows = cur.fetchall()
+
+            total_qty = 0
+            positions = []
+            for r in rows:
+                qty = int(r['QUANTITY'] or 0) if r['QUANTITY'] is not None else 0
+                if qty <= 0:
+                    qty = 1
+                total_qty += qty
+                pos = (r['ITEM_POSITION'] or '').strip()
+                if pos:
+                    positions.append(pos)
+
+                for img in [r['IMAGE'], r['IMAGES']]:
+                    if not img:
+                        continue
+                    s = str(img).strip()
+                    if not s:
+                        continue
+                    if s not in item['images']:
+                        item['images'].append(s)
+
+            item['inventory']['total_quantity'] = total_qty
+            item['inventory']['positions'] = sorted(set([p for p in positions if p]))
+            item['inventory']['rows'] = [{
+                'id': r['ID'],
+                'title': r['TITLE'] or '',
+                'position': r['ITEM_POSITION'] or '',
+                'picturePosition': r['PICTUREPOSITION'] or '',
+                'quantity': r['QUANTITY'] if r['QUANTITY'] is not None else 1,
+                'image': r['IMAGE'] or '',
+                'createdAt': r['CREATED_AT'] or ''
+            } for r in rows[:50]]
+
+            # Prefer the most recent title
+            for r in rows:
+                if r['TITLE']:
+                    item['title'] = r['TITLE']
+                    break
+
+        # BOL info
+        with db_connection('bol.db') as conn:
+            cur = conn.cursor()
+            cur.execute('''
+                SELECT item_description, image_url, lot_number, import_date,
+                       good_qty, bad_qty, unchecked_qty, quantity,
+                       listed_ebay, listed_ebay_date
+                FROM bol_items
+                WHERE TRIM(upc) = ? COLLATE NOCASE
+                ORDER BY import_date DESC
+                LIMIT 1
+            ''', (upc,))
+            bol_row = cur.fetchone()
+            if bol_row:
+                item['bol'] = {
+                    'description': bol_row['item_description'] or '',
+                    'image_url': bol_row['image_url'] or '',
+                    'lot_number': bol_row['lot_number'] or '',
+                    'import_date': bol_row['import_date'] or '',
+                    'good_qty': bol_row['good_qty'],
+                    'bad_qty': bol_row['bad_qty'],
+                    'unchecked_qty': bol_row['unchecked_qty'],
+                    'quantity': bol_row['quantity'],
+                    'listed_ebay': bol_row['listed_ebay'],
+                    'listed_ebay_date': bol_row['listed_ebay_date'] or ''
+                }
+                if not item['title'] and item['bol']['description']:
+                    item['title'] = item['bol']['description']
+                if item['bol']['image_url'] and item['bol']['image_url'] not in item['images']:
+                    item['images'].append(item['bol']['image_url'])
+
+        # ebayStore existing listings
+        with db_connection('ebayStore.db') as conn:
+            cur = conn.cursor()
+            cur.execute('''
+                SELECT Title, ItemID, SKU, Price, Quantity, Image, URL, List_State, Sold_Date, List_Date
+                FROM INVENTORY
+                WHERE TRIM(UPC) = ? COLLATE NOCASE
+                ORDER BY List_Date DESC
+                LIMIT 10
+            ''', (upc,))
+            for r in cur.fetchall():
+                listing = {
+                    'title': r['Title'] or '',
+                    'item_id': r['ItemID'] or '',
+                    'sku': r['SKU'] or '',
+                    'price': r['Price'] or '',
+                    'quantity': r['Quantity'] or '',
+                    'image': r['Image'] or '',
+                    'url': r['URL'] or '',
+                    'state': r['List_State'] or '',
+                    'sold_date': r['Sold_Date'] or '',
+                    'list_date': r['List_Date'] or ''
+                }
+                item['ebay_store']['listings'].append(listing)
+                if listing.get('image') and listing['image'] not in item['images']:
+                    item['images'].append(listing['image'])
+
+        # amazonStore existing listings
+        try:
+            with db_connection('amazonStore.db') as conn:
+                cur = conn.cursor()
+                cur.execute('''
+                    SELECT ASIN, SKU, TITLE, PRICE, QUANTITY, STATUS, IMAGE, UPC, CONDITION, FULFILLMENT_CHANNEL, LAST_UPDATED
+                    FROM ITEMS
+                    WHERE TRIM(UPC) = ? COLLATE NOCASE
+                    ORDER BY LAST_UPDATED DESC
+                    LIMIT 10
+                ''', (upc,))
+                for r in cur.fetchall():
+                    asin = (r['ASIN'] or '').strip()
+                    listing = {
+                        'asin': asin,
+                        'sku': r['SKU'] or '',
+                        'title': r['TITLE'] or '',
+                        'price': r['PRICE'],
+                        'quantity': r['QUANTITY'],
+                        'status': r['STATUS'] or '',
+                        'image': r['IMAGE'] or '',
+                        'condition': r['CONDITION'] or '',
+                        'fulfillment_channel': r['FULFILLMENT_CHANNEL'] or '',
+                        'last_updated': r['LAST_UPDATED'] or '',
+                        'product_url': f"https://www.amazon.com/dp/{asin}" if asin else ''
+                    }
+                    item['amazon_store']['listings'].append(listing)
+                    if listing.get('image') and listing['image'] not in item['images']:
+                        item['images'].append(listing['image'])
+                    if not item['title'] and listing.get('title'):
+                        item['title'] = listing['title']
+        except Exception:
+            # amazonStore.db may not exist in some environments; ignore.
+            pass
+
+        # Listing Manager (Item Prep) photos + notes (bol.db items_prep_*) — useful for auto-filling listing images and showing notes.
+        item['prep'] = {'notes': [], 'images': []}
+        try:
+            _ensure_items_prep_tables()
+
+            base_upc = (upc.split('-', 1)[0] if '-' in upc else upc).strip()
+            base_upc = base_upc.lstrip('0') if base_upc and base_upc.isdigit() else base_upc
+            like_upc = f"{base_upc}-%" if base_upc else ''
+
+            prep_notes = []
+            prep_images = []
+
+            if base_upc:
+                with db_connection('bol.db') as conn:
+                    cur = conn.cursor()
+
+                    # Notes (free-form) from Listing Manager / Item Prep
+                    cur.execute('''
+                        SELECT upc, id, note, created_at
+                        FROM items_prep_notes
+                        WHERE upc = ? COLLATE NOCASE OR upc LIKE ? COLLATE NOCASE
+                        ORDER BY created_at DESC, id DESC
+                        LIMIT 25
+                    ''', (base_upc, like_upc))
+                    prep_notes = [dict(r) for r in cur.fetchall()]
+
+                    # Fallback: if no note bubbles exist, use the status.note (single field) if present.
+                    if not prep_notes:
+                        cur.execute('''
+                            SELECT upc, note, updated_at
+                            FROM items_prep_status
+                            WHERE (upc = ? COLLATE NOCASE OR upc LIKE ? COLLATE NOCASE)
+                              AND note IS NOT NULL
+                              AND TRIM(note) != ''
+                            ORDER BY COALESCE(updated_at, '') DESC
+                            LIMIT 1
+                        ''', (base_upc, like_upc))
+                        sn = cur.fetchone()
+                        if sn and (sn['note'] or '').strip():
+                            prep_notes = [{
+                                'upc': sn['upc'],
+                                'id': None,
+                                'note': sn['note'],
+                                'created_at': sn['updated_at'] or ''
+                            }]
+
+                    # Photos from Listing Manager / Item Prep
+                    cur.execute('''
+                        SELECT upc, id, image_path, created_at, rotation
+                        FROM items_prep_images
+                        WHERE (upc = ? COLLATE NOCASE OR upc LIKE ? COLLATE NOCASE)
+                          AND (deleted_at IS NULL OR TRIM(COALESCE(deleted_at,'')) = '')
+                        ORDER BY created_at DESC, id DESC
+                        LIMIT 30
+                    ''', (base_upc, like_upc))
+                    prep_images = [dict(r) for r in cur.fetchall()]
+
+                base_url = (request.url_root or '').rstrip('/')
+                prep_urls = []
+                for pr in prep_images:
+                    rel = (pr.get('image_path') or '').strip()
+                    if not rel:
+                        continue
+                    url = f"{base_url}{url_for('static', filename=rel)}"
+                    if url and url not in prep_urls:
+                        prep_urls.append(url)
+
+                if prep_urls:
+                    # Prefer prep photos ahead of marketplace images, but keep existing order otherwise.
+                    merged = []
+                    for u in prep_urls + (item.get('images') or []):
+                        if not u:
+                            continue
+                        if u not in merged:
+                            merged.append(u)
+                    item['images'] = merged
+
+                item['prep'] = {'notes': prep_notes, 'images': prep_urls}
+        except Exception:
+            # Item prep tables may not exist in some envs; ignore.
+            item['prep'] = {'notes': [], 'images': []}
+
+        # Listing Agent uploaded photos (from listagent.db) — prefer these first.
+        try:
+            photo_rows = _listagent_get_photos(upc, limit=30)
+            base = (request.url_root or '').rstrip('/')
+            uploaded_urls = []
+            for pr in photo_rows:
+                rel = (pr.get('image_path') or '').strip()
+                if not rel:
+                    continue
+                url = f"{base}{url_for('static', filename=rel)}"
+                if url and url not in item['images']:
+                    uploaded_urls.append(url)
+            if uploaded_urls:
+                item['images'] = uploaded_urls + item['images']
+        except Exception:
+            pass
+
+        # sold stats (optional)
+        with db_connection('sold.db') as conn:
+            cur = conn.cursor()
+            cur.execute('''
+                SELECT COUNT(*) AS cnt,
+                       AVG(price) AS avg_price,
+                       MIN(price) AS min_price,
+                       MAX(price) AS max_price,
+                       MAX(paid_time) AS last_sold
+                FROM orders
+                WHERE TRIM(barcode) = ? COLLATE NOCASE
+                  AND price IS NOT NULL
+                  AND price > 0
+            ''', (upc,))
+            r = cur.fetchone()
+            if r and (r['cnt'] or 0) > 0:
+                item['sold_stats'] = {
+                    'count': int(r['cnt'] or 0),
+                    'avg_price': float(r['avg_price'] or 0),
+                    'min_price': float(r['min_price'] or 0),
+                    'max_price': float(r['max_price'] or 0),
+                    'last_sold': r['last_sold'] or ''
+                }
+
+        return jsonify({'success': True, 'item': item})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'listingagent:upc_detail')}), 500
+
+def _ebay_api_request(method, path, *, params=None, payload=None, timeout=30):
+    token = get_access_token()  # refreshes if expired
+    headers_local = {
+        'Authorization': f'Bearer {token}',
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'Content-Language': 'en-US'
+    }
+    url = f"https://api.ebay.com{path}"
+    resp = requests.request(method, url, headers=headers_local, params=params, json=payload, timeout=timeout)
+    return resp
+
+def _ebay_extract_error(resp):
+    try:
+        data = resp.json()
+        # Common eBay error schema: { errors: [ {message, errorId, ...} ] }
+        errors = data.get('errors') if isinstance(data, dict) else None
+        if errors and isinstance(errors, list):
+            first = errors[0] or {}
+            msg = first.get('message') or first.get('longMessage') or json.dumps(first)
+            return f"eBay API error ({resp.status_code}): {msg}"
+        if isinstance(data, dict) and data.get('message'):
+            return f"eBay API error ({resp.status_code}): {data.get('message')}"
+        return f"eBay API error ({resp.status_code}): {resp.text[:300]}"
+    except Exception:
+        return f"eBay API error ({resp.status_code}): {resp.text[:300]}"
+
+@app.route('/api/listingagent/ebay/locations', methods=['GET'])
+def api_listingagent_ebay_locations():
+    """Fetch inventory locations (locationKey) from eBay (requires sell.inventory scope)."""
+    try:
+        resp = _ebay_api_request('GET', '/sell/inventory/v1/location', params={'limit': 50})
+        if resp.status_code >= 400:
+            return jsonify({'success': False, 'error': _ebay_extract_error(resp)}), 400
+        return jsonify({'success': True, 'data': resp.json() if resp.text else {}})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'listingagent:ebay_locations')}), 500
+
+_LISTINGAGENT_EBAY_POLICIES_CACHE = {}
+_LISTINGAGENT_EBAY_POLICIES_LOCK = threading.Lock()
+
+def _listingagent_get_ebay_business_policies(marketplace_id: str):
+    """Fetch eBay business policies (fulfillment/payment/return). Cached in-memory."""
+    marketplace_id = (marketplace_id or 'EBAY_US').strip() or 'EBAY_US'
+    cache_key = marketplace_id
+    now = time.time()
+
+    cached = _LISTINGAGENT_EBAY_POLICIES_CACHE.get(cache_key)
+    if cached and (now - float(cached.get('ts') or 0)) < 6 * 3600:
+        return cached.get('data') or {}
+
+    def _fetch(path):
+        # Sell Account API endpoints only take marketplace_id; passing unknown params can 400.
+        resp = _ebay_api_request('GET', path, params={'marketplace_id': marketplace_id})
+        if resp.status_code == 403:
+            # Most common cause: missing OAuth scope for Sell Account API.
+            raise _ListingAgentUserError(
+                "eBay API error (403): Forbidden. Your eBay OAuth token likely does not include the "
+                "`sell.account` scope required to load business policies. Re-authorize your eBay app "
+                "with `https://api.ebay.com/oauth/api_scope/sell.account` (or "
+                "`https://api.ebay.com/oauth/api_scope/sell.account.readonly`) and regenerate "
+                "`tokens.json`.",
+                status_code=400,
+                extra={'needs_scope': 'sell.account'}
+            )
+        if resp.status_code == 401:
+            raise _ListingAgentUserError(
+                "eBay API error (401): Unauthorized. Your token may be expired or invalid. "
+                "Try re-authorizing and regenerating `tokens.json`.",
+                status_code=400
+            )
+        if resp.status_code >= 400:
+            raise _ListingAgentUserError(_ebay_extract_error(resp), status_code=400)
+        return resp.json() if resp.text else {}
+
+    with _LISTINGAGENT_EBAY_POLICIES_LOCK:
+        cached = _LISTINGAGENT_EBAY_POLICIES_CACHE.get(cache_key)
+        now = time.time()
+        if cached and (now - float(cached.get('ts') or 0)) < 6 * 3600:
+            return cached.get('data') or {}
+
+        ful = _fetch('/sell/account/v1/fulfillment_policy')
+        pay = _fetch('/sell/account/v1/payment_policy')
+        ret = _fetch('/sell/account/v1/return_policy')
+
+        def _norm_list(payload, list_key, id_key):
+            items = payload.get(list_key) or payload.get(list_key[0].upper() + list_key[1:]) or []
+            out = []
+            if isinstance(items, list):
+                for it in items:
+                    if not isinstance(it, dict):
+                        continue
+                    pid = (it.get(id_key) or it.get(id_key[0].lower() + id_key[1:]) or '').strip()
+                    if not pid:
+                        continue
+                    name = (it.get('name') or it.get('policyName') or it.get('policy_name') or '').strip()
+                    out.append({
+                        'id': pid,
+                        'name': name or pid,
+                        'categoryTypes': it.get('categoryTypes') or it.get('category_types') or [],
+                    })
+            out.sort(key=lambda x: (x.get('name') or '').lower())
+            return out
+
+        data = {
+            'fulfillment': _norm_list(ful, 'fulfillmentPolicies', 'fulfillmentPolicyId'),
+            'payment': _norm_list(pay, 'paymentPolicies', 'paymentPolicyId'),
+            'returns': _norm_list(ret, 'returnPolicies', 'returnPolicyId'),
+        }
+
+        _LISTINGAGENT_EBAY_POLICIES_CACHE[cache_key] = {'ts': now, 'data': data}
+        return data
+
+@app.route('/api/listingagent/ebay/business_policies', methods=['GET'])
+def api_listingagent_ebay_business_policies():
+    """Get eBay business policies (fulfillment/payment/return) for dropdowns."""
+    try:
+        settings = _listingagent_get_settings()
+        marketplace_id = (request.args.get('marketplaceId') or settings.get('ebay_marketplace_id') or 'EBAY_US').strip() or 'EBAY_US'
+        data = _listingagent_get_ebay_business_policies(marketplace_id)
+        out = {'success': True, 'marketplaceId': marketplace_id}
+        out.update(data or {})
+        return jsonify(out)
+    except _ListingAgentUserError as e:
+        payload = {'success': False, 'error': str(e)}
+        payload.update(e.extra or {})
+        return jsonify(payload), e.status_code
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'listingagent:ebay_business_policies')}), 500
+
+@app.route('/api/listingagent/ebay/offers_for_sku', methods=['GET'])
+def api_listingagent_ebay_offers_for_sku():
+    """Lookup Inventory offers for a SKU (helps edit existing listings)."""
+    try:
+        sku = (request.args.get('sku') or '').strip()
+        if not sku:
+            return jsonify({'success': False, 'error': 'sku is required'}), 400
+
+        include_raw = (request.args.get('raw') or '').lower() == 'true'
+        resp = _ebay_api_request('GET', '/sell/inventory/v1/offer', params={'sku': sku, 'limit': 50})
+        if resp.status_code >= 400:
+            return jsonify({'success': False, 'error': _ebay_extract_error(resp)}), 400
+
+        payload = resp.json() if resp.text else {}
+        offers = payload.get('offers') or payload.get('Offers') or []
+        results = []
+        if isinstance(offers, list):
+            for o in offers:
+                if not isinstance(o, dict):
+                    continue
+                results.append({
+                    'offerId': o.get('offerId') or o.get('offer_id') or '',
+                    'listingId': o.get('listingId') or o.get('listing_id') or '',
+                    'marketplaceId': o.get('marketplaceId') or o.get('marketplace_id') or '',
+                    'status': o.get('status') or '',
+                    'format': o.get('format') or '',
+                    'availableQuantity': o.get('availableQuantity') if o.get('availableQuantity') is not None else o.get('available_quantity'),
+                    'categoryId': o.get('categoryId') or o.get('category_id') or '',
+                    'pricingSummary': o.get('pricingSummary') or o.get('pricing_summary') or {},
+                })
+
+        out = {'success': True, 'data': {'sku': sku, 'offers': results}}
+        if include_raw:
+            out['raw'] = payload
+        return jsonify(out)
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'listingagent:ebay_offers_for_sku')}), 500
+
+def _build_ebay_inventory_item_payload(upc, title, description, images, quantity, condition, *, aspects=None):
+    images = [i.strip() for i in (images or []) if isinstance(i, str) and i.strip()]
+    # eBay limits imageUrls to 12
+    images = images[:12]
+    payload = {
+        'availability': {
+            'shipToLocationAvailability': {
+                'quantity': int(quantity or 1)
+            }
+        },
+        'condition': condition or 'USED_GOOD',
+        'product': {
+            'title': title or upc,
+            'description': description or (title or upc),
+            'upc': [upc],
+        }
+    }
+    if images:
+        payload['product']['imageUrls'] = images
+    if aspects and isinstance(aspects, dict):
+        clean = {}
+        for k, v in aspects.items():
+            name = str(k or '').strip()
+            if not name:
+                continue
+            vals = []
+            if isinstance(v, str):
+                vals = [v.strip()]
+            elif isinstance(v, (list, tuple)):
+                vals = [str(x).strip() for x in v if str(x).strip()]
+            elif v is not None:
+                vals = [str(v).strip()]
+            vals = [x for x in vals if x]
+            if vals:
+                clean[name] = vals[:20]
+        if clean:
+            payload['product']['aspects'] = clean
+    return payload
+
+def _build_ebay_offer_payload(sku, marketplace_id, currency, price, quantity, category_id, listing_description,
+                             merchant_location_key, fulfillment_policy_id, payment_policy_id, return_policy_id,
+                             listing_duration='GTC', format_='FIXED_PRICE'):
+    payload = {
+        'sku': sku,
+        'marketplaceId': marketplace_id,
+        'format': format_,
+    }
+    if quantity is not None:
+        payload['availableQuantity'] = int(quantity)
+    if listing_duration:
+        payload['listingDuration'] = listing_duration
+    if category_id:
+        payload['categoryId'] = str(category_id)
+    if listing_description:
+        payload['listingDescription'] = listing_description
+    if merchant_location_key:
+        payload['merchantLocationKey'] = str(merchant_location_key)
+    if price is not None:
+        payload['pricingSummary'] = {
+            'price': {'currency': currency or 'USD', 'value': f"{float(price):.2f}"}
+        }
+    policies = {}
+    if fulfillment_policy_id:
+        policies['fulfillmentPolicyId'] = str(fulfillment_policy_id)
+    if payment_policy_id:
+        policies['paymentPolicyId'] = str(payment_policy_id)
+    if return_policy_id:
+        policies['returnPolicyId'] = str(return_policy_id)
+    if policies:
+        payload['listingPolicies'] = policies
+    # Let eBay enrich if it can match a catalog product
+    payload['includeCatalogProductDetails'] = True
+    return payload
+
+class _ListingAgentUserError(Exception):
+    def __init__(self, message, status_code=400, extra=None):
+        super().__init__(message)
+        self.status_code = status_code
+        self.extra = extra or {}
+
+# eBay Buy/Browse requires an application token (client_credentials). We keep a simple in-memory cache
+# to avoid re-auth on every request. This does not touch tokens.json (which is used for Sell APIs).
+_LISTINGAGENT_EBAY_APP_TOKEN = {'access_token': None, 'expires_at': 0.0, 'scope': ''}
+_LISTINGAGENT_EBAY_APP_TOKEN_LOCK = threading.Lock()
+
+def _listingagent_get_ebay_app_token(scope=None):
+    scope = (scope or os.getenv('EBAY_BUY_SCOPE') or 'https://api.ebay.com/oauth/api_scope').strip()
+    now = time.time()
+    cached = _LISTINGAGENT_EBAY_APP_TOKEN
+    if cached.get('access_token') and cached.get('scope') == scope and now < float(cached.get('expires_at') or 0) - 60:
+        return cached['access_token']
+
+    if not CLIENT_ID or not CLIENT_SECRET:
+        raise _ListingAgentUserError('Missing EBAY_CLIENT_ID / EBAY_CLIENT_SECRET in environment (.env)', status_code=503)
+
+    with _LISTINGAGENT_EBAY_APP_TOKEN_LOCK:
+        cached = _LISTINGAGENT_EBAY_APP_TOKEN
+        now = time.time()
+        if cached.get('access_token') and cached.get('scope') == scope and now < float(cached.get('expires_at') or 0) - 60:
+            return cached['access_token']
+
+        encoded = base64.b64encode(f"{CLIENT_ID}:{CLIENT_SECRET}".encode('utf-8')).decode('utf-8')
+        headers = {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Authorization': f"Basic {encoded}",
+        }
+        data = {
+            'grant_type': 'client_credentials',
+            'scope': scope
+        }
+        resp = requests.post('https://api.ebay.com/identity/v1/oauth2/token', headers=headers, data=data, timeout=30)
+        if resp.status_code >= 400:
+            try:
+                j = resp.json()
+                msg = j.get('error_description') or j.get('error') or resp.text[:200]
+            except Exception:
+                msg = resp.text[:200]
+            raise _ListingAgentUserError(f"eBay app token failed: {msg}", status_code=503)
+
+        j = resp.json() if resp.text else {}
+        access_token = (j.get('access_token') or '').strip()
+        expires_in = int(j.get('expires_in') or 0)
+        if not access_token:
+            raise _ListingAgentUserError('eBay app token response missing access_token', status_code=503)
+
+        _LISTINGAGENT_EBAY_APP_TOKEN.update({
+            'access_token': access_token,
+            'expires_at': time.time() + max(60, expires_in),
+            'scope': scope
+        })
+        return access_token
+
+def _ebay_buy_api_request(method, path, *, params=None, timeout=30, marketplace_id='EBAY_US', scope=None):
+    token = _listingagent_get_ebay_app_token(scope=scope)
+    headers_local = {
+        'Authorization': f'Bearer {token}',
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'Accept-Language': 'en-US',
+        # Strongly recommended for Browse APIs.
+        'X-EBAY-C-MARKETPLACE-ID': marketplace_id or 'EBAY_US',
+    }
+    url = f"https://api.ebay.com{path}"
+    resp = requests.request(method, url, headers=headers_local, params=params, timeout=timeout)
+    return resp
+
+@app.route('/api/listingagent/ebay/comps', methods=['GET'])
+def api_listingagent_ebay_comps():
+    """Fetch live eBay marketplace comps by UPC (Buy Browse API)."""
+    try:
+        upc = (request.args.get('upc') or request.args.get('gtin') or '').strip()
+        if not upc:
+            raise _ListingAgentUserError('upc is required', status_code=400)
+
+        limit = _listingagent_parse_int(request.args.get('limit'), 12) or 12
+        limit = max(1, min(limit, 50))
+        include_raw = (request.args.get('raw') or '').lower() == 'true'
+
+        settings = _listingagent_get_settings()
+        marketplace_id = (request.args.get('marketplaceId') or settings.get('ebay_marketplace_id') or 'EBAY_US').strip()
+        sort = (request.args.get('sort') or '').strip()
+
+        params = {'gtin': upc, 'limit': limit}
+        if sort:
+            params['sort'] = sort
+
+        resp = _ebay_buy_api_request('GET', '/buy/browse/v1/item_summary/search', params=params, marketplace_id=marketplace_id)
+        if resp.status_code >= 400:
+            raise _ListingAgentUserError(_ebay_extract_error(resp), status_code=400)
+
+        payload = resp.json() if resp.text else {}
+        items = payload.get('itemSummaries') or payload.get('item_summaries') or []
+
+        results = []
+        for it in items[:limit]:
+            price = it.get('price') or {}
+
+            # shipping cost (best-effort; often empty)
+            shipping = None
+            ship_opts = it.get('shippingOptions') or it.get('shipping_options') or []
+            if ship_opts and isinstance(ship_opts, list):
+                sc = (ship_opts[0] or {}).get('shippingCost') or (ship_opts[0] or {}).get('shipping_cost') or {}
+                if isinstance(sc, dict) and sc.get('value') is not None:
+                    shipping = {'value': sc.get('value'), 'currency': sc.get('currency')}
+
+            image_url = ''
+            img = it.get('image') or {}
+            if isinstance(img, dict):
+                image_url = (img.get('imageUrl') or img.get('image_url') or '').strip()
+            if not image_url:
+                thumbs = it.get('thumbnailImages') or it.get('thumbnail_images') or []
+                if thumbs and isinstance(thumbs, list):
+                    t0 = thumbs[0] or {}
+                    if isinstance(t0, dict):
+                        image_url = (t0.get('imageUrl') or t0.get('image_url') or '').strip()
+
+            seller = ''
+            seller_obj = it.get('seller') or {}
+            if isinstance(seller_obj, dict):
+                seller = (seller_obj.get('username') or '').strip()
+
+            results.append({
+                'itemId': it.get('itemId') or it.get('item_id') or '',
+                'title': it.get('title') or '',
+                'price': {'value': price.get('value'), 'currency': price.get('currency')},
+                'shipping': shipping,
+                'condition': it.get('condition') or '',
+                'conditionId': it.get('conditionId') or it.get('condition_id') or '',
+                'itemWebUrl': it.get('itemWebUrl') or it.get('item_web_url') or '',
+                'image': image_url,
+                'seller': seller,
+                'buyingOptions': it.get('buyingOptions') or it.get('buying_options') or [],
+            })
+
+        out = {'success': True, 'total': payload.get('total') or len(results), 'results': results}
+        if include_raw:
+            out['raw'] = payload
+        return jsonify(out)
+
+    except _ListingAgentUserError as e:
+        payload = {'success': False, 'error': str(e)}
+        payload.update(e.extra or {})
+        return jsonify(payload), e.status_code
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'listingagent:ebay_comps')}), 500
+
+_LISTINGAGENT_EBAY_CATEGORY_TREE_ID = {}
+_LISTINGAGENT_EBAY_CATEGORY_TREE_LOCK = threading.Lock()
+
+def _listingagent_get_ebay_category_tree_id(marketplace_id: str):
+    mp = (marketplace_id or 'EBAY_US').strip() or 'EBAY_US'
+    cached = _LISTINGAGENT_EBAY_CATEGORY_TREE_ID.get(mp)
+    if cached:
+        return cached
+    with _LISTINGAGENT_EBAY_CATEGORY_TREE_LOCK:
+        cached = _LISTINGAGENT_EBAY_CATEGORY_TREE_ID.get(mp)
+        if cached:
+            return cached
+        resp = _ebay_buy_api_request(
+            'GET',
+            '/commerce/taxonomy/v1/get_default_category_tree_id',
+            params={'marketplace_id': mp},
+            marketplace_id=mp,
+            scope='https://api.ebay.com/oauth/api_scope'
+        )
+        if resp.status_code >= 400:
+            raise _ListingAgentUserError(_ebay_extract_error(resp), status_code=400)
+        data = resp.json() if resp.text else {}
+        tree_id = str(data.get('categoryTreeId') or data.get('category_tree_id') or '').strip()
+        if not tree_id:
+            raise _ListingAgentUserError('eBay taxonomy did not return categoryTreeId', status_code=502, extra={'raw': data})
+        _LISTINGAGENT_EBAY_CATEGORY_TREE_ID[mp] = tree_id
+        return tree_id
+
+@app.route('/api/listingagent/ebay/category_suggestions', methods=['GET'])
+def api_listingagent_ebay_category_suggestions():
+    """Suggest eBay categories for a given query using Commerce Taxonomy API."""
+    try:
+        q = (request.args.get('q') or request.args.get('query') or '').strip()
+        if not q:
+            raise _ListingAgentUserError('q is required', status_code=400)
+
+        limit = _listingagent_parse_int(request.args.get('limit'), 12) or 12
+        limit = max(1, min(limit, 50))
+        include_raw = (request.args.get('raw') or '').lower() == 'true'
+
+        settings = _listingagent_get_settings()
+        marketplace_id = (request.args.get('marketplaceId') or settings.get('ebay_marketplace_id') or 'EBAY_US').strip()
+
+        category_tree_id = _listingagent_get_ebay_category_tree_id(marketplace_id)
+
+        resp = _ebay_buy_api_request(
+            'GET',
+            f'/commerce/taxonomy/v1/category_tree/{category_tree_id}/get_category_suggestions',
+            params={'q': q},
+            marketplace_id=marketplace_id,
+            scope='https://api.ebay.com/oauth/api_scope'
+        )
+        if resp.status_code >= 400:
+            raise _ListingAgentUserError(_ebay_extract_error(resp), status_code=400)
+
+        payload = resp.json() if resp.text else {}
+        suggestions = payload.get('categorySuggestions') or payload.get('category_suggestions') or []
+
+        results = []
+        for s in (suggestions or [])[:limit]:
+            cat = s.get('category') or {}
+            cat_id = str(cat.get('categoryId') or cat.get('category_id') or '').strip()
+            cat_name = (cat.get('categoryName') or cat.get('category_name') or '').strip()
+
+            ancestors = s.get('categoryTreeNodeAncestors') or s.get('category_tree_node_ancestors') or []
+            path_parts = []
+            if isinstance(ancestors, list):
+                for a in ancestors:
+                    if not isinstance(a, dict):
+                        continue
+                    nm = (a.get('categoryName') or a.get('category_name') or '').strip()
+                    if nm:
+                        path_parts.append(nm)
+            if cat_name:
+                path_parts.append(cat_name)
+            path = ' > '.join(path_parts) if path_parts else cat_name
+
+            relevancy = s.get('relevancy')
+            try:
+                relevancy = float(relevancy) if relevancy is not None else None
+            except Exception:
+                relevancy = None
+
+            if not cat_id:
+                continue
+            results.append({
+                'categoryId': cat_id,
+                'categoryName': cat_name,
+                'path': path or cat_name or cat_id,
+                'relevancy': relevancy,
+            })
+
+        out = {
+            'success': True,
+            'marketplaceId': marketplace_id,
+            'categoryTreeId': category_tree_id,
+            'recommended': results[0] if results else None,
+            'results': results,
+        }
+        if include_raw:
+            out['raw'] = payload
+        return jsonify(out)
+
+    except _ListingAgentUserError as e:
+        payload = {'success': False, 'error': str(e)}
+        payload.update(e.extra or {})
+        return jsonify(payload), e.status_code
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'listingagent:ebay_category_suggestions')}), 500
+
+_LISTINGAGENT_EBAY_ASPECTS_CACHE = {}
+_LISTINGAGENT_EBAY_ASPECTS_LOCK = threading.Lock()
+
+def _listingagent_get_ebay_category_aspects(category_id: str, marketplace_id: str, *, values_limit: int = 140):
+    """Fetch item aspects metadata for an eBay category (Commerce Taxonomy). Cached in-memory."""
+    category_id = (category_id or '').strip()
+    marketplace_id = (marketplace_id or 'EBAY_US').strip() or 'EBAY_US'
+    values_limit = int(values_limit or 140)
+    values_limit = max(0, min(values_limit, 250))
+
+    cache_key = (marketplace_id, category_id, values_limit)
+    now = time.time()
+    cached = _LISTINGAGENT_EBAY_ASPECTS_CACHE.get(cache_key)
+    if cached and (now - float(cached.get('ts') or 0)) < 6 * 3600:
+        return cached.get('data') or []
+
+    with _LISTINGAGENT_EBAY_ASPECTS_LOCK:
+        cached = _LISTINGAGENT_EBAY_ASPECTS_CACHE.get(cache_key)
+        if cached and (now - float(cached.get('ts') or 0)) < 6 * 3600:
+            return cached.get('data') or []
+
+        category_tree_id = _listingagent_get_ebay_category_tree_id(marketplace_id)
+        resp = _ebay_buy_api_request(
+            'GET',
+            f'/commerce/taxonomy/v1/category_tree/{category_tree_id}/get_item_aspects_for_category',
+            params={'category_id': category_id},
+            marketplace_id=marketplace_id,
+            scope='https://api.ebay.com/oauth/api_scope'
+        )
+        if resp.status_code >= 400:
+            raise _ListingAgentUserError(_ebay_extract_error(resp), status_code=400)
+
+        payload = resp.json() if resp.text else {}
+        aspects = payload.get('aspects') or payload.get('Aspects') or []
+
+        results = []
+        if isinstance(aspects, list):
+            for a in aspects:
+                if not isinstance(a, dict):
+                    continue
+                name = (a.get('aspectName') or a.get('aspect_name') or '').strip()
+                if not name:
+                    continue
+                constraint = a.get('aspectConstraint') or a.get('aspect_constraint') or {}
+                if not isinstance(constraint, dict):
+                    constraint = {}
+
+                required = bool(constraint.get('aspectRequired') or constraint.get('aspect_required') or False)
+                mode = (constraint.get('aspectMode') or constraint.get('aspect_mode') or '').strip()
+                max_values = constraint.get('aspectMaxValues')
+                if max_values is None:
+                    max_values = constraint.get('aspect_max_values')
+                try:
+                    max_values = int(max_values) if max_values is not None else 1
+                except Exception:
+                    max_values = 1
+                if max_values < 1:
+                    max_values = 1
+
+                values_raw = a.get('aspectValues') or a.get('aspect_values') or []
+                values_count = len(values_raw) if isinstance(values_raw, list) else 0
+                values = []
+                if values_limit and isinstance(values_raw, list):
+                    for v in values_raw[:values_limit]:
+                        if not isinstance(v, dict):
+                            continue
+                        val = (v.get('localizedAspectValue') or v.get('localized_aspect_value') or v.get('value') or '').strip()
+                        if val:
+                            values.append(val)
+
+                results.append({
+                    'name': name,
+                    'required': required,
+                    'mode': mode,
+                    'maxValues': max_values,
+                    'values': values,
+                    'valuesCount': values_count,
+                    'valuesTruncated': bool(values_limit and values_count > len(values))
+                })
+
+        # Required first, then A-Z
+        results.sort(key=lambda x: (0 if x.get('required') else 1, (x.get('name') or '').lower()))
+
+        _LISTINGAGENT_EBAY_ASPECTS_CACHE[cache_key] = {'ts': now, 'data': results}
+        return results
+
+@app.route('/api/listingagent/ebay/category_aspects', methods=['GET'])
+def api_listingagent_ebay_category_aspects():
+    """Get eBay item specifics (aspects) for a categoryId (Commerce Taxonomy)."""
+    try:
+        category_id = (request.args.get('categoryId') or request.args.get('category_id') or '').strip()
+        if not category_id:
+            raise _ListingAgentUserError('categoryId is required', status_code=400)
+
+        values_limit = _listingagent_parse_int(request.args.get('valuesLimit'), 140) or 140
+        include_raw = (request.args.get('raw') or '').lower() == 'true'
+
+        settings = _listingagent_get_settings()
+        marketplace_id = (request.args.get('marketplaceId') or settings.get('ebay_marketplace_id') or 'EBAY_US').strip()
+
+        aspects = _listingagent_get_ebay_category_aspects(category_id, marketplace_id, values_limit=values_limit)
+
+        out = {
+            'success': True,
+            'marketplaceId': marketplace_id,
+            'categoryId': category_id,
+            'aspects': aspects
+        }
+        if include_raw:
+            # Raw is not cached; fetch again with full payload when requested.
+            category_tree_id = _listingagent_get_ebay_category_tree_id(marketplace_id)
+            resp = _ebay_buy_api_request(
+                'GET',
+                f'/commerce/taxonomy/v1/category_tree/{category_tree_id}/get_item_aspects_for_category',
+                params={'category_id': category_id},
+                marketplace_id=marketplace_id,
+                scope='https://api.ebay.com/oauth/api_scope'
+            )
+            out['raw'] = resp.json() if resp.text else {}
+        return jsonify(out)
+    except _ListingAgentUserError as e:
+        payload = {'success': False, 'error': str(e)}
+        payload.update(e.extra or {})
+        return jsonify(payload), e.status_code
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'listingagent:ebay_category_aspects')}), 500
+
+def _listingagent_ebay_create_draft_offer(data, *, dry_run=False):
+    upc = (data.get('upc') or '').strip()
+    sku = (data.get('sku') or upc).strip()
+    if not upc:
+        raise _ListingAgentUserError('UPC is required')
+    if not sku:
+        raise _ListingAgentUserError('SKU is required')
+
+    title = (data.get('title') or '').strip()
+    description = (data.get('description') or '').strip()
+    condition = (data.get('condition') or '').strip() or 'USED_GOOD'
+
+    quantity = _listingagent_parse_int(data.get('quantity'), 1) or 1
+    price = _listingagent_parse_float(data.get('price'), None)
+
+    settings = _listingagent_get_settings()
+    marketplace_id = (data.get('marketplaceId') or settings.get('ebay_marketplace_id') or 'EBAY_US').strip()
+    currency = (data.get('currency') or settings.get('ebay_currency') or 'USD').strip()
+    category_id = (data.get('categoryId') or settings.get('ebay_category_id') or '').strip()
+    listing_duration = (data.get('listingDuration') or settings.get('ebay_listing_duration') or 'GTC').strip()
+
+    merchant_location_key = (data.get('merchantLocationKey') or settings.get('ebay_location_key') or '').strip()
+    fulfillment_policy_id = (data.get('fulfillmentPolicyId') or settings.get('ebay_fulfillment_policy_id') or '').strip()
+    payment_policy_id = (data.get('paymentPolicyId') or settings.get('ebay_payment_policy_id') or '').strip()
+    return_policy_id = (data.get('returnPolicyId') or settings.get('ebay_return_policy_id') or '').strip()
+
+    listing_description = (data.get('listingDescription') or '').strip()
+
+    images = data.get('images') or []
+    if isinstance(images, str):
+        images = [images]
+
+    aspects = data.get('aspects') or {}
+    if not isinstance(aspects, dict):
+        aspects = {}
+
+    inventory_item_payload = _build_ebay_inventory_item_payload(upc, title, description, images, quantity, condition, aspects=aspects)
+    offer_payload = _build_ebay_offer_payload(
+        sku, marketplace_id, currency, price, quantity, category_id, listing_description,
+        merchant_location_key, fulfillment_policy_id, payment_policy_id, return_policy_id,
+        listing_duration=listing_duration
+    )
+
+    if dry_run:
+        return {'success': True, 'dry_run': True, 'inventoryItem': inventory_item_payload, 'offer': offer_payload}
+
+    from urllib.parse import quote
+    sku_encoded = quote(sku, safe='')
+
+    resp_item = _ebay_api_request('PUT', f'/sell/inventory/v1/inventory_item/{sku_encoded}', payload=inventory_item_payload)
+    if resp_item.status_code >= 400:
+        raise _ListingAgentUserError(
+            _ebay_extract_error(resp_item),
+            status_code=400,
+            extra={'inventoryItem': inventory_item_payload}
+        )
+
+    resp_offer = _ebay_api_request('POST', '/sell/inventory/v1/offer', payload=offer_payload)
+    if resp_offer.status_code >= 400:
+        raise _ListingAgentUserError(
+            _ebay_extract_error(resp_offer),
+            status_code=400,
+            extra={'offer': offer_payload}
+        )
+
+    offer_data = resp_offer.json() if resp_offer.text else {}
+    return {
+        'success': True,
+        'offerId': offer_data.get('offerId'),
+        'inventoryItem': inventory_item_payload,
+        'offer': offer_payload,
+        'raw': offer_data
+    }
+
+@app.route('/api/listingagent/ebay/draft', methods=['POST'])
+def api_listingagent_ebay_draft():
+    """Create/replace an inventory item and create a draft offer (not published)."""
+    try:
+        data = request.json or {}
+        dry_run = bool(data.get('dry_run', False))
+        result = _listingagent_ebay_create_draft_offer(data, dry_run=dry_run)
+        return jsonify(result)
+    except _ListingAgentUserError as e:
+        payload = {'success': False, 'error': str(e)}
+        payload.update(e.extra or {})
+        return jsonify(payload), e.status_code
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'listingagent:ebay_draft')}), 500
+
+@app.route('/api/listingagent/ebay/publish', methods=['POST'])
+def api_listingagent_ebay_publish():
+    """Publish an offer (creates inventory item + offer if needed)."""
+    try:
+        data = request.json or {}
+        confirm = bool(data.get('confirm', False))
+        dry_run = bool(data.get('dry_run', False))
+
+        offer_id = (data.get('offerId') or '').strip()
+        if not confirm and not dry_run:
+            return jsonify({'success': False, 'error': 'Confirmation required to publish'}), 400
+ 
+        inventory_payload = None
+        offer_payload = None
+        # If an offerId was provided, treat this as an edit/revise flow:
+        # update inventory item + offer (if we have full fields) and then publish to apply changes.
+        if offer_id:
+            wants_update = bool(data.get('updateExisting', True))
+            upc_for_update = (data.get('upc') or '').strip()
+            if wants_update and upc_for_update:
+                required = ['upc', 'sku', 'title', 'listingDescription', 'price', 'quantity', 'categoryId',
+                            'merchantLocationKey', 'fulfillmentPolicyId', 'paymentPolicyId', 'returnPolicyId']
+                missing = [k for k in required if not str(data.get(k) or '').strip()]
+                if missing and not dry_run:
+                    return jsonify({'success': False, 'error': f"Missing required fields to update: {', '.join(missing)}"}), 400
+  
+                # Reuse the draft builder to generate payloads without creating a new offer.
+                preview = _listingagent_ebay_create_draft_offer(data, dry_run=True)
+                inventory_payload = preview.get('inventoryItem')
+                offer_payload = preview.get('offer')
+  
+                if dry_run:
+                    return jsonify({'success': True, 'dry_run': True, 'offerId': offer_id, 'inventoryItem': inventory_payload, 'offer': offer_payload, 'wouldPublish': True, 'wouldUpdate': True})
+  
+                from urllib.parse import quote
+                sku_local = (data.get('sku') or upc_for_update).strip()
+                sku_encoded = quote(sku_local, safe='')
+  
+                resp_item = _ebay_api_request('PUT', f'/sell/inventory/v1/inventory_item/{sku_encoded}', payload=inventory_payload)
+                if resp_item.status_code >= 400:
+                    return jsonify({'success': False, 'error': _ebay_extract_error(resp_item), 'inventoryItem': inventory_payload}), 400
+  
+                resp_offer = _ebay_api_request('PUT', f'/sell/inventory/v1/offer/{offer_id}', payload=offer_payload)
+                if resp_offer.status_code >= 400:
+                    return jsonify({'success': False, 'error': _ebay_extract_error(resp_offer), 'offer': offer_payload}), 400
+  
+        if not offer_id:
+            # Enforce publish-required fields (unless dry_run)
+            required = ['upc', 'sku', 'title', 'listingDescription', 'price', 'quantity', 'categoryId',
+                        'merchantLocationKey', 'fulfillmentPolicyId', 'paymentPolicyId', 'returnPolicyId']
+            missing = [k for k in required if not str(data.get(k) or '').strip()]
+            if missing and not dry_run:
+                return jsonify({'success': False, 'error': f"Missing required fields: {', '.join(missing)}"}), 400
+
+            draft_result = _listingagent_ebay_create_draft_offer(data, dry_run=dry_run)
+            if dry_run:
+                # Tell the UI what would happen next
+                return jsonify({**draft_result, 'wouldPublish': True})
+
+            offer_id = (draft_result.get('offerId') or '').strip()
+            inventory_payload = draft_result.get('inventoryItem')
+            offer_payload = draft_result.get('offer')
+            if not offer_id:
+                return jsonify({'success': False, 'error': 'Draft offer created but no offerId returned'}), 500
+
+        if dry_run:
+            return jsonify({'success': True, 'dry_run': True, 'offerId': offer_id, 'inventoryItem': inventory_payload, 'offer': offer_payload, 'wouldPublish': True})
+
+        resp_pub = _ebay_api_request('POST', f'/sell/inventory/v1/offer/{offer_id}/publish')
+        if resp_pub.status_code >= 400:
+            return jsonify({'success': False, 'error': _ebay_extract_error(resp_pub)}), 400
+
+        pub_data = resp_pub.json() if resp_pub.text else {}
+        listing_id = pub_data.get('listingId')
+
+        # Mark BOL as listed on eBay so /items-to-list marketplace checkboxes stay in sync.
+        upc = (data.get('upc') or '').strip()
+        if upc:
+            try:
+                now_iso = datetime.datetime.now().isoformat()
+                like_upc = f"{upc}-%"
+                with db_connection('bol.db') as conn:
+                    cur = conn.cursor()
+                    cur.execute('''
+                        UPDATE bol_items
+                        SET listed_ebay = 1, listed_ebay_date = ?
+                        WHERE TRIM(upc) = ? COLLATE NOCASE
+                           OR TRIM(upc) LIKE ? COLLATE NOCASE
+                    ''', (now_iso, upc, like_upc))
+            except Exception:
+                pass
+ 
+        # Record listing completion in listagent.db (if UPC is available)
+        try:
+            if upc:
+                sku_local = (data.get('sku') or upc).strip() or None
+                try:
+                    settings_local = _listingagent_get_settings()
+                    marketplace_id_local = (data.get('marketplaceId') or settings_local.get('ebay_marketplace_id') or 'EBAY_US').strip() or 'EBAY_US'
+                except Exception:
+                    marketplace_id_local = (data.get('marketplaceId') or 'EBAY_US').strip() or 'EBAY_US'
+                title_local = (data.get('title') or '').strip() or None
+                qty_local = _listingagent_parse_int(data.get('quantity'), None)
+                price_local = _listingagent_parse_float(data.get('price'), None)
+                _listagent_mark_listed(
+                    upc,
+                    platform='ebay',
+                    listing_id=listing_id,
+                    offer_id=offer_id,
+                    sku=sku_local,
+                    marketplace_id=marketplace_id_local,
+                    title=title_local,
+                    price=price_local,
+                    quantity=qty_local,
+                    source='listingagent'
+                )
+        except Exception:
+            pass
+  
+        return jsonify({'success': True, 'listingId': listing_id, 'raw': pub_data})
+    except _ListingAgentUserError as e:
+        payload = {'success': False, 'error': str(e)}
+        payload.update(e.extra or {})
+        return jsonify(payload), e.status_code
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'listingagent:ebay_publish')}), 500
+
+# -----------------------------
+# Listing Agent - Amazon (SP-API)
+# -----------------------------
+
+def _amazon_marketplace_from_id(marketplace_id: str):
+    try:
+        from sp_api.base import Marketplaces
+        if not marketplace_id:
+            return Marketplaces.US
+        for name in dir(Marketplaces):
+            if not name.isupper():
+                continue
+            mp = getattr(Marketplaces, name)
+            if getattr(mp, 'marketplace_id', None) == marketplace_id:
+                return mp
+        return Marketplaces.US
+    except Exception:
+        # If SP-API isn't installed or something is misconfigured, default to US.
+        return None
+
+def _amazon_spapi_context():
+    """Load SP-API credentials + seller/marketplace from amazon_credentials.json."""
+    creds_path = BASE_DIR / 'amazon_credentials.json'
+    if not creds_path.exists():
+        raise _ListingAgentUserError('amazon_credentials.json not found', status_code=503)
+
+    with open(creds_path, 'r', encoding='utf-8') as f:
+        c = json.load(f)
+
+    seller_id = (c.get('seller_id') or '').strip()
+    marketplace_id = (c.get('marketplace_id') or '').strip() or 'ATVPDKIKX0DER'
+    if not seller_id:
+        raise _ListingAgentUserError('Amazon seller_id missing in amazon_credentials.json', status_code=503)
+
+    credentials = {
+        'refresh_token': c.get('refresh_token'),
+        'lwa_app_id': c.get('lwa_app_id'),
+        'lwa_client_secret': c.get('lwa_client_secret', ''),
+    }
+    if c.get('aws_access_key') and c.get('aws_secret_key'):
+        credentials['aws_access_key'] = c.get('aws_access_key')
+        credentials['aws_secret_key'] = c.get('aws_secret_key')
+    if c.get('role_arn'):
+        credentials['role_arn'] = c.get('role_arn')
+
+    marketplace = _amazon_marketplace_from_id(marketplace_id)
+    return credentials, seller_id, marketplace_id, marketplace
+
+@app.route('/api/listingagent/amazon/catalog_search', methods=['GET'])
+def api_listingagent_amazon_catalog_search():
+    """Search Amazon catalog by keyword/UPC (best-effort) to suggest ASINs."""
+    try:
+        q = (request.args.get('q') or request.args.get('upc') or '').strip()
+        if not q:
+            return jsonify({'success': False, 'error': 'q is required'}), 400
+
+        limit = _listingagent_parse_int(request.args.get('limit'), 8) or 8
+        limit = max(1, min(limit, 20))
+        include_raw = (request.args.get('raw') or '').lower() == 'true'
+        mode = (request.args.get('mode') or '').strip().lower()
+        identifiers_type = (request.args.get('identifiersType') or '').strip().upper()
+        q_no_space = q.replace(' ', '')
+
+        credentials, _seller_id, marketplace_id, marketplace = _amazon_spapi_context()
+        if marketplace is None:
+            return jsonify({'success': False, 'error': 'Amazon SP-API not available'}), 503
+
+        from sp_api.api import CatalogItems
+        from sp_api.base.exceptions import SellingApiException
+
+        ci = CatalogItems(credentials=credentials, marketplace=marketplace, version='2022-04-01')
+
+        # Prefer identifier search when q looks like a UPC/GTIN (or explicitly requested).
+        use_identifiers = False
+        if mode in ('upc', 'gtin', 'identifier'):
+            use_identifiers = True
+        elif identifiers_type:
+            use_identifiers = True
+        elif mode in ('asin',):
+            use_identifiers = True
+            if not identifiers_type:
+                identifiers_type = 'ASIN'
+        elif q_no_space.isalnum() and len(q_no_space) == 10 and any(ch.isdigit() for ch in q_no_space) and any(ch.isalpha() for ch in q_no_space):
+            # Likely ASIN (avoid treating plain words as ASIN).
+            use_identifiers = True
+            if not identifiers_type:
+                identifiers_type = 'ASIN'
+        elif q.isdigit() and 8 <= len(q) <= 14:
+            use_identifiers = True
+
+        if use_identifiers:
+            # Heuristic: UPC=8/10/11/12, EAN=13, GTIN=14. Allow override via identifiersType=...
+            if not identifiers_type:
+                if len(q) == 13:
+                    identifiers_type = 'EAN'
+                elif len(q) == 14:
+                    identifiers_type = 'GTIN'
+                elif len(q) == 10:
+                    # Commonly ISBN-10 when numeric; if this is actually UPC/other, keyword fallback will still work.
+                    identifiers_type = 'ISBN'
+                else:
+                    identifiers_type = 'UPC'
+
+        def _do_keywords():
+            return ci.search_catalog_items(
+                keywords=[q],
+                marketplaceIds=[marketplace_id],
+                includedData=['summaries', 'images'],
+                pageSize=limit
+            )
+
+        def _do_identifiers():
+            return ci.search_catalog_items(
+                identifiers=[q],
+                identifiersType=identifiers_type,
+                marketplaceIds=[marketplace_id],
+                includedData=['summaries', 'images'],
+                pageSize=limit
+            )
+
+        try:
+            resp = _do_identifiers() if use_identifiers else _do_keywords()
+        except SellingApiException:
+            # Some accounts/marketplaces/product-types can be finicky; fall back to keyword search.
+            if use_identifiers:
+                resp = _do_keywords()
+            else:
+                raise
+        if resp.errors:
+            return jsonify({'success': False, 'error': str(resp.errors)}), 400
+
+        payload = resp.payload or {}
+        items = payload.get('items') or []
+        # If identifier search returned nothing and the caller didn't force identifier mode, try keywords.
+        if use_identifiers and not items and mode not in ('upc','gtin','identifier','asin') and not (request.args.get('identifiersType') or '').strip():
+            try:
+                resp_kw = _do_keywords()
+                if not resp_kw.errors:
+                    payload = resp_kw.payload or {}
+                    items = payload.get('items') or []
+            except Exception:
+                pass
+
+        results = []
+        for it in items[:limit]:
+            asin = (it.get('asin') or '').strip()
+            title = ''
+            brand = ''
+            summaries = it.get('summaries') or []
+            if summaries:
+                s0 = summaries[0] or {}
+                title = s0.get('itemName') or s0.get('item_name') or ''
+                brand = s0.get('brandName') or s0.get('brand_name') or ''
+
+            image_url = ''
+            for grp in (it.get('images') or []):
+                imgs = grp.get('images') or []
+                if imgs:
+                    image_url = (imgs[0].get('link') or '').strip()
+                    if image_url:
+                        break
+
+            results.append({
+                'asin': asin,
+                'title': title or '',
+                'brand': brand or '',
+                'image': image_url or ''
+            })
+
+        out = {'success': True, 'results': results}
+        if include_raw:
+            out['raw'] = payload
+        return jsonify(out)
+
+    except Exception as e:
+        # SellingApiException string tends to be safe+useful (issues, codes, etc.)
+        from sp_api.base.exceptions import SellingApiException
+        if isinstance(e, SellingApiException):
+            return jsonify({'success': False, 'error': str(e)}), 400
+        return jsonify({'success': False, 'error': _safe_error(e, 'listingagent:amazon_catalog_search')}), 500
+
+@app.route('/api/listingagent/amazon/catalog_item', methods=['GET'])
+def api_listingagent_amazon_catalog_item():
+    """Fetch catalog details for an ASIN (public product page template data)."""
+    try:
+        asin = (request.args.get('asin') or '').strip()
+        if not asin:
+            return jsonify({'success': False, 'error': 'asin is required'}), 400
+
+        included = (request.args.get('includedData') or 'summaries,images,attributes').strip()
+        included_data = [x.strip() for x in included.split(',') if x.strip()]
+        include_raw = (request.args.get('raw') or '').lower() == 'true'
+
+        credentials, _seller_id, marketplace_id, marketplace = _amazon_spapi_context()
+        if marketplace is None:
+            return jsonify({'success': False, 'error': 'Amazon SP-API not available'}), 503
+
+        from sp_api.api import CatalogItems
+        from sp_api.base.exceptions import SellingApiException
+
+        ci = CatalogItems(credentials=credentials, marketplace=marketplace, version='2022-04-01')
+        resp = ci.get_catalog_item(
+            asin,
+            marketplaceIds=[marketplace_id],
+            includedData=included_data
+        )
+        if resp.errors:
+            return jsonify({'success': False, 'error': str(resp.errors)}), 400
+
+        payload = resp.payload or {}
+        out = {'success': True, 'data': payload}
+        if include_raw:
+            out['raw'] = payload
+        return jsonify(out)
+
+    except Exception as e:
+        from sp_api.base.exceptions import SellingApiException
+        if isinstance(e, SellingApiException):
+            return jsonify({'success': False, 'error': str(e)}), 400
+        return jsonify({'success': False, 'error': _safe_error(e, 'listingagent:amazon_catalog_item')}), 500
+
+@app.route('/api/listingagent/amazon/listing', methods=['GET'])
+def api_listingagent_amazon_get_listing():
+    """Fetch live SKU details from Amazon Listings Items API."""
+    try:
+        sku = (request.args.get('sku') or '').strip()
+        if not sku:
+            return jsonify({'success': False, 'error': 'sku is required'}), 400
+
+        included = (request.args.get('includedData') or 'summaries,attributes,issues').strip()
+        included_data = [x.strip() for x in included.split(',') if x.strip()]
+
+        credentials, seller_id, marketplace_id, marketplace = _amazon_spapi_context()
+        if marketplace is None:
+            return jsonify({'success': False, 'error': 'Amazon SP-API not available'}), 503
+
+        from sp_api.api import ListingsItems
+        from sp_api.base.exceptions import SellingApiException
+
+        li = ListingsItems(credentials=credentials, marketplace=marketplace)
+        resp = li.get_listings_item(
+            seller_id,
+            sku,
+            marketplaceIds=[marketplace_id],
+            includedData=included_data
+        )
+        if resp.errors:
+            return jsonify({'success': False, 'error': str(resp.errors)}), 400
+        return jsonify({'success': True, 'data': resp.payload or {}})
+
+    except Exception as e:
+        from sp_api.base.exceptions import SellingApiException
+        if isinstance(e, SellingApiException):
+            return jsonify({'success': False, 'error': str(e)}), 400
+        return jsonify({'success': False, 'error': _safe_error(e, 'listingagent:amazon_get_listing')}), 500
+
+def _build_amazon_offer_attributes(*, upc, asin, condition_type, fulfillment_channel_code, quantity, currency, price):
+    attrs = {}
+
+    if asin:
+        attrs['merchant_suggested_asin'] = [{'value': asin}]
+
+    # Optional: attach UPC to help Amazon match the catalog item (best-effort).
+    if upc:
+        attrs['externally_assigned_product_identifier'] = [{'value': upc}]
+        attrs['externally_assigned_product_identifier_type'] = [{'value': 'UPC'}]
+
+    if condition_type:
+        attrs['condition_type'] = [{'value': condition_type}]
+
+    if fulfillment_channel_code:
+        attrs['fulfillment_availability'] = [{
+            'fulfillment_channel_code': fulfillment_channel_code,
+            'quantity': int(quantity or 1)
+        }]
+
+    if price is not None:
+        attrs['purchasable_offer'] = [{
+            'currency': currency or 'USD',
+            'our_price': [{
+                'schedule': [{
+                    'value_with_tax': float(price)
+                }]
+            }]
+        }]
+
+    return attrs
+
+@app.route('/api/listingagent/amazon/put_offer', methods=['POST'])
+def api_listingagent_amazon_put_offer():
+    """Create/update an Amazon offer using Listings Items API (PUT)."""
+    try:
+        data = request.json or {}
+        dry_run = bool(data.get('dry_run', False))
+        confirm = bool(data.get('confirm', False))
+
+        if not confirm and not dry_run:
+            return jsonify({'success': False, 'error': 'Confirmation required'}), 400
+
+        settings = _listingagent_get_settings()
+
+        upc = (data.get('upc') or '').strip()
+        sku = (data.get('sku') or '').strip()
+        asin = (data.get('asin') or '').strip()
+
+        if not sku:
+            return jsonify({'success': False, 'error': 'SKU is required'}), 400
+        if not asin and not upc:
+            return jsonify({'success': False, 'error': 'ASIN or UPC is required'}), 400
+
+        quantity = _listingagent_parse_int(data.get('quantity'), 1) or 1
+        price = _listingagent_parse_float(data.get('price'), None)
+        if price is None:
+            return jsonify({'success': False, 'error': 'Price is required'}), 400
+
+        condition_type = (data.get('conditionType') or settings.get('amazon_condition_type') or 'used_good').strip()
+        fulfillment_channel_code = (data.get('fulfillmentChannelCode') or settings.get('amazon_fulfillment_channel_code') or 'DEFAULT').strip()
+        currency = (data.get('currency') or settings.get('amazon_currency') or 'USD').strip()
+        product_type = (data.get('productType') or settings.get('amazon_product_type') or 'PRODUCT').strip()
+        requirements = (data.get('requirements') or settings.get('amazon_requirements') or 'LISTING_OFFER_ONLY').strip()
+
+        marketplace_id_override = (data.get('marketplaceId') or '').strip()
+
+        attributes = _build_amazon_offer_attributes(
+            upc=upc,
+            asin=asin,
+            condition_type=condition_type,
+            fulfillment_channel_code=fulfillment_channel_code,
+            quantity=quantity,
+            currency=currency,
+            price=price
+        )
+
+        body = {
+            'productType': product_type,
+            'requirements': requirements,
+            'attributes': attributes
+        }
+
+        if dry_run:
+            return jsonify({'success': True, 'dry_run': True, 'body': body})
+
+        credentials, seller_id, marketplace_id, marketplace = _amazon_spapi_context()
+        if marketplace is None:
+            return jsonify({'success': False, 'error': 'Amazon SP-API not available'}), 503
+
+        mp_id = marketplace_id_override or marketplace_id
+
+        from sp_api.api import ListingsItems
+        from sp_api.base.exceptions import SellingApiException
+
+        li = ListingsItems(credentials=credentials, marketplace=marketplace)
+        resp = li.put_listings_item(
+            seller_id,
+            sku,
+            marketplaceIds=[mp_id],
+            issueLocale='en_US',
+            body=body
+        )
+        if resp.errors:
+            return jsonify({'success': False, 'error': str(resp.errors)}), 400
+
+        # Mark BOL as listed on Amazon so /items-to-list marketplace checkboxes stay in sync.
+        if upc:
+            try:
+                now_iso = datetime.datetime.now().isoformat()
+                like_upc = f"{upc}-%"
+                with db_connection('bol.db') as conn:
+                    cur = conn.cursor()
+                    cur.execute('''
+                        UPDATE bol_items
+                        SET listed_amazon = 1, listed_amazon_date = ?
+                        WHERE TRIM(upc) = ? COLLATE NOCASE
+                           OR TRIM(upc) LIKE ? COLLATE NOCASE
+                    ''', (now_iso, upc, like_upc))
+            except Exception:
+                pass
+ 
+        # Record listing completion in listagent.db (if UPC is available)
+        try:
+            if upc:
+                _listagent_mark_listed(
+                    upc,
+                    platform='amazon',
+                    sku=sku,
+                    asin=asin,
+                    marketplace_id=mp_id,
+                    price=price,
+                    quantity=quantity,
+                    source='listingagent'
+                )
+        except Exception:
+            pass
+ 
+        return jsonify({'success': True, 'data': resp.payload or {}, 'body': body})
+ 
+    except Exception as e:
+        from sp_api.base.exceptions import SellingApiException
+        if isinstance(e, SellingApiException):
+            return jsonify({'success': False, 'error': str(e)}), 400
+        return jsonify({'success': False, 'error': _safe_error(e, 'listingagent:amazon_put_offer')}), 500
 
 # Emailer page
 @app.route('/emailer')
@@ -3008,6 +5667,10 @@ def _ensure_bol_list_status_column():
 def item_prep_page():
     return render_template('item_prep.html')
 
+@app.route('/item-prep/log')
+def item_prep_log_page():
+    return render_template('item_prep_log.html')
+
 @app.route('/item-prep/diagnostic')
 def item_prep_diagnostic_page():
     upc_raw = (request.args.get('upc') or '').strip()
@@ -3987,6 +6650,25 @@ def api_items_prep_status():
             # Update data version for cache invalidation
             update_data_version()
 
+            # Prep log (preplog.db)
+            try:
+                _preplog_add_entry(
+                    upc=base_upc,
+                    base_upc=base_upc,
+                    status='good',
+                    quantity=qty,
+                    note=note or None,
+                    reason=None,
+                    source='item-prep',
+                    meta={
+                        'action': 'converted_to_good' if suffixed_upc_found else 'saved_good',
+                        'lot_number': selected_lot
+                    },
+                    dedupe=False
+                )
+            except Exception:
+                pass
+
             return jsonify({
                 'success': True, 
                 'action': 'converted_to_good' if suffixed_upc_found else 'saved_good',
@@ -4103,6 +6785,36 @@ def api_items_prep_status():
             # Update data version for cache invalidation
             update_data_version()
 
+            # Prep log (preplog.db)
+            try:
+                log_note = note or ''
+                try:
+                    cur.execute('''
+                        SELECT note
+                        FROM items_prep_notes
+                        WHERE upc = ? COLLATE NOCASE
+                        ORDER BY created_at DESC, id DESC
+                        LIMIT 1
+                    ''', (suffixed_upc,))
+                    nrow = cur.fetchone()
+                    if nrow and nrow[0] and str(nrow[0]).strip():
+                        log_note = str(nrow[0]).strip()
+                except Exception:
+                    pass
+                _preplog_add_entry(
+                    upc=suffixed_upc,
+                    base_upc=base_upc,
+                    status='bad',
+                    quantity=1,
+                    note=log_note or None,
+                    reason=reason or None,
+                    source='item-prep',
+                    meta={'action': 'converted_to_bad', 'lot_number': selected_lot},
+                    dedupe=True
+                )
+            except Exception:
+                pass
+
             return jsonify({'success': True, 'upc': suffixed_upc, 'action': 'converted_to_bad', 'quantity': 1})
         
         # Normal BAD/UNCHECKED flow - UPC already has suffix or is being updated
@@ -4121,6 +6833,37 @@ def api_items_prep_status():
 
         # Update data version for cache invalidation
         update_data_version()
+
+        # Prep log (preplog.db) — only for BAD (we don't log unchecked).
+        if status == 'bad':
+            try:
+                log_note = note or ''
+                try:
+                    cur.execute('''
+                        SELECT note
+                        FROM items_prep_notes
+                        WHERE upc = ? COLLATE NOCASE
+                        ORDER BY created_at DESC, id DESC
+                        LIMIT 1
+                    ''', (upc,))
+                    nrow = cur.fetchone()
+                    if nrow and nrow[0] and str(nrow[0]).strip():
+                        log_note = str(nrow[0]).strip()
+                except Exception:
+                    pass
+                _preplog_add_entry(
+                    upc=upc,
+                    base_upc=base_upc,
+                    status='bad',
+                    quantity=qty,
+                    note=log_note or None,
+                    reason=reason or None,
+                    source='item-prep',
+                    meta={'action': 'updated'},
+                    dedupe=True
+                )
+            except Exception:
+                pass
 
         return jsonify({'success': True, 'upc': upc, 'action': 'updated', 'quantity': qty})
         
@@ -4227,6 +6970,28 @@ def api_items_prep_allocate_lots():
                        (base_upc, 'good', reason, note, new_prep_qty, ts))
         
         conn.commit()
+
+        # Update data version for cache invalidation
+        try:
+            update_data_version()
+        except Exception:
+            pass
+
+        # Prep log (preplog.db)
+        try:
+            _preplog_add_entry(
+                upc=base_upc,
+                base_upc=base_upc,
+                status='good',
+                quantity=total_qty_allocated,
+                note=note or None,
+                reason=reason or None,
+                source='item-prep',
+                meta={'action': 'allocate_lots', 'lots_updated': results},
+                dedupe=False
+            )
+        except Exception:
+            pass
         
         return jsonify({
             'success': True,
@@ -4459,6 +7224,22 @@ def api_items_prep_create_return_entry():
         # Update data version for cache invalidation
         update_data_version()
 
+        # Prep log (preplog.db)
+        try:
+            _preplog_add_entry(
+                upc=suffixed_upc,
+                base_upc=base_upc,
+                status='return',
+                quantity=qty,
+                note=None,
+                reason='return',
+                source='item-prep',
+                meta={'action': 'create_return_entry'},
+                dedupe=True
+            )
+        except Exception:
+            pass
+
         return jsonify({
             'success': True, 
             'suffixed_upc': suffixed_upc, 
@@ -4576,6 +7357,148 @@ def api_items_prep_status_delete(upc):
     finally:
         conn.close()
 
+def _items_prep_undo_core(*, upc, status, qty=1, base_upc=None):
+    """Shared undo logic for Item Prep actions.
+
+    Returns: (ok: bool, error: str|None, http_status: int)
+    """
+    try:
+        upc = (upc or '').strip()
+        status = (status or '').strip().lower()
+        base_upc = (base_upc or '').strip() or None
+
+        if not upc or status not in ('good', 'bad', 'return'):
+            return False, 'Missing upc or invalid status', 400
+
+        try:
+            qty = int(qty or 1)
+        except Exception:
+            qty = 1
+        if qty < 1:
+            qty = 1
+
+        upc_norm = _normalize_upc(upc)
+        if upc_norm and '-' not in upc_norm and upc_norm.isdigit():
+            upc = upc_norm.lstrip('0')
+        else:
+            upc = upc_norm
+
+        if base_upc:
+            base_upc_norm = _normalize_upc(base_upc)
+            if base_upc_norm and base_upc_norm.isdigit():
+                base_upc = base_upc_norm.lstrip('0')
+            else:
+                base_upc = base_upc_norm
+
+        _ensure_items_prep_tables()
+        conn = sqlite3.connect('bol.db')
+        cur = conn.cursor()
+        try:
+            if status == 'good':
+                # Good item undo: Move qty from good back to unchecked
+                cur.execute('SELECT good_qty, unchecked_qty FROM bol_items WHERE upc = ? COLLATE NOCASE', (upc,))
+                row = cur.fetchone()
+                if not row:
+                    return False, f'UPC {upc} not found', 404
+
+                current_good = row[0] or 0
+                current_unchecked = row[1] or 0
+
+                if qty > current_good:
+                    return False, f'Cannot undo {qty} - only {current_good} marked as good', 400
+
+                new_good = current_good - qty
+                new_unchecked = current_unchecked + qty
+
+                cur.execute('''
+                    UPDATE bol_items
+                    SET good_qty = ?, unchecked_qty = ?, quantity = ?
+                    WHERE upc = ? COLLATE NOCASE
+                ''', (new_good, new_unchecked, new_good, upc))
+
+                if new_good > 0:
+                    cur.execute('UPDATE items_prep_status SET quantity = ? WHERE upc = ? COLLATE NOCASE', (new_good, upc))
+                else:
+                    cur.execute('DELETE FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (upc,))
+
+                print(f'[UNDO GOOD] {upc}: moved {qty} from good to unchecked (good: {current_good}→{new_good}, unchecked: {current_unchecked}→{new_unchecked})')
+
+            elif status == 'bad':
+                # Bad item undo: Delete suffixed entry and move qty from bad back to unchecked
+                cur.execute('SELECT quantity, temporary FROM bol_items WHERE upc = ? COLLATE NOCASE', (upc,))
+                row = cur.fetchone()
+                if not row:
+                    return False, f'UPC {upc} not found', 404
+
+                bad_qty_for_this_entry = row[0] if row[0] else 1
+                temporary = row[1]
+
+                cur.execute('DELETE FROM bol_items WHERE upc = ? COLLATE NOCASE', (upc,))
+                cur.execute('DELETE FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (upc,))
+
+                if temporary == 0:
+                    cur.execute('DELETE FROM items_prep_images WHERE upc = ? COLLATE NOCASE', (upc,))
+                    try:
+                        cur.execute('DELETE FROM items_prep_notes WHERE upc = ? COLLATE NOCASE', (upc,))
+                    except Exception:
+                        pass
+
+                if base_upc:
+                    cur.execute('SELECT bad_qty, unchecked_qty FROM bol_items WHERE upc = ? COLLATE NOCASE', (base_upc,))
+                    base_row = cur.fetchone()
+                    if base_row:
+                        current_bad = base_row[0] or 0
+                        current_unchecked = base_row[1] or 0
+
+                        new_bad = max(0, current_bad - bad_qty_for_this_entry)
+                        new_unchecked = current_unchecked + bad_qty_for_this_entry
+
+                        cur.execute('''
+                            UPDATE bol_items
+                            SET bad_qty = ?, unchecked_qty = ?
+                            WHERE upc = ? COLLATE NOCASE
+                        ''', (new_bad, new_unchecked, base_upc))
+
+                        print(f'[UNDO BAD] Deleted {upc}, {base_upc}: moved {bad_qty_for_this_entry} from bad to unchecked (bad: {current_bad}→{new_bad}, unchecked: {current_unchecked}→{new_unchecked})')
+                else:
+                    print(f'[UNDO BAD] Warning: No base_upc provided for {upc}, could not restore qty')
+
+            elif status == 'return':
+                # Return undo: remove the suffixed return entry (does not touch base UPC quantities)
+                cur.execute('SELECT temporary FROM bol_items WHERE upc = ? COLLATE NOCASE', (upc,))
+                row = cur.fetchone()
+                if not row:
+                    return False, f'UPC {upc} not found', 404
+
+                temporary = row[0]
+                cur.execute('DELETE FROM bol_items WHERE upc = ? COLLATE NOCASE', (upc,))
+                cur.execute('DELETE FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (upc,))
+                if temporary == 0:
+                    cur.execute('DELETE FROM items_prep_images WHERE upc = ? COLLATE NOCASE', (upc,))
+                    try:
+                        cur.execute('DELETE FROM items_prep_notes WHERE upc = ? COLLATE NOCASE', (upc,))
+                    except Exception:
+                        pass
+
+                print(f'[UNDO RETURN] Deleted return entry {upc}')
+
+            conn.commit()
+            try:
+                update_data_version()
+            except Exception:
+                pass
+            return True, None, 200
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            return False, _safe_error(e, 'items_prep:undo_core'), 500
+        finally:
+            conn.close()
+    except Exception as e:
+        return False, _safe_error(e, 'items_prep:undo_core_outer'), 500
+
 @app.route('/api/items_prep/undo', methods=['POST'])
 def api_items_prep_undo():
     """Undo the last item prep action.
@@ -4584,123 +7507,21 @@ def api_items_prep_undo():
                    or if temporary=0 (completed), restore base qty and delete suffixed entry
     """
     try:
-        data = request.get_json()
-        if not data:
-            return jsonify({'success': False, 'error': 'Missing request body'}), 400
-        
-        upc = data.get('upc')  # The status UPC (could be suffixed for Bad items)
-        status = data.get('status')  # 'good' or 'bad'
-        action = data.get('action')  # 'incremented' or 'created' for good items
-        previous_qty = data.get('previousQty', 0)  # Previous qty before increment (for good items)
-        base_upc = data.get('base_upc')  # The base UPC (for bad items, to restore qty)
-        qty = data.get('qty', 1)  # The qty that was decremented
-        
-        if not upc or not status:
-            return jsonify({'success': False, 'error': 'Missing upc or status'}), 400
-        
-        upc_norm = _normalize_upc(upc)
-        if upc_norm and '-' not in upc_norm and upc_norm.isdigit():
-            upc = upc_norm.lstrip('0')
-        else:
-            upc = upc_norm
-        
-        if base_upc:
-            base_upc_norm = _normalize_upc(base_upc)
-            if base_upc_norm and base_upc_norm.isdigit():
-                base_upc = base_upc_norm.lstrip('0')
-            else:
-                base_upc = base_upc_norm
-        
-        _ensure_items_prep_tables()
-        conn = sqlite3.connect('bol.db')
-        cur = conn.cursor()
-        
-        if status == 'good':
-            # Good item undo: Move qty from good back to unchecked
-            cur.execute('SELECT good_qty, unchecked_qty FROM bol_items WHERE upc = ? COLLATE NOCASE', (upc,))
-            row = cur.fetchone()
-            
-            if not row:
-                return jsonify({'success': False, 'error': f'UPC {upc} not found'}), 404
-            
-            current_good = row[0] or 0
-            current_unchecked = row[1] or 0
-            
-            if qty > current_good:
-                return jsonify({'success': False, 'error': f'Cannot undo {qty} - only {current_good} marked as good'}), 400
-            
-            # Move qty from good back to unchecked
-            new_good = current_good - qty
-            new_unchecked = current_unchecked + qty
-            
-            cur.execute('''
-                UPDATE bol_items 
-                SET good_qty = ?, unchecked_qty = ?, quantity = ?
-                WHERE upc = ? COLLATE NOCASE
-            ''', (new_good, new_unchecked, new_good, upc))
-            
-            # Update prep status
-            if new_good > 0:
-                cur.execute('UPDATE items_prep_status SET quantity = ? WHERE upc = ? COLLATE NOCASE', (new_good, upc))
-            else:
-                # Delete status if no good items left
-                cur.execute('DELETE FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (upc,))
-            
-            print(f'[UNDO GOOD] {upc}: moved {qty} from good to unchecked (good: {current_good}→{new_good}, unchecked: {current_unchecked}→{new_unchecked})')
-            
-        elif status == 'bad':
-            # Bad item undo: Delete suffixed entry and move qty from bad back to unchecked
-            cur.execute('SELECT quantity, temporary FROM bol_items WHERE upc = ? COLLATE NOCASE', (upc,))
-            row = cur.fetchone()
-            
-            if not row:
-                return jsonify({'success': False, 'error': f'UPC {upc} not found'}), 404
-            
-            bad_qty_for_this_entry = row[0] if row[0] else 1
-            temporary = row[1]
-            
-            # Delete the suffixed bad entry
-            cur.execute('DELETE FROM bol_items WHERE upc = ? COLLATE NOCASE', (upc,))
-            cur.execute('DELETE FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (upc,))
-            
-            # Delete associated photos and notes if completed
-            if temporary == 0:
-                cur.execute('DELETE FROM items_prep_images WHERE upc = ? COLLATE NOCASE', (upc,))
-                try:
-                    cur.execute('DELETE FROM items_prep_notes WHERE upc = ? COLLATE NOCASE', (upc,))
-                except Exception:
-                    pass
-            
-            # Move qty from bad back to unchecked in base UPC
-            if base_upc:
-                cur.execute('SELECT bad_qty, unchecked_qty FROM bol_items WHERE upc = ? COLLATE NOCASE', (base_upc,))
-                base_row = cur.fetchone()
-                
-                if base_row:
-                    current_bad = base_row[0] or 0
-                    current_unchecked = base_row[1] or 0
-                    
-                    new_bad = max(0, current_bad - bad_qty_for_this_entry)
-                    new_unchecked = current_unchecked + bad_qty_for_this_entry
-                    
-                    cur.execute('''
-                        UPDATE bol_items 
-                        SET bad_qty = ?, unchecked_qty = ?
-                        WHERE upc = ? COLLATE NOCASE
-                    ''', (new_bad, new_unchecked, base_upc))
-                    
-                    print(f'[UNDO BAD] Deleted {upc}, {base_upc}: moved {bad_qty_for_this_entry} from bad to unchecked (bad: {current_bad}→{new_bad}, unchecked: {current_unchecked}→{new_unchecked})')
-            else:
-                print(f'[UNDO BAD] Warning: No base_upc provided for {upc}, could not restore qty')
-        
-        conn.commit()
+        data = request.get_json() or {}
+        upc = data.get('upc')
+        status = data.get('status')
+        base_upc = data.get('base_upc')
+        qty = data.get('qty', 1)
+
+        ok, err, code = _items_prep_undo_core(upc=upc, status=status, qty=qty, base_upc=base_upc)
+        if not ok:
+            return jsonify({'success': False, 'error': err or 'Undo failed'}), (code or 400)
         return jsonify({'success': True})
         
     except Exception as e:
         print(f'Undo error: {e}')
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
-    finally:
-        conn.close()
+
 
 @app.route('/api/items_prep/diagnostic', methods=['POST'])
 def api_items_prep_diagnostic():
@@ -7886,15 +10707,23 @@ def position_diagnostic():
 def process_position():
     session['inv_position_code'] = request.form.get('scanned_result')
     session['inv_pictureposition_path'] = request.form.get('pictureposition')
-    position_locked = request.form.get('position_locked', 'false') == 'true'
+    position_locked_raw = request.form.get('position_locked')
+    position_locked = (position_locked_raw or '').strip().lower() == 'true'
 
     print("Received scanned code:", session.get('inv_position_code'))
     print("Received picture position path:", session.get('inv_pictureposition_path'))
     print(f"DEBUG: position_locked from form = {position_locked}")
     print(f"DEBUG: inv_same_position (session) = {session.get('inv_same_position')}")
 
-    # Use form value as primary source, fall back to session variable
-    is_locked = position_locked or session.get('inv_same_position', False)
+    # Trust the client-submitted form field when present.
+    # (Previously we OR'd with session state, which could stale/lag and incorrectly force multi-barcode flow.)
+    if position_locked_raw is None:
+        is_locked = session.get('inv_same_position', False)
+    else:
+        is_locked = position_locked
+
+    # Keep server session in sync with the latest scan.
+    session['inv_same_position'] = bool(is_locked)
     
     # Check if shelf is locked
     if is_locked:
