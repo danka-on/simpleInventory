@@ -4,686 +4,594 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Marketplace Session</title>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   <style>
     body {
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
       background: #f5f7fa;
       margin: 0;
       padding: 20px;
+      color: #2c3e50;
     }
     .container {
-      max-width: 900px;
+      max-width: 1000px;
       margin: 0 auto;
     }
-    .header-card {
-      background: white;
+    .card {
+      background: #fff;
       border-radius: 12px;
-      padding: 30px;
+      padding: 24px;
       box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-      margin-bottom: 20px;
+      margin-bottom: 16px;
     }
+    .layout {
+      display: grid;
+      grid-template-columns: 1.6fr 1fr;
+      gap: 16px;
+    }
+    .left-col, .right-col { min-width: 0; }
     .header-row {
       display: flex;
-      justify-content: space-between;
       align-items: center;
-      margin-bottom: 20px;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 16px;
     }
-    h1 {
-      color: #2c3e50;
-      margin: 0;
-      font-size: 2rem;
-    }
+    h1 { margin: 0; font-size: 1.8rem; }
     .btn {
       padding: 12px 24px;
       border: none;
       border-radius: 8px;
       font-size: 1rem;
       cursor: pointer;
-      transition: all 0.2s;
       text-decoration: none;
       display: inline-block;
+      transition: all 0.2s;
     }
-    .btn-secondary {
-      background: #95a5a6;
-      color: white;
-    }
-    .btn-secondary:hover {
-      background: #7f8c8d;
-    }
-    .btn-success {
-      background: #27ae60;
-      color: white;
-      font-size: 1.2rem;
-      padding: 16px 32px;
-    }
-    .btn-success:hover {
-      background: #229954;
-    }
-    .btn-success:disabled {
-      background: #bdc3c7;
-      cursor: not-allowed;
-    }
-    .btn-danger {
-      background: #e74c3c;
-      color: white;
-    }
-    .btn-danger:hover {
-      background: #c0392b;
-    }
-    .form-group {
-      margin-bottom: 20px;
-    }
-    .input-with-button {
+    .btn-danger { background: #e74c3c; color: #fff; }
+    .btn-success { background: #27ae60; color: #fff; }
+    .btn-secondary { background: #95a5a6; color: #fff; }
+    .scan-row {
       display: flex;
       gap: 12px;
-      align-items: stretch;
-    }
-    .input-with-button input {
-      flex: 1;
-    }
-    .camera-btn {
-      background: #27ae60;
-      color: white;
-      border: none;
-      border-radius: 8px;
-      padding: 0 16px;
-      cursor: pointer;
-      transition: background 0.2s;
-      display: flex;
       align-items: center;
-      justify-content: center;
+      flex-wrap: wrap;
     }
-    .camera-btn:hover {
-      background: #229954;
-    }
-    .camera-btn i {
-      font-size: 1.5rem;
-    }
-    label {
-      display: block;
-      font-weight: 600;
-      margin-bottom: 8px;
-      color: #2c3e50;
-    }
-    input[type="text"], input[type="number"] {
-      width: 100%;
+    .scan-row input {
+      flex: 1;
+      min-width: 220px;
       padding: 12px;
       border: 2px solid #e0e4e8;
       border-radius: 8px;
       font-size: 1rem;
-      box-sizing: border-box;
-      transition: border-color 0.2s;
     }
-    input[type="text"]:focus, input[type="number"]:focus {
-      outline: none;
-      border-color: #3498db;
-    }
-    .quantity-row {
+    .search-row {
       display: flex;
-      align-items: center;
       gap: 12px;
-    }
-    .quantity-btn {
-      width: 50px;
-      height: 50px;
-      border: 2px solid #3498db;
-      background: white;
-      color: #3498db;
-      border-radius: 8px;
-      font-size: 1.5rem;
-      font-weight: bold;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-    .quantity-btn:hover {
-      background: #3498db;
-      color: white;
-    }
-    #quantityInput {
-      flex: 1;
-      text-align: center;
-      font-size: 1.2rem;
-      font-weight: 600;
-    }
-    .add-item-btn {
-      background: #3498db;
-      color: white;
-      width: 100%;
-      font-size: 1.1rem;
-      padding: 14px;
-      margin-top: 10px;
-    }
-    .add-item-btn:hover {
-      background: #2980b9;
-    }
-    .items-card {
-      background: white;
-      border-radius: 12px;
-      padding: 30px;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-      margin-bottom: 20px;
-    }
-    .items-header {
-      display: flex;
-      justify-content: space-between;
       align-items: center;
-      margin-bottom: 20px;
-      padding-bottom: 15px;
-      border-bottom: 2px solid #e0e4e8;
+      flex-wrap: wrap;
+      margin-top: 12px;
     }
-    .items-header h2 {
-      margin: 0;
-      color: #2c3e50;
+    .search-row input {
+      flex: 1;
+      min-width: 200px;
+      padding: 12px;
+      border: 2px solid #e0e4e8;
+      border-radius: 8px;
+      font-size: 1rem;
     }
-    .clear-all-btn {
-      background: #e74c3c;
-      color: white;
-      padding: 8px 16px;
-      border: none;
-      border-radius: 6px;
-      cursor: pointer;
-      font-size: 0.9rem;
+    .search-results {
+      margin-top: 10px;
+      max-height: 260px;
+      overflow: auto;
+      border: 1px solid #e0e4e8;
+      border-radius: 10px;
     }
-    .clear-all-btn:hover {
-      background: #c0392b;
-    }
+    .search-results table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    .search-results th, .search-results td { padding: 8px; border-bottom: 1px solid #eef1f3; }
+    .search-results th { background: #f5f7fa; text-align: left; }
+    .thumb-sm { width: 36px; height: 36px; border-radius: 6px; object-fit: cover; background: #f0f0f0; }
     .items-list {
-      list-style: none;
-      padding: 0;
-      margin: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
     }
     .item-row {
-      display: flex;
-      justify-content: space-between;
+      display: grid;
+      grid-template-columns: 56px 1fr 180px 140px 110px;
+      gap: 10px;
       align-items: center;
-      padding: 12px;
+      padding: 10px;
       border: 1px solid #e0e4e8;
+      border-radius: 10px;
+      background: #fafbfc;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+    }
+    .thumb {
+      width: 56px;
+      height: 56px;
       border-radius: 8px;
-      margin-bottom: 10px;
-      transition: background 0.2s;
+      object-fit: cover;
+      background: #f0f0f0;
     }
-    .item-row:hover {
-      background: #f9fafb;
-    }
-    .item-details {
-      flex: 1;
-    }
-    .item-title {
-      font-weight: 600;
-      color: #2c3e50;
-      margin-bottom: 4px;
+    .item-title input {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid #dfe6e9;
+      border-radius: 6px;
+      font-size: 0.95rem;
     }
     .item-barcode {
+      font-family: monospace;
       color: #7f8c8d;
-      font-size: 0.9rem;
+      font-size: 0.85rem;
+      margin-top: 4px;
     }
-    .item-qty-price {
+    .price-input input {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid #dfe6e9;
+      border-radius: 6px;
+      font-size: 0.95rem;
+    }
+    .qty-control {
       display: flex;
       align-items: center;
-      gap: 20px;
-      margin-right: 20px;
+      gap: 6px;
+      justify-content: center;
     }
-    .item-qty {
-      color: #3498db;
-      font-weight: 600;
-    }
-    .item-price {
-      color: #27ae60;
+    .qty-btn {
+      width: 30px;
+      height: 30px;
+      border: none;
+      border-radius: 6px;
+      background: #3498db;
+      color: #fff;
+      cursor: pointer;
       font-weight: 700;
-      font-size: 1.1rem;
+    }
+    .qty-value {
+      min-width: 30px;
+      text-align: center;
+      font-weight: 700;
     }
     .remove-btn {
       background: #e74c3c;
-      color: white;
+      color: #fff;
       border: none;
       border-radius: 6px;
-      padding: 8px 12px;
+      padding: 6px 10px;
       cursor: pointer;
-      font-size: 0.85rem;
     }
-    .remove-btn:hover {
-      background: #c0392b;
+    .summary {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 12px;
+      align-items: end;
     }
-    .empty-state {
-      text-align: center;
-      padding: 40px;
-      color: #95a5a6;
+    .summary .box {
+      background: #f7f9fb;
+      border-radius: 10px;
+      padding: 12px;
+      border: 1px solid #e0e4e8;
     }
-    .summary-card {
-      background: white;
-      border-radius: 12px;
-      padding: 30px;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-    }
-    .summary-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 12px 0;
-      border-bottom: 1px solid #e0e4e8;
-    }
-    .summary-row:last-child {
-      border-bottom: none;
-      padding-top: 20px;
-      margin-top: 10px;
-      border-top: 2px solid #2c3e50;
-    }
-    .summary-label {
-      font-size: 1.1rem;
-      color: #2c3e50;
-    }
-    .summary-value {
-      font-size: 1.1rem;
+    .summary label {
       font-weight: 600;
-      color: #2c3e50;
+      display: block;
+      margin-bottom: 6px;
     }
-    .summary-row:last-child .summary-label,
-    .summary-row:last-child .summary-value {
-      font-size: 1.5rem;
+    .summary input {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid #dfe6e9;
+      border-radius: 6px;
+    }
+    .totals {
+      font-size: 1.1rem;
       font-weight: 700;
       color: #27ae60;
     }
     .message {
-      padding: 12px;
-      border-radius: 8px;
-      margin-bottom: 20px;
       display: none;
-    }
-    .message.success {
-      background: #d4edda;
-      color: #155724;
-      border: 1px solid #c3e6cb;
-      display: block;
-    }
-    .message.error {
-      background: #f8d7da;
-      color: #721c24;
-      border: 1px solid #f5c6cb;
-      display: block;
-    }
-    /* Camera modal */
-    #cameraModal {
-      display: none;
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      background: rgba(0,0,0,0.9);
-      z-index: 9999;
-      justify-content: center;
-      align-items: center;
-    }
-    #cameraModal.active {
-      display: flex;
-    }
-    .camera-container {
-      position: relative;
-      max-width: 90%;
-      max-height: 90%;
-    }
-    #cameraVideo {
-      width: 100%;
-      height: auto;
+      margin-top: 10px;
+      padding: 10px 12px;
       border-radius: 8px;
+      font-size: 0.95rem;
     }
-    .camera-controls {
-      position: absolute;
-      bottom: 20px;
-      left: 50%;
-      transform: translateX(-50%);
-      display: flex;
-      gap: 12px;
+    .message.success { background: #d4edda; color: #155724; display: block; }
+    .message.error { background: #f8d7da; color: #721c24; display: block; }
+    .empty-state {
+      text-align: center;
+      color: #95a5a6;
+      padding: 20px;
     }
-    .camera-controls button {
-      padding: 12px 24px;
-      border: none;
-      border-radius: 8px;
-      font-size: 1rem;
-      cursor: pointer;
-      font-weight: 600;
-    }
-    @media (max-width: 768px) {
+    @media (max-width: 900px) {
+      .layout { grid-template-columns: 1fr; }
       .item-row {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 10px;
+        grid-template-columns: 56px 1fr 1fr;
+        grid-template-areas:
+          "thumb title title"
+          "thumb price qty"
+          "thumb remove remove";
       }
-      .item-qty-price {
-        width: 100%;
-        justify-content: space-between;
-      }
-      .remove-btn {
-        width: 100%;
-      }
+      .item-title { grid-area: title; }
+      .price-input { grid-area: price; }
+      .qty-control { grid-area: qty; justify-content: flex-start; }
+      .remove-wrap { grid-area: remove; }
     }
+    @media (max-width: 640px) {
+      body { padding: 12px; }
+      .summary { grid-template-columns: 1fr; }
+    }
+    .recent-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    .recent-table th, .recent-table td { padding: 8px; border-bottom: 1px solid #eef1f3; text-align:left; }
+    .recent-table th { background: #f5f7fa; }
+    .recent-controls { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:10px; }
   </style>
 </head>
 <body>
   <div class="container">
-    <div class="header-card">
+    <div class="card">
       <div class="header-row">
-        <a href="/marketplace-sale" class="btn btn-danger">← Back</a>
-        <h1>Marketplace Session</h1>
+        <a href="/tools" class="btn btn-danger" data-i18n="back">← Back</a>
+        <h1 data-i18n="marketplace_session">Marketplace Session</h1>
+        <a href="/marketplace-stats" class="btn btn-secondary" data-i18n="marketplace_recent_sales">📊 Recent Sales</a>
       </div>
-
+      <div class="scan-row">
+        <input id="scanInput" type="text" data-i18n="marketplace_scan_barcode" placeholder="Scan barcode..." autofocus>
+        <button class="btn btn-secondary" id="clearSession" data-i18n="clear">Clear</button>
+        <button class="btn btn-success" id="submitSession" disabled data-i18n="marketplace_submit_session">Submit Session</button>
+      </div>
+      <div class="search-row">
+        <input id="searchName" type="text" data-i18n="marketplace_search_name" placeholder="Search by name">
+        <button class="btn btn-secondary" id="searchBtn" data-i18n="search">Search</button>
+      </div>
+      <div id="searchResults" class="search-results" style="display:none"></div>
       <div id="message" class="message"></div>
+    </div>
 
-      <form id="itemForm">
-        <div class="form-group">
-          <label for="barcodeInput">Barcode *</label>
-          <div class="input-with-button">
-            <input type="text" id="barcodeInput" placeholder="Scan or enter barcode" required autofocus>
-            <button type="button" class="camera-btn" id="cameraBtn" title="Scan with camera">
-              <i class="fas fa-camera"></i>
-            </button>
+    <div class="layout">
+      <div class="left-col">
+        <div class="card">
+          <div class="items-list" id="itemsList">
+            <div class="empty-state" data-i18n="marketplace_empty">Scan items to start a session.</div>
+          </div>
+        </div>
+      </div>
+      <div class="right-col">
+        <div class="card">
+          <div class="summary">
+            <div class="box">
+              <label data-i18n="marketplace_total_qty">Total Quantity</label>
+              <div id="totalQty" class="totals">0</div>
+            </div>
+            <div class="box">
+              <label data-i18n="marketplace_auto_total">Auto Total</label>
+              <div id="autoTotal" class="totals">$0.00</div>
+            </div>
+            <div class="box">
+              <label data-i18n="marketplace_final_total">Final Total (optional override)</label>
+              <input id="finalTotalInput" type="number" min="0" step="0.01" data-i18n="marketplace_final_total_placeholder" placeholder="Leave blank to use auto total">
+              <div id="finalTotal" class="totals" style="margin-top:8px">$0.00</div>
+            </div>
           </div>
         </div>
 
-        <div class="form-group">
-          <label for="titleInput">Title</label>
-          <input type="text" id="titleInput" placeholder="Item title (optional)">
-        </div>
-
-        <div class="form-group">
-          <label for="quantityInput">Quantity *</label>
-          <div class="quantity-row">
-            <button type="button" class="quantity-btn" id="decreaseBtn">−</button>
-            <input type="number" id="quantityInput" value="1" min="1" required>
-            <button type="button" class="quantity-btn" id="increaseBtn">+</button>
-          </div>
-        </div>
-
-        <div class="form-group">
-          <label for="priceInput">Price *</label>
-          <input type="number" id="priceInput" placeholder="0.00" step="0.01" min="0" required>
-        </div>
-
-        <button type="submit" class="btn add-item-btn">Add to Session</button>
-      </form>
-    </div>
-
-    <div class="items-card">
-      <div class="items-header">
-        <h2>Session Items (<span id="itemCount">0</span>)</h2>
-        <button class="clear-all-btn" id="clearAllBtn" style="display: none;">Clear All</button>
-      </div>
-
-      <ul class="items-list" id="itemsList">
-        <li class="empty-state">No items added yet. Scan or enter items above.</li>
-      </ul>
-    </div>
-
-    <div class="summary-card">
-      <div class="summary-row">
-        <span class="summary-label">Total Items:</span>
-        <span class="summary-value" id="totalItems">0</span>
-      </div>
-      <div class="summary-row">
-        <span class="summary-label">Total Quantity:</span>
-        <span class="summary-value" id="totalQuantity">0</span>
-      </div>
-      <div class="summary-row">
-        <span class="summary-label">Total Amount:</span>
-        <span class="summary-value" id="totalAmount">$0.00</span>
-      </div>
-
-      <button type="button" class="btn btn-success" id="submitSessionBtn" disabled style="width: 100%; margin-top: 20px;">
-        Submit Session
-      </button>
-    </div>
-  </div>
-
-  <!-- Camera Modal -->
-  <div id="cameraModal">
-    <div class="camera-container">
-      <video id="cameraVideo" playsinline autoplay></video>
-      <div class="camera-controls">
-        <button class="btn btn-secondary" id="closeCameraBtn">Close</button>
       </div>
     </div>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/@zxing/library@latest"></script>
   <script>
-    const sessionItems = [];
-    let videoStream = null;
-    let codeReader = null;
+    const items = new Map();
+    const scanInput = document.getElementById('scanInput');
+    const itemsList = document.getElementById('itemsList');
+    const message = document.getElementById('message');
+    const totalQtyEl = document.getElementById('totalQty');
+    const autoTotalEl = document.getElementById('autoTotal');
+    const finalTotalEl = document.getElementById('finalTotal');
+    const finalTotalInput = document.getElementById('finalTotalInput');
+    const submitBtn = document.getElementById('submitSession');
+    const clearBtn = document.getElementById('clearSession');
 
-    // Quantity buttons
-    document.getElementById('decreaseBtn').addEventListener('click', () => {
-      const input = document.getElementById('quantityInput');
-      if (input.value > 1) input.value = parseInt(input.value) - 1;
-    });
-
-    document.getElementById('increaseBtn').addEventListener('click', () => {
-      const input = document.getElementById('quantityInput');
-      input.value = parseInt(input.value) + 1;
-    });
-
-    // Camera functionality
-    document.getElementById('cameraBtn').addEventListener('click', startCamera);
-    document.getElementById('closeCameraBtn').addEventListener('click', stopCamera);
-
-    async function startCamera() {
-      const modal = document.getElementById('cameraModal');
-      const video = document.getElementById('cameraVideo');
-      
-      try {
-        videoStream = await navigator.mediaDevices.getUserMedia({ 
-          video: { facingMode: 'environment' } 
-        });
-        video.srcObject = videoStream;
-        modal.classList.add('active');
-        
-        // Start barcode scanning
-        codeReader = new ZXing.BrowserMultiFormatReader();
-        codeReader.decodeFromVideoDevice(null, 'cameraVideo', (result, err) => {
-          if (result) {
-            document.getElementById('barcodeInput').value = result.text;
-            stopCamera();
-            lookupItem(result.text);
-          }
-        });
-      } catch (error) {
-        showMessage('Camera access denied or not available', 'error');
-      }
+    function fmtMoney(v) {
+      const n = isNaN(v) ? 0 : v;
+      return '$' + n.toFixed(2);
     }
 
-    function stopCamera() {
-      const modal = document.getElementById('cameraModal');
-      if (videoStream) {
-        videoStream.getTracks().forEach(track => track.stop());
-        videoStream = null;
-      }
-      if (codeReader) {
-        codeReader.reset();
-        codeReader = null;
-      }
-      modal.classList.remove('active');
+    function showMessage(text, type) {
+      message.textContent = text;
+      message.className = 'message ' + type;
     }
 
-    // Auto-lookup when barcode is entered
-    document.getElementById('barcodeInput').addEventListener('blur', function() {
-      const barcode = this.value.trim();
-      if (barcode) {
-        lookupItem(barcode);
-      }
-    });
+    function hideMessage() {
+      message.className = 'message';
+    }
 
     async function lookupItem(barcode) {
       try {
-        const response = await fetch(`/api/marketplace/lookup?barcode=${encodeURIComponent(barcode)}`);
-        const data = await response.json();
-        
-        if (data.success && data.item) {
-          document.getElementById('titleInput').value = data.item.title || '';
-          document.getElementById('priceInput').value = data.item.price || '';
+        const resp = await fetch(`/api/marketplace/lookup?barcode=${encodeURIComponent(barcode)}`);
+        const data = await resp.json();
+        if (data.success && data.found) {
+          return { title: data.title || '', image: data.image_url || '' };
         }
-      } catch (error) {
-        console.error('Lookup error:', error);
+      } catch (e) {}
+      return { title: '', image: '' };
+    }
+
+    async function searchByName(q) {
+      const resultsEl = document.getElementById('searchResults');
+      if (!q) return;
+        resultsEl.style.display = 'block';
+        resultsEl.innerHTML = '<div class="empty-state" data-i18n="loading">Loading...</div>';
+      try {
+        const resp = await fetch(`/api/marketplace/search?q=${encodeURIComponent(q)}`);
+        const data = await resp.json();
+        if (!data.success) {
+          resultsEl.innerHTML = '<div class="empty-state" data-i18n="marketplace_search_error">Search failed</div>';
+          return;
+        }
+        const rows = data.results || [];
+        if (rows.length === 0) {
+          resultsEl.innerHTML = '<div class="empty-state" data-i18n="fb_listings_search_empty">No matches found.</div>';
+          return;
+        }
+        const t = (window.i18n && window.i18n.t) ? window.i18n.t : (k => k);
+        let html = '<table><thead><tr><th>' + t('image_label') + '</th><th>' + t('upc_label') + '</th><th>' + t('title') + '</th><th style="text-align:center">' + t('actions') + '</th></tr></thead><tbody>';
+        for (const r of rows) {
+          const img = r.image_url || '';
+          const thumb = img ? img : 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36"><rect width="100%" height="100%" fill="#f0f0f0"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#bbb" font-size="8">No img</text></svg>');
+          html += `<tr>
+            <td><img class="thumb-sm" src="${thumb}" onerror="this.src='${thumb}'"></td>
+            <td style="font-family:monospace">${r.upc || ''}</td>
+            <td>${r.item_description || ''}</td>
+            <td style="text-align:center"><button class="btn btn-secondary btn-add" data-upc="${r.upc || ''}">+</button></td>
+          </tr>`;
+        }
+        html += '</tbody></table>';
+        resultsEl.innerHTML = html;
+        if (window.i18n && window.i18n.applyTranslations) window.i18n.applyTranslations();
+        resultsEl.querySelectorAll('.btn-add').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const upc = btn.dataset.upc || '';
+            if (upc) addScan(upc);
+          });
+        });
+      } catch (e) {
+        resultsEl.innerHTML = '<div class="empty-state">Search failed</div>';
       }
     }
 
-    // Add item to session
-    document.getElementById('itemForm').addEventListener('submit', function(e) {
-      e.preventDefault();
-      
-      const barcode = document.getElementById('barcodeInput').value.trim();
-      const title = document.getElementById('titleInput').value.trim();
-      const quantity = parseInt(document.getElementById('quantityInput').value);
-      const price = parseFloat(document.getElementById('priceInput').value);
 
-      if (!barcode || quantity < 1 || price < 0) {
-        showMessage('Please fill in all required fields correctly', 'error');
+    async function addScan(barcode) {
+      if (!barcode) return;
+      if (items.has(barcode)) {
+        const item = items.get(barcode);
+        item.qty += 1;
+        items.set(barcode, item);
+        renderItems();
         return;
       }
-
-      const item = {
+      const info = await lookupItem(barcode);
+      items.set(barcode, {
         barcode,
-        title,
-        quantity,
-        price,
-        total: quantity * price
-      };
-
-      sessionItems.push(item);
+        title: info.title || '',
+        image: info.image || '',
+        qty: 1,
+        price: ''
+      });
       renderItems();
-      updateSummary();
-      
-      // Reset form
-      document.getElementById('itemForm').reset();
-      document.getElementById('quantityInput').value = 1;
-      document.getElementById('barcodeInput').focus();
-      
-      showMessage('Item added to session', 'success');
-      setTimeout(() => hideMessage(), 2000);
-    });
-
-    // Remove item from session
-    function removeItem(index) {
-      sessionItems.splice(index, 1);
-      renderItems();
-      updateSummary();
     }
 
-    // Clear all items
-    document.getElementById('clearAllBtn').addEventListener('click', function() {
-      if (confirm('Are you sure you want to clear all items?')) {
-        sessionItems.length = 0;
-        renderItems();
-        updateSummary();
-      }
-    });
-
-    // Render items list
     function renderItems() {
-      const list = document.getElementById('itemsList');
-      const clearBtn = document.getElementById('clearAllBtn');
-      
-      if (sessionItems.length === 0) {
-        list.innerHTML = '<li class="empty-state">No items added yet. Scan or enter items above.</li>';
-        clearBtn.style.display = 'none';
-      } else {
-        list.innerHTML = sessionItems.map((item, index) => `
-          <li class="item-row">
-            <div class="item-details">
-              <div class="item-title">${item.title || 'No title'}</div>
+      if (items.size === 0) {
+        itemsList.innerHTML = '<div class="empty-state" data-i18n="marketplace_empty">Scan items to start a session.</div>';
+        submitBtn.disabled = true;
+        updateSummary();
+        if (window.i18n && window.i18n.applyTranslations) window.i18n.applyTranslations();
+        return;
+      }
+      const html = [];
+      for (const item of items.values()) {
+        const thumb = item.image ? item.image : 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="56" height="56"><rect width="100%" height="100%" fill="#f0f0f0"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#bbb" font-size="8">No img</text></svg>');
+        html.push(`
+          <div class="item-row" data-barcode="${item.barcode}">
+            <img class="thumb" src="${thumb}" onerror="this.src='${thumb}'">
+            <div class="item-title">
+              <input type="text" class="title-input" value="${item.title || ''}" placeholder="Item name (optional)" data-i18n="marketplace_item_name_optional">
               <div class="item-barcode">${item.barcode}</div>
             </div>
-            <div class="item-qty-price">
-              <span class="item-qty">Qty: ${item.quantity}</span>
-              <span class="item-price">$${item.total.toFixed(2)}</span>
+            <div class="price-input">
+              <input type="number" class="price-input-field" min="0" step="0.01" placeholder="Price (optional)" data-i18n="marketplace_price_optional" value="${item.price}">
             </div>
-            <button class="remove-btn" onclick="removeItem(${index})">Remove</button>
-          </li>
-        `).join('');
-        clearBtn.style.display = 'block';
+            <div class="qty-control">
+              <button class="qty-btn qty-minus">-</button>
+              <div class="qty-value">${item.qty}</div>
+              <button class="qty-btn qty-plus">+</button>
+            </div>
+            <div class="remove-wrap">
+              <button class="remove-btn">X</button>
+            </div>
+          </div>
+        `);
       }
-      
-      document.getElementById('itemCount').textContent = sessionItems.length;
+      itemsList.innerHTML = html.join('');
+      attachRowHandlers();
+      submitBtn.disabled = false;
+      updateSummary();
+      if (window.i18n && window.i18n.applyTranslations) window.i18n.applyTranslations();
     }
 
-    // Update summary
+    function attachRowHandlers() {
+      document.querySelectorAll('.item-row').forEach(row => {
+        const barcode = row.dataset.barcode;
+        const item = items.get(barcode);
+        const titleInput = row.querySelector('.title-input');
+        const priceInput = row.querySelector('.price-input-field');
+        const minus = row.querySelector('.qty-minus');
+        const plus = row.querySelector('.qty-plus');
+        const remove = row.querySelector('.remove-btn');
+
+        titleInput.addEventListener('input', () => {
+          item.title = titleInput.value.trim();
+          items.set(barcode, item);
+        });
+        priceInput.addEventListener('input', () => {
+          item.price = priceInput.value;
+          items.set(barcode, item);
+          updateSummary();
+        });
+        minus.addEventListener('click', () => {
+          if (item.qty > 1) {
+            item.qty -= 1;
+            items.set(barcode, item);
+            renderItems();
+          }
+        });
+        plus.addEventListener('click', () => {
+          item.qty += 1;
+          items.set(barcode, item);
+          renderItems();
+        });
+        remove.addEventListener('click', () => {
+          items.delete(barcode);
+          renderItems();
+        });
+      });
+    }
+
+    function getTotals() {
+      let totalQty = 0;
+      let autoTotal = 0;
+      for (const item of items.values()) {
+        totalQty += item.qty;
+        const p = parseFloat(item.price || 0);
+        if (!isNaN(p)) autoTotal += p * item.qty;
+      }
+      return { totalQty, autoTotal };
+    }
+
     function updateSummary() {
-      const totalItems = sessionItems.length;
-      const totalQuantity = sessionItems.reduce((sum, item) => sum + item.quantity, 0);
-      const totalAmount = sessionItems.reduce((sum, item) => sum + item.total, 0);
-      
-      document.getElementById('totalItems').textContent = totalItems;
-      document.getElementById('totalQuantity').textContent = totalQuantity;
-      document.getElementById('totalAmount').textContent = '$' + totalAmount.toFixed(2);
-      
-      const submitBtn = document.getElementById('submitSessionBtn');
-      submitBtn.disabled = totalItems === 0;
+      const { totalQty, autoTotal } = getTotals();
+      totalQtyEl.textContent = totalQty;
+      autoTotalEl.textContent = fmtMoney(autoTotal);
+      const override = parseFloat(finalTotalInput.value);
+      const finalTotal = !isNaN(override) && override >= 0 ? override : autoTotal;
+      finalTotalEl.textContent = fmtMoney(finalTotal);
     }
 
-    // Submit session
-    document.getElementById('submitSessionBtn').addEventListener('click', async function() {
-      if (sessionItems.length === 0) return;
-      
-      const btn = this;
-      btn.disabled = true;
-      btn.textContent = 'Submitting...';
-      
-      try {
-        // Submit each item individually
-        let successCount = 0;
-        let failCount = 0;
-        
-        for (const item of sessionItems) {
+    scanInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const code = scanInput.value.trim();
+        scanInput.value = '';
+        if (code) addScan(code);
+      }
+    });
+
+    const searchBtn = document.getElementById('searchBtn');
+    const searchName = document.getElementById('searchName');
+    if (searchBtn) {
+      searchBtn.addEventListener('click', () => {
+        const q = (searchName.value || '').trim();
+        if (q) searchByName(q);
+      });
+    }
+    if (searchName) {
+      searchName.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          const q = (searchName.value || '').trim();
+          if (q) searchByName(q);
+        }
+      });
+    }
+
+    finalTotalInput.addEventListener('input', updateSummary);
+
+    clearBtn.addEventListener('click', () => {
+      const t = (window.i18n && window.i18n.t) ? window.i18n.t : (k => k);
+      if (confirm(t('marketplace_clear_confirm'))) {
+        items.clear();
+        renderItems();
+      }
+    });
+
+    submitBtn.addEventListener('click', async () => {
+      if (items.size === 0) return;
+      submitBtn.disabled = true;
+      hideMessage();
+      const sessionId = 'session-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
+      const { totalQty, autoTotal } = getTotals();
+      const override = parseFloat(finalTotalInput.value);
+      let finalTotal = (!isNaN(override) && override >= 0) ? override : autoTotal;
+
+      const itemList = Array.from(items.values());
+      let priceMap = new Map();
+      if (totalQty > 0) {
+        if (!isNaN(override) && override >= 0) {
+          if (autoTotal > 0) {
+            const ratio = finalTotal / autoTotal;
+            itemList.forEach(i => {
+              const p = parseFloat(i.price || 0);
+              const unit = isNaN(p) ? 0 : p * ratio;
+              priceMap.set(i.barcode, unit);
+            });
+          } else {
+            const unit = finalTotal / totalQty;
+            itemList.forEach(i => priceMap.set(i.barcode, unit));
+          }
+        } else {
+          itemList.forEach(i => {
+            const p = parseFloat(i.price || 0);
+            priceMap.set(i.barcode, isNaN(p) ? 0 : p);
+          });
+        }
+      }
+
+      let success = 0;
+      let fail = 0;
+      for (const item of itemList) {
+        const unitPrice = priceMap.get(item.barcode) || 0;
+        for (let i = 0; i < item.qty; i++) {
           try {
-            const response = await fetch('/api/marketplace/sale', {
+            const resp = await fetch('/api/marketplace/sale', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 barcode: item.barcode,
-                title: item.title,
-                quantity: item.quantity,
-                price: item.price
+                title: item.title || '',
+                quantity: 1,
+                price: unitPrice,
+                session_id: sessionId
               })
             });
-            
-            const data = await response.json();
-            if (data.success) {
-              successCount++;
-            } else {
-              failCount++;
-            }
-          } catch (error) {
-            failCount++;
+            const data = await resp.json();
+            if (data.success) success += 1;
+            else fail += 1;
+          } catch (e) {
+            fail += 1;
           }
         }
-        
-        if (failCount === 0) {
-          showMessage(`Session submitted successfully! ${successCount} items recorded.`, 'success');
-          sessionItems.length = 0;
-          renderItems();
-          updateSummary();
-        } else {
-          showMessage(`Submitted with errors: ${successCount} succeeded, ${failCount} failed.`, 'error');
-        }
-      } catch (error) {
-        showMessage('Error submitting session: ' + error.message, 'error');
-      } finally {
-        btn.disabled = false;
-        btn.textContent = 'Submit Session';
       }
+
+      if (fail === 0) {
+        showMessage((window.i18n && window.i18n.t) ? window.i18n.t('marketplace_submit_success') : 'Session submitted successfully.', 'success');
+        items.clear();
+        finalTotalInput.value = '';
+        renderItems();
+      } else {
+        const t = (window.i18n && window.i18n.t) ? window.i18n.t : (k => k);
+        const msg = t('marketplace_submit_partial')
+          .replace('{success}', success)
+          .replace('{fail}', fail);
+        showMessage(msg, 'error');
+      }
+      submitBtn.disabled = false;
+      scanInput.focus();
     });
 
-    // Message helpers
-    function showMessage(text, type) {
-      const msg = document.getElementById('message');
-      msg.textContent = text;
-      msg.className = 'message ' + type;
-    }
-
-    function hideMessage() {
-      const msg = document.getElementById('message');
-      msg.className = 'message';
-    }
+    renderItems();
   </script>
+  <script src="/static/i18n.js"></script>
 </body>
 </html>

@@ -205,23 +205,25 @@
         .main-actions {
             display: flex;
             flex-direction: column;
-            gap: 18px;
+            gap: 10px;
             margin-bottom: 32px;
         }
         .main-actions button, .main-actions a > button {
-            width: 100%;
-            font-size: 1.2rem;
-            padding: 18px 0;
-            background: var(--primary);
-            color: #fff;
             border: none;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .main-actions .main-btn {
+            width: 100%;
+            font-size: 1.15rem;
+            padding: 16px 0;
+            color: #fff;
             border-radius: var(--radius);
             box-shadow: 0 2px 8px rgba(0,0,0,0.04);
-            cursor: pointer;
-            transition: background 0.2s;
-        }
-        .main-actions button:hover, .main-actions a > button:hover {
-            background: var(--accent);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
         }
         /* Per-button hover variants: lighter shade for main buttons, darker for tools */
         .btn-lighten:hover { filter: brightness(1.06); transition: filter 0.15s ease; }
@@ -336,8 +338,13 @@
 
         <div class="main-actions" style="margin-bottom:12px;">
             <a href="/items-to-list" style="text-decoration:none; width: 100%;">
-                <button type="button" class="btn-lighten" style="width: 100%; font-size:1.2rem; padding:18px 0; background:var(--primary); color:#fff; border:none; border-radius:var(--radius); box-shadow:0 2px 8px rgba(0,0,0,0.04); display:flex;align-items:center;justify-content:center;gap:8px; margin-bottom:8px;">
+                <button type="button" class="btn-lighten main-btn" style="background:var(--primary);">
                     <i class="fas fa-list"></i> <span data-i18n="list_manager">List Manager</span>
+                </button>
+            </a>
+            <a href="/marketplace-session" style="text-decoration:none; width: 100%;">
+                <button type="button" class="btn-lighten main-btn" style="background:#27ae60;">
+                    <span style="font-size:1.1rem">💵</span> <span data-i18n="marketplace_sale">Marketplace Sale</span>
                 </button>
             </a>
         </div>
@@ -407,13 +414,13 @@
 
         <div class="main-actions" style="margin-top: 18px;">
             <form method="GET" action="/position" style="margin:0; width: 100%;">
-                <button type="submit" class="btn-lighten" style="background:#27ae60; width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                <button type="submit" class="btn-lighten main-btn" style="background:#27ae60;">
                     <i class="fas fa-plus-circle"></i> <span data-i18n="add_item_to_shelf">Add Item to Shelf</span>
                 </button>
             </form>
 
             <a href="/searchrack" style="text-decoration:none; width: 100%;">
-                <button type="button" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                <button type="button" class="main-btn" style="background:var(--primary);">
                     <i class="fas fa-search"></i> <span data-i18n="search_warehouse">Search Warehouse</span>
                 </button>
             </a>
@@ -421,7 +428,7 @@
             <div style="height:1px;background:var(--border);margin:8px 0;border-radius:2px"></div>
 
             <a href="/item-prep" style="text-decoration:none; width: 100%;">
-                <button type="button" class="btn-lighten" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; background: #7B3F00;">
+                <button type="button" class="btn-lighten main-btn" style="background:#7B3F00;">
                     <i class="fas fa-diagnoses"></i> <span data-i18n="preperation">Preperation</span>
                 </button>
             </a>
@@ -429,7 +436,7 @@
 
         <div class="main-actions" style="margin-top: 20px;">
             <a href="/tools" style="text-decoration:none; width: 100%;">
-                <button type="button" class="btn-darken" style="width: 100%; background: #95a5a6; color: #fff; margin: 0;">
+                <button type="button" class="btn-darken main-btn" style="background:#95a5a6;">
                     <i class="fas fa-tools" style="margin-right: 8px;"></i> <span data-i18n="tools">Tools</span>
                 </button>
             </a>

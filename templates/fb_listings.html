@@ -5,19 +5,19 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Facebook Marketplace Listings</title>
   <style>
-    body { font-family: "Segoe UI", Arial, sans-serif; background: #f7f7f8; margin: 0; padding: 18px; color: #333; }
+    body { font-family: "Segoe UI", Arial, sans-serif; background: #f5f7fa; margin: 0; padding: 18px; color: #333; }
     .top { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; margin-bottom: 14px; }
-    .btn { padding: 8px 14px; border-radius: 6px; border: none; cursor: pointer; }
-    .btn-sm { padding: 6px 10px; font-size: 0.85rem; }
+    .btn { padding: 12px 24px; border-radius: 8px; border: none; cursor: pointer; font-size: 1rem; transition: all 0.2s; }
+    .btn-sm { padding: 8px 14px; font-size: 0.85rem; border-radius: 6px; }
     .btn-primary { background: #1877f2; color: #fff; }
     .btn-danger { background: #e74c3c; color: #fff; }
     .filters { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
-    .card { background: #fff; border-radius: 8px; padding: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    .card { background: #fff; border-radius: 12px; padding: 16px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
     .muted { color: #666; font-size: 0.9rem; }
     input[type="text"], input[type="number"] { padding: 6px 8px; border: 1px solid #ddd; border-radius: 6px; }
     table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
-    th, td { padding: 8px; border-bottom: 1px solid #eee; }
-    th { background: #f0f0f0; text-align: left; }
+    th, td { padding: 12px 16px; border-bottom: 1px solid #e0e4e8; }
+    th { background: #f5f7fa; text-align: left; font-weight: 600; color: #2c3e50; }
     .badge { padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; color: #fff; display: inline-block; }
     .badge.active { background: #27ae60; }
     .badge.unlisted { background: #95a5a6; }
@@ -26,6 +26,12 @@
     .row-zero { background: #fdeaea; }
     .wh-zero { color: #e74c3c; font-weight: 700; }
     .wh-link { color: #e74c3c; font-weight: 700; text-decoration: underline; }
+    .modal { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: none; align-items: center; justify-content: center; padding: 16px; z-index: 9999; }
+    .modal .card { background:#fff; padding:18px; border-radius:8px; max-width:90%; max-height:90vh; width:1000px; overflow:auto; }
+    .modal-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
+    .modal-row { display:flex; gap:8px; align-items:center; flex-wrap: wrap; margin-bottom:10px; }
+    .modal-row input { flex:1; min-width: 180px; }
+    .modal-results { max-height: 280px; overflow:auto; }
     @media (max-width: 640px) {
       body { padding: 12px; }
       .top h2 { font-size: 1rem; }
@@ -37,15 +43,81 @@
   <div class="top">
     <a href="/items-to-list" class="btn btn-danger btn-sm" data-i18n="back">Back</a>
     <h2 style="margin:0;text-align:center" data-i18n="fb_listings_title">Facebook Marketplace Listings</h2>
-    <button class="btn btn-primary btn-sm" id="fb-listings-refresh" data-i18n="refresh" style="margin-right:96px">Refresh</button>
+    <div style="display:flex;gap:6px;justify-content:flex-end;margin-right:96px">
+      <button class="btn btn-primary btn-sm" id="fb-listings-sync" title="Sync Sold">↻</button>
+      <button class="btn btn-primary btn-sm" id="fb-listings-log-open" data-i18n="fb_listings_log_open">📋 Open Log</button>
+    </div>
   </div>
 
   <div class="filters">
     <input id="fb-listings-search" type="text" data-i18n="fb_listings_search_placeholder" placeholder="Search UPC or Title" style="flex:1;min-width:200px">
+    <button class="btn btn-sm" id="fb-listings-add-open" data-i18n="fb_listings_add_item" style="background:#27ae60;color:#fff">+ Add Item</button>
+    <span id="fb-listings-add-msg" class="muted" style="min-width:200px"></span>
   </div>
 
   <div id="fb-listings-content" class="card">
     <div class="muted" data-i18n="loading">Loading...</div>
+  </div>
+
+  <div id="fb-add-modal" class="modal" aria-hidden="true">
+    <div class="card">
+      <div class="modal-header">
+        <strong data-i18n="fb_listings_add_item">+ Add Item</strong>
+        <button class="btn btn-sm" id="fb-add-close" data-i18n="close">Close</button>
+      </div>
+      <div class="modal-row">
+        <input id="fb-add-scan" type="text" data-i18n="fb_listings_scan_barcode" placeholder="Scan barcode">
+        <button class="btn btn-sm" id="fb-add-scan-btn" data-i18n="fb_listings_add">Add Listing</button>
+      </div>
+      <div class="modal-row">
+        <input id="fb-add-name" type="text" data-i18n="fb_listings_search_name" placeholder="Search by name">
+        <button class="btn btn-sm" id="fb-add-name-btn" data-i18n="fb_listings_search">Search</button>
+      </div>
+      <div id="fb-add-results" class="modal-results"></div>
+    </div>
+  </div>
+
+  <div id="notesModal" class="modal" aria-hidden="true">
+    <div class="card" style="max-width:600px; width:95%;">
+      <div class="modal-header">
+        <h3 style="margin:0">📝 Notes</h3>
+        <button class="btn btn-sm" id="closeNotes" data-i18n="close">Close</button>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
+        <input id="fb-note-input" type="text" placeholder="Add a note..." style="flex:1;padding:8px;border:1px solid #ddd;border-radius:6px">
+        <button class="btn btn-sm" id="fb-note-add-btn" data-i18n="add">Add</button>
+      </div>
+      <div id="notesModalContent" style="max-height:400px;overflow-y:auto"></div>
+    </div>
+  </div>
+
+  <div id="fb-log-modal" class="modal" aria-hidden="true">
+    <div class="card">
+      <div class="modal-header">
+        <h3 style="margin:0" data-i18n="fb_listings_log_title">Changes Log</h3>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-sm" id="fb-log-refresh" data-i18n="refresh">Refresh</button>
+          <button class="btn btn-sm" id="fb-log-close" data-i18n="close">Close</button>
+        </div>
+      </div>
+      <div class="modal-row" style="margin-bottom:12px;flex-wrap:wrap;">
+        <input type="text" id="fb-log-search" data-i18n="fb_listings_log_search_placeholder" placeholder="Search by UPC, title, note..." style="flex:1;min-width:200px;">
+        <select id="fb-log-sort" style="padding:8px;border-radius:6px;border:1px solid #ddd;">
+          <option value="desc" data-i18n="fb_listings_log_sort_newest">Date (newest first)</option>
+          <option value="asc" data-i18n="fb_listings_log_sort_oldest">Date (oldest first)</option>
+        </select>
+        <select id="fb-log-action" style="padding:8px;border-radius:6px;border:1px solid #ddd;">
+          <option value="" data-i18n="fb_listings_log_action_all">All Actions</option>
+          <option value="auto_sold">Auto sold sync</option>
+          <option value="auto_sold_missing">Auto sold (not listed)</option>
+          <option value="manual_add">Manual add</option>
+          <option value="manual_qty_change">Manual qty change</option>
+          <option value="manual_unlist">Manual unlist</option>
+        </select>
+        <button class="btn btn-primary" id="fb-log-search-btn" data-i18n="search">Search</button>
+      </div>
+      <div id="fb-log-content" style="overflow:auto;max-height:calc(90vh - 220px);"></div>
+    </div>
   </div>
 
 <script>
@@ -53,6 +125,9 @@ function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;')
 const missingImg = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><rect width="100%" height="100%" fill="#f0f0f0"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#bbb" font-size="8">No img</text></svg>');
 
 let fbListingsData = [];
+let fbAddTimeout = null;
+let fbLogTimeout = null;
+let fbLogData = [];
 
 function filterFbListings() {
   const input = document.getElementById('fb-listings-search');
@@ -90,7 +165,7 @@ function renderFbListings(listings) {
   const warehouseLabel = t('fb_listings_warehouse_stock') || 'Warehouse Stock';
   let html = `<div class="muted" style="margin-bottom:10px">${showingText}</div>`;
   html += '<table>';
-  html += `<thead><tr><th>Image</th><th>UPC</th><th>Title</th><th style="text-align:center">Qty</th><th style="text-align:center">${esc(warehouseLabel)}</th><th>Listed</th><th style="text-align:center">Status</th><th style="text-align:center">Actions</th></tr></thead>`;
+  html += `<thead><tr><th>Image</th><th style="text-align:center">Notes</th><th>UPC</th><th>Title</th><th style="text-align:center">Qty</th><th style="text-align:center">${esc(warehouseLabel)}</th><th>Listed</th><th style="text-align:center">Status</th><th style="text-align:center">Actions</th></tr></thead>`;
   html += '<tbody>';
 
   for (const item of listings) {
@@ -101,6 +176,7 @@ function renderFbListings(listings) {
     const qtyVal = (item.quantity || 1);
     const warehouseQty = (item.warehouse_qty ?? 0);
     const isZero = Number(warehouseQty) === 0;
+    const hasNotes = !!item.has_notes;
     const finderParams = new URLSearchParams({
       title: item.title || '',
       barcode: item.upc || '',
@@ -114,6 +190,7 @@ function renderFbListings(listings) {
 
     html += `<tr class="${isZero ? 'row-zero' : ''}">
       <td><img src="${esc(imgSrc)}" class="img-thumb" onerror="this.src='${missingImg}'"></td>
+      <td style="text-align:center">${hasNotes ? `<span class="note-icon" data-upc="${esc(item.upc || '')}" style="cursor:pointer;font-size:1.2rem" title="Click to view notes">📝</span>` : `<span class="note-add" data-upc="${esc(item.upc || '')}" style="cursor:pointer;font-weight:700;font-size:1.1rem;color:#00b894;background:#e8fff7;border:1px solid #00b894;border-radius:6px;padding:2px 6px;display:inline-flex;align-items:center;gap:4px" title="Add note">📝</span>`}</td>
       <td style="font-family:monospace">${esc(item.upc || '')}</td>
       <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(item.title || '')}">${esc(item.title || '-')}</td>
       <td style="text-align:center">
@@ -138,6 +215,8 @@ function renderFbListings(listings) {
 
   content.querySelectorAll('.fb-qty-save').forEach(btn => btn.addEventListener('click', onFbQtySave));
   content.querySelectorAll('.fb-unlist').forEach(btn => btn.addEventListener('click', onFbUnlist));
+  content.querySelectorAll('.note-icon').forEach(el => el.addEventListener('click', onOpenNotes));
+  content.querySelectorAll('.note-add').forEach(el => el.addEventListener('click', onOpenNotes));
   content.querySelectorAll('.fb-qty-input').forEach(input => {
     input.addEventListener('input', onFbQtyInputChange);
     input.addEventListener('keydown', (e) => {
@@ -170,6 +249,383 @@ async function loadFbListings() {
   } catch (e) {
     content.innerHTML = `<div style="color:#e74c3c;padding:10px">Error loading: ${e.message}</div>`;
   }
+}
+
+function renderFbLog(logs) {
+  const container = document.getElementById('fb-log-content');
+  if (!container) return;
+  const t = (window.i18n && window.i18n.t) ? window.i18n.t : (key => key);
+  if (!logs || logs.length === 0) {
+    container.innerHTML = `<div class="muted">${esc(t('fb_listings_log_empty'))}</div>`;
+    return;
+  }
+  let html = '<table>';
+  html += `<thead><tr>
+    <th>${esc(t('fb_listings_log_date'))}</th>
+    <th>${esc(t('fb_listings_log_action'))}</th>
+    <th>UPC</th>
+    <th>${esc(t('fb_listings_log_qty'))}</th>
+    <th>${esc(t('fb_listings_log_note'))}</th>
+    <th style="text-align:center">${esc(t('actions'))}</th>
+  </tr></thead><tbody>`;
+  for (const row of logs) {
+    const actionKey = `fb_log_${row.action}`;
+    const actionLabel = t(actionKey) || row.action;
+    const qtyText = (row.prev_qty != null || row.new_qty != null)
+      ? `${row.prev_qty ?? '-'} → ${row.new_qty ?? '-'} (${row.delta_qty ?? 0})`
+      : (row.delta_qty != null ? String(row.delta_qty) : '-');
+    const note = row.note || '';
+    const undoDisabled = row.undone ? 'disabled' : '';
+    const undoLabel = row.undone ? t('fb_listings_log_undone') : t('undo');
+    html += `<tr>
+      <td>${esc(row.created_at || '')}</td>
+      <td>${esc(actionLabel)}</td>
+      <td style="font-family:monospace">${esc(row.upc || '')}</td>
+      <td>${esc(qtyText)}</td>
+      <td>${esc(note)}</td>
+      <td style="text-align:center">
+        <button class="btn btn-sm fb-log-undo" data-id="${row.id}" ${undoDisabled}>${esc(undoLabel)}</button>
+      </td>
+    </tr>`;
+  }
+  html += '</tbody></table>';
+  container.innerHTML = html;
+  container.querySelectorAll('.fb-log-undo').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const id = e.currentTarget.dataset.id;
+      if (!id) return;
+      e.currentTarget.disabled = true;
+      try {
+        const resp = await fetch('/api/fb/listings/log/undo', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id })
+        });
+        const data = await resp.json();
+        if (!data.success) {
+          setFbAddMessage(data.error || t('fb_listings_log_undo_error'), true);
+          e.currentTarget.disabled = false;
+          return;
+        }
+        await loadFbListings();
+        await loadFbLog();
+      } catch (err) {
+        setFbAddMessage(err.message || t('fb_listings_log_undo_error'), true);
+        e.currentTarget.disabled = false;
+      }
+    });
+  });
+}
+
+function applyFbLogFilters() {
+  const search = (document.getElementById('fb-log-search')?.value || '').trim().toLowerCase();
+  const sort = (document.getElementById('fb-log-sort')?.value || 'desc');
+  const action = (document.getElementById('fb-log-action')?.value || '');
+  let rows = Array.isArray(fbLogData) ? fbLogData.slice() : [];
+  if (action) rows = rows.filter(r => (r.action || '') === action);
+  if (search) {
+    rows = rows.filter(r => {
+      const hay = [
+        r.upc, r.title, r.note, r.order_id, r.item_id, r.store, r.action
+      ].map(v => String(v || '').toLowerCase()).join(' ');
+      return hay.includes(search);
+    });
+  }
+  rows.sort((a,b) => {
+    const ad = (a.created_at || '');
+    const bd = (b.created_at || '');
+    if (sort === 'asc') return ad.localeCompare(bd);
+    return bd.localeCompare(ad);
+  });
+  renderFbLog(rows);
+}
+
+async function loadFbLog() {
+  const container = document.getElementById('fb-log-content');
+  if (!container) return;
+  const t = (window.i18n && window.i18n.t) ? window.i18n.t : (key => key);
+  container.innerHTML = `<div class="muted">${esc(t('loading'))}</div>`;
+  try {
+    const resp = await fetch('/api/fb/listings/log?limit=200');
+    const data = await resp.json();
+    if (!data.success) {
+      container.innerHTML = `<div class="muted">${esc(data.error || t('fb_listings_log_error'))}</div>`;
+      return;
+    }
+    fbLogData = Array.isArray(data.logs) ? data.logs : [];
+    applyFbLogFilters();
+  } catch (e) {
+    container.innerHTML = `<div class="muted">${esc(e.message || t('fb_listings_log_error'))}</div>`;
+  }
+}
+
+async function onFbSyncSold() {
+  const btn = document.getElementById('fb-listings-sync');
+  if (!btn) return;
+  const t = (window.i18n && window.i18n.t) ? window.i18n.t : (key => key);
+  btn.disabled = true;
+  setFbAddMessage(t('loading'), false);
+  try {
+    const resp = await fetch('/api/fb/listings/sync_sold', { method: 'POST' });
+    const data = await resp.json();
+    if (!data.success) {
+      setFbAddMessage(data.error || t('fb_listings_sync_error'), true);
+    } else {
+      const msg = t('fb_listings_sync_done')
+        .replace('{updated}', data.updated ?? 0)
+        .replace('{skipped}', data.skipped ?? 0);
+      setFbAddMessage(msg, false);
+      await loadFbListings();
+      await loadFbLog();
+    }
+  } catch (e) {
+    setFbAddMessage(e.message || t('fb_listings_sync_error'), true);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function setFbAddMessage(text, isError) {
+  const msg = document.getElementById('fb-listings-add-msg');
+  if (!msg) return;
+  msg.textContent = text || '';
+  msg.style.color = isError ? '#e74c3c' : '#2c3e50';
+  if (fbAddTimeout) clearTimeout(fbAddTimeout);
+  if (text) {
+    fbAddTimeout = setTimeout(() => {
+      msg.textContent = '';
+    }, 3500);
+  }
+}
+
+let fbNotesUpc = '';
+async function onOpenNotes(e){
+  e.preventDefault();
+  const upc = e.currentTarget.dataset.upc;
+  if(!upc) return;
+  fbNotesUpc = upc;
+  const modal = document.getElementById('notesModal');
+  const content = document.getElementById('notesModalContent');
+  content.innerHTML = '<div class="small-muted">Loading...</div>';
+  modal.style.display = 'flex';
+  modal.setAttribute('aria-hidden', 'false');
+  try{
+    const res = await fetch('/api/fb/listings/notes/'+encodeURIComponent(upc));
+    if(!res.ok){
+      content.innerHTML = '<div class="small-muted">Failed to load notes</div>';
+      return;
+    }
+    const j = await res.json();
+    const notes = j.notes || [];
+    if(notes.length === 0){
+      content.innerHTML = '<div class="small-muted">No notes found.</div>';
+    } else {
+      content.innerHTML = notes.map(n=>{
+        const ts = n.updated_at || n.created_at;
+        const date = ts ? new Date(ts).toLocaleString('en-US', {timeZone:'America/New_York', year:'numeric', month:'2-digit', day:'2-digit', hour:'numeric', minute:'2-digit', hour12:true}) : '';
+        return `<div style="padding:10px;margin-bottom:8px;background:#f9f9f9;border-radius:6px;border-left:3px solid #00b894">
+          <div style="font-size:0.9rem;color:#666;margin-bottom:4px">${date}</div>
+          <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">
+            <div style="flex:1">${esc(n.note)}</div>
+            <div style="display:flex;gap:6px">
+              <button class="btn btn-sm fb-note-edit" data-id="${n.id}" data-note="${esc(n.note)}">Edit</button>
+              <button class="btn btn-sm fb-note-delete" data-id="${n.id}" style="background:#e74c3c;color:#fff">Delete</button>
+            </div>
+          </div>
+        </div>`;
+      }).join('');
+      content.querySelectorAll('.fb-note-edit').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const id = btn.dataset.id;
+          const current = btn.dataset.note || '';
+          const newNote = prompt('Edit note:', current);
+          if (newNote === null) return;
+          const note = newNote.trim();
+          if (!note) return;
+          const resp = await fetch('/api/fb/listings/notes/' + id, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ note })
+          });
+          const data = await resp.json();
+          if (data.success) {
+            onOpenNotes({ preventDefault(){}, currentTarget: { dataset: { upc: fbNotesUpc } } });
+          }
+        });
+      });
+      content.querySelectorAll('.fb-note-delete').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const id = btn.dataset.id;
+          if (!confirm('Delete this note?')) return;
+          const resp = await fetch('/api/fb/listings/notes/' + id, { method: 'DELETE' });
+          const data = await resp.json();
+          if (data.success) {
+            onOpenNotes({ preventDefault(){}, currentTarget: { dataset: { upc: fbNotesUpc } } });
+          }
+        });
+      });
+    }
+  }catch(err){
+    console.error('Error loading notes:', err);
+    content.innerHTML = '<div class="small-muted">Error loading notes</div>';
+  }
+}
+
+async function onFbAddListing(forcedUpc) {
+  const t = (window.i18n && window.i18n.t) ? window.i18n.t : (key => key);
+  const upc = (forcedUpc || '').trim();
+  if (!upc) {
+    setFbAddMessage(t('fb_listings_add_placeholder'), true);
+    return;
+  }
+  setFbAddMessage(t('loading'), false);
+  try {
+    const resp = await fetch('/api/fb/listings/add', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ upc })
+    });
+    const data = await resp.json();
+    if (!data.success) {
+      setFbAddMessage(data.error || t('fb_listings_add_error'), true);
+    } else {
+      setFbAddMessage(t('fb_listings_add_success'), false);
+      await loadFbListings();
+      await loadFbLog();
+    }
+  } catch (e) {
+    setFbAddMessage(e.message || t('fb_listings_add_error'), true);
+  }
+}
+
+function renderFbAddSearchResults(results) {
+  const container = document.getElementById('fb-add-results');
+  if (!container) return;
+  const t = (window.i18n && window.i18n.t) ? window.i18n.t : (key => key);
+  if (!results || results.length === 0) {
+    container.innerHTML = `<div class="muted">${esc(t('fb_listings_search_empty'))}</div>`;
+    return;
+  }
+  let html = '<table>';
+  html += `<thead><tr><th>Image</th><th>UPC</th><th>Title</th><th style="text-align:center">${esc(t('actions'))}</th></tr></thead>`;
+  html += '<tbody>';
+  for (const r of results) {
+    const img = r.image_url || '';
+    const thumb = img ? esc(img) : 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><rect width="100%" height="100%" fill="#f0f0f0"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#bbb" font-size="8">No img</text></svg>');
+    html += `<tr>
+      <td><img src="${thumb}" class="img-thumb" onerror="this.src='${thumb}'"></td>
+      <td style="font-family:monospace">${esc(r.upc || '')}</td>
+      <td>${esc(r.item_description || '')}</td>
+      <td style="text-align:center">
+        <button class="btn btn-sm fb-add-from-search" data-upc="${esc(r.upc || '')}" style="background:#27ae60;color:#fff">+</button>
+      </td>
+    </tr>`;
+  }
+  html += '</tbody></table>';
+  container.innerHTML = html;
+  container.querySelectorAll('.fb-add-from-search').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const upc = e.currentTarget.dataset.upc || '';
+      if (upc) onFbAddListing(upc);
+    });
+  });
+}
+
+async function onFbSearchByName() {
+  const input = document.getElementById('fb-add-name');
+  const btn = document.getElementById('fb-add-name-btn');
+  if (!input || !btn) return;
+  const t = (window.i18n && window.i18n.t) ? window.i18n.t : (key => key);
+  const q = (input.value || '').trim();
+  if (!q) {
+    setFbAddMessage(t('fb_listings_search_name'), true);
+    return;
+  }
+  btn.disabled = true;
+  setFbAddMessage(t('loading'), false);
+  try {
+    const resp = await fetch(`/api/fb/listings/search_rawbol?q=${encodeURIComponent(q)}`);
+    const data = await resp.json();
+    if (!data.success) {
+      setFbAddMessage(data.error || t('fb_listings_search_error'), true);
+    } else {
+      setFbAddMessage('', false);
+      renderFbAddSearchResults(data.results || []);
+    }
+  } catch (e) {
+    setFbAddMessage(e.message || t('fb_listings_search_error'), true);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function openFbAddModal() {
+  const modal = document.getElementById('fb-add-modal');
+  if (!modal) return;
+  modal.style.display = 'flex';
+  modal.setAttribute('aria-hidden', 'false');
+  const scan = document.getElementById('fb-add-scan');
+  if (scan) scan.focus();
+}
+
+function closeFbAddModal() {
+  const modal = document.getElementById('fb-add-modal');
+  if (!modal) return;
+  modal.style.display = 'none';
+  modal.setAttribute('aria-hidden', 'true');
+}
+
+const fbAddOpen = document.getElementById('fb-listings-add-open');
+if (fbAddOpen) fbAddOpen.addEventListener('click', openFbAddModal);
+const fbAddClose = document.getElementById('fb-add-close');
+if (fbAddClose) fbAddClose.addEventListener('click', closeFbAddModal);
+const fbAddModal = document.getElementById('fb-add-modal');
+if (fbAddModal) {
+  fbAddModal.addEventListener('click', (e) => {
+    if (e.target === fbAddModal) closeFbAddModal();
+  });
+}
+const fbAddScanBtn = document.getElementById('fb-add-scan-btn');
+if (fbAddScanBtn) {
+  fbAddScanBtn.addEventListener('click', () => {
+    const v = (document.getElementById('fb-add-scan')?.value || '').trim();
+    if (v) onFbAddListing(v);
+  });
+}
+const fbAddScanInput = document.getElementById('fb-add-scan');
+if (fbAddScanInput) {
+  fbAddScanInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      const v = (e.currentTarget.value || '').trim();
+      if (v) onFbAddListing(v);
+    }
+  });
+}
+const fbAddNameBtn = document.getElementById('fb-add-name-btn');
+if (fbAddNameBtn) {
+  fbAddNameBtn.addEventListener('click', onFbSearchByName);
+}
+const fbAddNameInput = document.getElementById('fb-add-name');
+if (fbAddNameInput) {
+  fbAddNameInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') onFbSearchByName();
+  });
+}
+
+// Re-render dynamic table text (like column headers) when language changes.
+if (window.i18n && window.i18n.setLang && !window._fbListingsLangHooked) {
+  window._fbListingsLangHooked = true;
+  const originalSetLang = window.i18n.setLang;
+  window.i18n.setLang = function(lang) {
+    const result = originalSetLang(lang);
+    if (Array.isArray(fbListingsData) && fbListingsData.length) {
+      renderFbListings(filterFbListings());
+    }
+    if (Array.isArray(fbLogData)) {
+      applyFbLogFilters();
+    }
+    return result;
+  };
 }
 
 function onFbQtyInputChange(e) {
@@ -212,6 +668,7 @@ async function onFbQtySave(e) {
         input.dataset.original = String(qty);
       }
       btn.style.display = 'none';
+      loadFbLog();
     }
   } catch (err) {
     alert('Error: ' + err.message);
@@ -241,6 +698,7 @@ async function onFbUnlist(e) {
       alert('Error: ' + (result.error || 'Unknown'));
     } else {
       loadFbListings();
+      loadFbLog();
     }
   } catch (err) {
     alert('Error: ' + err.message);
@@ -256,15 +714,133 @@ if (fbSearchInput) {
     renderFbListings(filterFbListings());
   });
 }
-const fbRefreshBtn = document.getElementById('fb-listings-refresh');
-if (fbRefreshBtn) {
-  fbRefreshBtn.addEventListener('click', (e) => {
+const fbSyncBtn = document.getElementById('fb-listings-sync');
+if (fbSyncBtn) {
+  fbSyncBtn.addEventListener('click', (e) => {
     e.preventDefault();
-    loadFbListings();
+    onFbSyncSold();
+  });
+}
+const fbLogOpenBtn = document.getElementById('fb-listings-log-open');
+if (fbLogOpenBtn) {
+  fbLogOpenBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    const modal = document.getElementById('fb-log-modal');
+    if (modal) {
+      modal.style.display = 'flex';
+      modal.setAttribute('aria-hidden', 'false');
+      loadFbLog();
+    }
+  });
+}
+const fbLogCloseBtn = document.getElementById('fb-log-close');
+if (fbLogCloseBtn) {
+  fbLogCloseBtn.addEventListener('click', () => {
+    const modal = document.getElementById('fb-log-modal');
+    if (modal) {
+      modal.style.display = 'none';
+      modal.setAttribute('aria-hidden', 'true');
+    }
+  });
+}
+const fbLogModal = document.getElementById('fb-log-modal');
+if (fbLogModal) {
+  fbLogModal.addEventListener('click', (e) => {
+    if (e.target === fbLogModal) {
+      fbLogModal.style.display = 'none';
+      fbLogModal.setAttribute('aria-hidden', 'true');
+    }
+  });
+}
+const closeNotesBtn = document.getElementById('closeNotes');
+if (closeNotesBtn) {
+  closeNotesBtn.addEventListener('click', () => {
+    const modal = document.getElementById('notesModal');
+    if (modal) {
+      modal.style.display = 'none';
+      modal.setAttribute('aria-hidden', 'true');
+    }
+  });
+}
+const notesModal = document.getElementById('notesModal');
+if (notesModal) {
+  notesModal.addEventListener('click', (e) => {
+    if (e.target === notesModal) {
+      notesModal.style.display = 'none';
+      notesModal.setAttribute('aria-hidden', 'true');
+    }
   });
 }
 
+const fbNoteAddBtn = document.getElementById('fb-note-add-btn');
+if (fbNoteAddBtn) {
+  fbNoteAddBtn.addEventListener('click', async () => {
+    const input = document.getElementById('fb-note-input');
+    const note = (input.value || '').trim();
+    if (!note || !fbNotesUpc) return;
+    const resp = await fetch('/api/fb/listings/notes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ upc: fbNotesUpc, note })
+    });
+    const data = await resp.json();
+    if (data.success) {
+      input.value = '';
+      onOpenNotes({ preventDefault(){}, currentTarget: { dataset: { upc: fbNotesUpc } } });
+      loadFbListings();
+    }
+  });
+}
+
+const fbNoteInput = document.getElementById('fb-note-input');
+if (fbNoteInput) {
+  fbNoteInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      fbNoteAddBtn && fbNoteAddBtn.click();
+    }
+    if (e.key === ' ') {
+      // Commit on space if there's text
+      if ((fbNoteInput.value || '').trim().length > 0) {
+        e.preventDefault();
+        fbNoteAddBtn && fbNoteAddBtn.click();
+      }
+    }
+  });
+}
+const fbLogRefreshBtn = document.getElementById('fb-log-refresh');
+if (fbLogRefreshBtn) {
+  fbLogRefreshBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    loadFbLog();
+  });
+}
+const fbLogSearchBtn = document.getElementById('fb-log-search-btn');
+if (fbLogSearchBtn) {
+  fbLogSearchBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    applyFbLogFilters();
+  });
+}
+const fbLogSearchInput = document.getElementById('fb-log-search');
+if (fbLogSearchInput) {
+  fbLogSearchInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      applyFbLogFilters();
+    }
+  });
+}
+const fbLogSort = document.getElementById('fb-log-sort');
+if (fbLogSort) fbLogSort.addEventListener('change', applyFbLogFilters);
+const fbLogAction = document.getElementById('fb-log-action');
+if (fbLogAction) fbLogAction.addEventListener('change', applyFbLogFilters);
+
 loadFbListings();
+if (!window._fbAutoSyncRan) {
+  window._fbAutoSyncRan = true;
+  onFbSyncSold();
+}
 </script>
 <script src="/static/i18n.js"></script>
 </body>

@@ -16,13 +16,20 @@ def ensure_marketplace_db():
         quantity INTEGER DEFAULT 1,
         price REAL,
         sale_date TEXT,
-        created_at TEXT
+        created_at TEXT,
+        session_id TEXT
     )''')
+
+    # Migration: add session_id if missing
+    try:
+        cur.execute("SELECT session_id FROM marketplace_sales LIMIT 1")
+    except sqlite3.OperationalError:
+        cur.execute("ALTER TABLE marketplace_sales ADD COLUMN session_id TEXT")
     
     conn.commit()
     conn.close()
 
-def add_marketplace_sale(barcode, title, quantity, price):
+def add_marketplace_sale(barcode, title, quantity, price, session_id=None):
     """Add a marketplace sale entry."""
     try:
         ensure_marketplace_db()
@@ -33,9 +40,9 @@ def add_marketplace_sale(barcode, title, quantity, price):
         created_at = datetime.datetime.utcnow().isoformat()
         
         cur.execute('''INSERT INTO marketplace_sales 
-            (barcode, title, quantity, price, sale_date, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)''',
-            (barcode, title, quantity, price, sale_date, created_at))
+            (barcode, title, quantity, price, sale_date, created_at, session_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?)''',
+            (barcode, title, quantity, price, sale_date, created_at, session_id))
         
         sale_id = cur.lastrowid
         conn.commit()
