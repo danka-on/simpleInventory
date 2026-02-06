@@ -8,6 +8,7 @@ from flask_compress import Compress
 from werkzeug.exceptions import RequestEntityTooLarge
 from PIL import Image, ImageDraw
 import io, time, subprocess, os, requests, json, threading, sqlite3, sys, datetime, base64
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import pytz
 import xml.etree.ElementTree as ET
 from dotenv import load_dotenv
@@ -74,7 +75,7 @@ def db_connection(db_name, row_factory=True):
 # Enable WAL mode for SQLite databases for better concurrent performance
 def enable_wal_mode():
     """Enable Write-Ahead Logging for all SQLite databases"""
-    databases = ['sold.db', 'bol.db', 'searchRack.db', 'ebayStore.db', 'amazonStore.db', 'rawbol.db', 'rackhistory.db', 'deleted.db', 'listing_alerts.db', 'fbstore.db', 'listagent.db', 'listinglog.db', 'preplog.db']
+    databases = ['sold.db', 'bol.db', 'searchRack.db', 'ebayStore.db', 'amazonStore.db', 'rawbol.db', 'rackhistory.db', 'deleted.db', 'listing_alerts.db', 'fbstore.db', 'listagent.db', 'listinglog.db', 'preplog.db', 'pricemaster.db']
     for db_name in databases:
         try:
             db_path = BASE_DIR / db_name
@@ -495,6 +496,44 @@ def add_no_cache_headers(response):
     try:
         # Only apply no-cache to HTML and JSON responses, not static files
         content_type = response.content_type or ''
+
+        # Ensure our shared client-side helpers (i18n + top banner + theme) are present
+        # on every HTML page, even legacy templates that don't include the script tag yet.
+        if 'text/html' in content_type:
+            try:
+                if (not getattr(response, 'direct_passthrough', False)) and (not getattr(response, 'is_streamed', False)):
+                    html = response.get_data(as_text=True)
+                    if html:
+                        v = int(getattr(app, 'start_time', 0) or 0)
+                        # Prefer a stable-per-restart cache buster so clients actually pick up updates.
+                        # Many legacy templates hardcode an old ?v=... value; always rewrite to the current
+                        # app.start_time so banner/theme changes propagate everywhere.
+                        try:
+                            import re
+                            qpat = r'src=(["\'])/static/i18n\.js(?:\?[^"\']*)?\1'
+                            if v:
+                                def _repl(m):
+                                    q = m.group(1)
+                                    return f'src={q}/static/i18n.js?v={v}{q}'
+                                html = re.sub(qpat, _repl, html)
+                            else:
+                                html = re.sub(qpat, r'src=\1/static/i18n.js\1', html)
+                        except Exception:
+                            pass
+
+                        if 'i18n.js' not in html:
+                            inject = f'\n<script src="/static/i18n.js?v={v}"></script>\n' if v else '\n<script src="/static/i18n.js"></script>\n'
+                            if '</body>' in html:
+                                html = html.replace('</body>', inject + '</body>', 1)
+                            elif '</html>' in html:
+                                html = html.replace('</html>', inject + '</html>', 1)
+                            else:
+                                html = html + inject
+
+                        response.set_data(html)
+            except Exception:
+                pass
+
         if 'text/html' in content_type or 'application/json' in content_type:
             response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
             response.headers['Pragma'] = 'no-cache'
@@ -8241,6 +8280,11 @@ def api_items_prep_reset():
 def items_to_list_page():
     return render_template('items_to_list.html')
 
+@app.route('/price-master')
+def price_master_page():
+    """Bulk re-pricing dashboard for eBay + Amazon store listings."""
+    return render_template('price_master.html')
+
 @app.route('/fb-listings')
 def fb_listings_page():
     return render_template('fb_listings.html')
@@ -8248,6 +8292,671 @@ def fb_listings_page():
 @app.route('/store-listing-helper')
 def store_listing_helper_page():
     return render_template('store_listing_helper.html')
+
+# -----------------------------
+# Price Master (Bulk Repricing)
+# -----------------------------
+
+def _pricemaster_now_iso():
+    # UTC, second precision keeps it readable and stable for sorting.
+    return datetime.datetime.utcnow().replace(microsecond=0).isoformat() + 'Z'
+
+def _pricemaster_parse_decimal(val):
+    try:
+        if val is None:
+            return None
+        if isinstance(val, Decimal):
+            return val
+        if isinstance(val, (int, float)) and not isinstance(val, bool):
+            return Decimal(str(val))
+        s = str(val).strip()
+        if s == '':
+            return None
+        s = s.replace('$', '').replace(',', '')
+        return Decimal(s)
+    except (InvalidOperation, Exception):
+        return None
+
+def _pricemaster_money_2dp(val: Decimal):
+    try:
+        if val is None:
+            return None
+        return val.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    except Exception:
+        return None
+
+def _pricemaster_compute_new_price(old_price: Decimal, mode: str, value: Decimal):
+    if old_price is None or value is None:
+        return None
+    mode = (mode or '').strip().lower()
+    if mode not in ('delta', 'percent'):
+        mode = 'delta'
+
+    try:
+        if mode == 'delta':
+            nxt = old_price + value
+        else:
+            nxt = old_price * (Decimal('1') + (value / Decimal('100')))
+        if nxt < 0:
+            nxt = Decimal('0')
+        return _pricemaster_money_2dp(nxt)
+    except Exception:
+        return None
+
+def _pricemaster_init_tables(cur):
+    try:
+        cur.execute('PRAGMA journal_mode=WAL')
+    except Exception:
+        pass
+
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS listing_meta (
+            platform TEXT NOT NULL,
+            listing_key TEXT NOT NULL,
+            first_seen_at TEXT,
+            last_price_change_at TEXT,
+            last_price_change_price REAL,
+            updated_at TEXT,
+            PRIMARY KEY (platform, listing_key)
+        )
+    ''')
+
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS price_changes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            platform TEXT NOT NULL,
+            listing_key TEXT NOT NULL,
+            old_price REAL,
+            new_price REAL,
+            changed_at TEXT NOT NULL,
+            adjustment_mode TEXT,
+            adjustment_value REAL,
+            success INTEGER NOT NULL DEFAULT 1,
+            error TEXT
+        )
+    ''')
+
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_price_changes_key_time ON price_changes(platform, listing_key, changed_at)')
+
+def _pricemaster_touch_meta(rows):
+    """Insert first_seen_at for listings if missing (platform, key, first_seen_at)."""
+    if not rows:
+        return
+    now = _pricemaster_now_iso()
+    with db_connection('pricemaster.db') as conn:
+        cur = conn.cursor()
+        _pricemaster_init_tables(cur)
+        cur.executemany('''
+            INSERT OR IGNORE INTO listing_meta (platform, listing_key, first_seen_at, updated_at)
+            VALUES (?, ?, ?, ?)
+        ''', [(p, k, fs or now, now) for (p, k, fs) in rows if p and k])
+
+def _pricemaster_get_meta_map(platform: str, keys: list):
+    """Return dict: listing_key -> meta row."""
+    out = {}
+    platform = (platform or '').strip().lower()
+    keys = [k for k in (keys or []) if k]
+    if not platform or not keys:
+        return out
+
+    # SQLite default max vars is commonly 999; batch to be safe.
+    CHUNK = 900
+    with db_connection('pricemaster.db') as conn:
+        cur = conn.cursor()
+        _pricemaster_init_tables(cur)
+        for i in range(0, len(keys), CHUNK):
+            batch = keys[i:i+CHUNK]
+            ph = ','.join(['?'] * len(batch))
+            cur.execute(f'''
+                SELECT listing_key, first_seen_at, last_price_change_at, last_price_change_price
+                FROM listing_meta
+                WHERE platform = ? AND listing_key IN ({ph})
+            ''', [platform] + batch)
+            for r in cur.fetchall():
+                out[r['listing_key']] = {
+                    'first_seen_at': r['first_seen_at'],
+                    'last_price_change_at': r['last_price_change_at'],
+                    'last_price_change_price': r['last_price_change_price'],
+                }
+    return out
+
+def _pricemaster_record_change(*, platform, listing_key, old_price, new_price, mode, value, success, error=None):
+    now = _pricemaster_now_iso()
+    with db_connection('pricemaster.db') as conn:
+        cur = conn.cursor()
+        _pricemaster_init_tables(cur)
+        cur.execute('''
+            INSERT INTO price_changes (platform, listing_key, old_price, new_price, changed_at, adjustment_mode, adjustment_value, success, error)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            platform, listing_key,
+            None if old_price is None else float(old_price),
+            None if new_price is None else float(new_price),
+            now,
+            mode,
+            None if value is None else float(value),
+            1 if success else 0,
+            (str(error) if error else None)
+        ))
+
+        if success:
+            cur.execute('''
+                INSERT INTO listing_meta (platform, listing_key, last_price_change_at, last_price_change_price, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(platform, listing_key) DO UPDATE SET
+                    last_price_change_at = excluded.last_price_change_at,
+                    last_price_change_price = excluded.last_price_change_price,
+                    updated_at = excluded.updated_at
+            ''', (
+                platform, listing_key, now,
+                None if new_price is None else float(new_price),
+                now
+            ))
+
+def _pricemaster_ebay_trading_call(call_name: str, xml_payload: str, timeout=30):
+    token = os.getenv("EBAY_OLDAUTH_TOKEN") or ''
+    if not token.strip():
+        raise Exception("Missing EBAY_OLDAUTH_TOKEN (Trading API token)")
+
+    headers = {
+        "X-EBAY-API-SITEID": "0",
+        "X-EBAY-API-COMPATIBILITY-LEVEL": "967",
+        "X-EBAY-API-CALL-NAME": call_name,
+        "X-EBAY-API-DEV-NAME": os.getenv("EBAY_PROD_DEV_ID"),
+        "X-EBAY-API-APP-NAME": os.getenv("EBAY_PROD_APP_ID"),
+        "X-EBAY-API-CERT-NAME": os.getenv("EBAY_PROD_CERT_ID"),
+        "Content-Type": "text/xml",
+    }
+    resp = requests.post("https://api.ebay.com/ws/api.dll", headers=headers, data=xml_payload, timeout=timeout)
+    return resp
+
+def _pricemaster_ebay_revise_prices_bulk(updates: list, currency='USD'):
+    """
+    updates: list of dicts {item_id, new_price}
+    Returns: (ok_item_ids_set, failed_map[item_id]=error)
+    """
+    updates = [u for u in (updates or []) if u.get('item_id') and u.get('new_price') is not None]
+    ok = set()
+    failed = {}
+    if not updates:
+        return ok, failed
+
+    token = os.getenv("EBAY_OLDAUTH_TOKEN") or ''
+    token = token.strip()
+    if not token:
+        for u in updates:
+            failed[u['item_id']] = 'Missing EBAY_OLDAUTH_TOKEN'
+        return ok, failed
+
+    # Build a single ReviseInventoryStatus call for a batch.
+    inv_chunks = []
+    for u in updates:
+        item_id = str(u['item_id']).strip()
+        new_price = float(u['new_price'])
+        inv_chunks.append(f'''
+          <InventoryStatus>
+            <ItemID>{item_id}</ItemID>
+            <StartPrice currencyID="{currency}">{new_price:.2f}</StartPrice>
+          </InventoryStatus>
+        ''')
+
+    xml_payload = f'''<?xml version="1.0" encoding="utf-8"?>
+      <ReviseInventoryStatusRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+        <RequesterCredentials>
+          <eBayAuthToken>{token}</eBayAuthToken>
+        </RequesterCredentials>
+        <WarningLevel>High</WarningLevel>
+        {''.join(inv_chunks)}
+      </ReviseInventoryStatusRequest>
+    '''
+
+    resp = _pricemaster_ebay_trading_call('ReviseInventoryStatus', xml_payload, timeout=30)
+    if resp.status_code != 200:
+        msg = f"HTTP {resp.status_code}"
+        try:
+            msg = msg + f": {resp.text[:200]}"
+        except Exception:
+            pass
+        for u in updates:
+            failed[str(u['item_id']).strip()] = msg
+        return ok, failed
+
+    # Parse response
+    ns = {'ebay': 'urn:ebay:apis:eBLBaseComponents'}
+    try:
+        root = ET.fromstring(resp.text)
+    except Exception:
+        for u in updates:
+            failed[str(u['item_id']).strip()] = 'Invalid XML response from eBay'
+        return ok, failed
+
+    ack = (root.findtext('.//ebay:Ack', default='', namespaces=ns) or '').strip()
+    errors = root.findall('.//ebay:Errors', ns) or []
+
+    if ack in ('Success', 'Warning', 'PartialFailure'):
+        # Best-effort map errors to ItemID via ErrorParameters.
+        for err in errors:
+            msg = (err.findtext('ebay:LongMessage', default='', namespaces=ns) or err.findtext('ebay:ShortMessage', default='', namespaces=ns) or 'eBay error').strip()
+            mapped = False
+            for ep in err.findall('ebay:ErrorParameters', ns) or []:
+                v = (ep.findtext('ebay:Value', default='', namespaces=ns) or '').strip()
+                if v and v.isdigit() and len(v) >= 8:  # item ids are typically long digits
+                    failed[v] = msg
+                    mapped = True
+            if not mapped and ack != 'PartialFailure' and msg:
+                # If we can't map and it's not partial, treat as a general failure.
+                for u in updates:
+                    failed[str(u['item_id']).strip()] = msg
+                return ok, failed
+
+        # Anything not marked failed is treated as success.
+        for u in updates:
+            item_id = str(u['item_id']).strip()
+            if item_id and item_id not in failed:
+                ok.add(item_id)
+        return ok, failed
+
+    # Failure
+    msg = 'eBay API error'
+    if errors:
+        msg = (errors[0].findtext('ebay:LongMessage', default='', namespaces=ns) or errors[0].findtext('ebay:ShortMessage', default='', namespaces=ns) or msg).strip()
+    for u in updates:
+        failed[str(u['item_id']).strip()] = msg
+    return ok, failed
+
+def _pricemaster_fetch_ebay_rows(item_ids: list):
+    out = {}
+    item_ids = [str(x).strip() for x in (item_ids or []) if str(x).strip()]
+    if not item_ids:
+        return out
+    CHUNK = 900
+    with db_connection('ebayStore.db') as conn:
+        cur = conn.cursor()
+        for i in range(0, len(item_ids), CHUNK):
+            batch = item_ids[i:i+CHUNK]
+            ph = ','.join(['?'] * len(batch))
+            cur.execute(f'''
+                SELECT ItemID, Title, UPC, Price, Quantity, URL, List_State, List_Date
+                FROM INVENTORY
+                WHERE TRIM(COALESCE(ItemID,'')) IN ({ph})
+                LIMIT {len(batch)}
+            ''', batch)
+            for r in cur.fetchall():
+                out[(r['ItemID'] or '').strip()] = dict(r)
+    return out
+
+def _pricemaster_fetch_amazon_rows(skus: list):
+    out = {}
+    skus = [str(x).strip() for x in (skus or []) if str(x).strip()]
+    if not skus:
+        return out
+    CHUNK = 900
+    with db_connection('amazonStore.db') as conn:
+        cur = conn.cursor()
+        for i in range(0, len(skus), CHUNK):
+            batch = skus[i:i+CHUNK]
+            ph = ','.join(['?'] * len(batch))
+            cur.execute(f'''
+                SELECT SKU, ASIN, UPC, TITLE, PRICE, QUANTITY, STATUS, CONDITION, FULFILLMENT_CHANNEL, LAST_UPDATED
+                FROM ITEMS
+                WHERE TRIM(COALESCE(SKU,'')) IN ({ph})
+                LIMIT {len(batch)}
+            ''', batch)
+            for r in cur.fetchall():
+                out[(r['SKU'] or '').strip()] = dict(r)
+    return out
+
+@app.route('/api/pricemaster/listings', methods=['GET'])
+def api_pricemaster_listings():
+    """Return current store listings (eBay + Amazon) with local meta (first seen + last price change)."""
+    try:
+        platform_param = (request.args.get('platform') or '').strip().lower()
+        include_inactive = (request.args.get('include_inactive') or '').strip() in ('1', 'true', 'yes')
+
+        want_ebay = (platform_param in ('', 'all', 'ebay'))
+        want_amazon = (platform_param in ('', 'all', 'amazon'))
+
+        items = []
+        ebay_keys = []
+        amazon_keys = []
+        touch_rows = []
+
+        if want_ebay:
+            with db_connection('ebayStore.db') as conn:
+                cur = conn.cursor()
+                if include_inactive:
+                    cur.execute('''
+                        SELECT Title, ItemID, SKU, Price, Quantity, URL, List_State, List_Date, UPC
+                        FROM INVENTORY
+                        WHERE TRIM(COALESCE(ItemID,'')) != ''
+                        ORDER BY ID DESC
+                        LIMIT 6000
+                    ''')
+                else:
+                    cur.execute('''
+                        SELECT Title, ItemID, SKU, Price, Quantity, URL, List_State, List_Date, UPC
+                        FROM INVENTORY
+                        WHERE TRIM(COALESCE(ItemID,'')) != ''
+                          AND (TRIM(COALESCE(List_State,'')) = 'Active')
+                        ORDER BY ID DESC
+                        LIMIT 6000
+                    ''')
+                for r in cur.fetchall():
+                    item_id = (r['ItemID'] or '').strip()
+                    if not item_id:
+                        continue
+                    price_d = _pricemaster_parse_decimal(r['Price'])
+                    price = float(_pricemaster_money_2dp(price_d)) if price_d is not None else None
+                    qty = _listingagent_parse_int(r['Quantity'], None)
+                    sku = (r['SKU'] or '').strip()
+                    if sku.lower() == 'none':
+                        sku = ''
+                    upc = (r['UPC'] or '').strip()
+                    list_date = (r['List_Date'] or '').strip()
+
+                    items.append({
+                        'platform': 'ebay',
+                        'listing_key': item_id,
+                        'item_id': item_id,
+                        'sku': sku,
+                        'asin': '',
+                        'upc': upc,
+                        'title': (r['Title'] or '').strip(),
+                        'price': price,
+                        'currency': 'USD',
+                        'quantity': qty,
+                        'status': (r['List_State'] or '').strip(),
+                        'url': (r['URL'] or '').strip(),
+                        'list_date': list_date,
+                        'last_updated': '',
+                    })
+                    ebay_keys.append(item_id)
+                    touch_rows.append(('ebay', item_id, list_date or _pricemaster_now_iso()))
+
+        if want_amazon:
+            with db_connection('amazonStore.db') as conn:
+                cur = conn.cursor()
+                if include_inactive:
+                    cur.execute('''
+                        SELECT TITLE, SKU, ASIN, UPC, PRICE, QUANTITY, STATUS, LAST_UPDATED
+                        FROM ITEMS
+                        WHERE TRIM(COALESCE(SKU,'')) != ''
+                        ORDER BY ID DESC
+                        LIMIT 6000
+                    ''')
+                else:
+                    cur.execute('''
+                        SELECT TITLE, SKU, ASIN, UPC, PRICE, QUANTITY, STATUS, LAST_UPDATED
+                        FROM ITEMS
+                        WHERE TRIM(COALESCE(SKU,'')) != ''
+                          AND (TRIM(COALESCE(STATUS,'')) = 'Active')
+                        ORDER BY ID DESC
+                        LIMIT 6000
+                    ''')
+                for r in cur.fetchall():
+                    sku = (r['SKU'] or '').strip()
+                    if not sku:
+                        continue
+                    asin = (r['ASIN'] or '').strip()
+                    upc = (r['UPC'] or '').strip()
+                    last_updated = (r['LAST_UPDATED'] or '').strip()
+
+                    price_d = _pricemaster_parse_decimal(r['PRICE'])
+                    price = float(_pricemaster_money_2dp(price_d)) if price_d is not None else None
+                    qty = _listingagent_parse_int(r['QUANTITY'], None)
+
+                    items.append({
+                        'platform': 'amazon',
+                        'listing_key': sku,
+                        'item_id': '',
+                        'sku': sku,
+                        'asin': asin,
+                        'upc': upc,
+                        'title': (r['TITLE'] or '').strip(),
+                        'price': price,
+                        'currency': 'USD',
+                        'quantity': qty,
+                        'status': (r['STATUS'] or '').strip(),
+                        'url': '',
+                        'list_date': '',
+                        'last_updated': last_updated,
+                    })
+                    amazon_keys.append(sku)
+                    touch_rows.append(('amazon', sku, last_updated or _pricemaster_now_iso()))
+
+        # Ensure meta rows exist for sorting (first_seen_at), then attach meta data.
+        _pricemaster_touch_meta(touch_rows)
+        ebay_meta = _pricemaster_get_meta_map('ebay', ebay_keys)
+        amazon_meta = _pricemaster_get_meta_map('amazon', amazon_keys)
+
+        for it in items:
+            key = it.get('listing_key') or ''
+            meta = (ebay_meta.get(key) if it.get('platform') == 'ebay' else amazon_meta.get(key)) or {}
+            it['first_seen_at'] = meta.get('first_seen_at') or ''
+            it['last_price_change_at'] = meta.get('last_price_change_at') or ''
+            it['last_price_change_price'] = meta.get('last_price_change_price')
+
+        return jsonify({'success': True, 'items': items})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'pricemaster:listings')}), 500
+
+@app.route('/api/pricemaster/bulk_update', methods=['POST'])
+def api_pricemaster_bulk_update():
+    """Bulk update prices on the marketplaces and record local price-change history."""
+    try:
+        data = request.json or {}
+        adj = data.get('adjustment') or {}
+        mode = (adj.get('mode') or 'delta').strip().lower()
+        if mode not in ('delta', 'percent'):
+            return jsonify({'success': False, 'error': 'Invalid adjustment mode'}), 400
+
+        value_d = _pricemaster_parse_decimal(adj.get('value'))
+        if value_d is None:
+            return jsonify({'success': False, 'error': 'Adjustment value is required'}), 400
+
+        targets = data.get('targets') or []
+        if not isinstance(targets, list) or len(targets) == 0:
+            return jsonify({'success': False, 'error': 'No targets provided'}), 400
+
+        dry_run = bool(data.get('dry_run', False))
+
+        ebay_ids = []
+        amazon_skus = []
+        for t in targets:
+            p = (t.get('platform') or '').strip().lower()
+            k = (t.get('listing_key') or '').strip()
+            if not p or not k:
+                continue
+            if p == 'ebay':
+                ebay_ids.append(k)
+            elif p == 'amazon':
+                amazon_skus.append(k)
+
+        ebay_rows = _pricemaster_fetch_ebay_rows(ebay_ids) if ebay_ids else {}
+        amazon_rows = _pricemaster_fetch_amazon_rows(amazon_skus) if amazon_skus else {}
+
+        results = []
+
+        # ---- eBay (Trading API) ----
+        ebay_updates = []
+        for item_id in ebay_ids:
+            row = ebay_rows.get(item_id)
+            if not row:
+                results.append({'platform': 'ebay', 'listing_key': item_id, 'success': False, 'error': 'Listing not found in ebayStore.db'})
+                continue
+
+            old_d = _pricemaster_parse_decimal(row.get('Price'))
+            old_d = _pricemaster_money_2dp(old_d) if old_d is not None else None
+            if old_d is None:
+                results.append({'platform': 'ebay', 'listing_key': item_id, 'success': False, 'error': 'Missing current price'})
+                continue
+
+            new_d = _pricemaster_compute_new_price(old_d, mode, value_d)
+            if new_d is None:
+                results.append({'platform': 'ebay', 'listing_key': item_id, 'success': False, 'error': 'Could not compute new price'})
+                continue
+
+            results.append({'platform': 'ebay', 'listing_key': item_id, 'success': True, 'old_price': float(old_d), 'new_price': float(new_d), '_dry': True})
+            if not dry_run:
+                ebay_updates.append({'item_id': item_id, 'new_price': float(new_d), 'old_price': float(old_d)})
+
+        if not dry_run and ebay_updates:
+            # Batch into modest chunks to avoid huge Trading API payloads.
+            ok_ids = set()
+            fail_map = {}
+            BATCH = 25
+            for i in range(0, len(ebay_updates), BATCH):
+                batch = ebay_updates[i:i+BATCH]
+                ok, failed = _pricemaster_ebay_revise_prices_bulk(batch, currency='USD')
+                ok_ids |= set(ok)
+                fail_map.update(failed or {})
+
+            # Update local DB + record history
+            with db_connection('ebayStore.db') as conn:
+                cur = conn.cursor()
+                for u in ebay_updates:
+                    item_id = str(u['item_id']).strip()
+                    old_price = u.get('old_price')
+                    new_price = u.get('new_price')
+                    if item_id in ok_ids:
+                        cur.execute('UPDATE INVENTORY SET Price = ? WHERE TRIM(COALESCE(ItemID,\'\')) = ? COLLATE NOCASE', (f"{float(new_price):.2f}", item_id))
+                        _pricemaster_record_change(platform='ebay', listing_key=item_id, old_price=old_price, new_price=new_price, mode=mode, value=value_d, success=True)
+                    else:
+                        err = fail_map.get(item_id) or 'eBay price update failed'
+                        _pricemaster_record_change(platform='ebay', listing_key=item_id, old_price=old_price, new_price=new_price, mode=mode, value=value_d, success=False, error=err)
+
+            # Patch results list to reflect real outcomes (replace the earlier _dry placeholders)
+            for r in results:
+                if r.get('platform') == 'ebay' and r.get('_dry') and not dry_run:
+                    item_id = r.get('listing_key')
+                    if item_id in ok_ids:
+                        r['success'] = True
+                    else:
+                        r['success'] = False
+                        r['error'] = fail_map.get(item_id) or 'eBay price update failed'
+                    r.pop('_dry', None)
+
+        # ---- Amazon (SP-API) ----
+        amazon_jobs = []
+        for sku in amazon_skus:
+            row = amazon_rows.get(sku)
+            if not row:
+                results.append({'platform': 'amazon', 'listing_key': sku, 'success': False, 'error': 'Listing not found in amazonStore.db'})
+                continue
+
+            old_d = _pricemaster_parse_decimal(row.get('PRICE'))
+            old_d = _pricemaster_money_2dp(old_d) if old_d is not None else None
+            if old_d is None:
+                results.append({'platform': 'amazon', 'listing_key': sku, 'success': False, 'error': 'Missing current price'})
+                continue
+
+            new_d = _pricemaster_compute_new_price(old_d, mode, value_d)
+            if new_d is None:
+                results.append({'platform': 'amazon', 'listing_key': sku, 'success': False, 'error': 'Could not compute new price'})
+                continue
+
+            results.append({'platform': 'amazon', 'listing_key': sku, 'success': True, 'old_price': float(old_d), 'new_price': float(new_d), '_dry': True})
+            if not dry_run:
+                amazon_jobs.append({
+                    'sku': sku,
+                    'asin': (row.get('ASIN') or '').strip(),
+                    'upc': (row.get('UPC') or '').strip(),
+                    'quantity': _listingagent_parse_int(row.get('QUANTITY'), 1) or 1,
+                    'condition': (row.get('CONDITION') or '').strip(),
+                    'fulfillment_channel': (row.get('FULFILLMENT_CHANNEL') or '').strip(),
+                    'old_price': float(old_d),
+                    'new_price': float(new_d),
+                })
+
+        if not dry_run and amazon_jobs:
+            settings = _listingagent_get_settings()
+            credentials, seller_id, marketplace_id, marketplace = _amazon_spapi_context()
+            if marketplace is None:
+                # Record failures consistently
+                for j in amazon_jobs:
+                    _pricemaster_record_change(platform='amazon', listing_key=j['sku'], old_price=j['old_price'], new_price=j['new_price'], mode=mode, value=value_d, success=False, error='Amazon SP-API not available')
+                for r in results:
+                    if r.get('platform') == 'amazon' and r.get('_dry'):
+                        r['success'] = False
+                        r['error'] = 'Amazon SP-API not available'
+                        r.pop('_dry', None)
+            else:
+                from sp_api.api import ListingsItems
+                li = ListingsItems(credentials=credentials, marketplace=marketplace)
+
+                mp_id = (settings.get('amazon_marketplace_id') or marketplace_id or 'ATVPDKIKX0DER').strip()
+                currency = (settings.get('amazon_currency') or 'USD').strip()
+                product_type = (settings.get('amazon_product_type') or 'PRODUCT').strip()
+                requirements = (settings.get('amazon_requirements') or 'LISTING_OFFER_ONLY').strip()
+                default_condition = (settings.get('amazon_condition_type') or 'used_good').strip()
+                default_fc = (settings.get('amazon_fulfillment_channel_code') or 'DEFAULT').strip()
+
+                ok_skus = set()
+                fail_skus = {}
+                for j in amazon_jobs:
+                    sku = j['sku']
+                    asin = j.get('asin') or ''
+                    upc = j.get('upc') or ''
+                    qty = int(j.get('quantity') or 1)
+                    condition_type = j.get('condition') or default_condition
+                    fc_code = j.get('fulfillment_channel') or default_fc
+                    price = float(j.get('new_price'))
+
+                    try:
+                        attrs = _build_amazon_offer_attributes(
+                            upc=upc,
+                            asin=asin,
+                            condition_type=condition_type,
+                            fulfillment_channel_code=fc_code,
+                            quantity=qty,
+                            currency=currency,
+                            price=price
+                        )
+                        body = {'productType': product_type, 'requirements': requirements, 'attributes': attrs}
+                        resp = li.put_listings_item(
+                            seller_id,
+                            sku,
+                            marketplaceIds=[mp_id],
+                            issueLocale='en_US',
+                            body=body
+                        )
+                        if getattr(resp, 'errors', None):
+                            raise Exception(str(resp.errors))
+
+                        ok_skus.add(sku)
+                        _pricemaster_record_change(platform='amazon', listing_key=sku, old_price=j['old_price'], new_price=j['new_price'], mode=mode, value=value_d, success=True)
+                    except Exception as e:
+                        msg = str(e)
+                        fail_skus[sku] = msg
+                        _pricemaster_record_change(platform='amazon', listing_key=sku, old_price=j['old_price'], new_price=j['new_price'], mode=mode, value=value_d, success=False, error=msg)
+
+                # Update local amazonStore.db for successes
+                now_iso = _pricemaster_now_iso()
+                with db_connection('amazonStore.db') as conn:
+                    cur = conn.cursor()
+                    for j in amazon_jobs:
+                        sku = j['sku']
+                        if sku in ok_skus:
+                            cur.execute('UPDATE ITEMS SET PRICE = ?, LAST_UPDATED = ? WHERE TRIM(COALESCE(SKU,\'\')) = ? COLLATE NOCASE', (float(j['new_price']), now_iso, sku))
+
+                for r in results:
+                    if r.get('platform') == 'amazon' and r.get('_dry'):
+                        sku = r.get('listing_key')
+                        if sku in ok_skus:
+                            r['success'] = True
+                        else:
+                            r['success'] = False
+                            r['error'] = fail_skus.get(sku) or 'Amazon price update failed'
+                        r.pop('_dry', None)
+
+        # Clean up any remaining placeholders
+        for r in results:
+            r.pop('_dry', None)
+
+        return jsonify({'success': True, 'dry_run': dry_run, 'results': results})
+
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'pricemaster:bulk_update')}), 500
 
 @app.route('/api/listing-helper/scan', methods=['GET'])
 def api_listing_helper_scan():

@@ -23,9 +23,11 @@ scp .\templates\multibarcode.html "$User@$HostName`:$RemotePath/templates/"
 scp .\templates\items_to_list.html "$User@$HostName`:$RemotePath/templates/"
 scp .\templates\shelfmanager.html "$User@$HostName`:$RemotePath/templates/"
 scp .\templates\tools.html "$User@$HostName`:$RemotePath/templates/"
+scp .\templates\misc.html "$User@$HostName`:$RemotePath/templates/"
 scp .\templates\item_prep.html "$User@$HostName`:$RemotePath/templates/"
 scp .\templates\listingagent.html "$User@$HostName`:$RemotePath/templates/"
 scp .\templates\listingagent_mobile.html "$User@$HostName`:$RemotePath/templates/"
+scp .\templates\price_master.html "$User@$HostName`:$RemotePath/templates/"
 
 # Transfer static files
 Write-Host "Transferring static assets..." -ForegroundColor Yellow

@@ -33,6 +33,22 @@
         <h1 style="flex:1;text-align:center;margin:0;">Miscellaneous Settings</h1>
         <div style="width:84px"></div>
     </div>
+
+    <h2 style="margin:18px 0 10px 0; font-size:1.1rem;">Theme (Day/Night)</h2>
+    <div class="desc">Toggle automatic day/night switching and set when Night Mode starts.</div>
+    <form id="themeSettingsForm">
+        <label style="display:flex;align-items:center;gap:8px;margin-bottom:10px;font-weight:600;">
+            <input type="checkbox" id="themeAutoEnabled" style="width:auto;">
+            <span>Automatic switching</span>
+        </label>
+
+        <label for="themeNightStart">Night Mode starts at:</label>
+        <input type="time" id="themeNightStart" step="60" value="19:00" style="padding:6px;font-size:1.05em;">
+
+        <button type="submit" style="background:#00b894;">Save Theme Settings</button>
+        <div id="themeSaveStatus" style="margin-top:10px;color:#555;display:none;"></div>
+    </form>
+
     <h2 style="margin:18px 0 10px 0; font-size:1.1rem;">Auto-Submit Timer Settings</h2>
     <div class="desc">Configure auto-submit timers for different pages.</div>
     <form id="miscSettingsForm">
@@ -140,7 +156,47 @@
         <div id="enrichStatus" style="margin-top:10px;color:#555;display:none;text-align:center;"></div>
     </div>
 
+    <script src="/static/i18n.js"></script>
     <script>
+        // Theme Settings (stored in browser localStorage)
+        function loadThemeSettings() {
+            const mode = (localStorage.getItem('ss_theme_mode') || 'auto').toString().trim().toLowerCase();
+            document.getElementById('themeAutoEnabled').checked = (mode === 'auto');
+            document.getElementById('themeNightStart').value = localStorage.getItem('ss_theme_night_start') || '19:00';
+        }
+
+        document.getElementById('themeSettingsForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+
+            const autoEnabled = document.getElementById('themeAutoEnabled').checked;
+            const nightStart = document.getElementById('themeNightStart').value || '19:00';
+
+            localStorage.setItem('ss_theme_night_start', nightStart);
+
+            if (autoEnabled) {
+                localStorage.setItem('ss_theme_mode', 'auto');
+            } else {
+                const currentMode = (localStorage.getItem('ss_theme_mode') || 'auto').toString().trim().toLowerCase();
+                if (currentMode === 'auto') {
+                    // Freeze whatever is currently applied.
+                    const applied = (localStorage.getItem('ss_theme_applied') || 'day').toString().trim().toLowerCase();
+                    localStorage.setItem('ss_theme_mode', (applied === 'night') ? 'night' : 'day');
+                }
+            }
+
+            try {
+                if (window.ssTheme && typeof window.ssTheme.apply === 'function') {
+                    window.ssTheme.apply();
+                }
+            } catch (err) {}
+
+            const el = document.getElementById('themeSaveStatus');
+            el.style.display = 'block';
+            el.style.color = '#388e3c';
+            el.textContent = '✓ Theme settings saved!';
+            setTimeout(() => { el.style.display = 'none'; }, 1500);
+        });
+
         // Load settings from localStorage
         function loadSettings() {
             const multibarcode = localStorage.getItem('multibarcodeTimer');
@@ -202,7 +258,7 @@
         }
         
         // On page load, always show saved settings and grace period
-        document.addEventListener('DOMContentLoaded', function(){ loadSettings(); loadGrace(); loadZeroQtySettings(); loadCacheSettings(); });
+        document.addEventListener('DOMContentLoaded', function(){ loadThemeSettings(); loadSettings(); loadGrace(); loadZeroQtySettings(); loadCacheSettings(); });
         
         // Zero-Quantity Deletion Settings
         async function loadZeroQtySettings() {

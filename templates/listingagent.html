@@ -58,7 +58,7 @@
       position: sticky;
       top: 0;
       z-index: 10;
-      background: rgba(15, 23, 42, 0.85);
+      background: var(--ss-banner-bg, rgba(15, 23, 42, 0.85));
       backdrop-filter: blur(12px);
       border-bottom: 1px solid var(--border);
     }
@@ -2246,7 +2246,6 @@
       if(resultsEl) resultsEl.innerHTML = '';
       state.mobileUploadUrl = '';
       if($('mobileUploadPanel')) $('mobileUploadPanel').style.display = 'none';
-      if($('mobileUploadLink')) $('mobileUploadLink').style.display = 'none';
       if($('previewTop')) $('previewTop').classList.remove('withQr');
       if($('mobileUploadStatus')) $('mobileUploadStatus').textContent = '';
       log(`Loading UPC ${clean}...`);
@@ -4110,7 +4109,6 @@
       if($('mobileUploadPanel')) $('mobileUploadPanel').style.display = 'none';
       if($('mobileUploadStatus')) $('mobileUploadStatus').textContent = '';
       if($('previewTop')) $('previewTop').classList.remove('withQr');
-      if($('mobileUploadLink')) { $('mobileUploadLink').style.display = 'none'; $('mobileUploadLink').href = '#'; }
       $('upcSearch').value = '';
       if($('results')) $('results').innerHTML = '';
       $('offerBadge').style.display = 'none';

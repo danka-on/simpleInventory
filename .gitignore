@@ -6,6 +6,7 @@ venv/
 .venv/
 ebayStore.db
 listagent.db
+pricemaster.db
 listinglog.db
 preplog.db
 __pycache__/

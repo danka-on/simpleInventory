@@ -1,0 +1,776 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.ico') }}">
+  <title>Price Master</title>
+
+  <!-- i18n also injects the global top banner + theme -->
+  <script src="/static/i18n.js" defer></script>
+
+  <style>
+    :root{
+      --pm-ink: var(--ink, #111827);
+      --pm-muted: var(--muted, #6b7280);
+      --pm-bg: var(--bg, #f9f9f9);
+      --pm-card: var(--card, #ffffff);
+      --pm-border: var(--border, #e5e7eb);
+      --pm-accent: var(--accent, #00b894);
+      --pm-primary: var(--primary, #0984e3);
+      --pm-danger: #e74c3c;
+      --pm-radius: 14px;
+      --pm-shadow: 0 10px 26px rgba(0,0,0,0.10);
+    }
+
+    *{ box-sizing:border-box; }
+    body{
+      margin:0;
+      padding: 16px;
+      font-family: "Segoe UI", Arial, sans-serif;
+      background: var(--pm-bg);
+      color: var(--pm-ink);
+      min-height: 100vh;
+    }
+
+    .wrap{
+      max-width: 1180px;
+      margin: 0 auto;
+      padding-bottom: 90px;
+    }
+
+    .top{
+      display:flex;
+      gap: 10px;
+      align-items:center;
+      margin-bottom: 12px;
+    }
+
+    .btn{
+      appearance:none;
+      border: 1px solid var(--pm-border);
+      background: var(--pm-card);
+      color: var(--pm-ink);
+      padding: 10px 14px;
+      border-radius: 12px;
+      cursor: pointer;
+      font-weight: 700;
+      letter-spacing: .2px;
+      display:inline-flex;
+      align-items:center;
+      gap: 8px;
+      text-decoration:none;
+      transition: transform .12s ease, filter .12s ease;
+      user-select: none;
+      white-space: nowrap;
+    }
+    .btn:hover{ transform: translateY(-1px); filter: brightness(1.02); }
+    .btn:active{ transform: translateY(0); }
+
+    .btnBack{
+      background: rgba(231,76,60,0.12);
+      border-color: rgba(231,76,60,0.25);
+      color: var(--pm-danger);
+    }
+    .btnPrimary{
+      background: var(--pm-accent);
+      border-color: transparent;
+      color: #fff;
+    }
+    .btnGhost{
+      background: rgba(0,0,0,0.02);
+    }
+    html.ss-theme-night .btnGhost{
+      background: rgba(255,255,255,0.04);
+    }
+
+    .title{
+      flex: 1;
+      text-align: center;
+      font-size: 1.25rem;
+      font-weight: 900;
+      letter-spacing: -0.02em;
+    }
+    .subtitle{
+      margin-top: 2px;
+      text-align:center;
+      color: var(--pm-muted);
+      font-size: 0.92rem;
+      font-weight: 600;
+    }
+
+    .grid{
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-top: 12px;
+    }
+
+    .card{
+      background: var(--pm-card);
+      border: 1px solid var(--pm-border);
+      border-radius: var(--pm-radius);
+      box-shadow: var(--pm-shadow);
+      overflow:hidden;
+    }
+    html.ss-theme-night .card{
+      box-shadow: 0 16px 40px rgba(0,0,0,0.35);
+      border-color: rgba(255,255,255,0.08);
+    }
+    .cardHeader{
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--pm-border);
+      display:flex;
+      align-items:center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    html.ss-theme-night .cardHeader{
+      border-bottom-color: rgba(255,255,255,0.08);
+      background: rgba(0,0,0,0.12);
+    }
+    .cardTitle{
+      font-weight: 900;
+      letter-spacing: -0.01em;
+      display:flex;
+      align-items:center;
+      gap: 10px;
+    }
+    .cardBody{ padding: 12px 14px; }
+
+    .fieldRow{
+      display:flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: flex-end;
+    }
+    .field{
+      display:flex;
+      flex-direction: column;
+      gap: 6px;
+      flex: 1;
+      min-width: 180px;
+    }
+    label{
+      font-size: 0.86rem;
+      font-weight: 800;
+      color: var(--pm-muted);
+      letter-spacing: .2px;
+    }
+    input[type="text"], input[type="number"], select{
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid var(--pm-border);
+      border-radius: 12px;
+      background: rgba(0,0,0,0.02);
+      color: var(--pm-ink);
+      outline: none;
+      font-size: 0.98rem;
+    }
+    html.ss-theme-night input[type="text"],
+    html.ss-theme-night input[type="number"],
+    html.ss-theme-night select{
+      background: rgba(255,255,255,0.04);
+      border-color: rgba(255,255,255,0.10);
+    }
+
+    .seg{
+      display:flex;
+      border: 1px solid var(--pm-border);
+      border-radius: 999px;
+      overflow:hidden;
+      background: rgba(0,0,0,0.02);
+    }
+    html.ss-theme-night .seg{
+      background: rgba(255,255,255,0.04);
+      border-color: rgba(255,255,255,0.10);
+    }
+    .seg button{
+      border:0;
+      background: transparent;
+      color: var(--pm-muted);
+      padding: 8px 12px;
+      cursor:pointer;
+      font-weight: 900;
+      letter-spacing: .2px;
+      min-width: 82px;
+    }
+    .seg button.active{
+      background: var(--pm-primary);
+      color: #fff;
+    }
+
+    .kpi{
+      display:flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 10px;
+    }
+    .pill{
+      display:inline-flex;
+      align-items:center;
+      gap: 8px;
+      padding: 8px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--pm-border);
+      background: rgba(0,0,0,0.02);
+      color: var(--pm-muted);
+      font-weight: 800;
+      font-size: 0.9rem;
+    }
+    html.ss-theme-night .pill{
+      background: rgba(255,255,255,0.04);
+      border-color: rgba(255,255,255,0.10);
+    }
+    .pill strong{ color: var(--pm-ink); }
+
+    .tableWrap{
+      overflow:auto;
+      max-height: 62vh;
+    }
+    table{
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.93rem;
+    }
+    thead th{
+      position: sticky;
+      top: 0;
+      z-index: 3;
+      background: var(--pm-card);
+      border-bottom: 1px solid var(--pm-border);
+      padding: 10px 10px;
+      text-align: left;
+      font-weight: 900;
+      letter-spacing: .2px;
+      white-space: nowrap;
+    }
+    /* The global top banner applies a sticky offset for many legacy pages; Price Master
+       uses its own internal scroll pane, so keep headers pinned to the pane top. */
+    html.ss-has-top-banner .tableWrap thead th{
+      top: 0 !important;
+    }
+    html.ss-theme-night thead th{
+      background: rgba(0,0,0,0.18);
+      border-bottom-color: rgba(255,255,255,0.08);
+    }
+    tbody td{
+      border-bottom: 1px solid rgba(0,0,0,0.06);
+      padding: 10px 10px;
+      vertical-align: top;
+    }
+    html.ss-theme-night tbody td{
+      border-bottom-color: rgba(255,255,255,0.07);
+    }
+    tbody tr:hover{
+      background: rgba(0,0,0,0.02);
+    }
+    html.ss-theme-night tbody tr:hover{
+      background: rgba(255,255,255,0.04);
+    }
+
+    .badge{
+      display:inline-flex;
+      align-items:center;
+      gap: 6px;
+      border-radius: 999px;
+      padding: 4px 8px;
+      font-size: 0.8rem;
+      font-weight: 900;
+      letter-spacing: .2px;
+      border: 1px solid var(--pm-border);
+      background: rgba(0,0,0,0.02);
+      color: var(--pm-muted);
+      white-space: nowrap;
+    }
+    html.ss-theme-night .badge{
+      background: rgba(255,255,255,0.04);
+      border-color: rgba(255,255,255,0.10);
+    }
+    .badge.ebay{ color: #0064d2; border-color: rgba(0,100,210,0.35); background: rgba(0,100,210,0.08); }
+    .badge.amazon{ color: #ff9900; border-color: rgba(255,153,0,0.35); background: rgba(255,153,0,0.08); }
+    html.ss-theme-night .badge.ebay{ background: rgba(96,165,250,0.12); border-color: rgba(96,165,250,0.24); color: #60a5fa; }
+    html.ss-theme-night .badge.amazon{ background: rgba(251,191,36,0.12); border-color: rgba(251,191,36,0.24); color: #fbbf24; }
+
+    .muted{ color: var(--pm-muted); }
+    .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; font-size: 0.9em; }
+
+    .log{
+      white-space: pre-wrap;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: 0.9rem;
+      margin: 0;
+      padding: 12px 14px;
+      max-height: 220px;
+      overflow:auto;
+      background: rgba(0,0,0,0.03);
+    }
+    html.ss-theme-night .log{
+      background: rgba(0,0,0,0.22);
+    }
+
+    @media (max-width: 980px){
+      .grid{ grid-template-columns: 1fr; }
+      body{ padding: 12px; }
+      .title{ font-size: 1.15rem; }
+      .seg button{ min-width: 70px; }
+      thead th, tbody td{ padding: 9px 8px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <a class="btn btnBack" href="/items-to-list"><span>←</span><span data-i18n="back">Back</span></a>
+      <div style="flex:1; min-width:0;">
+        <div class="title">Price Master</div>
+        <div class="subtitle">Bulk re-pricing for eBay + Amazon</div>
+      </div>
+      <button class="btn btnGhost" id="refreshBtn" type="button"><span>↻</span><span data-i18n="refresh">Refresh</span></button>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <div class="cardHeader">
+          <div class="cardTitle"><span>🔎</span><span>Filters</span></div>
+        </div>
+        <div class="cardBody">
+          <div class="fieldRow">
+            <div class="field" style="min-width:260px;">
+              <label for="pmSearch"><span data-i18n="search">Search</span></label>
+              <input id="pmSearch" type="text" placeholder="UPC / Title / SKU / ItemID / ASIN" />
+            </div>
+            <div class="field" style="min-width:240px;">
+              <label for="pmSort">Sort</label>
+              <select id="pmSort">
+                <option value="list_new">List Age (newest)</option>
+                <option value="list_old">List Age (oldest)</option>
+                <option value="chg_new">Since Price Change (recent)</option>
+                <option value="chg_old">Since Price Change (longest)</option>
+                <option value="price_low">Price (low → high)</option>
+                <option value="price_high">Price (high → low)</option>
+              </select>
+            </div>
+            <div class="field" style="min-width:260px;">
+              <label>Store</label>
+              <div class="seg" role="tablist" aria-label="Store filter">
+                <button type="button" class="active" data-store="all">All</button>
+                <button type="button" data-store="ebay">eBay</button>
+                <button type="button" data-store="amazon">Amazon</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="kpi">
+            <div class="pill"><span>Showing</span> <strong id="kpiShown">0</strong></div>
+            <div class="pill"><span>Selected</span> <strong id="kpiSelected">0</strong></div>
+            <div class="pill"><span>eBay</span> <strong id="kpiEbay">0</strong></div>
+            <div class="pill"><span>Amazon</span> <strong id="kpiAmazon">0</strong></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="cardHeader">
+          <div class="cardTitle"><span>🧮</span><span>Bulk Change</span></div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end;">
+            <button class="btn" type="button" id="selectAllBtn">Select All</button>
+            <button class="btn" type="button" id="clearSelBtn" data-i18n="clear">Clear</button>
+          </div>
+        </div>
+        <div class="cardBody">
+          <div class="fieldRow">
+            <div class="field" style="min-width:210px;">
+              <label for="pmMode">Mode</label>
+              <select id="pmMode">
+                <option value="delta">$ Increment (±)</option>
+                <option value="percent">% Change (±)</option>
+              </select>
+            </div>
+            <div class="field" style="min-width:210px;">
+              <label for="pmValue">Value</label>
+              <input id="pmValue" type="number" step="0.01" placeholder="e.g. -5 or 1.25" />
+            </div>
+            <div class="field" style="min-width:260px;">
+              <label>&nbsp;</label>
+              <button class="btn btnPrimary" type="button" id="applyBtn"><span>✓</span>Apply to Selected</button>
+            </div>
+          </div>
+
+          <div class="muted" style="margin-top:10px; font-weight:700;">
+            Tip: type a value to preview the New Price column before updating.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:12px;">
+      <div class="cardHeader">
+        <div class="cardTitle"><span>📋</span><span>Listings</span></div>
+        <div class="muted" id="pmStatus" style="font-weight:900;"></div>
+      </div>
+      <div class="tableWrap">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:42px;"><input type="checkbox" id="selectAllCheckbox" title="Select all shown"></th>
+              <th style="width:110px;">Store</th>
+              <th>Item</th>
+              <th style="width:170px;">ID</th>
+              <th style="width:120px;">Price</th>
+              <th style="width:130px;">New Price</th>
+              <th style="width:160px;">List Age</th>
+              <th style="width:190px;">Since Change</th>
+            </tr>
+          </thead>
+          <tbody id="pmTbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:12px;">
+      <div class="cardHeader">
+        <div class="cardTitle"><span>🧾</span><span>Activity</span></div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <button class="btn" type="button" id="clearLogBtn" data-i18n="clear">Clear</button>
+        </div>
+      </div>
+      <pre class="log" id="pmLog"></pre>
+    </div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    const state = {
+      all: [],
+      store: 'all',
+      q: '',
+      sort: 'list_new',
+      selected: new Set(), // key = `${platform}:${listing_key}`
+      mode: 'delta',
+      value: null,
+      lastRenderKeys: [],
+    };
+
+    function keyFor(it){
+      return `${it.platform}:${it.listing_key}`;
+    }
+
+    function toNumber(v){
+      if(v === null || v === undefined) return null;
+      const n = Number(v);
+      if(!Number.isFinite(n)) return null;
+      return n;
+    }
+
+    function fmtUsd(n){
+      const v = toNumber(n);
+      if(v === null) return '';
+      return '$' + v.toFixed(2);
+    }
+
+    function fmtDate(iso){
+      if(!iso) return '';
+      try{
+        const d = new Date(iso);
+        if(Number.isNaN(d.getTime())) return String(iso);
+        return d.toLocaleString([], {year:'numeric', month:'short', day:'2-digit', hour:'2-digit', minute:'2-digit'});
+      }catch(e){
+        return String(iso);
+      }
+    }
+
+    function fmtAge(iso){
+      if(!iso) return '';
+      const d = new Date(iso);
+      if(Number.isNaN(d.getTime())) return '';
+      const ms = Date.now() - d.getTime();
+      const mins = Math.max(0, Math.floor(ms / 60000));
+      const hrs = Math.floor(mins / 60);
+      const days = Math.floor(hrs / 24);
+      if(days > 0) return `${days}d`;
+      if(hrs > 0) return `${hrs}h`;
+      return `${mins}m`;
+    }
+
+    function computeNewPrice(oldPrice){
+      const base = toNumber(oldPrice);
+      if(base === null) return null;
+      const mode = state.mode;
+      const val = toNumber(state.value);
+      if(val === null) return null;
+      let next = base;
+      if(mode === 'delta') next = base + val;
+      else if(mode === 'percent') next = base * (1 + (val / 100));
+      next = Math.max(0, next);
+      // Ensure 2dp
+      next = Math.round(next * 100) / 100;
+      return next;
+    }
+
+    function log(line){
+      const ts = new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+      const el = $('pmLog');
+      if(!el) return;
+      el.textContent = `[${ts}] ${line}\n` + el.textContent;
+      try{
+        const lines = el.textContent.split('\\n');
+        if(lines.length > 250) el.textContent = lines.slice(0, 250).join('\\n');
+      }catch(e){}
+    }
+
+    function setStatus(text){
+      const el = $('pmStatus');
+      if(el) el.textContent = text || '';
+    }
+
+    function applyFilters(){
+      const q = (state.q || '').trim().toLowerCase();
+      let rows = Array.isArray(state.all) ? state.all.slice() : [];
+
+      if(state.store !== 'all'){
+        rows = rows.filter(it => it.platform === state.store);
+      }
+
+      if(q){
+        rows = rows.filter(it => {
+          const hay = [
+            it.title,
+            it.upc,
+            it.asin,
+            it.sku,
+            it.item_id,
+            it.listing_key,
+          ].filter(Boolean).join(' ').toLowerCase();
+          return hay.includes(q);
+        });
+      }
+
+      const ts = (iso) => {
+        if(!iso) return 0;
+        const d = new Date(iso);
+        const t = d.getTime();
+        return Number.isFinite(t) ? t : 0;
+      };
+
+      const listT = (it) => ts(it.list_date || it.first_seen_at || it.last_updated);
+      const chgT = (it) => ts(it.last_price_change_at);
+
+      const sort = state.sort;
+      rows.sort((a,b) => {
+        if(sort === 'list_new') return listT(b) - listT(a);
+        if(sort === 'list_old') return listT(a) - listT(b);
+        if(sort === 'chg_new') return chgT(b) - chgT(a);
+        if(sort === 'chg_old') return chgT(a) - chgT(b);
+        if(sort === 'price_low') return (toNumber(a.price) ?? 0) - (toNumber(b.price) ?? 0);
+        if(sort === 'price_high') return (toNumber(b.price) ?? 0) - (toNumber(a.price) ?? 0);
+        return 0;
+      });
+
+      return rows;
+    }
+
+    function updateKpis(shown){
+      const shownCount = shown.length;
+      const selCount = state.selected.size;
+      let ebay = 0, amazon = 0;
+      for(const it of shown){
+        if(it.platform === 'ebay') ebay++;
+        else if(it.platform === 'amazon') amazon++;
+      }
+      $('kpiShown').textContent = String(shownCount);
+      $('kpiSelected').textContent = String(selCount);
+      $('kpiEbay').textContent = String(ebay);
+      $('kpiAmazon').textContent = String(amazon);
+    }
+
+    function render(){
+      const tbody = $('pmTbody');
+      if(!tbody) return;
+
+      const rows = applyFilters();
+      state.lastRenderKeys = rows.map(keyFor);
+      updateKpis(rows);
+
+      const val = toNumber(state.value);
+      setStatus(rows.length ? `${rows.length} listing(s)` : 'No results');
+
+      tbody.innerHTML = '';
+      for(const it of rows){
+        const k = keyFor(it);
+        const tr = document.createElement('tr');
+
+        const selected = state.selected.has(k);
+
+        const listIso = it.list_date || it.first_seen_at || it.last_updated || '';
+        const chgIso = it.last_price_change_at || '';
+
+        const newPrice = (val === null) ? null : computeNewPrice(it.price);
+
+        tr.innerHTML = `
+          <td><input type="checkbox" class="pmRowCb" data-key="${k}" ${selected ? 'checked' : ''}></td>
+          <td>${it.platform === 'ebay' ? '<span class="badge ebay">eBay</span>' : '<span class="badge amazon">Amazon</span>'}</td>
+          <td>
+            <div style="font-weight:900; line-height:1.2;">${escapeHtml(it.title || '(no title)')}</div>
+            <div class="muted mono" style="margin-top:4px;">${escapeHtml(it.upc || it.asin || '')}</div>
+          </td>
+          <td class="mono">${escapeHtml(it.listing_key || '')}</td>
+          <td><span class="mono" style="font-weight:900;">${fmtUsd(it.price)}</span> <span class="muted mono">${it.currency || 'USD'}</span></td>
+          <td>${newPrice === null ? '<span class="muted">—</span>' : `<span class="mono" style="font-weight:900;">${fmtUsd(newPrice)}</span>`}</td>
+          <td>
+            <div class="mono" style="font-weight:900;">${fmtAge(listIso)}</div>
+            <div class="muted" style="margin-top:3px;">${escapeHtml(fmtDate(listIso))}</div>
+          </td>
+          <td>
+            <div class="mono" style="font-weight:900;">${chgIso ? fmtAge(chgIso) : ''}</div>
+            <div class="muted" style="margin-top:3px;">${chgIso ? escapeHtml(fmtDate(chgIso)) : '<span class="muted">—</span>'}</div>
+          </td>
+        `;
+
+        tbody.appendChild(tr);
+      }
+
+      // wire row checkbox events
+      tbody.querySelectorAll('.pmRowCb').forEach(cb => {
+        cb.addEventListener('change', (e) => {
+          const key = e.target.getAttribute('data-key');
+          if(!key) return;
+          if(e.target.checked) state.selected.add(key);
+          else state.selected.delete(key);
+          $('kpiSelected').textContent = String(state.selected.size);
+        });
+      });
+
+      // select-all checkbox reflects "all shown selected"
+      const allShownSelected = state.lastRenderKeys.length > 0 && state.lastRenderKeys.every(k => state.selected.has(k));
+      $('selectAllCheckbox').checked = allShownSelected;
+    }
+
+    function escapeHtml(s){
+      return String(s ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
+    }
+
+    async function loadListings(){
+      setStatus('Loading…');
+      try{
+        const r = await fetch('/api/pricemaster/listings', {cache:'no-store'});
+        const j = await r.json();
+        if(!r.ok || j.success === false) throw new Error(j.error || `Request failed (${r.status})`);
+        state.all = j.items || [];
+        log(`Loaded ${state.all.length} listing(s).`);
+        render();
+      }catch(e){
+        setStatus('Load failed');
+        log(`Load failed: ${e.message}`);
+        state.all = [];
+        render();
+      }
+    }
+
+    async function applyBulkUpdate(){
+      const val = toNumber(state.value);
+      if(val === null){
+        log('Enter a value first.');
+        return;
+      }
+      if(state.selected.size === 0){
+        log('Select at least one listing.');
+        return;
+      }
+
+      const targets = [];
+      for(const key of state.selected){
+        const parts = key.split(':');
+        if(parts.length !== 2) continue;
+        targets.push({platform: parts[0], listing_key: parts[1]});
+      }
+
+      setStatus('Updating…');
+      log(`Bulk update started (${targets.length} item(s))…`);
+
+      try{
+        const r = await fetch('/api/pricemaster/bulk_update', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json', 'Accept':'application/json'},
+          body: JSON.stringify({
+            adjustment: {mode: state.mode, value: val},
+            targets: targets
+          })
+        });
+        const j = await r.json().catch(() => ({}));
+        if(!r.ok || j.success === false) throw new Error(j.error || `Update failed (${r.status})`);
+
+        const res = j.results || [];
+        const ok = res.filter(x => x && x.success).length;
+        const bad = res.length - ok;
+        log(`Done. ${ok} success • ${bad} failed`);
+
+        for(const row of res){
+          if(!row) continue;
+          const tag = `${row.platform || '?'}:${row.listing_key || '?'}`;
+          if(row.success){
+            log(`✓ ${tag} ${fmtUsd(row.old_price)} → ${fmtUsd(row.new_price)}`);
+          } else {
+            log(`✗ ${tag} failed: ${row.error || 'Unknown error'}`);
+          }
+        }
+
+        // Refresh after update
+        await loadListings();
+      }catch(e){
+        log(`Bulk update failed: ${e.message}`);
+      }finally{
+        setStatus('');
+      }
+    }
+
+    function setStoreFilter(store){
+      state.store = store;
+      document.querySelectorAll('.seg button').forEach(b => b.classList.toggle('active', b.getAttribute('data-store') === store));
+      render();
+    }
+
+    // Wire controls
+    $('refreshBtn').addEventListener('click', loadListings);
+    $('pmSearch').addEventListener('input', (e) => { state.q = e.target.value || ''; render(); });
+    $('pmSort').addEventListener('change', (e) => { state.sort = e.target.value; render(); });
+    $('pmMode').addEventListener('change', (e) => { state.mode = e.target.value; render(); });
+    $('pmValue').addEventListener('input', (e) => {
+      const raw = (e.target.value || '').trim();
+      state.value = raw === '' ? null : Number(raw);
+      render();
+    });
+    $('applyBtn').addEventListener('click', applyBulkUpdate);
+    $('selectAllBtn').addEventListener('click', () => {
+      for(const k of state.lastRenderKeys) state.selected.add(k);
+      render();
+    });
+    $('clearSelBtn').addEventListener('click', () => {
+      state.selected.clear();
+      render();
+    });
+    $('selectAllCheckbox').addEventListener('change', (e) => {
+      if(e.target.checked){
+        for(const k of state.lastRenderKeys) state.selected.add(k);
+      } else {
+        for(const k of state.lastRenderKeys) state.selected.delete(k);
+      }
+      render();
+    });
+    $('clearLogBtn').addEventListener('click', () => { $('pmLog').textContent = ''; });
+    document.querySelectorAll('.seg button').forEach(b => b.addEventListener('click', () => setStoreFilter(b.getAttribute('data-store'))));
+
+    // Init
+    document.addEventListener('DOMContentLoaded', () => {
+      try{ if(window.applyTranslations) window.applyTranslations(); }catch(e){}
+      loadListings();
+    });
+  </script>
+</body>
+</html>

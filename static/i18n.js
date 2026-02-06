@@ -33,6 +33,7 @@ const translations = {
 
   // ===== index.html =====
   list_manager: { en: 'List Manager', lt: 'Sąrašų tvarkyklė' },
+  price_master: { en: 'Price Master', lt: 'Kainų meistras' },
   store_listing_helper: { en: 'Store Listing Helper', lt: 'Parduotuvės pagalbininkas' },
   store_helper: { en: 'Store Doctor', lt: 'Parduotuvės daktaras' },
   fb_listings: { en: 'FB Listings', lt: 'FB skelbimai' },
@@ -487,51 +488,462 @@ function applyTranslations() {
   updateToggleUI();
 }
 
-// Create language toggle widget
-function createLangToggle() {
-  const lang = getLang();
-  if (!document.getElementById('lang-toggle-style')) {
-    const style = document.createElement('style');
-    style.id = 'lang-toggle-style';
-    style.textContent = `
-      :root { --lang-toggle-offset: 96px; }
-      .lang-safe-right { margin-right: var(--lang-toggle-offset, 96px) !important; }
-      #lang-toggle { margin:0; }
-      #lang-toggle button {
-        margin:0 !important;
-        padding:0 12px !important;
-        min-height:26px !important;
-        height:26px !important;
-        font-size:12px !important;
-        line-height:1 !important;
-        border-radius:999px !important;
-        appearance:none;
-        -webkit-appearance:none;
-        box-shadow:none !important;
-      }
-      #lang-toggle button:focus { outline: none; }
-    `;
-    document.head.appendChild(style);
+// --------------------
+// Theme (Day / Night)
+// --------------------
+const THEME_MODE_KEY = 'ss_theme_mode'; // 'auto' | 'day' | 'night'
+const THEME_NIGHT_START_KEY = 'ss_theme_night_start'; // '19:00'
+const THEME_DAY_START_KEY = 'ss_theme_day_start'; // '07:00'
+const THEME_APPLIED_KEY = 'ss_theme_applied'; // internal (no need for UI to touch)
+
+function _lsGet(key, fallback=null){
+  try{
+    const v = localStorage.getItem(key);
+    return v === null ? fallback : v;
+  }catch(e){
+    return fallback;
   }
-  const toggle = document.createElement('div');
-  toggle.id = 'lang-toggle';
-  toggle.style.cssText = 'position:fixed;top:10px;right:10px;z-index:99999;display:flex;align-items:center;gap:4px;padding:3px;border-radius:999px;background:rgba(255,255,255,0.96);border:1px solid #dfe6e9;box-shadow:0 6px 16px rgba(0,0,0,0.12);font-size:12px;font-weight:700;font-family:Segoe UI,Arial,sans-serif;margin:0;';
+}
+
+function _lsSet(key, val){
+  try{
+    if(val === null || typeof val === 'undefined'){
+      localStorage.removeItem(key);
+    } else {
+      localStorage.setItem(key, String(val));
+    }
+  }catch(e){}
+}
+
+function getThemeMode(){
+  const m = (_lsGet(THEME_MODE_KEY, 'auto') || 'auto').toString().trim().toLowerCase();
+  if(m === 'day' || m === 'night' || m === 'auto') return m;
+  return 'auto';
+}
+
+function _parseHHMM(val, fallbackMinutes){
+  const s = (val ?? '').toString().trim();
+  const m = s.match(/^(\d{1,2}):(\d{2})$/);
+  if(!m) return fallbackMinutes;
+  const hh = Math.min(23, Math.max(0, parseInt(m[1], 10)));
+  const mm = Math.min(59, Math.max(0, parseInt(m[2], 10)));
+  return (hh * 60) + mm;
+}
+
+function _isNightNow(date, nightStartMin, dayStartMin){
+  const nowMin = (date.getHours() * 60) + date.getMinutes();
+  if(nightStartMin === dayStartMin) return true; // edge case: "always night"
+  if(nightStartMin > dayStartMin){
+    return nowMin >= nightStartMin || nowMin < dayStartMin; // wraps midnight
+  }
+  return nowMin >= nightStartMin && nowMin < dayStartMin; // doesn't wrap (unusual but supported)
+}
+
+function _computeAutoTheme(){
+  const nightStartStr = _lsGet(THEME_NIGHT_START_KEY, '19:00');
+  const dayStartStr = _lsGet(THEME_DAY_START_KEY, '07:00');
+  const nightStartMin = _parseHHMM(nightStartStr, 19 * 60);
+  const dayStartMin = _parseHHMM(dayStartStr, 7 * 60);
+  const isNight = _isNightNow(new Date(), nightStartMin, dayStartMin);
+  return isNight ? 'night' : 'day';
+}
+
+function getAppliedTheme(){
+  const applied = (_lsGet(THEME_APPLIED_KEY, '') || '').toString().trim().toLowerCase();
+  if(applied === 'day' || applied === 'night') return applied;
+  return '';
+}
+
+function applyThemeFromStorage(){
+  const mode = getThemeMode();
+  const theme = mode === 'auto' ? _computeAutoTheme() : mode;
+
+  const root = document.documentElement;
+  root.classList.remove('ss-theme-day', 'ss-theme-night');
+  root.classList.add(theme === 'night' ? 'ss-theme-night' : 'ss-theme-day');
+  _lsSet(THEME_APPLIED_KEY, theme);
+  updateToggleUI();
+}
+
+function setThemeMode(mode){
+  const m = (mode || '').toString().trim().toLowerCase();
+  if(m !== 'auto' && m !== 'day' && m !== 'night') return;
+  _lsSet(THEME_MODE_KEY, m);
+  applyThemeFromStorage();
+}
+
+function toggleThemeManual(){
+  const cur = getAppliedTheme() || (getThemeMode() === 'auto' ? _computeAutoTheme() : getThemeMode());
+  const next = (cur === 'night') ? 'day' : 'night';
+  setThemeMode(next); // manual override (auto can be re-enabled in /misc)
+}
+
+let _themeAutoTimer = null;
+function _startAutoThemeTimer(){
+  if(_themeAutoTimer) return;
+  _themeAutoTimer = setInterval(() => {
+    if(getThemeMode() !== 'auto') return;
+    applyThemeFromStorage();
+  }, 60 * 1000);
+
+  document.addEventListener('visibilitychange', () => {
+    if(document.visibilityState === 'visible' && getThemeMode() === 'auto'){
+      applyThemeFromStorage();
+    }
+  });
+}
+
+// --------------------
+// App-Wide Top Banner
+// --------------------
+function ensureTopBannerStyles(){
+  if(document.getElementById('ss-top-banner-style')) return;
+  const style = document.createElement('style');
+  style.id = 'ss-top-banner-style';
+  style.textContent = `
+    :root { --ss-banner-h: 44px; }
+
+    html.ss-theme-day{
+      color-scheme: light;
+      --primary: #0984e3;
+      --accent: #00b894;
+      --bg: #f9f9f9;
+      --card: #fff;
+      --border: #e0e0e0;
+      --radius: 14px;
+      --success: #4caf50;
+      --success-light: #e8f5e9;
+
+      --ink: #0f172a;
+      --ink-bright: #0b1220;
+      --muted: #475569;
+      --muted-dim: #64748b;
+      --bg0: #f9f9f9;
+      --bg1: #ffffff;
+      --bg2: #f1f5f9;
+      --card-hover: #f8fafc;
+      --border-hover: rgba(0, 0, 0, 0.14);
+      --shadow: 0 16px 40px rgba(0, 0, 0, 0.12);
+      --shadow2: 0 2px 10px rgba(0, 0, 0, 0.08);
+      --focus: 0 0 0 4px rgba(0, 184, 148, 0.22);
+
+      --ss-banner-bg: rgba(255,255,255,0.92);
+      --ss-banner-border: rgba(0,0,0,0.10);
+      --ss-banner-ink: #0f172a;
+      --ss-banner-ink-muted: rgba(15,23,42,0.72);
+    }
+
+    html.ss-theme-night{
+      color-scheme: dark;
+      --primary: #60a5fa;
+      --accent: #10b981;
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: rgba(255, 255, 255, 0.08);
+      --radius: 14px;
+      --success: #10b981;
+      --success-light: rgba(16,185,129,0.12);
+
+      --ink: #e2e8f0;
+      --ink-bright: #f8fafc;
+      --muted: #94a3b8;
+      --muted-dim: #64748b;
+      --bg0: #0f172a;
+      --bg1: #1e293b;
+      --bg2: #334155;
+      --card-hover: #263445;
+      --border-hover: rgba(255,255,255,0.14);
+      --shadow: 0 16px 40px rgba(0,0,0,0.35);
+      --shadow2: 0 2px 10px rgba(0,0,0,0.25);
+      --focus: 0 0 0 4px rgba(16,185,129,0.25);
+
+      --ss-banner-bg: rgba(15, 23, 42, 0.88);
+      --ss-banner-border: rgba(255,255,255,0.08);
+      --ss-banner-ink: #e2e8f0;
+      --ss-banner-ink-muted: rgba(226,232,240,0.72);
+    }
+
+    html.ss-theme-night body{
+      background: var(--bg0);
+      color: var(--ink);
+    }
+    html.ss-theme-day body{
+      background: var(--bg);
+      color: #111827;
+    }
+
+    /* Make legacy templates readable in Night Mode (many hardcode dark text colors). */
+    html.ss-theme-night h1,
+    html.ss-theme-night h2,
+    html.ss-theme-night h3,
+    html.ss-theme-night h4,
+    html.ss-theme-night h5,
+    html.ss-theme-night h6{
+      color: var(--ink);
+    }
+    html.ss-theme-night p,
+    html.ss-theme-night label,
+    html.ss-theme-night .desc,
+    html.ss-theme-night .hint{
+      color: var(--muted);
+    }
+    html.ss-theme-night table,
+    html.ss-theme-night th,
+    html.ss-theme-night td{
+      color: var(--ink);
+    }
+
+    /* Tables: force a consistent dark surface (many templates hardcode white cell backgrounds). */
+    html.ss-theme-night table{
+      background: var(--card) !important;
+      border-color: var(--border) !important;
+    }
+    html.ss-theme-night table th{
+      background: var(--bg2) !important;
+      color: var(--ink) !important;
+      border-color: var(--border) !important;
+    }
+    html.ss-theme-night table td{
+      background: var(--card) !important;
+      color: var(--ink) !important;
+      border-color: var(--border) !important;
+    }
+    html.ss-theme-night table tr:hover td{
+      background: rgba(255,255,255,0.04) !important;
+    }
+
+    /* Index "Ready to Ship" tables explicitly set backgrounds per-cell. */
+    html.ss-theme-night #sold-orders-table,
+    html.ss-theme-night #completed-orders-table{
+      border-color: var(--border) !important;
+    }
+    html.ss-theme-night #sold-orders-table th,
+    html.ss-theme-night #sold-orders-table td,
+    html.ss-theme-night #completed-orders-table th,
+    html.ss-theme-night #completed-orders-table td{
+      border-color: var(--border) !important;
+    }
+    html.ss-theme-night #sold-orders-table tr.handled td,
+    html.ss-theme-night #sold-orders-table tr.handled{
+      background: rgba(255,255,255,0.06) !important;
+      color: var(--muted) !important;
+    }
+
+    /* Common overlays/panels that are hardcoded white in legacy templates. */
+    html.ss-theme-night .modal .card,
+    html.ss-theme-night .dropdown-panel,
+    html.ss-theme-night .sold-popup{
+      background: var(--card) !important;
+      color: var(--ink) !important;
+      border-color: rgba(255,255,255,0.14) !important;
+    }
+    html.ss-theme-night .sold-popup-close{
+      color: var(--muted) !important;
+    }
+    html.ss-theme-night #results-summary{
+      background: rgba(255,255,255,0.04) !important;
+      color: var(--ink) !important;
+      border: 1px solid var(--border) !important;
+    }
+
+    html.ss-has-top-banner body{
+      padding-top: calc(var(--ss-banner-h) + var(--ss-body-pad-top, 0px));
+    }
+
+    #ss-top-banner{
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 100000;
+      background: var(--ss-banner-bg);
+      border-bottom: 1px solid var(--ss-banner-border);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+    }
+    #ss-top-banner .ss-inner{
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      padding: 8px 10px;
+      font-family: 'Segoe UI', Arial, sans-serif;
+    }
+
+    .ss-seg{
+      display: inline-flex;
+      border-radius: 999px;
+      overflow: hidden;
+      border: 1px solid var(--ss-banner-border);
+      background: rgba(0,0,0,0.02);
+    }
+    html.ss-theme-night .ss-seg{ background: rgba(255,255,255,0.04); }
+
+    .ss-seg button{
+      appearance: none;
+      -webkit-appearance: none;
+      border: 0;
+      margin: 0;
+      padding: 0 12px;
+      height: 28px;
+      min-width: 44px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .3px;
+      background: transparent;
+      color: var(--ss-banner-ink-muted);
+      transition: background .15s ease, color .15s ease, transform .1s ease;
+    }
+    .ss-seg button:hover{ transform: translateY(-1px); }
+    .ss-seg button.active{
+      background: var(--accent);
+      color: #fff;
+    }
+
+    .ss-pill{
+      appearance: none;
+      -webkit-appearance: none;
+      border: 1px solid var(--ss-banner-border);
+      background: rgba(0,0,0,0.02);
+      color: var(--ss-banner-ink);
+      border-radius: 999px;
+      height: 28px;
+      padding: 0 12px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .2px;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      transition: transform .1s ease, filter .15s ease;
+      white-space: nowrap;
+    }
+    html.ss-theme-night .ss-pill{ background: rgba(255,255,255,0.04); }
+    .ss-pill:hover{ transform: translateY(-1px); filter: brightness(1.05); }
+
+    .ss-pill .ss-dot{
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      background: var(--accent);
+      box-shadow: 0 0 0 3px rgba(16,185,129,0.18);
+    }
+
+    html.ss-has-top-banner .topbar,
+    html.ss-has-top-banner .navbar,
+    html.ss-has-top-banner .token-banner,
+    html.ss-has-top-banner .testing-banner{
+      top: var(--ss-banner-h) !important;
+    }
+    html.ss-has-top-banner thead{
+      top: var(--ss-banner-h) !important;
+    }
+    html.ss-has-top-banner thead th{
+      top: var(--ss-banner-h) !important;
+    }
+    html.ss-has-top-banner [style*="position: sticky"][style*="top: 0"],
+    html.ss-has-top-banner [style*="position:sticky"][style*="top:0"]{
+      top: var(--ss-banner-h) !important;
+    }
+
+    /* Listing Manager: make Status + Refresh buttons blue in Night Mode. */
+    html.ss-theme-night #status-filter-btn,
+    html.ss-theme-night #refresh-btn{
+      background: #2563eb !important;
+      border-color: rgba(37,99,235,0.55) !important;
+      color: #ffffff !important;
+    }
+    html.ss-theme-night #status-filter-btn:hover,
+    html.ss-theme-night #refresh-btn:hover{
+      filter: brightness(1.05);
+    }
+
+    /* Index → Ready To Ship tables live in their own scroll panes.
+       Keep sticky headers pinned to the pane top (not offset by the global banner). */
+    html.ss-has-top-banner #sold-orders-table thead tr,
+    html.ss-has-top-banner #completed-orders-table thead tr,
+    html.ss-has-top-banner #sold-orders-table thead th,
+    html.ss-has-top-banner #completed-orders-table thead th,
+    html.ss-has-top-banner #sold-orders-table thead,
+    html.ss-has-top-banner #completed-orders-table thead{
+      top: 0 !important;
+    }
+
+    @media print{
+      #ss-top-banner{ display:none !important; }
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+function createTopBanner(){
+  if(document.getElementById('ss-top-banner')) return;
+  ensureTopBannerStyles();
+
+  // Capture the page's original body padding-top so we can safely add
+  // banner space without breaking page-specific layouts.
+  try{
+    const pt = parseFloat(getComputedStyle(document.body).paddingTop || '0') || 0;
+    document.documentElement.style.setProperty('--ss-body-pad-top', `${pt}px`);
+  }catch(e){}
+
+  const bar = document.createElement('div');
+  bar.id = 'ss-top-banner';
+  bar.setAttribute('aria-label', 'Top banner');
+
+  const inner = document.createElement('div');
+  inner.className = 'ss-inner';
+
+  const langSeg = document.createElement('div');
+  langSeg.className = 'ss-seg';
 
   const btnEn = document.createElement('button');
-  btnEn.textContent = 'ENG';
+  btnEn.type = 'button';
   btnEn.id = 'lang-btn-en';
-  btnEn.style.cssText = 'border:none;min-width:44px;height:26px;padding:0 12px;border-radius:999px;cursor:pointer;transition:all 0.2s;display:flex;align-items:center;justify-content:center;line-height:1;font-size:12px;font-weight:700;margin:0;';
+  btnEn.textContent = 'ENG';
   btnEn.onclick = () => setLang('en');
 
   const btnLt = document.createElement('button');
-  btnLt.textContent = 'LT';
+  btnLt.type = 'button';
   btnLt.id = 'lang-btn-lt';
-  btnLt.style.cssText = 'border:none;min-width:38px;height:26px;padding:0 12px;border-radius:999px;cursor:pointer;transition:all 0.2s;display:flex;align-items:center;justify-content:center;line-height:1;font-size:12px;font-weight:700;margin:0;';
+  btnLt.textContent = 'LT';
   btnLt.onclick = () => setLang('lt');
 
-  toggle.appendChild(btnEn);
-  toggle.appendChild(btnLt);
-  document.body.appendChild(toggle);
+  langSeg.appendChild(btnEn);
+  langSeg.appendChild(btnLt);
+
+  const themeBtn = document.createElement('button');
+  themeBtn.type = 'button';
+  themeBtn.id = 'ss-theme-toggle';
+  themeBtn.className = 'ss-pill';
+  themeBtn.title = 'Toggle Day/Night (auto can be set in Tools → Misc)';
+  themeBtn.innerHTML = `<span class="ss-dot" aria-hidden="true"></span><span id="ss-theme-label">Theme</span>`;
+  themeBtn.onclick = toggleThemeManual;
+
+  inner.appendChild(langSeg);
+  inner.appendChild(themeBtn);
+  bar.appendChild(inner);
+
+  if(document.body.firstChild){
+    document.body.insertBefore(bar, document.body.firstChild);
+  } else {
+    document.body.appendChild(bar);
+  }
+
+  const root = document.documentElement;
+  root.classList.add('ss-has-top-banner');
+
+  const measure = () => {
+    try{
+      const h = Math.ceil(bar.getBoundingClientRect().height || 44);
+      root.style.setProperty('--ss-banner-h', `${h}px`);
+    }catch(e){}
+  };
+  measure();
+  window.addEventListener('resize', measure);
+
   updateToggleUI();
 }
 
@@ -539,25 +951,28 @@ function updateToggleUI() {
   const lang = getLang();
   const btnEn = document.getElementById('lang-btn-en');
   const btnLt = document.getElementById('lang-btn-lt');
-  if (!btnEn || !btnLt) return;
-  if (lang === 'en') {
-    btnEn.style.background = '#00b894';
-    btnEn.style.color = '#fff';
-    btnLt.style.background = '#fff';
-    btnLt.style.color = '#333';
-  } else {
-    btnLt.style.background = '#00b894';
-    btnLt.style.color = '#fff';
-    btnEn.style.background = '#fff';
-    btnEn.style.color = '#333';
+  if (btnEn) btnEn.classList.toggle('active', lang === 'en');
+  if (btnLt) btnLt.classList.toggle('active', lang === 'lt');
+
+  const themeLabel = document.getElementById('ss-theme-label');
+  const mode = getThemeMode();
+  const applied = getAppliedTheme() || (mode === 'auto' ? _computeAutoTheme() : mode);
+  if(themeLabel){
+    const suffix = mode === 'auto' ? ' (Auto)' : '';
+    themeLabel.textContent = (applied === 'night' ? 'Night' : 'Day') + suffix;
   }
 }
 
-// Auto-init on DOMContentLoaded
-document.addEventListener('DOMContentLoaded', () => {
-  createLangToggle();
+// Auto-init
+function _i18nInit(){
+  createTopBanner();
   applyTranslations();
-});
+}
+if(document.readyState === 'loading'){
+  document.addEventListener('DOMContentLoaded', _i18nInit);
+} else {
+  _i18nInit();
+}
 
 // Expose globally
 window.t = t;
@@ -565,6 +980,16 @@ window.setLang = setLang;
 window.getLang = getLang;
 window.applyTranslations = applyTranslations;
 window.i18n = { t, setLang, getLang, applyTranslations, translations };
+window.ssTheme = {
+  getMode: getThemeMode,
+  setMode: setThemeMode,
+  apply: applyThemeFromStorage,
+  getApplied: getAppliedTheme,
+};
+
+// Apply theme as early as possible to reduce "flash" between page loads.
+applyThemeFromStorage();
+_startAutoThemeTimer();
 
 })();
 
