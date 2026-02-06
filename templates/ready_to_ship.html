@@ -1,0 +1,1379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.ico') }}">
+    <link rel="preconnect" href="https://cdnjs.cloudflare.com">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" media="print" onload="this.media='all'">
+    <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css"></noscript>
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='apple-touch-icon.png') }}">
+    <title>Ready to Ship</title>
+    <style>
+        :root {
+            --primary: #0984e3;
+            --accent: #00b894;
+            --bg: #f9f9f9;
+            --card: #fff;
+            --border: #e0e0e0;
+            --radius: 14px;
+            --success: #4caf50;
+            --success-light: #e8f5e9;
+        }
+        
+        @keyframes slideOutRight {
+            to {
+                transform: translateX(100%);
+                opacity: 0;
+                height: 0;
+                padding-top: 0;
+                padding-bottom: 0;
+                margin-bottom: 0;
+                border-width: 0;
+            }
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        
+        @keyframes slideOut {
+            from {
+                transform: translateX(0);
+                opacity: 1;
+            }
+            to {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+        }
+        
+        @keyframes slideUp {
+            from {
+                transform: translateY(20px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+        
+        .tab-button {
+            background: none;
+            border: none;
+            padding: 10px 20px;
+            font-size: 1em;
+            cursor: pointer;
+            border-bottom: 3px solid transparent;
+            transition: all 0.3s ease;
+            font-weight: 600;
+            color: #666;
+        }
+        
+        .tab-button.active {
+            color: var(--primary);
+            border-bottom-color: var(--primary);
+        }
+        
+        .tab-content {
+            display: none;
+            animation: fadeIn 0.3s ease-in-out;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        .completed-row {
+            background-color: var(--success-light) !important;
+            transition: all 0.3s ease;
+        }
+        
+        .slide-out {
+            animation: slideOutRight 0.5s forwards;
+            overflow: hidden;
+            transition: all 0.5s ease;
+        }
+
+        /* Loading overlay */
+        .page-loading-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:99999;align-items:center;justify-content:center}
+        .page-loading-overlay.active{display:flex}
+        .loading-spinner-large{border:4px solid #f3f3f3;border-top:4px solid #00b894;border-radius:50%;width:50px;height:50px;animation:spin 1s linear infinite}
+
+        /* Refresh button */
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .refresh-btn {
+            width: 32px; height: 32px; border-radius: 50%; border: none;
+            background: #f0f0f0; cursor: pointer; display: flex;
+            align-items: center; justify-content: center; transition: background 0.2s;
+        }
+        .refresh-btn:hover { background: #e0e0e0; }
+        .refresh-btn.spinning i { animation: spin 0.8s linear; }
+
+        /* Days confirm button */
+        .days-confirm-btn {
+            width: 26px; height: 26px; border-radius: 50%; border: none;
+            background: var(--success); color: #fff; cursor: pointer;
+            display: none; align-items: center; justify-content: center;
+            font-size: 0.75rem; transition: opacity 0.2s, transform 0.2s;
+        }
+        .days-confirm-btn.visible { display: inline-flex; }
+        .days-confirm-btn:hover { transform: scale(1.1); }
+
+        /* Status buttons */
+        .status-btn {
+            border: none; color: #fff; padding: 6px 14px; border-radius: 20px;
+            font-size: 0.8rem; cursor: pointer; transition: all 0.2s;
+            display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+        }
+        .status-btn:hover { filter: brightness(1.1); transform: scale(1.05); }
+        .status-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+        .status-btn-done { background: var(--success); }
+        .status-btn-undo { background: #ff9800; }
+
+        /* Table header class */
+        .orders-th {
+            padding: 8px; border-bottom: 2px solid #e0e0e0; font-size: 0.85rem;
+        }
+
+        /* Completed tab styling */
+        #completed-orders-table thead tr { background: #e8f5e9 !important; }
+        #completed-orders-table tbody tr {
+            border-left: 3px solid var(--success);
+        }
+        .token-banner {
+            background: #d32f2f;
+            color: #fff;
+            text-align: center;
+            padding: 14px 16px;
+            font-weight: 700;
+            font-size: 1.05rem;
+            position: sticky;
+            top: 0;
+            z-index: 10001;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+            border-bottom: 3px solid #b71c1c;
+            display: none;
+        }
+        .token-banner .token-item {
+            display: inline-block;
+            margin: 0 12px;
+        }
+        .testing-banner {
+            background: #ff9800;
+            color: #fff;
+            text-align: center;
+            padding: 12px 16px;
+            font-weight: 700;
+            font-size: 1.1rem;
+            position: sticky;
+            top: 0;
+            z-index: 10000;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+            letter-spacing: 0.5px;
+            border-bottom: 3px solid #f57c00;
+        }
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background: var(--bg);
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+            opacity: 1;
+        }
+        .container {
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 20px 16px 80px 16px;
+        }
+        h1, h2 {
+            margin: 0;
+            font-weight: 600;
+        }
+        .page-header{
+            display:flex;
+            align-items:center;
+            justify-content:space-between;
+            gap:12px;
+            margin-bottom:16px;
+        }
+        .page-title{
+            font-size:1.6rem;
+            letter-spacing:0.2px;
+        }
+        .main-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-bottom: 32px;
+        }
+        .main-actions button, .main-actions a > button {
+            border: none;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .main-actions .main-btn {
+            width: 100%;
+            font-size: 1.15rem;
+            padding: 16px 0;
+            color: #fff;
+            border-radius: var(--radius);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+        /* Per-button hover variants: lighter shade for main buttons, darker for tools */
+        .btn-lighten:hover { filter: brightness(1.06); transition: filter 0.15s ease; }
+        .btn-darken:hover { filter: brightness(0.92); transition: filter 0.15s ease; }
+        .section-card {
+            background: var(--card);
+            border-radius: var(--radius);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+            padding: 16px 16px 12px 16px;
+            margin-bottom: 18px;
+            border: 1px solid var(--border);
+        }
+        #sold-orders-table {
+            border-collapse: collapse;
+            width: 100%;
+            margin-bottom: 10px;
+        }
+        #sold-orders-table, #sold-orders-table th, #sold-orders-table td,
+        #completed-orders-table, #completed-orders-table th, #completed-orders-table td {
+            border: 1px solid #e1e5ea;
+        }
+        #sold-orders-table th, #sold-orders-table td,
+        #completed-orders-table th, #completed-orders-table td {
+            padding: 8px 10px;
+            background: #fff;
+        }
+        #sold-orders-table th, #completed-orders-table th {
+            background: #f6f7f9;
+        }
+        #sold-orders-table tr.handled {
+            text-decoration: line-through;
+            background: #e0e0e0;
+            opacity: 0.6;
+        }
+        .sold-td-small {
+            font-size: 12px;
+            max-width: 120px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            cursor: pointer;
+        }
+        .sold-popup {
+            display: none;
+            position: fixed;
+            z-index: 9999;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            background: #fff;
+            border: 2px solid #333;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 16px rgba(0,0,0,0.3);
+            max-width: 90vw;
+            max-height: 70vh;
+            overflow: auto;
+            font-size: 16px;
+        }
+        .sold-popup-close {
+            float: right;
+            font-size: 22px;
+            font-weight: bold;
+            color: #333;
+            cursor: pointer;
+            margin-left: 10px;
+        }
+        html.ss-theme-night .sold-popup {
+            background: #1e293b;
+            color: #e2e8f0;
+            border-color: rgba(255,255,255,0.1);
+            box-shadow: 0 12px 30px rgba(0,0,0,0.45);
+        }
+        html.ss-theme-night .sold-popup-close { color: #e2e8f0; }
+        .order-popup-overlay { }
+        .order-popup-card {
+            background: #fff;
+            border-radius: 14px;
+            color: #111;
+            border: 1px solid #e5e7eb;
+        }
+        .order-popup-card .popup-muted { color: #666; }
+        .order-popup-card .popup-divider { border-top-color: #e0e0e0; }
+        .order-popup-card .popup-group-title { color: #2c3e50; }
+        .order-popup-card .popup-link { color: #0984e3; }
+        .order-popup-card .popup-qty { color: #666; }
+        .order-popup-card .popup-loc-banner { color: #e53935; }
+        .order-popup-card .popup-image,
+        .order-popup-card .popup-loc-image {
+            background: #f8f8f8;
+            border: 1px solid #e5e7eb;
+        }
+        html.ss-theme-night .order-popup-card {
+            background: #1e293b !important;
+            color: #e2e8f0 !important;
+            border-color: rgba(255,255,255,0.1) !important;
+            box-shadow: 0 12px 30px rgba(0,0,0,0.45) !important;
+        }
+        html.ss-theme-night .order-popup-card .popup-muted { color: #94a3b8 !important; }
+        html.ss-theme-night .order-popup-card .popup-divider { border-top-color: rgba(255,255,255,0.12) !important; }
+        html.ss-theme-night .order-popup-card .popup-group-title { color: #e2e8f0 !important; }
+        html.ss-theme-night .order-popup-card .popup-link { color: #7dd3fc !important; }
+        html.ss-theme-night .order-popup-card .popup-qty { color: #94a3b8 !important; }
+        html.ss-theme-night .order-popup-card .popup-loc-banner { color: #fca5a5 !important; }
+        html.ss-theme-night .order-popup-card .popup-image,
+        html.ss-theme-night .order-popup-card .popup-loc-image {
+            background: #0f172a;
+            border-color: rgba(255,255,255,0.12);
+        }
+        html.ss-theme-night .order-popup-card .popup-close-btn {
+            background: #334155 !important;
+            color: #e2e8f0 !important;
+        }
+        html.ss-theme-night .order-popup-card .popup-close-btn:hover {
+            background: #475569 !important;
+        }
+        .tools-section {
+            background: var(--card);
+            border-radius: var(--radius);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+            padding: 14px 12px 10px 12px;
+            border: 1px solid var(--border);
+            margin-bottom: 18px;
+        }
+        .tools-section h3 {
+            margin: 0 0 10px 0;
+            font-size: 1.1rem;
+            color: #555;
+            font-weight: 500;
+        }
+        .tools-row {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .tools-row label {
+            font-size: 0.98rem;
+            color: #444;
+        }
+        @media (max-width: 900px) {
+            .container { padding: 16px 12px 80px 12px; }
+        }
+        @media (max-width: 600px) {
+            .container { padding: 12px 8px 80px 8px; }
+            .section-card { padding: 12px 10px 8px 10px; }
+            .page-title { font-size:1.35rem; }
+        }
+    </style>
+</head>
+<body>
+    <div class="token-banner" id="tokenBanner"></div>
+    {% if is_testing_server %}
+    <div class="testing-banner">
+        ⚠️ TESTING SERVER - {{ server_hostname }} ⚠️
+    </div>
+    {% endif %}
+    <div id="pageLoadingOverlay" class="page-loading-overlay"><div class="loading-spinner-large"></div></div>
+    <div class="container">
+        <div class="page-header">
+            <h1 class="page-title" data-i18n="ready_to_ship">Ready to Ship</h1>
+        </div>
+
+        <div class="section-card" style="overflow-x: auto;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <button class="tab-button active" data-tab="pending" data-i18n="ready_to_ship">Ready to Ship</button>
+                    <button class="tab-button" data-tab="completed" data-i18n="completed">Completed</button>
+                    <span id="pending-count" style="background: #4caf50; color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; font-weight: bold;">0</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <button id="refresh-orders-btn" class="refresh-btn" title="Refresh orders">
+                        <i class="fas fa-arrows-rotate" style="font-size: 0.85rem; color: #666;"></i>
+                    </button>
+                    <label for="sold-orders-days" style="font-size:0.9rem; white-space: nowrap;" data-i18n="days">Days:</label>
+                    <input type="number" id="sold-orders-days" value="2" min="1" max="120" style="width: 50px; padding: 4px; border: 1px solid #ddd; border-radius: 4px;">
+                    <button id="days-confirm-btn" class="days-confirm-btn" title="Apply"><i class="fas fa-check"></i></button>
+                </div>
+            </div>
+            <div class="tab-content active" id="pending-orders">
+                <div style="border: 1px solid #e0e0e0; border-radius: 6px;">
+                    <table id="sold-orders-table" style="width: 100%; border-collapse: collapse;">
+                        <thead>
+                            <tr style="background:#f5f5f5; position: sticky; top: 0; z-index: 10;">
+                                <th class="orders-th" style="text-align: left;" data-i18n="title">Title</th>
+                                <th class="orders-th" style="text-align: left;" data-i18n="info">Info</th>
+                                <th class="orders-th" style="text-align: center; width: 60px;" data-i18n="loc">Loc</th>
+                                <th class="orders-th" style="text-align: center; width: 40px;">#</th>
+                                <th class="orders-th" style="text-align: center; width: 80px;" data-i18n="status">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody style="font-size: 0.85rem;">
+                            <tr class="loading-row">
+                                <td colspan="5" style="text-align: center; padding: 20px; color: #666;">
+                                    <i class="fas fa-spinner fa-spin"></i> <span data-i18n="loading_orders">Loading orders...</span>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="tab-content" id="completed-orders">
+                <div style="border: 1px solid #e0e0e0; border-radius: 6px; min-height: 100px;">
+                    <table id="completed-orders-table" style="width: 100%; border-collapse: collapse;">
+                        <thead>
+                            <tr style="position: sticky; top: 0; z-index: 10;">
+                                <th class="orders-th" style="text-align: left;" data-i18n="title">Title</th>
+                                <th class="orders-th" style="text-align: left;" data-i18n="info">Info</th>
+                                <th class="orders-th" style="text-align: center; width: 60px;" data-i18n="loc">Loc</th>
+                                <th class="orders-th" style="text-align: center; width: 40px;">#</th>
+                                <th class="orders-th" style="text-align: center; width: 80px;" data-i18n="status">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody style="font-size: 0.85rem;">
+                            <tr class="loading-row">
+                                <td colspan="5" style="text-align: center; padding: 20px; color: #666;">
+                                    <i class="fas fa-spinner fa-spin"></i> <span data-i18n="loading_orders">Loading orders...</span>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        
+    </div>
+
+<script>
+// ============================================================================
+// READY TO SHIP - OPTIMIZED ORDER MANAGEMENT SYSTEM
+// ============================================================================
+(function() {
+'use strict';
+
+// Global state management with localStorage caching
+const OrderManager = {
+    orders: new Map(),
+    isLoading: false,
+    currentDays: 2,
+    cacheKey: 'soldOrders_cache',
+    cacheTimestampKey: 'soldOrders_timestamp',
+    cacheDuration: 60 * 60 * 1000, // 1 hour in milliseconds
+    
+    // Add or update order in cache (normalize ID to string)
+    setOrder(order) {
+        const id = String(order.id);
+        this.orders.set(id, { ...order, id });
+    },
+    
+    // Get order from cache (normalize ID to string)
+    getOrder(id) {
+        return this.orders.get(String(id));
+    },
+    
+    // Get all orders with optional filter
+    getOrders(filter = null) {
+        const allOrders = Array.from(this.orders.values());
+        if (!filter) return allOrders;
+        return allOrders.filter(filter);
+    },
+    
+    // Update order status in cache (normalize ID to string)
+    updateOrderStatus(id, isHandled) {
+        const order = this.orders.get(String(id));
+        if (order) {
+            order.isHandled = isHandled;
+            this.saveToLocalStorage(); // Persist changes
+        }
+    },
+    
+    // Save orders to localStorage
+    saveToLocalStorage() {
+        try {
+            // Only cache pending (Ready to Ship) orders
+            const ordersArray = Array.from(this.orders.values()).filter(o => !o.isHandled);
+            localStorage.setItem(this.cacheKey, JSON.stringify(ordersArray));
+            localStorage.setItem(this.cacheTimestampKey, Date.now().toString());
+        } catch (e) {
+            console.warn('Failed to save to localStorage:', e);
+        }
+    },
+    
+    // Load orders from localStorage
+    loadFromLocalStorage() {
+        try {
+            const timestamp = parseInt(localStorage.getItem(this.cacheTimestampKey) || '0');
+            const age = Date.now() - timestamp;
+            
+            // Check if cache is still valid
+            if (age > this.cacheDuration) {
+                console.log('Cache expired, age:', age, 'ms');
+                return null;
+            }
+            
+            const cached = localStorage.getItem(this.cacheKey);
+            if (!cached) return null;
+            
+            const ordersArray = JSON.parse(cached);
+            console.log('Loaded', ordersArray.length, 'orders from cache');
+            
+            // Restore to Map
+            this.orders.clear();
+            ordersArray.forEach(order => this.setOrder(order));
+            
+            return ordersArray;
+        } catch (e) {
+            console.warn('Failed to load from localStorage:', e);
+            return null;
+        }
+    },
+    
+    // Clear cache
+    clearCache() {
+        try {
+            localStorage.removeItem(this.cacheKey);
+            localStorage.removeItem(this.cacheTimestampKey);
+            this.orders.clear();
+        } catch (e) {
+            console.warn('Failed to clear cache:', e);
+        }
+    }
+};
+
+// Utility functions
+function esc(s) {
+    return String(s||'').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function tdTitle(order) {
+    const fullTitle = esc(order.title || '');
+    const imgSrc = esc(order.image || order.image_url || '');
+    const missingDataUrlThumb = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48"><rect width="100%" height="100%" fill="#f8f8f8"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#b0b0b0" font-size="8">No Img</text></svg>');
+    const thumbHtml = imgSrc 
+        ? `<img src="${imgSrc}" style="width:48px;height:48px;object-fit:cover;border-radius:6px;margin-right:8px;vertical-align:middle;" onerror="this.src='${missingDataUrlThumb}'" loading="lazy">`
+        : `<img src='${missingDataUrlThumb}' style="width:48px;height:48px;object-fit:cover;border-radius:6px;margin-right:8px;vertical-align:middle;">`;
+    return `<td class='sold-td-small'><a href="#" class="order-title-link" data-order-id="${order.id}" style="display:flex;align-items:center;">${thumbHtml}<span style="display:inline-block;max-width:220px;vertical-align:middle;">${fullTitle}</span></a></td>`;
+}
+
+function tdInfo(order) {
+    const buyer = esc(order.shipping_name || '');
+    const address = [order.shipping_street1, order.shipping_street2, order.shipping_city, order.shipping_state, order.shipping_postal_code, order.shipping_country].filter(Boolean).map(esc).join(' ');
+    return `<td class='sold-td-small'><a href="#" class="order-info-link" data-order-id="${order.id}">${buyer}</a></td>`;
+}
+
+function tdLocation(order) {
+    const missingDataUrl = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="120" height="80"><rect width="100%" height="100%" fill="#f8f8f8"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#b0b0b0" font-size="12">Image missing</text></svg>');
+    
+    // Check if multiple locations exist
+    if (order.locations && Array.isArray(order.locations) && order.locations.length > 1) {
+        // Multiple locations - show all codes as clickable links
+        const locationCodes = order.locations.map(loc => esc(loc.code)).join(', ');
+        return `<td class='sold-td-small'><a href="#" class="order-loc-link" data-order-id="${order.id}" style="color:#e53935;font-weight:bold;">${locationCodes}</a></td>`;
+    }
+    
+    // Single location (legacy or single result)
+    const locationText = esc(order.location || '');
+    
+    if (locationText.match(/\.(jpg|jpeg|png)$/i)) {
+        const thumb = `/static/pictureposition/${locationText}`;
+        return `<td class='sold-td-small'><a href="#" class="order-loc-link" data-order-id="${order.id}"><img src="${thumb}" style="max-width:60px;max-height:60px;border-radius:6px;" onerror="this.src='${missingDataUrl}'" loading="lazy"></a></td>`;
+    }
+    
+    // If no location, show "Find" link if search data available, otherwise placeholder
+    if (!locationText) {
+        if (order.location_search) {
+            const finderParams = new URLSearchParams({title: order.title || '', order_id: order.id || '', barcode: order.barcode || '', image: order.image || ''});
+            return `<td class='sold-td-small'><a href="/finder?${finderParams.toString()}" target="_blank" style="color:#e53935;font-weight:bold;font-size:0.75rem;text-decoration:none;padding:2px 6px;border:1px solid #e53935;border-radius:4px;">Find</a></td>`;
+        }
+        return `<td class='sold-td-small' style="color:#999;font-style:italic;">—</td>`;
+    }
+    
+    return `<td class='sold-td-small'><a href="#" class="order-loc-link" data-order-id="${order.id}">${locationText}</a></td>`;
+}
+
+function tdQuantity(order) {
+    const qty = order.quantity || '1';
+    const highlight = parseInt(qty) > 1 ? ' style="color:#e53935;font-weight:bold;background:#ffeaea;"' : '';
+    return `<td${highlight}>${qty}</td>`;
+}
+
+// Create a single order row
+function createOrderRow(order, isCompleted = false) {
+    const tr = document.createElement('tr');
+    tr.dataset.orderId = order.id;
+    tr.style.transition = 'all 0.3s ease';
+    
+    const buttonHtml = isCompleted
+        ? `<button class="handle-btn undo-btn status-btn status-btn-undo" data-id="${order.id}">
+            <i class="fas fa-rotate-left"></i>
+        </button>`
+        : `<button class="handle-btn status-btn status-btn-done" data-id="${order.id}">
+            <i class="fas fa-check"></i>
+        </button>`;
+    
+    tr.innerHTML = tdTitle(order) + tdInfo(order) + tdLocation(order) + tdQuantity(order) + 
+        `<td style="text-align: center;">${buttonHtml}</td>`;
+    
+    return tr;
+}
+
+// Update pending count badge
+function updatePendingCount() {
+    const count = OrderManager.getOrders(o => !o.isHandled).length;
+    const badge = document.getElementById('pending-count');
+    if (badge) {
+        badge.textContent = count;
+        badge.style.display = count > 0 ? 'inline-block' : 'none';
+    }
+    if (window.ssReadyCount && typeof window.ssReadyCount.set === 'function') {
+        window.ssReadyCount.set(count);
+    }
+}
+
+// Render orders to tables with performance optimization
+function renderSoldOrders(orders, fromCache = false) {
+    const pendingTbody = document.querySelector('#sold-orders-table tbody');
+    const completedTbody = document.querySelector('#completed-orders-table tbody');
+    
+    // Use DocumentFragment for better performance
+    const pendingFragment = document.createDocumentFragment();
+    const completedFragment = document.createDocumentFragment();
+    
+    let hasPending = false;
+    let hasCompleted = false;
+    
+    orders.forEach(order => {
+        OrderManager.setOrder(order);
+        const row = createOrderRow(order, order.isHandled);
+        
+        if (order.isHandled) {
+            completedFragment.appendChild(row);
+            hasCompleted = true;
+        } else {
+            pendingFragment.appendChild(row);
+            hasPending = true;
+        }
+    });
+    
+    // Clear and update pending table
+    pendingTbody.innerHTML = '';
+    if (hasPending) {
+        pendingTbody.appendChild(pendingFragment);
+    } else {
+        pendingTbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 20px; color: #666;">No pending orders</td></tr>';
+    }
+    
+    // Clear and update completed table
+    completedTbody.innerHTML = '';
+    if (hasCompleted) {
+        completedTbody.appendChild(completedFragment);
+    } else {
+        completedTbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 20px; color: #666;">No completed orders yet</td></tr>';
+    }
+    
+    updatePendingCount();
+    attachPopups();
+    
+    // Save to cache after rendering (unless already from cache)
+    if (!fromCache) {
+        OrderManager.saveToLocalStorage();
+    }
+}
+
+// ============================================================================
+// ORDER STATUS CHANGE HANDLER - With optimistic updates and rollback
+// ============================================================================
+
+async function handleOrderStatusChange(orderId, isUndo) {
+    console.log('handleOrderStatusChange called with:', orderId, 'isUndo:', isUndo);
+    
+    const order = OrderManager.getOrder(orderId);
+    if (!order) {
+        console.error('Order not found in cache:', orderId);
+        console.log('Available orders:', Array.from(OrderManager.orders.keys()));
+        return;
+    }
+    
+    let tr = document.querySelector(`tr[data-order-id="${orderId}"]`);
+    if (!tr) {
+        // Fallback: try to find by button data-id
+        console.log('Row not found by data-order-id, trying button search...');
+        const btn = document.querySelector(`.handle-btn[data-id="${orderId}"]`);
+        if (btn) {
+            tr = btn.closest('tr');
+        }
+    }
+    if (!tr) {
+        console.error('Could not find table row for order:', orderId);
+        return;
+    }
+    
+    const btn = tr.querySelector('.handle-btn');
+    if (!btn) return;
+    
+    // Disable button during operation
+    btn.disabled = true;
+    btn.style.opacity = '0.5';
+    btn.style.cursor = 'not-allowed';
+    
+    // Store original state for rollback
+    const originalState = order.isHandled;
+    
+    // Optimistic update
+    OrderManager.updateOrderStatus(orderId, !originalState);
+    
+    // Animate out
+    tr.style.transform = 'translateX(100%)';
+    tr.style.opacity = '0';
+    
+    try {
+        // Update server
+        const endpoint = isUndo ? '/mark-order-unhandled' : '/mark-order-handled';
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: orderId })
+        });
+        
+        const data = await response.json();
+        
+        if (!data.success) {
+            throw new Error(data.error || 'Failed to update order');
+        }
+        
+        // Success - wait for animation, then move to other table
+        setTimeout(() => {
+            tr.remove();
+            
+            // Get fresh order data and render to new table
+            const updatedOrder = OrderManager.getOrder(orderId);
+            const newRow = createOrderRow(updatedOrder, updatedOrder.isHandled);
+            
+            const targetTable = updatedOrder.isHandled 
+                ? document.querySelector('#completed-orders-table tbody')
+                : document.querySelector('#sold-orders-table tbody');
+            
+            // Remove "no orders" message if it exists
+            const noOrdersMsg = targetTable.querySelector('td[colspan="5"]');
+            if (noOrdersMsg) {
+                noOrdersMsg.closest('tr').remove();
+            }
+            
+            // Add with fade-in animation
+            newRow.style.opacity = '0';
+            newRow.style.transform = 'translateX(-20px)';
+            targetTable.insertBefore(newRow, targetTable.firstChild);
+            
+            requestAnimationFrame(() => {
+                newRow.style.transition = 'all 0.3s ease';
+                newRow.style.opacity = '1';
+                newRow.style.transform = 'translateX(0)';
+            });
+            
+            updatePendingCount();
+            attachPopups();
+            
+            // Check if source table is now empty
+            const sourceTable = updatedOrder.isHandled
+                ? document.querySelector('#sold-orders-table tbody')
+                : document.querySelector('#completed-orders-table tbody');
+            
+            if (sourceTable.children.length === 0) {
+                const emptyMsg = updatedOrder.isHandled 
+                    ? 'No pending orders'
+                    : 'No completed orders yet';
+                sourceTable.innerHTML = `<tr><td colspan="5" style="text-align: center; padding: 20px; color: #666;">${emptyMsg}</td></tr>`;
+            }
+        }, 300);
+        
+    } catch (error) {
+        console.error('Error updating order status:', error);
+        
+        // Rollback on error
+        OrderManager.updateOrderStatus(orderId, originalState);
+        
+        // Restore button and row
+        tr.style.transform = '';
+        tr.style.opacity = '1';
+        btn.disabled = false;
+        btn.style.opacity = '1';
+        btn.style.cursor = 'pointer';
+        
+        // Show error toast
+        showToast('Failed to update order: ' + error.message, 'error');
+    }
+}
+
+// Simple toast notification
+function showToast(message, type = 'info') {
+    const toast = document.createElement('div');
+    toast.textContent = message;
+    toast.style.cssText = `
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        background: ${type === 'error' ? '#f44336' : '#4caf50'};
+        color: white;
+        padding: 12px 24px;
+        border-radius: 8px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        z-index: 10000;
+        animation: slideIn 0.3s ease;
+    `;
+    
+    document.body.appendChild(toast);
+    
+    setTimeout(() => {
+        toast.style.animation = 'slideOut 0.3s ease';
+        setTimeout(() => toast.remove(), 300);
+    }, 3000);
+}
+// ============================================================================
+// DATA FETCHING - With localStorage caching for instant loads
+// ============================================================================
+// Caching Strategy:
+// 1. First load: Check localStorage cache (5 min expiry)
+// 2. If cached and valid: Show instantly, then fetch fresh data in background
+// 3. If no cache/expired: Fetch from server and cache result
+// 4. Manual refresh: Force fetch and update cache
+// 5. Days change: Clear cache and fetch fresh
+// This provides near-instant subsequent loads while keeping data fresh
+// ============================================================================
+
+async function fetchAndShowSoldOrders(days, forceRefresh = false) {
+    if (OrderManager.isLoading) return;
+    
+    OrderManager.isLoading = true;
+    OrderManager.currentDays = days;
+    
+    // Try to load from cache first (unless forced refresh)
+    if (!forceRefresh) {
+        const cachedOrders = OrderManager.loadFromLocalStorage();
+        if (cachedOrders && cachedOrders.length > 0) {
+            console.log('Using cached orders - instant load!');
+            renderSoldOrders(cachedOrders, true);
+            
+            // Show brief indicator that we're using cached data
+            const badge = document.getElementById('pending-count');
+            if (badge) {
+                const originalBg = badge.style.background;
+                badge.style.background = '#2196F3';
+                badge.title = 'Loaded from cache';
+                setTimeout(() => {
+                    badge.style.background = originalBg;
+                    badge.title = '';
+                }, 2000);
+            }
+            
+            // Continue to fetch fresh data to populate "Completed" tab and update "Pending"
+            // Do not return here
+        }
+    }
+    
+    try {
+        // Cache-busting timestamp for forced refresh
+        const cacheBust = forceRefresh ? `&_t=${Date.now()}` : '';
+
+        // Parallel fetch for better performance
+        const [fetchResponse, ordersResponse] = await Promise.all([
+            fetch('/get-sold-orders', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ days })
+            }),
+            fetch(`/sold-orders?days=${days}${cacheBust}`)
+        ]);
+        
+        const [fetchData, orders] = await Promise.all([
+            fetchResponse.json(),
+            ordersResponse.json()
+        ]);
+        
+        if (!fetchData.success) {
+            throw new Error(fetchData.error || 'Failed to fetch orders');
+        }
+        
+        renderSoldOrders(orders, false);
+        
+    } catch (error) {
+        console.error('Error fetching orders:', error);
+        showToast('Failed to fetch orders: ' + error.message, 'error');
+        
+        // Show error state
+        const pendingTbody = document.querySelector('#sold-orders-table tbody');
+        const completedTbody = document.querySelector('#completed-orders-table tbody');
+        pendingTbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 20px; color: #e53935;">Failed to load orders. <a href="#" onclick="window.fetchAndShowSoldOrders(' + days + ', true); return false;">Retry</a></td></tr>';
+        completedTbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 20px; color: #666;">No completed orders yet</td></tr>';
+    } finally {
+        OrderManager.isLoading = false;
+    }
+}
+
+async function loadSoldOrders(days, force = false) {
+    if (!isSoldOrdersTabActive && !force) return;
+    
+    days = days || parseInt(document.getElementById('sold-orders-days')?.value) || 2;
+    
+    try {
+        const response = await fetch(`/sold-orders?days=${days}`, {
+            cache: 'default',
+            priority: 'high'
+        });
+        const orders = await response.json();
+        renderSoldOrders(orders);
+    } catch (error) {
+        console.error('Error loading orders:', error);
+        showToast('Failed to load orders', 'error');
+    }
+}
+
+// Track tab visibility for auto-refresh
+let isSoldOrdersTabActive = true;
+
+document.addEventListener('visibilitychange', function() {
+    isSoldOrdersTabActive = !document.hidden;
+    if (isSoldOrdersTabActive) {
+        loadSoldOrders(null, true);
+    }
+});
+
+// ============================================================================
+// TAB MANAGEMENT
+// ============================================================================
+
+function setupTabs() {
+    const tabButtons = document.querySelectorAll('.tab-button');
+    const tabContents = document.querySelectorAll('.tab-content');
+    
+    tabButtons.forEach(button => {
+        button.addEventListener('click', () => {
+            tabButtons.forEach(btn => btn.classList.remove('active'));
+            tabContents.forEach(content => content.classList.remove('active'));
+            
+            button.classList.add('active');
+            const tabId = button.getAttribute('data-tab') + '-orders';
+            document.getElementById(tabId).classList.add('active');
+        });
+    });
+}
+
+// ============================================================================
+// EVENT DELEGATION - Single handler for all order interactions
+// ============================================================================
+
+function setupEventDelegation() {
+    document.addEventListener('click', function(e) {
+        // Handle order status buttons (check/undo)
+        const handleBtn = e.target.closest('.handle-btn');
+        if (handleBtn) {
+            e.preventDefault();
+            e.stopPropagation();
+            const orderId = handleBtn.getAttribute('data-id');
+            const isUndo = handleBtn.classList.contains('undo-btn');
+            console.log('Button clicked:', orderId, 'isUndo:', isUndo);
+            handleOrderStatusChange(orderId, isUndo);
+            return;
+        }
+        
+        // Handle order detail popups
+        const titleLink = e.target.closest('.order-title-link');
+        const infoLink = e.target.closest('.order-info-link');
+        const locLink = e.target.closest('.order-loc-link');
+        
+        if (titleLink || infoLink || locLink) {
+            e.preventDefault();
+            e.stopPropagation();
+            const link = titleLink || infoLink || locLink;
+            const orderId = link.getAttribute('data-order-id');
+            console.log('Link clicked:', orderId);
+            const order = OrderManager.getOrder(orderId);
+            
+            if (order) {
+                if (titleLink) {
+                    showOrderPopup(order.title, order.image || order.image_url, null, null, null, null, order.barcode);
+                } else if (infoLink) {
+                    const buyer = order.shipping_name || '';
+                    const address = [order.shipping_street1, order.shipping_street2, order.shipping_city, 
+                                    order.shipping_state, order.shipping_postal_code, order.shipping_country]
+                        .filter(Boolean).join(' ');
+                    const info = `${buyer}${address ? ' - ' + address : ''}`;
+                    const price = order.price ? `$${parseFloat(order.price).toFixed(2)}` : 'N/A';
+                    const paidTime = order.paid_time ? fmtET(order.paid_time) : 'N/A';
+                    showOrderPopup(null, null, info, null, price, paidTime);
+                } else if (locLink) {
+                    // Pass locations array if available, otherwise single location
+                    showOrderPopup(null, null, null, order.locations || order.location);
+                }
+            } else {
+                console.error('Order not found in cache:', orderId);
+            }
+        }
+    });
+}
+
+// ============================================================================
+// INITIALIZATION
+// ============================================================================
+
+window.addEventListener('DOMContentLoaded', async function() {
+    console.log('DOM loaded, initializing...');
+    
+    // Set up event delegation FIRST
+    setupEventDelegation();
+    
+    setupTabs();
+    
+    // Set up refresh button
+    const refreshBtn = document.getElementById('refresh-orders-btn');
+    if (refreshBtn) {
+        refreshBtn.addEventListener('click', async function() {
+            if (this.classList.contains('spinning')) return;
+            this.classList.add('spinning');
+
+            const days = parseInt(document.getElementById('sold-orders-days').value) || 2;
+            const start = Date.now();
+            await fetchAndShowSoldOrders(days, true);
+            const elapsed = Date.now() - start;
+
+            setTimeout(() => {
+                this.classList.remove('spinning');
+                // Show green checkmark briefly
+                const icon = this.querySelector('i');
+                icon.className = 'fas fa-check';
+                icon.style.color = 'var(--success)';
+                setTimeout(() => {
+                    icon.className = 'fas fa-arrows-rotate';
+                    icon.style.color = '#666';
+                }, 800);
+            }, Math.max(0, 800 - elapsed));
+        });
+    }
+
+    // Days input — show confirm checkmark when value changes
+    const soldOrdersDays = document.getElementById('sold-orders-days');
+    const daysConfirmBtn = document.getElementById('days-confirm-btn');
+    let loadedDays = 2; // track what's currently loaded
+    try {
+        const savedDays = parseInt(localStorage.getItem('ss_ready_days') || '2', 10);
+        if (savedDays && savedDays > 0) {
+            loadedDays = savedDays;
+            if (soldOrdersDays) soldOrdersDays.value = String(savedDays);
+        }
+    } catch (e) {}
+    if (window.ssReadyCount && typeof window.ssReadyCount.setDays === 'function') {
+        window.ssReadyCount.setDays(loadedDays);
+    }
+
+    async function applyDaysChange() {
+        const days = parseInt(soldOrdersDays.value) || 2;
+        loadedDays = days;
+        try { localStorage.setItem('ss_ready_days', String(days)); } catch (e) {}
+        if (window.ssReadyCount && typeof window.ssReadyCount.setDays === 'function') {
+            window.ssReadyCount.setDays(days);
+            if (typeof window.ssReadyCount.refresh === 'function') {
+                window.ssReadyCount.refresh(true);
+            }
+        }
+        daysConfirmBtn.classList.remove('visible');
+        OrderManager.clearCache();
+        document.getElementById('pageLoadingOverlay').classList.add('active');
+        await fetchAndShowSoldOrders(days, true);
+        document.getElementById('pageLoadingOverlay').classList.remove('active');
+    }
+
+    if (soldOrdersDays && daysConfirmBtn) {
+        soldOrdersDays.addEventListener('input', function() {
+            const val = parseInt(this.value) || 2;
+            if (val !== loadedDays) {
+                daysConfirmBtn.classList.add('visible');
+            } else {
+                daysConfirmBtn.classList.remove('visible');
+            }
+        });
+
+        soldOrdersDays.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') { e.preventDefault(); applyDaysChange(); }
+        });
+
+        daysConfirmBtn.addEventListener('click', applyDaysChange);
+    }
+    
+    // Initial load - non-blocking, page shows immediately
+    setTimeout(() => {
+        fetchAndShowSoldOrders(loadedDays).catch(error => {
+            console.error('Error during initial load:', error);
+        });
+    }, 0);
+});
+
+// Listen for refresh signals from other tabs (e.g., finder.html after barcode match)
+function triggerSoldOrdersRefresh(source) {
+    console.log('Received refresh signal from ' + source + ', triggering refresh...');
+    OrderManager.clearCache();
+    // Small delay to ensure server cache is invalidated
+    setTimeout(() => {
+        const refreshBtn = document.getElementById('refresh-orders-btn');
+        if (refreshBtn && !refreshBtn.classList.contains('spinning')) {
+            console.log('Clicking refresh button...');
+            refreshBtn.click();
+        } else {
+            // Fallback: direct fetch if button is busy
+            const days = parseInt(document.getElementById('sold-orders-days')?.value) || 2;
+            window.fetchAndShowSoldOrders(days, true);
+        }
+    }, 100);
+}
+
+// Method 1: BroadcastChannel (most reliable for same-origin tabs)
+try {
+    const bc = new BroadcastChannel('sold_orders_channel');
+    bc.onmessage = function(e) {
+        if (e.data && e.data.type === 'refresh') {
+            triggerSoldOrdersRefresh('BroadcastChannel');
+        }
+    };
+} catch (e) {
+    console.log('BroadcastChannel not supported');
+}
+
+// Method 2: localStorage event (fallback)
+window.addEventListener('storage', function(e) {
+    if (e.key === 'sold_orders_refresh') {
+        triggerSoldOrdersRefresh('localStorage');
+    }
+});
+
+// ============================================================================
+// ORDER DETAIL POPUP
+// ============================================================================
+
+function showOrderPopup(title, imageUrl, info, loc, price, paidTime, barcode) {
+    const oldPopup = document.getElementById('order-popup');
+    if (oldPopup) oldPopup.remove();
+    
+    const overlay = document.createElement('div');
+    overlay.id = 'order-popup';
+    overlay.className = 'order-popup-overlay';
+    overlay.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100vh;
+        background: rgba(0,0,0,0.5);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 9999;
+        animation: fadeIn 0.2s ease;
+    `;
+    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+    
+    const popup = document.createElement('div');
+    popup.className = 'order-popup-card';
+    popup.style.cssText = `
+        background: #fff;
+        border-radius: 14px;
+        box-shadow: 0 4px 24px rgba(0,0,0,0.2);
+        padding: 28px 24px;
+        max-width: 360px;
+        max-height: 80vh;
+        overflow-y: auto;
+        text-align: center;
+        position: relative;
+        animation: slideUp 0.3s ease;
+    `;
+    popup.onclick = (e) => e.stopPropagation();
+    
+    const missingDataUrlPopup = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="360" height="220"><rect width="100%" height="100%" fill="#f8f8f8"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#b0b0b0" font-size="18">Image missing</text></svg>');
+    
+    let content = '';
+    
+    if (title) {
+        content += `<div style="font-weight: bold; font-size: 1.1rem; margin-bottom: 12px;">${esc(title)}</div>`;
+    }
+    
+    if (imageUrl) {
+        content += `<img src="${esc(imageUrl)}" alt="${esc(title || 'Order')}" class="popup-image" style="max-width: 100%; border-radius: 10px; margin-bottom: 18px;">`;
+    }
+    
+    // Add barcode under image if available
+    if (barcode) {
+        content += `<div class="popup-muted" style="font-size: 0.9rem; margin-bottom: 12px;"><strong>Barcode:</strong> ${esc(barcode)}</div>`;
+    }
+    
+    if (info) {
+        const infoParts = info.split(' - ');
+        const buyer = infoParts[0] || '';
+        const address = infoParts[1] || '';
+        content += `
+            <div style="max-width: 300px; margin: 0 auto;">
+                <div style="margin-bottom: 10px;">
+                    <strong>${esc(buyer)}</strong><br>
+                    <span class="popup-muted" style="font-size: 0.95em;">${esc(address)}</span>
+                </div>
+                <hr class="popup-divider" style="border: none; margin: 12px 0;">
+                <div style="text-align: left; font-size: 0.95em;">
+                    <div style="margin-bottom: 6px;"><strong>Price:</strong> ${price || 'N/A'}</div>
+                    <div><strong>Paid:</strong> ${paidTime || 'N/A'}</div>
+                </div>
+            </div>
+        `;
+    }
+    
+    if (loc) {
+        // Check if loc is an array of locations (multiple)
+        if (Array.isArray(loc)) {
+            content += `<div class="popup-loc-banner" style="font-size: 0.98rem; margin-bottom: 12px; font-weight: 500;">Multiple Locations:</div>`;
+            
+            // Group locations by shelf classification (h=hallway, o=office, g=garage, etc.)
+            const groups = {
+                hallway: [],
+                office: [],
+                garage: [],
+                other: []
+            };
+            
+            loc.forEach(location => {
+                const locCode = (location.code || '').toLowerCase();
+                if (locCode.startsWith('h')) {
+                    groups.hallway.push(location);
+                } else if (locCode.startsWith('o')) {
+                    groups.office.push(location);
+                } else if (locCode.startsWith('g')) {
+                    groups.garage.push(location);
+                } else {
+                    groups.other.push(location);
+                }
+            });
+            
+            // Display each group
+            ['hallway', 'office', 'garage', 'other'].forEach(groupName => {
+                if (groups[groupName].length === 0) return;
+                
+                const groupTitle = groupName.charAt(0).toUpperCase() + groupName.slice(1);
+                content += `<div style="margin-bottom: 16px;">`;
+                content += `<div class="popup-group-title" style="font-size: 0.95rem; font-weight: 600; margin-bottom: 8px;">${groupTitle}:</div>`;
+                
+                groups[groupName].forEach((location, index) => {
+                    const locCode = esc(location.code || '');
+                    const locImage = esc(location.image || location.code || '');
+                    const qty = location.quantity || 1;
+                    const uniqueId = 'loc-' + Math.random().toString(36).substr(2, 9);
+                    
+                    content += `<div style="margin-left: 12px; margin-bottom: 8px;">`;
+                    content += `<span class="popup-link" onclick="document.getElementById('${uniqueId}').style.display=document.getElementById('${uniqueId}').style.display==='none'?'block':'none'" style="cursor: pointer; text-decoration: underline; font-weight: 500;">${locCode}</span>`;
+                    content += ` <span class="popup-qty" style="font-size: 0.9rem;">(Qty: ${qty})</span>`;
+                    
+                    // Hidden image that shows on click
+                    content += `<div id="${uniqueId}" style="display: none; margin-top: 8px; margin-bottom: 12px;">`;
+                    if (locImage.match(/\.(jpg|jpeg|png)$/i)) {
+                        content += `<img src="/static/pictureposition/${locImage}" alt="${locCode}" class="popup-loc-image" style="max-width: 260px; border-radius: 8px;" onerror="this.src='${missingDataUrlPopup}'">`;
+                    } else {
+                        content += `<img src="/static/shelves/${locImage.toLowerCase()}.png" alt="${locCode}" class="popup-loc-image" style="max-width: 260px; border-radius: 8px;" onerror="this.src='${missingDataUrlPopup}'">`;
+                    }
+                    content += `</div>`;
+                    content += `</div>`;
+                });
+                
+                content += `</div>`;
+            });
+        } else {
+            // Single location (string)
+        content += `<div class="popup-loc-line" style="font-size: 0.98rem; margin-bottom: 12px; font-weight: 500;">Location: ${esc(loc)}</div>`;
+            
+            if (loc.match(/\.(jpg|jpeg|png)$/i)) {
+                content += `<img src="/static/pictureposition/${esc(loc)}" alt="${esc(loc)}" class="popup-loc-image" style="max-width: 280px; border-radius: 10px; margin-bottom: 18px;" onerror="this.src='${missingDataUrlPopup}'">`;
+            } else {
+                content += `<img src="/static/shelves/${esc(loc.toLowerCase())}.png" alt="${esc(loc)}" class="popup-loc-image" style="max-width: 280px; border-radius: 10px; margin-bottom: 18px;" onerror="this.src='${missingDataUrlPopup}'">`;
+            }
+        }
+    }
+    
+    popup.innerHTML = content + `
+        <button class="popup-close-btn" onclick="this.closest('#order-popup').remove()" style="
+            margin-top: 16px;
+            background: #0984e3;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            padding: 10px 24px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: background 0.2s ease;
+        " onmouseover="this.style.background='#0770c9'" onmouseout="this.style.background='#0984e3'">
+            Close
+        </button>
+    `;
+    
+    overlay.appendChild(popup);
+    document.body.appendChild(overlay);
+}
+
+// Simplified attachPopups - now only used for legacy compatibility
+function attachPopups() {
+    // Event delegation handles clicks now, this is just a placeholder
+}
+// Friendly Eastern Time formatter used across pages
+function fmtET(ts){
+    try{
+        if(!ts) return '';
+        const d = new Date(ts);
+        if(isNaN(d.getTime())) return String(ts);
+        const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', year:'numeric', month:'2-digit', day:'2-digit', hour:'numeric', minute:'2-digit', hour12:true }).formatToParts(d);
+        const vals = {}; parts.forEach(p=> vals[p.type] = p.value);
+        const year = vals.year || d.getFullYear(); const month = vals.month || String(d.getMonth()+1).padStart(2,'0'); const day = vals.day || String(d.getDate()).padStart(2,'0');
+        let hour = vals.hour || String(d.getHours()).padStart(2,'0'); let minute = vals.minute || String(d.getMinutes()).padStart(2,'0'); const ampm = (vals.dayPeriod||'').toLowerCase(); hour = String(hour).replace(/^0/, '');
+        return `${year}-${month}-${day} ${hour}:${minute}${ampm}`;
+    }catch(e){ return String(ts); }
+}
+
+// Make critical functions available globally
+window.OrderManager = OrderManager;
+window.showOrderPopup = showOrderPopup;
+window.fetchAndShowSoldOrders = fetchAndShowSoldOrders;
+
+})();
+</script>
+<script>
+(function checkTokenStatus() {
+    fetch('/api/token-status')
+        .then(r => r.json())
+        .then(data => {
+            const problems = [];
+            if (data.ebay === 'expired') problems.push('<span class="token-item">eBay token expired — re-authorize in Developer Portal</span>');
+            if (data.amazon === 'expired') problems.push('<span class="token-item">Amazon token expired — re-authorize in Seller Central</span>');
+            const banner = document.getElementById('tokenBanner');
+            if (problems.length) {
+                banner.innerHTML = '\u26a0\ufe0f ' + problems.join(' | ');
+                banner.style.display = 'block';
+            } else {
+                banner.style.display = 'none';
+            }
+        })
+        .catch(() => {});
+    setTimeout(checkTokenStatus, 10 * 60 * 1000);
+})();
+</script>
+<script src="/static/i18n.js"></script>
+</body>
+</html>

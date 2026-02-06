@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title data-i18n="store_manager">Store Manager</title>
+  <style>
+    :root {
+      --primary: #0984e3;
+      --accent: #00b894;
+      --bg: #f9f9f9;
+      --card: #fff;
+      --border: #e0e0e0;
+      --radius: 14px;
+      --ink: #0f172a;
+      --muted: #64748b;
+    }
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      background: var(--bg);
+      margin: 0;
+      padding: 18px;
+      color: var(--ink);
+    }
+    .container {
+      max-width: 520px;
+      margin: 0 auto;
+    }
+    .top {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 1.4rem;
+      text-align: center;
+      flex: 1;
+    }
+    .grid {
+      display: grid;
+      gap: 10px;
+    }
+    .tool-btn {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      color: #fff;
+      text-decoration: none;
+      font-weight: 600;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+      transition: transform 0.12s ease, filter 0.12s ease;
+    }
+    .tool-btn:hover { transform: translateY(-1px); filter: brightness(1.05); }
+    .tool-btn .icon { font-size: 1.1rem; }
+    .hint {
+      margin-top: 6px;
+      font-size: 0.85rem;
+      color: rgba(255,255,255,0.85);
+      font-weight: 500;
+    }
+    .tool-btn.list { background: var(--primary); }
+    .tool-btn.price { background: #2c3e50; }
+    .tool-btn.label { background: #1f8f5f; }
+    .tool-btn.fb { background: #1877f2; }
+    .tool-btn.doctor { background: #f39c12; }
+
+    /* Night mode */
+    html.ss-theme-night body { background: #0f172a; color: #e2e8f0; }
+    html.ss-theme-night h1 { color: #e2e8f0; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="top">
+      <h1 data-i18n="store_manager">Store Manager</h1>
+    </div>
+
+    <div class="grid">
+      <a class="tool-btn list" href="/items-to-list">
+        <span class="icon">📋</span>
+        <div>
+          <div data-i18n="list_manager">List Manager</div>
+          <div class="hint">Item Manager</div>
+        </div>
+      </a>
+      <a class="tool-btn price" href="/price-master">
+        <span class="icon">💲</span>
+        <div>
+          <div data-i18n="price_master">Price Master</div>
+          <div class="hint">Bulk price updates</div>
+        </div>
+      </a>
+      <a class="tool-btn label" href="/label-master">
+        <span class="icon">🏷️</span>
+        <div>
+          <div>Label Master</div>
+          <div class="hint">Buy & print labels</div>
+        </div>
+      </a>
+      <a class="tool-btn doctor" href="/store-listing-helper">
+        <span class="icon">🩺</span>
+        <div>
+          <div data-i18n="store_helper">Store Doctor</div>
+          <div class="hint">Listings diagnostics</div>
+        </div>
+      </a>
+      <a class="tool-btn fb" href="/fb-listings">
+        <span class="icon">📘</span>
+        <div>
+          <div data-i18n="fb_listings">FB Listings</div>
+          <div class="hint">Facebook Marketplace</div>
+        </div>
+      </a>
+    </div>
+  </div>
+
+  <script src="/static/i18n.js"></script>
+</body>
+</html>

@@ -198,12 +198,27 @@
         font-weight: 600;
     }
 
+    /* Night mode */
+    html.ss-theme-night body{
+        background: #0f172a;
+        color: #e2e8f0;
+    }
+    html.ss-theme-night .title-main{
+        color: #e2e8f0;
+    }
+    html.ss-theme-night .title-step{
+        color: #94a3b8;
+    }
+    html.ss-theme-night input[type="text"]{
+        background: #0f172a;
+        color: #e2e8f0 !important;
+        border: 1px solid rgba(255,255,255,0.12);
+        -webkit-text-fill-color: #e2e8f0;
+    }
+
     </style>
 </head>
 <body>
-    <a href="/" style="text-decoration:none;">
-        <button type="button" class="back-fixed"><i class="fas fa-arrow-left"></i><span data-i18n="back">Back</span></button>
-    </a>
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;gap:12px;width:100%;">
         <div style="width:120px;"></div>
         <div style="display:flex;flex-direction:column;align-items:center;gap:6px;">

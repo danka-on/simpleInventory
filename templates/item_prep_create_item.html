@@ -51,6 +51,37 @@
     .cam-overlay-btn { position:absolute; bottom:18px; left:50%; transform:translateX(-50%); display:flex; gap:12px; align-items:center; justify-content:center; z-index:5; }
     .cam-btn { background:rgba(255,255,255,0.18); backdrop-filter:blur(4px); border:1px solid rgba(255,255,255,0.24); color:#fff; padding:18px 22px; border-radius:999px; cursor:pointer; font-size:1.2rem; box-shadow:0 8px 20px rgba(0,0,0,0.22); transition:all 0.2s; }
     .cam-btn:hover { background:rgba(255,255,255,0.28); transform:scale(1.05); }
+
+    /* Night mode */
+    html.ss-theme-night body { background:#0f172a; color:#e2e8f0; }
+    html.ss-theme-night h1 { color:#e2e8f0; }
+    html.ss-theme-night .card { background:#1e293b; border:1px solid rgba(255,255,255,0.08); box-shadow:0 10px 28px rgba(0,0,0,0.45); }
+    html.ss-theme-night label { color:#e2e8f0; }
+    html.ss-theme-night input[type="text"] { background:#0f172a; border-color:rgba(255,255,255,0.12); color:#e2e8f0; }
+    html.ss-theme-night input[type="text"]::placeholder { color:#94a3b8; }
+    html.ss-theme-night .barcode-display,
+    html.ss-theme-night .barcode-input { background:#0f172a; border-color:#10b981; color:#e2e8f0; }
+    html.ss-theme-night .barcode-display:hover { background:#111827; border-color:#0ea371; }
+    html.ss-theme-night .status-success { background:rgba(16,185,129,0.12); color:#10b981; border-color:#10b981; }
+    html.ss-theme-night .status-error { background:rgba(239,68,68,0.12); color:#fca5a5; border-color:#ef4444; }
+    html.ss-theme-night .status-warning { background:rgba(251,191,36,0.12); color:#fbbf24; border-color:#fbbf24; }
+    html.ss-theme-night .field-incomplete { color:#fca5a5; }
+    html.ss-theme-night .field-complete { color:#34d399; }
+    html.ss-theme-night .btn { color:#e2e8f0; }
+    html.ss-theme-night .btn-primary { background:#10b981; }
+    html.ss-theme-night .btn-primary:hover { background:#0ea371; }
+    html.ss-theme-night .btn-danger { background:#ef4444; }
+    html.ss-theme-night .btn-danger:hover { background:#dc2626; }
+    html.ss-theme-night .btn-gray { background:#334155; }
+    html.ss-theme-night .btn-gray:hover { background:#475569; }
+    html.ss-theme-night .btn-success { background:#22c55e; }
+    html.ss-theme-night .btn-success:hover { background:#16a34a; }
+    html.ss-theme-night .btn-orange { background:#f59e0b; }
+    html.ss-theme-night .btn-orange:hover { background:#d97706; }
+    html.ss-theme-night .camera-container { border:1px solid rgba(255,255,255,0.08); }
+    html.ss-theme-night .preview-image { border:1px solid rgba(255,255,255,0.1); }
+    html.ss-theme-night .loading-overlay { background:rgba(0,0,0,0.65); }
+    html.ss-theme-night .loading-spinner-large { border-color:#334155; border-top-color:#10b981; }
   </style>
 </head>
 <body>

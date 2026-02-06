@@ -33,6 +33,7 @@ const translations = {
 
   // ===== index.html =====
   list_manager: { en: 'List Manager', lt: 'Sąrašų tvarkyklė' },
+  store_manager: { en: 'Store Manager', lt: 'Parduotuvės valdymas' },
   price_master: { en: 'Price Master', lt: 'Kainų meistras' },
   store_listing_helper: { en: 'Store Listing Helper', lt: 'Parduotuvės pagalbininkas' },
   store_helper: { en: 'Store Doctor', lt: 'Parduotuvės daktaras' },
@@ -126,9 +127,9 @@ const translations = {
   days: { en: 'Days:', lt: 'Dienos:' },
   info: { en: 'Info', lt: 'Informacija' },
   loc: { en: 'Loc', lt: 'Vieta' },
-  add_item_to_shelf: { en: 'Add Item to Shelf', lt: 'Pridėti prekę į lentyną' },
-  search_warehouse: { en: 'Search Warehouse', lt: 'Ieškoti sandėlyje' },
-  preperation: { en: 'Preperation', lt: 'Paruošimas' },
+  add_item_to_shelf: { en: 'Add Item', lt: 'Pridėti prekę' },
+  search_warehouse: { en: 'Warehouse', lt: 'Sandėlis' },
+  preparation: { en: 'Preparation', lt: 'Paruošimas' },
   tools: { en: 'Tools', lt: 'Įrankiai' },
   find: { en: 'Find', lt: 'Rasti' },
   undo: { en: 'Undo', lt: 'Atšaukti' },
@@ -750,6 +751,11 @@ function ensureTopBannerStyles(){
       padding-top: calc(var(--ss-banner-h) + var(--ss-body-pad-top, 0px));
     }
 
+    /* Keep fixed back buttons below the banner */
+    html.ss-has-top-banner .back-fixed{
+      top: calc(var(--ss-banner-h) + 12px) !important;
+    }
+
     #ss-top-banner{
       position: fixed;
       top: 0;
@@ -764,10 +770,23 @@ function ensureTopBannerStyles(){
     #ss-top-banner .ss-inner{
       display: flex;
       align-items: center;
-      justify-content: flex-end;
+      justify-content: space-between;
       gap: 8px;
       padding: 8px 10px;
       font-family: 'Segoe UI', Arial, sans-serif;
+      flex-wrap: wrap;
+    }
+
+    #ss-top-banner .ss-left,
+    #ss-top-banner .ss-center,
+    #ss-top-banner .ss-right{
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+    #ss-top-banner .ss-left{
+      flex: 1 1 auto;
+      min-width: 0;
     }
 
     .ss-seg{
@@ -819,6 +838,7 @@ function ensureTopBannerStyles(){
       gap: 8px;
       transition: transform .1s ease, filter .15s ease;
       white-space: nowrap;
+      text-decoration: none;
     }
     html.ss-theme-night .ss-pill{ background: rgba(255,255,255,0.04); }
     .ss-pill:hover{ transform: translateY(-1px); filter: brightness(1.05); }
@@ -829,6 +849,137 @@ function ensureTopBannerStyles(){
       border-radius: 999px;
       background: var(--accent);
       box-shadow: 0 0 0 3px rgba(16,185,129,0.18);
+    }
+    .ss-pill .ss-count{
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 18px;
+      height: 18px;
+      padding: 0 6px;
+      border-radius: 999px;
+      background: var(--success);
+      color: #fff;
+      font-size: 10px;
+      font-weight: 900;
+      line-height: 18px;
+      box-shadow: 0 0 0 3px rgba(16,185,129,0.18);
+    }
+    .ss-pill.ss-ready{
+      padding: 0 10px;
+      gap: 6px;
+    }
+    .ss-pill.ss-ready.is-zero .ss-count{
+      background: var(--muted-dim);
+      box-shadow: none;
+    }
+
+    .ss-theme-wrap{
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      overflow: hidden;
+      border: 1px solid var(--ss-banner-border);
+      background: rgba(0,0,0,0.02);
+    }
+    html.ss-theme-night .ss-theme-wrap{ background: rgba(255,255,255,0.04); }
+    .ss-theme-wrap button{
+      appearance: none;
+      -webkit-appearance: none;
+      border: 0;
+      margin: 0;
+      height: 28px;
+      padding: 0 12px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .2px;
+      background: transparent;
+      color: var(--ss-banner-ink-muted);
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      transition: background .15s ease, color .15s ease, transform .1s ease;
+    }
+    .ss-theme-wrap button:hover{ transform: translateY(-1px); }
+    .ss-theme-wrap button.active{
+      background: var(--accent);
+      color: #fff;
+    }
+
+    .ss-icon{
+      padding: 0 10px;
+      font-size: 14px;
+      line-height: 1;
+    }
+    .ss-icon.ss-home{
+      padding: 0 16px;
+    }
+    .ss-icon svg{
+      width: 16px;
+      height: 16px;
+      display: block;
+      stroke: currentColor;
+    }
+
+    .ss-search{
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid var(--ss-banner-border);
+      background: rgba(0,0,0,0.02);
+      border-radius: 999px;
+      height: 28px;
+      padding: 0 8px;
+      min-width: 0;
+    }
+    html.ss-theme-night .ss-search{ background: rgba(255,255,255,0.04); }
+    .ss-search .ss-search-label{
+      font-size: 11px;
+      font-weight: 800;
+      color: var(--ss-banner-ink-muted);
+      letter-spacing: .2px;
+    }
+    .ss-search input{
+      border: 0;
+      outline: none;
+      background: transparent;
+      color: var(--ss-banner-ink);
+      font-size: 12px;
+      min-width: 80px;
+      width: 160px;
+      max-width: 38vw;
+      padding: 0 6px !important;
+      height: 22px !important;
+      line-height: 22px !important;
+    }
+    .ss-search input::placeholder{ color: var(--ss-banner-ink-muted); }
+    .ss-search button{
+      display:none;
+    }
+
+    /* Override page-level input/button styles that break the banner search. */
+    #ss-top-banner .ss-search input{
+      border: 0 !important;
+      box-shadow: none !important;
+      background: transparent !important;
+      border-radius: 0 !important;
+      margin: 0 !important;
+    }
+    #ss-top-banner .ss-search button{ display:none; }
+
+    @media (max-width: 720px){
+      .ss-search input{ width: 110px; }
+      .ss-search .ss-search-label{ display:none; }
+    }
+    @media (max-width: 640px){
+      #ss-top-banner .ss-inner{ padding: 6px 8px; gap: 6px; }
+      .ss-pill{ height: 26px; font-size: 11px; }
+      .ss-theme-wrap button{ height: 26px; font-size: 11px; }
+      .ss-seg button{ height: 26px; font-size: 11px; }
+      .ss-search{ height: 26px; }
+      .ss-search input{ width: 90px; }
+      .ss-icon svg{ width: 14px; height: 14px; }
     }
 
     html.ss-has-top-banner .topbar,
@@ -896,6 +1047,12 @@ function createTopBanner(){
   const inner = document.createElement('div');
   inner.className = 'ss-inner';
 
+  const left = document.createElement('div');
+  left.className = 'ss-left';
+
+  const right = document.createElement('div');
+  right.className = 'ss-right';
+
   const langSeg = document.createElement('div');
   langSeg.className = 'ss-seg';
 
@@ -914,10 +1071,12 @@ function createTopBanner(){
   langSeg.appendChild(btnEn);
   langSeg.appendChild(btnLt);
 
+  const themeWrap = document.createElement('div');
+  themeWrap.className = 'ss-theme-wrap';
+
   const themeBtn = document.createElement('button');
   themeBtn.type = 'button';
   themeBtn.id = 'ss-theme-toggle';
-  themeBtn.className = 'ss-pill';
   themeBtn.title = 'Toggle Day/Night';
   themeBtn.innerHTML = `<span class="ss-dot" aria-hidden="true"></span><span id="ss-theme-label">Theme</span>`;
   themeBtn.onclick = toggleThemeManual;
@@ -925,18 +1084,66 @@ function createTopBanner(){
   const autoBtn = document.createElement('button');
   autoBtn.type = 'button';
   autoBtn.id = 'ss-theme-auto';
-  autoBtn.className = 'ss-pill';
   autoBtn.title = 'Switch to automatic day/night based on time';
   autoBtn.textContent = 'Auto';
-  autoBtn.style.cssText = 'font-size:0.7rem;padding:4px 10px;opacity:0.6;transition:all .15s ease;';
   autoBtn.onclick = () => {
     setThemeMode('auto');
     updateToggleUI();
   };
 
-  inner.appendChild(langSeg);
-  inner.appendChild(themeBtn);
-  inner.appendChild(autoBtn);
+  themeWrap.appendChild(themeBtn);
+  themeWrap.appendChild(autoBtn);
+
+  const homeBtn = document.createElement('a');
+  homeBtn.className = 'ss-pill ss-icon ss-home';
+  homeBtn.href = '/';
+  homeBtn.title = 'Home';
+  homeBtn.setAttribute('aria-label', 'Home');
+  homeBtn.innerHTML = `
+    <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M3 10.5L12 3l9 7.5"></path>
+      <path d="M5 10v10a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V10"></path>
+    </svg>
+  `;
+
+  const toolsBtn = document.createElement('a');
+  toolsBtn.className = 'ss-pill ss-icon';
+  toolsBtn.href = '/tools';
+  toolsBtn.title = 'Tools';
+  toolsBtn.setAttribute('aria-label', 'Tools');
+  toolsBtn.innerHTML = `
+    <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="3"></circle>
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+    </svg>
+  `;
+
+  const readyBtn = document.createElement('a');
+  readyBtn.className = 'ss-pill ss-ready';
+  readyBtn.href = '/ready-to-ship';
+  readyBtn.title = 'Ready to Ship';
+  readyBtn.setAttribute('aria-label', 'Ready to Ship');
+  readyBtn.innerHTML = `
+    <span class="ss-ready-label" data-i18n="ready_to_ship">Ready to Ship</span>
+    <span class="ss-count" id="ss-ready-count">0</span>
+  `;
+  const searchWrap = document.createElement('div');
+  searchWrap.className = 'ss-search';
+  searchWrap.innerHTML = `
+    <span class="ss-search-label">ALL</span>
+    <input type="text" id="all-search-input" placeholder="Search all…" />
+  `;
+
+  left.appendChild(homeBtn);
+  left.appendChild(readyBtn);
+  left.appendChild(searchWrap);
+
+  right.appendChild(langSeg);
+  right.appendChild(themeWrap);
+  right.appendChild(toolsBtn);
+
+  inner.appendChild(left);
+  inner.appendChild(right);
   bar.appendChild(inner);
 
   if(document.body.firstChild){
@@ -962,6 +1169,82 @@ function createTopBanner(){
   });
 
   updateToggleUI();
+
+  try{
+    const input = document.getElementById('all-search-input');
+    const go = () => {
+      const q = (input && input.value || '').trim();
+      if(q) window.location.href = `/unified-search?q=${encodeURIComponent(q)}`;
+    };
+    if(input) input.addEventListener('keydown', (e) => { if(e.key === 'Enter') go(); });
+  }catch(e){}
+
+  // Ready-to-ship count badge (cached)
+  if(!window.ssReadyCount){
+    const countEl = readyBtn.querySelector('.ss-count');
+    const state = { count: 0, ts: 0, inflight: false };
+
+    const getDays = () => {
+      try{
+        const raw = localStorage.getItem('ss_ready_days');
+        const val = parseInt(raw || '2', 10);
+        return (val && val > 0) ? val : 2;
+      }catch(e){ return 2; }
+    };
+
+    const setDays = (val) => {
+      const days = (val && val > 0) ? parseInt(val, 10) : 2;
+      try{ localStorage.setItem('ss_ready_days', String(days)); }catch(e){}
+      return days;
+    };
+
+    const setCount = (val) => {
+      const count = Number.isFinite(val) ? Math.max(0, Math.round(val)) : 0;
+      state.count = count;
+      if(countEl) countEl.textContent = String(count);
+      readyBtn.classList.toggle('is-zero', count === 0);
+      readyBtn.setAttribute('aria-label', `Ready to Ship (${count})`);
+      try{
+        localStorage.setItem('ss_ready_count', String(count));
+        localStorage.setItem('ss_ready_count_ts', String(Date.now()));
+      }catch(e){}
+    };
+
+    const refresh = async (force = false) => {
+      const now = Date.now();
+      if(!force && state.ts && (now - state.ts) < 60 * 1000) return;
+      if(state.inflight) return;
+      state.inflight = true;
+      const days = getDays();
+      try{
+        const resp = await fetch(`/api/ready-to-ship/count?days=${days}`, { cache: 'no-store' });
+        const data = await resp.json().catch(()=> ({}));
+        if(resp.ok && data && data.success){
+          setCount(parseInt(data.count, 10) || 0);
+        }
+      }catch(e){}
+      finally{
+        state.ts = Date.now();
+        state.inflight = false;
+      }
+    };
+
+    // Load cached count immediately for a fast render.
+    try{
+      const cached = parseInt(localStorage.getItem('ss_ready_count') || '0', 10);
+      const cachedTs = parseInt(localStorage.getItem('ss_ready_count_ts') || '0', 10);
+      if(cachedTs && (Date.now() - cachedTs) < 60 * 1000){
+        setCount(cached);
+        state.ts = cachedTs;
+      } else {
+        refresh(true);
+      }
+    }catch(e){ refresh(true); }
+
+    setInterval(() => refresh(false), 60 * 1000);
+
+    window.ssReadyCount = { set: setCount, refresh, setDays, getDays };
+  }
 }
 
 function updateToggleUI() {
@@ -971,17 +1254,20 @@ function updateToggleUI() {
   if (btnEn) btnEn.classList.toggle('active', lang === 'en');
   if (btnLt) btnLt.classList.toggle('active', lang === 'lt');
 
+  const themeBtn = document.getElementById('ss-theme-toggle');
   const themeLabel = document.getElementById('ss-theme-label');
   const autoBtn = document.getElementById('ss-theme-auto');
   const mode = getThemeMode();
   const applied = getAppliedTheme() || (mode === 'auto' ? _computeAutoTheme() : mode);
+  const isAuto = mode === 'auto';
   if(themeLabel){
-    const suffix = mode === 'auto' ? ' (Auto)' : '';
-    themeLabel.textContent = (applied === 'night' ? 'Night' : 'Day') + suffix;
+    themeLabel.textContent = (applied === 'night' ? 'Night' : 'Day');
+  }
+  if(themeBtn){
+    themeBtn.classList.toggle('active', !isAuto);
   }
   if(autoBtn){
-    autoBtn.style.opacity = mode === 'auto' ? '1' : '0.5';
-    autoBtn.style.fontWeight = mode === 'auto' ? '700' : '400';
+    autoBtn.classList.toggle('active', isAuto);
   }
 }
 

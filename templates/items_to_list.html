@@ -85,11 +85,6 @@
         align-items: center;
         gap: 10px;
       }
-      .top #back-btn {
-        order: 0;
-        margin: 0 !important;
-        justify-self: auto !important;
-      }
       .top h2 {
         order: 1;
         flex: 1;
@@ -172,13 +167,6 @@
         order: 2;
         width: 100%;
         margin: 8px 0 0 0;
-      }
-      .top #back-btn {
-        order: 0;
-        width: auto;
-        text-align: center;
-        margin: 0 !important;
-        justify-self: auto !important;
       }
       .top > div:last-child {
         order: 1;
@@ -349,20 +337,11 @@
 </head>
 <body>
   <div class="top">
-    <button class="btn btn-danger" id="back-btn" style="margin:0; justify-self:start" data-i18n="back">Back</button>
+    <div></div>
     <h2 style="margin:0; justify-self:center; text-align:center" data-i18n="list_manager">List Manager</h2>
     <div style="justify-self:end; display:flex; gap:8px;">
-      <a href="/price-master" class="btn" style="background:#2c3e50; color:#fff; text-decoration:none; display:flex; align-items:center; gap:6px">
-        <span style="font-size:1rem">💲</span> <span data-i18n="price_master">Price Master</span>
-      </a>
-      <a href="/label-master" class="btn" style="background:#1f8f5f; color:#fff; text-decoration:none; display:flex; align-items:center; gap:6px">
-        <span style="font-size:1rem">🏷️</span> <span>Label Master</span>
-      </a>
       <a href="/fb-listings" class="btn" style="background:#1877f2; color:#fff; text-decoration:none; display:flex; align-items:center; gap:6px">
         <span style="font-size:1rem">📘</span> <span data-i18n="fb_listings">FB Listings</span>
-      </a>
-      <a href="/store-listing-helper" class="btn" style="background:#f39c12; color:#fff; text-decoration:none; display:flex; align-items:center; gap:6px">
-        <span style="font-size:1.1rem">🩺</span> <span data-i18n="store_helper">Store Doctor</span>
       </a>
     </div>
   </div>
@@ -1098,9 +1077,12 @@ loadLots().then(loadItems);
 // Focus the search input on load
 document.getElementById('filter-q').focus();
 // Back button navigates home; using button confines clickable area to the button
-document.getElementById('back-btn').addEventListener('click', ()=>{ 
-  window.location.href = '/'; 
-});
+const backBtn = document.getElementById('back-btn');
+if (backBtn) {
+  backBtn.addEventListener('click', ()=>{ 
+    window.location.href = '/'; 
+  });
+}
 // Trigger load on Enter in search
 document.getElementById('filter-q').addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ e.preventDefault(); loadItems(); } });
 // Search button click handler

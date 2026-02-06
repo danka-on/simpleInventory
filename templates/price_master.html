@@ -491,6 +491,7 @@
     };
     const feedCheckAttempts = {};
     let lastFeedId = null;
+    const ebayUpdateKey = 'pm_last_ebay_updates';
 
     function setLastFeedId(id){
       if(!id) return;
@@ -514,6 +515,34 @@
         return m[1];
       }
       return null;
+    }
+
+    function pushEbayUpdate(itemId, expectedPrice){
+      if(!itemId) return;
+      let arr = [];
+      try{ arr = JSON.parse(localStorage.getItem(ebayUpdateKey) || '[]'); }catch(e){ arr = []; }
+      if(!Array.isArray(arr)) arr = [];
+      arr = arr.filter(x => x && x.item_id !== itemId);
+      arr.unshift({item_id: String(itemId), expected_price: expectedPrice ?? null, ts: Date.now()});
+      if(arr.length > 10) arr = arr.slice(0, 10);
+      try{ localStorage.setItem(ebayUpdateKey, JSON.stringify(arr)); }catch(e){}
+    }
+
+    function getRecentEbayUpdates(){
+      try{
+        const arr = JSON.parse(localStorage.getItem(ebayUpdateKey) || '[]');
+        if(Array.isArray(arr) && arr.length) return arr;
+      }catch(e){}
+      // Fallback: parse most recent log line
+      const logText = ($('pmLog') && $('pmLog').textContent) ? $('pmLog').textContent : '';
+      const m = logText.match(/ebay:(\d+)\s+\$[0-9.]+\s+→\s+\$([0-9.]+)/i);
+      if(m){
+        const itemId = m[1];
+        const expected = Number(m[2]);
+        if(Number.isFinite(expected)) return [{item_id: itemId, expected_price: expected}];
+        return [{item_id: itemId}];
+      }
+      return [];
     }
 
     function keyFor(it){
@@ -801,6 +830,9 @@
             log(`✓ ${tag} ${fmtUsd(row.old_price)} → ${fmtUsd(row.new_price)}${note}`);
             const feedIdMatch = (row.note || '').match(/feed\\s+(\\d+)/i);
             if(feedIdMatch) setLastFeedId(feedIdMatch[1]);
+            if((row.platform || '').toLowerCase() === 'ebay'){
+              pushEbayUpdate(row.listing_key, row.new_price);
+            }
           } else {
             log(`✗ ${tag} failed: ${row.error || 'Unknown error'}`);
           }
@@ -846,6 +878,41 @@
       }
     }
 
+    async function checkEbayStatus(items){
+      if(!items || !items.length) return;
+      try{
+        const r = await fetch('/api/pricemaster/ebay_verify', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json', 'Accept':'application/json'},
+          body: JSON.stringify({items})
+        });
+        const j = await r.json().catch(() => ({}));
+        if(!r.ok || j.success === false) throw new Error(j.error || `eBay verify failed (${r.status})`);
+        const list = j.items || [];
+        let anyApplied = false;
+        for(const it of list){
+          const itemId = it.item_id || '?';
+          if(it.error){
+            log(`eBay ${itemId} check failed: ${it.error}`);
+            continue;
+          }
+          const price = fmtUsd(it.price);
+          if(it.applied === true){
+            anyApplied = true;
+            log(`eBay ${itemId} status: ${price} (applied)`);
+          } else if(it.applied === false){
+            const exp = it.expected_price != null ? fmtUsd(it.expected_price) : '';
+            log(`eBay ${itemId} status: ${price}${exp ? ` (expected ${exp})` : ''}`);
+          } else {
+            log(`eBay ${itemId} status: ${price}`);
+          }
+        }
+        if(anyApplied) await loadListings();
+      }catch(e){
+        log(`eBay status check failed: ${e.message}`);
+      }
+    }
+
     function setStoreFilter(store){
       state.store = store;
       document.querySelectorAll('.seg button').forEach(b => b.classList.toggle('active', b.getAttribute('data-store') === store));
@@ -875,13 +942,23 @@
     $('checkFeedBtn').addEventListener('click', () => {
       const id = getLastFeedId();
       if(!id){
-        const manual = prompt('Enter Amazon feed id (from log):', '');
-        if(manual && manual.trim()){
-          setLastFeedId(manual.trim());
-          checkFeedStatus(manual.trim());
+        const ebayItems = getRecentEbayUpdates();
+        if(ebayItems.length){
+          checkEbayStatus(ebayItems);
           return;
         }
-        log('No recent feed id. Run a feed-based update first.');
+        const manual = prompt('Enter Amazon feed id or eBay ItemID (from log):', '');
+        if(manual && manual.trim()){
+          const raw = manual.trim();
+          if(/^\d{8,}$/.test(raw)){
+            checkEbayStatus([{item_id: raw}]);
+          } else {
+            setLastFeedId(raw);
+            checkFeedStatus(raw);
+          }
+          return;
+        }
+        log('No recent Amazon feed or eBay update. Run an update first.');
         return;
       }
       checkFeedStatus(id);

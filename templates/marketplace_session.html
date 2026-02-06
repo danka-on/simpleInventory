@@ -49,8 +49,6 @@
       transition: all 0.2s;
     }
     .nav-link:hover { background: rgba(255,255,255,0.1); color: #fff; }
-    .nav-link.back { background: rgba(231,76,60,0.2); color: #e74c3c; }
-    .nav-link.back:hover { background: rgba(231,76,60,0.3); }
 
     /* Main Content */
     .main-content {
@@ -444,7 +442,6 @@
     html.ss-theme-day .navbar h1 { color: #111827; }
     html.ss-theme-day .nav-link { color: #475569; }
     html.ss-theme-day .nav-link:hover { background: rgba(0,0,0,0.06); color: #111827; }
-    html.ss-theme-day .nav-link.back { background: rgba(231,76,60,0.1); }
     html.ss-theme-day .items-section { background: rgba(0,0,0,0.03); }
     html.ss-theme-day .items-header h3 { color: #475569; }
     html.ss-theme-day .item-card { background: #fff; border: 1px solid #e2e8f0; }
@@ -472,7 +469,7 @@
 <body>
   <!-- Top Navigation -->
   <nav class="navbar">
-    <a href="/" class="nav-link back">← Home</a>
+    <div style="width:120px;"></div>
     <h1 data-i18n="marketplace_session">Marketplace Sale</h1>
     <div class="nav-links" style="margin-right: 120px;">
       <a href="/marketplace-stats" class="nav-link">📊 History</a>

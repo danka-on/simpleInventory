@@ -52,8 +52,33 @@
     html.ss-theme-night #db-select{background:#0f172a;color:#e2e8f0;border-color:rgba(255,255,255,0.2)}
     html.ss-theme-night #db-select option{background:#0f172a;color:#e2e8f0}
     html.ss-theme-night .db-selector-group label{color:#e2e8f0}
-    html.ss-theme-night #show-location-browser-btn{background:#374151;border-color:#4b5563;color:#e5e7eb}
-    html.ss-theme-night #show-location-browser-btn:hover{background:#4b5563}
+    html.ss-theme-night #show-location-browser-btn{background:#1f2937;border-color:#334155;color:#e5e7eb}
+    html.ss-theme-night #show-location-browser-btn:hover{background:#334155}
+    html.ss-theme-night #location-browser{
+        background:#1e293b;
+        border-color:#334155;
+        color:#e2e8f0;
+    }
+    html.ss-theme-night #location-browser h3{color:#e2e8f0}
+    html.ss-theme-night #location-breadcrumb{color:#94a3b8}
+    html.ss-theme-night #location-breadcrumb a,
+    html.ss-theme-night #location-breadcrumb span{color:#60a5fa}
+    html.ss-theme-night .location-card{
+        background:#111827;
+        border-color:#334155;
+        box-shadow:0 2px 8px rgba(0,0,0,0.4);
+    }
+    html.ss-theme-night .location-card:hover{
+        border-color:#60a5fa;
+        box-shadow:0 6px 16px rgba(0,0,0,0.45);
+    }
+    html.ss-theme-night .location-card.active{
+        background:#1f2937;
+        border-color:#60a5fa;
+    }
+    html.ss-theme-night .location-card-title{color:#e2e8f0}
+    html.ss-theme-night .location-card-count{color:#94a3b8}
+    html.ss-theme-night .location-card-quantity{color:#60a5fa}
     /* Inventory options gear dropdown */
     .inventory-gear-btn{background:#f0f0f0;border:1px solid #ddd;padding:8px 12px;border-radius:6px;cursor:pointer;font-size:18px;margin-left:12px;display:none}
     .inventory-gear-btn:hover{background:#e0e0e0}
@@ -73,7 +98,7 @@
     @media (max-width: 768px) {
         body { padding: 10px; }
 
-        /* Top header - wraps: Row 1: Back | Database | Gear, Row 2: Unified Search */
+        /* Top header - wraps: Row 1: Database | Gear, Row 2: Unified Search */
         .top { flex-direction: column; align-items: stretch; gap: 10px; }
         .top > div:first-child {
             flex-wrap: wrap;
@@ -82,12 +107,9 @@
             align-items: center;
         }
 
-        /* Back button first */
-        #back-btn-link { order: 0; flex-shrink: 0; }
-
-        /* Database selector in middle - compact */
+        /* Database selector first - compact */
         .db-selector-group {
-            order: 1;
+            order: 0;
             flex: 1;
             margin-right: 0;
         }
@@ -107,12 +129,12 @@
         }
 
         /* Inventory gear on first row */
-        .inventory-gear-btn { order: 2; margin-left: 0 !important; flex-shrink: 0; }
+        .inventory-gear-btn { order: 1; margin-left: 0 !important; flex-shrink: 0; }
 
         /* Unified search - stay on top row at half width */
         .unified-search-box {
             flex: 0 0 45% !important;
-            order: 3;
+            order: 2;
             margin-left: auto !important;
             margin-top: 0;
             padding: 6px 8px !important;
@@ -241,8 +263,6 @@
 <body>
     <div class="top">
         <div style="display:flex;gap:8px;align-items:center">
-            <a href="/" style="text-decoration:none" id="back-btn-link"><button class="btn btn-danger" id="main-back-btn" data-i18n="back">Back</button></a>
-            
             <!-- Database and Store Selectors -->
             <div class="db-selector-group">
                 <label>Database:
@@ -252,12 +272,7 @@
                 </label>
             </div>
             
-            <!-- ALL SEARCH moved to top section -->
-            <div class="unified-search-box" style="display:flex; gap:8px; align-items:center; margin-left:auto; padding:8px 12px; background:#fff3e0; border:2px solid #ff6b35; border-radius:8px;">
-                <label style="font-weight:600; color:#ff6b35; white-space:nowrap; font-size:0.9rem;">🔍 ALL:</label>
-                <input type="text" id="all-search-input" placeholder="Search all databases..." style="flex:1; min-width:120px; padding:6px 10px; font-size:0.95rem; border:1px solid #ff6b35; border-radius:4px;">
-                <button class="btn" id="all-search-btn" style="background:#ff6b35; color:#fff; border:none; padding:6px 16px; font-weight:600; font-size:0.9rem;">Go</button>
-            </div>
+            <!-- ALL SEARCH moved to global top banner -->
 
             <!-- Inventory Options Gear (only visible for Inventory database) -->
             <div style="position:relative;">
@@ -2071,22 +2086,30 @@ document.getElementById('force-load-all-btn').addEventListener('click', () => {
     doSearch();
 });
 
-// ALL SEARCH functionality
-document.getElementById('all-search-btn').addEventListener('click', () => {
-    const query = document.getElementById('all-search-input').value.trim();
-    if (query) {
-        window.location.href = `/unified-search?q=${encodeURIComponent(query)}`;
-    }
-});
-
-document.getElementById('all-search-input').addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') {
-        const query = document.getElementById('all-search-input').value.trim();
+// ALL SEARCH functionality (now in global top banner)
+function bindAllSearch(){
+    const btn = document.getElementById('all-search-btn');
+    const input = document.getElementById('all-search-input');
+    if (!btn || !input) return false;
+    const go = () => {
+        const query = input.value.trim();
         if (query) {
             window.location.href = `/unified-search?q=${encodeURIComponent(query)}`;
         }
-    }
-});
+    };
+    btn.addEventListener('click', go);
+    input.addEventListener('keypress', (e) => { if(e.key === 'Enter') go(); });
+    return true;
+}
+function initAllSearch(){
+    if (bindAllSearch()) return;
+    setTimeout(bindAllSearch, 200);
+}
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initAllSearch);
+} else {
+    initAllSearch();
+}
 
 // Header Cache Clear Button (optional element)
 const headerClearBtn = document.getElementById('header-clear-cache-btn');

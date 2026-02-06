@@ -37,13 +37,38 @@
     .from-cache { display: inline-block; padding: 4px 8px; background: #e8f8f5; color: #00b894; border-radius: 4px; font-size: 12px; margin-left: 8px; }
     .view-all-btn { padding: 6px 16px; background: #3498db; color: white; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; margin-left: 12px; }
     .view-all-btn:hover { background: #2980b9; }
+
+    /* Night mode */
+    html.ss-theme-night body { background:#0f172a; color:#e2e8f0; }
+    html.ss-theme-night h1 { color:#e2e8f0; }
+    html.ss-theme-night .search-box,
+    html.ss-theme-night .results-summary,
+    html.ss-theme-night .db-result { background:#1e293b; border:1px solid rgba(255,255,255,0.08); box-shadow:0 10px 28px rgba(0,0,0,0.45); }
+    html.ss-theme-night .search-input { background:#0f172a; border-color:rgba(255,255,255,0.12); color:#e2e8f0; }
+    html.ss-theme-night .search-input::placeholder { color:#94a3b8; }
+    html.ss-theme-night .search-btn { background:#2563eb; }
+    html.ss-theme-night .search-btn:hover { background:#1d4ed8; }
+    html.ss-theme-night .search-btn:disabled { background:#334155; }
+    html.ss-theme-night .db-name { color:#e2e8f0; }
+    html.ss-theme-night .db-result:hover { box-shadow:0 12px 30px rgba(0,0,0,0.5); }
+    html.ss-theme-night .db-result.not-found { opacity:0.55; }
+    html.ss-theme-night .db-samples { border-top-color:rgba(255,255,255,0.08); }
+    html.ss-theme-night .sample-item { background:#111827; color:#e2e8f0; }
+    html.ss-theme-night .loading,
+    html.ss-theme-night .no-results { color:#94a3b8; }
+    html.ss-theme-night .spinner { border-color:#334155; border-top-color:#60a5fa; }
+    html.ss-theme-night .from-cache { background:rgba(16,185,129,0.15); color:#10b981; }
+    html.ss-theme-night .view-all-btn { background:#2563eb; }
+    html.ss-theme-night .view-all-btn:hover { background:#1d4ed8; }
+    html.ss-theme-night .back-btn { background:#ef4444; }
+    html.ss-theme-night .back-btn:hover { background:#dc2626; }
   </style>
 </head>
 <body>
   <div class="container">
     <div style="margin-bottom: 15px;">
         <a href="/" style="text-decoration: none;">
-            <button style="padding: 8px 16px; background: #e74c3c; color: white; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; font-weight: 600;">Back</button>
+            <button class="back-btn" style="padding: 8px 16px; background: #e74c3c; color: white; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; font-weight: 600;">Back</button>
         </a>
     </div>
     <h1>🔍 Unified Search</h1>

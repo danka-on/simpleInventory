@@ -94,20 +94,6 @@
             color: var(--primary);
             font-size: 1.2rem;
         }
-        .back-btn {
-            display: inline-block;
-            margin-top: 25px;
-            padding: 12px 20px;
-            background: var(--primary);
-            color: white;
-            text-decoration: none;
-            border-radius: var(--radius);
-            font-weight: 500;
-            transition: background 0.2s;
-        }
-        .back-btn:hover {
-            background: var(--accent);
-        }
         .sold-orders-section {
             margin-top: 30px;
             background: var(--card);
@@ -194,24 +180,11 @@
 </head>
 <body>
     <div class="container">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
-            <a href="/" style="text-decoration:none;">
-                <button style="background:#e74c3c;color:#fff;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;display:flex;align-items:center;gap:8px;">
-                    <i class="fas fa-arrow-left"></i> <span data-i18n="back">Back</span>
-                </button>
-            </a>
-            <h1 style="flex:1;text-align:center;margin:0;" data-i18n="tools">Tools</h1>
-            <div style="width:84px"></div>
+        <div style="display:flex;align-items:center;justify-content:center;gap:12px;">
+            <h1 style="margin:0;" data-i18n="tools">Tools</h1>
         </div>
 
         <div class="tools-grid">
-            <!-- Marketplace Sale - Top, wide button -->
-            <a href="/marketplace-session" class="tool-card wide marketplace-green">
-                <i class="fas fa-cash-register"></i>
-                <h3 data-i18n="marketplace_sale">Marketplace Sale</h3>
-                <p data-i18n="record_in_person_sales">Record in-person sales</p>
-            </a>
-
             <!-- Barcode Print Que -->
             <a href="/barcode-print-que" class="tool-card important">
                 <i class="fas fa-print"></i>
@@ -224,13 +197,6 @@
                 <i class="fas fa-file-import"></i>
                 <h3 data-i18n="bol_extract">BOL Extract</h3>
                 <p data-i18n="extract_bol_data">Extract BOL data from Excel files</p>
-            </a>
-
-            <!-- Listing Agent (Experimental) -->
-            <a href="/listingagent" class="tool-card wide">
-                <i class="fas fa-clipboard-list" style="color:#0064d2;"></i>
-                <h3 data-i18n="listing_agent">Listing Agent</h3>
-                <p data-i18n="listing_agent_desc">Draft and publish listings from UPCs</p>
             </a>
 
             <!-- Sync Manager - Wide button -->

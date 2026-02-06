@@ -8896,6 +8896,16 @@ def price_master_page():
     """Bulk re-pricing dashboard for eBay + Amazon store listings."""
     return render_template('price_master.html')
 
+@app.route('/ready-to-ship')
+def ready_to_ship_page():
+    """Ready to Ship orders page."""
+    return render_template('ready_to_ship.html')
+
+@app.route('/store-manager')
+def store_manager_page():
+    """Central hub for store-related tools."""
+    return render_template('store_manager.html')
+
 @app.route('/label-master')
 def label_master_page():
     """Label Master portal for buying/printing labels for sold orders."""
@@ -10005,6 +10015,62 @@ def _pricemaster_ebay_revise_prices_bulk(updates: list, currency='USD'):
         failed[str(u['item_id']).strip()] = msg
     return ok, failed
 
+def _pricemaster_ebay_get_item_price(item_id: str):
+    """Fetch current price for an eBay listing via Trading API GetItem."""
+    item_id = (item_id or '').strip()
+    if not item_id:
+        raise Exception('Missing item_id')
+
+    token = os.getenv("EBAY_OLDAUTH_TOKEN") or ''
+    token = token.strip()
+    if not token:
+        raise Exception("Missing EBAY_OLDAUTH_TOKEN (Trading API token)")
+
+    xml_payload = f'''<?xml version="1.0" encoding="utf-8"?>
+      <GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+        <RequesterCredentials>
+          <eBayAuthToken>{token}</eBayAuthToken>
+        </RequesterCredentials>
+        <ItemID>{item_id}</ItemID>
+        <DetailLevel>ReturnAll</DetailLevel>
+        <IncludeItemSpecifics>false</IncludeItemSpecifics>
+      </GetItemRequest>
+    '''
+
+    resp = _pricemaster_ebay_trading_call('GetItem', xml_payload, timeout=30)
+    if resp.status_code != 200:
+        raise Exception(f"HTTP {resp.status_code}: {resp.text[:200]}")
+
+    ns = {'ebay': 'urn:ebay:apis:eBLBaseComponents'}
+    try:
+        root = ET.fromstring(resp.text)
+    except Exception:
+        raise Exception('Invalid XML response from eBay')
+
+    ack = (root.findtext('.//ebay:Ack', default='', namespaces=ns) or '').strip()
+    if ack not in ('Success', 'Warning', 'PartialFailure'):
+        # Try to extract error
+        err = root.find('.//ebay:Errors', ns)
+        msg = 'eBay API error'
+        if err is not None:
+            msg = (err.findtext('ebay:LongMessage', default='', namespaces=ns) or err.findtext('ebay:ShortMessage', default='', namespaces=ns) or msg).strip()
+        raise Exception(msg)
+
+    price_el = (
+        root.find('.//ebay:CurrentPrice', ns)
+        or root.find('.//ebay:StartPrice', ns)
+        or root.find('.//ebay:BuyItNowPrice', ns)
+    )
+    if price_el is None or price_el.text is None:
+        raise Exception('Price not found in eBay response')
+
+    currency = price_el.attrib.get('currencyID') or 'USD'
+    price_d = _pricemaster_parse_decimal(price_el.text)
+    if price_d is None:
+        raise Exception('Invalid price value returned by eBay')
+
+    return float(_pricemaster_money_2dp(price_d)), currency
+
 def _pricemaster_fetch_ebay_rows(item_ids: list):
     out = {}
     item_ids = [str(x).strip() for x in (item_ids or []) if str(x).strip()]
@@ -10483,6 +10549,57 @@ def api_pricemaster_bulk_update():
 
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e, 'pricemaster:bulk_update')}), 500
+
+@app.route('/api/pricemaster/ebay_verify', methods=['POST'])
+def api_pricemaster_ebay_verify():
+    """Verify eBay listing prices against live data and sync local DB."""
+    try:
+        data = request.json or {}
+        items = data.get('items') or []
+        if not items:
+            item_id = (data.get('item_id') or '').strip()
+            expected = data.get('expected_price')
+            if item_id:
+                items = [{'item_id': item_id, 'expected_price': expected}]
+
+        if not items:
+            return jsonify({'success': False, 'error': 'No item ids provided'}), 400
+
+        results = []
+        # Limit to a reasonable number to avoid rate limits
+        items = items[:10]
+
+        for it in items:
+            item_id = (it.get('item_id') or '').strip()
+            if not item_id:
+                continue
+            expected_d = _pricemaster_parse_decimal(it.get('expected_price'))
+            expected = float(_pricemaster_money_2dp(expected_d)) if expected_d is not None else None
+            try:
+                price, currency = _pricemaster_ebay_get_item_price(item_id)
+                applied = None
+                if expected is not None and price is not None:
+                    applied = abs(float(price) - float(expected)) <= 0.01
+                # Sync local DB price
+                with db_connection('ebayStore.db') as conn:
+                    cur = conn.cursor()
+                    cur.execute('UPDATE INVENTORY SET Price = ? WHERE TRIM(COALESCE(ItemID,\'\')) = ? COLLATE NOCASE', (f"{float(price):.2f}", item_id))
+                results.append({
+                    'item_id': item_id,
+                    'price': price,
+                    'currency': currency,
+                    'expected_price': expected,
+                    'applied': applied,
+                })
+            except Exception as e:
+                results.append({
+                    'item_id': item_id,
+                    'error': _safe_error(e, 'pricemaster:ebay_verify:item')
+                })
+
+        return jsonify({'success': True, 'items': results})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'pricemaster:ebay_verify')}), 500
 
 @app.route('/api/pricemaster/feed_status', methods=['POST'])
 def api_pricemaster_feed_status():
@@ -14079,6 +14196,28 @@ def sold_orders():
 
     return jsonify(result)
 
+@app.route('/api/ready-to-ship/count', methods=['GET'])
+@cache.cached(timeout=60, query_string=True)
+def ready_to_ship_count():
+    """Return count of unhandled (ready to ship) orders within the last N days."""
+    days = int(request.args.get('days', 2))
+    conn = sqlite3.connect('sold.db')
+    try:
+        cur = conn.cursor()
+        cur.execute('''
+            SELECT COUNT(*)
+            FROM orders
+            WHERE paid_time >= date('now', '-' || ? || ' days')
+              AND COALESCE(TRIM(isHandled), '') != '1'
+        ''', (days,))
+        row = cur.fetchone()
+        count = int(row[0] or 0) if row else 0
+        return jsonify({'success': True, 'count': count, 'days': days})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'ready_to_ship:count')}), 500
+    finally:
+        conn.close()
+
 
 @app.route('/get-order', methods=['GET'])
 def get_order():
@@ -14126,6 +14265,7 @@ def mark_order_handled():
         
         # Clear the sold-orders cache since data changed
         cache.delete_memoized(sold_orders)
+        cache.delete_memoized(ready_to_ship_count)
         
         return jsonify({'success': True})
     except Exception as e:
@@ -14149,6 +14289,7 @@ def mark_order_unhandled():
         
         # Clear the sold-orders cache since data changed
         cache.delete_memoized(sold_orders)
+        cache.delete_memoized(ready_to_ship_count)
         
         return jsonify({'success': True})
     except Exception as e:
