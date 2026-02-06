@@ -39,3 +39,11 @@ scp .\static\shelves\originals\*.png "$User@$HostName`:$RemotePath/static/shelve
 
 Write-Host "✅ Deployment complete!" -ForegroundColor Green
 Write-Host "💡 Restart the Flask app on the Pi to see changes" -ForegroundColor Cyan
+
+# Log deployment timestamp locally
+$LogPath = Join-Path $PSScriptRoot "deploy-log.txt"
+$Stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+"[$Stamp] Deployed to $User@$HostName ($RemotePath) via deploy-to-pi.ps1" | Out-File -FilePath $LogPath -Append -Encoding utf8
+
+# Log deployment timestamp on the Pi
+ssh "$User@$HostName" 'ts=$(date +%Y-%m-%dT%H:%M:%S); echo "[deploy-to-pi.ps1] $ts" >> /opt/sweetshelves/deploy-log.txt'
