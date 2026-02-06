@@ -918,12 +918,25 @@ function createTopBanner(){
   themeBtn.type = 'button';
   themeBtn.id = 'ss-theme-toggle';
   themeBtn.className = 'ss-pill';
-  themeBtn.title = 'Toggle Day/Night (auto can be set in Tools → Misc)';
+  themeBtn.title = 'Toggle Day/Night';
   themeBtn.innerHTML = `<span class="ss-dot" aria-hidden="true"></span><span id="ss-theme-label">Theme</span>`;
   themeBtn.onclick = toggleThemeManual;
 
+  const autoBtn = document.createElement('button');
+  autoBtn.type = 'button';
+  autoBtn.id = 'ss-theme-auto';
+  autoBtn.className = 'ss-pill';
+  autoBtn.title = 'Switch to automatic day/night based on time';
+  autoBtn.textContent = 'Auto';
+  autoBtn.style.cssText = 'font-size:0.7rem;padding:4px 10px;opacity:0.6;transition:all .15s ease;';
+  autoBtn.onclick = () => {
+    setThemeMode('auto');
+    updateToggleUI();
+  };
+
   inner.appendChild(langSeg);
   inner.appendChild(themeBtn);
+  inner.appendChild(autoBtn);
   bar.appendChild(inner);
 
   if(document.body.firstChild){
@@ -942,7 +955,11 @@ function createTopBanner(){
     }catch(e){}
   };
   measure();
-  window.addEventListener('resize', measure);
+  let _resizeTimer;
+  window.addEventListener('resize', () => {
+    clearTimeout(_resizeTimer);
+    _resizeTimer = setTimeout(measure, 150);
+  });
 
   updateToggleUI();
 }
@@ -955,11 +972,16 @@ function updateToggleUI() {
   if (btnLt) btnLt.classList.toggle('active', lang === 'lt');
 
   const themeLabel = document.getElementById('ss-theme-label');
+  const autoBtn = document.getElementById('ss-theme-auto');
   const mode = getThemeMode();
   const applied = getAppliedTheme() || (mode === 'auto' ? _computeAutoTheme() : mode);
   if(themeLabel){
     const suffix = mode === 'auto' ? ' (Auto)' : '';
     themeLabel.textContent = (applied === 'night' ? 'Night' : 'Day') + suffix;
+  }
+  if(autoBtn){
+    autoBtn.style.opacity = mode === 'auto' ? '1' : '0.5';
+    autoBtn.style.fontWeight = mode === 'auto' ? '700' : '400';
   }
 }
 

@@ -72,6 +72,34 @@
       .qty-btn{max-width:30vw}
       .hero{max-height:28vh}
     }
+
+    /* Night mode overrides */
+    html.ss-theme-night body { background: var(--bg0, #0f172a); color: var(--ink, #e2e8f0); }
+    html.ss-theme-night .card { background: var(--card, #1e293b); border-color: rgba(255,255,255,0.08); }
+    html.ss-theme-night .title { color: var(--ink-bright, #f8fafc); }
+    html.ss-theme-night .muted { color: var(--muted, #94a3b8); }
+    html.ss-theme-night .ok { color: #10b981; }
+    html.ss-theme-night .bad { color: #f87171; }
+    html.ss-theme-night .pill { background: #334155; color: var(--muted, #94a3b8); }
+    html.ss-theme-night .qty-display { background: #1e293b; }
+    html.ss-theme-night .qty-number { color: var(--ink, #e2e8f0); }
+    html.ss-theme-night .qty-label { color: var(--muted-dim, #64748b); }
+    html.ss-theme-night .qty-btn { background: #1e293b; border-color: currentColor; }
+    html.ss-theme-night .qty-btn.plus:hover { background: #00b894; color: #fff; }
+    html.ss-theme-night .qty-btn.minus:hover { background: #e74c3c; color: #fff; }
+    html.ss-theme-night input[type="text"] { background: var(--bg0, #0f172a); color: var(--ink, #e2e8f0); border-color: rgba(255,255,255,0.12); }
+    html.ss-theme-night select { background: var(--bg0, #0f172a); color: var(--ink, #e2e8f0); border-color: rgba(255,255,255,0.12); }
+    html.ss-theme-night label { color: var(--muted, #94a3b8); }
+    html.ss-theme-night video { background: #0f172a; }
+    html.ss-theme-night .thumb { background: #334155; }
+    html.ss-theme-night .hero { background: #1e293b; }
+    html.ss-theme-night .btn { background: #334155; color: var(--muted, #94a3b8); }
+    html.ss-theme-night .btn-gray { background: #475569; }
+    html.ss-theme-night .loading-overlay { background: rgba(15,23,42,0.9); }
+    html.ss-theme-night .page-loading-overlay { background: rgba(15,23,42,0.7); }
+    html.ss-theme-night .spinner { border-color: #334155; border-top-color: #10b981; }
+    html.ss-theme-night .loading-spinner-large { border-color: #334155; border-top-color: #10b981; }
+    html.ss-theme-night .top h2 { color: var(--ink-bright, #f8fafc); }
   </style>
   <script src="https://unpkg.com/@zxing/library@0.19.1/umd/index.min.js"></script>
 </head>
@@ -290,7 +318,7 @@
       qtyNumber.style.color = change > 0 ? '#00b894' : '#e74c3c';
       setTimeout(() => {
         qtyNumber.style.transform = 'scale(1)';
-        qtyNumber.style.color = '#2c3e50';
+        qtyNumber.style.color = '';
       }, 300);
     }
 
@@ -298,7 +326,7 @@
       currentQty = 1;
       document.getElementById('qtyNumber').textContent = '1';
       document.getElementById('qtyNumber').style.transform = 'scale(1)';
-      document.getElementById('qtyNumber').style.color = '#2c3e50';
+      document.getElementById('qtyNumber').style.color = '';
       document.getElementById('qtyDisplay').classList.add('hidden');
     }
 

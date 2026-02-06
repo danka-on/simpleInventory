@@ -131,6 +131,22 @@
       th, td { padding: 6px 4px; font-size: 0.75rem; }
       .badge { padding: 2px 6px; font-size: 0.7rem; }
     }
+
+    /* Night mode overrides */
+    html.ss-theme-night body { background: linear-gradient(135deg, #0f172a, #1e293b); color: var(--ink, #e2e8f0); }
+    html.ss-theme-night .card { background: var(--card, #1e293b); border: 1px solid rgba(255,255,255,0.08); box-shadow: 0 8px 32px rgba(0,0,0,0.35); }
+    html.ss-theme-night .filters { background: rgba(30,41,59,0.95); box-shadow: 0 4px 16px rgba(0,0,0,0.3); }
+    html.ss-theme-night .muted { color: var(--muted, #94a3b8); }
+    html.ss-theme-night input[type="text"], html.ss-theme-night input[type="number"] { background: var(--bg0, #0f172a); color: var(--ink, #e2e8f0); border-color: rgba(255,255,255,0.12); }
+    html.ss-theme-night input[type="text"]:focus, html.ss-theme-night input[type="number"]:focus { border-color: #60a5fa; box-shadow: 0 0 0 3px rgba(96,165,250,0.2); }
+    html.ss-theme-night select { background: var(--bg0, #0f172a); color: var(--ink, #e2e8f0); border-color: rgba(255,255,255,0.12); }
+    html.ss-theme-night table { color: var(--ink, #e2e8f0); }
+    html.ss-theme-night th { background: #0f172a; color: var(--ink, #e2e8f0); border-color: rgba(255,255,255,0.08); }
+    html.ss-theme-night td { border-color: rgba(255,255,255,0.08); }
+    html.ss-theme-night tbody tr:hover { background: rgba(255,255,255,0.04); }
+    html.ss-theme-night .row-zero { background: rgba(239,68,68,0.08); }
+    html.ss-theme-night .modal .card { background: var(--card, #1e293b); color: var(--ink, #e2e8f0); border-color: rgba(255,255,255,0.1); }
+    html.ss-theme-night .modal-header { border-bottom-color: rgba(255,255,255,0.08); }
   </style>
 </head>
 <body>

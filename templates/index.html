@@ -289,6 +289,55 @@
             cursor: pointer;
             margin-left: 10px;
         }
+        html.ss-theme-night .sold-popup {
+            background: #1e293b;
+            color: #e2e8f0;
+            border-color: rgba(255,255,255,0.1);
+            box-shadow: 0 12px 30px rgba(0,0,0,0.45);
+        }
+        html.ss-theme-night .sold-popup-close { color: #e2e8f0; }
+        .order-popup-overlay { }
+        .order-popup-card {
+            background: #fff;
+            border-radius: 14px;
+            color: #111;
+            border: 1px solid #e5e7eb;
+        }
+        .order-popup-card .popup-muted { color: #666; }
+        .order-popup-card .popup-divider { border-top-color: #e0e0e0; }
+        .order-popup-card .popup-group-title { color: #2c3e50; }
+        .order-popup-card .popup-link { color: #0984e3; }
+        .order-popup-card .popup-qty { color: #666; }
+        .order-popup-card .popup-loc-banner { color: #e53935; }
+        .order-popup-card .popup-image,
+        .order-popup-card .popup-loc-image {
+            background: #f8f8f8;
+            border: 1px solid #e5e7eb;
+        }
+        html.ss-theme-night .order-popup-card {
+            background: #1e293b !important;
+            color: #e2e8f0 !important;
+            border-color: rgba(255,255,255,0.1) !important;
+            box-shadow: 0 12px 30px rgba(0,0,0,0.45) !important;
+        }
+        html.ss-theme-night .order-popup-card .popup-muted { color: #94a3b8 !important; }
+        html.ss-theme-night .order-popup-card .popup-divider { border-top-color: rgba(255,255,255,0.12) !important; }
+        html.ss-theme-night .order-popup-card .popup-group-title { color: #e2e8f0 !important; }
+        html.ss-theme-night .order-popup-card .popup-link { color: #7dd3fc !important; }
+        html.ss-theme-night .order-popup-card .popup-qty { color: #94a3b8 !important; }
+        html.ss-theme-night .order-popup-card .popup-loc-banner { color: #fca5a5 !important; }
+        html.ss-theme-night .order-popup-card .popup-image,
+        html.ss-theme-night .order-popup-card .popup-loc-image {
+            background: #0f172a;
+            border-color: rgba(255,255,255,0.12);
+        }
+        html.ss-theme-night .order-popup-card .popup-close-btn {
+            background: #334155 !important;
+            color: #e2e8f0 !important;
+        }
+        html.ss-theme-night .order-popup-card .popup-close-btn:hover {
+            background: #475569 !important;
+        }
         .tools-section {
             background: var(--card);
             border-radius: var(--radius);
@@ -429,7 +478,7 @@
 
             <a href="/item-prep" style="text-decoration:none; width: 100%;">
                 <button type="button" class="btn-lighten main-btn" style="background:#7B3F00;">
-                    <i class="fas fa-diagnoses"></i> <span data-i18n="preperation">Preperation</span>
+                    <i class="fas fa-diagnoses"></i> <span data-i18n="preparation">Preparation</span>
                 </button>
             </a>
         </div>
@@ -1132,6 +1181,7 @@ function showOrderPopup(title, imageUrl, info, loc, price, paidTime, barcode) {
     
     const overlay = document.createElement('div');
     overlay.id = 'order-popup';
+    overlay.className = 'order-popup-overlay';
     overlay.style.cssText = `
         position: fixed;
         top: 0;
@@ -1148,6 +1198,7 @@ function showOrderPopup(title, imageUrl, info, loc, price, paidTime, barcode) {
     overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
     
     const popup = document.createElement('div');
+    popup.className = 'order-popup-card';
     popup.style.cssText = `
         background: #fff;
         border-radius: 14px;
@@ -1171,12 +1222,12 @@ function showOrderPopup(title, imageUrl, info, loc, price, paidTime, barcode) {
     }
     
     if (imageUrl) {
-        content += `<img src="${esc(imageUrl)}" alt="${esc(title || 'Order')}" style="max-width: 100%; border-radius: 10px; margin-bottom: 18px;">`;
+        content += `<img src="${esc(imageUrl)}" alt="${esc(title || 'Order')}" class="popup-image" style="max-width: 100%; border-radius: 10px; margin-bottom: 18px;">`;
     }
     
     // Add barcode under image if available
     if (barcode) {
-        content += `<div style="font-size: 0.9rem; color: #666; margin-bottom: 12px;"><strong>Barcode:</strong> ${esc(barcode)}</div>`;
+        content += `<div class="popup-muted" style="font-size: 0.9rem; margin-bottom: 12px;"><strong>Barcode:</strong> ${esc(barcode)}</div>`;
     }
     
     if (info) {
@@ -1187,9 +1238,9 @@ function showOrderPopup(title, imageUrl, info, loc, price, paidTime, barcode) {
             <div style="max-width: 300px; margin: 0 auto;">
                 <div style="margin-bottom: 10px;">
                     <strong>${esc(buyer)}</strong><br>
-                    <span style="font-size: 0.95em; color: #666;">${esc(address)}</span>
+                    <span class="popup-muted" style="font-size: 0.95em;">${esc(address)}</span>
                 </div>
-                <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 12px 0;">
+                <hr class="popup-divider" style="border: none; margin: 12px 0;">
                 <div style="text-align: left; font-size: 0.95em;">
                     <div style="margin-bottom: 6px;"><strong>Price:</strong> ${price || 'N/A'}</div>
                     <div><strong>Paid:</strong> ${paidTime || 'N/A'}</div>
@@ -1201,7 +1252,7 @@ function showOrderPopup(title, imageUrl, info, loc, price, paidTime, barcode) {
     if (loc) {
         // Check if loc is an array of locations (multiple)
         if (Array.isArray(loc)) {
-            content += `<div style="font-size: 0.98rem; margin-bottom: 12px; font-weight: 500; color: #e53935;">Multiple Locations:</div>`;
+            content += `<div class="popup-loc-banner" style="font-size: 0.98rem; margin-bottom: 12px; font-weight: 500;">Multiple Locations:</div>`;
             
             // Group locations by shelf classification (h=hallway, o=office, g=garage, etc.)
             const groups = {
@@ -1230,7 +1281,7 @@ function showOrderPopup(title, imageUrl, info, loc, price, paidTime, barcode) {
                 
                 const groupTitle = groupName.charAt(0).toUpperCase() + groupName.slice(1);
                 content += `<div style="margin-bottom: 16px;">`;
-                content += `<div style="font-size: 0.95rem; font-weight: 600; margin-bottom: 8px; color: #2c3e50;">${groupTitle}:</div>`;
+                content += `<div class="popup-group-title" style="font-size: 0.95rem; font-weight: 600; margin-bottom: 8px;">${groupTitle}:</div>`;
                 
                 groups[groupName].forEach((location, index) => {
                     const locCode = esc(location.code || '');
@@ -1239,15 +1290,15 @@ function showOrderPopup(title, imageUrl, info, loc, price, paidTime, barcode) {
                     const uniqueId = 'loc-' + Math.random().toString(36).substr(2, 9);
                     
                     content += `<div style="margin-left: 12px; margin-bottom: 8px;">`;
-                    content += `<span onclick="document.getElementById('${uniqueId}').style.display=document.getElementById('${uniqueId}').style.display==='none'?'block':'none'" style="cursor: pointer; color: #0984e3; text-decoration: underline; font-weight: 500;">${locCode}</span>`;
-                    content += ` <span style="color: #666; font-size: 0.9rem;">(Qty: ${qty})</span>`;
+                    content += `<span class="popup-link" onclick="document.getElementById('${uniqueId}').style.display=document.getElementById('${uniqueId}').style.display==='none'?'block':'none'" style="cursor: pointer; text-decoration: underline; font-weight: 500;">${locCode}</span>`;
+                    content += ` <span class="popup-qty" style="font-size: 0.9rem;">(Qty: ${qty})</span>`;
                     
                     // Hidden image that shows on click
                     content += `<div id="${uniqueId}" style="display: none; margin-top: 8px; margin-bottom: 12px;">`;
                     if (locImage.match(/\.(jpg|jpeg|png)$/i)) {
-                        content += `<img src="/static/pictureposition/${locImage}" alt="${locCode}" style="max-width: 260px; border-radius: 8px;" onerror="this.src='${missingDataUrlPopup}'">`;
+                        content += `<img src="/static/pictureposition/${locImage}" alt="${locCode}" class="popup-loc-image" style="max-width: 260px; border-radius: 8px;" onerror="this.src='${missingDataUrlPopup}'">`;
                     } else {
-                        content += `<img src="/static/shelves/${locImage.toLowerCase()}.png" alt="${locCode}" style="max-width: 260px; border-radius: 8px;" onerror="this.src='${missingDataUrlPopup}'">`;
+                        content += `<img src="/static/shelves/${locImage.toLowerCase()}.png" alt="${locCode}" class="popup-loc-image" style="max-width: 260px; border-radius: 8px;" onerror="this.src='${missingDataUrlPopup}'">`;
                     }
                     content += `</div>`;
                     content += `</div>`;
@@ -1257,18 +1308,18 @@ function showOrderPopup(title, imageUrl, info, loc, price, paidTime, barcode) {
             });
         } else {
             // Single location (string)
-            content += `<div style="font-size: 0.98rem; margin-bottom: 12px; font-weight: 500;">Location: ${esc(loc)}</div>`;
+        content += `<div class="popup-loc-line" style="font-size: 0.98rem; margin-bottom: 12px; font-weight: 500;">Location: ${esc(loc)}</div>`;
             
             if (loc.match(/\.(jpg|jpeg|png)$/i)) {
-                content += `<img src="/static/pictureposition/${esc(loc)}" alt="${esc(loc)}" style="max-width: 280px; border-radius: 10px; margin-bottom: 18px;" onerror="this.src='${missingDataUrlPopup}'">`;
+                content += `<img src="/static/pictureposition/${esc(loc)}" alt="${esc(loc)}" class="popup-loc-image" style="max-width: 280px; border-radius: 10px; margin-bottom: 18px;" onerror="this.src='${missingDataUrlPopup}'">`;
             } else {
-                content += `<img src="/static/shelves/${esc(loc.toLowerCase())}.png" alt="${esc(loc)}" style="max-width: 280px; border-radius: 10px; margin-bottom: 18px;" onerror="this.src='${missingDataUrlPopup}'">`;
+                content += `<img src="/static/shelves/${esc(loc.toLowerCase())}.png" alt="${esc(loc)}" class="popup-loc-image" style="max-width: 280px; border-radius: 10px; margin-bottom: 18px;" onerror="this.src='${missingDataUrlPopup}'">`;
             }
         }
     }
     
     popup.innerHTML = content + `
-        <button onclick="this.closest('#order-popup').remove()" style="
+        <button class="popup-close-btn" onclick="this.closest('#order-popup').remove()" style="
             margin-top: 16px;
             background: #0984e3;
             color: #fff;

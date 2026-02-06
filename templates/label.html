@@ -1,0 +1,1022 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.ico') }}">
+  <title>Label Master</title>
+
+  <script src="/static/i18n.js" defer></script>
+
+  <style>
+    :root{
+      --lm-ink: var(--ink, #111827);
+      --lm-muted: var(--muted, #6b7280);
+      --lm-bg: var(--bg, #f9f9f9);
+      --lm-card: var(--card, #ffffff);
+      --lm-border: var(--border, #e5e7eb);
+      --lm-accent: #1f8f5f;
+      --lm-primary: #0f4c81;
+      --lm-danger: #b42318;
+      --lm-radius: 14px;
+      --lm-shadow: 0 10px 26px rgba(0,0,0,0.10);
+    }
+
+    *{ box-sizing:border-box; }
+    body{
+      margin:0;
+      padding: 16px;
+      font-family: "Segoe UI", Arial, sans-serif;
+      background: var(--lm-bg);
+      color: var(--lm-ink);
+      min-height: 100vh;
+    }
+
+    .wrap{
+      max-width: 1180px;
+      margin: 0 auto;
+      padding-bottom: 90px;
+    }
+
+    .top{
+      display:flex;
+      gap: 10px;
+      align-items:center;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+    .titleBlock{
+      flex: 1;
+      min-width: 220px;
+      text-align:center;
+    }
+    .title{
+      font-size: 1.25rem;
+      font-weight: 900;
+      letter-spacing: -0.02em;
+    }
+    .subtitle{
+      margin-top: 2px;
+      color: var(--lm-muted);
+      font-size: 0.92rem;
+      font-weight: 600;
+    }
+
+    .btn{
+      appearance:none;
+      border: 1px solid var(--lm-border);
+      background: var(--lm-card);
+      color: var(--lm-ink);
+      padding: 10px 14px;
+      border-radius: 12px;
+      cursor: pointer;
+      font-weight: 700;
+      letter-spacing: .2px;
+      display:inline-flex;
+      align-items:center;
+      gap: 8px;
+      text-decoration:none;
+      transition: transform .12s ease, filter .12s ease;
+      user-select: none;
+      white-space: nowrap;
+    }
+    .btn:hover{ transform: translateY(-1px); filter: brightness(1.02); }
+    .btn:active{ transform: translateY(0); }
+    .btn:disabled{ cursor:not-allowed; opacity: 0.6; transform:none; }
+
+    .btnBack{
+      background: rgba(180,35,24,0.08);
+      border-color: rgba(180,35,24,0.25);
+      color: var(--lm-danger);
+    }
+    .btnPrimary{
+      background: var(--lm-accent);
+      border-color: transparent;
+      color: #fff;
+    }
+    .btnGhost{
+      background: rgba(0,0,0,0.02);
+    }
+    html.ss-theme-night .btnGhost{
+      background: rgba(255,255,255,0.04);
+    }
+
+    .grid{
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-top: 12px;
+    }
+
+    .card{
+      background: var(--lm-card);
+      border: 1px solid var(--lm-border);
+      border-radius: var(--lm-radius);
+      box-shadow: var(--lm-shadow);
+      overflow:hidden;
+    }
+    html.ss-theme-night .card{
+      box-shadow: 0 16px 40px rgba(0,0,0,0.35);
+      border-color: rgba(255,255,255,0.08);
+    }
+    .cardHeader{
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--lm-border);
+      display:flex;
+      align-items:center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    html.ss-theme-night .cardHeader{
+      border-bottom-color: rgba(255,255,255,0.08);
+      background: rgba(0,0,0,0.12);
+    }
+    .cardTitle{
+      font-weight: 900;
+      letter-spacing: -0.01em;
+      display:flex;
+      align-items:center;
+      gap: 10px;
+    }
+    .cardBody{ padding: 12px 14px; }
+
+    .fieldRow{
+      display:flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: flex-end;
+    }
+    .field{
+      display:flex;
+      flex-direction: column;
+      gap: 6px;
+      flex: 1;
+      min-width: 180px;
+    }
+    label{
+      font-size: 0.86rem;
+      font-weight: 800;
+      color: var(--lm-muted);
+      letter-spacing: .2px;
+    }
+    input[type="text"], input[type="number"], select{
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid var(--lm-border);
+      border-radius: 12px;
+      background: rgba(0,0,0,0.02);
+      color: var(--lm-ink);
+      outline: none;
+      font-size: 0.98rem;
+    }
+    html.ss-theme-night input[type="text"],
+    html.ss-theme-night input[type="number"],
+    html.ss-theme-night select{
+      background: rgba(255,255,255,0.04);
+      border-color: rgba(255,255,255,0.10);
+    }
+
+    .seg{
+      display:flex;
+      border: 1px solid var(--lm-border);
+      border-radius: 999px;
+      overflow:hidden;
+      background: rgba(0,0,0,0.02);
+    }
+    html.ss-theme-night .seg{
+      background: rgba(255,255,255,0.04);
+      border-color: rgba(255,255,255,0.10);
+    }
+    .seg button{
+      border:0;
+      background: transparent;
+      color: var(--lm-muted);
+      padding: 8px 12px;
+      cursor:pointer;
+      font-weight: 900;
+      letter-spacing: .2px;
+      min-width: 82px;
+    }
+    .seg button.active{
+      background: var(--lm-primary);
+      color: #fff;
+    }
+
+    .kpi{
+      display:flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 10px;
+    }
+    .pill{
+      display:inline-flex;
+      align-items:center;
+      gap: 8px;
+      padding: 8px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--lm-border);
+      background: rgba(0,0,0,0.02);
+      color: var(--lm-muted);
+      font-weight: 800;
+      font-size: 0.9rem;
+    }
+    .pill.ebay{
+      background: rgba(96,165,250,0.15);
+      border-color: rgba(96,165,250,0.25);
+      color: #60a5fa;
+    }
+    .pill.amazon{
+      background: rgba(255,153,0,0.15);
+      border-color: rgba(255,153,0,0.25);
+      color: #fbbf24;
+    }
+    .pill.selected-active{
+      background: rgba(16,185,129,0.15);
+      border-color: rgba(16,185,129,0.25);
+      color: #10b981;
+    }
+    html.ss-theme-night .pill{
+      background: rgba(255,255,255,0.04);
+      border-color: rgba(255,255,255,0.10);
+    }
+    html.ss-theme-night .pill.ebay{
+      background: rgba(96,165,250,0.2);
+      border-color: rgba(96,165,250,0.3);
+      color: #60a5fa;
+    }
+    html.ss-theme-night .pill.amazon{
+      background: rgba(251,191,36,0.18);
+      border-color: rgba(251,191,36,0.3);
+      color: #fbbf24;
+    }
+    html.ss-theme-night .pill.selected-active{
+      background: rgba(16,185,129,0.2);
+      border-color: rgba(16,185,129,0.35);
+      color: #34d399;
+    }
+    .pill strong{ color: var(--lm-ink); }
+
+    .statusRow{
+      display:flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items:center;
+      margin-top: 10px;
+    }
+    .statusDot{
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: #9ca3af;
+    }
+    .statusDot.ok{ background: #22c55e; }
+    .statusDot.warn{ background: #f59e0b; }
+    .statusDot.bad{ background: #ef4444; }
+
+    .tableWrap{
+      overflow:auto;
+      max-height: 62vh;
+    }
+    table{
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.93rem;
+    }
+    thead th{
+      position: sticky;
+      top: 0;
+      z-index: 3;
+      background: var(--lm-card);
+      border-bottom: 1px solid var(--lm-border);
+      padding: 10px 10px;
+      text-align: left;
+      font-weight: 900;
+      letter-spacing: .2px;
+      white-space: nowrap;
+    }
+    html.ss-has-top-banner .tableWrap thead th{
+      top: 0 !important;
+    }
+    html.ss-theme-night thead th{
+      background: rgba(0,0,0,0.18);
+      border-bottom-color: rgba(255,255,255,0.08);
+    }
+    tbody td{
+      border-bottom: 1px solid rgba(0,0,0,0.06);
+      padding: 10px 10px;
+      vertical-align: top;
+    }
+    html.ss-theme-night tbody td{
+      border-bottom-color: rgba(255,255,255,0.07);
+    }
+    tbody tr:hover{
+      background: rgba(0,0,0,0.02);
+    }
+    html.ss-theme-night tbody tr:hover{
+      background: rgba(255,255,255,0.04);
+    }
+
+    .badge{
+      display:inline-flex;
+      align-items:center;
+      gap: 6px;
+      border-radius: 999px;
+      padding: 4px 8px;
+      font-size: 0.8rem;
+      font-weight: 900;
+      letter-spacing: .2px;
+      border: 1px solid var(--lm-border);
+      background: rgba(0,0,0,0.02);
+      color: var(--lm-muted);
+      white-space: nowrap;
+    }
+    html.ss-theme-night .badge{
+      background: rgba(255,255,255,0.04);
+      border-color: rgba(255,255,255,0.10);
+    }
+    .badge.ebay{ color: #0064d2; border-color: rgba(0,100,210,0.35); background: rgba(0,100,210,0.08); }
+    .badge.amazon{ color: #c27800; border-color: rgba(194,120,0,0.35); background: rgba(194,120,0,0.08); }
+    html.ss-theme-night .badge.ebay{ background: rgba(96,165,250,0.12); border-color: rgba(96,165,250,0.24); color: #60a5fa; }
+    html.ss-theme-night .badge.amazon{ background: rgba(251,191,36,0.12); border-color: rgba(251,191,36,0.24); color: #fbbf24; }
+
+    .muted{ color: var(--lm-muted); }
+    .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; font-size: 0.9em; }
+
+    .log{
+      white-space: pre-wrap;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: 0.9rem;
+      margin: 0;
+      padding: 12px 14px;
+      max-height: 220px;
+      overflow:auto;
+      background: rgba(0,0,0,0.03);
+    }
+    html.ss-theme-night .log{
+      background: rgba(0,0,0,0.22);
+    }
+
+    @media (max-width: 980px){
+      .grid{ grid-template-columns: 1fr; }
+      body{ padding: 12px; }
+      .title{ font-size: 1.15rem; }
+      .seg button{ min-width: 70px; }
+      thead th, tbody td{ padding: 9px 8px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <a class="btn btnBack" href="/items-to-list">Back</a>
+      <div class="titleBlock">
+        <div class="title">Label Master</div>
+        <div class="subtitle">Buy and print shipping labels for sold orders</div>
+      </div>
+      <button class="btn btnGhost" id="refreshBtn" type="button">Refresh</button>
+      <button class="btn btnPrimary" id="syncBtn" type="button">Sync Orders</button>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <div class="cardHeader">
+          <div class="cardTitle">Filters</div>
+        </div>
+        <div class="cardBody">
+          <div class="fieldRow">
+            <div class="field" style="min-width:260px;">
+              <label for="lmSearch">Search</label>
+              <input id="lmSearch" type="text" placeholder="Order ID, Title, Barcode, Name, ZIP" />
+            </div>
+            <div class="field" style="min-width:160px;">
+              <label for="lmDays">Lookback (days)</label>
+              <input id="lmDays" type="number" min="1" max="365" value="7" />
+            </div>
+            <div class="field" style="min-width:260px;">
+              <label>Store</label>
+              <div class="seg" role="tablist" aria-label="Store filter">
+                <button type="button" class="active" data-store="all">All</button>
+                <button type="button" data-store="ebay">eBay</button>
+                <button type="button" data-store="amazon">Amazon</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="kpi">
+            <div class="pill" id="kpiSelectedPill"><span>Selected</span> <strong id="kpiSelected">0</strong></div>
+            <div class="pill"><span>Showing</span> <strong id="kpiShown">0</strong></div>
+            <div class="pill ebay"><span>eBay</span> <strong id="kpiEbay">0</strong></div>
+            <div class="pill amazon"><span>Amazon</span> <strong id="kpiAmazon">0</strong></div>
+          </div>
+
+          <div class="statusRow">
+            <div class="pill" id="ebayStatus"><span class="statusDot" id="ebayDot"></span><span>eBay: checking</span></div>
+            <div class="pill" id="amazonStatus"><span class="statusDot" id="amazonDot"></span><span>Amazon: checking</span></div>
+            <button class="btn btnGhost" type="button" id="checkBtn">Check APIs</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="cardHeader">
+          <div class="cardTitle">Actions</div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end;">
+            <button class="btn" type="button" id="selectAllBtn">Select All</button>
+            <button class="btn" type="button" id="clearSelBtn">Clear</button>
+          </div>
+        </div>
+        <div class="cardBody">
+          <div class="fieldRow">
+            <div class="field" style="min-width:220px;">
+              <label>&nbsp;</label>
+              <button class="btn btnPrimary" type="button" id="buySelectedBtn">Buy Labels for Selected</button>
+            </div>
+            <div class="field" style="min-width:220px;">
+              <label>&nbsp;</label>
+              <button class="btn" type="button" id="printSelectedBtn">Print Selected Labels</button>
+            </div>
+          </div>
+          <div class="muted" style="margin-top:10px; font-weight:700;">
+            Labels are purchased and printed per order. API support must be enabled for each store.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:12px;">
+      <div class="cardHeader">
+        <div class="cardTitle">Defaults</div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <button class="btn" type="button" id="saveDefaultsBtn">Save Defaults</button>
+        </div>
+      </div>
+      <div class="cardBody">
+        <div class="fieldRow">
+          <div class="field" style="min-width:220px;">
+            <label for="dfFromName">Ship From Name</label>
+            <input id="dfFromName" type="text" placeholder="Sender name" />
+          </div>
+          <div class="field" style="min-width:220px;">
+            <label for="dfFromCompany">Company (optional)</label>
+            <input id="dfFromCompany" type="text" placeholder="Company" />
+          </div>
+          <div class="field" style="min-width:180px;">
+            <label for="dfFromPhone">Phone (optional)</label>
+            <input id="dfFromPhone" type="text" placeholder="555-123-4567" />
+          </div>
+          <div class="field" style="min-width:220px;">
+            <label for="dfFromEmail">Email (optional)</label>
+            <input id="dfFromEmail" type="text" placeholder="you@email.com" />
+          </div>
+        </div>
+
+        <div class="fieldRow" style="margin-top:10px;">
+          <div class="field" style="min-width:260px;">
+            <label for="dfFromAddress1">Address Line 1</label>
+            <input id="dfFromAddress1" type="text" placeholder="Street address" />
+          </div>
+          <div class="field" style="min-width:240px;">
+            <label for="dfFromAddress2">Address Line 2</label>
+            <input id="dfFromAddress2" type="text" placeholder="Suite / Apt" />
+          </div>
+          <div class="field" style="min-width:180px;">
+            <label for="dfFromCity">City</label>
+            <input id="dfFromCity" type="text" />
+          </div>
+          <div class="field" style="min-width:120px;">
+            <label for="dfFromState">State</label>
+            <input id="dfFromState" type="text" />
+          </div>
+          <div class="field" style="min-width:140px;">
+            <label for="dfFromPostal">Postal Code</label>
+            <input id="dfFromPostal" type="text" />
+          </div>
+          <div class="field" style="min-width:120px;">
+            <label for="dfFromCountry">Country</label>
+            <input id="dfFromCountry" type="text" value="US" />
+          </div>
+        </div>
+
+        <div class="fieldRow" style="margin-top:10px;">
+          <div class="field" style="min-width:160px;">
+            <label for="dfPkgWeight">Weight (oz)</label>
+            <input id="dfPkgWeight" type="number" step="0.1" min="0.1" placeholder="16" />
+          </div>
+          <div class="field" style="min-width:140px;">
+            <label for="dfPkgLength">Length (in)</label>
+            <input id="dfPkgLength" type="number" step="0.1" min="0.1" placeholder="8" />
+          </div>
+          <div class="field" style="min-width:140px;">
+            <label for="dfPkgWidth">Width (in)</label>
+            <input id="dfPkgWidth" type="number" step="0.1" min="0.1" placeholder="6" />
+          </div>
+          <div class="field" style="min-width:140px;">
+            <label for="dfPkgHeight">Height (in)</label>
+            <input id="dfPkgHeight" type="number" step="0.1" min="0.1" placeholder="4" />
+          </div>
+          <div class="field" style="min-width:240px;">
+            <label for="dfAmazonDelivery">Amazon Delivery Experience</label>
+            <select id="dfAmazonDelivery">
+              <option value="NoTracking">No Tracking</option>
+              <option value="DeliveryConfirmationWithoutSignature">Delivery Confirmation</option>
+              <option value="DeliveryConfirmationWithSignature">Signature Required</option>
+            </select>
+          </div>
+          <div class="field" style="min-width:200px;">
+            <label for="dfEbayLabelSize">eBay Label Size</label>
+            <select id="dfEbayLabelSize">
+              <option value="4&quot;x6&quot;">4&quot;x6&quot;</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="muted" style="margin-top:10px; font-weight:700;">
+          These defaults are required for buying labels. Keep them accurate to avoid carrier issues.
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:12px;">
+      <div class="cardHeader">
+        <div class="cardTitle">Orders</div>
+        <div class="muted" id="lmStatus" style="font-weight:900;"></div>
+      </div>
+      <div class="tableWrap">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:42px;"><input type="checkbox" id="selectAllCheckbox" title="Select all shown"></th>
+              <th style="width:110px;">Store</th>
+              <th style="width:170px;">Order ID</th>
+              <th>Item</th>
+              <th style="width:70px;">Qty</th>
+              <th style="width:110px;">Price</th>
+              <th style="width:210px;">Ship To</th>
+              <th style="width:170px;">Paid</th>
+              <th style="width:120px;">Status</th>
+              <th style="width:200px;">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="lmTbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:12px;">
+      <div class="cardHeader">
+        <div class="cardTitle">Activity</div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <button class="btn" type="button" id="clearLogBtn">Clear</button>
+        </div>
+      </div>
+      <pre class="log" id="lmLog"></pre>
+    </div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    const state = {
+      orders: [],
+      store: 'all',
+      q: '',
+      days: 7,
+      selected: new Set(),
+      lastRenderKeys: [],
+      defaults: {},
+      status: {
+        ebay: { connected: false, supported: false, reason: '' },
+        amazon: { connected: false, supported: false, reason: '' }
+      }
+    };
+
+    function keyFor(o){
+      const id = o.id || o.order_id || '';
+      const store = o.store || 'unknown';
+      return `${store}:${id}`;
+    }
+
+    function escapeHtml(s){
+      return String(s ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
+    }
+
+    function fmtUsd(n){
+      const v = Number(n);
+      if(!Number.isFinite(v)) return '';
+      return '$' + v.toFixed(2);
+    }
+
+    function fmtDate(iso){
+      if(!iso) return '';
+      try{
+        const d = new Date(iso);
+        if(Number.isNaN(d.getTime())) return String(iso);
+        return d.toLocaleString([], {year:'numeric', month:'short', day:'2-digit', hour:'2-digit', minute:'2-digit'});
+      }catch(e){
+        return String(iso);
+      }
+    }
+
+    function log(line){
+      const ts = new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+      const el = $('lmLog');
+      if(!el) return;
+      el.textContent = `[${ts}] ${line}\n` + el.textContent;
+      try{
+        const lines = el.textContent.split('\n');
+        if(lines.length > 250) el.textContent = lines.slice(0, 250).join('\n');
+      }catch(e){}
+    }
+
+    function applyDefaultsForm(settings){
+      const s = settings || {};
+      $('dfFromName').value = s.label_from_name || '';
+      $('dfFromCompany').value = s.label_from_company || '';
+      $('dfFromPhone').value = s.label_from_phone || '';
+      $('dfFromEmail').value = s.label_from_email || '';
+      $('dfFromAddress1').value = s.label_from_address1 || '';
+      $('dfFromAddress2').value = s.label_from_address2 || '';
+      $('dfFromCity').value = s.label_from_city || '';
+      $('dfFromState').value = s.label_from_state || '';
+      $('dfFromPostal').value = s.label_from_postal || '';
+      $('dfFromCountry').value = s.label_from_country || 'US';
+      $('dfPkgWeight').value = s.label_pkg_weight_oz || '';
+      $('dfPkgLength').value = s.label_pkg_length_in || '';
+      $('dfPkgWidth').value = s.label_pkg_width_in || '';
+      $('dfPkgHeight').value = s.label_pkg_height_in || '';
+      $('dfAmazonDelivery').value = s.label_amazon_delivery_experience || 'NoTracking';
+      $('dfEbayLabelSize').value = s.label_ebay_label_size || '4"x6"';
+    }
+
+    function collectDefaultsForm(){
+      return {
+        label_from_name: $('dfFromName').value.trim(),
+        label_from_company: $('dfFromCompany').value.trim(),
+        label_from_phone: $('dfFromPhone').value.trim(),
+        label_from_email: $('dfFromEmail').value.trim(),
+        label_from_address1: $('dfFromAddress1').value.trim(),
+        label_from_address2: $('dfFromAddress2').value.trim(),
+        label_from_city: $('dfFromCity').value.trim(),
+        label_from_state: $('dfFromState').value.trim(),
+        label_from_postal: $('dfFromPostal').value.trim(),
+        label_from_country: $('dfFromCountry').value.trim() || 'US',
+        label_pkg_weight_oz: $('dfPkgWeight').value.trim(),
+        label_pkg_length_in: $('dfPkgLength').value.trim(),
+        label_pkg_width_in: $('dfPkgWidth').value.trim(),
+        label_pkg_height_in: $('dfPkgHeight').value.trim(),
+        label_amazon_delivery_experience: $('dfAmazonDelivery').value,
+        label_ebay_label_size: $('dfEbayLabelSize').value
+      };
+    }
+
+    async function loadDefaults(){
+      try{
+        const r = await fetch('/api/labelmaster/settings', {cache:'no-store'});
+        const j = await r.json();
+        if(!r.ok || j.success === false) throw new Error(j.error || `Request failed (${r.status})`);
+        state.defaults = j.settings || {};
+        applyDefaultsForm(state.defaults);
+      }catch(e){
+        log(`Defaults load failed: ${e.message}`);
+      }
+    }
+
+    async function saveDefaults(){
+      try{
+        const payload = collectDefaultsForm();
+        const r = await fetch('/api/labelmaster/settings', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json', 'Accept':'application/json'},
+          body: JSON.stringify({settings: payload})
+        });
+        const j = await r.json().catch(() => ({}));
+        if(!r.ok || j.success === false) throw new Error(j.error || `Save failed (${r.status})`);
+        log('Defaults saved.');
+        await loadStatus();
+      }catch(e){
+        log(`Defaults save failed: ${e.message}`);
+      }
+    }
+
+    function setStatus(text){
+      const el = $('lmStatus');
+      if(el) el.textContent = text || '';
+    }
+
+    function applyFilters(){
+      const q = (state.q || '').trim().toLowerCase();
+      let rows = Array.isArray(state.orders) ? state.orders.slice() : [];
+
+      if(state.store !== 'all'){
+        rows = rows.filter(it => (it.store || '').toLowerCase() === state.store);
+      }
+
+      if(q){
+        rows = rows.filter(it => {
+          const hay = [
+            it.order_id,
+            it.item_id,
+            it.title,
+            it.barcode,
+            it.shipping_name,
+            it.shipping_city,
+            it.shipping_state,
+            it.shipping_postal_code,
+            it.location
+          ].filter(Boolean).join(' ').toLowerCase();
+          return hay.includes(q);
+        });
+      }
+
+      const ts = (iso) => {
+        if(!iso) return 0;
+        const d = new Date(iso);
+        const t = d.getTime();
+        return Number.isFinite(t) ? t : 0;
+      };
+      rows.sort((a,b) => ts(b.paid_time) - ts(a.paid_time));
+      return rows;
+    }
+
+    function updateKpis(shown){
+      const shownCount = shown.length;
+      const selCount = state.selected.size;
+      let ebay = 0, amazon = 0;
+      for(const it of shown){
+        if((it.store || '').toLowerCase() === 'ebay') ebay++;
+        else if((it.store || '').toLowerCase() === 'amazon') amazon++;
+      }
+      $('kpiShown').textContent = String(shownCount);
+      $('kpiSelected').textContent = String(selCount);
+      $('kpiEbay').textContent = String(ebay);
+      $('kpiAmazon').textContent = String(amazon);
+      const selPill = $('kpiSelectedPill');
+      if(selPill) selPill.classList.toggle('selected-active', selCount > 0);
+    }
+
+    function statusLabel(it){
+      if(it.label_ready) return 'Label Ready';
+      if(it.shipped_time) return 'Shipped';
+      return 'Needs Label';
+    }
+
+    function render(){
+      const tbody = $('lmTbody');
+      if(!tbody) return;
+
+      const rows = applyFilters();
+      state.lastRenderKeys = rows.map(keyFor);
+      updateKpis(rows);
+
+      setStatus(rows.length ? `${rows.length} order(s)` : 'No results');
+      tbody.innerHTML = '';
+
+      for(const it of rows){
+        const k = keyFor(it);
+        const selected = state.selected.has(k);
+        const store = (it.store || '').toLowerCase();
+        const cap = store === 'ebay' ? state.status.ebay : (store === 'amazon' ? state.status.amazon : null);
+        const canAction = cap ? (cap.connected && cap.supported) : false;
+        const reason = cap ? (cap.reason || (cap.connected ? 'Not supported' : 'Not connected')) : 'Not supported';
+
+        const shipTo = [
+          it.shipping_name,
+          it.shipping_city,
+          it.shipping_state,
+          it.shipping_postal_code
+        ].filter(Boolean).join(', ');
+
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td><input type="checkbox" class="lmRowCb" data-key="${k}" ${selected ? 'checked' : ''}></td>
+          <td>${store === 'ebay' ? '<span class="badge ebay">eBay</span>' : (store === 'amazon' ? '<span class="badge amazon">Amazon</span>' : '<span class="badge">Other</span>')}</td>
+          <td class="mono">${escapeHtml(it.order_id || '')}</td>
+          <td>
+            <div style="font-weight:900; line-height:1.2;">${escapeHtml(it.title || '(no title)')}</div>
+            <div class="muted mono" style="margin-top:4px;">${escapeHtml(it.barcode || it.item_id || '')}</div>
+          </td>
+          <td class="mono">${escapeHtml(it.quantity || '')}</td>
+          <td><span class="mono" style="font-weight:900;">${fmtUsd(it.price)}</span></td>
+          <td>${escapeHtml(shipTo || '')}</td>
+          <td>
+            <div class="mono" style="font-weight:900;">${fmtDate(it.paid_time)}</div>
+          </td>
+          <td><span class="badge">${escapeHtml(statusLabel(it))}</span></td>
+          <td>
+            <button class="btn btnPrimary btnBuy" data-key="${k}" ${canAction ? '' : 'disabled'} title="${escapeHtml(reason)}">Buy Label</button>
+            <button class="btn btnGhost btnPrint" data-key="${k}" ${canAction ? '' : 'disabled'} title="${escapeHtml(reason)}">Print</button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      }
+
+      tbody.querySelectorAll('.lmRowCb').forEach(cb => {
+        cb.addEventListener('change', (e) => {
+          const key = e.target.getAttribute('data-key');
+          if(!key) return;
+          if(e.target.checked) state.selected.add(key);
+          else state.selected.delete(key);
+          $('kpiSelected').textContent = String(state.selected.size);
+          const selPill = $('kpiSelectedPill');
+          if(selPill) selPill.classList.toggle('selected-active', state.selected.size > 0);
+        });
+      });
+
+      tbody.querySelectorAll('.btnBuy').forEach(btn => btn.addEventListener('click', onBuyLabel));
+      tbody.querySelectorAll('.btnPrint').forEach(btn => btn.addEventListener('click', onPrintLabel));
+
+      const allShownSelected = state.lastRenderKeys.length > 0 && state.lastRenderKeys.every(k => state.selected.has(k));
+      $('selectAllCheckbox').checked = allShownSelected;
+    }
+
+    async function loadStatus(){
+      try{
+        const r = await fetch('/api/labelmaster/status', {cache:'no-store'});
+        const j = await r.json();
+        if(!r.ok || j.success === false) throw new Error(j.error || `Request failed (${r.status})`);
+        state.status = {
+          ebay: j.ebay || state.status.ebay,
+          amazon: j.amazon || state.status.amazon
+        };
+        updateStatusPills();
+      }catch(e){
+        log(`Status check failed: ${e.message}`);
+      }
+    }
+
+    function updateStatusPills(){
+      const eb = state.status.ebay || {};
+      const am = state.status.amazon || {};
+
+      const ebDot = $('ebayDot');
+      const amDot = $('amazonDot');
+      const ebEl = $('ebayStatus');
+      const amEl = $('amazonStatus');
+
+      ebDot.className = 'statusDot ' + (eb.connected ? (eb.supported ? 'ok' : 'warn') : 'bad');
+      amDot.className = 'statusDot ' + (am.connected ? (am.supported ? 'ok' : 'warn') : 'bad');
+
+      ebEl.lastElementChild.textContent = eb.connected ? (eb.supported ? 'eBay: ready' : `eBay: ${eb.reason || 'not enabled'}`) : 'eBay: not connected';
+      amEl.lastElementChild.textContent = am.connected ? (am.supported ? 'Amazon: ready' : `Amazon: ${am.reason || 'not enabled'}`) : 'Amazon: not connected';
+    }
+
+    async function loadOrders(){
+      setStatus('Loading...');
+      try{
+        const days = Number(state.days) || 7;
+        const qs = new URLSearchParams({days: String(days)});
+        const r = await fetch(`/api/labelmaster/orders?${qs.toString()}`, {cache:'no-store'});
+        const j = await r.json();
+        if(!r.ok || j.success === false) throw new Error(j.error || `Request failed (${r.status})`);
+        state.orders = j.orders || [];
+        log(`Loaded ${state.orders.length} order(s).`);
+        render();
+      }catch(e){
+        setStatus('Load failed');
+        log(`Load failed: ${e.message}`);
+        state.orders = [];
+        render();
+      }finally{
+        setStatus('');
+      }
+    }
+
+    async function syncOrders(){
+      const days = Number(state.days) || 7;
+      log(`Syncing orders (last ${days} days)...`);
+      try{
+        const r = await fetch('/get-sold-orders', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json', 'Accept':'application/json'},
+          body: JSON.stringify({days: days})
+        });
+        const j = await r.json().catch(() => ({}));
+        if(!r.ok || j.success === false) throw new Error(j.error || `Sync failed (${r.status})`);
+        log('Sync complete.');
+        await loadOrders();
+      }catch(e){
+        log(`Sync failed: ${e.message}`);
+      }
+    }
+
+    function getOrderByKey(key){
+      if(!key) return null;
+      const parts = key.split(':');
+      if(parts.length < 2) return null;
+      const store = parts[0];
+      const id = parts.slice(1).join(':');
+      return state.orders.find(o => (String(o.id || o.order_id || '') === id) && ((o.store || '') === store));
+    }
+
+    async function onBuyLabel(e){
+      const key = e.target.getAttribute('data-key');
+      const order = getOrderByKey(key);
+      if(!order) return;
+      log(`Buy label requested: ${order.store}:${order.order_id || order.id}`);
+      try{
+        const r = await fetch('/api/labelmaster/buy', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json', 'Accept':'application/json'},
+          body: JSON.stringify({order_id: order.order_id || order.id, store: order.store})
+        });
+        const j = await r.json().catch(() => ({}));
+        if(!r.ok || j.success === false) throw new Error(j.error || `Request failed (${r.status})`);
+        log(`Label purchased for ${order.order_id || order.id}.`);
+        if(j.label_url){
+          try{ window.open(j.label_url, '_blank'); }catch(e){}
+        }
+        await loadOrders();
+      }catch(err){
+        log(`Buy label failed: ${err.message}`);
+      }
+    }
+
+    async function onPrintLabel(e){
+      const key = e.target.getAttribute('data-key');
+      const order = getOrderByKey(key);
+      if(!order) return;
+      log(`Print label requested: ${order.store}:${order.order_id || order.id}`);
+      try{
+        const r = await fetch('/api/labelmaster/print', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json', 'Accept':'application/json'},
+          body: JSON.stringify({order_id: order.order_id || order.id, store: order.store})
+        });
+        const j = await r.json().catch(() => ({}));
+        if(!r.ok || j.success === false) throw new Error(j.error || `Request failed (${r.status})`);
+        log(`Label ready for ${order.order_id || order.id}.`);
+        if(j.label_url){
+          try{ window.open(j.label_url, '_blank'); }catch(e){}
+        }
+      }catch(err){
+        log(`Print label failed: ${err.message}`);
+      }
+    }
+
+    async function bulkAction(fn){
+      if(state.selected.size === 0){
+        log('Select at least one order.');
+        return;
+      }
+      for(const key of state.selected){
+        const order = getOrderByKey(key);
+        if(!order) continue;
+        await fn({target: {getAttribute: () => key}});
+      }
+    }
+
+    function setStoreFilter(store){
+      state.store = store;
+      document.querySelectorAll('.seg button').forEach(b => b.classList.toggle('active', b.getAttribute('data-store') === store));
+      constrainSelectionToStore();
+      render();
+    }
+
+    function constrainSelectionToStore(){
+      if(state.store === 'all') return;
+      const prefix = `${state.store}:`;
+      for(const key of Array.from(state.selected)){
+        if(!key.startsWith(prefix)) state.selected.delete(key);
+      }
+    }
+
+    $('refreshBtn').addEventListener('click', loadOrders);
+    $('syncBtn').addEventListener('click', syncOrders);
+    $('checkBtn').addEventListener('click', loadStatus);
+    $('saveDefaultsBtn').addEventListener('click', saveDefaults);
+    $('lmSearch').addEventListener('input', (e) => { state.q = e.target.value || ''; render(); });
+    $('lmDays').addEventListener('change', (e) => { state.days = Number(e.target.value) || 7; loadOrders(); });
+    $('selectAllBtn').addEventListener('click', () => {
+      constrainSelectionToStore();
+      for(const k of state.lastRenderKeys) state.selected.add(k);
+      render();
+    });
+    $('clearSelBtn').addEventListener('click', () => { state.selected.clear(); render(); });
+    $('selectAllCheckbox').addEventListener('change', (e) => {
+      if(e.target.checked){
+        constrainSelectionToStore();
+        for(const k of state.lastRenderKeys) state.selected.add(k);
+      } else {
+        for(const k of state.lastRenderKeys) state.selected.delete(k);
+      }
+      render();
+    });
+    $('buySelectedBtn').addEventListener('click', () => bulkAction(onBuyLabel));
+    $('printSelectedBtn').addEventListener('click', () => bulkAction(onPrintLabel));
+    $('clearLogBtn').addEventListener('click', () => { $('lmLog').textContent = ''; });
+    document.querySelectorAll('.seg button').forEach(b => b.addEventListener('click', () => setStoreFilter(b.getAttribute('data-store'))));
+
+    document.addEventListener('DOMContentLoaded', () => {
+      try{ if(window.applyTranslations) window.applyTranslations(); }catch(e){}
+      loadDefaults();
+      loadStatus();
+      loadOrders();
+    });
+  </script>
+</body>
+</html>

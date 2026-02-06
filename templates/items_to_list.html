@@ -30,6 +30,26 @@
     .dropdown-section{display:flex;flex-direction:column;gap:6px;margin-bottom:10px}
     .dropdown-section:last-child{margin-bottom:0}
     .gear-btn{background:#f0f0f0}
+    /* Night mode overrides */
+    html.ss-theme-night body { background: var(--bg0, #0f172a); color: var(--ink, #e2e8f0); }
+    html.ss-theme-night .top h2 { color: var(--ink-bright, #f8fafc); }
+    html.ss-theme-night input, html.ss-theme-night select { background: var(--bg0, #0f172a); color: var(--ink, #e2e8f0); border-color: rgba(255,255,255,0.12); }
+    html.ss-theme-night table { color: var(--ink, #e2e8f0); }
+    html.ss-theme-night th { background: #1e293b; color: var(--ink, #e2e8f0); border-color: rgba(255,255,255,0.08); }
+    html.ss-theme-night td { border-color: rgba(255,255,255,0.08); }
+    html.ss-theme-night tr:hover td { background: rgba(255,255,255,0.04); }
+    html.ss-theme-night .status-box { background: #475569; }
+    html.ss-theme-night .small-muted { color: var(--muted, #94a3b8); }
+    html.ss-theme-night .modal .card { background: var(--card, #1e293b); color: var(--ink, #e2e8f0); border: 1px solid rgba(255,255,255,0.1); }
+    html.ss-theme-night .dropdown-panel { background: var(--card, #1e293b); border-color: rgba(255,255,255,0.1); color: var(--ink, #e2e8f0); box-shadow: 0 8px 24px rgba(0,0,0,0.4); }
+    html.ss-theme-night .dropdown-panel label { color: var(--ink, #e2e8f0); }
+    html.ss-theme-night .gear-btn { background: #0064d2; color: #fff; }
+    html.ss-theme-night .btn { color: var(--ink, #e2e8f0); }
+    html.ss-theme-night #loading-overlay { background: rgba(15,23,42,0.7); }
+    html.ss-theme-night .spinner { border-color: #334155; border-top-color: #3498db; }
+    html.ss-theme-night #results-summary { color: var(--muted, #94a3b8); }
+    html.ss-theme-night .btn-copy { background: rgba(32,201,151,0.15) !important; color: #10b981 !important; border-color: rgba(32,201,151,0.3) !important; }
+    html.ss-theme-night .title-cell { color: var(--ink, #e2e8f0); }
     /* Loading Spinner */
     #loading-overlay {
       position: fixed;
@@ -335,6 +355,9 @@
       <a href="/price-master" class="btn" style="background:#2c3e50; color:#fff; text-decoration:none; display:flex; align-items:center; gap:6px">
         <span style="font-size:1rem">💲</span> <span data-i18n="price_master">Price Master</span>
       </a>
+      <a href="/label-master" class="btn" style="background:#1f8f5f; color:#fff; text-decoration:none; display:flex; align-items:center; gap:6px">
+        <span style="font-size:1rem">🏷️</span> <span>Label Master</span>
+      </a>
       <a href="/fb-listings" class="btn" style="background:#1877f2; color:#fff; text-decoration:none; display:flex; align-items:center; gap:6px">
         <span style="font-size:1rem">📘</span> <span data-i18n="fb_listings">FB Listings</span>
       </a>
@@ -623,7 +646,7 @@ function render(results){
     // Notes icon - show 📝 if note exists and make it clickable
     const hasNote = r.note && String(r.note).trim().length > 0;
     const noteCell = hasNote ? `<td style="text-align:center;font-size:1.2rem"><span class="note-icon" data-upc="${upc}" style="cursor:pointer" title="Click to view notes">📝</span></td>` : `<td style="text-align:center"></td>`;
-    const rowBg = isListedAnywhere ? 'background:#d4edda' : '';
+    const rowBg = isListedAnywhere ? 'background:rgba(16,185,129,0.08)' : '';
     html += `<tr style="${rowBg}">`;
     if (selectMode) {
       // Allow selection of all items (base barcodes will be reset instead of deleted)

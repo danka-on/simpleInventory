@@ -7,7 +7,7 @@ from flask_caching import Cache
 from flask_compress import Compress
 from werkzeug.exceptions import RequestEntityTooLarge
 from PIL import Image, ImageDraw
-import io, time, subprocess, os, requests, json, threading, sqlite3, sys, datetime, base64
+import io, time, subprocess, os, requests, json, threading, sqlite3, sys, datetime, base64, gzip
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import pytz
 import xml.etree.ElementTree as ET
@@ -491,37 +491,34 @@ def inject_server_info():
     is_testing = 'nexuscentralhq.org' in hostname and not hostname.startswith('pi.')
     return dict(is_testing_server=is_testing, server_hostname=hostname)
 
+import re as _re
+_I18N_SRC_PAT = _re.compile(r'src=(["\'])/static/i18n\.js(?:\?[^"\']*)?\1')
+_I18N_CACHE_V = int(getattr(app, 'start_time', 0) or 0)
+
 @app.after_request
 def add_no_cache_headers(response):
     try:
-        # Only apply no-cache to HTML and JSON responses, not static files
         content_type = response.content_type or ''
 
-        # Ensure our shared client-side helpers (i18n + top banner + theme) are present
-        # on every HTML page, even legacy templates that don't include the script tag yet.
         if 'text/html' in content_type:
             try:
                 if (not getattr(response, 'direct_passthrough', False)) and (not getattr(response, 'is_streamed', False)):
                     html = response.get_data(as_text=True)
                     if html:
-                        v = int(getattr(app, 'start_time', 0) or 0)
-                        # Prefer a stable-per-restart cache buster so clients actually pick up updates.
-                        # Many legacy templates hardcode an old ?v=... value; always rewrite to the current
-                        # app.start_time so banner/theme changes propagate everywhere.
-                        try:
-                            import re
-                            qpat = r'src=(["\'])/static/i18n\.js(?:\?[^"\']*)?\1'
-                            if v:
-                                def _repl(m):
-                                    q = m.group(1)
-                                    return f'src={q}/static/i18n.js?v={v}{q}'
-                                html = re.sub(qpat, _repl, html)
-                            else:
-                                html = re.sub(qpat, r'src=\1/static/i18n.js\1', html)
-                        except Exception:
-                            pass
+                        needs_write = False
+                        v = _I18N_CACHE_V
 
-                        if 'i18n.js' not in html:
+                        # Only run regex if i18n.js is already in the HTML
+                        if 'i18n.js' in html:
+                            if v:
+                                new_html = _I18N_SRC_PAT.sub(lambda m: f'src={m.group(1)}/static/i18n.js?v={v}{m.group(1)}', html)
+                            else:
+                                new_html = _I18N_SRC_PAT.sub(r'src=\1/static/i18n.js\1', html)
+                            if new_html is not html:
+                                html = new_html
+                                needs_write = True
+                        else:
+                            # Inject i18n.js for legacy templates that don't include it
                             inject = f'\n<script src="/static/i18n.js?v={v}"></script>\n' if v else '\n<script src="/static/i18n.js"></script>\n'
                             if '</body>' in html:
                                 html = html.replace('</body>', inject + '</body>', 1)
@@ -529,8 +526,10 @@ def add_no_cache_headers(response):
                                 html = html.replace('</html>', inject + '</html>', 1)
                             else:
                                 html = html + inject
+                            needs_write = True
 
-                        response.set_data(html)
+                        if needs_write:
+                            response.set_data(html)
             except Exception:
                 pass
 
@@ -2941,6 +2940,319 @@ def _amazon_spapi_context():
     marketplace = _amazon_marketplace_from_id(marketplace_id)
     return credentials, seller_id, marketplace_id, marketplace
 
+def _amazon_get_listing_product_type(li, seller_id, sku, marketplace_id, cache=None):
+    cache = cache if cache is not None else {}
+    if sku in cache:
+        return cache.get(sku)
+    try:
+        resp = li.get_listings_item(
+            seller_id,
+            sku,
+            marketplaceIds=[marketplace_id],
+            includedData=['summaries']
+        )
+        if getattr(resp, 'errors', None):
+            raise Exception(str(resp.errors))
+        payload = resp.payload or {}
+        summaries = payload.get('summaries') or []
+        pt = None
+        for s in summaries:
+            pt = s.get('productType')
+            if pt:
+                break
+        if not pt:
+            pt = payload.get('productType')
+        if pt:
+            cache[sku] = pt
+        return pt
+    except Exception:
+        return None
+
+def _amazon_get_catalog_product_type(credentials, marketplace, marketplace_id, asin):
+    if not asin:
+        return None
+    try:
+        from sp_api.api import CatalogItems
+        ci = CatalogItems(credentials=credentials, marketplace=marketplace, version='2022-04-01')
+        resp = ci.get_catalog_item(
+            asin,
+            marketplaceIds=[marketplace_id],
+            includedData=['productTypes']
+        )
+        if getattr(resp, 'errors', None):
+            return None
+        payload = resp.payload or {}
+        pts = payload.get('productTypes') or []
+        for pt in pts:
+            if isinstance(pt, dict) and pt.get('productType'):
+                return pt.get('productType')
+        # Some responses may nest product types elsewhere
+        pt = payload.get('productType')
+        return pt
+    except Exception:
+        return None
+
+def _amazon_build_price_feed_xml(*, seller_id, jobs, currency='USD'):
+    # Legacy XML feed for price updates (does not require product type).
+    from xml.sax.saxutils import escape as _xesc
+    lines = [
+        '<?xml version="1.0" encoding="utf-8"?>',
+        '<AmazonEnvelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="amzn-envelope.xsd">',
+        '  <Header>',
+        '    <DocumentVersion>1.01</DocumentVersion>',
+        f'    <MerchantIdentifier>{_xesc(str(seller_id))}</MerchantIdentifier>',
+        '  </Header>',
+        '  <MessageType>Price</MessageType>',
+    ]
+    msg_id = 1
+    for j in jobs:
+        sku = j.get('sku')
+        price = j.get('new_price')
+        if not sku or price is None:
+            continue
+        lines.extend([
+            '  <Message>',
+            f'    <MessageID>{msg_id}</MessageID>',
+            '    <Price>',
+            f'      <SKU>{_xesc(str(sku))}</SKU>',
+            f'      <StandardPrice currency="{_xesc(str(currency).upper())}">{float(price):.2f}</StandardPrice>',
+            '    </Price>',
+            '  </Message>',
+        ])
+        msg_id += 1
+    lines.append('</AmazonEnvelope>')
+    return '\n'.join(lines).encode('utf-8')
+
+def _amazon_submit_price_feed_json(*, credentials, marketplace, marketplace_id, seller_id, jobs, currency='USD', offer_audience='ALL'):
+    from sp_api.api import Feeds
+    feed = {
+        'header': {
+            'sellerId': seller_id,
+            'version': '2.0',
+            'issueLocale': 'en_US'
+        },
+        'messages': []
+    }
+    msg_id = 1
+    for j in jobs:
+        sku = j.get('sku')
+        product_type = j.get('product_type')
+        price = j.get('new_price')
+        if not sku or not product_type:
+            continue
+        attrs = _amazon_offer_price_attrs(currency, price, marketplace_id, offer_audience=offer_audience)
+        feed['messages'].append({
+            'messageId': msg_id,
+            'sku': sku,
+            'operationType': 'PATCH',
+            'productType': product_type,
+            'patches': [{
+                'op': 'replace',
+                'path': '/attributes/purchasable_offer',
+                'value': attrs.get('purchasable_offer')
+            }]
+        })
+        msg_id += 1
+
+    if not feed['messages']:
+        raise Exception('No feed messages to submit')
+
+    feeds = Feeds(credentials=credentials, marketplace=marketplace)
+    content_type = 'application/json; charset=UTF-8'
+    body = json.dumps(feed, ensure_ascii=True).encode('utf-8')
+    try:
+        doc_id, url, uploaded = _amazon_create_feed_document(feeds, content_type, body)
+    except Exception as e:
+        raise Exception(_amazon_feeds_error(e, 'create_feed_document'))
+    if not doc_id:
+        raise Exception('Failed to create feed document')
+    if not uploaded:
+        if not url:
+            raise Exception('Feed document upload URL missing')
+        up = requests.put(url, data=body, headers={'Content-Type': content_type})
+        if up.status_code >= 400:
+            raise Exception(f'Feed upload failed ({up.status_code})')
+
+    try:
+        feed_resp = _amazon_create_feed(
+            feeds,
+            feed_type='JSON_LISTINGS_FEED',
+            marketplace_ids=[marketplace_id],
+            input_feed_document_id=doc_id
+        )
+        feed_payload = getattr(feed_resp, 'payload', None) or {}
+    except Exception as e:
+        raise Exception(_amazon_feeds_error(e, 'create_feed'))
+    feed_id = feed_payload.get('feedId') or feed_payload.get('feed_id')
+    if not feed_id:
+        raise Exception('Feed submission failed')
+    return feed_id
+
+def _amazon_submit_price_feed_xml(*, credentials, marketplace, marketplace_id, seller_id, jobs, currency='USD'):
+    from sp_api.api import Feeds
+    feeds = Feeds(credentials=credentials, marketplace=marketplace)
+    content_type = 'text/xml; charset=UTF-8'
+    body = _amazon_build_price_feed_xml(seller_id=seller_id, jobs=jobs, currency=currency)
+    try:
+        doc_id, url, uploaded = _amazon_create_feed_document(feeds, content_type, body)
+    except Exception as e:
+        raise Exception(_amazon_feeds_error(e, 'create_feed_document'))
+    if not doc_id:
+        raise Exception('Failed to create feed document')
+    if not uploaded:
+        if not url:
+            raise Exception('Feed document upload URL missing')
+        up = requests.put(url, data=body, headers={'Content-Type': content_type})
+        if up.status_code >= 400:
+            raise Exception(f'Feed upload failed ({up.status_code})')
+
+    try:
+        feed_resp = _amazon_create_feed(
+            feeds,
+            feed_type='POST_PRODUCT_PRICING_DATA',
+            marketplace_ids=[marketplace_id],
+            input_feed_document_id=doc_id
+        )
+        feed_payload = getattr(feed_resp, 'payload', None) or {}
+    except Exception as e:
+        raise Exception(_amazon_feeds_error(e, 'create_feed'))
+    feed_id = feed_payload.get('feedId') or feed_payload.get('feed_id')
+    if not feed_id:
+        raise Exception('Feed submission failed')
+    return feed_id
+
+def _amazon_submit_price_feed(*, credentials, marketplace, marketplace_id, seller_id, jobs, currency='USD', offer_audience='ALL'):
+    try:
+        return _amazon_submit_price_feed_json(
+            credentials=credentials,
+            marketplace=marketplace,
+            marketplace_id=marketplace_id,
+            seller_id=seller_id,
+            jobs=jobs,
+            currency=currency,
+            offer_audience=offer_audience
+        )
+    except Exception as e:
+        json_err = _amazon_format_spapi_error(e)
+        try:
+            return _amazon_submit_price_feed_xml(
+                credentials=credentials,
+                marketplace=marketplace,
+                marketplace_id=marketplace_id,
+                seller_id=seller_id,
+                jobs=jobs,
+                currency=currency
+            )
+        except Exception as e2:
+            xml_err = _amazon_format_spapi_error(e2)
+            raise Exception(f"JSON feed failed: {json_err} | XML feed failed: {xml_err}")
+
+def _amazon_parse_feed_report(body_bytes):
+    """Parse Amazon feed processing report (JSON or XML). Returns dict with errors/warnings."""
+    out = {
+        'error_count': 0,
+        'warning_count': 0,
+        'errors': [],
+        'warnings': [],
+        'raw_excerpt': ''
+    }
+    if not body_bytes:
+        return out
+    try:
+        raw = body_bytes.decode('utf-8', errors='replace')
+    except Exception:
+        try:
+            raw = body_bytes.decode('latin-1', errors='replace')
+        except Exception:
+            raw = ''
+    out['raw_excerpt'] = (raw[:1200] + '...') if len(raw) > 1200 else raw
+
+    # Try JSON first
+    try:
+        import json as _json
+        js = _json.loads(raw)
+        issues = []
+        if isinstance(js, dict):
+            issues = js.get('issues') or js.get('issuesWithAttributes') or js.get('messagesWithIssues') or []
+        if isinstance(issues, dict):
+            issues = [issues]
+        for it in issues:
+            sev = str(it.get('severity') or it.get('Severity') or '').upper()
+            msg = it.get('message') or it.get('messageText') or it.get('description') or it.get('Message') or ''
+            code = it.get('code') or it.get('Code') or ''
+            if sev == 'ERROR':
+                out['error_count'] += 1
+                out['errors'].append({'code': code, 'message': msg})
+            elif sev == 'WARNING':
+                out['warning_count'] += 1
+                out['warnings'].append({'code': code, 'message': msg})
+        return out
+    except Exception:
+        pass
+
+    # Fallback: XML
+    try:
+        import xml.etree.ElementTree as _ET
+        root = _ET.fromstring(raw)
+        for result in root.findall('.//Result'):
+            code = (result.findtext('ResultCode') or '').strip().lower()
+            msg = (result.findtext('ResultMessage') or '').strip()
+            if code == 'error':
+                out['error_count'] += 1
+                out['errors'].append({'code': 'Error', 'message': msg})
+            elif code == 'warning':
+                out['warning_count'] += 1
+                out['warnings'].append({'code': 'Warning', 'message': msg})
+        return out
+    except Exception:
+        return out
+
+def _amazon_get_feed_document_info(feeds, feed_document_id):
+    import inspect as _inspect
+    try:
+        params = _inspect.signature(feeds.get_feed_document).parameters
+    except Exception:
+        params = {}
+    if not params or 'feedDocumentId' in params or any(p.kind == _inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        try:
+            return feeds.get_feed_document(feedDocumentId=feed_document_id)
+        except TypeError:
+            pass
+    return feeds.get_feed_document(feed_document_id)
+
+def _amazon_get_feed_status(credentials, marketplace, feed_id):
+    from sp_api.api import Feeds
+    feeds = Feeds(credentials=credentials, marketplace=marketplace)
+    try:
+        resp = feeds.get_feed(feedId=feed_id)
+    except TypeError:
+        resp = feeds.get_feed(feed_id)
+    payload = getattr(resp, 'payload', None) or {}
+    status = payload.get('processingStatus') or payload.get('processing_status') or payload.get('status')
+    result_doc = payload.get('resultFeedDocumentId') or payload.get('result_feed_document_id')
+    return {
+        'feed_id': feed_id,
+        'status': status,
+        'result_feed_document_id': result_doc,
+        'raw': payload
+    }
+
+def _amazon_download_feed_document(url):
+    import gzip as _gzip
+    if not url:
+        return None
+    resp = requests.get(url, timeout=30)
+    if resp.status_code != 200:
+        return None
+    data = resp.content or b''
+    # Decompress if gzipped
+    try:
+        if data[:2] == b'\x1f\x8b':
+            data = _gzip.decompress(data)
+    except Exception:
+        pass
+    return data
+
 @app.route('/api/listingagent/amazon/catalog_search', methods=['GET'])
 def api_listingagent_amazon_catalog_search():
     """Search Amazon catalog by keyword/UPC (best-effort) to suggest ASINs."""
@@ -3149,37 +3461,330 @@ def api_listingagent_amazon_get_listing():
             return jsonify({'success': False, 'error': str(e)}), 400
         return jsonify({'success': False, 'error': _safe_error(e, 'listingagent:amazon_get_listing')}), 500
 
-def _build_amazon_offer_attributes(*, upc, asin, condition_type, fulfillment_channel_code, quantity, currency, price):
+def _amazon_normalize_condition_type(raw, default_condition='used_good'):
+    allowed = {
+        'new_new',
+        'used_like_new',
+        'used_very_good',
+        'used_good',
+        'used_acceptable',
+        'collectible_like_new',
+        'collectible_very_good',
+        'collectible_good',
+        'collectible_acceptable',
+        'refurbished_refurbished',
+        'club_club',
+    }
+    if raw is None:
+        return default_condition
+    s = str(raw).strip()
+    if not s:
+        return default_condition
+    if s.isdigit():
+        code_map = {
+            11: 'new_new',
+            1: 'used_good',
+            2: 'collectible_good',
+            3: 'refurbished_refurbished',
+            4: 'club_club',
+        }
+        return code_map.get(int(s), default_condition)
+
+    lowered = s.lower().strip()
+    label_map = {
+        'new': 'new_new',
+        'brand_new': 'new_new',
+        'used_like_new': 'used_like_new',
+        'used_very_good': 'used_very_good',
+        'used_good': 'used_good',
+        'used_acceptable': 'used_acceptable',
+        'collectible_like_new': 'collectible_like_new',
+        'collectible_very_good': 'collectible_very_good',
+        'collectible_good': 'collectible_good',
+        'collectible_acceptable': 'collectible_acceptable',
+        'refurbished': 'refurbished_refurbished',
+        'refurbished_refurbished': 'refurbished_refurbished',
+        'club': 'club_club',
+        'club_club': 'club_club',
+    }
+    cleaned = _re.sub(r'[^a-z0-9]+', '_', lowered).strip('_')
+    if cleaned in label_map:
+        return label_map[cleaned]
+    if cleaned in allowed:
+        return cleaned
+    return default_condition
+
+def _amazon_normalize_fulfillment_channel(raw, default_fc='DEFAULT'):
+    if raw is None:
+        return default_fc
+    s = str(raw).strip().upper()
+    if not s:
+        return default_fc
+    if s in ('DEFAULT', 'AMAZON_NA'):
+        return s
+    if s == 'AFN':
+        return 'AMAZON_NA'
+    if s == 'MFN':
+        return 'DEFAULT'
+    return default_fc
+
+def _amazon_format_spapi_error(err):
+    try:
+        from sp_api.base.exceptions import SellingApiException
+        if isinstance(err, SellingApiException):
+            payload = getattr(err, 'payload', None) or getattr(err, 'errors', None)
+            if payload:
+                return f"{err} | payload={payload}"
+    except Exception:
+        pass
+    return str(err)
+
+def _amazon_feeds_error(err, step=''):
+    msg = _amazon_format_spapi_error(err)
+    if step:
+        return f"{step}: {msg}"
+    return msg
+
+def _amazon_create_feed_document(feeds, content_type, body_bytes):
+    import inspect as _inspect
+    f = io.BytesIO(body_bytes)
+    params = {}
+    try:
+        params = _inspect.signature(feeds.create_feed_document).parameters
+    except Exception:
+        params = {}
+
+    # Try file-based signature (newer sp-api versions)
+    if 'file' in params or any(p.kind == _inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        for kwargs in (
+            {'file': f, 'content_type': content_type},
+            {'file': f, 'contentType': content_type},
+        ):
+            try:
+                f.seek(0)
+                resp = feeds.create_feed_document(**kwargs)
+                payload = getattr(resp, 'payload', None) or {}
+                doc_id = payload.get('feedDocumentId') or payload.get('feed_document_id')
+                url = payload.get('url')
+                return doc_id, url, True
+            except TypeError:
+                continue
+    # Fallback: legacy signature (no file upload)
+    resp = feeds.create_feed_document(contentType=content_type)
+    payload = getattr(resp, 'payload', None) or {}
+    doc_id = payload.get('feedDocumentId') or payload.get('feed_document_id')
+    url = payload.get('url')
+    return doc_id, url, False
+
+def _amazon_create_feed(feeds, *, feed_type, marketplace_ids, input_feed_document_id):
+    import inspect as _inspect
+    try:
+        params = _inspect.signature(feeds.create_feed).parameters
+    except Exception:
+        params = {}
+
+    # Newer sp-api supports keyword args
+    if not params or 'feedType' in params or 'feed_type' in params or any(p.kind == _inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        try:
+            return feeds.create_feed(feedType=feed_type, marketplaceIds=marketplace_ids, inputFeedDocumentId=input_feed_document_id)
+        except TypeError:
+            try:
+                return feeds.create_feed(feed_type=feed_type, marketplace_ids=marketplace_ids, input_feed_document_id=input_feed_document_id)
+            except Exception:
+                pass
+
+    # Legacy signature: (feed_type, input_feed_document_id, marketplace_ids)
+    return feeds.create_feed(feed_type, input_feed_document_id, marketplace_ids)
+
+def _amazon_update_price_spapi(li, seller_id, sku, mp_id, *, product_type, requirements, attrs):
+    debug = {'attempts': []}
+
+    def _record_attempt(method, body, resp=None, exc=None):
+        entry = {'method': method, 'body': body}
+        if resp is not None:
+            entry['errors'] = getattr(resp, 'errors', None)
+            try:
+                payload = getattr(resp, 'payload', None) or {}
+                if payload:
+                    entry['payload_status'] = payload.get('status')
+                    issues = payload.get('issues')
+                    if issues:
+                        entry['payload_issues'] = issues
+            except Exception:
+                pass
+        if exc is not None:
+            entry['exception'] = _amazon_format_spapi_error(exc)
+        debug['attempts'].append(entry)
+
+    def _payload_has_error(resp):
+        try:
+            payload = getattr(resp, 'payload', None) or {}
+        except Exception:
+            payload = {}
+        if not payload:
+            return False, None
+        try:
+            status = str(payload.get('status') or '').strip().upper()
+        except Exception:
+            status = ''
+        issues = []
+        try:
+            issues = payload.get('issues') or []
+        except Exception:
+            issues = []
+        err_issues = []
+        try:
+            for it in issues:
+                sev = str(it.get('severity') or '').strip().upper()
+                if sev == 'ERROR':
+                    err_issues.append(it)
+        except Exception:
+            pass
+        if err_issues:
+            return True, f"issues={err_issues}"
+        if status in ('INVALID', 'ERROR', 'REJECTED', 'FAILURE'):
+            return True, f"status={status}"
+        return False, None
+
+    patch_failed = False
+    if hasattr(li, 'patch_listings_item'):
+        patch_body = {
+            'productType': product_type,
+            'patches': []
+        }
+        if attrs.get('purchasable_offer'):
+            patch_body['patches'].append({
+                'op': 'replace',
+                'path': '/attributes/purchasable_offer',
+                'value': attrs['purchasable_offer']
+            })
+        if attrs.get('condition_type'):
+            patch_body['patches'].append({
+                'op': 'replace',
+                'path': '/attributes/condition_type',
+                'value': attrs['condition_type']
+            })
+        if patch_body['patches']:
+            try:
+                resp = li.patch_listings_item(
+                    seller_id,
+                    sku,
+                    marketplaceIds=[mp_id],
+                    issueLocale='en_US',
+                    body=patch_body
+                )
+                _record_attempt('PATCH', patch_body, resp=resp)
+                if not getattr(resp, 'errors', None):
+                    payload_err, payload_detail = _payload_has_error(resp)
+                    if payload_err:
+                        return False, debug, payload_detail
+                    return True, debug, None
+            except Exception as e:
+                _record_attempt('PATCH', patch_body, exc=e)
+                patch_failed = True
+
+    put_body = {
+        'productType': product_type,
+        'requirements': requirements,
+        'attributes': attrs
+    }
+    try:
+        resp = li.put_listings_item(
+            seller_id,
+            sku,
+            marketplaceIds=[mp_id],
+            issueLocale='en_US',
+            body=put_body
+        )
+        _record_attempt('PUT', put_body, resp=resp)
+        if getattr(resp, 'errors', None):
+            return False, debug, resp.errors
+        payload_err, payload_detail = _payload_has_error(resp)
+        if payload_err:
+            return False, debug, payload_detail
+        return True, debug, None
+    except Exception as e:
+        _record_attempt('PUT', put_body, exc=e)
+        return False, debug, e
+
+def _amazon_price_value_key(marketplace_id):
+    # US marketplace expects "value". VAT marketplaces often use "value_with_tax".
+    if not marketplace_id:
+        return 'value'
+    mp = str(marketplace_id).strip().upper()
+    if mp == 'ATVPDKIKX0DER':
+        return 'value'
+    return 'value_with_tax'
+
+def _amazon_offer_audience(settings=None):
+    val = None
+    try:
+        if settings and settings.get('amazon_offer_audience'):
+            val = str(settings.get('amazon_offer_audience')).strip()
+    except Exception:
+        val = None
+    return val or 'ALL'
+
+def _build_amazon_offer_attributes(*, upc, asin, condition_type, fulfillment_channel_code, quantity, currency, price, include_identifiers=True, marketplace_id=None, offer_audience='ALL'):
     attrs = {}
 
-    if asin:
-        attrs['merchant_suggested_asin'] = [{'value': asin}]
+    if include_identifiers:
+        if asin:
+            attrs['merchant_suggested_asin'] = [{'value': asin}]
 
-    # Optional: attach UPC to help Amazon match the catalog item (best-effort).
-    if upc:
-        attrs['externally_assigned_product_identifier'] = [{'value': upc}]
-        attrs['externally_assigned_product_identifier_type'] = [{'value': 'UPC'}]
+        # Optional: attach UPC to help Amazon match the catalog item (best-effort).
+        if upc:
+            attrs['externally_assigned_product_identifier'] = [{'value': upc}]
+            attrs['externally_assigned_product_identifier_type'] = [{'value': 'UPC'}]
 
     if condition_type:
-        attrs['condition_type'] = [{'value': condition_type}]
+        entry = {'value': condition_type}
+        if marketplace_id:
+            entry['marketplace_id'] = marketplace_id
+        attrs['condition_type'] = [entry]
 
     if fulfillment_channel_code:
-        attrs['fulfillment_availability'] = [{
+        entry = {
             'fulfillment_channel_code': fulfillment_channel_code,
             'quantity': int(quantity or 1)
-        }]
+        }
+        if marketplace_id:
+            entry['marketplace_id'] = marketplace_id
+        attrs['fulfillment_availability'] = [entry]
 
     if price is not None:
-        attrs['purchasable_offer'] = [{
-            'currency': currency or 'USD',
+        value_key = _amazon_price_value_key(marketplace_id)
+        offer = {
+            'currency': (currency or 'USD').upper(),
+            'audience': offer_audience or 'ALL',
             'our_price': [{
                 'schedule': [{
-                    'value_with_tax': float(price)
+                    value_key: float(price)
                 }]
             }]
+        }
+        if marketplace_id:
+            offer['marketplace_id'] = marketplace_id
+        attrs['purchasable_offer'] = [{
+            **offer
         }]
 
     return attrs
+
+def _amazon_offer_price_attrs(currency, price, marketplace_id=None, offer_audience='ALL'):
+    value_key = _amazon_price_value_key(marketplace_id)
+    offer = {
+        'currency': (currency or 'USD').upper(),
+        'audience': offer_audience or 'ALL',
+        'our_price': [{
+            'schedule': [{
+                value_key: float(price)
+            }]
+        }]
+    }
+    if marketplace_id:
+        offer['marketplace_id'] = marketplace_id
+    return {'purchasable_offer': [offer]}
 
 @app.route('/api/listingagent/amazon/put_offer', methods=['POST'])
 def api_listingagent_amazon_put_offer():
@@ -3216,6 +3821,12 @@ def api_listingagent_amazon_put_offer():
 
         marketplace_id_override = (data.get('marketplaceId') or '').strip()
 
+        condition_type = _amazon_normalize_condition_type(condition_type, settings.get('amazon_condition_type') or 'used_good')
+        fulfillment_channel_code = _amazon_normalize_fulfillment_channel(
+            fulfillment_channel_code,
+            settings.get('amazon_fulfillment_channel_code') or 'DEFAULT'
+        )
+
         attributes = _build_amazon_offer_attributes(
             upc=upc,
             asin=asin,
@@ -3223,7 +3834,8 @@ def api_listingagent_amazon_put_offer():
             fulfillment_channel_code=fulfillment_channel_code,
             quantity=quantity,
             currency=currency,
-            price=price
+            price=price,
+            marketplace_id=mp_id
         )
 
         body = {
@@ -4442,8 +5054,7 @@ def financial_analytics():
 
 # API endpoint for financial analytics data
 @app.route('/api/financial-analytics')
-# Temporarily disable cache to debug
-# @cache.cached(timeout=300, query_string=True)  # Cache for 5 minutes
+@cache.cached(timeout=300, query_string=True)
 def api_financial_analytics():
     """
     Fetch all sold orders with cost data from BOL and calculate profits.
@@ -8285,6 +8896,11 @@ def price_master_page():
     """Bulk re-pricing dashboard for eBay + Amazon store listings."""
     return render_template('price_master.html')
 
+@app.route('/label-master')
+def label_master_page():
+    """Label Master portal for buying/printing labels for sold orders."""
+    return render_template('label.html')
+
 @app.route('/fb-listings')
 def fb_listings_page():
     return render_template('fb_listings.html')
@@ -8292,6 +8908,760 @@ def fb_listings_page():
 @app.route('/store-listing-helper')
 def store_listing_helper_page():
     return render_template('store_listing_helper.html')
+
+# -----------------------------
+# Label Master (Shipping Labels)
+# -----------------------------
+
+_LABELMASTER_REQUIRED_SETTINGS = [
+    'label_from_name',
+    'label_from_address1',
+    'label_from_city',
+    'label_from_state',
+    'label_from_postal',
+    'label_from_country',
+    'label_pkg_weight_oz',
+    'label_pkg_length_in',
+    'label_pkg_width_in',
+    'label_pkg_height_in',
+]
+
+def _labelmaster_get_settings():
+    settings = _listingagent_get_settings()
+    out = {k: v for k, v in (settings or {}).items() if str(k).startswith('label_')}
+    if not out.get('label_from_country'):
+        out['label_from_country'] = 'US'
+    if not out.get('label_amazon_delivery_experience'):
+        out['label_amazon_delivery_experience'] = 'NoTracking'
+    if not out.get('label_amazon_carrier_pickup_option'):
+        out['label_amazon_carrier_pickup_option'] = 'ShipperWillDropOff'
+    if not out.get('label_ebay_label_size'):
+        out['label_ebay_label_size'] = '4"x6"'
+    return out
+
+def _labelmaster_missing_settings(settings: dict):
+    missing = []
+    for k in _LABELMASTER_REQUIRED_SETTINGS:
+        v = (settings or {}).get(k)
+        if v is None or str(v).strip() == '':
+            missing.append(k)
+    return missing
+
+def _labelmaster_init_label_tables(cur):
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS shipping_labels (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            store TEXT NOT NULL,
+            order_id TEXT NOT NULL,
+            label_id TEXT,
+            label_url TEXT,
+            label_format TEXT,
+            label_path TEXT,
+            cost REAL,
+            currency TEXT,
+            created_at TEXT,
+            status TEXT,
+            raw_response TEXT
+        )
+    ''')
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_shipping_labels_order ON shipping_labels(store, order_id, id)')
+
+def _labelmaster_safe_name(s):
+    try:
+        return _re.sub(r'[^A-Za-z0-9._-]+', '_', str(s or '').strip()) or 'label'
+    except Exception:
+        return 'label'
+
+def _labelmaster_store_label(store, order_id, *, label_id=None, label_url=None, label_format=None, label_bytes=None, cost=None, currency=None, raw=None):
+    label_path = None
+    if label_bytes:
+        label_dir = BASE_DIR / 'debug_uploads' / 'labels' / store
+        label_dir.mkdir(parents=True, exist_ok=True)
+        safe_order = _labelmaster_safe_name(order_id)
+        ts = datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+        ext = (label_format or 'pdf').lower().replace('.', '')
+        if ext not in ('pdf', 'png', 'zpl'):
+            ext = 'pdf'
+        label_path = str(label_dir / f"{safe_order}_{ts}.{ext}")
+        with open(label_path, 'wb') as f:
+            f.write(label_bytes)
+
+    with sqlite3.connect('sold.db') as conn:
+        cur = conn.cursor()
+        _labelmaster_init_label_tables(cur)
+        cur.execute('''
+            INSERT INTO shipping_labels
+                (store, order_id, label_id, label_url, label_format, label_path, cost, currency, created_at, status, raw_response)
+            VALUES
+                (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            store,
+            order_id,
+            label_id,
+            label_url,
+            label_format,
+            label_path,
+            cost,
+            currency,
+            datetime.datetime.utcnow().isoformat() + 'Z',
+            'created',
+            json.dumps(raw, ensure_ascii=True, default=str) if raw is not None else None
+        ))
+        conn.commit()
+    return label_path
+
+def _labelmaster_latest_label(store, order_id):
+    with sqlite3.connect('sold.db') as conn:
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        _labelmaster_init_label_tables(cur)
+        cur.execute('''
+            SELECT *
+            FROM shipping_labels
+            WHERE store = ? AND order_id = ?
+            ORDER BY id DESC
+            LIMIT 1
+        ''', (store, order_id))
+        row = cur.fetchone()
+    return dict(row) if row else None
+
+def _labelmaster_find_order(order_id, store):
+    with sqlite3.connect('sold.db') as conn:
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        params = [store, order_id]
+        q = 'SELECT * FROM orders WHERE store = ? AND order_id = ? ORDER BY id DESC LIMIT 1'
+        cur.execute(q, params)
+        row = cur.fetchone()
+        if row:
+            return dict(row)
+        # Fallback to numeric id
+        try:
+            oid = int(order_id)
+            cur.execute('SELECT * FROM orders WHERE store = ? AND id = ? ORDER BY id DESC LIMIT 1', (store, oid))
+            row = cur.fetchone()
+            if row:
+                return dict(row)
+        except Exception:
+            pass
+    return None
+
+def _labelmaster_amazon_ship_from(settings):
+    return {
+        'Name': (settings.get('label_from_name') or '').strip(),
+        'AddressLine1': (settings.get('label_from_address1') or '').strip(),
+        'AddressLine2': (settings.get('label_from_address2') or '').strip(),
+        'City': (settings.get('label_from_city') or '').strip(),
+        'StateOrProvinceCode': (settings.get('label_from_state') or '').strip(),
+        'PostalCode': (settings.get('label_from_postal') or '').strip(),
+        'CountryCode': (settings.get('label_from_country') or 'US').strip(),
+        'Phone': (settings.get('label_from_phone') or '').strip(),
+        'Email': (settings.get('label_from_email') or '').strip(),
+    }
+
+def _labelmaster_ebay_ship_from(settings):
+    addr = {
+        'addressLine1': (settings.get('label_from_address1') or '').strip(),
+        'addressLine2': (settings.get('label_from_address2') or '').strip(),
+        'city': (settings.get('label_from_city') or '').strip(),
+        'stateOrProvince': (settings.get('label_from_state') or '').strip(),
+        'postalCode': (settings.get('label_from_postal') or '').strip(),
+        'countryCode': (settings.get('label_from_country') or 'US').strip(),
+    }
+    contact = {
+        'fullName': (settings.get('label_from_name') or '').strip(),
+        'companyName': (settings.get('label_from_company') or '').strip(),
+        'contactAddress': addr,
+    }
+    phone = (settings.get('label_from_phone') or '').strip()
+    if phone:
+        contact['primaryPhone'] = {'phoneNumber': phone}
+    email = (settings.get('label_from_email') or '').strip()
+    if email:
+        contact['email'] = email
+    return contact
+
+def _labelmaster_package_dims(settings):
+    return {
+        'length': _listingagent_parse_float(settings.get('label_pkg_length_in'), None),
+        'width': _listingagent_parse_float(settings.get('label_pkg_width_in'), None),
+        'height': _listingagent_parse_float(settings.get('label_pkg_height_in'), None),
+        'unit': 'INCH'
+    }
+
+def _labelmaster_package_weight(settings):
+    return {
+        'value': _listingagent_parse_float(settings.get('label_pkg_weight_oz'), None),
+        'unit': 'OUNCE'
+    }
+
+def _labelmaster_validate_package(settings):
+    dims = _labelmaster_package_dims(settings)
+    weight = _labelmaster_package_weight(settings)
+    if not dims['length'] or not dims['width'] or not dims['height']:
+        return None, None, 'Package dimensions are required'
+    if not weight['value']:
+        return None, None, 'Package weight is required'
+    return dims, weight, None
+
+def _labelmaster_amazon_decode_label(label):
+    if not label:
+        return None
+    data = label.get('FileContents') or label.get('LabelStream')
+    if not data:
+        return None
+    raw = base64.b64decode(data)
+    try:
+        return gzip.decompress(raw)
+    except Exception:
+        return raw
+
+def _labelmaster_pick_cheapest_rate(rates):
+    best = None
+    best_amount = None
+    for r in rates or []:
+        rate = r.get('Rate') or {}
+        amt = rate.get('Amount')
+        try:
+            val = float(amt)
+        except Exception:
+            continue
+        if best is None or val < best_amount:
+            best = r
+            best_amount = val
+    return best
+
+def _labelmaster_ebay_request(method, path, token, *, json_payload=None, marketplace_id='EBAY_US', timeout=30):
+    url = f"https://api.ebay.com/sell/logistics/v1_beta{path}"
+    headers = {
+        'Authorization': f'Bearer {token}',
+        'Content-Type': 'application/json',
+        'X-EBAY-C-MARKETPLACE-ID': marketplace_id
+    }
+    resp = requests.request(method, url, headers=headers, json=json_payload, timeout=timeout)
+    return resp
+
+def _labelmaster_buy_ebay(order, settings):
+    from token_manager import get_access_token
+    token = get_access_token()
+    if not token:
+        raise Exception('Missing eBay OAuth token (run ebay_oauth_setup.py)')
+
+    dims, weight, err = _labelmaster_validate_package(settings)
+    if err:
+        raise Exception(err)
+
+    ship_to_addr = {
+        'addressLine1': (order.get('shipping_street1') or '').strip(),
+        'addressLine2': (order.get('shipping_street2') or '').strip(),
+        'city': (order.get('shipping_city') or '').strip(),
+        'stateOrProvince': (order.get('shipping_state') or '').strip(),
+        'postalCode': (order.get('shipping_postal_code') or '').strip(),
+        'countryCode': (order.get('shipping_country') or 'US').strip(),
+    }
+    if not ship_to_addr['addressLine1'] or not ship_to_addr['postalCode']:
+        raise Exception('Missing ship-to address on order. Re-sync orders and try again.')
+
+    ship_to = {
+        'fullName': (order.get('shipping_name') or 'eBay Buyer').strip(),
+        'contactAddress': ship_to_addr
+    }
+
+    ship_from = _labelmaster_ebay_ship_from(settings)
+    if not ship_from.get('fullName') or not ship_from.get('contactAddress', {}).get('addressLine1'):
+        raise Exception('Ship-from defaults are missing. Fill in Label Master defaults.')
+
+    payload = {
+        'shipFrom': ship_from,
+        'shipTo': ship_to,
+        'packageSpecification': {
+            'dimensions': dims,
+            'weight': weight
+        },
+        'orders': [{
+            'channel': 'EBAY',
+            'orderId': (order.get('order_id') or '').strip()
+        }]
+    }
+
+    settings_all = _listingagent_get_settings()
+    marketplace_id = (settings_all.get('ebay_marketplace_id') or 'EBAY_US').strip()
+
+    quote_resp = _labelmaster_ebay_request('POST', '/shipping_quote', token, json_payload=payload, marketplace_id=marketplace_id)
+    try:
+        quote_json = quote_resp.json()
+    except Exception:
+        quote_json = {}
+
+    if quote_resp.status_code >= 400:
+        raise Exception(str(quote_json.get('errors') or quote_json or f"eBay error {quote_resp.status_code}"))
+
+    quote_id = quote_json.get('shippingQuoteId')
+    rates = quote_json.get('rates') or []
+    if not quote_id or not rates:
+        raise Exception('No shipping rates returned from eBay')
+
+    best = None
+    best_cost = None
+    for r in rates:
+        cost = (r.get('totalShippingCost') or r.get('baseShippingCost') or {}).get('value')
+        try:
+            val = float(cost)
+        except Exception:
+            continue
+        if best is None or val < best_cost:
+            best = r
+            best_cost = val
+
+    if not best:
+        raise Exception('Could not select a shipping rate')
+
+    shipment_payload = {
+        'shippingQuoteId': quote_id,
+        'rateId': best.get('rateId'),
+        'labelSize': settings.get('label_ebay_label_size') or '4\"x6\"'
+    }
+    ship_resp = _labelmaster_ebay_request('POST', '/shipment', token, json_payload=shipment_payload, marketplace_id=marketplace_id)
+    try:
+        ship_json = ship_resp.json()
+    except Exception:
+        ship_json = {}
+
+    if ship_resp.status_code >= 400:
+        raise Exception(str(ship_json.get('errors') or ship_json or f"eBay error {ship_resp.status_code}"))
+
+    label_url = ship_json.get('labelDownloadUrl') or ship_json.get('labelUrl')
+    label_bytes = None
+    if label_url:
+        try:
+            dl = requests.get(label_url, headers={'Authorization': f'Bearer {token}'}, timeout=30)
+            if dl.status_code == 200:
+                label_bytes = dl.content
+        except Exception:
+            label_bytes = None
+
+    label_path = _labelmaster_store_label(
+        'ebay',
+        order.get('order_id') or '',
+        label_id=ship_json.get('shipmentId'),
+        label_url=label_url,
+        label_format='pdf',
+        label_bytes=label_bytes,
+        cost=best_cost,
+        currency=(best.get('totalShippingCost') or best.get('baseShippingCost') or {}).get('currency') or 'USD',
+        raw={'quote': quote_json, 'shipment': ship_json}
+    )
+
+    return {
+        'label_id': ship_json.get('shipmentId'),
+        'label_url': label_url,
+        'label_path': label_path,
+        'cost': best_cost,
+        'currency': (best.get('totalShippingCost') or best.get('baseShippingCost') or {}).get('currency') or 'USD',
+        'format': 'pdf'
+    }
+
+def _labelmaster_buy_amazon(order, settings):
+    if not AMAZON_AVAILABLE:
+        raise Exception('Amazon SP-API not available')
+
+    dims, weight, err = _labelmaster_validate_package(settings)
+    if err:
+        raise Exception(err)
+
+    credentials, seller_id, marketplace_id, marketplace = _amazon_spapi_context()
+    if marketplace is None:
+        raise Exception('Amazon SP-API not available')
+
+    from amazon_manager import AmazonManager
+    am = AmazonManager()
+    items = am.get_order_items(order.get('order_id') or '')
+    if not items:
+        raise Exception('Could not load Amazon order items')
+
+    item_list = []
+    for it in items:
+        oid = it.get('OrderItemId')
+        qty = it.get('QuantityOrdered') or it.get('Quantity') or 1
+        if oid:
+            item_list.append({'OrderItemId': oid, 'Quantity': int(qty)})
+    if not item_list:
+        raise Exception('Amazon order items missing OrderItemId')
+
+    ship_from = _labelmaster_amazon_ship_from(settings)
+    if not ship_from.get('Name') or not ship_from.get('AddressLine1'):
+        raise Exception('Ship-from defaults are missing. Fill in Label Master defaults.')
+
+    ship_date = datetime.datetime.utcnow().replace(microsecond=0).isoformat() + 'Z'
+    delivery_experience = (settings.get('label_amazon_delivery_experience') or 'NoTracking').strip()
+    carrier_pickup = str(settings.get('label_amazon_carrier_pickup') or '').lower() in ('1', 'true', 'yes')
+    carrier_pickup_option = (settings.get('label_amazon_carrier_pickup_option') or 'ShipperWillDropOff').strip()
+
+    service_options = {
+        'DeliveryExperience': delivery_experience,
+        'CarrierWillPickUp': carrier_pickup
+    }
+    if carrier_pickup:
+        service_options['CarrierWillPickUpOption'] = carrier_pickup_option
+
+    shipment_request = {
+        'AmazonOrderId': (order.get('order_id') or '').strip(),
+        'ItemList': item_list,
+        'ShipFromAddress': ship_from,
+        'PackageDimensions': {
+            'Length': dims['length'],
+            'Width': dims['width'],
+            'Height': dims['height'],
+            'Unit': 'inches'
+        },
+        'Weight': {
+            'Value': weight['value'],
+            'Unit': 'oz'
+        },
+        'ShipDate': ship_date,
+        'ShippingServiceOptions': service_options
+    }
+
+    try:
+        from sp_api.api import MerchantFulfillment, Tokens
+    except Exception:
+        from sp_api.api import MerchantFulfillment
+        Tokens = None
+
+    rdt = None
+    if Tokens:
+        try:
+            tokens_api = Tokens(credentials=credentials, marketplace=marketplace)
+            rdt_resp = tokens_api.create_restricted_data_token(restricted_resources=[{
+                'method': 'POST',
+                'path': '/mfn/v0/shipments',
+                'dataElements': ['shippingAddress', 'buyerInfo']
+            }])
+            rdt = (rdt_resp.payload or {}).get('restrictedDataToken')
+        except Exception:
+            rdt = None
+
+    if rdt:
+        mf = MerchantFulfillment(credentials=credentials, marketplace=marketplace, restricted_data_token=rdt)
+    else:
+        mf = MerchantFulfillment(credentials=credentials, marketplace=marketplace)
+
+    services_resp = mf.get_eligible_shipment_services(shipment_request_details=shipment_request)
+    if getattr(services_resp, 'errors', None):
+        raise Exception(str(services_resp.errors))
+
+    services = (services_resp.payload or {}).get('ShippingServiceList') or []
+    if not services:
+        raise Exception('No Amazon shipping services returned')
+
+    preferred_id = (settings.get('label_amazon_service_id') or '').strip()
+    chosen = None
+    if preferred_id:
+        for s in services:
+            if str(s.get('ShippingServiceId')) == preferred_id:
+                chosen = s
+                break
+    if not chosen:
+        chosen = _labelmaster_pick_cheapest_rate(services)
+
+    if not chosen:
+        raise Exception('Could not select an Amazon shipping service')
+
+    service_id = chosen.get('ShippingServiceId')
+    offer_id = chosen.get('ShippingServiceOfferId')
+
+    kwargs = {}
+    if offer_id:
+        try:
+            import inspect as _inspect
+            sig = _inspect.signature(mf.create_shipment)
+            if 'shipping_service_offer_id' in sig.parameters:
+                kwargs['shipping_service_offer_id'] = offer_id
+            elif 'ShippingServiceOfferId' in sig.parameters:
+                kwargs['ShippingServiceOfferId'] = offer_id
+        except Exception:
+            kwargs['shipping_service_offer_id'] = offer_id
+
+    create_resp = mf.create_shipment(
+        shipment_request_details=shipment_request,
+        shipping_service_id=service_id,
+        **kwargs
+    )
+    if getattr(create_resp, 'errors', None):
+        raise Exception(str(create_resp.errors))
+
+    shipment = (create_resp.payload or {}).get('Shipment') or create_resp.payload or {}
+    label = shipment.get('Label') or {}
+    label_bytes = _labelmaster_amazon_decode_label(label)
+    label_format = (label.get('LabelFormat') or 'PDF').lower()
+    label_id = shipment.get('ShipmentId')
+    label_cost = None
+    label_currency = None
+    rate = chosen.get('Rate') or {}
+    try:
+        label_cost = float(rate.get('Amount'))
+        label_currency = rate.get('CurrencyCode') or 'USD'
+    except Exception:
+        label_cost = None
+
+    label_path = _labelmaster_store_label(
+        'amazon',
+        order.get('order_id') or '',
+        label_id=label_id,
+        label_url=None,
+        label_format=label_format,
+        label_bytes=label_bytes,
+        cost=label_cost,
+        currency=label_currency,
+        raw={'services': services_resp.payload, 'shipment': shipment}
+    )
+
+    return {
+        'label_id': label_id,
+        'label_url': None,
+        'label_path': label_path,
+        'cost': label_cost,
+        'currency': label_currency or 'USD',
+        'format': label_format
+    }
+
+@app.route('/api/labelmaster/settings', methods=['GET'])
+def api_labelmaster_get_settings():
+    try:
+        return jsonify({
+            'success': True,
+            'settings': _labelmaster_get_settings(),
+            'required': _LABELMASTER_REQUIRED_SETTINGS
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'labelmaster:get_settings')}), 500
+
+@app.route('/api/labelmaster/settings', methods=['POST'])
+def api_labelmaster_save_settings():
+    try:
+        payload = request.json or {}
+        settings = payload.get('settings', payload)
+        if not isinstance(settings, dict):
+            return jsonify({'success': False, 'error': 'settings must be an object'}), 400
+        filtered = {k: v for k, v in settings.items() if str(k).startswith('label_')}
+        _listingagent_upsert_settings(filtered)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'labelmaster:save_settings')}), 500
+
+@app.route('/api/labelmaster/status', methods=['GET'])
+def api_labelmaster_status():
+    """Return a quick capability check for label buying/printing APIs."""
+    settings = _labelmaster_get_settings()
+    missing = _labelmaster_missing_settings(settings)
+
+    ebay_connected = False
+    ebay_reason = ''
+    ebay_scope = (os.getenv('EBAY_SCOPE') or '')
+    has_logistics_scope = 'sell.logistics' in ebay_scope
+
+    tokens_path = BASE_DIR / 'tokens.json'
+    if tokens_path.exists():
+        try:
+            with open(tokens_path, 'r', encoding='utf-8') as f:
+                tokens = json.load(f)
+            ebay_connected = bool(tokens.get('refresh_token'))
+        except Exception:
+            ebay_connected = False
+
+    if not ebay_connected:
+        ebay_reason = 'eBay OAuth token missing (run ebay_oauth_setup.py)'
+    elif not has_logistics_scope:
+        ebay_reason = 'Missing sell.logistics scope (reauthorize eBay app)'
+    elif missing:
+        ebay_reason = f"Missing defaults: {', '.join(missing)}"
+
+    amazon_connected = False
+    amazon_reason = ''
+    if AMAZON_AVAILABLE:
+        try:
+            credentials, seller_id, marketplace_id, marketplace = _amazon_spapi_context()
+            amazon_connected = marketplace is not None
+            if not amazon_connected:
+                amazon_reason = 'Amazon SP-API not available'
+            elif missing:
+                amazon_reason = f"Missing defaults: {', '.join(missing)}"
+        except Exception as e:
+            amazon_connected = False
+            amazon_reason = _safe_error(e, 'labelmaster:amazon_status')
+    else:
+        amazon_reason = 'Amazon SP-API library not available'
+
+    return jsonify({
+        'success': True,
+        'ebay': {
+            'connected': ebay_connected,
+            'supported': ebay_connected and has_logistics_scope and not missing,
+            'reason': ebay_reason
+        },
+        'amazon': {
+            'connected': amazon_connected,
+            'supported': amazon_connected and not missing,
+            'reason': amazon_reason
+        },
+        'missing_defaults': missing
+    })
+
+@app.route('/api/labelmaster/orders', methods=['GET'])
+def api_labelmaster_orders():
+    """Return sold orders for label purchasing/printing."""
+    try:
+        days = int(request.args.get('days', 7))
+        store = (request.args.get('store') or '').strip().lower()
+        q = (request.args.get('q') or '').strip().lower()
+
+        params = [days]
+        where = "paid_time >= date('now', '-' || ? || ' days')"
+        if store in ('ebay', 'amazon'):
+            where += " AND store = ?"
+            params.append(store)
+
+        with sqlite3.connect('sold.db') as conn:
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            _labelmaster_init_label_tables(cur)
+            cur.execute(f'''
+                SELECT o.*,
+                       l.label_id,
+                       l.label_url,
+                       l.label_format,
+                       l.label_path,
+                       l.created_at AS label_created_at
+                FROM orders o
+                LEFT JOIN (
+                    SELECT store, order_id, MAX(id) AS max_id
+                    FROM shipping_labels
+                    GROUP BY store, order_id
+                ) last
+                    ON last.store = o.store AND last.order_id = o.order_id
+                LEFT JOIN shipping_labels l
+                    ON l.id = last.max_id
+                WHERE {where}
+                ORDER BY paid_time DESC
+                LIMIT 4000
+            ''', params)
+            rows = cur.fetchall()
+
+        orders = [dict(r) for r in rows]
+        for o in orders:
+            o['label_ready'] = bool(o.get('label_path') or o.get('label_url'))
+
+        if q:
+            def _matches(o):
+                hay = ' '.join([
+                    str(o.get('order_id') or ''),
+                    str(o.get('item_id') or ''),
+                    str(o.get('title') or ''),
+                    str(o.get('barcode') or ''),
+                    str(o.get('shipping_name') or ''),
+                    str(o.get('shipping_city') or ''),
+                    str(o.get('shipping_state') or ''),
+                    str(o.get('shipping_postal_code') or ''),
+                    str(o.get('location') or ''),
+                ]).lower()
+                return q in hay
+            orders = [o for o in orders if _matches(o)]
+
+        return jsonify({'success': True, 'orders': orders})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'labelmaster:orders')}), 500
+
+@app.route('/api/labelmaster/buy', methods=['POST'])
+def api_labelmaster_buy():
+    """Buy a shipping label for an order."""
+    try:
+        data = request.json or {}
+        order_id = (data.get('order_id') or '').strip()
+        store = (data.get('store') or '').strip().lower()
+        if not order_id or store not in ('ebay', 'amazon'):
+            return jsonify({'success': False, 'error': 'order_id and store are required'}), 400
+
+        settings = _labelmaster_get_settings()
+        missing = _labelmaster_missing_settings(settings)
+        if missing:
+            return jsonify({'success': False, 'error': f"Missing defaults: {', '.join(missing)}"}), 400
+
+        order = _labelmaster_find_order(order_id, store)
+        if not order:
+            return jsonify({'success': False, 'error': 'Order not found'}), 404
+
+        if store == 'ebay':
+            result = _labelmaster_buy_ebay(order, settings)
+        else:
+            result = _labelmaster_buy_amazon(order, settings)
+
+        label_url = result.get('label_url')
+        if not label_url and result.get('label_path'):
+            label_url = url_for('api_labelmaster_label_file', store=store, order_id=order.get('order_id') or order_id)
+
+        return jsonify({
+            'success': True,
+            'label_url': label_url,
+            'label_id': result.get('label_id'),
+            'cost': result.get('cost'),
+            'currency': result.get('currency'),
+            'format': result.get('format')
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'labelmaster:buy')}), 500
+
+@app.route('/api/labelmaster/print', methods=['POST'])
+def api_labelmaster_print():
+    """Return the label URL for printing if purchased."""
+    try:
+        data = request.json or {}
+        order_id = (data.get('order_id') or '').strip()
+        store = (data.get('store') or '').strip().lower()
+        if not order_id or store not in ('ebay', 'amazon'):
+            return jsonify({'success': False, 'error': 'order_id and store are required'}), 400
+        order = _labelmaster_find_order(order_id, store)
+        if not order:
+            return jsonify({'success': False, 'error': 'Order not found'}), 404
+
+        label = _labelmaster_latest_label(store, order.get('order_id') or order_id)
+        if not label:
+            return jsonify({'success': False, 'error': 'Label not purchased yet'}), 400
+
+        if label.get('label_path'):
+            label_url = url_for('api_labelmaster_label_file', store=store, order_id=order.get('order_id') or order_id)
+            return jsonify({'success': True, 'label_url': label_url})
+
+        if label.get('label_url'):
+            return jsonify({'success': True, 'label_url': label.get('label_url')})
+
+        return jsonify({'success': False, 'error': 'Label file missing'}), 404
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'labelmaster:print')}), 500
+
+@app.route('/api/labelmaster/label', methods=['GET'])
+def api_labelmaster_label_file():
+    try:
+        store = (request.args.get('store') or '').strip().lower()
+        order_id = (request.args.get('order_id') or '').strip()
+        if not order_id or store not in ('ebay', 'amazon'):
+            return jsonify({'success': False, 'error': 'order_id and store are required'}), 400
+
+        label = _labelmaster_latest_label(store, order_id)
+        if not label or not label.get('label_path'):
+            return jsonify({'success': False, 'error': 'Label file not found'}), 404
+
+        label_path = label.get('label_path')
+        if not label_path or not os.path.exists(label_path):
+            return jsonify({'success': False, 'error': 'Label file not found on disk'}), 404
+        mime = 'application/pdf'
+        ext = os.path.splitext(label_path)[1].lower()
+        if ext == '.png':
+            mime = 'image/png'
+        elif ext == '.zpl':
+            mime = 'application/octet-stream'
+        return send_file(label_path, mimetype=mime)
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'labelmaster:label_file')}), 500
 
 # -----------------------------
 # Price Master (Bulk Repricing)
@@ -8378,6 +9748,19 @@ def _pricemaster_init_tables(cur):
 
     cur.execute('CREATE INDEX IF NOT EXISTS idx_price_changes_key_time ON price_changes(platform, listing_key, changed_at)')
 
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS price_feed_jobs (
+            feed_id TEXT PRIMARY KEY,
+            marketplace_id TEXT,
+            submitted_at TEXT,
+            status TEXT,
+            last_checked_at TEXT,
+            result_document_id TEXT,
+            items_json TEXT,
+            error TEXT
+        )
+    ''')
+
 def _pricemaster_touch_meta(rows):
     """Insert first_seen_at for listings if missing (platform, key, first_seen_at)."""
     if not rows:
@@ -8419,6 +9802,60 @@ def _pricemaster_get_meta_map(platform: str, keys: list):
                     'last_price_change_price': r['last_price_change_price'],
                 }
     return out
+
+def _pricemaster_save_feed_job(feed_id, marketplace_id, items, error=None, status='SUBMITTED'):
+    if not feed_id:
+        return
+    now = _pricemaster_now_iso()
+    try:
+        import json as _json
+        items_json = _json.dumps(items or [], ensure_ascii=True, default=str)
+    except Exception:
+        items_json = '[]'
+    with db_connection('pricemaster.db') as conn:
+        cur = conn.cursor()
+        _pricemaster_init_tables(cur)
+        cur.execute('''
+            INSERT INTO price_feed_jobs (feed_id, marketplace_id, submitted_at, status, last_checked_at, result_document_id, items_json, error)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(feed_id) DO UPDATE SET
+                marketplace_id = excluded.marketplace_id,
+                status = excluded.status,
+                last_checked_at = excluded.last_checked_at,
+                result_document_id = excluded.result_document_id,
+                items_json = excluded.items_json,
+                error = excluded.error
+        ''', (feed_id, marketplace_id, now, status or 'SUBMITTED', now, None, items_json, error))
+
+def _pricemaster_get_feed_job(feed_id):
+    if not feed_id:
+        return None
+    with db_connection('pricemaster.db') as conn:
+        cur = conn.cursor()
+        _pricemaster_init_tables(cur)
+        cur.execute('''
+            SELECT feed_id, marketplace_id, submitted_at, status, last_checked_at, result_document_id, items_json, error
+            FROM price_feed_jobs
+            WHERE feed_id = ?
+        ''', (feed_id,))
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+def _pricemaster_update_feed_job(feed_id, *, status=None, error=None, result_document_id=None):
+    if not feed_id:
+        return
+    now = _pricemaster_now_iso()
+    with db_connection('pricemaster.db') as conn:
+        cur = conn.cursor()
+        _pricemaster_init_tables(cur)
+        cur.execute('''
+            UPDATE price_feed_jobs
+            SET status = COALESCE(?, status),
+                last_checked_at = ?,
+                result_document_id = COALESCE(?, result_document_id),
+                error = COALESCE(?, error)
+            WHERE feed_id = ?
+        ''', (status, now, result_document_id, error, feed_id))
 
 def _pricemaster_record_change(*, platform, listing_key, old_price, new_price, mode, value, success, error=None):
     now = _pricemaster_now_iso()
@@ -8489,13 +9926,17 @@ def _pricemaster_ebay_revise_prices_bulk(updates: list, currency='USD'):
         return ok, failed
 
     # Build a single ReviseInventoryStatus call for a batch.
+    import html as _html
     inv_chunks = []
     for u in updates:
         item_id = str(u['item_id']).strip()
+        sku = str(u.get('sku') or '').strip()
         new_price = float(u['new_price'])
+        sku_xml = f"<SKU>{_html.escape(sku)}</SKU>" if sku else ""
         inv_chunks.append(f'''
           <InventoryStatus>
             <ItemID>{item_id}</ItemID>
+            {sku_xml}
             <StartPrice currencyID="{currency}">{new_price:.2f}</StartPrice>
           </InventoryStatus>
         ''')
@@ -8798,7 +10239,8 @@ def api_pricemaster_bulk_update():
 
             results.append({'platform': 'ebay', 'listing_key': item_id, 'success': True, 'old_price': float(old_d), 'new_price': float(new_d), '_dry': True})
             if not dry_run:
-                ebay_updates.append({'item_id': item_id, 'new_price': float(new_d), 'old_price': float(old_d)})
+                sku = (row.get('SKU') or '').strip()
+                ebay_updates.append({'item_id': item_id, 'sku': sku, 'new_price': float(new_d), 'old_price': float(old_d)})
 
         if not dry_run and ebay_updates:
             # Batch into modest chunks to avoid huge Trading API payloads.
@@ -8886,49 +10328,128 @@ def api_pricemaster_bulk_update():
 
                 mp_id = (settings.get('amazon_marketplace_id') or marketplace_id or 'ATVPDKIKX0DER').strip()
                 currency = (settings.get('amazon_currency') or 'USD').strip()
-                product_type = (settings.get('amazon_product_type') or 'PRODUCT').strip()
+                default_product_type = (settings.get('amazon_product_type') or 'PRODUCT').strip()
                 requirements = (settings.get('amazon_requirements') or 'LISTING_OFFER_ONLY').strip()
                 default_condition = (settings.get('amazon_condition_type') or 'used_good').strip()
                 default_fc = (settings.get('amazon_fulfillment_channel_code') or 'DEFAULT').strip()
+                offer_audience = _amazon_offer_audience(settings)
 
                 ok_skus = set()
                 fail_skus = {}
+                product_type_cache = {}
+                feed_candidates = []
                 for j in amazon_jobs:
                     sku = j['sku']
                     asin = j.get('asin') or ''
                     upc = j.get('upc') or ''
                     qty = int(j.get('quantity') or 1)
-                    condition_type = j.get('condition') or default_condition
-                    fc_code = j.get('fulfillment_channel') or default_fc
+                    condition_type = _amazon_normalize_condition_type(j.get('condition'), default_condition)
+                    fc_code = _amazon_normalize_fulfillment_channel(j.get('fulfillment_channel'), default_fc)
                     price = float(j.get('new_price'))
 
                     try:
-                        attrs = _build_amazon_offer_attributes(
-                            upc=upc,
-                            asin=asin,
-                            condition_type=condition_type,
-                            fulfillment_channel_code=fc_code,
-                            quantity=qty,
-                            currency=currency,
-                            price=price
-                        )
-                        body = {'productType': product_type, 'requirements': requirements, 'attributes': attrs}
-                        resp = li.put_listings_item(
+                        debug = None
+                        product_type = _amazon_get_listing_product_type(li, seller_id, sku, mp_id, product_type_cache)
+                        if not product_type:
+                            product_type = _amazon_get_catalog_product_type(credentials, marketplace, mp_id, asin)
+                        product_type = product_type or default_product_type
+
+                        # Price-only update first (avoid touching condition/fulfillment identifiers)
+                        attrs_price = _amazon_offer_price_attrs(currency, price, mp_id, offer_audience=offer_audience)
+                        ok, debug, err = _amazon_update_price_spapi(
+                            li,
                             seller_id,
                             sku,
-                            marketplaceIds=[mp_id],
-                            issueLocale='en_US',
-                            body=body
+                            mp_id,
+                            product_type=product_type,
+                            requirements=requirements,
+                            attrs=attrs_price
                         )
-                        if getattr(resp, 'errors', None):
-                            raise Exception(str(resp.errors))
+                        if not ok:
+                            # Fallback: include condition + fulfillment for strict validators
+                            attrs_full = _build_amazon_offer_attributes(
+                                upc=upc,
+                                asin=asin,
+                                condition_type=condition_type,
+                                fulfillment_channel_code=fc_code,
+                                quantity=qty,
+                                currency=currency,
+                                price=price,
+                                include_identifiers=False,
+                                marketplace_id=mp_id,
+                                offer_audience=offer_audience
+                            )
+                            ok2, debug2, err2 = _amazon_update_price_spapi(
+                                li,
+                                seller_id,
+                                sku,
+                                mp_id,
+                                product_type=product_type,
+                                requirements=requirements,
+                                attrs=attrs_full
+                            )
+                            if debug2:
+                                try:
+                                    debug['attempts'].extend(debug2.get('attempts') or [])
+                                except Exception:
+                                    debug = debug2
+                            if not ok2:
+                                raise Exception(str(err2) if err2 else str(err) if err else 'Amazon price update failed')
 
                         ok_skus.add(sku)
                         _pricemaster_record_change(platform='amazon', listing_key=sku, old_price=j['old_price'], new_price=j['new_price'], mode=mode, value=value_d, success=True)
                     except Exception as e:
-                        msg = str(e)
+                        msg = _amazon_format_spapi_error(e)
+                        try:
+                            msg = f"{msg} | product_type={product_type}"
+                        except Exception:
+                            pass
+                        try:
+                            import json as json_module
+                            msg = f"{msg} | debug={json_module.dumps(debug, ensure_ascii=True, default=str)}"
+                        except Exception:
+                            pass
                         fail_skus[sku] = msg
+                        if 'InvalidInput' in msg:
+                            feed_candidates.append({
+                                'sku': sku,
+                                'product_type': product_type,
+                                'new_price': j.get('new_price'),
+                                'old_price': j.get('old_price')
+                            })
                         _pricemaster_record_change(platform='amazon', listing_key=sku, old_price=j['old_price'], new_price=j['new_price'], mode=mode, value=value_d, success=False, error=msg)
+
+                # Feed fallback for InvalidInput failures
+                feed_skus = set()
+                pending_skus = set()
+                feed_id = None
+                if feed_candidates:
+                    try:
+                        # Attach adjustment info for later reconciliation
+                        for fc in feed_candidates:
+                            if 'mode' not in fc:
+                                fc['mode'] = mode
+                            if 'value' not in fc:
+                                fc['value'] = float(value_d) if value_d is not None else None
+                        feed_id = _amazon_submit_price_feed(
+                            credentials=credentials,
+                            marketplace=marketplace,
+                            marketplace_id=mp_id,
+                            seller_id=seller_id,
+                            jobs=feed_candidates,
+                            currency=currency,
+                            offer_audience=offer_audience
+                        )
+                        _pricemaster_save_feed_job(feed_id, mp_id, feed_candidates, status='SUBMITTED')
+                        for j in feed_candidates:
+                            feed_skus.add(j['sku'])
+                            pending_skus.add(j['sku'])
+                            # overwrite failure if feed submitted
+                            fail_skus.pop(j['sku'], None)
+                    except Exception as e:
+                        feed_err = _amazon_format_spapi_error(e)
+                        for j in feed_candidates:
+                            fail_skus[j['sku']] = f"{fail_skus.get(j['sku'], '')} | feed_error={feed_err}"
 
                 # Update local amazonStore.db for successes
                 now_iso = _pricemaster_now_iso()
@@ -8936,13 +10457,18 @@ def api_pricemaster_bulk_update():
                     cur = conn.cursor()
                     for j in amazon_jobs:
                         sku = j['sku']
-                        if sku in ok_skus:
+                        if sku in ok_skus and sku not in pending_skus:
                             cur.execute('UPDATE ITEMS SET PRICE = ?, LAST_UPDATED = ? WHERE TRIM(COALESCE(SKU,\'\')) = ? COLLATE NOCASE', (float(j['new_price']), now_iso, sku))
 
                 for r in results:
                     if r.get('platform') == 'amazon' and r.get('_dry'):
                         sku = r.get('listing_key')
-                        if sku in ok_skus:
+                        if sku in pending_skus:
+                            r['success'] = True
+                            r['pending'] = True
+                            if feed_id:
+                                r['note'] = f"Submitted via Amazon feed {feed_id} (processing)"
+                        elif sku in ok_skus:
                             r['success'] = True
                         else:
                             r['success'] = False
@@ -8957,6 +10483,109 @@ def api_pricemaster_bulk_update():
 
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e, 'pricemaster:bulk_update')}), 500
+
+@app.route('/api/pricemaster/feed_status', methods=['POST'])
+def api_pricemaster_feed_status():
+    """Check Amazon feed processing status and apply successful feed updates to local DB."""
+    try:
+        data = request.json or {}
+        feed_id = (data.get('feed_id') or '').strip()
+        if not feed_id:
+            return jsonify({'success': False, 'error': 'feed_id is required'}), 400
+
+        credentials, _seller_id, _marketplace_id, marketplace = _amazon_spapi_context()
+        if marketplace is None:
+            return jsonify({'success': False, 'error': 'Amazon SP-API not available'}), 503
+
+        info = _amazon_get_feed_status(credentials, marketplace, feed_id)
+        status = (info.get('status') or '').strip()
+        result_doc_id = info.get('result_feed_document_id')
+
+        report = None
+        report_errors = []
+        report_warnings = []
+        if result_doc_id:
+            try:
+                from sp_api.api import Feeds
+                feeds = Feeds(credentials=credentials, marketplace=marketplace)
+                doc_resp = _amazon_get_feed_document_info(feeds, result_doc_id)
+                doc_payload = getattr(doc_resp, 'payload', None) or {}
+                url = doc_payload.get('url')
+                raw = _amazon_download_feed_document(url)
+                report = _amazon_parse_feed_report(raw)
+                report_errors = report.get('errors') or []
+                report_warnings = report.get('warnings') or []
+            except Exception as e:
+                report = {'error_count': 1, 'errors': [{'code': 'Report', 'message': _amazon_format_spapi_error(e)}]}
+
+        # Update feed job + apply if successful
+        job = _pricemaster_get_feed_job(feed_id)
+        if status:
+            _pricemaster_update_feed_job(feed_id, status=status, result_document_id=result_doc_id)
+
+        applied = False
+        if status and status.upper() in ('DONE', 'DONE_NO_DATA', 'DONE_SUCCESS', 'DONE_WARNING', 'SUCCESS'):
+            if report and report.get('error_count', 0) == 0:
+                # Apply updates to local DB + record history
+                items = []
+                try:
+                    import json as _json
+                    items = _json.loads((job or {}).get('items_json') or '[]')
+                except Exception:
+                    items = []
+
+                now_iso = _pricemaster_now_iso()
+                with db_connection('amazonStore.db') as conn:
+                    cur = conn.cursor()
+                    for it in items:
+                        sku = (it.get('sku') or '').strip()
+                        if not sku:
+                            continue
+                        new_price = it.get('new_price')
+                        old_price = it.get('old_price')
+                        mode = it.get('mode') or 'delta'
+                        val = it.get('value')
+                        try:
+                            cur.execute('UPDATE ITEMS SET PRICE = ?, LAST_UPDATED = ? WHERE TRIM(COALESCE(SKU,\'\')) = ? COLLATE NOCASE', (float(new_price), now_iso, sku))
+                        except Exception:
+                            pass
+                        try:
+                            _pricemaster_record_change(platform='amazon', listing_key=sku, old_price=old_price, new_price=new_price, mode=mode, value=_pricemaster_parse_decimal(val), success=True)
+                        except Exception:
+                            pass
+                applied = True
+                _pricemaster_update_feed_job(feed_id, status=status, error=None, result_document_id=result_doc_id)
+            elif report and report.get('error_count', 0) > 0:
+                # Record failures
+                items = []
+                try:
+                    import json as _json
+                    items = _json.loads((job or {}).get('items_json') or '[]')
+                except Exception:
+                    items = []
+                err_msg = report_errors[0].get('message') if report_errors else 'Feed processing error'
+                for it in items:
+                    sku = (it.get('sku') or '').strip()
+                    if not sku:
+                        continue
+                    try:
+                        _pricemaster_record_change(platform='amazon', listing_key=sku, old_price=it.get('old_price'), new_price=it.get('new_price'), mode=it.get('mode') or 'delta', value=_pricemaster_parse_decimal(it.get('value')), success=False, error=err_msg)
+                    except Exception:
+                        pass
+                _pricemaster_update_feed_job(feed_id, status=status, error=err_msg, result_document_id=result_doc_id)
+
+        return jsonify({
+            'success': True,
+            'feed_id': feed_id,
+            'status': status,
+            'result_feed_document_id': result_doc_id,
+            'report': report,
+            'report_errors': report_errors,
+            'report_warnings': report_warnings,
+            'applied': applied
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'pricemaster:feed_status')}), 500
 
 @app.route('/api/listing-helper/scan', methods=['GET'])
 def api_listing_helper_scan():

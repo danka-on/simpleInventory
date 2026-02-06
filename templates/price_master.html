@@ -172,6 +172,12 @@
     html.ss-theme-night select{
       background: rgba(255,255,255,0.04);
       border-color: rgba(255,255,255,0.10);
+      color: var(--ink, #e2e8f0);
+    }
+    html.ss-theme-night select option,
+    html.ss-theme-night select optgroup{
+      background: #0f172a;
+      color: #e2e8f0;
     }
 
     .seg{
@@ -218,9 +224,39 @@
       font-weight: 800;
       font-size: 0.9rem;
     }
+    .pill.ebay{
+      background: rgba(96,165,250,0.15);
+      border-color: rgba(96,165,250,0.25);
+      color: #60a5fa;
+    }
+    .pill.amazon{
+      background: rgba(255,153,0,0.15);
+      border-color: rgba(255,153,0,0.25);
+      color: #fbbf24;
+    }
+    .pill.selected-active{
+      background: rgba(16,185,129,0.15);
+      border-color: rgba(16,185,129,0.25);
+      color: #10b981;
+    }
     html.ss-theme-night .pill{
       background: rgba(255,255,255,0.04);
       border-color: rgba(255,255,255,0.10);
+    }
+    html.ss-theme-night .pill.ebay{
+      background: rgba(96,165,250,0.2);
+      border-color: rgba(96,165,250,0.3);
+      color: #60a5fa;
+    }
+    html.ss-theme-night .pill.amazon{
+      background: rgba(251,191,36,0.18);
+      border-color: rgba(251,191,36,0.3);
+      color: #fbbf24;
+    }
+    html.ss-theme-night .pill.selected-active{
+      background: rgba(16,185,129,0.2);
+      border-color: rgba(16,185,129,0.35);
+      color: #34d399;
     }
     .pill strong{ color: var(--pm-ink); }
 
@@ -362,10 +398,10 @@
           </div>
 
           <div class="kpi">
+            <div class="pill" id="kpiSelectedPill"><span>Selected</span> <strong id="kpiSelected">0</strong></div>
             <div class="pill"><span>Showing</span> <strong id="kpiShown">0</strong></div>
-            <div class="pill"><span>Selected</span> <strong id="kpiSelected">0</strong></div>
-            <div class="pill"><span>eBay</span> <strong id="kpiEbay">0</strong></div>
-            <div class="pill"><span>Amazon</span> <strong id="kpiAmazon">0</strong></div>
+            <div class="pill ebay"><span>eBay</span> <strong id="kpiEbay">0</strong></div>
+            <div class="pill amazon"><span>Amazon</span> <strong id="kpiAmazon">0</strong></div>
           </div>
         </div>
       </div>
@@ -376,6 +412,7 @@
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end;">
             <button class="btn" type="button" id="selectAllBtn">Select All</button>
             <button class="btn" type="button" id="clearSelBtn" data-i18n="clear">Clear</button>
+            <button class="btn btnGhost" type="button" id="checkFeedBtn">Check Feed</button>
           </div>
         </div>
         <div class="cardBody">
@@ -452,6 +489,32 @@
       value: null,
       lastRenderKeys: [],
     };
+    const feedCheckAttempts = {};
+    let lastFeedId = null;
+
+    function setLastFeedId(id){
+      if(!id) return;
+      lastFeedId = String(id);
+      try{ localStorage.setItem('pm_last_feed_id', lastFeedId); }catch(e){}
+    }
+
+    function getLastFeedId(){
+      if(lastFeedId) return lastFeedId;
+      try{
+        const v = localStorage.getItem('pm_last_feed_id');
+        if(v){
+          lastFeedId = v;
+          return v;
+        }
+      }catch(e){}
+      const logText = ($('pmLog') && $('pmLog').textContent) ? $('pmLog').textContent : '';
+      const m = logText.match(/feed\s+(\d+)/i);
+      if(m){
+        setLastFeedId(m[1]);
+        return m[1];
+      }
+      return null;
+    }
 
     function keyFor(it){
       return `${it.platform}:${it.listing_key}`;
@@ -583,6 +646,8 @@
       $('kpiSelected').textContent = String(selCount);
       $('kpiEbay').textContent = String(ebay);
       $('kpiAmazon').textContent = String(amazon);
+      const selPill = $('kpiSelectedPill');
+      if(selPill) selPill.classList.toggle('selected-active', selCount > 0);
     }
 
     function render(){
@@ -639,6 +704,8 @@
           if(e.target.checked) state.selected.add(key);
           else state.selected.delete(key);
           $('kpiSelected').textContent = String(state.selected.size);
+          const selPill = $('kpiSelectedPill');
+          if(selPill) selPill.classList.toggle('selected-active', state.selected.size > 0);
         });
       });
 
@@ -707,15 +774,33 @@
         if(!r.ok || j.success === false) throw new Error(j.error || `Update failed (${r.status})`);
 
         const res = j.results || [];
-        const ok = res.filter(x => x && x.success).length;
-        const bad = res.length - ok;
-        log(`Done. ${ok} success • ${bad} failed`);
+        const pending = res.filter(x => x && x.pending).length;
+        const ok = res.filter(x => x && x.success && !x.pending).length;
+        const bad = res.length - ok - pending;
+        if(pending > 0){
+          log(`Done. ${ok} success • ${pending} pending • ${bad} failed`);
+        } else {
+          log(`Done. ${ok} success • ${bad} failed`);
+        }
 
         for(const row of res){
           if(!row) continue;
           const tag = `${row.platform || '?'}:${row.listing_key || '?'}`;
-          if(row.success){
-            log(`✓ ${tag} ${fmtUsd(row.old_price)} → ${fmtUsd(row.new_price)}`);
+          if(row.success && row.pending){
+            const note = row.note ? ` (${row.note})` : '';
+            log(`⏳ ${tag} ${fmtUsd(row.old_price)} → ${fmtUsd(row.new_price)}${note}`);
+            // Auto-check feed status once after a short delay
+            const feedIdMatch = (row.note || '').match(/feed\\s+(\\d+)/i);
+            if(feedIdMatch){
+              const feedId = feedIdMatch[1];
+              setLastFeedId(feedId);
+              setTimeout(() => checkFeedStatus(feedId), 2500);
+            }
+          } else if(row.success){
+            const note = row.note ? ` (${row.note})` : '';
+            log(`✓ ${tag} ${fmtUsd(row.old_price)} → ${fmtUsd(row.new_price)}${note}`);
+            const feedIdMatch = (row.note || '').match(/feed\\s+(\\d+)/i);
+            if(feedIdMatch) setLastFeedId(feedIdMatch[1]);
           } else {
             log(`✗ ${tag} failed: ${row.error || 'Unknown error'}`);
           }
@@ -730,10 +815,50 @@
       }
     }
 
+    async function checkFeedStatus(feedId){
+      if(!feedId) return;
+      setLastFeedId(feedId);
+      feedCheckAttempts[feedId] = (feedCheckAttempts[feedId] || 0) + 1;
+      try{
+        const r = await fetch('/api/pricemaster/feed_status', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json', 'Accept':'application/json'},
+          body: JSON.stringify({feed_id: feedId})
+        });
+        const j = await r.json().catch(() => ({}));
+        if(!r.ok || j.success === false) throw new Error(j.error || `Feed status failed (${r.status})`);
+        const st = (j.status || '').toString();
+        if(j.report && j.report.error_count > 0){
+          const msg = (j.report_errors && j.report_errors[0] && j.report_errors[0].message) ? j.report_errors[0].message : 'Feed processing error';
+          log(`Feed ${feedId} status: ${st} (errors: ${j.report.error_count}) — ${msg}`);
+        } else {
+          log(`Feed ${feedId} status: ${st}${j.applied ? ' (applied)' : ''}`);
+        }
+        if(j.applied){
+          await loadListings();
+        } else if(['IN_QUEUE','IN_PROGRESS','IN_PROGRESS','IN_QUEUE','IN_PROGRESS','IN_PROGRESS','IN_QUEUE'].includes(st.toUpperCase())) {
+          if(feedCheckAttempts[feedId] < 3){
+            setTimeout(() => checkFeedStatus(feedId), 20000);
+          }
+        }
+      }catch(e){
+        log(`Feed ${feedId} status check failed: ${e.message}`);
+      }
+    }
+
     function setStoreFilter(store){
       state.store = store;
       document.querySelectorAll('.seg button').forEach(b => b.classList.toggle('active', b.getAttribute('data-store') === store));
+      constrainSelectionToStore();
       render();
+    }
+
+    function constrainSelectionToStore(){
+      if(state.store === 'all') return;
+      const prefix = `${state.store}:`;
+      for(const key of Array.from(state.selected)){
+        if(!key.startsWith(prefix)) state.selected.delete(key);
+      }
     }
 
     // Wire controls
@@ -747,7 +872,22 @@
       render();
     });
     $('applyBtn').addEventListener('click', applyBulkUpdate);
+    $('checkFeedBtn').addEventListener('click', () => {
+      const id = getLastFeedId();
+      if(!id){
+        const manual = prompt('Enter Amazon feed id (from log):', '');
+        if(manual && manual.trim()){
+          setLastFeedId(manual.trim());
+          checkFeedStatus(manual.trim());
+          return;
+        }
+        log('No recent feed id. Run a feed-based update first.');
+        return;
+      }
+      checkFeedStatus(id);
+    });
     $('selectAllBtn').addEventListener('click', () => {
+      constrainSelectionToStore();
       for(const k of state.lastRenderKeys) state.selected.add(k);
       render();
     });
@@ -757,6 +897,7 @@
     });
     $('selectAllCheckbox').addEventListener('change', (e) => {
       if(e.target.checked){
+        constrainSelectionToStore();
         for(const k of state.lastRenderKeys) state.selected.add(k);
       } else {
         for(const k of state.lastRenderKeys) state.selected.delete(k);
