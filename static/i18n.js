@@ -142,13 +142,13 @@ const translations = {
   qr: { en: 'QR', lt: 'QR' },
   step_1_2: { en: '(step 1/2)', lt: '(1/2 žingsnis)' },
   restart_scanner: { en: 'Restart Scanner', lt: 'Paleisti skaitytuvą iš naujo' },
-  lock_shelf_multi: { en: 'Scan Multiple Barcodes (Same Shelf)', lt: 'Skenuoti kelias prekes (ta pati lentyna)' },
-  locked_multi: { en: 'Scan Multiple Barcodes (Same Shelf)', lt: 'Skenuoti kelias prekes (ta pati lentyna)' },
+  lock_shelf_multi: { en: 'Multiple Items', lt: 'Kelios prekės' },
+  locked_multi: { en: 'Multiple Items', lt: 'Kelios prekės' },
   locked: { en: 'LOCKED', lt: 'UŽRAKINTA' },
-  single_item: { en: 'Single Item (SCAN QR CODE)', lt: 'Viena prekė (SKENUOKITE QR KODĄ)' },
+  single_item: { en: 'Single Item', lt: 'Viena prekė' },
   invalid_location_title: { en: 'Invalid Shelf Code', lt: 'Neteisingas lentynos kodas' },
   invalid_location_body: { en: 'This is not a valid shelf/location code. Please scan a shelf QR code.', lt: 'Tai nėra galiojantis lentynos/vietos kodas. Prašome nuskenuoti lentynos QR kodą.' },
-  scan_or_enter_qr: { en: 'Scan or enter QR code', lt: 'Nuskenuokite arba įveskite QR kodą' },
+  scan_or_enter_qr: { en: 'Scan or enter QR LOCATION code', lt: 'Nuskenuokite arba įveskite QR vietos kodą' },
   edit_mode_moving: { en: 'EDIT MODE: Moving', lt: 'REDAGAVIMO REŽIMAS: Perkeliama' },
   items: { en: 'items', lt: 'prekių' },
   move_items_location: { en: 'Move Items to Another Location', lt: 'Perkelti prekes į kitą vietą' },
@@ -459,6 +459,17 @@ function t(key) {
   return entry[lang] || entry.en || key;
 }
 
+let _readyLabelEl = null;
+let _readyLabelResizeBound = false;
+function updateReadyLabel(){
+  if(!_readyLabelEl) return;
+  const isMobile = window.innerWidth <= 640;
+  const lang = getLang();
+  const shortText = (lang === 'lt') ? 'Siųsti' : 'Ship';
+  const fullText = t('ready_to_ship');
+  _readyLabelEl.textContent = isMobile ? shortText : fullText;
+}
+
 // Apply translations to all [data-i18n] elements
 function applyTranslations() {
   const lang = getLang();
@@ -487,6 +498,7 @@ function applyTranslations() {
   });
   // Update toggle button states
   updateToggleUI();
+  updateReadyLabel();
 }
 
 // --------------------
@@ -775,6 +787,7 @@ function ensureTopBannerStyles(){
       padding: 8px 10px;
       font-family: 'Segoe UI', Arial, sans-serif;
       flex-wrap: wrap;
+      position: relative;
     }
 
     #ss-top-banner .ss-left,
@@ -921,6 +934,14 @@ function ensureTopBannerStyles(){
       display: block;
       stroke: currentColor;
     }
+    .ss-settings{
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .ss-settings-toggle{
+      display: none;
+    }
 
     .ss-search{
       display: inline-flex;
@@ -975,11 +996,48 @@ function ensureTopBannerStyles(){
     @media (max-width: 640px){
       #ss-top-banner .ss-inner{ padding: 6px 8px; gap: 6px; }
       .ss-pill{ height: 26px; font-size: 11px; }
+      .ss-pill.ss-ready{ padding: 0 8px; }
+      .ss-pill.ss-ready .ss-count{ min-width: 16px; height: 16px; font-size: 9px; line-height: 16px; }
       .ss-theme-wrap button{ height: 26px; font-size: 11px; }
       .ss-seg button{ height: 26px; font-size: 11px; }
       .ss-search{ height: 26px; }
       .ss-search input{ width: 90px; }
       .ss-icon svg{ width: 14px; height: 14px; }
+
+      #ss-top-banner .ss-left{
+        flex: 1 1 auto;
+        min-width: 0;
+      }
+      #ss-top-banner .ss-right{
+        flex: 0 0 auto;
+        margin-left: auto;
+        justify-content: flex-end;
+        flex-wrap: nowrap;
+        gap: 6px;
+      }
+      .ss-settings{
+        display: none;
+        position: absolute;
+        top: calc(100% + 6px);
+        left: 0;
+        right: 0;
+        width: 100%;
+        justify-content: flex-start;
+        padding: 8px 8px 10px 8px;
+        border-radius: 14px;
+        border: 1px solid var(--ss-banner-border);
+        background: var(--ss-banner-bg);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        box-shadow: 0 10px 26px rgba(0,0,0,0.18);
+      }
+      html.ss-settings-open .ss-settings{
+        display: flex;
+        flex-wrap: wrap;
+      }
+      .ss-settings-toggle{
+        display: inline-flex;
+      }
     }
 
     html.ss-has-top-banner .topbar,
@@ -1094,6 +1152,27 @@ function createTopBanner(){
   themeWrap.appendChild(themeBtn);
   themeWrap.appendChild(autoBtn);
 
+  const settingsPanel = document.createElement('div');
+  settingsPanel.className = 'ss-settings';
+  settingsPanel.appendChild(langSeg);
+  settingsPanel.appendChild(themeWrap);
+
+  const settingsBtn = document.createElement('button');
+  settingsBtn.type = 'button';
+  settingsBtn.className = 'ss-pill ss-icon ss-settings-toggle';
+  settingsBtn.title = 'Settings';
+  settingsBtn.setAttribute('aria-label', 'Settings');
+  settingsBtn.innerHTML = `
+    <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <line x1="4" y1="6" x2="20" y2="6"></line>
+      <circle cx="9" cy="6" r="2"></circle>
+      <line x1="4" y1="12" x2="20" y2="12"></line>
+      <circle cx="15" cy="12" r="2"></circle>
+      <line x1="4" y1="18" x2="20" y2="18"></line>
+      <circle cx="7" cy="18" r="2"></circle>
+    </svg>
+  `;
+
   const homeBtn = document.createElement('a');
   homeBtn.className = 'ss-pill ss-icon ss-home';
   homeBtn.href = '/';
@@ -1138,8 +1217,8 @@ function createTopBanner(){
   left.appendChild(readyBtn);
   left.appendChild(searchWrap);
 
-  right.appendChild(langSeg);
-  right.appendChild(themeWrap);
+  right.appendChild(settingsPanel);
+  right.appendChild(settingsBtn);
   right.appendChild(toolsBtn);
 
   inner.appendChild(left);
@@ -1169,6 +1248,23 @@ function createTopBanner(){
   });
 
   updateToggleUI();
+  _readyLabelEl = readyBtn.querySelector('.ss-ready-label');
+  updateReadyLabel();
+  if(!_readyLabelResizeBound){
+    window.addEventListener('resize', updateReadyLabel);
+    _readyLabelResizeBound = true;
+  }
+
+  settingsBtn.addEventListener('click', () => {
+    root.classList.toggle('ss-settings-open');
+    measure();
+  });
+
+  window.addEventListener('resize', () => {
+    if(window.innerWidth > 640){
+      root.classList.remove('ss-settings-open');
+    }
+  });
 
   try{
     const input = document.getElementById('all-search-input');

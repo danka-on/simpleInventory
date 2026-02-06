@@ -151,7 +151,7 @@
 </head>
 <body>
   <div class="top">
-    <a href="/items-to-list" class="btn btn-danger" data-i18n="back">← Back</a>
+    <a href="/items-to-list" class="btn btn-danger" data-i18n="back" id="fb-back-btn">← Back</a>
     <h2 data-i18n="fb_listings_title">Facebook Marketplace Listings</h2>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-right:70px">
       <button class="btn btn-primary btn-sm" id="fb-listings-sync" title="Sync Sold">↻ Sync</button>
@@ -951,6 +951,16 @@ const fbLogSort = document.getElementById('fb-log-sort');
 if (fbLogSort) fbLogSort.addEventListener('change', applyFbLogFilters);
 const fbLogAction = document.getElementById('fb-log-action');
 if (fbLogAction) fbLogAction.addEventListener('change', applyFbLogFilters);
+
+// Back button should return to Store Manager if launched from there
+const fbBackBtn = document.getElementById('fb-back-btn');
+if (fbBackBtn) {
+  const params = new URLSearchParams(window.location.search);
+  const returnTo = params.get('return');
+  if (returnTo === '/store-manager') {
+    fbBackBtn.href = returnTo;
+  }
+}
 
 loadFbListings();
 if (!window._fbAutoSyncRan) {

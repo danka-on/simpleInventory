@@ -14122,6 +14122,10 @@ def get_amazon_orders():
 @cache.cached(timeout=300, query_string=True)  # Cache for 5 minutes based on query params (days parameter)
 def sold_orders():
     days = int(request.args.get('days', 1))
+    if days < 1:
+        days = 1
+    elif days > 120:
+        days = 120
     
     # Get orders from sold.db
     sold_conn = sqlite3.connect('sold.db')
@@ -14201,6 +14205,10 @@ def sold_orders():
 def ready_to_ship_count():
     """Return count of unhandled (ready to ship) orders within the last N days."""
     days = int(request.args.get('days', 2))
+    if days < 1:
+        days = 1
+    elif days > 120:
+        days = 120
     conn = sqlite3.connect('sold.db')
     try:
         cur = conn.cursor()

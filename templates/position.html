@@ -43,10 +43,87 @@
         align-items: center; /* Center horizontally */
         min-height: 100vh; /* Full viewport height */
     }
+    .layout {
+        width: 100%;
+        max-width: 600px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 18px;
+    }
+    .header-block {
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+    }
+    .scan-bar {
+        width: 100%;
+        max-width: 420px;
+        display: flex;
+        gap: 10px;
+    }
+    .section {
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+    }
+    .dual-row{
+        width: 100%;
+        display: flex;
+        gap: 16px;
+        align-items: flex-start;
+        justify-content: center;
+        flex-wrap: wrap;
+    }
+    .dual-card{
+        display:flex;
+        flex-direction:column;
+        align-items:center;
+        gap:8px;
+        width: 100%;
+        max-width: 260px;
+    }
+    .dual-card .dual-btn{
+        width: 100%;
+        max-width: 220px;
+        min-height: 52px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+    }
+    @media (max-width: 640px){
+        .dual-row{
+            flex-direction: column;
+            align-items: center;
+        }
+    }
+    .img-frame{
+        width: 180px;
+        height: 180px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+    }
+    .img-card {
+        max-width: 100%;
+        max-height: 100%;
+        width: auto;
+        height: auto;
+        object-fit: contain;
+        background: transparent;
+        border-radius: 6px;
+        display: block;
+        box-sizing: border-box;
+    }
     #reader {
         width: 100%;
         max-width: 300px; /* Square container */
-        margin-top: 20px;
+        margin-top: 0;
         aspect-ratio: 1/1; /* Force square */
         background: #222;
         border-radius: 8px;
@@ -127,9 +204,8 @@
     }
 
     .img-highlight {
-        outline: 4px solid #2ecc71;
-        outline-offset: 3px;
-        box-shadow: 0 0 0 2px rgba(46, 204, 113, 0.25);
+        box-shadow: 0 0 0 2px #2ecc71;
+        border-radius: 6px;
     }
     .title-line {
         display: flex;
@@ -219,49 +295,42 @@
     </style>
 </head>
 <body>
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;gap:12px;width:100%;">
-        <div style="width:120px;"></div>
-        <div style="display:flex;flex-direction:column;align-items:center;gap:6px;">
-            <h1 style="margin: 0 0 8px 0; display:flex; flex-direction:column; align-items:center; gap:4px;">
+    <div class="layout">
+        <div class="header-block">
+            <h1 style="margin: 0; display:flex; flex-direction:column; align-items:center; gap:4px;">
                 <span class="title-line">
                     <span class="title-main" data-i18n="location">Location</span>
                     <span class="title-qr" data-i18n="qr">QR</span>
                 </span>
                 <span class="title-step" data-i18n="step_1_2">(step 1/2)</span>
             </h1>
-            <img id="singleBarcodeImg" class="img-highlight" src="/static/singlebarcodeexample.png?v=20260203e" alt="QR Code" style="width:180px; height:180px; object-fit:contain; border:2px solid #000; background:#fff; margin-bottom:10px;" />
-            <button id="singleModeBtn" type="button" data-i18n="single_item" style="margin-top:4px;background:#2ecc71;color:#fff;border:none;padding:10px 14px;border-radius:8px;cursor:pointer;font-size:1.05em;font-weight:700;min-width:180px;">Single Item (SCAN QR CODE)</button>
+            <div class="scan-bar" style="margin-bottom: 10px;">
+                <input type="text" id="qrTextInput" name="qrTextInput" data-i18n="scan_or_enter_qr" placeholder="Scan or enter QR LOCATION code" style="flex: 1; font-size:1.2em; padding:10px; display:none;" autocomplete="off" />
+            </div>
         </div>
-        <div style="width:120px;"></div>
-    </div>
-    
-    <!-- Edit Mode Banner -->
-    <div id="editModeBanner" style="display:none; background:#ff9800; color:white; padding:12px; text-align:center; font-weight:bold; margin-bottom:15px; border-radius:8px; box-shadow:0 2px 8px rgba(0,0,0,0.2);">
-        📦 EDIT MODE: Moving <span id="editModeQty">?</span> items
-    </div>
-    
-    <div id="reader"></div>
 
-    <!-- Simplified overlay with just the scanning line -->
-    <div class="qr-overlay" id="qrOverlay">
-        <div class="qr-square">
-            <div class="qr-scan-line"></div>
+        <!-- Edit Mode Banner -->
+        <div id="editModeBanner" style="display:none; background:#ff9800; color:white; padding:12px; text-align:center; font-weight:bold; border-radius:8px; box-shadow:0 2px 8px rgba(0,0,0,0.2);">
+            📦 EDIT MODE: Moving <span id="editModeQty">?</span> items
         </div>
-    </div>
+        
+        <div id="reader"></div>
 
-    <!-- Notification for invalid QR code (hidden by default) -->
-    <div id="flashMsg" style="color:#d32f2f; background:#ffdddd; display:none; font-size:0.9em; font-weight:bold; text-align:center; margin-bottom:8px; border-radius:6px; padding:8px;"></div>
-    
-    <!-- Input with camera button -->
-    <div style="display: flex; gap: 10px; align-items: center; margin-top: 20px;">
-        <input type="text" id="qrTextInput" name="qrTextInput" placeholder="Scan or enter QR code" style="flex: 1; font-size:1.2em; padding:10px; display:none;" autocomplete="off" />
-    </div>
+        <!-- Simplified overlay with just the scanning line -->
+        <div class="qr-overlay" id="qrOverlay">
+            <div class="qr-square">
+                <div class="qr-scan-line"></div>
+            </div>
+        </div>
 
-    <div style="margin: 20px 0; display: flex; flex-direction: column; gap: 15px; width: 100%; max-width: 300px;">
-        <button id="restartScannerBtn" onclick="restartScanner()" style="background-color: #2196F3; color: white; border: none; padding: 12px; border-radius: 6px; cursor: pointer; font-size: 1.1em; display: flex; align-items: center; justify-content: center; gap: 8px;">
-            <i class="fas fa-sync-alt"></i> <span data-i18n="restart_scanner">Restart Scanner</span>
-        </button>
-    </div>
+        <!-- Notification for invalid QR code (hidden by default) -->
+        <div id="flashMsg" style="color:#d32f2f; background:#ffdddd; display:none; font-size:0.9em; font-weight:bold; text-align:center; border-radius:6px; padding:8px;"></div>
+
+        <div class="section" style="max-width:300px;">
+            <button id="restartScannerBtn" onclick="restartScanner()" style="background-color: #2196F3; color: white; border: none; padding: 12px; border-radius: 6px; cursor: pointer; font-size: 1.1em; display: flex; align-items: center; justify-content: center; gap: 8px; width:100%;">
+                <i class="fas fa-sync-alt"></i> <span data-i18n="restart_scanner">Restart Scanner</span>
+            </button>
+        </div>
     <form id="scan_form" action="/submitposition" method="POST" style="display: none;">
         <input name="scanned_result" type="text" id="scanned_result">
         <input name="for_diagnostic" type="hidden" id="for_diagnostic">
@@ -270,20 +339,30 @@
         <input name="position_locked" type="hidden" id="position_locked_field" value="false">
     </form>
     <!-- Lock Shelf button (replaces checkbox) -->
-    <div style="margin-top: 20px; text-align: center; display:flex; flex-direction:column; align-items:center; gap:10px;">
-        <div style="display:flex; align-items:center; gap:8px; width:100%; max-width:360px; justify-content:center;">
-            <div style="display:flex; flex-direction:column; align-items:center; gap:6px; width:100%;">
-                <img id="multiBarcodeImg" src="/static/multibarcodeexample.png?v=20260203e" alt="Multi barcode example" style="width:158px;height:158px;object-fit:contain;background:#fff;border-radius:6px;border:1px solid #d0d0d0;box-shadow:0 2px 6px rgba(0,0,0,0.08);">
-                <button id="lockPositionBtn" type="button" style="background-color: #757575; color: white; border: none; padding: 16px 24px; border-radius: 8px; cursor: pointer; font-size: 1.2em; display: inline-flex; align-items: center; justify-content: center; gap: 10px; font-weight: bold; transition: background 0.3s; width:100%;">
+    <div class="section" style="text-align: center;">
+        <div class="dual-row">
+            <div class="dual-card">
+                <div class="img-frame">
+                    <img id="singleBarcodeImg" class="img-highlight img-card" src="/static/singlebarcodeexample.png?v=20260203e" alt="QR Code" />
+                </div>
+                <button id="singleModeBtn" type="button" class="dual-btn" data-i18n="single_item" style="background:#2ecc71;color:#fff;border:none;padding:10px 14px;border-radius:8px;cursor:pointer;font-size:1.05em;font-weight:700;">Single Item</button>
+            </div>
+            <div class="dual-card">
+                <div class="img-frame">
+                    <img id="multiBarcodeImg" class="img-card" src="/static/multibarcodeexample.png?v=20260203e" alt="Multi barcode example">
+                </div>
+                <button id="lockPositionBtn" type="button" class="dual-btn" style="background-color: #757575; color: white; border: none; padding: 10px 14px; border-radius: 8px; cursor: pointer; font-size: 1.05em; display: inline-flex; align-items: center; justify-content: center; gap: 10px; font-weight: bold; transition: background 0.3s;">
                     <i class="fas fa-unlock" id="lockIcon"></i>
-                    <span id="lockText" data-i18n="lock_shelf_multi">Scan Multiple Barcodes (Same Shelf)</span>
+                    <span id="lockText" data-i18n="lock_shelf_multi">Multiple Items</span>
                 </button>
             </div>
         </div>
         <div style="display:flex; align-items:center; gap:8px; width:100%; max-width:360px; justify-content:center;">
             <div style="display:flex; flex-direction:column; align-items:center; gap:6px; width:100%;">
-                <img src="/static/movelocationexample.png?v=20260203e" alt="Move items example" style="width:158px;height:158px;object-fit:contain;background:#fff;border-radius:6px;border:1px solid #d0d0d0;box-shadow:0 2px 6px rgba(0,0,0,0.08);">
-                <a href="/movelocation" style="text-decoration:none; width:100%;">
+                <a href="/movelocation" style="text-decoration:none; width:100%; display:flex; flex-direction:column; align-items:center;">
+                    <div class="img-frame">
+                        <img src="/static/movelocationexample.png?v=20260203e" alt="Move items example" class="img-card">
+                    </div>
                     <button style="background:#2d98da;color:#fff;border:none;padding:12px 18px;border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;font-size:1.05em;font-weight:600;width:100%;">
                         <i class="fas fa-exchange-alt"></i> <span data-i18n="move_items_location">Move Items to Another Location</span>
                     </button>
@@ -306,6 +385,7 @@
                 <button class="invalid-close" id="invalidModalClose" data-i18n="close">Close</button>
             </div>
         </div>
+    </div>
     </div>
 
     <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
@@ -362,6 +442,19 @@
     });
   }
 
+  function queueScanInput() {
+    const qrInput = document.getElementById('qrTextInput');
+    if (!qrInput) return;
+    if (qrInput.style.display === 'none') {
+      qrInput.style.display = '';
+    }
+    setTimeout(() => {
+      qrInput.focus();
+      qrInput.click();
+      qrInput.select();
+    }, 100);
+  }
+
   function setLockState(locked, notifyServer = true) {
     positionLocked = !!locked;
     if (positionLocked) {
@@ -370,16 +463,8 @@
       setLockText('locked_multi', 'Scan Multiple Barcodes (Same Shelf)');
       sessionStorage.setItem('positionLocked', 'true');
       document.getElementById('position_locked_field').value = 'true';
-
       // Auto-focus on input field for immediate scanning
-      const qrInput = document.getElementById('qrTextInput');
-      if (qrInput && qrInput.style.display !== 'none') {
-        setTimeout(() => {
-          qrInput.focus();
-          qrInput.click();
-          qrInput.select();
-        }, 100);
-      }
+      queueScanInput();
     } else {
       lockBtn.style.backgroundColor = '#757575'; // Gray when unlocked
       lockIcon.className = 'fas fa-unlock';
@@ -389,6 +474,8 @@
       // Clear position when unlocking
       sessionStorage.removeItem('item_position');
       sessionStorage.removeItem('pictureposition_path');
+      // Keep the scan input queued for single item mode
+      queueScanInput();
     }
     updateImageHighlight();
 
