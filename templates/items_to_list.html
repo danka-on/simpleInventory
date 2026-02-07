@@ -28,6 +28,11 @@
     /* Filter dropdown panel */
     .dropdown-panel{display:none;position:fixed;z-index:10000;min-width:280px;max-width:92vw;background:#fff;border:1px solid #ddd;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.12);padding:12px}
     .dropdown-section{display:flex;flex-direction:column;gap:6px;margin-bottom:10px}
+    .dropdown-section.listed-row{flex-direction:row;align-items:center;flex-wrap:wrap;gap:12px}
+    .dropdown-section.listed-row label{display:flex;align-items:center;gap:6px;margin:0}
+    .marketplace-filter label{display:flex;align-items:center;gap:6px;cursor:pointer;padding:4px 8px;border-radius:999px;border:1px solid transparent;transition:all .15s ease}
+    .marketplace-filter label.active{background:rgba(37,99,235,0.12);border-color:rgba(37,99,235,0.35);color:#1d4ed8;font-weight:600}
+    html.ss-theme-night .marketplace-filter label.active{background:rgba(59,130,246,0.18);border-color:rgba(59,130,246,0.45);color:#93c5fd}
     .dropdown-section:last-child{margin-bottom:0}
     .gear-btn{background:#f0f0f0}
     /* Night mode overrides */
@@ -339,7 +344,10 @@
   <div class="top">
     <div></div>
     <h2 style="margin:0; justify-self:center; text-align:center" data-i18n="list_manager">List Manager</h2>
-    <div style="justify-self:end; display:flex; gap:8px;">
+    <div style="justify-self:end; display:flex; gap:8px; flex-wrap:wrap;">
+      <a href="/listingagent?return=/items-to-list" class="btn" style="background:#f59e0b; color:#fff; text-decoration:none; display:flex; align-items:center; gap:6px">
+        <span style="font-size:1rem">🤖</span> <span data-i18n="listing_agent">Listing Agent</span>
+      </a>
       <a href="/fb-listings" class="btn" style="background:#1877f2; color:#fff; text-decoration:none; display:flex; align-items:center; gap:6px">
         <span style="font-size:1rem">📘</span> <span data-i18n="fb_listings">FB Listings</span>
       </a>
@@ -401,7 +409,7 @@
           </select>
         </label>
       </div>
-      <div class="dropdown-section">
+      <div class="dropdown-section listed-row">
         <label>Listed:
           <select id="filter-listed-select">
             <option value="">All</option>
@@ -409,17 +417,15 @@
             <option value="not_listed">Not Listed</option>
           </select>
         </label>
-      </div>
-      <div class="dropdown-section">
-        <div style="font-weight:600;margin-bottom:6px">Marketplace:</div>
-        <div style="display:flex;gap:10px;flex-wrap:wrap">
-          <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+        <div class="marketplace-filter" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <span style="font-weight:600;">Marketplace:</span>
+          <label data-marketplace-filter="amazon">
             <input type="checkbox" id="filter-listed-amazon" checked> Amazon
           </label>
-          <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+          <label data-marketplace-filter="ebay">
             <input type="checkbox" id="filter-listed-ebay" checked> eBay
           </label>
-          <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+          <label data-marketplace-filter="facebook">
             <input type="checkbox" id="filter-listed-fb" checked> Facebook
           </label>
         </div>
@@ -517,6 +523,7 @@ function setFiltersFromURL(){
     if (ebayCb) ebayCb.checked = stores.includes('ebay');
     if (fbCb) fbCb.checked = stores.includes('facebook');
   }
+  updateMarketplaceFilterHighlight();
 }
 
 // Format a timestamp into Eastern Time like: 2025-10-18 9:20am
@@ -601,10 +608,9 @@ function render(results){
     }
     
     // Marketplace listing checkboxes
-    const listedAmazon = r.listed_amazon === 1;
-    const listedEbay = r.listed_ebay === 1;
-    const listedFacebook = r.listed_facebook === 1;
-    const isListedAnywhere = listedAmazon || listedEbay || listedFacebook;
+    const listedAmazon = Number(r.listed_amazon) === 1;
+    const listedEbay = Number(r.listed_ebay) === 1;
+    const listedFacebook = Number(r.listed_facebook) === 1;
     
     rowIndex++;
     
@@ -625,8 +631,7 @@ function render(results){
     // Notes icon - show 📝 if note exists and make it clickable
     const hasNote = r.note && String(r.note).trim().length > 0;
     const noteCell = hasNote ? `<td style="text-align:center;font-size:1.2rem"><span class="note-icon" data-upc="${upc}" style="cursor:pointer" title="Click to view notes">📝</span></td>` : `<td style="text-align:center"></td>`;
-    const rowBg = isListedAnywhere ? 'background:rgba(16,185,129,0.08)' : '';
-    html += `<tr style="${rowBg}">`;
+    html += `<tr>`;
     if (selectMode) {
       // Allow selection of all items (base barcodes will be reset instead of deleted)
       html += `<td><input type="checkbox" class="item-checkbox" data-id="${r.id}" data-upc="${upc}"></td>`;
@@ -774,6 +779,25 @@ const listedEbayEl = document.getElementById('filter-listed-ebay');
 if(listedEbayEl) listedEbayEl.addEventListener('change', loadItems);
 const listedFbEl = document.getElementById('filter-listed-fb');
 if(listedFbEl) listedFbEl.addEventListener('change', loadItems);
+
+function updateMarketplaceFilterHighlight(){
+  const map = {
+    amazon: document.getElementById('filter-listed-amazon'),
+    ebay: document.getElementById('filter-listed-ebay'),
+    facebook: document.getElementById('filter-listed-fb')
+  };
+  Object.entries(map).forEach(([key, el]) => {
+    if(!el) return;
+    const label = el.closest('label[data-marketplace-filter]');
+    if(label){
+      label.classList.toggle('active', !!el.checked);
+    }
+  });
+}
+updateMarketplaceFilterHighlight();
+if(listedAmazonEl) listedAmazonEl.addEventListener('change', updateMarketplaceFilterHighlight);
+if(listedEbayEl) listedEbayEl.addEventListener('change', updateMarketplaceFilterHighlight);
+if(listedFbEl) listedFbEl.addEventListener('change', updateMarketplaceFilterHighlight);
 
 // Gear dropdown toggle and positioning
 const gearBtn = document.getElementById('filter-gear');
@@ -940,18 +964,13 @@ async function onMarketplaceToggle(e){
       const amazonCb = row.querySelector('.marketplace-checkbox[data-marketplace="amazon"]');
       const ebayCb = row.querySelector('.marketplace-checkbox[data-marketplace="ebay"]');
       const facebookCb = row.querySelector('.marketplace-checkbox[data-marketplace="facebook"]');
+      const amazonOn = Number(result.current_state.listed_amazon) === 1;
+      const ebayOn = Number(result.current_state.listed_ebay) === 1;
+      const facebookOn = Number(result.current_state.listed_facebook) === 1;
       
-      if(amazonCb) amazonCb.checked = !!result.current_state.listed_amazon;
-      if(ebayCb) ebayCb.checked = !!result.current_state.listed_ebay;
-      if(facebookCb) facebookCb.checked = !!result.current_state.listed_facebook;
-      
-      // Update row background color based on whether ANY marketplace is checked
-      const anyChecked = result.current_state.listed_amazon || result.current_state.listed_ebay || result.current_state.listed_facebook;
-      if(anyChecked) {
-        row.style.background = '#d4edda';
-      } else {
-        row.style.background = '';
-      }
+      if(amazonCb) amazonCb.checked = amazonOn;
+      if(ebayCb) ebayCb.checked = ebayOn;
+      if(facebookCb) facebookCb.checked = facebookOn;
     }
     
     // Update checkbox title with timestamp

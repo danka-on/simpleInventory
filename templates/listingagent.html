@@ -1173,7 +1173,7 @@
 <body>
   <div class="topbar">
     <div class="topbarInner">
-      <a class="backBtn" href="/tools">
+      <a class="backBtn" id="listingagent-back-btn" href="/tools">
         <i class="fas fa-arrow-left"></i>
         <span data-i18n="back">Back</span>
       </a>
@@ -1694,6 +1694,21 @@
       imgModalList: [],
       imgModalIndex: 0,
     };
+
+    function getReturnParam(){
+      try{
+        const params = new URLSearchParams(window.location.search);
+        const ret = params.get('return');
+        if(ret && ret.startsWith('/')) return ret;
+      }catch(e){}
+      return '';
+    }
+
+    const backBtn = $('listingagent-back-btn');
+    const ret = getReturnParam();
+    if(backBtn && ret){
+      backBtn.href = ret;
+    }
 
     // Card collapse/expand functionality
     function toggleCard(cardId){
@@ -3570,7 +3585,9 @@
         return;
       }
 
-      const url = `${window.location.origin}/listingagent/mobile?upc=${encodeURIComponent(clean)}`;
+      const retParam = getReturnParam();
+      const returnQuery = retParam ? `&return=${encodeURIComponent(retParam)}` : '';
+      const url = `${window.location.origin}/listingagent/mobile?upc=${encodeURIComponent(clean)}${returnQuery}`;
       state.mobileUploadUrl = url;
       panel.style.display = 'block';
       if(top) top.classList.add('withQr');

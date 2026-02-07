@@ -35,6 +35,7 @@ const translations = {
   list_manager: { en: 'List Manager', lt: 'Sąrašų tvarkyklė' },
   store_manager: { en: 'Store Manager', lt: 'Parduotuvės valdymas' },
   price_master: { en: 'Price Master', lt: 'Kainų meistras' },
+  label_master: { en: 'Label Master', lt: 'Etikečių meistras' },
   store_listing_helper: { en: 'Store Listing Helper', lt: 'Parduotuvės pagalbininkas' },
   store_helper: { en: 'Store Doctor', lt: 'Parduotuvės daktaras' },
   fb_listings: { en: 'FB Listings', lt: 'FB skelbimai' },
@@ -130,6 +131,8 @@ const translations = {
   add_item_to_shelf: { en: 'Add Item', lt: 'Pridėti prekę' },
   search_warehouse: { en: 'Warehouse', lt: 'Sandėlis' },
   preparation: { en: 'Preparation', lt: 'Paruošimas' },
+  all_search_label: { en: 'ALL', lt: 'VISI' },
+  all_search_placeholder: { en: 'Search all…', lt: 'Ieškoti visų…' },
   tools: { en: 'Tools', lt: 'Įrankiai' },
   find: { en: 'Find', lt: 'Rasti' },
   undo: { en: 'Undo', lt: 'Atšaukti' },
@@ -1209,8 +1212,8 @@ function createTopBanner(){
   const searchWrap = document.createElement('div');
   searchWrap.className = 'ss-search';
   searchWrap.innerHTML = `
-    <span class="ss-search-label">ALL</span>
-    <input type="text" id="all-search-input" placeholder="Search all…" />
+    <span class="ss-search-label" data-i18n="all_search_label">ALL</span>
+    <input type="text" id="all-search-input" data-i18n="all_search_placeholder" placeholder="Search all…" />
   `;
 
   left.appendChild(homeBtn);

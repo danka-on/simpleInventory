@@ -69,6 +69,7 @@
     .tool-btn.label { background: linear-gradient(135deg,#111827 0%, #374151 100%); border: 1px solid rgba(255,255,255,0.12); }
     .tool-btn.fb { background: #1877f2; }
     .tool-btn.doctor { background: linear-gradient(135deg,#f87171 0%, #ef4444 100%); }
+    .tool-btn.agent { background: linear-gradient(135deg,#f59e0b 0%, #d97706 100%); }
 
     /* Night mode */
     html.ss-theme-night body { background: #0f172a; color: #e2e8f0; }
@@ -89,6 +90,13 @@
           <div data-i18n="list_manager">List Manager</div>
         </div>
       </a>
+      <a class="tool-btn agent" href="/listingagent?return=/store-manager">
+        <span class="icon">🤖</span>
+        <div>
+          <div><span data-i18n="listing_agent">Listing Agent</span> <span class="uc">(Under Construction 🚧)</span></div>
+          <div class="hint" data-i18n="listing_agent_desc">Draft and publish listings from UPCs</div>
+        </div>
+      </a>
       <a class="tool-btn price" href="/price-master">
         <span class="icon">💲</span>
         <div>
@@ -99,7 +107,7 @@
       <a class="tool-btn label" href="/label-master">
         <span class="icon">🏷️</span>
         <div>
-          <div>Label Master <span class="uc">(Under Construction 🚧)</span></div>
+          <div><span data-i18n="label_master">Label Master</span> <span class="uc">(Under Construction 🚧)</span></div>
           <div class="hint">Buy & print labels</div>
         </div>
       </a>

@@ -325,7 +325,7 @@
 <body>
   <div class="wrap">
     <div class="top">
-      <a class="back" href="/listingagent">Back</a>
+      <a class="back" id="listingagent-mobile-back" href="/listingagent">Back</a>
       <span class="pill">Mobile Upload</span>
     </div>
 
@@ -374,6 +374,13 @@
   <script>
     const UPC = {{ (upc or '')|tojson }};
     const $ = (id) => document.getElementById(id);
+    try{
+      const ret = new URLSearchParams(window.location.search).get('return');
+      const back = $('listingagent-mobile-back');
+      if(back && ret && ret.startsWith('/')){
+        back.href = ret;
+      }
+    }catch(e){}
 
     function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
