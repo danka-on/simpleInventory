@@ -827,6 +827,25 @@ function formatUpcDisplay(code){
     if (/^\d+$/.test(s) && s.length <= 12) return s.padStart(12, '0');
     return s;
 }
+function goUnifiedFromWarehouse(encodedBarcode){
+    try{
+        const barcode = decodeURIComponent(String(encodedBarcode || ''));
+        const state = {
+            q: document.getElementById('search-input').value || '',
+            pageSize: document.getElementById('page-size').value || '10',
+            page: _currentPage || 1,
+            checkedDBs: getActiveDBs(),
+            scrollY: window.scrollY || window.pageYOffset || 0
+        };
+        sessionStorage.setItem('searchrack_unified_return_state', JSON.stringify(state));
+        const returnTo = window.location.pathname + window.location.search;
+        const target = `/unified-search?q=${encodeURIComponent(barcode)}&return_to=${encodeURIComponent(returnTo)}`;
+        window.location.href = target;
+    }catch(e){
+        console.error('Failed to navigate to unified search:', e);
+    }
+    return false;
+}
 
 function missingThumb(width=48,height=48,text='No Img'){ return 'data:image/svg+xml;utf8,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="'+width+'" height="'+height+'"><rect width="100%" height="100%" fill="#f8f8f8"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#b0b0b0" font-size="10">'+text+'</text></svg>'); }
 
@@ -921,6 +940,11 @@ function renderResults(results){
     
     const barcode = esc(formatUpcDisplay(barcodeRaw));
     const barcodeRawEsc = esc(barcodeRaw);
+    const barcodeQuery = encodeURIComponent(String(barcodeRaw || '').trim());
+    const barcodeArg = encodeURIComponent(String(barcodeRaw || '').trim());
+    const barcodeCell = (dbRaw === 'searchRack' && barcodeQuery)
+        ? `<a href="/unified-search?q=${barcodeQuery}" onclick="return goUnifiedFromWarehouse('${barcodeArg}')" title="Search this barcode in Unified Search">${barcode}</a>`
+        : barcode;
     const itemid = esc(r.item_id || (r.raw && (r.raw.ItemID || r.raw.item_id || r.raw.id || r.raw.upc)) || '')
         // Normalize quantity: allow 0 for searchRack, default to 1 for others
         function toIntLike(q, allowZero){
@@ -1112,7 +1136,7 @@ function renderResults(results){
     
     html += `<tr data-src="${db}" data-id="${r.id}" data-qty="${qty}"${r.is_duplicate_group ? ' style="background:#fff3cd;"' : ''}>`+
         `<td><div class="title-cell"><img class="thumb" src="${thumb}" onerror="this.src='${missingThumb(48,48,'No Img')}'"><div><a href="#" class="title-link" data-src="${db}" data-id="${r.id}" data-image="${img}" data-title="${title}">${title}</a>${deletedInfo}${createdInfo}${r.is_duplicate_group && r.group_index === 0 ? `<div style="font-size:0.85rem; color:#856404; margin-top:4px;">🔄 <strong>Duplicate Locations</strong> (${r.group_size} locations, ${r.group_total_qty} total qty)</div>` : ''}${r.is_duplicate_group && r.other_locations ? `<div style="font-size:0.8rem; color:#666; margin-top:2px;">Also in: ${esc(r.other_locations)}</div>` : ''}</div></div></td>`+
-                `<td>${barcode}</td>`+
+                `<td>${barcodeCell}</td>`+
                 itemIdCell +
                 lotCell +
                 locationCell +
@@ -1623,6 +1647,36 @@ window.addEventListener('load', ()=>{
     try{
         // focus the input
         document.getElementById('search-input').focus();
+
+        // If returning from unified-search via barcode click, restore state first.
+        const unifiedStateRaw = sessionStorage.getItem('searchrack_unified_return_state');
+        if(unifiedStateRaw){
+            try{
+                const s = JSON.parse(unifiedStateRaw);
+                if(s && typeof s === 'object'){
+                    document.getElementById('search-input').value = s.q || '';
+                    if(s.pageSize) document.getElementById('page-size').value = String(s.pageSize);
+                    if(Array.isArray(s.checkedDBs) && s.checkedDBs.length){
+                        const first = s.checkedDBs[0];
+                        if(DATABASES.includes(first) || STORES.includes(first)){
+                            document.getElementById('db-select').value = first;
+                        }
+                    }
+                    sessionStorage.removeItem('searchrack_unified_return_state');
+                    doSearch(false, s.q || null).then(() => {
+                        const targetPage = parseInt(s.page || 1, 10) || 1;
+                        _currentPage = Math.max(1, targetPage);
+                        renderPagedResults();
+                        const y = parseInt(s.scrollY || 0, 10) || 0;
+                        setTimeout(() => window.scrollTo(0, y), 0);
+                    });
+                    return;
+                }
+            }catch(e){
+                console.warn('Failed to restore unified return state:', e);
+                sessionStorage.removeItem('searchrack_unified_return_state');
+            }
+        }
 
         // Check URL parameters for db and q
         const params = new URLSearchParams(window.location.search);

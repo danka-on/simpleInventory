@@ -282,22 +282,22 @@
 
     /* NOTE card (from Listing Manager) */
     .noteCard{
-      border-color: rgba(251, 191, 36, 0.28);
-      box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.08), 0 18px 45px rgba(0, 0, 0, 0.35);
+      border-color: rgba(251, 191, 36, 0.35);
+      box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.10), 0 12px 28px rgba(0, 0, 0, 0.10);
       background:
-        radial-gradient(700px 220px at 14% 0%, rgba(251, 191, 36, 0.26), rgba(0,0,0,0)),
-        radial-gradient(700px 240px at 95% 0%, rgba(239, 68, 68, 0.16), rgba(0,0,0,0)),
-        linear-gradient(180deg, rgba(30, 41, 59, 0.85), rgba(15, 23, 42, 0.92));
+        radial-gradient(700px 220px at 14% 0%, rgba(251, 191, 36, 0.20), rgba(0,0,0,0)),
+        radial-gradient(700px 240px at 95% 0%, rgba(239, 68, 68, 0.10), rgba(0,0,0,0)),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.98));
     }
     .noteCard .cardHeader{
-      background: linear-gradient(90deg, rgba(251, 191, 36, 0.18), rgba(0,0,0,0));
-      border-bottom-color: rgba(251, 191, 36, 0.22);
+      background: linear-gradient(90deg, rgba(251, 191, 36, 0.20), rgba(0,0,0,0));
+      border-bottom-color: rgba(251, 191, 36, 0.25);
     }
     .noteHero{
       padding: 12px 12px;
       border-radius: 14px;
       border: 1px solid rgba(251, 191, 36, 0.25);
-      background: rgba(0, 0, 0, 0.25);
+      background: rgba(255, 255, 255, 0.92);
       color: var(--ink-bright);
       font-weight: 700;
       letter-spacing: -0.01em;
@@ -322,11 +322,29 @@
       padding: 10px 12px;
       border-radius: 12px;
       border: 1px solid var(--border);
-      background: rgba(15, 23, 42, 0.65);
+      background: var(--bg0);
       color: var(--muted);
       white-space: pre-wrap;
       line-height: 1.35;
       font-size: 0.92rem;
+    }
+    html.ss-theme-night .noteCard{
+      border-color: rgba(251, 191, 36, 0.28);
+      box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.08), 0 18px 45px rgba(0, 0, 0, 0.35);
+      background:
+        radial-gradient(700px 220px at 14% 0%, rgba(251, 191, 36, 0.26), rgba(0,0,0,0)),
+        radial-gradient(700px 240px at 95% 0%, rgba(239, 68, 68, 0.16), rgba(0,0,0,0)),
+        linear-gradient(180deg, rgba(30, 41, 59, 0.85), rgba(15, 23, 42, 0.92));
+    }
+    html.ss-theme-night .noteCard .cardHeader{
+      background: linear-gradient(90deg, rgba(251, 191, 36, 0.18), rgba(0,0,0,0));
+      border-bottom-color: rgba(251, 191, 36, 0.22);
+    }
+    html.ss-theme-night .noteHero{
+      background: rgba(0, 0, 0, 0.25);
+    }
+    html.ss-theme-night .noteItem{
+      background: rgba(15, 23, 42, 0.65);
     }
 
     .field{
@@ -361,6 +379,11 @@
     input:focus, select:focus, textarea:focus{ box-shadow: var(--focus); border-color: var(--green); background: rgba(16, 185, 129, 0.05); }
     input::placeholder, textarea::placeholder { color: var(--muted-dim); }
     select option { background: var(--bg1); color: var(--ink); }
+    .fieldInvalid{
+      border-color: rgba(239, 68, 68, 0.70) !important;
+      background: rgba(239, 68, 68, 0.10) !important;
+      box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.18) !important;
+    }
 
     .row2{
       display: grid;
@@ -587,6 +610,11 @@
       background: var(--bg0);
     }
     .checkRow input{ width: 18px; height: 18px; accent-color: var(--green); }
+    .checkRowInvalid{
+      border-color: rgba(239, 68, 68, 0.70) !important;
+      background: rgba(239, 68, 68, 0.14) !important;
+      box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.18) !important;
+    }
 
     .miniBox{
       background: var(--bg0);
@@ -1410,7 +1438,7 @@
                   </div>
                 </div>
                 <div id="ebayAspectsBox" class="miniBox" style="margin-top:10px;">
-                  <div class="muted">Select a category to load item specifics like Color, Brand, Size…</div>
+                  <div class="muted">Core item specifics are shown by default. Select a category to load category-specific specifics.</div>
                 </div>
                 <div class="hint">These map to eBay taxonomy “aspects” and are category-specific. Missing required specifics can cause publish errors.</div>
               </div>
@@ -1641,6 +1669,18 @@
                 </div>
               </div>
 
+              <div class="row2">
+                <div class="field">
+                  <label for="amazonMerchantShippingGroup">Shipping Template ID (optional)</label>
+                  <input id="amazonMerchantShippingGroup" type="text" placeholder="legacy-template-id" />
+                  <div class="hint">Use your Seller Central shipping template id for MFN create offers.</div>
+                </div>
+                <div class="field">
+                  <label for="amazonFulfillmentLabel">Fulfillment</label>
+                  <input id="amazonFulfillmentLabel" type="text" value="DEFAULT (MFN)" disabled />
+                </div>
+              </div>
+
               <div class="btnRow" style="margin-top:0;justify-content:flex-end;">
                 <button class="btn btnPrimary" id="btnSaveAmazonDefaults"><i class="fas fa-save"></i>Save Amazon Defaults</button>
               </div>
@@ -1664,6 +1704,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <script>
     const $ = (id) => document.getElementById(id);
+    const AMAZON_VERBOSE_DEBUG = false;
     const state = {
       activeStore: 'ebay',
       settings: {},
@@ -1686,6 +1727,7 @@
       ebayAspectsReqId: 0,
       ebayAspectsCategoryId: '',
       ebayAspectsMeta: [],
+      manualRequiredAspects: [],
       priceManuallySet: false,
       amazonPriceManuallySet: false,
       ebayPoliciesLoaded: false,
@@ -1792,18 +1834,82 @@
         body: JSON.stringify(payload ?? {})
       });
       const data = await res.json().catch(() => ({}));
-      if(!res.ok || data.success === false) throw new Error(data.error || `Request failed (${res.status})`);
+      if(!res.ok || data.success === false){
+        const err = new Error(data.error || `Request failed (${res.status})`);
+        err.api = data || {};
+        throw err;
+      }
       return data;
+    }
+
+    function _splitUpcSuffix(val){
+      const s = (val ?? '').toString().trim();
+      if(!s) return {base: '', suffix: ''};
+      const i = s.indexOf('-');
+      if(i < 0) return {base: s, suffix: ''};
+      return {base: s.slice(0, i), suffix: s.slice(i + 1)};
+    }
+
+    function _stripLeadingZerosNumeric(base){
+      const b = (base ?? '').toString().trim();
+      if(!b || !/^\d+$/.test(b)) return b;
+      const out = b.replace(/^0+/, '');
+      return out || '0';
+    }
+
+    function formatUpc12(val){
+      const parts = _splitUpcSuffix((val ?? '').toString().replace(/\s+/g, ''));
+      const base = parts.base;
+      const suffix = parts.suffix;
+      if(!base) return '';
+      let outBase = base;
+      if(/^\d+$/.test(base) && base.length <= 12){
+        outBase = base.padStart(12, '0');
+      }
+      return suffix ? `${outBase}-${suffix}` : outBase;
+    }
+
+    function _upcComparableKey(val){
+      const parts = _splitUpcSuffix((val ?? '').toString().replace(/\s+/g, ''));
+      const base = _stripLeadingZerosNumeric(parts.base);
+      const suffix = (parts.suffix || '').toString().trim();
+      return suffix ? `${base}-${suffix}` : base;
+    }
+
+    function _upcEquals(a, b){
+      const ak = _upcComparableKey(a);
+      const bk = _upcComparableKey(b);
+      return !!ak && !!bk && ak === bk;
+    }
+
+    function _buildUpcLookupCandidates(rawVal){
+      const raw = (rawVal ?? '').toString().trim();
+      const formatted = formatUpc12(raw);
+      const out = [];
+      const push = (v) => {
+        const s = (v ?? '').toString().trim();
+        if(!s) return;
+        if(!out.includes(s)) out.push(s);
+      };
+      push(formatted);
+      push(raw);
+      const parts = _splitUpcSuffix(formatted || raw);
+      if(/^\d+$/.test(parts.base)){
+        const stripped = _stripLeadingZerosNumeric(parts.base);
+        const strippedFull = parts.suffix ? `${stripped}-${parts.suffix}` : stripped;
+        push(strippedFull);
+      }
+      return out;
     }
 
     function normalizeUpc(val){
       const raw = (val ?? '').toString().trim();
       if(!raw) return '';
       const s = raw.replace(/\s+/g, '');
-      if(/^\d+(-\d+)?$/.test(s)) return s;
+      if(/^\d+(-\d+)?$/.test(s)) return formatUpc12(s);
       // Some scanners prepend symbols; best-effort: pull digits.
       const digits = s.replace(/[^\d]/g, '');
-      if(digits.length >= 6) return digits;
+      if(digits.length >= 6) return formatUpc12(digits);
       return '';
     }
 
@@ -1811,11 +1917,12 @@
       try{
         const data = await apiGet('/api/listingagent/queue?limit=120');
         state.queue = (data.items || []).map(it => {
+          const upc = formatUpc12((it.upc || '').toString().trim());
           const ebayAt = (it.listed_ebay_at || '').toString().trim();
           const amazonAt = (it.listed_amazon_at || '').toString().trim();
           const st = (it.status || '').toString().trim().toLowerCase();
           const done = (st === 'done') || (!!ebayAt && !!amazonAt);
-          return {...it, _done: done};
+          return {...it, upc, _done: done};
         });
         // Keep completed items at the bottom.
         state.queue = [...state.queue.filter(x => !x._done), ...state.queue.filter(x => x._done)];
@@ -1837,12 +1944,13 @@
         });
         const item = res.item || null;
         if(item){
-          const idx = state.queue.findIndex(x => ((x.upc || '').toString().trim() === clean));
+          const idx = state.queue.findIndex(x => _upcEquals(x.upc, clean));
           const mergeDone = (obj) => {
             const ebayAt = (obj.listed_ebay_at || '').toString().trim();
             const amazonAt = (obj.listed_amazon_at || '').toString().trim();
             const st = (obj.status || '').toString().trim().toLowerCase();
             obj._done = (st === 'done') || (!!ebayAt && !!amazonAt);
+            obj.upc = formatUpc12(obj.upc || clean);
             return obj;
           };
           if(idx >= 0){
@@ -1863,8 +1971,8 @@
     }
 
     function markQueueDone(upc, platform, extra={}){
-      const clean = (upc ?? '').toString().trim();
-      const idx = state.queue.findIndex(x => ((x.upc || '').toString().trim() === clean));
+      const clean = formatUpc12((upc ?? '').toString().trim());
+      const idx = state.queue.findIndex(x => _upcEquals(x.upc, clean));
       if(idx < 0) return;
       const it = {...state.queue[idx]};
       const nowIso = new Date().toISOString();
@@ -1914,7 +2022,7 @@
         const hasEbay = !!((it.listed_ebay_at || '').toString().trim());
         const hasAmazon = !!((it.listed_amazon_at || '').toString().trim());
         const isDone = it._done || (it.status || '').toString().trim().toLowerCase() === 'done' || (hasEbay && hasAmazon);
-        const isActive = state.activeUpc && state.activeUpc === upc;
+        const isActive = state.activeUpc && _upcEquals(state.activeUpc, upc);
         const title = (it.title || it.item_description || upc).toString().trim();
         const source = (it.source || '').toString().trim();
         const itemStatus = (it.item_status || '').toString().trim().toLowerCase();
@@ -1972,10 +2080,10 @@
     }
 
     async function removeFromQueue(upc){
-      const clean = (upc ?? '').toString().trim();
+      const clean = formatUpc12((upc ?? '').toString().trim());
       if(!clean) return;
       const before = Array.isArray(state.queue) ? [...state.queue] : [];
-      state.queue = before.filter(it => (it.upc || '').toString().trim() !== clean);
+      state.queue = before.filter(it => !_upcEquals((it.upc || '').toString().trim(), clean));
       renderQueue();
       try{
         await apiPost('/api/listingagent/queue/remove', {upc: clean});
@@ -2029,7 +2137,7 @@
         main.className = 'compMain';
 
         const platform = (r.platform || '').toString().toLowerCase();
-        const upc = (r.upc || '').toString().trim();
+        const upc = formatUpc12((r.upc || '').toString().trim());
         const title = (r.title || '').toString().trim();
         const sku = (r.sku || '').toString().trim();
         const asin = (r.asin || '').toString().trim();
@@ -2078,7 +2186,7 @@
 
     async function openLiveListingForEdit(r){
       const platform = (r.platform || '').toString().toLowerCase();
-      const upc = (r.upc || '').toString().trim();
+      const upc = formatUpc12((r.upc || '').toString().trim());
       if(!upc){
         log('This store listing has no UPC in the local DB (cannot open for edit).');
         return;
@@ -2152,8 +2260,8 @@
       for(const r of results){
         const li = document.createElement('li');
         li.className = 'resultItem';
-        li.dataset.upc = (r.upc || '').toString();
-        li.onclick = () => selectUPC(r.upc);
+        li.dataset.upc = formatUpc12(r.upc || '');
+        li.onclick = () => selectUPC(li.dataset.upc || r.upc);
 
         const thumb = document.createElement('div');
         thumb.className = 'resultThumb';
@@ -2170,7 +2278,7 @@
         const main = document.createElement('div');
         main.className = 'resultMain';
         main.innerHTML = `
-          <div class=\"resultUpc\">${escapeHtml(r.upc)}</div>
+          <div class=\"resultUpc\">${escapeHtml(formatUpc12(r.upc || ''))}</div>
           <div class=\"resultTitle\">${escapeHtml(r.title || '(no title)')}</div>
           <div class=\"resultMeta\">
             <span class=\"badge badgeGreen\">Qty: ${Number(r.quantity || 0)}</span>
@@ -2211,6 +2319,7 @@
     function resetFormsForNewUPC(newUpc){
       const current = $('upc').value.trim();
       if(!current || current === newUpc) return;
+      state.manualRequiredAspects = [];
 
       // eBay per-item fields (keep policy defaults)
       $('offerBadge').style.display = 'none';
@@ -2250,9 +2359,11 @@
     }
 
     async function selectUPC(upc){
-      const clean = (upc ?? '').toString().trim();
+      const raw = (upc ?? '').toString().trim();
+      const clean = normalizeUpc(raw) || raw;
       if(!clean) return;
       resetFormsForNewUPC(clean);
+      state.manualRequiredAspects = [];
       state.removedImages = new Set();
       state.activeUpc = clean;
       renderQueue();
@@ -2265,14 +2376,25 @@
       if($('mobileUploadStatus')) $('mobileUploadStatus').textContent = '';
       log(`Loading UPC ${clean}...`);
       try{
-        const data = await apiGet(`/api/listingagent/upc/${encodeURIComponent(clean)}`);
-        state.item = data.item;
+        let data = null;
+        const tried = [];
+        const candidates = _buildUpcLookupCandidates(raw || clean);
+        for(const cand of candidates){
+          try{
+            data = await apiGet(`/api/listingagent/upc/${encodeURIComponent(cand)}`);
+            break;
+          }catch(err){
+            tried.push(cand);
+          }
+        }
+        if(!data) throw new Error(`No local item found for UPC (${tried.join(', ')})`);
+        state.item = data.item || {};
         state.images = Array.isArray(state.item.images) ? [...state.item.images] : [];
         renderPreview();
-        setupMobileUploadForUPC(clean);
+        setupMobileUploadForUPC(state.item.upc || clean);
         autofillForm();
         loadTemplatesForUPC(clean);
-        log(`Loaded ${clean}`);
+        log(`Loaded ${formatUpc12(state.item.upc || clean)}`);
       } catch(e){
         log(`Load error: ${e.message}`);
       }
@@ -2372,7 +2494,7 @@
 
       const top = filtered[0];
       const when = top.created_at ? fmtNoteTime(top.created_at) : '';
-      const upc = (top.upc || state.activeUpc || '').toString();
+      const upc = formatUpc12((top.upc || state.activeUpc || '').toString());
 
       const hero = escapeHtml((top.note || '').toString()).replaceAll('\n', '<br>');
       body.innerHTML = `
@@ -2646,10 +2768,40 @@
     function clearEbayAspectsUI(msg){
       state.ebayAspectsMeta = [];
       state.ebayAspectsCategoryId = '';
-      const box = $('ebayAspectsBox');
-      if(box){
-        box.innerHTML = `<div class=\"muted\">${escapeHtml(msg || 'Select a category to load item specifics like Color, Brand, Size…')}</div>`;
+      renderEbayAspects();
+      if(msg){
+        const box = $('ebayAspectsBox');
+        if(box){
+          const hint = document.createElement('div');
+          hint.className = 'hint';
+          hint.textContent = msg;
+          box.prepend(hint);
+        }
       }
+    }
+
+    function getDefaultEbayAspectsMeta(){
+      // Core specifics commonly present across many eBay categories.
+      return [
+        'Brand',
+        'Type',
+        'Model',
+        'MPN',
+        'Color',
+        'Size',
+        'Department',
+        'Style',
+        'Material',
+        'Compatible Brand',
+        'Compatible Model',
+      ].map((name) => ({
+        name,
+        required: false,
+        mode: 'FREE_TEXT',
+        maxValues: 1,
+        values: [],
+        valuesCount: 0,
+      }));
     }
 
     function collectEbayAspects(){
@@ -2683,18 +2835,26 @@
       const box = $('ebayAspectsBox');
       if(!box) return;
 
-      const meta = Array.isArray(state.ebayAspectsMeta) ? state.ebayAspectsMeta : [];
+      const baseMeta = Array.isArray(state.ebayAspectsMeta) ? state.ebayAspectsMeta : [];
+      const manual = Array.isArray(state.manualRequiredAspects) ? state.manualRequiredAspects : [];
+      const existingNames = new Set(baseMeta.map(a => _normAspectName(a?.name || '')).filter(Boolean));
+      const manualMeta = manual
+        .map(n => (n || '').toString().trim())
+        .filter(Boolean)
+        .filter(n => !existingNames.has(_normAspectName(n)))
+        .map(n => ({ name: n, required: true, mode: 'FREE_TEXT', maxValues: 1, values: [], valuesCount: 0 }));
+      const namesWithManual = new Set([
+        ...existingNames,
+        ...manualMeta.map(a => _normAspectName(a?.name || '')).filter(Boolean),
+      ]);
+      const defaultMeta = getDefaultEbayAspectsMeta()
+        .filter(a => !namesWithManual.has(_normAspectName(a?.name || '')));
+      const meta = [...manualMeta, ...baseMeta, ...defaultMeta];
       const prev = _captureEbayAspectInputs();
       box.innerHTML = '';
 
-      const categoryId = ($('categoryId')?.value || '').toString().trim();
-      if(!categoryId){
-        box.innerHTML = '<div class="muted">Select a category to load item specifics like Color, Brand, Size…</div>';
-        return;
-      }
-
       if(!meta.length){
-        box.innerHTML = '<div class="hint">No item specifics returned for this category.</div>';
+        box.innerHTML = '<div class="hint">No item specifics available.</div>';
         return;
       }
 
@@ -2780,6 +2940,7 @@
             const sel = document.createElement('select');
             sel.dataset.ebayAspect = name;
             sel.dataset.maxValues = String(maxValues || 1);
+            sel.dataset.aspectRequired = a.required ? '1' : '0';
             const ph = document.createElement('option');
             ph.value = '';
             ph.textContent = '(select)';
@@ -2798,6 +2959,7 @@
             inp.autocomplete = 'off';
             inp.dataset.ebayAspect = name;
             inp.dataset.maxValues = String(maxValues || 1);
+            inp.dataset.aspectRequired = a.required ? '1' : '0';
             if(values.length){
               inp.setAttribute('list', dlId);
               const dl = document.createElement('datalist');
@@ -2819,10 +2981,13 @@
               inputEl.value = prev[name];
             }catch(e){}
           }
+          // Clear missing-field highlight once user edits this aspect.
+          inputEl.addEventListener('input', () => inputEl.classList.remove('fieldInvalid'));
+          inputEl.addEventListener('change', () => inputEl.classList.remove('fieldInvalid'));
 
           // Provide a compact hint per aspect.
           const bits = [];
-          if(mode) bits.push(mode.replaceAll('_',' '));
+          if(mode && mode !== 'FREE_TEXT') bits.push(mode.replaceAll('_',' '));
           if(maxValues && maxValues > 1) bits.push(`up to ${maxValues}`);
           if(valuesCount){
             bits.push(`${valuesCount} value${valuesCount===1?'':'s'}`);
@@ -2880,7 +3045,9 @@
     async function loadEbayAspectsForCurrentCategory({force=false} = {}){
       const categoryId = ($('categoryId')?.value || '').toString().trim();
       if(!categoryId){
-        clearEbayAspectsUI();
+        state.ebayAspectsMeta = [];
+        state.ebayAspectsCategoryId = '';
+        renderEbayAspects();
         return;
       }
       if(!force && state.ebayAspectsCategoryId === categoryId && Array.isArray(state.ebayAspectsMeta) && state.ebayAspectsMeta.length){
@@ -2903,7 +3070,8 @@
         if(reqId !== state.ebayAspectsReqId) return;
         state.ebayAspectsCategoryId = categoryId;
         state.ebayAspectsMeta = [];
-        if(box) box.innerHTML = `<div class=\"hint\">Item specifics unavailable: ${escapeHtml(e.message)}</div>`;
+        renderEbayAspects();
+        log(`Item specifics unavailable for selected category; using default specifics. (${e.message})`);
       }
     }
 
@@ -3098,6 +3266,7 @@
 
         row.onclick = () => {
           $('amazonAsin').value = asin;
+          applyCommonSpecificsFromAvailableData({asin, brand, title});
           loadAmazonCatalogDetail(asin);
           renderAmazonTemplates(); // update selection highlight
           log(`Selected Amazon catalog ASIN ${asin} for listing.`);
@@ -3113,6 +3282,16 @@
       }
 
       box.appendChild(list);
+      try{
+        const selectedRow = results.find(r => ((r?.asin || '').toString().trim() === (($('amazonAsin')?.value || '').toString().trim()))) || results[0];
+        if(selectedRow){
+          applyCommonSpecificsFromAvailableData({
+            asin: (selectedRow.asin || '').toString().trim(),
+            brand: (selectedRow.brand || '').toString().trim(),
+            title: (selectedRow.title || '').toString().trim(),
+          });
+        }
+      }catch(e){}
 
       if(hint){
         hint.innerHTML = `${results.length} match${results.length===1?'':'es'} found. Click one to select. <span class="badge badgeBlue">ASIN required</span>`;
@@ -3133,6 +3312,145 @@
         }
       }
       return out.filter(Boolean).slice(0, 12);
+    }
+
+    function _firstAmazonAttrValue(attributes, keys){
+      if(!attributes || typeof attributes !== 'object') return '';
+      const ks = Array.isArray(keys) ? keys : [keys];
+      for(const k of ks){
+        if(!k) continue;
+        const arr = attributes[k];
+        if(!Array.isArray(arr) || !arr.length) continue;
+        for(const it of arr){
+          if(it === null || it === undefined) continue;
+          if(typeof it === 'string'){
+            const s = it.trim();
+            if(s) return s;
+            continue;
+          }
+          if(typeof it === 'number'){
+            return String(it);
+          }
+          if(typeof it === 'object'){
+            const cands = [it.value, it.Value, it.displayValue, it.display_value, it.text, it.Text, it.name, it.Name];
+            for(const c of cands){
+              const s = (c ?? '').toString().trim();
+              if(s) return s;
+            }
+          }
+        }
+      }
+      return '';
+    }
+
+    function _findEbayAspectInputByName(name){
+      const targetNorm = _normAspectName(name);
+      const box = $('ebayAspectsBox');
+      if(!box) return null;
+      let target = null;
+      box.querySelectorAll('[data-ebay-aspect]').forEach((el) => {
+        if(target) return;
+        const n = _normAspectName((el.dataset.ebayAspect || '').toString());
+        if(n === targetNorm || n.includes(targetNorm) || targetNorm.includes(n)){
+          target = el;
+        }
+      });
+      return target;
+    }
+
+    function _setEbayAspectIfEmpty(name, value){
+      const v = (value ?? '').toString().trim();
+      if(!v) return false;
+
+      let el = _findEbayAspectInputByName(name);
+      if(!el){
+        const current = Array.isArray(state.manualRequiredAspects) ? state.manualRequiredAspects : [];
+        if(!current.some(n => _normAspectName(n) === _normAspectName(name))){
+          current.push(name);
+          state.manualRequiredAspects = current;
+          try{ renderEbayAspects(); }catch(e){}
+        }
+        el = _findEbayAspectInputByName(name);
+      }
+      if(!el) return false;
+      if((el.value || '').toString().trim()) return false;
+      el.value = v;
+      el.classList.remove('fieldInvalid');
+      return true;
+    }
+
+    function applyCommonSpecificsFromAmazon(detail, seed = {}){
+      const d = detail || {};
+      const attrs = d.attributes || {};
+      const summaries = Array.isArray(d.summaries) ? d.summaries : [];
+      const s0 = summaries[0] || {};
+
+      const brand = (seed.brand || s0.brandName || s0.brand_name || _firstAmazonAttrValue(attrs, ['brand', 'brand_name', 'manufacturer'])).toString().trim();
+      const pairs = [
+        ['Brand', brand],
+        ['Type', (seed.type || _firstAmazonAttrValue(attrs, ['item_type_name', 'product_type', 'item_type_keyword']))],
+        ['Model', (seed.model || _firstAmazonAttrValue(attrs, ['model', 'model_name', 'model_number']))],
+        ['MPN', (seed.mpn || _firstAmazonAttrValue(attrs, ['manufacturer_part_number', 'mpn', 'part_number']))],
+        ['Color', (seed.color || _firstAmazonAttrValue(attrs, ['color', 'colour']))],
+        ['Size', (seed.size || _firstAmazonAttrValue(attrs, ['size_name', 'size']))],
+        ['Department', (seed.department || _firstAmazonAttrValue(attrs, ['department']))],
+        ['Style', (seed.style || _firstAmazonAttrValue(attrs, ['style']))],
+        ['Material', (seed.material || _firstAmazonAttrValue(attrs, ['material']))],
+      ];
+
+      let applied = 0;
+      for(const [name, value] of pairs){
+        if(_setEbayAspectIfEmpty(name, value)) applied += 1;
+      }
+      if(applied > 0){
+        log(`Auto-filled ${applied} common specific${applied === 1 ? '' : 's'} from catalog item.`);
+      }
+    }
+
+    function _extractLikelyColorFromText(text){
+      const t = (text || '').toString().toLowerCase();
+      if(!t) return '';
+      const colors = [
+        'rose gold','navy blue','light blue','dark blue','sky blue','royal blue',
+        'forest green','olive green','lime green','mint green',
+        'dark gray','light gray','charcoal gray',
+        'dark brown','light brown',
+        'off white','ivory',
+        'black','white','gray','grey','silver','gold','red','blue','green','yellow','orange','pink','purple','brown','beige','tan'
+      ];
+      for(const c of colors){
+        const re = new RegExp(`(^|[^a-z])${c.replace(/\s+/g, '\\s+')}([^a-z]|$)`, 'i');
+        if(re.test(t)) return c.replace(/\b\w/g, ch => ch.toUpperCase());
+      }
+      return '';
+    }
+
+    function _extractLikelyMaterialFromText(text){
+      const t = (text || '').toString().toLowerCase();
+      if(!t) return '';
+      const mats = ['stainless steel','leather','cotton','polyester','plastic','metal','wood','aluminum','rubber','silicone','ceramic','glass'];
+      for(const m of mats){
+        const re = new RegExp(`(^|[^a-z])${m.replace(/\s+/g, '\\s+')}([^a-z]|$)`, 'i');
+        if(re.test(t)) return m.replace(/\b\w/g, ch => ch.toUpperCase());
+      }
+      return '';
+    }
+
+    function applyCommonSpecificsFromAvailableData(seed = {}){
+      const selectedAsin = (($('amazonAsin')?.value || '').toString().trim() || (seed.asin || '').toString().trim());
+      const catalog = Array.isArray(state.amazonCatalog) ? state.amazonCatalog : [];
+      const selectedCatalog = catalog.find(r => ((r?.asin || '').toString().trim() === selectedAsin)) || catalog[0] || {};
+
+      const detail = state.amazonCatalogDetail || {};
+      const detailAsin = (detail.asin || '').toString().trim();
+      const detailUsable = (!selectedAsin || !detailAsin || selectedAsin === detailAsin) ? detail : {};
+
+      const title = (seed.title || $('title')?.value || state.item?.title || state.item?.bol?.description || selectedCatalog.title || '').toString().trim();
+      const brand = (seed.brand || selectedCatalog.brand || '').toString().trim();
+      const color = (seed.color || _extractLikelyColorFromText(title) || '').toString().trim();
+      const material = (seed.material || _extractLikelyMaterialFromText(title) || '').toString().trim();
+
+      applyCommonSpecificsFromAmazon(detailUsable, {brand, color, material});
     }
 
     function extractAmazonImages(detail){
@@ -3197,6 +3515,7 @@
       try{
         const res = await apiGet(`/api/listingagent/amazon/catalog_item?asin=${encodeURIComponent(clean)}&includedData=summaries,images,attributes`);
         state.amazonCatalogDetail = res.data || null;
+        applyCommonSpecificsFromAvailableData({asin: clean});
         renderAmazonDetail();
       } catch(e){
         $('amazonCatalogDetail').innerHTML = `<div class=\"detailBox\"><div class=\"hint\">Amazon catalog error: ${escapeHtml(e.message)}</div></div>`;
@@ -3204,7 +3523,7 @@
     }
 
     async function loadTemplatesForUPC(upc){
-      const clean = (upc ?? '').toString().trim();
+      const clean = formatUpc12((upc ?? '').toString().trim());
       if(!clean) return;
       const reqId = ++state.templateReqId;
 
@@ -3648,6 +3967,7 @@
       setIfEmpty('amazonCurrency', 'amazon_currency');
       setIfEmpty('amazonProductType', 'amazon_product_type');
       setIfEmpty('amazonRequirements', 'amazon_requirements');
+      setIfEmpty('amazonMerchantShippingGroup', 'amazon_merchant_shipping_group');
 
       const amazonCond = $('amazonConditionType');
       if(amazonCond && s.amazon_condition_type){
@@ -3723,6 +4043,7 @@
         amazon_product_type: $('amazonProductType').value.trim(),
         amazon_requirements: $('amazonRequirements').value.trim(),
         amazon_condition_type: $('amazonConditionType').value,
+        amazon_merchant_shipping_group: $('amazonMerchantShippingGroup').value.trim(),
         // Keep code-side default unless you later add this to the UI.
         amazon_fulfillment_channel_code: 'DEFAULT',
       };
@@ -3738,8 +4059,8 @@
     function autofillForm(){
       const item = state.item;
       if(!item) return;
-      $('upc').value = item.upc || '';
-      if(!$('sku').value.trim()) $('sku').value = item.upc || '';
+      $('upc').value = formatUpc12(item.upc || '');
+      if(!$('sku').value.trim()) $('sku').value = formatUpc12(item.upc || '');
       if(!$('title').value.trim()) $('title').value = (item.title || item.bol?.description || '').toString().trim();
 
       const qty = Number(item.inventory?.total_quantity || 0);
@@ -3757,14 +4078,16 @@
         }, 0);
         if(!state.priceManuallySet && $('price').value === '' && Number.isFinite(avg)){
           $('price').value = avg.toFixed(2);
-          log(`Auto-set eBay price from sold history: $${avg.toFixed(2)}`);
+          if(state.activeStore === 'ebay'){
+            log(`Auto-set eBay price from sold history: $${avg.toFixed(2)}`);
+          }
         }
       } else {
         hint.style.display = 'none';
       }
 
       // Amazon autofill
-      $('amazonUpc').value = item.upc || '';
+      $('amazonUpc').value = formatUpc12(item.upc || '');
       const amazonListings = (item.amazon_store?.listings || []);
       $('amazonFoundBadge').style.display = amazonListings.length ? 'inline-flex' : 'none';
 
@@ -3804,13 +4127,14 @@
 
       // Auto-suggest category from the best title we have.
       const t = ($('title')?.value || item.title || item.bol?.description || '').toString().trim();
+      try{ applyCommonSpecificsFromAvailableData({title: t}); }catch(e){}
       if(t) suggestCategories(t, {auto: true});
     }
 
     function defaultDescription(){
       if(!state.item) return '';
       const title = (state.item.title || state.item.bol?.description || 'Item').toString().trim();
-      const upc = (state.item.upc || '').toString().trim();
+      const upc = formatUpc12((state.item.upc || '').toString().trim());
       const cond = $('condition').value;
       return [
         `<h2 style=\"margin:0 0 10px 0;\">${escapeHtml(title)}</h2>`,
@@ -3858,8 +4182,173 @@
         requirements: $('amazonRequirements').value.trim(),
         marketplaceId: $('amazonMarketplaceId').value.trim(),
         currency: $('amazonCurrency').value.trim(),
+        merchantShippingGroup: $('amazonMerchantShippingGroup').value.trim(),
         fulfillmentChannelCode: 'DEFAULT',
       };
+    }
+
+    function clearFieldHighlights(){
+      const invalidEls = document.querySelectorAll('.fieldInvalid');
+      invalidEls.forEach(el => el.classList.remove('fieldInvalid'));
+      const confirmRow = $('confirmPublish')?.closest('.checkRow');
+      if(confirmRow) confirmRow.classList.remove('checkRowInvalid');
+      const amazonRow = $('amazonConfirm')?.closest('.checkRow');
+      if(amazonRow) amazonRow.classList.remove('checkRowInvalid');
+    }
+
+    function markFieldInvalid(id){
+      const el = $(id);
+      if(!el) return;
+      el.classList.add('fieldInvalid');
+    }
+
+    function markConfirmInvalid(id){
+      const cb = $(id);
+      const row = cb?.closest('.checkRow');
+      if(row) row.classList.add('checkRowInvalid');
+    }
+
+    function _isBlank(v){
+      return (v === null || v === undefined || String(v).trim() === '');
+    }
+
+    function validateEbayPayload(payload, mode){
+      clearFieldHighlights();
+      const missing = [];
+      const mset = new Set();
+      const add = (fieldId, label) => {
+        if(!mset.has(fieldId)){
+          mset.add(fieldId);
+          missing.push(label);
+          markFieldInvalid(fieldId);
+        }
+      };
+
+      if(mode === 'publish'){
+        if(!payload.confirm){
+          missing.push('confirmation');
+          markConfirmInvalid('confirmPublish');
+        }
+        if(!payload.upc && !payload.offerId){
+          add('upc', 'UPC');
+          add('offerId', 'Offer ID');
+        }
+      }
+
+      // When UPC flow is used (new publish or update), require core listing fields.
+      if(payload.upc){
+        if(_isBlank(payload.sku)) add('sku', 'SKU');
+        if(_isBlank(payload.title)) add('title', 'Title');
+        if(_isBlank(payload.listingDescription)) add('listingDescEditor', 'Listing Description');
+        if(_isBlank(payload.categoryId)) add('categoryId', 'Category');
+        if(_isBlank(payload.fulfillmentPolicyId)) add('fulfillmentPolicyId', 'Fulfillment Policy');
+        if(_isBlank(payload.paymentPolicyId)) add('paymentPolicyId', 'Payment Policy');
+        if(_isBlank(payload.returnPolicyId)) add('returnPolicyId', 'Return Policy');
+
+        if(payload.price === null || Number.isNaN(payload.price)) add('price', 'Price');
+        if(!Number.isFinite(payload.quantity) || Number(payload.quantity) < 1) add('quantity', 'Quantity');
+
+        // Validate required eBay aspects currently shown in UI.
+        const box = $('ebayAspectsBox');
+        if(box){
+          box.querySelectorAll('[data-ebay-aspect]').forEach((el) => {
+            const req = String(el.dataset.aspectRequired || '') === '1';
+            if(!req) return;
+            const val = (el.value || '').toString().trim();
+            if(!val){
+              const label = (el.dataset.ebayAspect || 'Item Specific').toString();
+              if(!mset.has('__aspect__' + label)){
+                mset.add('__aspect__' + label);
+                missing.push(`Item Specific: ${label}`);
+              }
+              el.classList.add('fieldInvalid');
+            }
+          });
+        }
+      }
+
+      return { ok: missing.length === 0, missing };
+    }
+
+    function validateAmazonPayload(payload){
+      clearFieldHighlights();
+      const missing = [];
+      const add = (fieldId, label) => {
+        missing.push(label);
+        markFieldInvalid(fieldId);
+      };
+      if(!payload.confirm){
+        missing.push('confirmation');
+        markConfirmInvalid('amazonConfirm');
+      }
+      if(_isBlank(payload.sku)) add('amazonSku', 'Amazon SKU');
+      if(payload.price === null || Number.isNaN(payload.price)) add('amazonPrice', 'Amazon Price');
+      return { ok: missing.length === 0, missing };
+    }
+
+    function _normAspectName(v){
+      return (v || '').toString().trim().toLowerCase().replace(/\s+/g, ' ');
+    }
+
+    function highlightMissingEbayAspectFromError(err){
+      const apiMissing = (err && err.api && err.api.missingAspect) ? String(err.api.missingAspect).trim() : '';
+      let missing = apiMissing;
+      if(!missing){
+        const msg = (err && err.message) ? String(err.message) : '';
+        const low = msg.toLowerCase();
+        const marker = 'item specific ';
+        const endMarker = ' is missing';
+        const i = low.indexOf(marker);
+        if(i >= 0){
+          const j = low.indexOf(endMarker, i + marker.length);
+          if(j > i){
+            missing = msg.slice(i + marker.length, j).trim();
+          }
+        }
+      }
+      if(!missing) return false;
+
+      const targetNorm = _normAspectName(missing);
+      const box = $('ebayAspectsBox');
+      if(!box) return false;
+      let target = null;
+      box.querySelectorAll('[data-ebay-aspect]').forEach((el) => {
+        if(target) return;
+        const name = (el.dataset.ebayAspect || '').toString();
+        const nameNorm = _normAspectName(name);
+        if(nameNorm === targetNorm || nameNorm.includes(targetNorm) || targetNorm.includes(nameNorm)){
+          target = el;
+        }
+      });
+      if(!target){
+        // eBay can require a specific that taxonomy response didn't include; add a manual required field.
+        const current = Array.isArray(state.manualRequiredAspects) ? state.manualRequiredAspects : [];
+        const has = current.some(n => _normAspectName(n) === targetNorm);
+        if(!has){
+          current.push(missing);
+          state.manualRequiredAspects = current;
+        }
+        try{ renderEbayAspects(); }catch(e){}
+        const box2 = $('ebayAspectsBox');
+        if(box2){
+          box2.querySelectorAll('[data-ebay-aspect]').forEach((el) => {
+            if(target) return;
+            const name = (el.dataset.ebayAspect || '').toString();
+            const nameNorm = _normAspectName(name);
+            if(nameNorm === targetNorm || nameNorm.includes(targetNorm) || targetNorm.includes(nameNorm)){
+              target = el;
+            }
+          });
+        }
+      }
+      if(target){
+        target.classList.add('fieldInvalid');
+        try{ target.scrollIntoView({behavior:'smooth', block:'center'}); }catch(e){}
+        try{ target.focus(); }catch(e){}
+        log(`Missing required eBay specific: ${missing} (field highlighted).`);
+        return true;
+      }
+      return false;
     }
 
     function setBusy(busy){
@@ -3876,7 +4365,12 @@
 
     async function createDraft(){
       const payload = collectPayload();
-      if(!payload.upc){ log('Pick a UPC first.'); return; }
+      if(!payload.upc){ log('Pick a UPC first.'); markFieldInvalid('upc'); return; }
+      const v = validateEbayPayload(payload, 'draft');
+      if(!v.ok){
+        log(`Missing required fields: ${v.missing.join(', ')}`);
+        return;
+      }
       setBusy(true);
       log('Creating draft offer...');
       try{
@@ -3888,6 +4382,7 @@
         }
         log(`Draft created. OfferId: ${offerId || '(none returned)'}`);
       } catch(e){
+        highlightMissingEbayAspectFromError(e);
         log(`Draft failed: ${e.message}`);
       } finally {
         setBusy(false);
@@ -3897,8 +4392,15 @@
     async function publish(){
       const payload = collectPayload();
       payload.confirm = $('confirmPublish').checked;
-      if(!payload.confirm){ log('Publish blocked: check the confirmation box first.'); return; }
-      if(!payload.upc && !payload.offerId){ log('Pick a UPC (or paste an Offer ID) first.'); return; }
+      const v = validateEbayPayload(payload, 'publish');
+      if(!v.ok){
+        if(!payload.confirm){
+          log('Publish blocked: check the confirmation box first.');
+        } else {
+          log(`Missing required fields: ${v.missing.join(', ')}`);
+        }
+        return;
+      }
       setBusy(true);
       log('Publishing to eBay...');
       try{
@@ -3909,6 +4411,7 @@
           await loadQueue();
         }
       } catch(e){
+        highlightMissingEbayAspectFromError(e);
         log(`Publish failed: ${e.message}`);
       } finally {
         setBusy(false);
@@ -4018,14 +4521,20 @@
     }
 
     async function amazonCatalogSearch(){
-      const q = ($('amazonCatalogQ')?.value || '').trim() || $('amazonUpc').value.trim() || $('upc').value.trim();
+      const typed = ($('amazonCatalogQ')?.value || '').trim();
+      const upc12 = formatUpc12((($('amazonUpc')?.value || '').trim() || ($('upc')?.value || '').trim()));
+      let q = typed || upc12;
+      const qCompact = q.replace(/\s+/g, '');
+      if(/^\d+(-\d+)?$/.test(qCompact)){
+        q = formatUpc12(qCompact);
+      }
       if(!q){
         log('Pick a UPC first (Amazon).');
         return;
       }
       setBusy(true);
       log(`Amazon catalog search: ${q}...`);
-      if($('amazonCatalogQ') && !$('amazonCatalogQ').value.trim()) $('amazonCatalogQ').value = q;
+      if($('amazonCatalogQ')) $('amazonCatalogQ').value = q;
       if($('amazonCatalogSelectHint')) $('amazonCatalogSelectHint').textContent = 'Searching Amazon catalog...';
       if($('amazonTemplatesBox')) $('amazonTemplatesBox').innerHTML = '<div class="hint">Searching Amazon catalog…</div>';
       try{
@@ -4087,16 +4596,13 @@
     async function amazonPutOffer(){
       const payload = collectAmazonPayload();
       payload.confirm = $('amazonConfirm').checked;
-      if(!payload.confirm){
-        log('Amazon Put Offer blocked: check confirmation box.');
-        return;
-      }
-      if(!payload.sku){
-        log('Amazon SKU is required.');
-        return;
-      }
-      if(payload.price === null || Number.isNaN(payload.price)){
-        log('Amazon price is required.');
+      const v = validateAmazonPayload(payload);
+      if(!v.ok){
+        if(!payload.confirm){
+          log('Amazon Put Offer blocked: check confirmation box.');
+        } else {
+          log(`Missing required fields: ${v.missing.join(', ')}`);
+        }
         return;
       }
       setBusy(true);
@@ -4104,19 +4610,53 @@
       try{
         const res = await apiPost('/api/listingagent/amazon/put_offer', payload);
         const sub = res.data?.submissionId || res.data?.submission_id || '';
+        const ctx = res?.context || {};
+        if(ctx?.effective_sku && ctx?.requested_sku && ctx.effective_sku !== ctx.requested_sku){
+          log(`Amazon used existing SKU ${ctx.effective_sku} (requested ${ctx.requested_sku}).`);
+        }
         log(`Amazon offer submitted${sub ? `: ${sub}` : ''}`);
         if(payload.upc){
-          markQueueDone(payload.upc, 'amazon', {sku: payload.sku, asin: payload.asin});
+          markQueueDone(payload.upc, 'amazon', {sku: (ctx?.effective_sku || payload.sku), asin: (res?.resolved_asin || payload.asin)});
           await loadQueue();
         }
       } catch(e){
         log(`Amazon Put Offer failed: ${e.message}`);
+        if(AMAZON_VERBOSE_DEBUG){
+          const api = e?.api || {};
+          const ctx = api?.context || {};
+          const ctxBits = [];
+          if(typeof ctx?.sku_exists === 'boolean') ctxBits.push(`sku_exists=${ctx.sku_exists}`);
+          if(ctx?.requested_sku) ctxBits.push(`requested_sku=${ctx.requested_sku}`);
+          if(ctx?.effective_sku) ctxBits.push(`effective_sku=${ctx.effective_sku}`);
+          if(ctx?.effective_sku_source && ctx?.effective_sku_source !== 'requested') ctxBits.push(`sku_source=${ctx.effective_sku_source}`);
+          if(ctx?.marketplace_id) ctxBits.push(`marketplace=${ctx.marketplace_id}`);
+          if(ctx?.condition_type) ctxBits.push(`condition=${ctx.condition_type}`);
+          if(ctx?.merchant_shipping_group) ctxBits.push(`shipping_group=${ctx.merchant_shipping_group}`);
+          if(typeof ctx?.restriction_checked === 'boolean') ctxBits.push(`restriction_checked=${ctx.restriction_checked}`);
+          if(typeof ctx?.restriction_restricted === 'boolean') ctxBits.push(`restricted=${ctx.restriction_restricted}`);
+          if(api?.resolved_asin) ctxBits.push(`asin=${api.resolved_asin}`);
+          if(api?.resolved_product_type) ctxBits.push(`productType=${api.resolved_product_type}`);
+          if(ctxBits.length) log(`Amazon debug: ${ctxBits.join(' | ')}`);
+
+          const attempts = Array.isArray(api?.attempts) ? api.attempts : [];
+          if(attempts.length){
+            const shown = attempts.length <= 8 ? attempts.slice() : attempts.slice(0, 3).concat(attempts.slice(-5));
+            for(const a of shown){
+              const label = (a?.attempt || 'attempt').toString();
+              const detail = (a?.detail || a?.exception || '').toString().trim();
+              log(`Amazon debug [${label}]: ${detail || 'no explicit error detail'}`);
+            }
+            if(attempts.length > shown.length) log(`Amazon debug: showing ${shown.length} of ${attempts.length} attempts.`);
+          }
+        }
       } finally {
         setBusy(false);
       }
     }
 
     function clearAll(){
+      clearFieldHighlights();
+      state.manualRequiredAspects = [];
       stopMobilePhotoPoll();
       state.item = null;
       state.images = [];
@@ -4363,6 +4903,22 @@
     // Price manual override tracking (prevents late auto-fill overwriting user input)
     if($('price')) $('price').addEventListener('input', () => { state.priceManuallySet = true; });
     if($('amazonPrice')) $('amazonPrice').addEventListener('input', () => { state.amazonPriceManuallySet = true; });
+
+    // Clear red validation highlights as fields are corrected.
+    ['upc','offerId','sku','title','quantity','price','categoryId','fulfillmentPolicyId','paymentPolicyId','returnPolicyId',
+     'listingDescEditor','amazonSku','amazonPrice'].forEach((id) => {
+      const el = $(id);
+      if(!el) return;
+      const evt = (id === 'listingDescEditor') ? 'input' : 'input';
+      el.addEventListener(evt, () => {
+        el.classList.remove('fieldInvalid');
+      });
+      if(el.tagName === 'SELECT'){
+        el.addEventListener('change', () => el.classList.remove('fieldInvalid'));
+      }
+    });
+    if($('confirmPublish')) $('confirmPublish').addEventListener('change', () => $('confirmPublish').closest('.checkRow')?.classList.remove('checkRowInvalid'));
+    if($('amazonConfirm')) $('amazonConfirm').addEventListener('change', () => $('amazonConfirm').closest('.checkRow')?.classList.remove('checkRowInvalid'));
 
     // Rich description editor wiring (WYSIWYG -> hidden HTML textarea)
     if(descEditor()){

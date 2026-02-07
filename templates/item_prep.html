@@ -105,7 +105,6 @@
     html.ss-theme-night .loading-spinner-large { border-color: #334155; border-top-color: #10b981; }
     html.ss-theme-night .top h2 { color: var(--ink-bright, #f8fafc); }
   </style>
-  <script src="https://unpkg.com/@zxing/library@0.19.1/umd/index.min.js"></script>
 </head>
 <body>
 <div class="top">
@@ -128,10 +127,7 @@
   </div>
 
   <div class="card">
-    <div id="scanner" style="max-width:320px">
-      <video id="video" playsinline style="width:100%;aspect-ratio:1/1;background:#222;border-radius:8px"></video>
-      <div id="scanMsg" class="muted" data-i18n="initializing_camera">Initializing camera...</div>
-    </div>
+    <div class="muted" style="margin-bottom:8px" data-i18n="ready_to_scan_upc">Ready to scan UPC</div>
 
     <div class="row" style="align-items:center;margin-top:12px">
   <input type="text" id="manualUpc" placeholder="Enter/scan UPC" data-i18n="enter_scan_upc" autofocus style="padding:8px;border:1px solid #ddd;border-radius:6px;flex:1;min-width:200px">
@@ -206,11 +202,6 @@
       document.getElementById('pageLoadingOverlay').classList.remove('active');
     }
     
-    const video = document.getElementById('video');
-    const scanMsg = document.getElementById('scanMsg');
-    let reader = null;
-    let stream = null;
-
     function missingThumb(width=56,height=56,text='No Img'){return 'data:image/svg+xml;utf8,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="'+width+'" height="'+height+'"><rect width="100%" height="100%" fill="#f8f8f8"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#b0b0b0" font-size="10">'+text+'</text></svg>');}
 
     let selectedLot = null;
@@ -285,24 +276,7 @@
       }
     }
     
-    async function startScanner(){
-      try{
-        reader = new ZXing.BrowserMultiFormatReader();
-        if (video.srcObject) video.srcObject.getTracks().forEach(t=>t.stop());
-        const ms = await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
-        stream = ms;
-        video.srcObject = ms;
-        await video.play();
-        scanMsg.textContent = 'Ready to scan UPC';
-        await reader.decodeFromVideoDevice(undefined,'video',(res,err)=>{
-          if(res){ const upc = res.getText().trim(); onScan(upc); }
-        });
-      }catch(e){ scanMsg.textContent = 'Camera unavailable: '+(e.message||''); }
-    }
-
-    function stopScanner(){ try{ reader && reader.reset(); }catch{}; try{ stream && stream.getTracks().forEach(t=>t.stop()); }catch{}; reader=null; stream=null; }
-
-    async function onScan(upc){ stopScanner(); document.getElementById('manualUpc').value = upc; await lookup(upc); }
+    function stopScanner(){ /* camera removed intentionally */ }
 
     function esc(s){return String(s||'').replace(/[&<>]/g, c=>({"&":"&amp;","<":"&lt;","<":"&lt;",">":"&gt;"}[c]));}
 
@@ -368,7 +342,7 @@
         resEl.classList.add('hidden'); actions.classList.add('hidden');
         document.getElementById('noBarcodeBtn').classList.remove('hidden');
         statusMsg.innerHTML = '<span class="bad">Not found in BOL</span>';
-        setTimeout(()=>{ statusMsg.textContent=''; startScanner(); }, 1000);
+        setTimeout(()=>{ statusMsg.textContent=''; }, 1000);
         currentUpc = null;
         // Auto-clear the input after lookup completes
         document.getElementById('manualUpc').value = '';
@@ -669,28 +643,11 @@
       return 'Desktop';
     }
     function setupDeviceMode(){
-      const type = getDeviceType();
-      const scannerDiv = document.getElementById('scanner');
       const input = document.getElementById('manualUpc');
-      
-      // Check for scanner mode override
-      const scannerMode = localStorage.getItem('scannerMode');
-      const forceHandheld = scannerMode === 'handheld';
-      
-      // Requirement: iPad or Desktop -> manual input only; Mobile phones -> camera
-      // UNLESS scanner mode is set to 'handheld'
-      if (type === 'iPad' || type === 'Desktop' || forceHandheld){
-        if (scannerDiv) scannerDiv.style.display = 'none';
-        stopScanner();
-        if (input){ 
-          input.style.display=''; 
-          try{ input.focus({preventScroll:true}); if(input.select) input.select(); }catch{} 
-        }
-        scanMsg.textContent = '';
-      } else {
-        if (scannerDiv) scannerDiv.style.display = '';
-        if (input){ input.style.display=''; }
-        startScanner();
+      stopScanner();
+      if (input){
+        input.style.display='';
+        try{ input.focus({preventScroll:true}); if(input.select) input.select(); }catch{}
       }
     }
     // Treat Enter key or change as a trigger for lookup (works well with USB scanners on desktop)

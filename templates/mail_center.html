@@ -1,0 +1,668 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title data-i18n="mail_center">Mail Center</title>
+  <style>
+    :root {
+      --bg: #f8fafc;
+      --card: #ffffff;
+      --line: #e2e8f0;
+      --ink: #0f172a;
+      --muted: #64748b;
+      --accent: #0284c7;
+      --accent-2: #0ea5e9;
+      --ok: #16a34a;
+      --warn: #f59e0b;
+      --shadow: 0 10px 30px rgba(2, 8, 23, 0.08);
+      --radius: 12px;
+    }
+    body {
+      margin: 0;
+      padding: 18px;
+      font-family: 'Segoe UI', Arial, sans-serif;
+      background: linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%);
+      color: var(--ink);
+    }
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: grid;
+      gap: 14px;
+    }
+    .topbar {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      justify-content: space-between;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 12px;
+      box-shadow: var(--shadow);
+    }
+    .top-left {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      min-width: 0;
+    }
+    .btn {
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--ink);
+      border-radius: 10px;
+      padding: 9px 12px;
+      font-size: 0.95rem;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+    }
+    .btn.primary {
+      background: linear-gradient(135deg, var(--accent-2), var(--accent));
+      color: #fff;
+      border: none;
+    }
+    .btn:hover { filter: brightness(1.03); }
+    h1 {
+      margin: 0;
+      font-size: 1.2rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .hint {
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    .toolbar {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 10px;
+      box-shadow: var(--shadow);
+    }
+    .field {
+      display: grid;
+      gap: 6px;
+    }
+    .field label {
+      font-size: 0.84rem;
+      color: var(--muted);
+    }
+    .field select, .field input, .field textarea {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 9px 10px;
+      font: inherit;
+      background: #fff;
+      color: var(--ink);
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: 360px 1fr;
+      gap: 12px;
+      min-height: 70vh;
+    }
+    .panel {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      min-height: 0;
+      display: grid;
+    }
+    .panel-header {
+      border-bottom: 1px solid var(--line);
+      padding: 10px 12px;
+      font-weight: 700;
+    }
+    .message-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      overflow: auto;
+      max-height: 70vh;
+    }
+    .msg {
+      display: grid;
+      gap: 6px;
+      width: 100%;
+      border: 0;
+      border-bottom: 1px solid var(--line);
+      background: transparent;
+      text-align: left;
+      padding: 11px 12px;
+      cursor: pointer;
+      color: inherit;
+    }
+    .msg:hover { background: rgba(14, 165, 233, 0.06); }
+    .msg.active { background: rgba(14, 165, 233, 0.11); }
+    .msg.unread .msg-subject { font-weight: 800; }
+    .msg-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+    }
+    .badge {
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      border: 1px solid transparent;
+    }
+    .badge.store-ebay { background: rgba(245, 158, 11, 0.14); color: #b45309; border-color: rgba(245, 158, 11, 0.22); }
+    .badge.store-amazon { background: rgba(22, 163, 74, 0.14); color: #15803d; border-color: rgba(22, 163, 74, 0.22); }
+    .badge.unread { background: rgba(2, 132, 199, 0.14); color: #0369a1; border-color: rgba(2, 132, 199, 0.2); }
+    .msg-subject {
+      font-size: 0.96rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .msg-meta {
+      font-size: 0.82rem;
+      color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .detail-wrap {
+      display: grid;
+      grid-template-rows: auto auto 1fr;
+      min-height: 0;
+    }
+    .detail {
+      border-bottom: 1px solid var(--line);
+      padding: 12px;
+      min-height: 180px;
+      display: grid;
+      gap: 10px;
+      align-content: start;
+    }
+    .meta-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 14px;
+      font-size: 0.88rem;
+      color: var(--muted);
+    }
+    .body {
+      white-space: pre-wrap;
+      line-height: 1.45;
+      background: rgba(148, 163, 184, 0.09);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px;
+      min-height: 70px;
+    }
+    .compose {
+      padding: 12px;
+      display: grid;
+      gap: 10px;
+      align-content: start;
+    }
+    .compose-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .compose .full { grid-column: 1 / -1; }
+    .actions {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+    .muted { color: var(--muted); }
+    .status {
+      min-height: 1.2em;
+      font-size: 0.88rem;
+      color: var(--muted);
+    }
+    .status.ok { color: var(--ok); }
+    .status.err { color: #dc2626; }
+    .empty {
+      padding: 16px;
+      color: var(--muted);
+      text-align: center;
+    }
+    @media (max-width: 980px) {
+      .layout { grid-template-columns: 1fr; }
+      .message-list { max-height: 42vh; }
+      .toolbar { grid-template-columns: 1fr; }
+      .compose-grid { grid-template-columns: 1fr; }
+    }
+    html.ss-theme-night body { background: linear-gradient(180deg, #0f172a 0%, #111827 100%); color: #e2e8f0; }
+    html.ss-theme-night .topbar,
+    html.ss-theme-night .toolbar,
+    html.ss-theme-night .panel { background: #1e293b; border-color: rgba(255,255,255,0.1); box-shadow: 0 14px 36px rgba(0,0,0,0.38); }
+    html.ss-theme-night .btn { background: #0f172a; border-color: rgba(255,255,255,0.12); color: #e2e8f0; }
+    html.ss-theme-night .btn.primary { background: linear-gradient(135deg, #0284c7, #0369a1); border: none; }
+    html.ss-theme-night .field select,
+    html.ss-theme-night .field input,
+    html.ss-theme-night .field textarea { background: #0f172a; border-color: rgba(255,255,255,0.12); color: #e2e8f0; }
+    html.ss-theme-night .msg { border-bottom-color: rgba(255,255,255,0.09); }
+    html.ss-theme-night .msg:hover { background: rgba(96, 165, 250, 0.11); }
+    html.ss-theme-night .msg.active { background: rgba(96, 165, 250, 0.2); }
+    html.ss-theme-night .detail,
+    html.ss-theme-night .panel-header { border-color: rgba(255,255,255,0.09); }
+    html.ss-theme-night .body { background: rgba(2, 6, 23, 0.6); border-color: rgba(255,255,255,0.1); }
+    html.ss-theme-night .hint,
+    html.ss-theme-night .muted,
+    html.ss-theme-night .meta-row,
+    html.ss-theme-night .msg-meta,
+    html.ss-theme-night .field label,
+    html.ss-theme-night .status { color: #94a3b8; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="topbar">
+      <div class="top-left">
+        <a class="btn" href="/store-manager">
+          <span>←</span>
+          <span data-i18n="back">Back</span>
+        </a>
+        <div>
+          <h1 data-i18n="mail_center">Mail Center</h1>
+          <div class="hint" data-i18n="mail_center_desc">Centralized messages for all stores</div>
+        </div>
+      </div>
+      <div style="display:flex; gap:8px;">
+        <button id="syncBtn" class="btn" type="button" data-i18n="sync_live">Sync Live</button>
+        <button id="refreshBtn" class="btn" type="button" data-i18n="refresh">Refresh</button>
+      </div>
+    </div>
+
+    <div class="toolbar">
+      <div class="field">
+        <label for="storeFilter" data-i18n="store">Store</label>
+        <select id="storeFilter">
+          <option value="all" data-i18n="all_stores">All Stores</option>
+          <option value="ebay">eBay</option>
+          <option value="amazon">Amazon</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="boxFilter" data-i18n="mail_box">Mailbox</label>
+        <select id="boxFilter">
+          <option value="inbox" data-i18n="inbox">Inbox</option>
+          <option value="sent" data-i18n="sent">Sent</option>
+          <option value="all" data-i18n="all_messages">All Messages</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="searchInput" data-i18n="search">Search</label>
+        <input id="searchInput" type="text" data-i18n="mail_search_placeholder" placeholder="Search subject, body, sender, recipient">
+      </div>
+    </div>
+
+    <div class="layout">
+      <section class="panel">
+        <div class="panel-header" data-i18n="mail_queue">Queued Messages</div>
+        <ul id="messageList" class="message-list"></ul>
+      </section>
+
+      <section class="panel detail-wrap">
+        <div class="panel-header" data-i18n="message">Message</div>
+        <div id="messageDetail" class="detail">
+          <div class="muted" data-i18n="select_message_to_view">Select a message to view details</div>
+        </div>
+        <form id="composeForm" class="compose">
+          <div class="panel-header" style="margin:-12px -12px 0 -12px;" data-i18n="send_message">Send Message</div>
+          <input id="replyToId" type="hidden">
+          <div class="compose-grid">
+            <div class="field">
+              <label for="composeStore" data-i18n="store">Store</label>
+              <select id="composeStore">
+                <option value="ebay">eBay</option>
+                <option value="amazon">Amazon</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="composeTo" data-i18n="recipient">Recipient</label>
+              <input id="composeTo" type="text" data-i18n="recipient_placeholder" placeholder="Recipient name/email">
+            </div>
+            <div class="field">
+              <label for="composeSubject" data-i18n="subject">Subject</label>
+              <input id="composeSubject" type="text" data-i18n="subject_placeholder" placeholder="Subject">
+            </div>
+            <div class="field full">
+              <label for="composeBody" data-i18n="message_body">Message Body</label>
+              <textarea id="composeBody" rows="5" data-i18n="message_body_placeholder" placeholder="Type your message"></textarea>
+            </div>
+          </div>
+          <div class="actions">
+            <button id="clearComposeBtn" type="button" class="btn" data-i18n="clear">Clear</button>
+            <button id="sendBtn" type="submit" class="btn primary" data-i18n="send">Send</button>
+          </div>
+          <div id="statusLine" class="status"></div>
+        </form>
+      </section>
+    </div>
+  </div>
+
+  <script src="/static/i18n.js"></script>
+  <script>
+    (function(){
+      const state = {
+        messages: [],
+        activeId: null,
+        loadPromise: null,
+        syncPromise: null,
+        lastLoadAt: 0,
+        lastSyncAt: 0,
+        lastLoadQuery: '',
+      };
+
+      const $ = (id) => document.getElementById(id);
+      const listEl = $('messageList');
+      const detailEl = $('messageDetail');
+      const statusEl = $('statusLine');
+      const storeFilterEl = $('storeFilter');
+      const boxFilterEl = $('boxFilter');
+      const searchInputEl = $('searchInput');
+      const syncBtnEl = $('syncBtn');
+
+      function t(key){
+        return (window.i18n && window.i18n.t) ? window.i18n.t(key) : key;
+      }
+
+      function esc(v){
+        return String(v == null ? '' : v)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;');
+      }
+
+      function fmtStore(raw){
+        const s = (raw || '').toLowerCase();
+        if(s.includes('ebay')) return 'eBay';
+        if(s.includes('amazon')) return 'Amazon';
+        return raw || '';
+      }
+
+      function fmtTs(value){
+        if(!value) return '';
+        const d = new Date(value.replace(' ', 'T'));
+        if(Number.isNaN(d.getTime())) return value;
+        return d.toLocaleString();
+      }
+
+      function setStatus(msg, kind){
+        statusEl.textContent = msg || '';
+        statusEl.className = 'status';
+        if(kind === 'ok') statusEl.classList.add('ok');
+        if(kind === 'err') statusEl.classList.add('err');
+      }
+
+      function buildQuery(){
+        const p = new URLSearchParams();
+        p.set('store', storeFilterEl.value || 'all');
+        p.set('box', boxFilterEl.value || 'inbox');
+        const q = (searchInputEl.value || '').trim();
+        if(q) p.set('q', q);
+        p.set('limit', '300');
+        return p.toString();
+      }
+
+      async function markRead(id){
+        try{
+          await fetch('/api/mail-center/messages/' + encodeURIComponent(id) + '/read', { method: 'POST' });
+        }catch(_e){}
+      }
+
+      function renderList(){
+        const activeId = state.activeId;
+        if(!state.messages.length){
+          listEl.innerHTML = '<li class="empty" data-i18n="no_messages_found">' + esc(t('no_messages_found')) + '</li>';
+          if(window.i18n && window.i18n.applyTranslations) window.i18n.applyTranslations();
+          return;
+        }
+
+        listEl.innerHTML = state.messages.map((m) => {
+          const active = (m.id === activeId) ? ' active' : '';
+          const unread = (m.direction === 'inbound' && m.status === 'unread') ? ' unread' : '';
+          const storeClass = fmtStore(m.store) === 'eBay' ? 'store-ebay' : 'store-amazon';
+          const subject = m.subject || '(No subject)';
+          const peer = m.direction === 'inbound' ? (m.sender_name || '') : (m.recipient_name || '');
+          const unreadBadge = unread ? ('<span class="badge unread">' + esc(t('unread')) + '</span>') : '';
+          return ''
+            + '<li>'
+            + '  <button class="msg' + active + unread + '" data-id="' + m.id + '" type="button">'
+            + '    <div class="msg-top">'
+            + '      <span class="badge ' + storeClass + '">' + esc(fmtStore(m.store)) + '</span>'
+            + '      ' + unreadBadge
+            + '    </div>'
+            + '    <div class="msg-subject">' + esc(subject) + '</div>'
+            + '    <div class="msg-meta">' + esc(peer) + ' • ' + esc(fmtTs(m.created_at)) + '</div>'
+            + '  </button>'
+            + '</li>';
+        }).join('');
+
+        listEl.querySelectorAll('.msg').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            const id = parseInt(btn.getAttribute('data-id') || '0', 10);
+            if(id) setActiveMessage(id);
+          });
+        });
+      }
+
+      function renderDetail(){
+        const m = state.messages.find(x => x.id === state.activeId);
+        if(!m){
+          detailEl.innerHTML = '<div class="muted" data-i18n="select_message_to_view">' + esc(t('select_message_to_view')) + '</div>';
+          if(window.i18n && window.i18n.applyTranslations) window.i18n.applyTranslations();
+          return;
+        }
+        const peerLabel = m.direction === 'inbound' ? t('sender') : t('recipient');
+        const peerValue = m.direction === 'inbound' ? (m.sender_name || '') : (m.recipient_name || '');
+        const statusLabel = m.direction === 'inbound' ? (m.status || '') : t('sent');
+        detailEl.innerHTML = ''
+          + '<div style="font-size:1.05rem;font-weight:700;">' + esc(m.subject || '(No subject)') + '</div>'
+          + '<div class="meta-row">'
+          + '  <span><strong>' + esc(t('store')) + ':</strong> ' + esc(fmtStore(m.store)) + '</span>'
+          + '  <span><strong>' + esc(peerLabel) + ':</strong> ' + esc(peerValue) + '</span>'
+          + '  <span><strong>' + esc(t('status')) + ':</strong> ' + esc(statusLabel) + '</span>'
+          + '  <span><strong>' + esc(t('date')) + ':</strong> ' + esc(fmtTs(m.created_at)) + '</span>'
+          + '</div>'
+          + '<div class="body">' + esc(m.body || '') + '</div>'
+          + '<div class="actions" style="justify-content:flex-start;">'
+          + '  <button id="replyBtn" type="button" class="btn">' + esc(t('reply')) + '</button>'
+          + '</div>';
+
+        const replyBtn = $('replyBtn');
+        if(replyBtn){
+          replyBtn.addEventListener('click', () => {
+            prepareReply(m);
+          });
+        }
+      }
+
+      function clearCompose(){
+        $('replyToId').value = '';
+        $('composeTo').value = '';
+        $('composeSubject').value = '';
+        $('composeBody').value = '';
+        setStatus('');
+      }
+
+      function prepareReply(m){
+        $('replyToId').value = String(m.id);
+        $('composeStore').value = fmtStore(m.store) === 'eBay' ? 'ebay' : 'amazon';
+        $('composeTo').value = m.sender_name || m.recipient_name || '';
+        const subj = (m.subject || '').trim();
+        $('composeSubject').value = subj.toLowerCase().startsWith('re:') ? subj : ('Re: ' + (subj || 'Message'));
+        $('composeBody').focus();
+      }
+
+      async function setActiveMessage(id){
+        state.activeId = id;
+        renderList();
+        renderDetail();
+        const m = state.messages.find(x => x.id === id);
+        if(m && m.direction === 'inbound' && m.status === 'unread'){
+          m.status = 'read';
+          renderList();
+          renderDetail();
+          await markRead(id);
+        }
+      }
+
+      async function loadMessages(opts){
+        const keepSelection = !opts || opts.keepSelection !== false;
+        const force = !!(opts && opts.force);
+        const now = Date.now();
+        const query = buildQuery();
+        if(state.loadPromise){
+          return state.loadPromise;
+        }
+        if(!force && state.lastLoadQuery === query && (now - state.lastLoadAt) < 1000){
+          return;
+        }
+
+        state.loadPromise = (async () => {
+          setStatus(t('loading'));
+          try{
+            const r = await fetch('/api/mail-center/messages?' + query);
+            const j = await r.json();
+            if(!j || !j.success){
+              throw new Error((j && j.error) ? j.error : 'Failed to load messages');
+            }
+            state.messages = j.messages || [];
+            if(keepSelection && state.activeId && state.messages.some(m => m.id === state.activeId)){
+              // keep active selection
+            } else {
+              state.activeId = state.messages.length ? state.messages[0].id : null;
+            }
+            renderList();
+            renderDetail();
+            setStatus('');
+            state.lastLoadAt = Date.now();
+            state.lastLoadQuery = query;
+          }catch(err){
+            setStatus((err && err.message) ? err.message : t('error'), 'err');
+          } finally {
+            state.loadPromise = null;
+          }
+        })();
+        return state.loadPromise;
+      }
+
+      async function syncLive(opts){
+        const silent = !!(opts && opts.silent);
+        const now = Date.now();
+        if(state.syncPromise){
+          return state.syncPromise;
+        }
+        if(!silent && (now - state.lastSyncAt) < 1000){
+          return;
+        }
+        state.syncPromise = (async () => {
+          if(!silent) setStatus(t('live_syncing'));
+          try{
+            const payload = { store: (storeFilterEl.value || 'all') };
+            const resp = await fetch('/api/mail-center/sync', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload)
+            });
+            const j = await resp.json();
+            if(!resp.ok || !j.success){
+              throw new Error((j && j.error) ? j.error : 'Sync failed');
+            }
+            state.lastSyncAt = Date.now();
+            if(!silent){
+              const warnings = (j.warnings || []);
+              setStatus(warnings.length ? warnings.join(', ') : t('live_sync_ok'), warnings.length ? 'err' : 'ok');
+            }
+          }catch(err){
+            if(!silent){
+              setStatus((err && err.message) ? err.message : t('error'), 'err');
+            }
+          } finally {
+            state.syncPromise = null;
+          }
+        })();
+        return state.syncPromise;
+      }
+
+      async function sendMessage(ev){
+        ev.preventDefault();
+        setStatus('');
+        const store = $('composeStore').value || '';
+        const recipient_name = ($('composeTo').value || '').trim();
+        const subject = ($('composeSubject').value || '').trim();
+        const body = ($('composeBody').value || '').trim();
+        const reply_to_id = $('replyToId').value ? parseInt($('replyToId').value, 10) : null;
+        if(!body){
+          setStatus(t('message_body_required'), 'err');
+          return;
+        }
+
+        try{
+          const resp = await fetch('/api/mail-center/send', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ store, recipient_name, subject, body, reply_to_id })
+          });
+          const j = await resp.json();
+          if(!resp.ok || !j.success){
+            throw new Error((j && j.error) ? j.error : 'Send failed');
+          }
+
+          setStatus(t('message_sent_ok'), 'ok');
+          $('replyToId').value = '';
+          $('composeSubject').value = '';
+          $('composeBody').value = '';
+          if((boxFilterEl.value || 'inbox') === 'sent'){
+            await loadMessages({ keepSelection: false });
+          }
+        }catch(err){
+          setStatus((err && err.message) ? err.message : t('error'), 'err');
+        }
+      }
+
+      function wireEvents(){
+        $('refreshBtn').addEventListener('click', () => loadMessages({ keepSelection: true }));
+        if(syncBtnEl){
+          syncBtnEl.addEventListener('click', async () => {
+            await syncLive({ silent: false });
+            await loadMessages({ keepSelection: true, force: true });
+          });
+        }
+        $('clearComposeBtn').addEventListener('click', clearCompose);
+        $('composeForm').addEventListener('submit', sendMessage);
+        storeFilterEl.addEventListener('change', () => loadMessages({ keepSelection: false }));
+        boxFilterEl.addEventListener('change', () => loadMessages({ keepSelection: false }));
+
+        let searchTimer = null;
+        searchInputEl.addEventListener('input', () => {
+          clearTimeout(searchTimer);
+          searchTimer = setTimeout(() => loadMessages({ keepSelection: false }), 220);
+        });
+      }
+
+      wireEvents();
+      (async () => {
+        await syncLive({ silent: true });
+        await loadMessages({ keepSelection: false, force: true });
+      })();
+      setInterval(async () => {
+        if(document.visibilityState !== 'visible') return;
+        await syncLive({ silent: true });
+        await loadMessages({ keepSelection: true, force: true });
+      }, 60000);
+    })();
+  </script>
+</body>
+</html>
