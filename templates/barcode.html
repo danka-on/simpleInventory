@@ -275,12 +275,28 @@
             if (!/^\d+$/.test(code)) {
                 return false;
             }
-            // Valid lengths: 8 (UPC-E), 11, 12 (UPC-A), 13 (EAN-13), 14 (GTIN-14)
+            // Valid lengths for this workflow: UPC-family only (8, 11, 12)
             const len = code.length;
-            if (len < 8 || len > 14) {
+            if (len < 8 || len > 12) {
                 return false;
             }
             return true;
+        }
+
+        function normalizeScannedBarcode(code) {
+            const s0 = String(code || '').trim();
+            if (!/^\d+$/.test(s0)) return s0;
+            if (s0.length > 12 && s0.startsWith('0')) {
+                const stripped = s0.replace(/^0+/, '');
+                if (stripped && stripped.length <= 12) return stripped;
+            }
+            return s0;
+        }
+
+        function formatUpcDisplay(code) {
+            const s = String(code || '').trim();
+            if (/^\d+$/.test(s) && s.length <= 12) return s.padStart(12, '0');
+            return s;
         }
 
         // Handle barcode input for manual or scanner input
@@ -372,7 +388,7 @@
 
             listEl.innerHTML = scannedBarcodes.map((code, idx) => `
                 <div style="display:flex; justify-content:space-between; align-items:center; padding:8px; background:#fff; margin-bottom:4px; border-radius:4px;">
-                    <span style="font-family:monospace; font-weight:600;">${code}</span>
+                    <span style="font-family:monospace; font-weight:600;">${formatUpcDisplay(code)}</span>
                     <button onclick="removeBarcodeAt(${idx})" style="background:#e74c3c; color:#fff; border:none; padding:4px 8px; border-radius:4px; cursor:pointer;">X</button>
                 </div>
             `).join('');
@@ -455,6 +471,7 @@
 
         // Ensure barcode is set in sessionStorage on successful scan or input
         function handleBarcodeScan(code) {
+            code = normalizeScannedBarcode(code);
             // Validate barcode format
             if (!isValidBarcode(code)) {
                 playErrorBeep();

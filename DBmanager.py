@@ -410,7 +410,7 @@ def store_ebay_order(order):
                     bol_cur.execute('SELECT item_description, image_url FROM raw_bol_items WHERE upc = ? COLLATE NOCASE LIMIT 1', (barcode_val,))
                     row_bol = bol_cur.fetchone()
                     if not row_bol and barcode_val.startswith('0'):
-                        barcode_no_zero = barcode_val.lstrip('0')
+                        barcode_no_zero = barcode_val.lstrip('0') if str(barcode_val).isdigit() else barcode_val
                         bol_cur.execute('SELECT item_description, image_url FROM raw_bol_items WHERE upc = ? COLLATE NOCASE LIMIT 1', (barcode_no_zero,))
                         row_bol = bol_cur.fetchone()
                     if row_bol:
@@ -744,7 +744,7 @@ def enrich_searchrack_db(batch_size=500, do_backup=True):
                                     rawbol_cur.execute("SELECT image_url FROM raw_bol_items WHERE upc = ?", (upc,))
                                     rawbol_row = rawbol_cur.fetchone()
                                     if not rawbol_row and upc.startswith('0'):
-                                        upc_no_zero = upc.lstrip('0')
+                                        upc_no_zero = upc.lstrip('0') if str(upc).isdigit() else upc
                                         rawbol_cur.execute("SELECT image_url FROM raw_bol_items WHERE upc = ?", (upc_no_zero,))
                                         rawbol_row = rawbol_cur.fetchone()
                                     if rawbol_row:

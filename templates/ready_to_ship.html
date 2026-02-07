@@ -878,6 +878,11 @@ const OrderManager = {
 function esc(s) {
     return String(s||'').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
+function formatUpcDisplay(code) {
+    const s = String(code || '').trim();
+    if (/^\d+$/.test(s) && s.length <= 12) return s.padStart(12, '0');
+    return s;
+}
 
 function tdTitle(order) {
     const fullTitle = esc(order.title || '');
@@ -1567,7 +1572,7 @@ function showOrderPopup(title, imageUrl, info, loc, price, paidTime, barcode) {
     
     // Add barcode under image if available
     if (barcode) {
-        content += `<div class="popup-muted" style="font-size: 0.9rem; margin-bottom: 12px;"><strong>Barcode:</strong> ${esc(barcode)}</div>`;
+        content += `<div class="popup-muted" style="font-size: 0.9rem; margin-bottom: 12px;"><strong>Barcode:</strong> ${esc(formatUpcDisplay(barcode))}</div>`;
     }
     
     if (info) {

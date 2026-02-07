@@ -1924,7 +1924,7 @@ def api_listingagent_upc_detail(upc):
             _ensure_items_prep_tables()
 
             base_upc = (upc.split('-', 1)[0] if '-' in upc else upc).strip()
-            base_upc = base_upc.lstrip('0') if base_upc and base_upc.isdigit() else base_upc
+            base_upc = _strip_leading_zeros_numeric(base_upc)
             like_upc = f"{base_upc}-%" if base_upc else ''
 
             prep_notes = []
@@ -5542,6 +5542,48 @@ def _normalize_upc(upc):
     except Exception:
         return str(upc or '')
 
+def _format_upc_display(upc):
+    """Display helper: numeric UPCs are shown as UPC-A width (12 digits)."""
+    s = _normalize_upc(upc)
+    if s and s.isdigit() and len(s) <= 12:
+        return s.zfill(12)
+    return s
+
+def _normalize_scanned_upc(upc):
+    """
+    Scanner helper:
+    - Preserve original code unless it has extra leading zeros beyond UPC-A width.
+    - Keep non-digit values unchanged.
+    """
+    s = _normalize_upc(upc)
+    if not s or not s.isdigit():
+        return s
+    if len(s) > 12 and s.startswith('0'):
+        stripped = s.lstrip('0')
+        if stripped and len(stripped) <= 12:
+            return stripped
+    return s
+
+def _strip_leading_zeros_numeric(value):
+    """Legacy-match helper: strip leading zeros only for fully numeric codes."""
+    s = _normalize_upc(value)
+    if s and s.isdigit():
+        return s.lstrip('0')
+    return s
+
+def _normalize_upc_preserve_suffix_for_match(value):
+    """
+    Strip leading zeros from numeric UPCs while preserving -suffix variants.
+    Example: 0719978859014-24 -> 719978859014-24
+    """
+    s = _normalize_upc(value)
+    if not s:
+        return s
+    if '-' in s:
+        base, suffix = s.split('-', 1)
+        return f"{_strip_leading_zeros_numeric(base)}-{suffix}"
+    return _strip_leading_zeros_numeric(s)
+
 def _ensure_items_prep_tables():
     try:
         conn = sqlite3.connect('bol.db')
@@ -5996,7 +6038,7 @@ def _process_automatic_inventory_removals():
                 item_row = None
 
                 # Helper to clean barcode for comparisons
-                barcode_stripped = barcode.lstrip('0') if barcode and barcode.isdigit() else barcode
+                barcode_stripped = _strip_leading_zeros_numeric(barcode)
 
                 # 1. Try exact match first
                 searchrack_cur.execute('SELECT ID, QUANTITY FROM SEARCHRACK WHERE BARCODE = ?', (barcode,))
@@ -6324,15 +6366,7 @@ def item_prep_log_page():
 @app.route('/item-prep/diagnostic')
 def item_prep_diagnostic_page():
     upc_raw = (request.args.get('upc') or '').strip()
-    # Strip leading zeros ONLY if it's all digits (preserve suffix like -24)
-    if upc_raw and '-' in upc_raw:
-        # Has suffix: strip zeros from base part only (e.g., '0719978859014-24' -> '719978859014-24')
-        parts = upc_raw.split('-', 1)
-        base = parts[0].lstrip('0') if parts[0].isdigit() else parts[0]
-        upc = f"{base}-{parts[1]}"
-    else:
-        # No suffix: strip zeros normally
-        upc = upc_raw.lstrip('0') if upc_raw.isdigit() else upc_raw
+    upc = _normalize_upc_preserve_suffix_for_match(upc_raw)
     
     # If coming from Item Manager with lot parameter, set it in session
     lot = request.args.get('lot', '').strip()
@@ -6346,8 +6380,8 @@ def item_prep_diagnostic_page():
 @app.route('/item-prep/diagnostic/view')
 def item_prep_diagnostic_view_page():
     upc_raw = request.args.get('upc', '').strip()
-    # Strip leading zeros from barcode
-    upc_stripped = upc_raw.lstrip('0') if upc_raw.isdigit() else upc_raw
+    # Strip leading zeros from numeric barcode values
+    upc_stripped = _strip_leading_zeros_numeric(upc_raw)
     upc = _normalize_upc(upc_stripped)
     
     # If coming from Item Manager with lot parameter, set it in session
@@ -7070,7 +7104,7 @@ def api_items_prep_status_get(upc):
     try:
         upc_norm = _normalize_upc(upc)
         # Strip leading zeros to match item manager behavior
-        upc_n = upc_norm.lstrip('0') if upc_norm and upc_norm.isdigit() else upc_norm
+        upc_n = _strip_leading_zeros_numeric(upc_norm)
         _ensure_items_prep_tables()
         conn = sqlite3.connect('bol.db')
         conn.row_factory = sqlite3.Row
@@ -7107,12 +7141,7 @@ def api_items_prep_status():
             return jsonify({'success': False, 'error': 'Missing upc or invalid status'}), 400
         
         # Strip leading zeros but preserve suffix
-        if upc and '-' in upc:
-            parts = upc.split('-', 1)
-            base = parts[0].lstrip('0') if parts[0].isdigit() else parts[0]
-            upc = f"{base}-{parts[1]}"
-        else:
-            upc = upc.lstrip('0') if upc and upc.isdigit() else upc
+        upc = _normalize_upc_preserve_suffix_for_match(upc)
         
         base_upc = upc.split('-')[0] if '-' in upc else upc
         
@@ -7540,7 +7569,7 @@ def api_items_prep_allocate_lots():
             return jsonify({'success': False, 'error': 'Missing upc or allocations'}), 400
         
         # Strip leading zeros
-        base_upc = upc.lstrip('0') if upc and upc.isdigit() else upc
+        base_upc = _strip_leading_zeros_numeric(upc)
         
         conn = sqlite3.connect('bol.db')
         cur = conn.cursor()
@@ -7675,12 +7704,7 @@ def api_items_prep_create_bad_entry():
             return jsonify({'success': False, 'error': 'Missing upc'}), 400
         
         # Strip leading zeros
-        if upc and '-' in upc:
-            parts = upc.split('-', 1)
-            base = parts[0].lstrip('0') if parts[0].isdigit() else parts[0]
-            upc = f"{base}-{parts[1]}"
-        else:
-            upc = upc.lstrip('0') if upc and upc.isdigit() else upc
+        upc = _normalize_upc_preserve_suffix_for_match(upc)
         
         base_upc = upc.split('-')[0] if '-' in upc else upc
         
@@ -7798,12 +7822,7 @@ def api_items_prep_create_return_entry():
             return jsonify({'success': False, 'error': 'Missing upc'}), 400
         
         # Strip leading zeros
-        if upc and '-' in upc:
-            parts = upc.split('-', 1)
-            base = parts[0].lstrip('0') if parts[0].isdigit() else parts[0]
-            upc = f"{base}-{parts[1]}"
-        else:
-            upc = upc.lstrip('0') if upc and upc.isdigit() else upc
+        upc = _normalize_upc_preserve_suffix_for_match(upc)
         
         base_upc = upc.split('-')[0] if '-' in upc else upc
         
@@ -7981,10 +8000,7 @@ def api_items_prep_status_delete(upc):
     try:
         upc_norm = _normalize_upc(upc)
         # Strip leading zeros to match item manager behavior (but preserve suffixes like -1)
-        if upc_norm and '-' not in upc_norm and upc_norm.isdigit():
-            upc = upc_norm.lstrip('0')
-        else:
-            upc = upc_norm
+        upc = _normalize_upc_preserve_suffix_for_match(upc_norm)
         if not upc:
             return jsonify({'success': False, 'error': 'Missing upc'}), 400
         
@@ -8028,17 +8044,11 @@ def _items_prep_undo_core(*, upc, status, qty=1, base_upc=None):
             qty = 1
 
         upc_norm = _normalize_upc(upc)
-        if upc_norm and '-' not in upc_norm and upc_norm.isdigit():
-            upc = upc_norm.lstrip('0')
-        else:
-            upc = upc_norm
+        upc = _normalize_upc_preserve_suffix_for_match(upc_norm)
 
         if base_upc:
             base_upc_norm = _normalize_upc(base_upc)
-            if base_upc_norm and base_upc_norm.isdigit():
-                base_upc = base_upc_norm.lstrip('0')
-            else:
-                base_upc = base_upc_norm
+            base_upc = _strip_leading_zeros_numeric(base_upc_norm)
 
         _ensure_items_prep_tables()
         conn = sqlite3.connect('bol.db')
@@ -8180,14 +8190,7 @@ def api_items_prep_diagnostic():
         _ensure_items_prep_tables()
         upc_raw = _normalize_upc(request.form.get('upc'))
         # Strip leading zeros ONLY if it's all digits (preserve suffix like -24)
-        if upc_raw and '-' in upc_raw:
-            # Has suffix: strip zeros from base part only (e.g., '0719978859014-24' -> '719978859014-24')
-            parts = upc_raw.split('-', 1)
-            base = parts[0].lstrip('0') if parts[0].isdigit() else parts[0]
-            upc = f"{base}-{parts[1]}"
-        else:
-            # No suffix: strip zeros normally
-            upc = upc_raw.lstrip('0') if upc_raw and upc_raw.isdigit() else upc_raw
+        upc = _normalize_upc_preserve_suffix_for_match(upc_raw)
         reason = (request.form.get('reason') or '').strip()
         note = (request.form.get('note') or '').strip()
         if not upc:
@@ -8290,14 +8293,7 @@ def api_items_prep_diagnostic_get(upc):
     try:
         upc_norm = _normalize_upc(upc)
         # Strip leading zeros ONLY if it's all digits (preserve suffix like -24)
-        if upc_norm and '-' in upc_norm:
-            # Has suffix: strip zeros from base part only (e.g., '0719978859014-24' -> '719978859014-24')
-            parts = upc_norm.split('-', 1)
-            base = parts[0].lstrip('0') if parts[0].isdigit() else parts[0]
-            upc_n = f"{base}-{parts[1]}"
-        else:
-            # No suffix: strip zeros normally
-            upc_n = upc_norm.lstrip('0') if upc_norm and upc_norm.isdigit() else upc_norm
+        upc_n = _normalize_upc_preserve_suffix_for_match(upc_norm)
         print(f'[DEBUG] Getting diagnostic for UPC: {upc} -> {upc_norm} -> {upc_n}')
         _ensure_items_prep_tables()
         conn = sqlite3.connect('bol.db')
@@ -8322,7 +8318,7 @@ def api_items_prep_diagnostic_delete_photos(upc):
     try:
         upc_norm = _normalize_upc(upc)
         # Strip leading zeros to match item manager behavior
-        upc_n = upc_norm.lstrip('0') if upc_norm and upc_norm.isdigit() else upc_norm
+        upc_n = _strip_leading_zeros_numeric(upc_norm)
         hard = (request.args.get('hard') or '0') in ('1','true','yes')
         _ensure_items_prep_tables()
         conn = sqlite3.connect('bol.db')
@@ -8381,7 +8377,7 @@ def api_items_prep_diagnostic_add_photos(upc):
     try:
         upc_norm = _normalize_upc(upc)
         # Strip leading zeros to match item manager behavior
-        upc_n = upc_norm.lstrip('0') if upc_norm and upc_norm.isdigit() else upc_norm
+        upc_n = _strip_leading_zeros_numeric(upc_norm)
         if not upc_n:
             return jsonify({'success': False, 'error': 'Missing upc'}), 400
         _ensure_items_prep_tables()
@@ -8489,7 +8485,7 @@ def api_items_prep_set_display_image():
     try:
         data = request.get_json() or {}
         upc = _normalize_upc(data.get('upc', ''))
-        upc_n = upc.lstrip('0') if upc and upc.isdigit() else upc
+        upc_n = _strip_leading_zeros_numeric(upc)
         photo_id = data.get('photo_id')
         image_path = data.get('image_path')
         
@@ -8541,7 +8537,7 @@ def api_items_prep_trash_list(upc):
     try:
         upc_norm = _normalize_upc(upc)
         # Strip leading zeros to match item manager behavior
-        upc_n = upc_norm.lstrip('0') if upc_norm and upc_norm.isdigit() else upc_norm
+        upc_n = _strip_leading_zeros_numeric(upc_norm)
         _ensure_items_prep_tables()
         conn = sqlite3.connect('bol.db')
         conn.row_factory = sqlite3.Row
@@ -8656,7 +8652,7 @@ def api_items_prep_notes_get(upc):
     try:
         upc_norm = _normalize_upc(upc)
         # Strip leading zeros to match item manager behavior
-        upc_n = upc_norm.lstrip('0') if upc_norm and upc_norm.isdigit() else upc_norm
+        upc_n = _strip_leading_zeros_numeric(upc_norm)
         _ensure_items_prep_tables()
         conn = sqlite3.connect('bol.db')
         conn.row_factory = sqlite3.Row
@@ -8676,7 +8672,7 @@ def api_items_prep_notes_add():
         data = request.get_json() or {}
         upc_norm = _normalize_upc(data.get('upc'))
         # Strip leading zeros to match item manager behavior
-        upc = upc_norm.lstrip('0') if upc_norm and upc_norm.isdigit() else upc_norm
+        upc = _strip_leading_zeros_numeric(upc_norm)
         note = (data.get('note') or '').strip()
         if not upc or not note:
             return jsonify({'success': False, 'error': 'Missing upc or note'}), 400
@@ -8718,7 +8714,7 @@ def api_items_prep_location_get(upc):
     try:
         upc_norm = _normalize_upc(upc)
         # Strip leading zeros to match item manager behavior
-        upc = upc_norm.lstrip('0') if upc_norm and upc_norm.isdigit() else upc_norm
+        upc = _strip_leading_zeros_numeric(upc_norm)
         _ensure_items_prep_tables()
         conn = sqlite3.connect('bol.db')
         cur = conn.cursor()
@@ -8740,7 +8736,7 @@ def api_items_prep_location_set():
         data = request.get_json() or {}
         upc_norm = _normalize_upc(data.get('upc'))
         # Strip leading zeros to match item manager behavior
-        upc = upc_norm.lstrip('0') if upc_norm and upc_norm.isdigit() else upc_norm
+        upc = _strip_leading_zeros_numeric(upc_norm)
         location = (data.get('location') or '').strip()
         pictureposition = (data.get('pictureposition') or '').strip()
         if not upc:
@@ -11835,8 +11831,8 @@ def api_bol_items():
         lot = (request.args.get('lot') or '').strip()
         import_date = (request.args.get('import_date') or '').strip()
         q = (request.args.get('q') or '').strip()
-        # Strip leading zeros from barcode searches
-        q_stripped = q.lstrip('0') if q and q.isdigit() else q
+        # Strip leading zeros from numeric barcode searches
+        q_stripped = _strip_leading_zeros_numeric(q)
         status_filter = (request.args.get('status') or '').strip().lower()
         page = int(request.args.get('page', 1))
         limit = int(request.args.get('limit', 25))
@@ -13194,7 +13190,16 @@ def process_position():
 #inventory flow #3
 @app.route('/submitbarcode', methods=['POST'])
 def process_barcode():
-    session['inv_barcode'] = request.form.get('scanned_result')
+    scanned = (request.form.get('scanned_result') or '').strip()
+    if ',' in scanned:
+        normalized_codes = [
+            _normalize_scanned_upc(code)
+            for code in scanned.split(',')
+            if (code or '').strip()
+        ]
+        session['inv_barcode'] = ','.join(normalized_codes)
+    else:
+        session['inv_barcode'] = _normalize_scanned_upc(scanned)
     print("Received scanned code:", session.get('inv_barcode'))
 
     return render_template("additem.html")
@@ -14497,7 +14502,7 @@ def repair_missing_removals():
                 continue
 
             # Try to find item in searchRack with flexible matching
-            barcode_stripped = barcode.lstrip('0') if barcode.isdigit() else barcode
+            barcode_stripped = _strip_leading_zeros_numeric(barcode)
             item_row = None
 
             # Try exact match
@@ -14678,7 +14683,7 @@ def remove_sold_now(order_id):
         row = searchrack_cur.fetchone()
 
         if not row and barcode.isdigit():
-            barcode_stripped = barcode.lstrip('0')
+            barcode_stripped = _strip_leading_zeros_numeric(barcode)
             searchrack_cur.execute('SELECT ID, QUANTITY, ITEM_POSITION, TITLE FROM SEARCHRACK WHERE BARCODE = ? COLLATE NOCASE', (barcode_stripped,))
             row = searchrack_cur.fetchone()
 
@@ -14773,7 +14778,7 @@ def find_inventory_for_sold(order_id):
 
         # Try stripped zeros
         if barcode.isdigit():
-            barcode_stripped = barcode.lstrip('0')
+            barcode_stripped = _strip_leading_zeros_numeric(barcode)
             if barcode_stripped != barcode:
                 searchrack_cur.execute('''
                     SELECT ID, TITLE, BARCODE, ITEM_POSITION, PICTUREPOSITION, QUANTITY, IMAGE
@@ -15885,7 +15890,7 @@ def api_finder():
     if not q:
         return jsonify({'searchrack': [], 'rawbol': []})
 
-    q_stripped = q.lstrip('0') if q.isdigit() else q
+    q_stripped = _strip_leading_zeros_numeric(q)
     # Split into words for multi-word fuzzy matching
     words = [w for w in q_stripped.split() if len(w) >= 2]
     if not words:
@@ -15919,10 +15924,12 @@ def api_finder():
                        WHERE {where}
                        LIMIT 20''', params)
         for row in cur.fetchall():
+            barcode_raw = row['BARCODE']
             searchrack_results.append({
                 'id': row['ID'],
                 'title': row['TITLE'],
-                'barcode': row['BARCODE'],
+                'barcode': barcode_raw,
+                'barcode_display': _format_upc_display(barcode_raw),
                 'item_position': row['ITEM_POSITION'],
                 'pictureposition': row['PICTUREPOSITION'],
                 'quantity': row['QUANTITY'],
@@ -15944,8 +15951,10 @@ def api_finder():
                        WHERE {where}
                        LIMIT 20''', params)
         for row in cur.fetchall():
+            upc_raw = row['upc']
             rawbol_results.append({
-                'upc': row['upc'],
+                'upc': upc_raw,
+                'upc_display': _format_upc_display(upc_raw),
                 'item_description': row['item_description'],
                 'image_url': row['image_url'],
                 'lot_number': row['lot_number'],
@@ -15973,7 +15982,7 @@ def api_lookup_image_by_barcode():
         cur = conn.cursor()
 
         row = None
-        barcode_stripped = barcode.lstrip('0') if barcode.isdigit() else barcode
+        barcode_stripped = _strip_leading_zeros_numeric(barcode)
 
         # Try exact match first
         cur.execute('SELECT image_url FROM raw_bol_items WHERE upc = ? COLLATE NOCASE LIMIT 1', (barcode,))
@@ -16149,7 +16158,7 @@ def unified_search_page():
 def searchrack_api():
     q = request.args.get('q', '').strip()
     # Strip leading zeros from barcode searches
-    q_stripped = q.lstrip('0') if q.isdigit() else q
+    q_stripped = _strip_leading_zeros_numeric(q)
     results = []
     if q_stripped:
         conn = sqlite3.connect('searchRack.db')
@@ -16211,7 +16220,7 @@ def searchrack_api():
 def searchbol_api():
     q = request.args.get('q', '').strip()
     # Strip leading zeros from barcode searches
-    q_stripped = q.lstrip('0') if q.isdigit() else q
+    q_stripped = _strip_leading_zeros_numeric(q)
     results = []
     if q_stripped:
         conn = sqlite3.connect('rawbol.db')
@@ -16345,7 +16354,7 @@ def api_search_db(db_key):
     q = (data.get('q') or '').strip()
     print(f"DEBUG: api_search_db hit. db={db_key}, q='{q}'")
     # Strip leading zeros from barcode searches
-    q_stripped = q.lstrip('0') if q and q.isdigit() else q
+    q_stripped = _strip_leading_zeros_numeric(q)
     # Accept limit from client. If limit is 0 or None, we will NOT apply a SQL LIMIT (i.e., return all rows).
     limit_raw = data.get('limit')
     try:
@@ -16510,7 +16519,7 @@ def api_search_db(db_key):
                 bc = r.get('BARCODE') or r.get('barcode') or r.get('Barcode') or ''
                 if bc:
                     base = str(bc).split('-')[0]
-                    base = base.lstrip('0') if base and base.isdigit() else base
+                    base = _strip_leading_zeros_numeric(base)
                     if base:
                         _barcodes_to_enrich.add(base)
             if _barcodes_to_enrich:
@@ -16522,7 +16531,7 @@ def api_search_db(db_key):
                     with connect_db('ebayStore.db') as _ec:
                         _ec.row_factory = sqlite3.Row
                         for r in _ec.cursor().execute(f"SELECT Title, Image, ItemID, UPC FROM INVENTORY WHERE UPC IN ({placeholders}) COLLATE NOCASE", bc_tuple):
-                            upc_key = (r['UPC'] or '').lstrip('0') if (r['UPC'] or '').isdigit() else r['UPC']
+                            upc_key = _strip_leading_zeros_numeric(r['UPC'] or '')
                             _enrichment_cache.setdefault(upc_key, {}).update({'title': r['Title'], 'image': r['Image'], 'item_id': r['ItemID']})
                 except Exception:
                     pass
@@ -16531,7 +16540,7 @@ def api_search_db(db_key):
                     with connect_db('amazonStore.db') as _ac:
                         _ac.row_factory = sqlite3.Row
                         for r in _ac.cursor().execute(f"SELECT TITLE, IMAGE, ASIN, UPC FROM ITEMS WHERE UPC IN ({placeholders}) COLLATE NOCASE", bc_tuple):
-                            upc_key = (r['UPC'] or '').lstrip('0') if (r['UPC'] or '').isdigit() else r['UPC']
+                            upc_key = _strip_leading_zeros_numeric(r['UPC'] or '')
                             cached = _enrichment_cache.setdefault(upc_key, {})
                             cached.setdefault('title', r['TITLE'])
                             cached.setdefault('image', r['IMAGE'])
@@ -16543,7 +16552,7 @@ def api_search_db(db_key):
                     with connect_db('rawbol.db') as _rc:
                         _rc.row_factory = sqlite3.Row
                         for r in _rc.cursor().execute(f"SELECT item_description, image_url, upc FROM raw_bol_items WHERE upc IN ({placeholders}) COLLATE NOCASE", bc_tuple):
-                            upc_key = (r['upc'] or '').lstrip('0') if (r['upc'] or '').isdigit() else r['upc']
+                            upc_key = _strip_leading_zeros_numeric(r['upc'] or '')
                             cached = _enrichment_cache.setdefault(upc_key, {})
                             cached.setdefault('title', r['item_description'])
                             cached.setdefault('image', r['image_url'])
@@ -16555,7 +16564,7 @@ def api_search_db(db_key):
                     with connect_db('bol.db') as _bc:
                         _bc.row_factory = sqlite3.Row
                         for r in _bc.cursor().execute(f"SELECT item_description, image_url, upc FROM bol_items WHERE upc IN ({placeholders}) COLLATE NOCASE", bc_tuple):
-                            upc_key = (r['upc'] or '').lstrip('0') if (r['upc'] or '').isdigit() else r['upc']
+                            upc_key = _strip_leading_zeros_numeric(r['upc'] or '')
                             cached = _enrichment_cache.setdefault(upc_key, {})
                             cached.setdefault('title', r['item_description'])
                             cached.setdefault('image', r['image_url'])
@@ -16658,7 +16667,7 @@ def api_search_db(db_key):
                 if db_key == 'searchRack' and item_out.get('barcode'):
                     lookup_barcode = item_out.get('barcode')
                     base_barcode = str(lookup_barcode).split('-')[0] if lookup_barcode else lookup_barcode
-                    base_barcode = base_barcode.lstrip('0') if base_barcode and base_barcode.isdigit() else base_barcode
+                    base_barcode = _strip_leading_zeros_numeric(base_barcode)
                     cached = _enrichment_cache.get(base_barcode, {})
                     if cached:
                         item_out['title'] = item_out.get('title') or cached.get('title')
@@ -16705,7 +16714,7 @@ def api_search_db(db_key):
                                 barcode_to_lookup = str(barcode_to_lookup).strip()
                                 if barcode_to_lookup.endswith('.0') and barcode_to_lookup.replace('.0', '').isdigit():
                                     barcode_to_lookup = barcode_to_lookup[:-2]
-                            barcode_stripped = barcode_to_lookup.lstrip('0') if barcode_to_lookup.isdigit() else barcode_to_lookup
+                            barcode_stripped = _strip_leading_zeros_numeric(barcode_to_lookup)
                             row_bol = None
 
                             # Try exact match first
@@ -17078,8 +17087,8 @@ def api_search_all():
         if not query:
             return jsonify({'error': 'No search query provided'}), 400
         
-        # Strip leading zeros for barcode searches
-        query_stripped = query.lstrip('0') if query and query.isdigit() else query
+        # Strip leading zeros for numeric barcode searches
+        query_stripped = _strip_leading_zeros_numeric(query)
         
         # Determine search type (UPC searches are cached)
         is_upc_search = query.isdigit()

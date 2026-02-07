@@ -352,7 +352,7 @@ const searchBtn = document.getElementById('searchBtn');
 if (orderTitle) {
   document.getElementById('orderContext').style.display = 'flex';
   document.getElementById('orderTitle').textContent = orderTitle;
-  if (orderBarcode) document.getElementById('orderBarcode').textContent = 'UPC: ' + orderBarcode;
+  if (orderBarcode) document.getElementById('orderBarcode').textContent = 'UPC: ' + formatUpcDisplay(orderBarcode);
   if (orderId) document.getElementById('orderIdDisplay').textContent = ' | Order #' + orderId;
 
   // Set order image if provided, otherwise try to fetch from rawbol using barcode
@@ -459,6 +459,11 @@ if (orderBarcode) {
 }
 
 function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+function formatUpcDisplay(code) {
+  const s = String(code || '').trim();
+  if (/^\d+$/.test(s) && s.length <= 12) return s.padStart(12, '0');
+  return s;
+}
 
 const missingImg = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="50" height="50"><rect width="100%" height="100%" fill="#f0f0f0"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#b0b0b0" font-size="8">No img</text></svg>');
 
@@ -514,7 +519,7 @@ function renderWarehouse(items) {
       <div class="details">
         <div class="title">${esc(item.title)}</div>
         <div class="meta">
-          <span>UPC: ${esc(item.barcode)}</span>
+          <span>UPC: ${esc(formatUpcDisplay(item.barcode))}</span>
           <span class="qty-display" data-id="${item.id}">Qty: ${item.quantity || '?'}</span>
         </div>
         ${locBadgeHtml}
@@ -535,14 +540,15 @@ function renderRawbol(items) {
 
   el.innerHTML = items.map(item => {
     const imgSrc = item.image_url || missingImg;
-    const upc = esc(item.upc || '');
+    const upcRaw = item.upc || '';
+    const upc = esc(upcRaw);
 
     return `<div class="result-card">
       <img src="${esc(imgSrc)}" onerror="this.src='${missingImg}'" style="cursor:pointer" onclick="showImgPopup(this.src)">
       <div class="details">
         <div class="title">${esc(item.item_description)}</div>
         <div class="meta">
-          <span>UPC: ${upc}</span>
+          <span>UPC: ${esc(formatUpcDisplay(upcRaw))}</span>
           <span>LOT: ${esc(item.lot_number)}</span>
         </div>
       </div>
@@ -749,7 +755,7 @@ async function handleMatch(searchrackId, barcode, location, btnEl) {
       // Show success banner with undo button
       const banner = document.getElementById('successBanner');
       const locText = location ? ` | Loc: ${location}` : '';
-      banner.innerHTML = `${t('barcode_matched') || 'Matched!'} UPC: ${barcode}${locText}
+      banner.innerHTML = `${t('barcode_matched') || 'Matched!'} UPC: ${formatUpcDisplay(barcode)}${locText}
         <button class="undo-btn" onclick="undoMatch()">${t('undo') || 'Undo'}</button>`;
       banner.style.display = 'block';
       banner.style.background = '#4caf50';

@@ -616,7 +616,7 @@ class AmazonManager:
 
                                     # If not found and barcode has leading zeros, try without them
                                     if not result and barcode.startswith('0'):
-                                        barcode_no_zero = barcode.lstrip('0')
+                                        barcode_no_zero = barcode.lstrip('0') if str(barcode).isdigit() else barcode
                                         rawbol_cur.execute('SELECT image_url FROM raw_bol_items WHERE upc = ?', (barcode_no_zero,))
                                         result = rawbol_cur.fetchone()
 
@@ -1007,7 +1007,7 @@ class AmazonManager:
                                 rawbol_row = rawbol_cur.fetchone()
 
                                 if not rawbol_row and upc.startswith('0'):
-                                    upc_no_zero = upc.lstrip('0')
+                                    upc_no_zero = upc.lstrip('0') if str(upc).isdigit() else upc
                                     rawbol_cur.execute("SELECT image_url FROM raw_bol_items WHERE upc = ?", (upc_no_zero,))
                                     rawbol_row = rawbol_cur.fetchone()
 

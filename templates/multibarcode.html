@@ -450,22 +450,34 @@
                 return false;
             }
             
-            // Valid lengths: 8 (UPC-E), 11, 12 (UPC-A), 13 (EAN-13), 14 (GTIN-14)
+            // Valid lengths for this workflow: UPC-family only (8, 11, 12)
             const len = code.length;
-            if (len < 8 || len > 14) {
+            if (len < 8 || len > 12) {
                 return false;
             }
-            
-            // Reject if longer than 14 digits (Macy's internal codes, etc.)
-            if (len > 14) {
-                return false;
-            }
-            
+
             return true;
+        }
+
+        function normalizeScannedBarcode(code) {
+            const s0 = String(code || '').trim();
+            if (!/^\d+$/.test(s0)) return s0;
+            if (s0.length > 12 && s0.startsWith('0')) {
+                const stripped = s0.replace(/^0+/, '');
+                if (stripped && stripped.length <= 12) return stripped;
+            }
+            return s0;
+        }
+
+        function formatUpcDisplay(code) {
+            const s = String(code || '').trim();
+            if (/^\d+$/.test(s) && s.length <= 12) return s.padStart(12, '0');
+            return s;
         }
         
         // Add barcode to list
         function addBarcode(code) {
+            code = normalizeScannedBarcode(code);
             // Validate barcode format
             if (!isValidBarcode(code)) {
                 playErrorBeep();
@@ -530,7 +542,7 @@
                 barcodeListEl.innerHTML = barcodeItems.map((item, index) => `
                     <div class="barcode-item">
                         <span class="barcode-text">
-                            ${item.code}
+                            ${formatUpcDisplay(item.code)}
                             ${item.quantity > 1 ? `<span style="margin-left: 10px; background: rgba(255,255,255,0.3); padding: 4px 10px; border-radius: 12px; font-size: 0.9em;">(${item.quantity}x)</span>` : ''}
                         </span>
                         <button class="delete-btn" onclick="removeBarcode(${index})" title="Remove one">

@@ -822,6 +822,11 @@ document.getElementById('sort-select').addEventListener('change', () => {
     // page-size control hidden when fetching all by default
 
 function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function formatUpcDisplay(code){
+    const s = String(code || '').trim();
+    if (/^\d+$/.test(s) && s.length <= 12) return s.padStart(12, '0');
+    return s;
+}
 
 function missingThumb(width=48,height=48,text='No Img'){ return 'data:image/svg+xml;utf8,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="'+width+'" height="'+height+'"><rect width="100%" height="100%" fill="#f8f8f8"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#b0b0b0" font-size="10">'+text+'</text></svg>'); }
 
@@ -914,9 +919,8 @@ function renderResults(results){
     const hasPicturePosition = !isArchived && r.pictureposition && String(r.pictureposition).trim() !== '' && String(r.pictureposition) !== 'undefined' && String(r.pictureposition) !== 'null' && String(r.pictureposition) !== 'nan';
     const thumb = (imgUrl && imgUrl.trim() && imgUrl.trim() !== '') ? img : (hasPicturePosition ? ('/static/pictureposition/'+r.pictureposition) : missingThumb());
     
-    // Strip leading zeros from barcode display
-    const barcodeStripped = barcodeRaw && /^\d+$/.test(String(barcodeRaw)) ? String(barcodeRaw).replace(/^0+/, '') : barcodeRaw;
-    const barcode = esc(barcodeStripped);
+    const barcode = esc(formatUpcDisplay(barcodeRaw));
+    const barcodeRawEsc = esc(barcodeRaw);
     const itemid = esc(r.item_id || (r.raw && (r.raw.ItemID || r.raw.item_id || r.raw.id || r.raw.upc)) || '')
         // Normalize quantity: allow 0 for searchRack, default to 1 for others
         function toIntLike(q, allowZero){
@@ -1050,7 +1054,7 @@ function renderResults(results){
             locationCell = `<td><span style="color:#27ae60;font-weight:600;">${esc(soldLocation)}</span></td>`;
         } else if (locDisplay) {
             // Single location - original behavior for warehouse items
-            locationCell = `<td>${`<a href="#" class=\"location-link\" data-src=\"${db}\" data-id=\"${r.id}\" data-barcode=\"${barcode}\" data-picture=\"${esc(r.pictureposition||'')}\" data-item_position=\"${esc((r.item_position||'').toLowerCase())}\">${esc(locDisplay)}</a>`}</td>`;
+            locationCell = `<td>${`<a href="#" class=\"location-link\" data-src=\"${db}\" data-id=\"${r.id}\" data-barcode=\"${barcodeRawEsc}\" data-picture=\"${esc(r.pictureposition||'')}\" data-item_position=\"${esc((r.item_position||'').toLowerCase())}\">${esc(locDisplay)}</a>`}</td>`;
         } else {
             locationCell = '<td></td>';
         }
@@ -1831,7 +1835,7 @@ async function loadHistory() {
             html += `<td style="padding:8px;border:1px solid #ddd;white-space:nowrap;">${date}</td>`;
             html += `<td style="padding:8px;border:1px solid #ddd;">${item.action}</td>`;
             html += `<td style="padding:8px;border:1px solid #ddd;">${item.title}</td>`;
-            html += `<td style="padding:8px;border:1px solid #ddd;">${item.barcode}</td>`;
+            html += `<td style="padding:8px;border:1px solid #ddd;">${esc(formatUpcDisplay(item.barcode))}</td>`;
             html += `<td style="padding:8px;border:1px solid #ddd;">${item.location || ''}</td>`;
             html += `<td style="padding:8px;border:1px solid #ddd;color:${qtyColor};font-weight:bold;">${qtySign}${item.quantity_change} (${item.old_quantity}→${item.new_quantity})</td>`;
             html += `<td style="padding:8px;border:1px solid #ddd;">${item.method}</td>`;
@@ -2235,7 +2239,7 @@ async function showCompleteHistory(orderId) {
                 <div style="background:#d4edda;padding:12px;border-radius:8px;margin-bottom:15px;">
                     <div><strong>Order ID:</strong> ${order.order_id || 'N/A'}</div>
                     <div><strong>Title:</strong> ${esc(order.title || 'N/A')}</div>
-                    <div><strong>Barcode:</strong> ${order.barcode || 'N/A'}</div>
+                    <div><strong>Barcode:</strong> ${order.barcode ? formatUpcDisplay(order.barcode) : 'N/A'}</div>
                 </div>
                 <h4 style="margin-bottom:10px;">Removal History</h4>
                 ${historyHtml}
@@ -2273,7 +2277,7 @@ async function showPendingRemoval(orderId, remainingMins) {
                 <div style="background:#fff3cd;padding:12px;border-radius:8px;margin-bottom:15px;">
                     <div><strong>Order ID:</strong> ${order.order_id || 'N/A'}</div>
                     <div><strong>Title:</strong> ${esc(order.title || 'N/A')}</div>
-                    <div><strong>Barcode:</strong> ${order.barcode || 'N/A'}</div>
+                    <div><strong>Barcode:</strong> ${order.barcode ? formatUpcDisplay(order.barcode) : 'N/A'}</div>
                     <div><strong>Shipped:</strong> ${order.shipped_time ? new Date(order.shipped_time).toLocaleString() : 'N/A'}</div>
                 </div>
                 <div style="background:#ffeaa7;padding:15px;border-radius:8px;text-align:center;margin-bottom:15px;">
@@ -2378,7 +2382,7 @@ async function showNotRemoved(orderId) {
                 <div style="background:#fee;padding:12px;border-radius:8px;margin-bottom:15px;">
                     <div><strong>Order ID:</strong> ${order.order_id || 'N/A'}</div>
                     <div><strong>Title:</strong> ${esc(order.title || 'N/A')}</div>
-                    <div><strong>Barcode:</strong> ${order.barcode || 'N/A'}</div>
+                    <div><strong>Barcode:</strong> ${order.barcode ? formatUpcDisplay(order.barcode) : 'N/A'}</div>
                     <div><strong>Qty Sold:</strong> ${order.quantity || 1}</div>
                 </div>
                 <h4 style="margin-bottom:10px;">Matching Inventory Items</h4>
