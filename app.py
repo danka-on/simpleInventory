@@ -10677,6 +10677,7 @@ def _mail_sync_amazon(days_back=7, max_orders=60):
     checked = 0
     inserted = 0
     updated = 0
+    first_error = None
     for r in rows:
         order_id = (r['order_id'] or '').strip()
         if not order_id:
@@ -10685,7 +10686,10 @@ def _mail_sync_amazon(days_back=7, max_orders=60):
         try:
             resp = msg_api.get_messaging_actions_for_order(order_id, marketplaceIds=[marketplace_id])
             payload = getattr(resp, 'payload', None) or {}
-        except Exception:
+        except Exception as e:
+            # Capture first error for reporting, but continue processing other orders
+            if first_error is None:
+                first_error = str(e)
             continue
 
         actions = []
@@ -10726,7 +10730,159 @@ def _mail_sync_amazon(days_back=7, max_orders=60):
             inserted += 1
         else:
             updated += 1
-    return {'checked_orders': checked, 'inserted': inserted, 'updated': updated}
+    
+    result = {'checked_orders': checked, 'inserted': inserted, 'updated': updated}
+    if first_error:
+        result['error'] = first_error
+        result['note'] = 'Authorization error: Check Amazon SP-API permissions. See MAIL_CENTER_AMAZON_FIX.md'
+    return result
+
+def _verify_sns_signature(message):
+    """Verify AWS SNS message signature to ensure it came from Amazon."""
+    try:
+        # Validate the certificate URL is from Amazon
+        cert_url = message.get('SigningCertUrl', '')
+        if not cert_url.startswith('https://sns.'):
+            return False
+        if '.amazonaws.com/' not in cert_url:
+            return False
+        
+        # Get the certificate from Amazon
+        try:
+            cert_response = requests.get(cert_url, timeout=5)
+            if cert_response.status_code != 200:
+                return False
+            cert_pem = cert_response.text
+        except Exception:
+            return False
+        
+        # Verify the signature
+        try:
+            from cryptography.hazmat.primitives import serialization, hashes
+            from cryptography.hazmat.primitives.asymmetric import padding
+            from cryptography.hazmat.backends import default_backend
+            from cryptography import x509
+            import base64
+            
+            # Load certificate
+            cert_obj = x509.load_pem_x509_certificate(
+                cert_pem.encode('utf-8'),
+                default_backend()
+            )
+            public_key = cert_obj.public_key()
+            
+            # Build the string to sign (order matters!)
+            fields_to_sign = []
+            for field in ['Message', 'MessageId', 'Subject', 'Timestamp', 'TopicArn', 'Type']:
+                if field in message:
+                    fields_to_sign.append(f"{field}\n{message[field]}")
+            
+            if not fields_to_sign:
+                return False
+            
+            signing_string = '\n'.join(fields_to_sign)
+            signature_b64 = message.get('Signature', '')
+            signature = base64.b64decode(signature_b64)
+            
+            # Verify
+            public_key.verify(
+                signature,
+                signing_string.encode('utf-8'),
+                padding.PKCS1v15(),
+                hashes.SHA256()
+            )
+            return True
+        except Exception as e:
+            print(f"SNS signature verification failed: {e}")
+            return False
+    
+    except Exception as e:
+        print(f"Error in SNS signature verification: {e}")
+        return False
+
+@app.route('/api/amazon-sns-webhook', methods=['POST'])
+def api_amazon_sns_webhook():
+    """Handle SNS notifications from Amazon when customer messages arrive on orders."""
+    try:
+        data = request.get_json(silent=True) or {}
+        message_type = data.get('Type', '').strip()
+        
+        # Handle subscription confirmation (one-time only during setup)
+        if message_type == 'SubscriptionConfirmation':
+            subscribe_url = data.get('SubscribeURL', '').strip()
+            if subscribe_url:
+                try:
+                    resp = requests.get(subscribe_url, timeout=10)
+                    if resp.status_code == 200:
+                        return jsonify({'success': True, 'message': 'Subscription confirmed'}), 200
+                except Exception as e:
+                    return jsonify({'error': f'Failed to confirm subscription: {str(e)}'}), 400
+            return jsonify({'error': 'No SubscribeURL in message'}), 400
+        
+        # Handle actual notifications
+        if message_type != 'Notification':
+            return jsonify({'error': f'Unknown SNS message type: {message_type}'}), 400
+        
+        # Verify the signature is from Amazon
+        if not _verify_sns_signature(data):
+            return jsonify({'error': 'Invalid SNS signature - not from Amazon'}), 403
+        
+        # Parse the message content
+        message_body = data.get('Message', '{}')
+        try:
+            if isinstance(message_body, str):
+                message_data = json.loads(message_body)
+            else:
+                message_data = message_body
+        except Exception:
+            message_data = {}
+        
+        # Extract order ID (Amazon's structure varies)
+        order_id = (
+            message_data.get('orderId') or 
+            message_data.get('order_id') or 
+            message_data.get('AmazonOrderId')
+        )
+        
+        if not order_id:
+            # Still return 200 - don't want SNS retrying on data we can't parse
+            return jsonify({'warning': 'No order ID found in SNS message', 'data': message_data}), 200
+        
+        # Store the notification in mail-center
+        _ensure_storemail_tables()
+        subject = f"📨 Message on Amazon order {order_id}"
+        body = f"""A customer sent you a message on Amazon.
+
+Order ID: {order_id}
+
+Please log into Amazon Seller Central to view and reply to the message."""
+        
+        _id, is_new = _mail_store_upsert_external(
+            store='Amazon',
+            direction='inbound',
+            status='unread',
+            sender_name='Amazon Customer',
+            recipient_name='Sweet Shelves',
+            subject=subject,
+            body=body,
+            external_source='amazon_sns_message',
+            external_id=f"{order_id}:{data.get('Timestamp', '')}",
+            external_payload={'order_id': order_id, 'sns_data': message_data},
+            created_at=data.get('Timestamp'),
+        )
+        
+        return jsonify({
+            'success': True,
+            'order_id': order_id,
+            'message_id': _id,
+            'is_new': is_new
+        }), 200
+    
+    except Exception as e:
+        print(f"Amazon SNS webhook error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': _safe_error(e, 'amazon_sns_webhook')}), 500
 
 def _mail_ebay_send_reply(*, item_id, recipient_id, parent_message_id, subject, body):
     token = (os.getenv("EBAY_OLDAUTH_TOKEN") or '').strip()
@@ -11445,7 +11601,88 @@ def _labelmaster_buy_ebay(order, settings):
         'format': 'pdf'
     }
 
-def _labelmaster_buy_amazon(order, settings):
+def _labelmaster_resolve_amazon_address(order_id, credentials, marketplace):
+    """Try to get the buyer's full shipping address from Amazon APIs.
+    Attempts: 1) RDT + get_order_address  2) Plain get_order_address
+    Returns a ship_to dict or None.
+    """
+    from sp_api.api import Tokens, Orders
+
+    # --- Attempt 1: Get RDT token, then use it for get_order_address ---
+    try:
+        logger.error(f"labelmaster: [addr] Requesting RDT for order {order_id}...")
+        tokens_api = Tokens(credentials=credentials, marketplace=marketplace)
+        rdt_resp = tokens_api.create_restricted_data_token(
+            restrictedResources=[{
+                'method': 'GET',
+                'path': f'/orders/v0/orders/{order_id}/address',
+                'dataElements': ['shippingAddress']
+            }]
+        )
+        rdt_payload = rdt_resp.payload or {}
+        rdt_token = rdt_payload.get('restrictedDataToken') or ''
+        logger.error(f"labelmaster: [addr] RDT token received: {bool(rdt_token)} (expires: {rdt_payload.get('expiresIn', '?')}s)")
+
+        if rdt_token:
+            orders_api = Orders(credentials=credentials, marketplace=marketplace,
+                               restricted_data_token=rdt_token)
+            addr_resp = orders_api.get_order_address(order_id)
+            addr_data = (addr_resp.payload or {}).get('ShippingAddress') or {}
+            logger.error(f"labelmaster: [addr] RDT address keys: {list(addr_data.keys())}")
+            logger.error(f"labelmaster: [addr] RDT address data: {json.dumps(addr_data, default=str)}")
+            line1 = addr_data.get('AddressLine1') or ''
+            postal = addr_data.get('PostalCode') or ''
+            name = addr_data.get('Name') or ''
+            if line1 and postal:
+                logger.error(f"labelmaster: [addr] Got FULL address via RDT!")
+                return {
+                    'name': name,
+                    'addressLine1': line1,
+                    'addressLine2': addr_data.get('AddressLine2') or '',
+                    'city': addr_data.get('City') or '',
+                    'stateOrRegion': addr_data.get('StateOrRegion') or '',
+                    'postalCode': postal,
+                    'countryCode': addr_data.get('CountryCode') or 'US',
+                }
+            else:
+                logger.error(f"labelmaster: [addr] RDT returned partial address still")
+    except Exception as e:
+        logger.error(f"labelmaster: [addr] RDT attempt failed: {e}")
+
+    # --- Attempt 2: Plain get_order_address (no RDT) ---
+    try:
+        logger.error(f"labelmaster: [addr] Trying plain get_order_address...")
+        orders_api = Orders(credentials=credentials, marketplace=marketplace)
+        addr_resp = orders_api.get_order_address(order_id)
+        addr_data = (addr_resp.payload or {}).get('ShippingAddress') or {}
+        logger.error(f"labelmaster: [addr] Plain address keys: {list(addr_data.keys())}")
+        line1 = addr_data.get('AddressLine1') or ''
+        postal = addr_data.get('PostalCode') or ''
+        name = addr_data.get('Name') or ''
+        if line1 and postal:
+            logger.error(f"labelmaster: [addr] Got full address without RDT!")
+            return {
+                'name': name,
+                'addressLine1': line1,
+                'addressLine2': addr_data.get('AddressLine2') or '',
+                'city': addr_data.get('City') or '',
+                'stateOrRegion': addr_data.get('StateOrRegion') or '',
+                'postalCode': postal,
+                'countryCode': addr_data.get('CountryCode') or 'US',
+            }
+        else:
+            logger.error(f"labelmaster: [addr] Plain address also partial")
+    except Exception as e:
+        logger.error(f"labelmaster: [addr] Plain get_order_address failed: {e}")
+
+    return None
+
+def _labelmaster_buy_amazon(order, settings, ship_to=None):
+    """Buy a shipping label via Amazon Shipping API v2 with channelDetails.
+
+    Uses channelType=AMAZON so Amazon resolves the buyer address from the order ID.
+    No PII / manual address needed.
+    """
     if not AMAZON_AVAILABLE:
         raise Exception('Amazon SP-API not available')
 
@@ -11457,147 +11694,309 @@ def _labelmaster_buy_amazon(order, settings):
     if marketplace is None:
         raise Exception('Amazon SP-API not available')
 
-    from amazon_manager import AmazonManager
-    am = AmazonManager()
-    items = am.get_order_items(order.get('order_id') or '')
-    if not items:
-        raise Exception('Could not load Amazon order items')
+    order_id = (order.get('order_id') or '').strip()
 
-    item_list = []
-    for it in items:
-        oid = it.get('OrderItemId')
-        qty = it.get('QuantityOrdered') or it.get('Quantity') or 1
-        if oid:
-            item_list.append({'OrderItemId': oid, 'Quantity': int(qty)})
-    if not item_list:
-        raise Exception('Amazon order items missing OrderItemId')
-
-    ship_from = _labelmaster_amazon_ship_from(settings)
-    if not ship_from.get('Name') or not ship_from.get('AddressLine1'):
+    # --- Build ship-from ---
+    ship_from_raw = _labelmaster_amazon_ship_from(settings)
+    if not ship_from_raw.get('Name') or not ship_from_raw.get('AddressLine1'):
         raise Exception('Ship-from defaults are missing. Fill in Label Master defaults.')
 
+    ship_from = {
+        'name': ship_from_raw.get('Name', ''),
+        'addressLine1': ship_from_raw.get('AddressLine1', ''),
+        'addressLine2': ship_from_raw.get('AddressLine2', ''),
+        'city': ship_from_raw.get('City', ''),
+        'stateOrRegion': ship_from_raw.get('StateOrProvinceCode', ''),
+        'postalCode': ship_from_raw.get('PostalCode', ''),
+        'countryCode': ship_from_raw.get('CountryCode', 'US'),
+        'phoneNumber': ship_from_raw.get('Phone', ''),
+        'email': ship_from_raw.get('Email', ''),
+    }
+    ship_from = {k: v for k, v in ship_from.items() if v}
+
     ship_date = datetime.datetime.utcnow().replace(microsecond=0).isoformat() + 'Z'
-    delivery_experience = (settings.get('label_amazon_delivery_experience') or 'NoTracking').strip()
-    carrier_pickup = str(settings.get('label_amazon_carrier_pickup') or '').lower() in ('1', 'true', 'yes')
-    carrier_pickup_option = (settings.get('label_amazon_carrier_pickup_option') or 'ShipperWillDropOff').strip()
 
-    service_options = {
-        'DeliveryExperience': delivery_experience,
-        'CarrierWillPickUp': carrier_pickup
-    }
-    if carrier_pickup:
-        service_options['CarrierWillPickUpOption'] = carrier_pickup_option
+    # Convert weight from oz to pounds for Shipping v2
+    weight_lb = round(weight['value'] / 16.0, 2)
 
-    shipment_request = {
-        'AmazonOrderId': (order.get('order_id') or '').strip(),
-        'ItemList': item_list,
-        'ShipFromAddress': ship_from,
-        'PackageDimensions': {
-            'Length': dims['length'],
-            'Width': dims['width'],
-            'Height': dims['height'],
-            'Unit': 'inches'
-        },
-        'Weight': {
-            'Value': weight['value'],
-            'Unit': 'oz'
-        },
-        'ShipDate': ship_date,
-        'ShippingServiceOptions': service_options
-    }
-
-    try:
-        from sp_api.api import MerchantFulfillment, Tokens
-    except Exception:
-        from sp_api.api import MerchantFulfillment
-        Tokens = None
-
-    rdt = None
-    if Tokens:
+    # --- Fetch order items for package item details ---
+    from amazon_manager import AmazonManager
+    am = AmazonManager()
+    items = am.get_order_items(order_id)
+    package_items = []
+    total_value = 0
+    for it in (items or []):
+        qty = int(it.get('QuantityOrdered') or it.get('Quantity') or 1)
+        title = it.get('Title') or 'Item'
+        price_amount = 0
         try:
-            tokens_api = Tokens(credentials=credentials, marketplace=marketplace)
-            rdt_resp = tokens_api.create_restricted_data_token(restricted_resources=[{
-                'method': 'POST',
-                'path': '/mfn/v0/shipments',
-                'dataElements': ['shippingAddress', 'buyerInfo']
-            }])
-            rdt = (rdt_resp.payload or {}).get('restrictedDataToken')
-        except Exception:
-            rdt = None
+            price_amount = float((it.get('ItemPrice') or {}).get('Amount', 0))
+        except (TypeError, ValueError):
+            pass
+        total_value += price_amount
+        package_items.append({
+            'itemValue': {'unit': 'USD', 'value': round(price_amount, 2)},
+            'description': title[:80],
+            'itemIdentifier': it.get('OrderItemId') or '',
+            'quantity': qty,
+            'weight': {'unit': 'LB', 'value': weight_lb},
+        })
+    if not package_items:
+        package_items.append({
+            'itemValue': {'unit': 'USD', 'value': 0},
+            'description': 'Package',
+            'itemIdentifier': order_id,
+            'quantity': 1,
+            'weight': {'unit': 'LB', 'value': weight_lb},
+        })
 
-    if rdt:
-        mf = MerchantFulfillment(credentials=credentials, marketplace=marketplace, restricted_data_token=rdt)
-    else:
-        mf = MerchantFulfillment(credentials=credentials, marketplace=marketplace)
+    package = {
+        'dimensions': {
+            'length': dims['length'],
+            'width': dims['width'],
+            'height': dims['height'],
+            'unit': 'INCH'
+        },
+        'weight': {
+            'unit': 'LB',
+            'value': weight_lb
+        },
+        'insuredValue': {
+            'unit': 'USD',
+            'value': round(total_value, 2)
+        },
+        'packageClientReferenceId': order_id,
+        'items': package_items
+    }
 
-    services_resp = mf.get_eligible_shipment_services(shipment_request_details=shipment_request)
-    if getattr(services_resp, 'errors', None):
-        raise Exception(str(services_resp.errors))
+    channel_details = {
+        'channelType': 'AMAZON',
+        'amazonOrderDetails': {
+            'orderId': order_id
+        }
+    }
 
-    services = (services_resp.payload or {}).get('ShippingServiceList') or []
-    if not services:
-        raise Exception('No Amazon shipping services returned')
+    # --- Step 1: Get shipping rates (v2) ---
+    logger.info(f"labelmaster: [v2 step 1/2] Getting rates for order {order_id}")
+    from sp_api.api.shipping.shippingV2 import Shipping as ShippingV2
+    shipping_api = ShippingV2(credentials=credentials, marketplace=marketplace)
 
-    preferred_id = (settings.get('label_amazon_service_id') or '').strip()
+    rates_body = {
+        'shipFrom': ship_from,
+        'shipDate': ship_date,
+        'packages': [package],
+        'channelDetails': channel_details,
+    }
+
+    logger.info(f"labelmaster: v2 endpoint={shipping_api.endpoint} business_id={shipping_api.amzn_shipping_business}")
+    try:
+        rates_resp = shipping_api.get_rates(body=rates_body)
+    except Exception as e:
+        err_str = str(e)
+        logger.error(f"labelmaster: v2 getRates failed: {err_str}")
+        # If v2 is denied, try v1 as fallback
+        if 'Unauthorized' in err_str or 'AccessDenied' in err_str or 'Forbidden' in err_str or '403' in err_str:
+            logger.info("labelmaster: v2 denied, trying to get buyer address via RDT + Orders API...")
+
+            # Try to get buyer address automatically via RDT or Orders API
+            if not ship_to:
+                ship_to = _labelmaster_resolve_amazon_address(order_id, credentials, marketplace)
+
+            from sp_api.api import Shipping as ShippingV1
+            v1_api = ShippingV1(credentials=credentials, marketplace=marketplace)
+            if not ship_to:
+                raise Exception('NEED_ADDRESS')
+            v1_body = {
+                'shipTo': ship_to,
+                'shipFrom': ship_from,
+                'shipDate': ship_date,
+                'serviceTypes': ['Amazon Shipping Ground', 'Amazon Shipping Standard', 'Amazon Shipping Premium'],
+                'containerSpecifications': [{
+                    'dimensions': {'length': dims['length'], 'width': dims['width'], 'height': dims['height'], 'unit': 'IN'},
+                    'weight': {'unit': 'OZ', 'value': weight['value']}
+                }]
+            }
+            rates_resp = v1_api.get_rates(**v1_body)
+            # If we get here, v1 works - continue with v1 flow
+            logger.info("labelmaster: v1 getRates succeeded!")
+            v1_payload = rates_resp.payload or {}
+            service_rates = v1_payload.get('serviceRates') or []
+            if not service_rates:
+                raise Exception('No shipping rates returned from v1.')
+            # Pick cheapest
+            chosen = None
+            chosen_cost = None
+            for sr in service_rates:
+                total = sr.get('totalCharge') or {}
+                try:
+                    amt = float(total.get('value', 0))
+                except (TypeError, ValueError):
+                    continue
+                if chosen is None or amt < chosen_cost:
+                    chosen = sr
+                    chosen_cost = amt
+            if not chosen:
+                raise Exception('Could not select a shipping rate')
+            service_type = chosen.get('serviceType') or ''
+            total_charge = chosen.get('totalCharge') or {}
+            label_cost = chosen_cost
+            label_currency = total_charge.get('unit') or 'USD'
+            logger.info(f"labelmaster: v1 selected: {service_type} @ ${label_cost:.2f}")
+
+            # Build v1 container
+            weight_grams = round(weight['value'] * 28.3495, 1)
+            container_items = []
+            for it in (items or []):
+                qty = int(it.get('QuantityOrdered') or it.get('Quantity') or 1)
+                title = it.get('Title') or 'Item'
+                price_amount = 0
+                try:
+                    price_amount = float((it.get('ItemPrice') or {}).get('Amount', 0))
+                except (TypeError, ValueError):
+                    pass
+                container_items.append({
+                    'quantity': qty,
+                    'unitPrice': {'value': price_amount, 'unit': 'USD'},
+                    'unitWeight': {'unit': 'g', 'value': weight_grams},
+                    'title': title[:80]
+                })
+            container = {
+                'containerType': 'PACKAGE',
+                'containerReferenceId': order_id,
+                'dimensions': {'length': dims['length'], 'width': dims['width'], 'height': dims['height'], 'unit': 'IN'},
+                'weight': {'unit': 'g', 'value': weight_grams},
+                'items': container_items or [{'quantity': 1, 'unitPrice': {'value': 0, 'unit': 'USD'}, 'unitWeight': {'unit': 'g', 'value': weight_grams}, 'title': 'Package'}],
+                'value': total_charge
+            }
+            logger.info(f"labelmaster: v1 purchasing shipment ({service_type})")
+            purchase_resp = v1_api.purchase_shipment(
+                clientReferenceId=order_id,
+                shipTo=ship_to,
+                shipFrom=ship_from,
+                shipDate=ship_date,
+                serviceType=service_type,
+                containers=[container],
+                labelSpecification={'labelFormat': 'PNG', 'labelStockSize': '4x6'}
+            )
+            if getattr(purchase_resp, 'errors', None):
+                raise Exception(f"v1 purchase failed: {purchase_resp.errors}")
+            p_payload = purchase_resp.payload or {}
+            label_result = p_payload.get('labelResults') or [{}]
+            first_label = label_result[0] if label_result else {}
+            label_obj = first_label.get('label') or {}
+            label_stream = label_obj.get('labelStream') or ''
+            label_id = p_payload.get('shipmentId') or first_label.get('trackingId') or ''
+            label_bytes = base64.b64decode(label_stream) if label_stream else None
+            label_path = _labelmaster_store_label('amazon', order_id, label_id=label_id, label_url=None, label_format='png', label_bytes=label_bytes, cost=label_cost, currency=label_currency, raw={'rates': v1_payload, 'purchase': p_payload})
+            return {'label_id': label_id, 'label_url': None, 'label_path': label_path, 'cost': label_cost, 'currency': label_currency or 'USD', 'format': 'png'}
+        raise
+
+    if getattr(rates_resp, 'errors', None):
+        raise Exception(f"Get rates failed: {rates_resp.errors}")
+
+    payload = rates_resp.payload or {}
+    request_token = payload.get('requestToken')
+    rates = payload.get('rates') or []
+    ineligible = payload.get('ineligibleRates') or []
+
+    if not rates:
+        reasons = '; '.join(
+            f"{r.get('serviceName','?')}: {', '.join(x.get('message','') for x in (r.get('ineligibilityReasons') or []))}"
+            for r in ineligible
+        ) if ineligible else 'none returned'
+        raise Exception(f'No shipping rates available. Ineligible: {reasons}')
+
+    logger.info(f"labelmaster: Got {len(rates)} rate(s), {len(ineligible)} ineligible")
+    for r in rates:
+        tc = r.get('totalCharge') or {}
+        logger.info(f"  - {r.get('serviceName','')} ({r.get('carrierId','')}) ${tc.get('value',0)}")
+
+    # Pick cheapest rate
     chosen = None
-    if preferred_id:
-        for s in services:
-            if str(s.get('ShippingServiceId')) == preferred_id:
-                chosen = s
-                break
-    if not chosen:
-        chosen = _labelmaster_pick_cheapest_rate(services)
-
-    if not chosen:
-        raise Exception('Could not select an Amazon shipping service')
-
-    service_id = chosen.get('ShippingServiceId')
-    offer_id = chosen.get('ShippingServiceOfferId')
-
-    kwargs = {}
-    if offer_id:
+    chosen_cost = None
+    for r in rates:
+        tc = r.get('totalCharge') or {}
         try:
-            import inspect as _inspect
-            sig = _inspect.signature(mf.create_shipment)
-            if 'shipping_service_offer_id' in sig.parameters:
-                kwargs['shipping_service_offer_id'] = offer_id
-            elif 'ShippingServiceOfferId' in sig.parameters:
-                kwargs['ShippingServiceOfferId'] = offer_id
-        except Exception:
-            kwargs['shipping_service_offer_id'] = offer_id
+            amt = float(tc.get('value', 0))
+        except (TypeError, ValueError):
+            continue
+        if chosen is None or amt < chosen_cost:
+            chosen = r
+            chosen_cost = amt
 
-    create_resp = mf.create_shipment(
-        shipment_request_details=shipment_request,
-        shipping_service_id=service_id,
-        **kwargs
-    )
-    if getattr(create_resp, 'errors', None):
-        raise Exception(str(create_resp.errors))
+    if not chosen:
+        raise Exception('Could not select a shipping rate')
 
-    shipment = (create_resp.payload or {}).get('Shipment') or create_resp.payload or {}
-    label = shipment.get('Label') or {}
-    label_bytes = _labelmaster_amazon_decode_label(label)
-    label_format = (label.get('LabelFormat') or 'PDF').lower()
-    label_id = shipment.get('ShipmentId')
-    label_cost = None
-    label_currency = None
-    rate = chosen.get('Rate') or {}
-    try:
-        label_cost = float(rate.get('Amount'))
-        label_currency = rate.get('CurrencyCode') or 'USD'
-    except Exception:
-        label_cost = None
+    rate_id = chosen.get('rateId')
+    label_cost = chosen_cost
+    label_currency = (chosen.get('totalCharge') or {}).get('unit') or 'USD'
+    logger.info(f"labelmaster: Selected: {chosen.get('serviceName','')} @ ${label_cost:.2f} (rateId={rate_id})")
+
+    # Figure out supported label format from the rate
+    doc_specs = chosen.get('supportedDocumentSpecifications') or []
+    doc_spec = None
+    for preferred_fmt in ['PNG', 'PDF']:
+        for ds in doc_specs:
+            if ds.get('format') == preferred_fmt:
+                doc_spec = ds
+                break
+        if doc_spec:
+            break
+    if not doc_spec and doc_specs:
+        doc_spec = doc_specs[0]
+    if not doc_spec:
+        doc_spec = {'format': 'PNG', 'size': {'width': 4, 'length': 6, 'unit': 'INCH'}}
+
+    label_format = (doc_spec.get('format') or 'PNG').lower()
+    requested_doc = {
+        'format': doc_spec.get('format', 'PNG'),
+        'size': doc_spec.get('size', {'width': 4, 'length': 6, 'unit': 'INCH'}),
+        'needFileJoining': False,
+        'requestedDocumentTypes': ['LABEL']
+    }
+    print_opts = (doc_spec.get('printOptions') or [{}])
+    if print_opts and print_opts[0].get('supportedPageLayouts'):
+        requested_doc['pageLayout'] = print_opts[0]['supportedPageLayouts'][0]
+
+    # --- Step 2: Purchase shipment (v2) ---
+    logger.info(f"labelmaster: [v2 step 2/2] Purchasing shipment (rateId={rate_id})")
+    purchase_body = {
+        'requestToken': request_token,
+        'rateId': rate_id,
+        'requestedDocumentSpecification': requested_doc,
+    }
+
+    purchase_resp = shipping_api.purchase_shipment(body=purchase_body)
+
+    if getattr(purchase_resp, 'errors', None):
+        raise Exception(f"Purchase failed: {purchase_resp.errors}")
+
+    p_payload = purchase_resp.payload or {}
+    shipment_id = p_payload.get('shipmentId') or ''
+    pkg_details = (p_payload.get('packageDocumentDetails') or [{}])
+    first_pkg = pkg_details[0] if pkg_details else {}
+    tracking_id = first_pkg.get('trackingId') or ''
+    pkg_docs = first_pkg.get('packageDocuments') or []
+    label_doc = next((d for d in pkg_docs if d.get('type') == 'LABEL'), pkg_docs[0] if pkg_docs else {})
+    label_contents = label_doc.get('contents') or ''
+
+    label_id = shipment_id or tracking_id
+    logger.info(f"labelmaster: Purchased! shipmentId={shipment_id}, trackingId={tracking_id}, label format={label_format}")
+
+    label_bytes = None
+    if label_contents:
+        label_bytes = base64.b64decode(label_contents)
 
     label_path = _labelmaster_store_label(
         'amazon',
-        order.get('order_id') or '',
+        order_id,
         label_id=label_id,
         label_url=None,
         label_format=label_format,
         label_bytes=label_bytes,
         cost=label_cost,
         currency=label_currency,
-        raw={'services': services_resp.payload, 'shipment': shipment}
+        raw={'rates': payload, 'purchase': p_payload}
     )
 
     return {
@@ -11777,7 +12176,8 @@ def api_labelmaster_buy():
         if store == 'ebay':
             result = _labelmaster_buy_ebay(order, settings)
         else:
-            result = _labelmaster_buy_amazon(order, settings)
+            ship_to = data.get('ship_to')
+            result = _labelmaster_buy_amazon(order, settings, ship_to=ship_to)
 
         label_url = result.get('label_url')
         if not label_url and result.get('label_path'):
@@ -11792,7 +12192,21 @@ def api_labelmaster_buy():
             'format': result.get('format')
         })
     except Exception as e:
-        return jsonify({'success': False, 'error': _safe_error(e, 'labelmaster:buy')}), 500
+        if str(e) == 'NEED_ADDRESS':
+            return jsonify({
+                'success': False,
+                'need_address': True,
+                'error': 'Shipping address required. Please enter the buyer address.',
+                'prefill': {
+                    'city': order.get('shipping_city') or '',
+                    'stateOrRegion': order.get('shipping_state') or '',
+                    'postalCode': order.get('shipping_postal_code') or '',
+                    'countryCode': order.get('shipping_country') or 'US',
+                    'name': order.get('shipping_name') or order.get('buyer_name') or '',
+                }
+            }), 400
+        logger.error(f"labelmaster:buy: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/labelmaster/print', methods=['POST'])
 def api_labelmaster_print():
@@ -22232,6 +22646,64 @@ def marketplace_session():
 def marketplace_stats():
     """Marketplace sales statistics page."""
     return render_template('marketplace_stats.html')
+
+@app.route('/api/marketplace/generate-barcode', methods=['POST'])
+def marketplace_generate_barcode():
+    """Generate auto-incremented 888 prefix barcode for marketplace manual entries."""
+    try:
+        conn = sqlite3.connect('bol.db')
+        cur = conn.cursor()
+
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS temp_items (
+                upc TEXT PRIMARY KEY,
+                item_description TEXT,
+                image_url TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        # Get the highest 888 barcode from both tables
+        cur.execute("SELECT MAX(CAST(upc AS INTEGER)) FROM bol_items WHERE upc LIKE '888%' AND LENGTH(upc) = 12")
+        result = cur.fetchone()
+        cur.execute("SELECT MAX(CAST(upc AS INTEGER)) FROM temp_items WHERE upc LIKE '888%' AND LENGTH(upc) = 12")
+        temp_result = cur.fetchone()
+
+        max_barcode = result[0] if result[0] else None
+        temp_max = temp_result[0] if temp_result[0] else None
+        if temp_max and (not max_barcode or temp_max > max_barcode):
+            max_barcode = temp_max
+
+        attempts = 0
+        while attempts < 100:
+            if max_barcode:
+                new_barcode = str(int(max_barcode) + 1)
+                if not new_barcode.startswith('888'):
+                    numeric_part = int(str(max_barcode)[3:]) + 1
+                    new_barcode = f"888{str(numeric_part).zfill(9)}"
+            else:
+                new_barcode = '888000000001'
+
+            if len(new_barcode) < 12 and new_barcode.startswith('888'):
+                new_barcode = f"888{new_barcode[3:].zfill(9)}"
+
+            cur.execute('SELECT upc FROM bol_items WHERE upc = ? COLLATE NOCASE', (new_barcode,))
+            exists_bol = cur.fetchone()
+            cur.execute('SELECT upc FROM temp_items WHERE upc = ? COLLATE NOCASE', (new_barcode,))
+            exists_temp = cur.fetchone()
+
+            if not exists_bol and not exists_temp:
+                conn.close()
+                return jsonify({'success': True, 'barcode': new_barcode.strip()})
+
+            max_barcode = int(new_barcode)
+            attempts += 1
+
+        conn.close()
+        return jsonify({'success': False, 'error': 'Could not generate unique barcode'}), 500
+    except Exception as e:
+        print(f'Error generating marketplace barcode: {e}')
+        return jsonify({'success': False, 'error': _safe_error(e)}), 500
 
 @app.route('/api/marketplace/lookup', methods=['GET'])
 def api_marketplace_lookup():

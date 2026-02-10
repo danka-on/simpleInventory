@@ -363,6 +363,34 @@
       .seg button{ min-width: 70px; }
       thead th, tbody td{ padding: 9px 8px; }
     }
+
+    /* Address modal */
+    .addr-overlay{
+      display:none; position:fixed; inset:0; background:rgba(0,0,0,0.45);
+      z-index:9000; align-items:center; justify-content:center;
+    }
+    .addr-overlay.open{ display:flex; }
+    .addr-modal{
+      background:var(--lm-card); border-radius:var(--lm-radius);
+      box-shadow:var(--lm-shadow); padding:24px 28px; width:420px; max-width:95vw;
+    }
+    .addr-modal h3{ margin:0 0 14px; font-size:1.1rem; }
+    .addr-modal label{ display:block; font-size:0.82rem; color:var(--lm-muted); margin-bottom:3px; margin-top:10px; }
+    .addr-modal input{
+      width:100%; padding:8px 10px; border:1px solid var(--lm-border);
+      border-radius:8px; font-size:0.95rem; background:var(--lm-bg); color:var(--lm-ink);
+    }
+    .addr-modal input:focus{ outline:none; border-color:var(--lm-primary); }
+    .addr-row{ display:flex; gap:10px; }
+    .addr-row > div{ flex:1; }
+    .addr-actions{ display:flex; gap:10px; margin-top:18px; justify-content:flex-end; }
+    .addr-actions button{
+      padding:8px 18px; border:none; border-radius:8px; font-size:0.9rem;
+      cursor:pointer; font-weight:600;
+    }
+    .addr-submit{ background:var(--lm-primary); color:#fff; }
+    .addr-submit:hover{ opacity:0.9; }
+    .addr-cancel{ background:var(--lm-border); color:var(--lm-ink); }
   </style>
 </head>
 <body>
@@ -912,19 +940,76 @@
       return state.orders.find(o => (String(o.id || o.order_id || '') === id) && ((o.store || '') === store));
     }
 
+    async function _buyLabelRequest(order, shipTo){
+      const payload = {order_id: order.order_id || order.id, store: order.store};
+      if(shipTo) payload.ship_to = shipTo;
+      const r = await fetch('/api/labelmaster/buy', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'Accept':'application/json'},
+        body: JSON.stringify(payload)
+      });
+      return await r.json().catch(() => ({}));
+    }
+
+    function _showAddrModal(prefill, onSubmit){
+      const ov = document.getElementById('addrOverlay');
+      document.getElementById('addrName').value = prefill.name || '';
+      document.getElementById('addrLine1').value = '';
+      document.getElementById('addrLine2').value = '';
+      document.getElementById('addrCity').value = prefill.city || '';
+      document.getElementById('addrState').value = prefill.stateOrRegion || '';
+      document.getElementById('addrZip').value = prefill.postalCode || '';
+      document.getElementById('addrCountry').value = prefill.countryCode || 'US';
+      ov.classList.add('open');
+      // Focus the first empty required field
+      if(!prefill.name) document.getElementById('addrName').focus();
+      else document.getElementById('addrLine1').focus();
+
+      const submit = document.getElementById('addrSubmit');
+      const cancel = document.getElementById('addrCancel');
+      const close = () => { ov.classList.remove('open'); submit.onclick = null; cancel.onclick = null; };
+      cancel.onclick = close;
+      submit.onclick = () => {
+        const name = document.getElementById('addrName').value.trim();
+        const line1 = document.getElementById('addrLine1').value.trim();
+        if(!name || !line1){ log('Name and street address are required.'); return; }
+        const addr = {
+          name, addressLine1: line1,
+          addressLine2: document.getElementById('addrLine2').value.trim(),
+          city: document.getElementById('addrCity').value.trim(),
+          stateOrRegion: document.getElementById('addrState').value.trim(),
+          postalCode: document.getElementById('addrZip').value.trim(),
+          countryCode: document.getElementById('addrCountry').value.trim() || 'US',
+        };
+        close();
+        onSubmit(addr);
+      };
+    }
+
     async function onBuyLabel(e){
       const key = e.target.getAttribute('data-key');
       const order = getOrderByKey(key);
       if(!order) return;
       log(`Buy label requested: ${order.store}:${order.order_id || order.id}`);
       try{
-        const r = await fetch('/api/labelmaster/buy', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json', 'Accept':'application/json'},
-          body: JSON.stringify({order_id: order.order_id || order.id, store: order.store})
-        });
-        const j = await r.json().catch(() => ({}));
-        if(!r.ok || j.success === false) throw new Error(j.error || `Request failed (${r.status})`);
+        const j = await _buyLabelRequest(order);
+        if(j.need_address){
+          log('Address required — fill in the buyer address.');
+          _showAddrModal(j.prefill || {}, async (addr) => {
+            log('Retrying with address...');
+            try{
+              const j2 = await _buyLabelRequest(order, addr);
+              if(!j2.success) throw new Error(j2.error || 'Purchase failed');
+              log(`Label purchased for ${order.order_id || order.id}.`);
+              if(j2.label_url){ try{ window.open(j2.label_url, '_blank'); }catch(e){} }
+              await loadOrders();
+            }catch(err2){
+              log(`Buy label failed: ${err2.message}`);
+            }
+          });
+          return;
+        }
+        if(j.success === false) throw new Error(j.error || 'Request failed');
         log(`Label purchased for ${order.order_id || order.id}.`);
         if(j.label_url){
           try{ window.open(j.label_url, '_blank'); }catch(e){}
@@ -1017,5 +1102,30 @@
       loadOrders();
     });
   </script>
+
+  <div class="addr-overlay" id="addrOverlay">
+    <div class="addr-modal">
+      <h3>Buyer Shipping Address</h3>
+      <p style="font-size:0.82rem;color:var(--lm-muted);margin:0 0 6px;">Paste from Amazon Seller Central order page.</p>
+      <label>Full Name</label>
+      <input id="addrName" placeholder="Buyer name">
+      <label>Street Address</label>
+      <input id="addrLine1" placeholder="123 Main St">
+      <label>Apt / Suite (optional)</label>
+      <input id="addrLine2" placeholder="">
+      <div class="addr-row">
+        <div><label>City</label><input id="addrCity" placeholder="City"></div>
+        <div><label>State</label><input id="addrState" placeholder="CA"></div>
+      </div>
+      <div class="addr-row">
+        <div><label>Zip Code</label><input id="addrZip" placeholder="90210"></div>
+        <div><label>Country</label><input id="addrCountry" placeholder="US" value="US"></div>
+      </div>
+      <div class="addr-actions">
+        <button class="addr-cancel" id="addrCancel">Cancel</button>
+        <button class="addr-submit" id="addrSubmit">Buy Label</button>
+      </div>
+    </div>
+  </div>
 </body>
 </html>

@@ -99,6 +99,10 @@
     /* Search Toggle */
     .search-toggle {
       margin-top: 16px;
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+      align-items: center;
     }
     .search-toggle-btn {
       background: rgba(255,255,255,0.2);
@@ -111,6 +115,16 @@
       transition: all 0.2s;
     }
     .search-toggle-btn:hover { background: rgba(255,255,255,0.3); }
+    #toggleManual {
+      background: linear-gradient(135deg, #27ae60, #2ecc71);
+      font-weight: 600;
+      box-shadow: 0 2px 8px rgba(39,174,96,0.4);
+    }
+    #toggleManual:hover {
+      background: linear-gradient(135deg, #219a52, #27ae60);
+      box-shadow: 0 4px 12px rgba(39,174,96,0.5);
+      transform: translateY(-1px);
+    }
     .search-panel {
       display: none;
       margin-top: 16px;
@@ -436,6 +450,40 @@
       .stat-value { font-size: 1.2rem; }
     }
 
+    /* Manual entry panel */
+    .manual-entry-panel {
+      display: none;
+      margin-top: 16px;
+      background: rgba(255,255,255,0.1);
+      border-radius: 12px;
+      padding: 16px;
+    }
+    .manual-entry-panel.open { display: block; }
+    .manual-add-btn {
+      padding: 12px 20px;
+      border: none;
+      border-radius: 8px;
+      background: #27ae60;
+      color: #fff;
+      font-weight: 600;
+      font-size: 1rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      white-space: nowrap;
+    }
+    .manual-add-btn:hover { background: #219a52; }
+
+    /* Highlight animation for scan-not-found items */
+    @keyframes pulse-border {
+      0% { box-shadow: 0 0 0 0 rgba(102,126,234,0.6); }
+      50% { box-shadow: 0 0 12px 4px rgba(102,126,234,0.4); }
+      100% { box-shadow: 0 0 0 0 rgba(102,126,234,0); }
+    }
+    .item-card.highlight {
+      animation: pulse-border 1s ease-in-out 2;
+      border-color: #667eea !important;
+    }
+
     /* Day mode overrides */
     html.ss-theme-day body { background: var(--bg, #f9f9f9); color: var(--ink, #111827); }
     html.ss-theme-day .navbar { background: rgba(255,255,255,0.85); border-bottom-color: rgba(0,0,0,0.08); }
@@ -464,6 +512,8 @@
     html.ss-theme-day .override-input input::placeholder { color: #94a3b8; }
     html.ss-theme-day .message.success { background: #d4edda; color: #155724; }
     html.ss-theme-day .message.error { background: #f8d7da; color: #721c24; }
+    html.ss-theme-day .manual-entry-panel { background: rgba(0,0,0,0.04); }
+    html.ss-theme-day .manual-add-btn { background: #27ae60; color: #fff; }
   </style>
 </head>
 <body>
@@ -485,6 +535,7 @@
       </div>
       <div class="search-toggle">
         <button class="search-toggle-btn" id="toggleSearch">🔍 Search by Name</button>
+        <button class="search-toggle-btn" id="toggleManual">➕ Add Manually</button>
       </div>
       <div class="search-panel" id="searchPanel">
         <div class="search-row">
@@ -492,6 +543,13 @@
           <button id="searchBtn">Search</button>
         </div>
         <div id="searchResults" class="search-results" style="display:none"></div>
+      </div>
+      <div class="manual-entry-panel" id="manualPanel">
+        <div class="search-row">
+          <input id="manualTitle" type="text" placeholder="Item name (required)" style="flex:2">
+          <input id="manualPrice" type="number" min="0" step="0.01" placeholder="Price" style="flex:1; max-width:120px">
+          <button id="manualAddBtn" class="manual-add-btn">+ Add</button>
+        </div>
       </div>
     </div>
 
@@ -553,11 +611,25 @@
     const clearBtn = document.getElementById('clearSession');
     const toggleSearch = document.getElementById('toggleSearch');
     const searchPanel = document.getElementById('searchPanel');
+    const toggleManual = document.getElementById('toggleManual');
+    const manualPanel = document.getElementById('manualPanel');
 
-    // Toggle search panel
+    // Toggle search panel (closes manual panel)
     toggleSearch.addEventListener('click', () => {
       searchPanel.classList.toggle('open');
+      manualPanel.classList.remove('open');
       toggleSearch.textContent = searchPanel.classList.contains('open') ? '✕ Close Search' : '🔍 Search by Name';
+      toggleManual.textContent = '➕ Add Manually';
+      if (searchPanel.classList.contains('open')) document.getElementById('searchName').focus();
+    });
+
+    // Toggle manual entry panel (closes search panel)
+    toggleManual.addEventListener('click', () => {
+      manualPanel.classList.toggle('open');
+      searchPanel.classList.remove('open');
+      toggleManual.textContent = manualPanel.classList.contains('open') ? '✕ Close Manual' : '➕ Add Manually';
+      toggleSearch.textContent = '🔍 Search by Name';
+      if (manualPanel.classList.contains('open')) document.getElementById('manualTitle').focus();
     });
 
     function fmtMoney(v) {
@@ -634,6 +706,57 @@
       }
     }
 
+    async function addManualItem() {
+      const titleInput = document.getElementById('manualTitle');
+      const priceInput = document.getElementById('manualPrice');
+      const title = (titleInput.value || '').trim();
+
+      if (!title) {
+        showMessage('Please enter an item name', 'error');
+        titleInput.focus();
+        return;
+      }
+
+      try {
+        const resp = await fetch('/api/marketplace/generate-barcode', { method: 'POST' });
+        const data = await resp.json();
+
+        if (!data.success) {
+          showMessage('Failed to generate barcode', 'error');
+          return;
+        }
+
+        const barcode = data.barcode;
+        const price = priceInput.value || '';
+
+        items.set(barcode, {
+          barcode: barcode,
+          title: title,
+          image: '',
+          qty: 1,
+          price: price
+        });
+
+        renderItems();
+        showMessage('Added: ' + title, 'success');
+
+        titleInput.value = '';
+        priceInput.value = '';
+        titleInput.focus();
+      } catch (e) {
+        showMessage('Error adding item', 'error');
+      }
+    }
+
+    // Manual entry event listeners
+    document.getElementById('manualAddBtn').addEventListener('click', addManualItem);
+    document.getElementById('manualTitle').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); addManualItem(); }
+    });
+    document.getElementById('manualPrice').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); addManualItem(); }
+    });
+
     async function addScan(barcode) {
       if (!barcode) return;
       if (items.has(barcode)) {
@@ -644,6 +767,7 @@
         return;
       }
       const info = await lookupItem(barcode);
+      const isNotFound = !info.title && !info.image;
       items.set(barcode, {
         barcode,
         title: info.title || '',
@@ -652,6 +776,19 @@
         price: ''
       });
       renderItems();
+
+      if (isNotFound) {
+        showMessage('Item not in system \u2014 enter a name below', 'error');
+        setTimeout(() => {
+          const card = document.querySelector(`.item-card[data-barcode="${barcode}"]`);
+          if (card) {
+            const titleEl = card.querySelector('.title-input');
+            if (titleEl) titleEl.focus();
+            card.classList.add('highlight');
+            setTimeout(() => card.classList.remove('highlight'), 2000);
+          }
+        }, 50);
+      }
     }
 
     function renderItems() {

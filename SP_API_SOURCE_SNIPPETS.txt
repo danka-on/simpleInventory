@@ -1,0 +1,186 @@
+================================================================================
+SP-API SHIPPING CLASS - ACTUAL SOURCE CODE SNIPPETS
+================================================================================
+
+Location: C:\Users\boxatron\Desktop\simpleInventory\.venv\Lib\site-packages\sp_api
+
+
+================================================================================
+1. SHIPPING CLASS EXAMPLE
+================================================================================
+File: sp_api/api/shipping/shipping.py
+
+All Shipping methods use this pattern:
+
+@sp_endpoint("/shipping/v1/shipments", method="POST")
+def create_shipment(self, **kwargs) -> ApiResponse:
+    return self._request(kwargs.pop("path"), data=kwargs)
+
+@sp_endpoint("/shipping/v1/account", method="GET")
+def get_account(self, **kwargs) -> ApiResponse:
+    return self._request(kwargs.pop("path"), params=kwargs)
+
+
+Key observation: All methods delegate to self._request()
+
+
+================================================================================
+2. CLIENT._REQUEST() - THE CORE METHOD
+================================================================================
+File: sp_api/base/client.py
+
+def _request(self, path: str, *, data=None, params=None, headers=None,
+             add_marketplace=True, res_no_data=False, bulk=False,
+             wrap_list=False) -> ApiResponse:
+    
+    # Extract HTTP method
+    self.method = params.pop("method", data.pop("method", "GET"))
+    
+    # Add marketplace ID
+    if add_marketplace:
+        self._add_marketplaces(...)
+    
+    # THE ACTUAL HTTP REQUEST using requests library:
+    res = request(
+        self.method,
+        self.endpoint + self._check_version(path),
+        params=params,
+        data=json.dumps(data) if data and self.method in ("POST", "PUT", "PATCH") else None,
+        headers=headers or self.headers,
+        timeout=self.timeout,
+        proxies=self.proxies,
+        verify=self.verify,
+    )
+    return self._check_response(res, res_no_data, bulk, wrap_list)
+
+
+================================================================================
+3. AUTH HEADERS - AUTOMATICALLY ADDED
+================================================================================
+File: sp_api/base/client.py
+
+@property
+def headers(self):
+    return {
+        "host": self.endpoint[8:],
+        "user-agent": self.user_agent,
+        "x-amz-access-token": self.auth.access_token,
+        "x-amz-date": datetime.utcnow().strftime("%Y%m%dT%H%M%SZ"),
+        "content-type": "application/json",
+    }
+
+
+================================================================================
+4. BASE URLS BY MARKETPLACE
+================================================================================
+File: sp_api/base/marketplaces.py
+
+BASE_URL = "https://sellingpartnerapi"
+
+Examples:
+US  = ("https://sellingpartnerapi-na.amazon.com", "ATVPDKIKX0DER", "us-east-1")
+CA  = ("https://sellingpartnerapi-na.amazon.com", "A2EUQ1WTGCTBG2", "us-east-1")
+DE  = ("https://sellingpartnerapi-eu.amazon.com", "A1PA6795UKMFR9", "eu-west-1")
+JP  = ("https://sellingpartnerapi-fe.amazon.com", "A1VC38T7YXB528", "us-west-2")
+
+Regional endpoints:
+- North America: https://sellingpartnerapi-na.amazon.com
+- Europe: https://sellingpartnerapi-eu.amazon.com
+- Far East: https://sellingpartnerapi-fe.amazon.com
+
+
+================================================================================
+5. REQUEST FLOW
+================================================================================
+
+1. User calls: shipping.get_account()
+
+2. Shipping.get_account() executes:
+   return self._request(kwargs.pop("path"), params=kwargs)
+
+3. Client._request() method:
+   a. Extracts HTTP method: "GET" (default)
+   b. Adds marketplace ID to params
+   c. Calls requests.request() with:
+      - URL: https://sellingpartnerapi-na.amazon.com/shipping/v1/account
+      - Headers: includes x-amz-access-token, x-amz-date
+      - Method: GET
+      - Params: marketplace info
+
+4. requests library makes actual HTTP request
+
+5. Response parsed and returned as ApiResponse object
+
+
+================================================================================
+6. KEY FINDINGS
+================================================================================
+
+1. Base class method: Client._request() inherited by Shipping
+2. HTTP library: requests (standard Python)
+3. Auth mechanism: OAuth 2.0 token in x-amz-access-token header
+4. Custom requests: Call shipping._request(path, data=..., params=...)
+5. Endpoint pattern: /shipping/v1/{operation}
+6. Base URL: depends on marketplace initialization
+7. Token refresh: automatic via Client._auth.get_auth()
+8. Marketplace ID: automatically added by Client._add_marketplaces()
+9. Error handling: _check_response() raises exceptions for HTTP errors
+
+
+================================================================================
+7. MAKING CUSTOM REQUESTS
+================================================================================
+
+from sp_api.api.shipping import Shipping
+from sp_api.base import Marketplaces
+
+shipping = Shipping(
+    marketplace=Marketplaces.US,
+    refresh_token="your_token"
+)
+
+# Call _request() directly for custom endpoints:
+response = shipping._request(
+    "/shipping/v1/account",
+    params={"method": "GET"}
+)
+
+# POST example:
+response = shipping._request(
+    "/shipping/v1/shipments",
+    data={"clientReferenceId": "test", ...},
+    params={"method": "POST"}
+)
+
+Benefits:
+- Automatic OAuth token handling
+- Automatic marketplace ID addition
+- Automatic error handling
+- Automatic response parsing
+
+
+================================================================================
+8. GRANTLESS OPERATIONS
+================================================================================
+
+response = shipping._request_grantless_operation(
+    path="/shipping/v1/endpoint",
+    data={"key": "value"},
+    params={"method": "POST"}
+)
+
+
+================================================================================
+INSTALLATION LOCATION
+================================================================================
+
+pip install python-amazon-sp-api
+Location: C:\Users\boxatron\Desktop\simpleInventory\.venv\Lib\site-packages\sp_api
+
+Key files:
+- sp_api/api/shipping/shipping.py - Shipping class
+- sp_api/base/client.py - Client class with _request()
+- sp_api/base/base_client.py - BaseClient class
+- sp_api/base/marketplaces.py - Marketplace endpoints
+- sp_api/base/ApiResponse.py - Response object
+
