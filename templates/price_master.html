@@ -6,27 +6,29 @@
   <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.ico') }}">
   <title>Price Master</title>
 
-  <!-- i18n also injects the global top banner + theme -->
   <script src="/static/i18n.js" defer></script>
 
   <style>
     :root{
       --pm-ink: var(--ink, #111827);
       --pm-muted: var(--muted, #6b7280);
-      --pm-bg: var(--bg, #f9f9f9);
+      --pm-bg: var(--bg, #f3f4f6);
       --pm-card: var(--card, #ffffff);
       --pm-border: var(--border, #e5e7eb);
-      --pm-accent: var(--accent, #00b894);
-      --pm-primary: var(--primary, #0984e3);
+      --pm-accent: #10b981;
+      --pm-accent2: #059669;
+      --pm-primary: #0984e3;
       --pm-danger: #e74c3c;
-      --pm-radius: 14px;
-      --pm-shadow: 0 10px 26px rgba(0,0,0,0.10);
+      --pm-radius: 16px;
+      --pm-shadow: 0 4px 24px rgba(0,0,0,0.07);
+      --pm-hero-from: #10b981;
+      --pm-hero-to: #059669;
     }
 
     *{ box-sizing:border-box; }
     body{
       margin:0;
-      padding: 16px;
+      padding:0;
       font-family: "Segoe UI", Arial, sans-serif;
       background: var(--pm-bg);
       color: var(--pm-ink);
@@ -34,140 +36,168 @@
     }
 
     .wrap{
-      max-width: 1180px;
+      max-width: 1280px;
       margin: 0 auto;
-      padding-bottom: 90px;
+      padding: 0 16px 100px;
     }
 
-    .top{
-      display:flex;
-      gap: 10px;
-      align-items:center;
-      margin-bottom: 12px;
-    }
-
-    .btn{
-      appearance:none;
-      border: 1px solid var(--pm-border);
-      background: var(--pm-card);
-      color: var(--pm-ink);
-      padding: 10px 14px;
-      border-radius: 12px;
-      cursor: pointer;
-      font-weight: 700;
-      letter-spacing: .2px;
-      display:inline-flex;
-      align-items:center;
-      gap: 8px;
-      text-decoration:none;
-      transition: transform .12s ease, filter .12s ease;
-      user-select: none;
-      white-space: nowrap;
-    }
-    .btn:hover{ transform: translateY(-1px); filter: brightness(1.02); }
-    .btn:active{ transform: translateY(0); }
-
-    .btnPrimary{
-      background: var(--pm-accent);
-      border-color: transparent;
+    /* ─── HERO HEADER ─── */
+    .hero{
+      background: linear-gradient(135deg, var(--pm-hero-from), var(--pm-hero-to));
+      padding: 28px 28px 22px;
       color: #fff;
+      position: relative;
+      overflow: hidden;
     }
-    .btnGhost{
-      background: rgba(0,0,0,0.02);
+    .hero::before{
+      content:'';
+      position:absolute;
+      top:-40%;right:-10%;
+      width:340px;height:340px;
+      border-radius:50%;
+      background: rgba(255,255,255,0.08);
     }
-    html.ss-theme-night .btnGhost{
-      background: rgba(255,255,255,0.04);
+    .hero::after{
+      content:'';
+      position:absolute;
+      bottom:-30%;left:10%;
+      width:200px;height:200px;
+      border-radius:50%;
+      background: rgba(255,255,255,0.05);
     }
-
-    .title{
-      flex: 1;
-      text-align: center;
-      font-size: 1.25rem;
-      font-weight: 900;
+    .heroInner{
+      max-width: 1280px;
+      margin: 0 auto;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+      position:relative;
+      z-index:1;
+    }
+    .heroLeft{
+      display:flex;
+      align-items:center;
+      gap: 14px;
+    }
+    .heroIcon{
+      width:44px;height:44px;
+      background: rgba(255,255,255,0.18);
+      border-radius:12px;
+      display:flex;align-items:center;justify-content:center;
+      font-size:1.4rem;
+      backdrop-filter: blur(6px);
+    }
+    .heroTitle{
+      font-size: 1.35rem;
+      font-weight: 800;
       letter-spacing: -0.02em;
     }
-    .subtitle{
+    .heroSub{
+      font-size: 0.88rem;
+      opacity: 0.85;
       margin-top: 2px;
-      text-align:center;
-      color: var(--pm-muted);
-      font-size: 0.92rem;
-      font-weight: 600;
+      font-weight: 500;
     }
+    .heroActions{
+      display:flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .heroBtn{
+      appearance:none;
+      border: 1px solid rgba(255,255,255,0.25);
+      background: rgba(255,255,255,0.15);
+      backdrop-filter: blur(6px);
+      color: #fff;
+      padding: 9px 18px;
+      border-radius: 10px;
+      cursor: pointer;
+      font-weight: 700;
+      font-size: 0.88rem;
+      display:inline-flex;
+      align-items:center;
+      gap: 6px;
+      transition: background .15s, transform .12s;
+      white-space: nowrap;
+    }
+    .heroBtn:hover{ background: rgba(255,255,255,0.25); transform: translateY(-1px); }
+    .heroBtn:active{ transform: translateY(0); }
+    .heroBtnSolid{
+      background: #fff;
+      color: var(--pm-hero-from);
+      border-color: transparent;
+      font-weight: 800;
+    }
+    .heroBtnSolid:hover{ background: rgba(255,255,255,0.92); }
 
-    .grid{
-      display:grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
-      margin-top: 12px;
-    }
-
-    .card{
-      background: var(--pm-card);
-      border: 1px solid var(--pm-border);
-      border-radius: var(--pm-radius);
-      box-shadow: var(--pm-shadow);
-      overflow:hidden;
-    }
-    html.ss-theme-night .card{
-      box-shadow: 0 16px 40px rgba(0,0,0,0.35);
-      border-color: rgba(255,255,255,0.08);
-    }
-    .cardHeader{
-      padding: 12px 14px;
-      border-bottom: 1px solid var(--pm-border);
+    /* ─── TOOLBAR ─── */
+    .toolbar{
       display:flex;
       align-items:center;
-      justify-content: space-between;
-      gap: 10px;
-    }
-    html.ss-theme-night .cardHeader{
-      border-bottom-color: rgba(255,255,255,0.08);
-      background: rgba(0,0,0,0.12);
-    }
-    .cardTitle{
-      font-weight: 900;
-      letter-spacing: -0.01em;
-      display:flex;
-      align-items:center;
-      gap: 10px;
-    }
-    .cardBody{ padding: 12px 14px; }
-
-    .fieldRow{
-      display:flex;
       gap: 10px;
       flex-wrap: wrap;
-      align-items: flex-end;
+      padding: 12px 16px;
+      background: var(--pm-card);
+      border-bottom: 1px solid var(--pm-border);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+      position: sticky;
+      top: 0;
+      z-index: 50;
     }
-    .field{
-      display:flex;
-      flex-direction: column;
-      gap: 6px;
+    html.ss-has-top-banner .toolbar{
+      top: 36px;
+    }
+
+    .searchPill{
       flex: 1;
-      min-width: 180px;
+      min-width: 200px;
+      max-width: 340px;
+      position: relative;
     }
-    label{
-      font-size: 0.86rem;
-      font-weight: 800;
-      color: var(--pm-muted);
-      letter-spacing: .2px;
-    }
-    input[type="text"], input[type="number"], select{
+    .searchPill input{
       width: 100%;
-      padding: 10px 12px;
-      border: 1px solid var(--pm-border);
-      border-radius: 12px;
-      background: rgba(0,0,0,0.02);
+      padding: 9px 14px;
+      border: 1.5px solid var(--pm-border);
+      border-radius: 999px;
+      background: var(--pm-bg);
       color: var(--pm-ink);
+      font-size: 0.9rem;
       outline: none;
-      font-size: 0.98rem;
+      transition: border-color .15s;
     }
-    html.ss-theme-night input[type="text"],
-    html.ss-theme-night input[type="number"],
-    html.ss-theme-night select{
-      background: rgba(255,255,255,0.04);
-      border-color: rgba(255,255,255,0.10);
-      color: var(--ink, #e2e8f0);
+    .searchPill input:focus{
+      border-color: var(--pm-accent);
+    }
+    html.ss-theme-night .searchPill input{
+      background: rgba(255,255,255,0.05);
+      border-color: rgba(255,255,255,0.12);
+    }
+
+    .tbSort{
+      display:flex;
+      align-items:center;
+      gap: 6px;
+    }
+    .tbSort label{
+      font-size: 0.82rem;
+      font-weight: 700;
+      color: var(--pm-muted);
+      white-space: nowrap;
+    }
+    .tbSort select{
+      padding: 8px 10px;
+      border: 1.5px solid var(--pm-border);
+      border-radius: 10px;
+      background: var(--pm-bg);
+      color: var(--pm-ink);
+      font-size: 0.85rem;
+      outline: none;
+    }
+    html.ss-theme-night .tbSort select{
+      background: rgba(255,255,255,0.05);
+      border-color: rgba(255,255,255,0.12);
     }
     html.ss-theme-night select option,
     html.ss-theme-night select optgroup{
@@ -175,123 +205,195 @@
       color: #e2e8f0;
     }
 
-    .seg{
+    .storePills{
       display:flex;
-      border: 1px solid var(--pm-border);
-      border-radius: 999px;
-      overflow:hidden;
-      background: rgba(0,0,0,0.02);
-    }
-    html.ss-theme-night .seg{
-      background: rgba(255,255,255,0.04);
-      border-color: rgba(255,255,255,0.10);
-    }
-    .seg button{
-      border:0;
-      background: transparent;
-      color: var(--pm-muted);
-      padding: 8px 12px;
-      cursor:pointer;
-      font-weight: 900;
-      letter-spacing: .2px;
-      min-width: 82px;
-    }
-    .seg button.active{
-      background: var(--pm-primary);
-      color: #fff;
-    }
-
-    .kpi{
-      display:flex;
-      gap: 10px;
+      gap: 6px;
       flex-wrap: wrap;
-      margin-top: 10px;
     }
-    .pill{
+    .spill{
       display:inline-flex;
       align-items:center;
-      gap: 8px;
-      padding: 8px 10px;
+      gap: 5px;
+      padding: 6px 13px;
       border-radius: 999px;
-      border: 1px solid var(--pm-border);
+      font-weight: 800;
+      font-size: 0.82rem;
+      border: 1.5px solid var(--pm-border);
       background: rgba(0,0,0,0.02);
       color: var(--pm-muted);
-      font-weight: 800;
-      font-size: 0.9rem;
+      white-space: nowrap;
+      cursor: pointer;
+      transition: all .2s;
+      letter-spacing: .3px;
+      user-select: none;
     }
-    .pill.ebay{
-      background: rgba(96,165,250,0.15);
+    .spill .cnt{
+      font-weight: 900;
+      font-size: 0.85rem;
+      min-width: 14px;
+      text-align: center;
+    }
+    .spill.all{
+      border-color: var(--pm-border);
+    }
+    .spill.all.active{
+      background: var(--pm-accent);
+      border-color: var(--pm-accent);
+      color: #fff;
+    }
+    .spill.ebay{
+      background: rgba(96,165,250,0.10);
       border-color: rgba(96,165,250,0.25);
-      color: #60a5fa;
+      color: #3b82f6;
     }
-    .pill.amazon{
-      background: rgba(255,153,0,0.15);
+    .spill.ebay.active{
+      background: #3b82f6;
+      border-color: #3b82f6;
+      color: #fff;
+      box-shadow: 0 0 0 2px rgba(96,165,250,0.2);
+    }
+    .spill.ebay .cnt{ color: inherit; }
+    .spill.amazon{
+      background: rgba(255,153,0,0.10);
       border-color: rgba(255,153,0,0.25);
-      color: #fbbf24;
+      color: #f59e0b;
     }
-    .pill.selected-active{
-      background: rgba(16,185,129,0.15);
-      border-color: rgba(16,185,129,0.25);
-      color: #10b981;
+    .spill.amazon.active{
+      background: #f59e0b;
+      border-color: #f59e0b;
+      color: #fff;
+      box-shadow: 0 0 0 2px rgba(255,153,0,0.2);
     }
-    html.ss-theme-night .pill{
+    .spill.amazon .cnt{ color: inherit; }
+    .spill.ebay.has-sel{
+      background: rgba(96,165,250,0.22);
+      border-color: rgba(96,165,250,0.4);
+      box-shadow: 0 0 0 2px rgba(96,165,250,0.15);
+    }
+    .spill.amazon.has-sel{
+      background: rgba(255,153,0,0.22);
+      border-color: rgba(255,153,0,0.4);
+      box-shadow: 0 0 0 2px rgba(255,153,0,0.15);
+    }
+    html.ss-theme-night .spill{
       background: rgba(255,255,255,0.04);
       border-color: rgba(255,255,255,0.10);
+      color: #94a3b8;
     }
-    html.ss-theme-night .pill.ebay{
-      background: rgba(96,165,250,0.2);
-      border-color: rgba(96,165,250,0.3);
+    html.ss-theme-night .spill.all.active{
+      background: var(--pm-accent);
+      border-color: var(--pm-accent);
+      color: #fff;
+    }
+    html.ss-theme-night .spill.ebay{
+      background: rgba(96,165,250,0.12);
+      border-color: rgba(96,165,250,0.28);
       color: #60a5fa;
     }
-    html.ss-theme-night .pill.amazon{
-      background: rgba(251,191,36,0.18);
-      border-color: rgba(251,191,36,0.3);
+    html.ss-theme-night .spill.ebay.active{
+      background: #3b82f6;
+      border-color: #3b82f6;
+      color: #fff;
+    }
+    html.ss-theme-night .spill.ebay.has-sel{
+      background: rgba(96,165,250,0.25);
+      border-color: rgba(96,165,250,0.4);
+    }
+    html.ss-theme-night .spill.amazon{
+      background: rgba(251,191,36,0.12);
+      border-color: rgba(251,191,36,0.28);
       color: #fbbf24;
     }
-    html.ss-theme-night .pill.selected-active{
-      background: rgba(16,185,129,0.2);
-      border-color: rgba(16,185,129,0.35);
-      color: #34d399;
+    html.ss-theme-night .spill.amazon.active{
+      background: #f59e0b;
+      border-color: #f59e0b;
+      color: #fff;
     }
-    .pill strong{ color: var(--pm-ink); }
+    html.ss-theme-night .spill.amazon.has-sel{
+      background: rgba(251,191,36,0.25);
+      border-color: rgba(251,191,36,0.4);
+    }
+
+    /* ─── TABLE ─── */
+    .tableCard{
+      background: var(--pm-card);
+      border: 1px solid var(--pm-border);
+      border-radius: var(--pm-radius);
+      margin: 16px 16px 0;
+      box-shadow: var(--pm-shadow);
+      overflow: hidden;
+    }
+    html.ss-theme-night .tableCard{
+      border-color: rgba(255,255,255,0.08);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+    }
+    .tableHeader{
+      padding: 12px 16px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap: 10px;
+      border-bottom: 1px solid var(--pm-border);
+    }
+    html.ss-theme-night .tableHeader{
+      border-bottom-color: rgba(255,255,255,0.08);
+      background: rgba(0,0,0,0.08);
+    }
+    .tableTitle{
+      font-weight: 800;
+      font-size: 0.95rem;
+      display:flex;
+      align-items:center;
+      gap: 8px;
+    }
+    .listingCount{
+      font-size: 0.82rem;
+      font-weight: 700;
+      color: var(--pm-muted);
+    }
 
     .tableWrap{
       overflow:auto;
-      max-height: 62vh;
+      max-height: 65vh;
     }
     table{
       width: 100%;
-      border-collapse: collapse;
-      font-size: 0.93rem;
+      border-collapse: separate;
+      border-spacing: 0;
+      font-size: 0.9rem;
     }
     thead th{
       position: sticky;
       top: 0;
       z-index: 3;
       background: var(--pm-card);
-      border-bottom: 1px solid var(--pm-border);
-      padding: 10px 10px;
+      border-bottom: 2px solid var(--pm-border);
+      padding: 10px 12px;
       text-align: left;
-      font-weight: 900;
-      letter-spacing: .2px;
+      font-weight: 800;
+      font-size: 0.78rem;
+      letter-spacing: .5px;
+      text-transform: uppercase;
+      color: var(--pm-muted);
       white-space: nowrap;
     }
-    /* The global top banner applies a sticky offset for many legacy pages; Price Master
-       uses its own internal scroll pane, so keep headers pinned to the pane top. */
     html.ss-has-top-banner .tableWrap thead th{
       top: 0 !important;
     }
     html.ss-theme-night thead th{
-      background: rgba(0,0,0,0.18);
+      background: var(--pm-card);
       border-bottom-color: rgba(255,255,255,0.08);
     }
     tbody td{
-      border-bottom: 1px solid rgba(0,0,0,0.06);
-      padding: 10px 10px;
-      vertical-align: top;
+      border-bottom: 1px solid rgba(0,0,0,0.05);
+      padding: 10px 12px;
+      vertical-align: middle;
     }
     html.ss-theme-night tbody td{
-      border-bottom-color: rgba(255,255,255,0.07);
+      border-bottom-color: rgba(255,255,255,0.06);
+    }
+    tbody tr{
+      transition: background .12s;
     }
     tbody tr:hover{
       background: rgba(0,0,0,0.02);
@@ -299,16 +401,41 @@
     html.ss-theme-night tbody tr:hover{
       background: rgba(255,255,255,0.04);
     }
+    /* Store row tinting */
+    tbody tr[data-store="ebay"]{
+      background: rgba(59,130,246,0.03);
+    }
+    tbody tr[data-store="amazon"]{
+      background: rgba(245,158,11,0.03);
+    }
+    html.ss-theme-night tbody tr[data-store="ebay"]{
+      background: rgba(59,130,246,0.05);
+    }
+    html.ss-theme-night tbody tr[data-store="amazon"]{
+      background: rgba(245,158,11,0.04);
+    }
+    tbody tr[data-store="ebay"]:hover{
+      background: rgba(59,130,246,0.07);
+    }
+    tbody tr[data-store="amazon"]:hover{
+      background: rgba(245,158,11,0.07);
+    }
+    html.ss-theme-night tbody tr[data-store="ebay"]:hover{
+      background: rgba(59,130,246,0.10);
+    }
+    html.ss-theme-night tbody tr[data-store="amazon"]:hover{
+      background: rgba(245,158,11,0.08);
+    }
 
     .badge{
       display:inline-flex;
       align-items:center;
-      gap: 6px;
+      gap: 5px;
       border-radius: 999px;
-      padding: 4px 8px;
-      font-size: 0.8rem;
-      font-weight: 900;
-      letter-spacing: .2px;
+      padding: 3px 9px;
+      font-size: 0.76rem;
+      font-weight: 800;
+      letter-spacing: .3px;
       border: 1px solid var(--pm-border);
       background: rgba(0,0,0,0.02);
       color: var(--pm-muted);
@@ -318,140 +445,331 @@
       background: rgba(255,255,255,0.04);
       border-color: rgba(255,255,255,0.10);
     }
-    .badge.ebay{ color: #0064d2; border-color: rgba(0,100,210,0.35); background: rgba(0,100,210,0.08); }
-    .badge.amazon{ color: #ff9900; border-color: rgba(255,153,0,0.35); background: rgba(255,153,0,0.08); }
-    html.ss-theme-night .badge.ebay{ background: rgba(96,165,250,0.12); border-color: rgba(96,165,250,0.24); color: #60a5fa; }
-    html.ss-theme-night .badge.amazon{ background: rgba(251,191,36,0.12); border-color: rgba(251,191,36,0.24); color: #fbbf24; }
+    .badge.ebay{ color: #2563eb; border-color: rgba(37,99,235,0.3); background: rgba(37,99,235,0.08); }
+    .badge.amazon{ color: #d97706; border-color: rgba(217,119,6,0.3); background: rgba(217,119,6,0.08); }
+    html.ss-theme-night .badge.ebay{ background: rgba(96,165,250,0.15); border-color: rgba(96,165,250,0.25); color: #60a5fa; }
+    html.ss-theme-night .badge.amazon{ background: rgba(251,191,36,0.15); border-color: rgba(251,191,36,0.25); color: #fbbf24; }
 
     .muted{ color: var(--pm-muted); }
-    .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; font-size: 0.9em; }
+    .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; font-size: 0.88em; }
 
+    .newPriceUp{
+      color: #ef4444;
+      font-weight: 800;
+    }
+    .newPriceDown{
+      color: #22c55e;
+      font-weight: 800;
+    }
+
+    .btnSm{
+      appearance:none;
+      border: 1.5px solid var(--pm-border);
+      background: var(--pm-card);
+      color: var(--pm-ink);
+      padding: 7px 14px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 700;
+      font-size: 0.82rem;
+      transition: transform .12s, background .15s;
+      white-space: nowrap;
+    }
+    .btnSm:hover{ transform: translateY(-1px); }
+
+    /* ─── FLOATING ACTION BAR ─── */
+    .fab{
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      z-index: 60;
+      transform: translateY(100%);
+      transition: transform .3s cubic-bezier(0.4,0,0.2,1);
+      pointer-events: none;
+    }
+    .fab.visible{
+      transform: translateY(0);
+      pointer-events: auto;
+    }
+    .fabInner{
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 12px 20px;
+      background: var(--pm-card);
+      border-top: 1px solid var(--pm-border);
+      box-shadow: 0 -4px 24px rgba(0,0,0,0.1);
+      display:flex;
+      align-items:center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    html.ss-theme-night .fabInner{
+      background: var(--pm-card);
+      border-top-color: rgba(255,255,255,0.08);
+      box-shadow: 0 -4px 24px rgba(0,0,0,0.4);
+    }
+    .fabLeft{
+      display:flex;
+      align-items:center;
+      gap: 10px;
+      font-weight: 800;
+      font-size: 0.92rem;
+    }
+    .fabCount{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      background: var(--pm-accent);
+      color: #fff;
+      border-radius: 999px;
+      min-width: 28px;
+      height: 28px;
+      padding: 0 8px;
+      font-size: 0.88rem;
+      font-weight: 800;
+    }
+    .fabControls{
+      display:flex;
+      align-items:center;
+      gap: 8px;
+      flex: 1;
+      flex-wrap: wrap;
+    }
+    .fabControls label{
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: var(--pm-muted);
+      text-transform: uppercase;
+    }
+    .fabControls select, .fabControls input{
+      padding: 8px 10px;
+      border: 1.5px solid var(--pm-border);
+      border-radius: 8px;
+      background: var(--pm-bg);
+      color: var(--pm-ink);
+      font-size: 0.88rem;
+      outline: none;
+    }
+    html.ss-theme-night .fabControls select,
+    html.ss-theme-night .fabControls input{
+      background: rgba(255,255,255,0.05);
+      border-color: rgba(255,255,255,0.12);
+    }
+    .fabRight{
+      display:flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-left: auto;
+    }
+    .fabBtn{
+      appearance:none;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 10px;
+      cursor: pointer;
+      font-weight: 700;
+      font-size: 0.88rem;
+      display:inline-flex;
+      align-items:center;
+      gap: 6px;
+      transition: transform .12s, filter .12s;
+      white-space: nowrap;
+    }
+    .fabBtn:hover{ transform: translateY(-1px); filter: brightness(1.05); }
+    .fabBtnApply{
+      background: linear-gradient(135deg, #10b981, #059669);
+      color: #fff;
+    }
+    .fabBtnCheck{
+      background: var(--pm-bg);
+      color: var(--pm-ink);
+      border: 1.5px solid var(--pm-border);
+    }
+    .fabBtnClear{
+      background: transparent;
+      color: var(--pm-muted);
+      font-size: 0.82rem;
+      padding: 8px 12px;
+    }
+
+    /* ─── COLLAPSIBLE LOG ─── */
+    .logCard{
+      background: var(--pm-card);
+      border: 1px solid var(--pm-border);
+      border-radius: var(--pm-radius);
+      margin: 16px 16px 0;
+      box-shadow: var(--pm-shadow);
+      overflow: hidden;
+    }
+    html.ss-theme-night .logCard{
+      border-color: rgba(255,255,255,0.08);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+    }
+    .logHeader{
+      padding: 10px 16px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap: 10px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .logTitle{
+      font-weight: 800;
+      font-size: 0.88rem;
+      display:flex;
+      align-items:center;
+      gap: 8px;
+      color: var(--pm-muted);
+    }
+    .logBody{
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height .3s ease;
+    }
+    .logCard.open .logBody{
+      max-height: 250px;
+    }
+    .logCard.open .logHeader{
+      border-bottom: 1px solid var(--pm-border);
+    }
+    html.ss-theme-night .logCard.open .logHeader{
+      border-bottom-color: rgba(255,255,255,0.08);
+    }
+    .logChev{
+      transition: transform .25s ease;
+      font-size: 0.8rem;
+      color: var(--pm-muted);
+    }
+    .logCard.open .logChev{
+      transform: rotate(180deg);
+    }
     .log{
       white-space: pre-wrap;
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-      font-size: 0.9rem;
+      font-size: 0.84rem;
       margin: 0;
-      padding: 12px 14px;
+      padding: 10px 14px;
       max-height: 220px;
       overflow:auto;
-      background: rgba(0,0,0,0.03);
+      background: rgba(0,0,0,0.02);
+      color: var(--pm-muted);
     }
     html.ss-theme-night .log{
-      background: rgba(0,0,0,0.22);
+      background: rgba(0,0,0,0.18);
     }
 
-    @media (max-width: 980px){
-      .grid{ grid-template-columns: 1fr; }
-      body{ padding: 12px; }
-      .title{ font-size: 1.15rem; }
-      .seg button{ min-width: 70px; }
-      thead th, tbody td{ padding: 9px 8px; }
+    label{
+      font-size: 0.8rem;
+      font-weight: 800;
+      color: var(--pm-muted);
+      letter-spacing: .3px;
+      text-transform: uppercase;
+    }
+    input[type="text"], input[type="number"], select{
+      width: 100%;
+      padding: 9px 12px;
+      border: 1.5px solid var(--pm-border);
+      border-radius: 10px;
+      background: var(--pm-bg);
+      color: var(--pm-ink);
+      outline: none;
+      font-size: 0.92rem;
+      transition: border-color .15s;
+    }
+    input[type="text"]:focus, input[type="number"]:focus, select:focus{
+      border-color: var(--pm-accent);
+    }
+    html.ss-theme-night input[type="text"],
+    html.ss-theme-night input[type="number"],
+    html.ss-theme-night select{
+      background: rgba(255,255,255,0.05);
+      border-color: rgba(255,255,255,0.12);
+    }
+
+    /* ─── RESPONSIVE ─── */
+    @media (max-width: 900px){
+      .hero{ padding: 20px 16px 16px; }
+      .heroInner{ flex-direction: column; align-items: flex-start; }
+      .heroTitle{ font-size: 1.15rem; }
+      .toolbar{ padding: 10px 12px; }
+      .searchPill{ max-width: none; }
+      .storePills{ margin-left: 0; width: 100%; }
+      .tableCard, .logCard{ margin: 12px 8px 0; }
+      thead th, tbody td{ padding: 8px 8px; }
+      .fabInner{ padding: 10px 12px; }
     }
   </style>
 </head>
 <body>
+  <!-- ─── HERO HEADER ─── -->
+  <div class="hero">
+    <div class="heroInner">
+      <a href="/store-manager" class="heroBtn" style="margin-right:6px;">← Back</a>
+      <div class="heroLeft">
+        <div class="heroIcon">💰</div>
+        <div>
+          <div class="heroTitle">Price Master</div>
+          <div class="heroSub">Bulk re-pricing for eBay & Amazon listings</div>
+        </div>
+      </div>
+      <div class="heroActions">
+        <button class="heroBtnSolid heroBtn" id="refreshBtn" type="button">↻ Refresh</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── TOOLBAR ─── -->
+  <div class="toolbar">
+    <div class="searchPill">
+      <input id="pmSearch" type="text" placeholder="UPC, Title, SKU, ASIN…" />
+    </div>
+
+    <div class="tbSort">
+      <label for="pmSort">Sort</label>
+      <select id="pmSort">
+        <option value="list_new">Newest Listed</option>
+        <option value="list_old">Oldest Listed</option>
+        <option value="chg_new">Recent Change</option>
+        <option value="chg_old">Longest Unchanged</option>
+        <option value="price_low">Price ↑</option>
+        <option value="price_high">Price ↓</option>
+      </select>
+    </div>
+
+    <div class="storePills" role="tablist" aria-label="Store filter">
+      <button type="button" class="spill all active" data-store="all">All <span class="cnt" id="kpiAll">0</span></button>
+      <button type="button" class="spill ebay" data-store="ebay" id="kpiEbayPill">eBay <span class="cnt" id="kpiEbay">0</span></button>
+      <button type="button" class="spill amazon" data-store="amazon" id="kpiAmazonPill">Amz <span class="cnt" id="kpiAmazon">0</span></button>
+    </div>
+  </div>
+
   <div class="wrap">
-    <div class="top">
-      <div style="flex:1; min-width:0;">
-        <div class="title">Price Master</div>
-        <div class="subtitle">Bulk re-pricing for eBay + Amazon</div>
-      </div>
-      <button class="btn btnGhost" id="refreshBtn" type="button"><span>↻</span><span data-i18n="refresh">Refresh</span></button>
-    </div>
-
-    <div class="grid">
-      <div class="card">
-        <div class="cardHeader">
-          <div class="cardTitle"><span>🔎</span><span>Filters</span></div>
+    <!-- ─── LISTINGS TABLE ─── -->
+    <div class="tableCard">
+      <div class="tableHeader">
+        <div class="tableTitle">
+          📋 Listings <span class="listingCount" id="pmStatus"></span>
         </div>
-        <div class="cardBody">
-          <div class="fieldRow">
-            <div class="field" style="min-width:260px;">
-              <label for="pmSearch"><span data-i18n="search">Search</span></label>
-              <input id="pmSearch" type="text" placeholder="UPC / Title / SKU / ItemID / ASIN" />
-            </div>
-            <div class="field" style="min-width:240px;">
-              <label for="pmSort">Sort</label>
-              <select id="pmSort">
-                <option value="list_new">List Age (newest)</option>
-                <option value="list_old">List Age (oldest)</option>
-                <option value="chg_new">Since Price Change (recent)</option>
-                <option value="chg_old">Since Price Change (longest)</option>
-                <option value="price_low">Price (low → high)</option>
-                <option value="price_high">Price (high → low)</option>
-              </select>
-            </div>
-            <div class="field" style="min-width:260px;">
-              <label>Store</label>
-              <div class="seg" role="tablist" aria-label="Store filter">
-                <button type="button" class="active" data-store="all">All</button>
-                <button type="button" data-store="ebay">eBay</button>
-                <button type="button" data-store="amazon">Amazon</button>
-              </div>
-            </div>
-          </div>
-
-          <div class="kpi">
-            <div class="pill" id="kpiSelectedPill"><span>Selected</span> <strong id="kpiSelected">0</strong></div>
-            <div class="pill"><span>Showing</span> <strong id="kpiShown">0</strong></div>
-            <div class="pill ebay"><span>eBay</span> <strong id="kpiEbay">0</strong></div>
-            <div class="pill amazon"><span>Amazon</span> <strong id="kpiAmazon">0</strong></div>
-          </div>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <input type="checkbox" id="selectAllCheckbox" title="Select all shown" style="width:16px;height:16px;cursor:pointer;">
+          <button class="btnSm" type="button" id="selectAllBtn">Select All</button>
+          <button class="btnSm" type="button" id="clearSelBtn">Clear</button>
         </div>
-      </div>
-
-      <div class="card">
-        <div class="cardHeader">
-          <div class="cardTitle"><span>🧮</span><span>Bulk Change</span></div>
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end;">
-            <button class="btn" type="button" id="selectAllBtn">Select All</button>
-            <button class="btn" type="button" id="clearSelBtn" data-i18n="clear">Clear</button>
-            <button class="btn btnGhost" type="button" id="checkFeedBtn">Check Feed</button>
-          </div>
-        </div>
-        <div class="cardBody">
-          <div class="fieldRow">
-            <div class="field" style="min-width:210px;">
-              <label for="pmMode">Mode</label>
-              <select id="pmMode">
-                <option value="delta">$ Increment (±)</option>
-                <option value="percent">% Change (±)</option>
-              </select>
-            </div>
-            <div class="field" style="min-width:210px;">
-              <label for="pmValue">Value</label>
-              <input id="pmValue" type="number" step="0.01" placeholder="e.g. -5 or 1.25" />
-            </div>
-            <div class="field" style="min-width:260px;">
-              <label>&nbsp;</label>
-              <button class="btn btnPrimary" type="button" id="applyBtn"><span>✓</span>Apply to Selected</button>
-            </div>
-          </div>
-
-          <div class="muted" style="margin-top:10px; font-weight:700;">
-            Tip: type a value to preview the New Price column before updating.
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div class="card" style="margin-top:12px;">
-      <div class="cardHeader">
-        <div class="cardTitle"><span>📋</span><span>Listings</span></div>
-        <div class="muted" id="pmStatus" style="font-weight:900;"></div>
       </div>
       <div class="tableWrap">
         <table>
           <thead>
             <tr>
-              <th style="width:42px;"><input type="checkbox" id="selectAllCheckbox" title="Select all shown"></th>
-              <th style="width:110px;">Store</th>
+              <th style="width:38px;"></th>
+              <th style="width:90px;">Store</th>
               <th>Item</th>
-              <th style="width:170px;">ID</th>
-              <th style="width:120px;">Price</th>
-              <th style="width:130px;">New Price</th>
-              <th style="width:160px;">List Age</th>
-              <th style="width:190px;">Since Change</th>
+              <th style="width:150px;">ID</th>
+              <th style="width:100px;">Price</th>
+              <th style="width:110px;">New Price</th>
+              <th style="width:130px;">List Age</th>
+              <th style="width:150px;">Since Change</th>
             </tr>
           </thead>
           <tbody id="pmTbody"></tbody>
@@ -459,14 +777,40 @@
       </div>
     </div>
 
-    <div class="card" style="margin-top:12px;">
-      <div class="cardHeader">
-        <div class="cardTitle"><span>🧾</span><span>Activity</span></div>
+    <!-- ─── COLLAPSIBLE LOG ─── -->
+    <div class="logCard" id="logPanel">
+      <div class="logHeader" id="logToggle">
+        <div class="logTitle">📝 Activity Log</div>
         <div style="display:flex;gap:8px;align-items:center;">
-          <button class="btn" type="button" id="clearLogBtn" data-i18n="clear">Clear</button>
+          <button class="btnSm" type="button" id="clearLogBtn" onclick="event.stopPropagation()">Clear</button>
+          <span class="logChev">▼</span>
         </div>
       </div>
-      <pre class="log" id="pmLog"></pre>
+      <div class="logBody">
+        <pre class="log" id="pmLog"></pre>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── FLOATING ACTION BAR ─── -->
+  <div class="fab" id="fabBar">
+    <div class="fabInner">
+      <div class="fabLeft">
+        <span class="fabCount" id="fabCount">0</span>
+        <span>selected</span>
+      </div>
+      <div class="fabControls">
+        <select id="pmMode" style="width:auto;">
+          <option value="delta">$ ±</option>
+          <option value="percent">% ±</option>
+        </select>
+        <input id="pmValue" type="number" step="0.01" placeholder="e.g. -5 or 1.25" style="width:140px;" />
+      </div>
+      <div class="fabRight">
+        <button class="fabBtn fabBtnApply" type="button" id="applyBtn">✓ Apply</button>
+        <button class="fabBtn fabBtnCheck" type="button" id="checkFeedBtn">Check Feed</button>
+        <button class="fabBtn fabBtnClear" type="button" id="fabClearBtn">✕ Clear</button>
+      </div>
     </div>
   </div>
 
@@ -478,7 +822,7 @@
       store: 'all',
       q: '',
       sort: 'list_new',
-      selected: new Set(), // key = `${platform}:${listing_key}`
+      selected: new Set(),
       mode: 'delta',
       value: null,
       lastRenderKeys: [],
@@ -527,7 +871,6 @@
         const arr = JSON.parse(localStorage.getItem(ebayUpdateKey) || '[]');
         if(Array.isArray(arr) && arr.length) return arr;
       }catch(e){}
-      // Fallback: parse most recent log line
       const logText = ($('pmLog') && $('pmLog').textContent) ? $('pmLog').textContent : '';
       const m = logText.match(/ebay:(\d+)\s+\$[0-9.]+\s+→\s+\$([0-9.]+)/i);
       if(m){
@@ -590,9 +933,17 @@
       if(mode === 'delta') next = base + val;
       else if(mode === 'percent') next = base * (1 + (val / 100));
       next = Math.max(0, next);
-      // Ensure 2dp
       next = Math.round(next * 100) / 100;
       return next;
+    }
+
+    function escapeHtml(s){
+      return String(s ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
     }
 
     function log(line){
@@ -601,9 +952,11 @@
       if(!el) return;
       el.textContent = `[${ts}] ${line}\n` + el.textContent;
       try{
-        const lines = el.textContent.split('\\n');
-        if(lines.length > 250) el.textContent = lines.slice(0, 250).join('\\n');
+        const lines = el.textContent.split('\n');
+        if(lines.length > 250) el.textContent = lines.slice(0, 250).join('\n');
       }catch(e){}
+      const lp = $('logPanel');
+      if(lp && !lp.classList.contains('open')) lp.classList.add('open');
     }
 
     function setStatus(text){
@@ -657,20 +1010,30 @@
       return rows;
     }
 
+    function updateFab(){
+      const count = state.selected.size;
+      const fab = $('fabBar');
+      if(!fab) return;
+      fab.classList.toggle('visible', count > 0);
+      $('fabCount').textContent = String(count);
+    }
+
     function updateKpis(shown){
-      const shownCount = shown.length;
-      const selCount = state.selected.size;
-      let ebay = 0, amazon = 0;
+      let ebay = 0, amazon = 0, ebSel = 0, amSel = 0;
       for(const it of shown){
-        if(it.platform === 'ebay') ebay++;
-        else if(it.platform === 'amazon') amazon++;
+        const k = keyFor(it);
+        if(it.platform === 'ebay'){ ebay++; if(state.selected.has(k)) ebSel++; }
+        else if(it.platform === 'amazon'){ amazon++; if(state.selected.has(k)) amSel++; }
       }
-      $('kpiShown').textContent = String(shownCount);
-      $('kpiSelected').textContent = String(selCount);
-      $('kpiEbay').textContent = String(ebay);
-      $('kpiAmazon').textContent = String(amazon);
-      const selPill = $('kpiSelectedPill');
-      if(selPill) selPill.classList.toggle('selected-active', selCount > 0);
+      const hasSel = state.selected.size > 0;
+      $('kpiAll').textContent = String(ebay + amazon);
+      $('kpiEbay').textContent = hasSel ? `${ebSel}/${ebay}` : String(ebay);
+      $('kpiAmazon').textContent = hasSel ? `${amSel}/${amazon}` : String(amazon);
+      const ebPill = $('kpiEbayPill');
+      const amPill = $('kpiAmazonPill');
+      if(ebPill) ebPill.classList.toggle('has-sel', ebSel > 0 && state.store !== 'ebay');
+      if(amPill) amPill.classList.toggle('has-sel', amSel > 0 && state.store !== 'amazon');
+      updateFab();
     }
 
     function render(){
@@ -688,6 +1051,7 @@
       for(const it of rows){
         const k = keyFor(it);
         const tr = document.createElement('tr');
+        tr.setAttribute('data-store', it.platform);
 
         const selected = state.selected.has(k);
 
@@ -695,55 +1059,48 @@
         const chgIso = it.last_price_change_at || '';
 
         const newPrice = (val === null) ? null : computeNewPrice(it.price);
+        const oldP = toNumber(it.price);
+        let npClass = '';
+        if(newPrice !== null && oldP !== null){
+          npClass = newPrice > oldP ? 'newPriceUp' : (newPrice < oldP ? 'newPriceDown' : '');
+        }
 
         tr.innerHTML = `
-          <td><input type="checkbox" class="pmRowCb" data-key="${k}" ${selected ? 'checked' : ''}></td>
+          <td><input type="checkbox" class="pmRowCb" data-key="${k}" ${selected ? 'checked' : ''} style="width:15px;height:15px;cursor:pointer;"></td>
           <td>${it.platform === 'ebay' ? '<span class="badge ebay">eBay</span>' : '<span class="badge amazon">Amazon</span>'}</td>
           <td>
-            <div style="font-weight:900; line-height:1.2;">${escapeHtml(it.title || '(no title)')}</div>
-            <div class="muted mono" style="margin-top:4px;">${escapeHtml(it.upc || it.asin || '')}</div>
+            <div style="font-weight:800; line-height:1.2; font-size:0.88rem;">${escapeHtml(it.title || '(no title)')}</div>
+            <div class="muted mono" style="margin-top:3px; font-size:0.78em;">${escapeHtml(it.upc || it.asin || '')}</div>
           </td>
-          <td class="mono">${escapeHtml(it.listing_key || '')}</td>
-          <td><span class="mono" style="font-weight:900;">${fmtUsd(it.price)}</span> <span class="muted mono">${it.currency || 'USD'}</span></td>
-          <td>${newPrice === null ? '<span class="muted">—</span>' : `<span class="mono" style="font-weight:900;">${fmtUsd(newPrice)}</span>`}</td>
+          <td class="mono" style="font-size:0.82em;">${escapeHtml(it.listing_key || '')}</td>
+          <td><span class="mono" style="font-weight:800;">${fmtUsd(it.price)}</span></td>
+          <td>${newPrice === null ? '<span class="muted">—</span>' : `<span class="mono ${npClass}">${fmtUsd(newPrice)}</span>`}</td>
           <td>
-            <div class="mono" style="font-weight:900;">${fmtAge(listIso)}</div>
-            <div class="muted" style="margin-top:3px;">${escapeHtml(fmtDate(listIso))}</div>
+            <div class="mono" style="font-weight:800;">${fmtAge(listIso)}</div>
+            <div class="muted" style="margin-top:2px; font-size:0.78em;">${escapeHtml(fmtDate(listIso))}</div>
           </td>
           <td>
-            <div class="mono" style="font-weight:900;">${chgIso ? fmtAge(chgIso) : ''}</div>
-            <div class="muted" style="margin-top:3px;">${chgIso ? escapeHtml(fmtDate(chgIso)) : '<span class="muted">—</span>'}</div>
+            <div class="mono" style="font-weight:800;">${chgIso ? fmtAge(chgIso) : ''}</div>
+            <div class="muted" style="margin-top:2px; font-size:0.78em;">${chgIso ? escapeHtml(fmtDate(chgIso)) : '<span class="muted">—</span>'}</div>
           </td>
         `;
 
         tbody.appendChild(tr);
       }
 
-      // wire row checkbox events
       tbody.querySelectorAll('.pmRowCb').forEach(cb => {
         cb.addEventListener('change', (e) => {
           const key = e.target.getAttribute('data-key');
           if(!key) return;
           if(e.target.checked) state.selected.add(key);
           else state.selected.delete(key);
-          $('kpiSelected').textContent = String(state.selected.size);
-          const selPill = $('kpiSelectedPill');
-          if(selPill) selPill.classList.toggle('selected-active', state.selected.size > 0);
+          updateKpis(applyFilters());
+          updateFab();
         });
       });
 
-      // select-all checkbox reflects "all shown selected"
       const allShownSelected = state.lastRenderKeys.length > 0 && state.lastRenderKeys.every(k => state.selected.has(k));
       $('selectAllCheckbox').checked = allShownSelected;
-    }
-
-    function escapeHtml(s){
-      return String(s ?? '')
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;')
-        .replaceAll('"', '&quot;')
-        .replaceAll("'", '&#039;');
     }
 
     async function loadListings(){
@@ -812,8 +1169,7 @@
           if(row.success && row.pending){
             const note = row.note ? ` (${row.note})` : '';
             log(`⏳ ${tag} ${fmtUsd(row.old_price)} → ${fmtUsd(row.new_price)}${note}`);
-            // Auto-check feed status once after a short delay
-            const feedIdMatch = (row.note || '').match(/feed\\s+(\\d+)/i);
+            const feedIdMatch = (row.note || '').match(/feed\s+(\d+)/i);
             if(feedIdMatch){
               const feedId = feedIdMatch[1];
               setLastFeedId(feedId);
@@ -822,7 +1178,7 @@
           } else if(row.success){
             const note = row.note ? ` (${row.note})` : '';
             log(`✓ ${tag} ${fmtUsd(row.old_price)} → ${fmtUsd(row.new_price)}${note}`);
-            const feedIdMatch = (row.note || '').match(/feed\\s+(\\d+)/i);
+            const feedIdMatch = (row.note || '').match(/feed\s+(\d+)/i);
             if(feedIdMatch) setLastFeedId(feedIdMatch[1]);
             if((row.platform || '').toLowerCase() === 'ebay'){
               pushEbayUpdate(row.listing_key, row.new_price);
@@ -832,7 +1188,6 @@
           }
         }
 
-        // Refresh after update
         await loadListings();
       }catch(e){
         log(`Bulk update failed: ${e.message}`);
@@ -862,7 +1217,7 @@
         }
         if(j.applied){
           await loadListings();
-        } else if(['IN_QUEUE','IN_PROGRESS','IN_PROGRESS','IN_QUEUE','IN_PROGRESS','IN_PROGRESS','IN_QUEUE'].includes(st.toUpperCase())) {
+        } else if(['IN_QUEUE','IN_PROGRESS'].includes(st.toUpperCase())) {
           if(feedCheckAttempts[feedId] < 3){
             setTimeout(() => checkFeedStatus(feedId), 20000);
           }
@@ -909,7 +1264,7 @@
 
     function setStoreFilter(store){
       state.store = store;
-      document.querySelectorAll('.seg button').forEach(b => b.classList.toggle('active', b.getAttribute('data-store') === store));
+      document.querySelectorAll('.spill').forEach(b => b.classList.toggle('active', b.getAttribute('data-store') === store));
       constrainSelectionToStore();
       render();
     }
@@ -922,7 +1277,7 @@
       }
     }
 
-    // Wire controls
+    // ─── EVENT BINDINGS ───
     $('refreshBtn').addEventListener('click', loadListings);
     $('pmSearch').addEventListener('input', (e) => { state.q = e.target.value || ''; render(); });
     $('pmSort').addEventListener('change', (e) => { state.sort = e.target.value; render(); });
@@ -976,7 +1331,14 @@
       render();
     });
     $('clearLogBtn').addEventListener('click', () => { $('pmLog').textContent = ''; });
-    document.querySelectorAll('.seg button').forEach(b => b.addEventListener('click', () => setStoreFilter(b.getAttribute('data-store'))));
+    $('fabClearBtn').addEventListener('click', () => { state.selected.clear(); render(); });
+    document.querySelectorAll('.spill').forEach(b => b.addEventListener('click', () => setStoreFilter(b.getAttribute('data-store'))));
+
+    // Collapsible log
+    $('logToggle').addEventListener('click', (e) => {
+      if(e.target.closest('.btnSm')) return;
+      $('logPanel').classList.toggle('open');
+    });
 
     // Init
     document.addEventListener('DOMContentLoaded', () => {

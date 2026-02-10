@@ -6,319 +6,522 @@
   <title data-i18n="mail_center">Mail Center</title>
   <style>
     :root {
-      --bg: #f8fafc;
-      --card: #ffffff;
-      --line: #e2e8f0;
-      --ink: #0f172a;
-      --muted: #64748b;
-      --accent: #0284c7;
-      --accent-2: #0ea5e9;
-      --ok: #16a34a;
-      --warn: #f59e0b;
-      --shadow: 0 10px 30px rgba(2, 8, 23, 0.08);
-      --radius: 12px;
+      --mc-bg: #f8fafc;
+      --mc-card: #ffffff;
+      --mc-border: #e2e8f0;
+      --mc-ink: #0f172a;
+      --mc-muted: #64748b;
+      --mc-accent: #7c3aed;
+      --mc-accent2: #a78bfa;
+      --mc-ok: #16a34a;
+      --mc-warn: #f59e0b;
+      --mc-radius: 14px;
     }
+    * { box-sizing: border-box; margin: 0; }
     body {
-      margin: 0;
-      padding: 18px;
-      font-family: 'Segoe UI', Arial, sans-serif;
-      background: linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%);
-      color: var(--ink);
+      font-family: 'Segoe UI', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--mc-bg);
+      color: var(--mc-ink);
+      min-height: 100vh;
     }
-    .container {
-      max-width: 1200px;
+
+    /* ── HERO ── */
+    .hero {
+      background: linear-gradient(135deg, #7c3aed 0%, #6366f1 50%, #818cf8 100%);
+      padding: 22px 28px 18px;
+      color: #fff;
+    }
+    .heroInner {
+      max-width: 1280px;
       margin: 0 auto;
-      display: grid;
+      display: flex;
+      align-items: center;
       gap: 14px;
     }
-    .topbar {
-      display: flex;
-      gap: 10px;
-      align-items: center;
-      justify-content: space-between;
-      background: var(--card);
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      padding: 12px;
-      box-shadow: var(--shadow);
-    }
-    .top-left {
-      display: flex;
-      gap: 8px;
-      align-items: center;
-      min-width: 0;
-    }
-    .btn {
-      border: 1px solid var(--line);
-      background: #fff;
-      color: var(--ink);
-      border-radius: 10px;
-      padding: 9px 12px;
-      font-size: 0.95rem;
-      cursor: pointer;
-      text-decoration: none;
+    .heroBtn {
       display: inline-flex;
       align-items: center;
-      gap: 7px;
-    }
-    .btn.primary {
-      background: linear-gradient(135deg, var(--accent-2), var(--accent));
+      gap: 5px;
+      padding: 7px 14px;
+      border-radius: 10px;
+      border: 1.5px solid rgba(255,255,255,0.3);
+      background: rgba(255,255,255,0.12);
       color: #fff;
-      border: none;
-    }
-    .btn:hover { filter: brightness(1.03); }
-    h1 {
-      margin: 0;
-      font-size: 1.2rem;
+      font-size: 0.88rem;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: none;
+      backdrop-filter: blur(6px);
+      transition: background .15s, border-color .15s;
       white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
     }
-    .hint {
-      color: var(--muted);
-      font-size: 0.9rem;
+    .heroBtn:hover { background: rgba(255,255,255,0.22); border-color: rgba(255,255,255,0.5); }
+    .heroTitle {
+      font-size: 1.35rem;
+      font-weight: 800;
+      letter-spacing: -.02em;
     }
+    .heroSub {
+      font-size: 0.82rem;
+      opacity: 0.8;
+      margin-top: 2px;
+    }
+    .heroActions {
+      margin-left: auto;
+      display: flex;
+      gap: 8px;
+    }
+
+    /* ── TOOLBAR ── */
     .toolbar {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 10px;
-      background: var(--card);
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      padding: 10px;
-      box-shadow: var(--shadow);
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      background: var(--mc-card);
+      border-bottom: 1px solid var(--mc-border);
+      padding: 10px 28px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
     }
-    .field {
-      display: grid;
+    .tbSearch {
+      flex: 1;
+      min-width: 180px;
+      max-width: 340px;
+    }
+    .tbSearch input {
+      width: 100%;
+      padding: 8px 14px;
+      border: 1.5px solid var(--mc-border);
+      border-radius: 22px;
+      font: inherit;
+      font-size: 0.9rem;
+      background: var(--mc-bg);
+      color: var(--mc-ink);
+      transition: border-color .15s;
+    }
+    .tbSearch input:focus {
+      outline: none;
+      border-color: var(--mc-accent);
+    }
+    .tbField {
+      display: flex;
+      align-items: center;
       gap: 6px;
     }
-    .field label {
-      font-size: 0.84rem;
-      color: var(--muted);
+    .tbField label {
+      font-size: 0.78rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .4px;
+      color: var(--mc-muted);
+      white-space: nowrap;
     }
-    .field select, .field input, .field textarea {
-      border: 1px solid var(--line);
+    .tbField select {
+      padding: 7px 10px;
+      border: 1.5px solid var(--mc-border);
       border-radius: 10px;
-      padding: 9px 10px;
       font: inherit;
-      background: #fff;
-      color: var(--ink);
+      font-size: 0.88rem;
+      background: var(--mc-bg);
+      color: var(--mc-ink);
+      cursor: pointer;
+    }
+    .tbField select:focus { outline: none; border-color: var(--mc-accent); }
+
+    /* ── KPI PILLS ── */
+    .kpiPills {
+      display: flex;
+      gap: 6px;
+      margin-left: auto;
+    }
+    .kpiPill {
+      padding: 5px 12px;
+      border-radius: 20px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      background: rgba(124, 58, 237, 0.08);
+      color: var(--mc-accent);
+      border: 1px solid rgba(124, 58, 237, 0.15);
+      white-space: nowrap;
+    }
+    .kpiPill.unread {
+      background: rgba(239, 68, 68, 0.08);
+      color: #dc2626;
+      border-color: rgba(239, 68, 68, 0.18);
+    }
+
+    /* ── LAYOUT ── */
+    .container {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 16px 28px;
     }
     .layout {
       display: grid;
-      grid-template-columns: 360px 1fr;
-      gap: 12px;
-      min-height: 70vh;
+      grid-template-columns: 380px 1fr;
+      gap: 14px;
+      min-height: 72vh;
     }
+
+    /* ── PANELS ── */
     .panel {
-      background: var(--card);
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      box-shadow: var(--shadow);
-      min-height: 0;
-      display: grid;
+      background: var(--mc-card);
+      border: 1px solid var(--mc-border);
+      border-radius: var(--mc-radius);
+      box-shadow: 0 4px 24px rgba(0,0,0,0.05);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
     }
-    .panel-header {
-      border-bottom: 1px solid var(--line);
-      padding: 10px 12px;
-      font-weight: 700;
+    .panelHead {
+      padding: 10px 14px;
+      font-weight: 800;
+      font-size: 0.85rem;
+      letter-spacing: .3px;
+      text-transform: uppercase;
+      color: var(--mc-muted);
+      border-bottom: 1px solid var(--mc-border);
+      background: rgba(124, 58, 237, 0.03);
     }
-    .message-list {
+
+    /* ── MESSAGE LIST ── */
+    .msgList {
       list-style: none;
-      margin: 0;
       padding: 0;
       overflow: auto;
-      max-height: 70vh;
+      max-height: 72vh;
+      flex: 1;
     }
     .msg {
-      display: grid;
-      gap: 6px;
+      display: block;
       width: 100%;
       border: 0;
-      border-bottom: 1px solid var(--line);
+      border-bottom: 1px solid var(--mc-border);
       background: transparent;
       text-align: left;
-      padding: 11px 12px;
+      padding: 12px 14px;
       cursor: pointer;
       color: inherit;
+      font: inherit;
+      transition: background .1s;
     }
-    .msg:hover { background: rgba(14, 165, 233, 0.06); }
-    .msg.active { background: rgba(14, 165, 233, 0.11); }
-    .msg.unread .msg-subject { font-weight: 800; }
-    .msg-top {
+    .msg:hover { background: rgba(124, 58, 237, 0.05); }
+    .msg.active { background: rgba(124, 58, 237, 0.1); border-left: 3px solid var(--mc-accent); }
+    .msg.unread .msgSubject { font-weight: 800; }
+    .msgTop {
       display: flex;
       justify-content: space-between;
       align-items: center;
       gap: 8px;
+      margin-bottom: 4px;
     }
     .badge {
+      display: inline-flex;
+      align-items: center;
       border-radius: 999px;
-      padding: 2px 8px;
-      font-size: 0.75rem;
+      padding: 2px 9px;
+      font-size: 0.72rem;
       font-weight: 700;
-      border: 1px solid transparent;
+      letter-spacing: .3px;
     }
-    .badge.store-ebay { background: rgba(245, 158, 11, 0.14); color: #b45309; border-color: rgba(245, 158, 11, 0.22); }
-    .badge.store-amazon { background: rgba(22, 163, 74, 0.14); color: #15803d; border-color: rgba(22, 163, 74, 0.22); }
-    .badge.unread { background: rgba(2, 132, 199, 0.14); color: #0369a1; border-color: rgba(2, 132, 199, 0.2); }
-    .msg-subject {
-      font-size: 0.96rem;
+    .badge.store-ebay {
+      background: rgba(59, 130, 246, 0.1);
+      color: #2563eb;
+      border: 1px solid rgba(59, 130, 246, 0.2);
+    }
+    .badge.store-amazon {
+      background: rgba(249, 115, 22, 0.1);
+      color: #c2410c;
+      border: 1px solid rgba(249, 115, 22, 0.2);
+    }
+    .badge.unread-badge {
+      background: rgba(239, 68, 68, 0.1);
+      color: #dc2626;
+      border: 1px solid rgba(239, 68, 68, 0.18);
+    }
+    .msgSubject {
+      font-size: 0.94rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-bottom: 3px;
+    }
+    .msgMeta {
+      font-size: 0.8rem;
+      color: var(--mc-muted);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
-    .msg-meta {
-      font-size: 0.82rem;
-      color: var(--muted);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .detail-wrap {
-      display: grid;
-      grid-template-rows: auto auto 1fr;
+
+    /* ── DETAIL PANEL ── */
+    .detailWrap {
+      display: flex;
+      flex-direction: column;
       min-height: 0;
     }
     .detail {
-      border-bottom: 1px solid var(--line);
-      padding: 12px;
-      min-height: 180px;
-      display: grid;
+      border-bottom: 1px solid var(--mc-border);
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
       gap: 10px;
-      align-content: start;
+      min-height: 180px;
     }
-    .meta-row {
+    .detailSubject {
+      font-size: 1.08rem;
+      font-weight: 700;
+    }
+    .metaRow {
       display: flex;
       flex-wrap: wrap;
-      gap: 8px 14px;
-      font-size: 0.88rem;
-      color: var(--muted);
+      gap: 8px 16px;
+      font-size: 0.86rem;
+      color: var(--mc-muted);
     }
-    .body {
+    .metaRow strong { color: var(--mc-ink); font-weight: 600; }
+    .bodyBlock {
       white-space: pre-wrap;
-      line-height: 1.45;
-      background: rgba(148, 163, 184, 0.09);
-      border: 1px solid var(--line);
+      line-height: 1.5;
+      background: rgba(124, 58, 237, 0.03);
+      border: 1px solid var(--mc-border);
       border-radius: 10px;
-      padding: 10px;
-      min-height: 70px;
-    }
-    .compose {
       padding: 12px;
-      display: grid;
-      gap: 10px;
-      align-content: start;
+      min-height: 70px;
+      font-size: 0.92rem;
     }
-    .compose-grid {
+    .detailActions {
+      display: flex;
+      gap: 8px;
+      margin-top: 4px;
+    }
+
+    /* ── COMPOSE ── */
+    .compose {
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      flex: 1;
+    }
+    .composeGrid {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(3, 1fr);
       gap: 10px;
     }
-    .compose .full { grid-column: 1 / -1; }
-    .actions {
+    .composeGrid .full { grid-column: 1 / -1; }
+    .field { display: flex; flex-direction: column; gap: 5px; }
+    .field label {
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--mc-muted);
+    }
+    .field select,
+    .field input,
+    .field textarea {
+      border: 1.5px solid var(--mc-border);
+      border-radius: 10px;
+      padding: 9px 11px;
+      font: inherit;
+      font-size: 0.9rem;
+      background: var(--mc-bg);
+      color: var(--mc-ink);
+      transition: border-color .15s;
+    }
+    .field select:focus,
+    .field input:focus,
+    .field textarea:focus {
+      outline: none;
+      border-color: var(--mc-accent);
+    }
+    .composeActions {
       display: flex;
       gap: 8px;
       justify-content: flex-end;
     }
-    .muted { color: var(--muted); }
+    .btnSm {
+      padding: 8px 16px;
+      border-radius: 10px;
+      border: 1.5px solid var(--mc-border);
+      background: var(--mc-card);
+      color: var(--mc-ink);
+      font-size: 0.88rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all .15s;
+    }
+    .btnSm:hover { background: var(--mc-bg); }
+    .btnSm.primary {
+      background: linear-gradient(135deg, #7c3aed, #6366f1);
+      color: #fff;
+      border: none;
+      box-shadow: 0 3px 12px rgba(124, 58, 237, 0.25);
+    }
+    .btnSm.primary:hover { box-shadow: 0 5px 18px rgba(124, 58, 237, 0.35); }
     .status {
       min-height: 1.2em;
-      font-size: 0.88rem;
-      color: var(--muted);
+      font-size: 0.86rem;
+      color: var(--mc-muted);
     }
-    .status.ok { color: var(--ok); }
+    .status.ok { color: var(--mc-ok); }
     .status.err { color: #dc2626; }
     .empty {
-      padding: 16px;
-      color: var(--muted);
+      padding: 24px;
+      color: var(--mc-muted);
       text-align: center;
+      font-size: 0.92rem;
     }
+
+    /* ── RESPONSIVE ── */
     @media (max-width: 980px) {
       .layout { grid-template-columns: 1fr; }
-      .message-list { max-height: 42vh; }
-      .toolbar { grid-template-columns: 1fr; }
-      .compose-grid { grid-template-columns: 1fr; }
+      .msgList { max-height: 42vh; }
+      .composeGrid { grid-template-columns: 1fr; }
+      .hero { padding: 16px 14px 14px; }
+      .toolbar { padding: 10px 14px; }
+      .container { padding: 12px 14px; }
     }
-    html.ss-theme-night body { background: linear-gradient(180deg, #0f172a 0%, #111827 100%); color: #e2e8f0; }
-    html.ss-theme-night .topbar,
-    html.ss-theme-night .toolbar,
-    html.ss-theme-night .panel { background: #1e293b; border-color: rgba(255,255,255,0.1); box-shadow: 0 14px 36px rgba(0,0,0,0.38); }
-    html.ss-theme-night .btn { background: #0f172a; border-color: rgba(255,255,255,0.12); color: #e2e8f0; }
-    html.ss-theme-night .btn.primary { background: linear-gradient(135deg, #0284c7, #0369a1); border: none; }
+
+    /* ── NIGHT MODE ── */
+    html.ss-theme-night {
+      --mc-bg: #0f172a;
+      --mc-card: #1e293b;
+      --mc-border: rgba(255,255,255,0.1);
+      --mc-ink: #e2e8f0;
+      --mc-muted: #94a3b8;
+    }
+    html.ss-theme-night .hero {
+      background: linear-gradient(135deg, #5b21b6 0%, #4338ca 50%, #6366f1 100%);
+    }
+    html.ss-theme-night .toolbar {
+      background: var(--mc-card);
+      border-bottom-color: rgba(255,255,255,0.08);
+    }
+    html.ss-theme-night .tbSearch input {
+      background: rgba(255,255,255,0.05);
+      border-color: rgba(255,255,255,0.12);
+      color: var(--mc-ink);
+    }
+    html.ss-theme-night .tbField select {
+      background: rgba(255,255,255,0.05);
+      border-color: rgba(255,255,255,0.12);
+      color: var(--mc-ink);
+    }
+    html.ss-theme-night .panel {
+      box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+    }
+    html.ss-theme-night .panelHead {
+      background: rgba(124, 58, 237, 0.06);
+    }
+    html.ss-theme-night .msg {
+      border-bottom-color: rgba(255,255,255,0.06);
+    }
+    html.ss-theme-night .msg:hover { background: rgba(139, 92, 246, 0.1); }
+    html.ss-theme-night .msg.active { background: rgba(139, 92, 246, 0.18); border-left-color: var(--mc-accent2); }
+    html.ss-theme-night .bodyBlock {
+      background: rgba(0,0,0,0.3);
+      border-color: rgba(255,255,255,0.08);
+    }
     html.ss-theme-night .field select,
     html.ss-theme-night .field input,
-    html.ss-theme-night .field textarea { background: #0f172a; border-color: rgba(255,255,255,0.12); color: #e2e8f0; }
-    html.ss-theme-night .msg { border-bottom-color: rgba(255,255,255,0.09); }
-    html.ss-theme-night .msg:hover { background: rgba(96, 165, 250, 0.11); }
-    html.ss-theme-night .msg.active { background: rgba(96, 165, 250, 0.2); }
-    html.ss-theme-night .detail,
-    html.ss-theme-night .panel-header { border-color: rgba(255,255,255,0.09); }
-    html.ss-theme-night .body { background: rgba(2, 6, 23, 0.6); border-color: rgba(255,255,255,0.1); }
-    html.ss-theme-night .hint,
-    html.ss-theme-night .muted,
-    html.ss-theme-night .meta-row,
-    html.ss-theme-night .msg-meta,
-    html.ss-theme-night .field label,
-    html.ss-theme-night .status { color: #94a3b8; }
+    html.ss-theme-night .field textarea {
+      background: rgba(255,255,255,0.05);
+      border-color: rgba(255,255,255,0.12);
+      color: var(--mc-ink);
+    }
+    html.ss-theme-night .btnSm {
+      background: rgba(255,255,255,0.05);
+      border-color: rgba(255,255,255,0.12);
+      color: var(--mc-ink);
+    }
+    html.ss-theme-night .btnSm:hover { background: rgba(255,255,255,0.1); }
+    html.ss-theme-night .metaRow strong { color: #e2e8f0; }
+    html.ss-theme-night .kpiPill {
+      background: rgba(167, 139, 250, 0.12);
+      border-color: rgba(167, 139, 250, 0.2);
+      color: var(--mc-accent2);
+    }
+    html.ss-theme-night .kpiPill.unread {
+      background: rgba(248, 113, 113, 0.12);
+      border-color: rgba(248, 113, 113, 0.2);
+      color: #f87171;
+    }
+    html.ss-theme-night .badge.store-ebay {
+      background: rgba(96, 165, 250, 0.12);
+      color: #93c5fd;
+      border-color: rgba(96, 165, 250, 0.2);
+    }
+    html.ss-theme-night .badge.store-amazon {
+      background: rgba(251, 146, 60, 0.12);
+      color: #fdba74;
+      border-color: rgba(251, 146, 60, 0.2);
+    }
   </style>
 </head>
 <body>
+  <!-- ── HERO ── -->
+  <div class="hero">
+    <div class="heroInner">
+      <a href="/store-manager" class="heroBtn" style="margin-right:6px;">← Back</a>
+      <div>
+        <div class="heroTitle" data-i18n="mail_center">Mail Center</div>
+        <div class="heroSub" data-i18n="mail_center_desc">Centralized messages for all stores</div>
+      </div>
+      <div class="heroActions">
+        <button id="syncBtn" class="heroBtn" type="button" data-i18n="sync_live">Sync Live</button>
+        <button id="refreshBtn" class="heroBtn" type="button" data-i18n="refresh">Refresh</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── TOOLBAR ── -->
+  <div class="toolbar">
+    <div class="tbSearch">
+      <input id="searchInput" type="text" data-i18n="mail_search_placeholder" placeholder="Search subject, body, sender, recipient">
+    </div>
+    <div class="tbField">
+      <label for="storeFilter">Store</label>
+      <select id="storeFilter">
+        <option value="all" data-i18n="all_stores">All Stores</option>
+        <option value="ebay">eBay</option>
+        <option value="amazon">Amazon</option>
+      </select>
+    </div>
+    <div class="tbField">
+      <label for="boxFilter">Mailbox</label>
+      <select id="boxFilter">
+        <option value="inbox" data-i18n="inbox">Inbox</option>
+        <option value="sent" data-i18n="sent">Sent</option>
+        <option value="all" data-i18n="all_messages">All</option>
+      </select>
+    </div>
+    <div class="kpiPills">
+      <span class="kpiPill" id="kpiTotal">0 messages</span>
+      <span class="kpiPill unread" id="kpiUnread">0 unread</span>
+    </div>
+  </div>
+
+  <!-- ── MAIN LAYOUT ── -->
   <div class="container">
-    <div class="topbar">
-      <div class="top-left">
-        <a class="btn" href="/store-manager">
-          <span>←</span>
-          <span data-i18n="back">Back</span>
-        </a>
-        <div>
-          <h1 data-i18n="mail_center">Mail Center</h1>
-          <div class="hint" data-i18n="mail_center_desc">Centralized messages for all stores</div>
-        </div>
-      </div>
-      <div style="display:flex; gap:8px;">
-        <button id="syncBtn" class="btn" type="button" data-i18n="sync_live">Sync Live</button>
-        <button id="refreshBtn" class="btn" type="button" data-i18n="refresh">Refresh</button>
-      </div>
-    </div>
-
-    <div class="toolbar">
-      <div class="field">
-        <label for="storeFilter" data-i18n="store">Store</label>
-        <select id="storeFilter">
-          <option value="all" data-i18n="all_stores">All Stores</option>
-          <option value="ebay">eBay</option>
-          <option value="amazon">Amazon</option>
-        </select>
-      </div>
-      <div class="field">
-        <label for="boxFilter" data-i18n="mail_box">Mailbox</label>
-        <select id="boxFilter">
-          <option value="inbox" data-i18n="inbox">Inbox</option>
-          <option value="sent" data-i18n="sent">Sent</option>
-          <option value="all" data-i18n="all_messages">All Messages</option>
-        </select>
-      </div>
-      <div class="field">
-        <label for="searchInput" data-i18n="search">Search</label>
-        <input id="searchInput" type="text" data-i18n="mail_search_placeholder" placeholder="Search subject, body, sender, recipient">
-      </div>
-    </div>
-
     <div class="layout">
+      <!-- Message List Panel -->
       <section class="panel">
-        <div class="panel-header" data-i18n="mail_queue">Queued Messages</div>
-        <ul id="messageList" class="message-list"></ul>
+        <div class="panelHead" data-i18n="mail_queue">Messages</div>
+        <ul id="messageList" class="msgList"></ul>
       </section>
 
-      <section class="panel detail-wrap">
-        <div class="panel-header" data-i18n="message">Message</div>
+      <!-- Detail & Compose Panel -->
+      <section class="panel detailWrap">
+        <div class="panelHead" data-i18n="message">Message Detail</div>
         <div id="messageDetail" class="detail">
-          <div class="muted" data-i18n="select_message_to_view">Select a message to view details</div>
+          <div class="empty" data-i18n="select_message_to_view">Select a message to view details</div>
         </div>
         <form id="composeForm" class="compose">
-          <div class="panel-header" style="margin:-12px -12px 0 -12px;" data-i18n="send_message">Send Message</div>
+          <div class="panelHead" style="margin:-14px -14px 0 -14px;" data-i18n="send_message">Send Message</div>
           <input id="replyToId" type="hidden">
-          <div class="compose-grid">
+          <div class="composeGrid">
             <div class="field">
               <label for="composeStore" data-i18n="store">Store</label>
               <select id="composeStore">
@@ -339,9 +542,9 @@
               <textarea id="composeBody" rows="5" data-i18n="message_body_placeholder" placeholder="Type your message"></textarea>
             </div>
           </div>
-          <div class="actions">
-            <button id="clearComposeBtn" type="button" class="btn" data-i18n="clear">Clear</button>
-            <button id="sendBtn" type="submit" class="btn primary" data-i18n="send">Send</button>
+          <div class="composeActions">
+            <button id="clearComposeBtn" type="button" class="btnSm" data-i18n="clear">Clear</button>
+            <button id="sendBtn" type="submit" class="btnSm primary" data-i18n="send">Send</button>
           </div>
           <div id="statusLine" class="status"></div>
         </form>
@@ -405,6 +608,13 @@
         if(kind === 'err') statusEl.classList.add('err');
       }
 
+      function updateKpis(){
+        const total = state.messages.length;
+        const unread = state.messages.filter(m => m.direction === 'inbound' && m.status === 'unread').length;
+        $('kpiTotal').textContent = total + ' message' + (total !== 1 ? 's' : '');
+        $('kpiUnread').textContent = unread + ' unread';
+      }
+
       function buildQuery(){
         const p = new URLSearchParams();
         p.set('store', storeFilterEl.value || 'all');
@@ -435,16 +645,16 @@
           const storeClass = fmtStore(m.store) === 'eBay' ? 'store-ebay' : 'store-amazon';
           const subject = m.subject || '(No subject)';
           const peer = m.direction === 'inbound' ? (m.sender_name || '') : (m.recipient_name || '');
-          const unreadBadge = unread ? ('<span class="badge unread">' + esc(t('unread')) + '</span>') : '';
+          const unreadBadge = unread ? ('<span class="badge unread-badge">NEW</span>') : '';
           return ''
             + '<li>'
             + '  <button class="msg' + active + unread + '" data-id="' + m.id + '" type="button">'
-            + '    <div class="msg-top">'
+            + '    <div class="msgTop">'
             + '      <span class="badge ' + storeClass + '">' + esc(fmtStore(m.store)) + '</span>'
             + '      ' + unreadBadge
             + '    </div>'
-            + '    <div class="msg-subject">' + esc(subject) + '</div>'
-            + '    <div class="msg-meta">' + esc(peer) + ' • ' + esc(fmtTs(m.created_at)) + '</div>'
+            + '    <div class="msgSubject">' + esc(subject) + '</div>'
+            + '    <div class="msgMeta">' + esc(peer) + ' · ' + esc(fmtTs(m.created_at)) + '</div>'
             + '  </button>'
             + '</li>';
         }).join('');
@@ -460,7 +670,7 @@
       function renderDetail(){
         const m = state.messages.find(x => x.id === state.activeId);
         if(!m){
-          detailEl.innerHTML = '<div class="muted" data-i18n="select_message_to_view">' + esc(t('select_message_to_view')) + '</div>';
+          detailEl.innerHTML = '<div class="empty" data-i18n="select_message_to_view">' + esc(t('select_message_to_view')) + '</div>';
           if(window.i18n && window.i18n.applyTranslations) window.i18n.applyTranslations();
           return;
         }
@@ -468,16 +678,16 @@
         const peerValue = m.direction === 'inbound' ? (m.sender_name || '') : (m.recipient_name || '');
         const statusLabel = m.direction === 'inbound' ? (m.status || '') : t('sent');
         detailEl.innerHTML = ''
-          + '<div style="font-size:1.05rem;font-weight:700;">' + esc(m.subject || '(No subject)') + '</div>'
-          + '<div class="meta-row">'
+          + '<div class="detailSubject">' + esc(m.subject || '(No subject)') + '</div>'
+          + '<div class="metaRow">'
           + '  <span><strong>' + esc(t('store')) + ':</strong> ' + esc(fmtStore(m.store)) + '</span>'
           + '  <span><strong>' + esc(peerLabel) + ':</strong> ' + esc(peerValue) + '</span>'
           + '  <span><strong>' + esc(t('status')) + ':</strong> ' + esc(statusLabel) + '</span>'
           + '  <span><strong>' + esc(t('date')) + ':</strong> ' + esc(fmtTs(m.created_at)) + '</span>'
           + '</div>'
-          + '<div class="body">' + esc(m.body || '') + '</div>'
-          + '<div class="actions" style="justify-content:flex-start;">'
-          + '  <button id="replyBtn" type="button" class="btn">' + esc(t('reply')) + '</button>'
+          + '<div class="bodyBlock">' + esc(m.body || '') + '</div>'
+          + '<div class="detailActions">'
+          + '  <button id="replyBtn" type="button" class="btnSm">Reply</button>'
           + '</div>';
 
         const replyBtn = $('replyBtn');
@@ -514,6 +724,7 @@
           m.status = 'read';
           renderList();
           renderDetail();
+          updateKpis();
           await markRead(id);
         }
       }
@@ -546,6 +757,7 @@
             }
             renderList();
             renderDetail();
+            updateKpis();
             setStatus('');
             state.lastLoadAt = Date.now();
             state.lastLoadQuery = query;
