@@ -61,7 +61,7 @@ const translations = {
   live_sync_ok: { en: 'Live sync completed', lt: 'Gyva sinchronizacija baigta' },
 
   // ===== index.html =====
-  list_manager: { en: 'Items to List Prep', lt: 'Prekės skelbimams' },
+  list_manager: { en: 'Prepared Items', lt: 'Paruoštos prekės' },
   store_manager: { en: 'Store Manager', lt: 'Parduotuvės valdymas' },
   price_master: { en: 'Price Master', lt: 'Kainų meistras' },
   label_master: { en: 'Label Master', lt: 'Etikečių meistras' },
