@@ -129,15 +129,18 @@
     .session-row {
       background: #f9fafb;
       font-weight: 700;
-    }
-    .session-toggle {
-      background: #3498db;
-      color: #fff;
-      border: none;
-      border-radius: 6px;
-      padding: 6px 10px;
       cursor: pointer;
-      font-size: 0.85rem;
+    }
+    .session-row:hover {
+      background: #eef2f7;
+    }
+    .session-row .chevron {
+      display: inline-block;
+      transition: transform .2s;
+      margin-right: 4px;
+    }
+    .session-row.open .chevron {
+      transform: rotate(90deg);
     }
     .child-row {
       display: none;
@@ -504,7 +507,7 @@
     function updateStats(sales) {
       const total = sales.length;
       const totalQuantity = sales.reduce((sum, sale) => sum + sale.quantity, 0);
-      const totalRevenue = sales.reduce((sum, sale) => sum + (sale.quantity * parseFloat(sale.price)), 0);
+      const totalRevenue = sales.reduce((sum, sale) => sum + parseFloat(sale.price || 0), 0);
 
       document.getElementById('totalSales').textContent = total;
       document.getElementById('totalQuantity').textContent = totalQuantity;
@@ -517,89 +520,96 @@
       if (sales.length === 0) {
         tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No sales found</td></tr>';
       } else {
+        // Group by session_id, then sort everything by date desc
         const groups = new Map();
-        const singles = [];
+        const displayItems = []; // {type:'session'|'single', sortKey, items|sale}
         sales.forEach(sale => {
           if (sale.session_id) {
             if (!groups.has(sale.session_id)) groups.set(sale.session_id, []);
             groups.get(sale.session_id).push(sale);
           } else {
-            singles.push(sale);
+            displayItems.push({type:'single', sortKey: sale.created_at || sale.sale_date || '', sale});
           }
         });
-
-        let html = '';
-        const allRows = [];
-        // Build grouped sessions
         groups.forEach((items, sessionId) => {
           if (items.length <= 1) {
-            singles.push(items[0]);
-            return;
+            displayItems.push({type:'single', sortKey: items[0].created_at || items[0].sale_date || '', sale: items[0]});
+          } else {
+            const newest = items.reduce((a,b) => (a.created_at||'') > (b.created_at||'') ? a : b);
+            displayItems.push({type:'session', sortKey: newest.created_at || newest.sale_date || '', sessionId, items});
           }
-          const totalQty = items.reduce((s,i)=>s + (i.quantity || 1), 0);
-          const totalPrice = items.reduce((s,i)=>s + ((i.quantity || 1) * parseFloat(i.price || 0)), 0);
-          const date = items[0].sale_date || '';
-          const rowId = `session-${sessionId}`;
-          allRows.push(`
-            <tr class="session-row">
-              <td>${date}</td>
-              <td>SESSION</td>
-              <td><strong>${totalQty} items sold</strong></td>
-              <td>${totalQty}</td>
-              <td>$${totalPrice.toFixed(2)}</td>
-              <td class="actions">
-                <button class="session-toggle" data-target="${rowId}">Details</button>
-              </td>
-            </tr>
-          `);
-          items.forEach(sale => {
-            const titleEscaped = (sale.title || '').replace(/'/g, "\\\\'").replace(/"/g, '&quot;');
-            const priceAuto = sale.price_auto === 1 || sale.price_auto === true;
-            const priceStyle = priceAuto ? 'font-style:italic;color:#7f8c8d' : '';
+        });
+        // Sort newest first
+        displayItems.sort((a,b) => b.sortKey.localeCompare(a.sortKey));
+
+        const allRows = [];
+        displayItems.forEach(item => {
+          if (item.type === 'session') {
+            const {items, sessionId} = item;
+            const totalQty = items.reduce((s,i)=>s + (i.quantity || 1), 0);
+            const totalPrice = items.reduce((s,i)=>s + parseFloat(i.price || 0), 0);
+            const date = items[0].sale_date || '';
+            const rowId = `session-${sessionId}`;
+            const itemIds = items.map(i => i.id);
             allRows.push(`
-              <tr class="child-row ${rowId}">
-                <td><span style="color:#95a5a6;margin-right:4px">└</span>${sale.sale_date}</td>
+              <tr class="session-row" data-target="${rowId}">
+                <td><span class="chevron">▶</span> ${date}</td>
+                <td colspan="2"><strong>${totalQty} items sold</strong> &mdash; <span style="color:#27ae60;font-weight:700">$${totalPrice.toFixed(2)}</span></td>
+                <td></td>
+                <td></td>
+                <td class="actions">
+                  <button class="btn-small btn-delete" onclick="event.stopPropagation(); deleteSession([${itemIds.join(',')}])">Delete All</button>
+                </td>
+              </tr>
+            `);
+            items.forEach(sale => {
+              const titleEscaped = (sale.title || '').replace(/'/g, "\\\\'").replace(/"/g, '&quot;');
+              const priceAuto = sale.price_auto === 1 || sale.price_auto === true;
+              const priceStyle = priceAuto ? 'font-style:italic;color:#7f8c8d' : '';
+              allRows.push(`
+                <tr class="child-row ${rowId}">
+                  <td><span style="color:#95a5a6;margin-right:4px">└</span>${sale.sale_date}</td>
+                  <td>${sale.barcode}</td>
+                  <td>${sale.title || '-'}</td>
+                  <td>${sale.quantity}</td>
+                  <td style="${priceStyle}">$${parseFloat(sale.price).toFixed(2)}</td>
+                  <td class="actions">
+                    <button class="btn-small btn-edit" onclick="editSale(${sale.id}, '${sale.barcode}', '${titleEscaped}', ${sale.quantity}, ${sale.price})">Edit</button>
+                    <button class="btn-small btn-delete" onclick="deleteSale(${sale.id})">Delete</button>
+                  </td>
+                </tr>
+              `);
+            });
+          } else {
+            const sale = item.sale;
+            const titleEscaped = (sale.title || '').replace(/'/g, "\\\\'").replace(/"/g, '&quot;');
+            allRows.push(`
+              <tr>
+                <td>${sale.sale_date}</td>
                 <td>${sale.barcode}</td>
                 <td>${sale.title || '-'}</td>
                 <td>${sale.quantity}</td>
-                <td style="${priceStyle}">$${parseFloat(sale.price).toFixed(2)}</td>
+                <td>$${parseFloat(sale.price).toFixed(2)}</td>
                 <td class="actions">
                   <button class="btn-small btn-edit" onclick="editSale(${sale.id}, '${sale.barcode}', '${titleEscaped}', ${sale.quantity}, ${sale.price})">Edit</button>
                   <button class="btn-small btn-delete" onclick="deleteSale(${sale.id})">Delete</button>
                 </td>
               </tr>
             `);
-          });
-        });
-
-        // Add single rows
-        singles.forEach(sale => {
-          const titleEscaped = (sale.title || '').replace(/'/g, "\\\\'").replace(/"/g, '&quot;');
-          allRows.push(`
-            <tr>
-              <td>${sale.sale_date}</td>
-              <td>${sale.barcode}</td>
-              <td>${sale.title || '-'}</td>
-              <td>${sale.quantity}</td>
-              <td>$${parseFloat(sale.price).toFixed(2)}</td>
-              <td class="actions">
-                <button class="btn-small btn-edit" onclick="editSale(${sale.id}, '${sale.barcode}', '${titleEscaped}', ${sale.quantity}, ${sale.price})">Edit</button>
-                <button class="btn-small btn-delete" onclick="deleteSale(${sale.id})">Delete</button>
-              </td>
-            </tr>
-          `);
+          }
         });
 
         tbody.innerHTML = allRows.join('');
 
-        // wire toggles
-        tbody.querySelectorAll('.session-toggle').forEach(btn => {
-          btn.addEventListener('click', () => {
-            const target = btn.dataset.target;
+        // wire session row click to toggle children
+        tbody.querySelectorAll('.session-row').forEach(row => {
+          row.addEventListener('click', () => {
+            const target = row.dataset.target;
             if (!target) return;
-            const rows = tbody.querySelectorAll('.' + target);
-            const isOpen = rows.length > 0 && rows[0].style.display === 'table-row';
-            rows.forEach(r => r.style.display = isOpen ? 'none' : 'table-row');
+            const children = tbody.querySelectorAll('.' + target);
+            const isOpen = row.classList.contains('open');
+            row.classList.toggle('open');
+            children.forEach(r => r.style.display = isOpen ? 'none' : 'table-row');
           });
         });
       }
@@ -665,6 +675,23 @@
         alert('Error: ' + error.message);
       }
     });
+
+    async function deleteSession(ids) {
+      if (!confirm(`Delete all ${ids.length} items in this session?`)) return;
+      try {
+        for (const id of ids) {
+          const resp = await fetch(`/api/marketplace/sale/${id}`, { method: 'DELETE' });
+          const data = await resp.json();
+          if (!data.success) {
+            alert('Error deleting sale #' + id + ': ' + data.error);
+            break;
+          }
+        }
+        loadSales();
+      } catch (error) {
+        alert('Error: ' + error.message);
+      }
+    }
 
     async function deleteSale(id) {
       if (!confirm('Are you sure you want to delete this sale?')) return;

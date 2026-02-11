@@ -22663,16 +22663,30 @@ def marketplace_generate_barcode():
             )
         ''')
 
-        # Get the highest 888 barcode from both tables
-        cur.execute("SELECT MAX(CAST(upc AS INTEGER)) FROM bol_items WHERE upc LIKE '888%' AND LENGTH(upc) = 12")
+        # Get the highest 888000xxxxxx barcode from bol_items, temp_items, and marketplace_sales
+        # Use '888000%' prefix to avoid colliding with real UPCs that start with 888
+        cur.execute("SELECT MAX(CAST(upc AS INTEGER)) FROM bol_items WHERE upc LIKE '888000%' AND LENGTH(upc) = 12")
         result = cur.fetchone()
-        cur.execute("SELECT MAX(CAST(upc AS INTEGER)) FROM temp_items WHERE upc LIKE '888%' AND LENGTH(upc) = 12")
+        cur.execute("SELECT MAX(CAST(upc AS INTEGER)) FROM temp_items WHERE upc LIKE '888000%' AND LENGTH(upc) = 12")
         temp_result = cur.fetchone()
 
         max_barcode = result[0] if result[0] else None
         temp_max = temp_result[0] if temp_result[0] else None
         if temp_max and (not max_barcode or temp_max > max_barcode):
             max_barcode = temp_max
+
+        # Also check marketplace.db for existing 888000 barcodes
+        try:
+            mkt_conn = sqlite3.connect('marketplace.db')
+            mkt_cur = mkt_conn.cursor()
+            mkt_cur.execute("SELECT MAX(CAST(barcode AS INTEGER)) FROM marketplace_sales WHERE barcode LIKE '888000%' AND LENGTH(barcode) = 12")
+            mkt_result = mkt_cur.fetchone()
+            mkt_max = mkt_result[0] if mkt_result[0] else None
+            mkt_conn.close()
+            if mkt_max and (not max_barcode or mkt_max > max_barcode):
+                max_barcode = mkt_max
+        except Exception:
+            pass
 
         attempts = 0
         while attempts < 100:

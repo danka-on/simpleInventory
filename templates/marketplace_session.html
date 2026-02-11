@@ -298,20 +298,32 @@
       font-size: 0.8rem;
     }
     .item-price {
-      width: 90px;
+      width: 100px;
+      position: relative;
+    }
+    .item-price .dollar-sign {
+      position: absolute;
+      left: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: #27ae60;
+      font-weight: 700;
+      font-size: 0.95rem;
+      pointer-events: none;
     }
     .item-price input {
       width: 100%;
-      background: rgba(255,255,255,0.1);
-      border: 1px solid rgba(255,255,255,0.2);
+      background: rgba(39,174,96,0.15);
+      border: 1.5px solid rgba(39,174,96,0.4);
       border-radius: 8px;
-      color: #fff;
-      padding: 10px;
+      color: #27ae60;
+      padding: 10px 10px 10px 22px;
       text-align: center;
       font-size: 0.95rem;
+      font-weight: 600;
     }
-    .item-price input:focus { outline: none; border-color: #667eea; }
-    .item-price input::placeholder { color: rgba(255,255,255,0.4); }
+    .item-price input:focus { outline: none; border-color: #27ae60; box-shadow: 0 0 0 2px rgba(39,174,96,0.2); }
+    .item-price input::placeholder { color: rgba(39,174,96,0.5); }
     .item-qty {
       display: flex;
       align-items: center;
@@ -497,8 +509,9 @@
     html.ss-theme-day .item-title-input { color: #111827; border-bottom-color: #e2e8f0; }
     html.ss-theme-day .item-title-input::placeholder { color: #94a3b8; }
     html.ss-theme-day .item-barcode { color: #64748b; }
-    html.ss-theme-day .item-price input { background: #f1f5f9; border-color: #e2e8f0; color: #111827; }
-    html.ss-theme-day .item-price input::placeholder { color: #94a3b8; }
+    html.ss-theme-day .item-price input { background: rgba(39,174,96,0.08); border-color: rgba(39,174,96,0.3); color: #16a34a; }
+    html.ss-theme-day .item-price input::placeholder { color: rgba(22,163,74,0.4); }
+    html.ss-theme-day .item-price .dollar-sign { color: #16a34a; }
     html.ss-theme-day .qty-btn { background: #e2e8f0; color: #111827; }
     html.ss-theme-day .qty-btn:hover { background: #cbd5e1; }
     html.ss-theme-day .qty-value { color: #111827; }
@@ -706,6 +719,19 @@
       }
     }
 
+    let lastGeneratedBarcode = null; // track last 888 barcode to avoid duplicates within session
+
+    function nextLocalBarcode() {
+      // Increment the last generated barcode locally
+      const num = parseInt(lastGeneratedBarcode, 10) + 1;
+      lastGeneratedBarcode = String(num).padStart(12, '0');
+      // Ensure it keeps 888000 prefix
+      if (!lastGeneratedBarcode.startsWith('888000')) {
+        lastGeneratedBarcode = '888000' + lastGeneratedBarcode.slice(6);
+      }
+      return lastGeneratedBarcode;
+    }
+
     async function addManualItem() {
       const titleInput = document.getElementById('manualTitle');
       const priceInput = document.getElementById('manualPrice');
@@ -717,16 +743,25 @@
         return;
       }
 
+      let barcode;
       try {
-        const resp = await fetch('/api/marketplace/generate-barcode', { method: 'POST' });
-        const data = await resp.json();
+        if (lastGeneratedBarcode) {
+          // Already have a base barcode from API, just increment locally
+          barcode = nextLocalBarcode();
+          // Skip if this barcode already exists in the session
+          while (items.has(barcode)) barcode = nextLocalBarcode();
+        } else {
+          // First manual item — fetch from API to get the correct starting point
+          const resp = await fetch('/api/marketplace/generate-barcode', { method: 'POST' });
+          const data = await resp.json();
 
-        if (!data.success) {
-          showMessage('Failed to generate barcode', 'error');
-          return;
+          if (!data.success) {
+            showMessage('Failed to generate barcode', 'error');
+            return;
+          }
+          barcode = data.barcode;
+          lastGeneratedBarcode = barcode;
         }
-
-        const barcode = data.barcode;
         const price = priceInput.value || '';
 
         items.set(barcode, {
@@ -809,7 +844,8 @@
               <div class="item-barcode">${item.barcode}</div>
             </div>
             <div class="item-price">
-              <input type="number" class="price-input-field" min="0" step="0.01" placeholder="$0.00" value="${item.price}">
+              <span class="dollar-sign">$</span>
+              <input type="number" class="price-input-field" min="0" step="0.01" placeholder="0.00" value="${item.price}">
             </div>
             <div class="item-qty">
               <button class="qty-btn qty-minus">−</button>
@@ -870,7 +906,7 @@
       for (const item of items.values()) {
         totalQty += item.qty;
         const p = parseFloat(item.price || 0);
-        if (!isNaN(p)) autoTotal += p * item.qty;
+        if (!isNaN(p)) autoTotal += p;
       }
       return { totalQty, autoTotal };
     }
@@ -947,10 +983,10 @@
               priceAutoMap.set(i.barcode, Math.abs(ratio - 1) > 0.001 || !i.price);
             });
           } else {
-            // No individual prices, split evenly - definitely auto
-            const unit = finalTotal / totalQty;
+            // No individual prices, split evenly across items - definitely auto
+            const perItem = finalTotal / itemList.length;
             itemList.forEach(i => {
-              priceMap.set(i.barcode, unit);
+              priceMap.set(i.barcode, perItem);
               priceAutoMap.set(i.barcode, true);
             });
           }
@@ -967,28 +1003,26 @@
       let success = 0;
       let fail = 0;
       for (const item of itemList) {
-        const unitPrice = priceMap.get(item.barcode) || 0;
+        const itemPrice = priceMap.get(item.barcode) || 0;
         const priceAuto = priceAutoMap.get(item.barcode) || false;
-        for (let i = 0; i < item.qty; i++) {
-          try {
-            const resp = await fetch('/api/marketplace/sale', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                barcode: item.barcode,
-                title: item.title || '',
-                quantity: 1,
-                price: unitPrice,
-                session_id: sessionId,
-                price_auto: priceAuto
-              })
-            });
-            const data = await resp.json();
-            if (data.success) success += 1;
-            else fail += 1;
-          } catch (e) {
-            fail += 1;
-          }
+        try {
+          const resp = await fetch('/api/marketplace/sale', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              barcode: item.barcode,
+              title: item.title || '',
+              quantity: item.qty,
+              price: itemPrice,
+              session_id: sessionId,
+              price_auto: priceAuto
+            })
+          });
+          const data = await resp.json();
+          if (data.success) success += 1;
+          else fail += 1;
+        } catch (e) {
+          fail += 1;
         }
       }
 
