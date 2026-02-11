@@ -100,30 +100,43 @@
     .search-toggle {
       margin-top: 16px;
       display: flex;
+      flex-direction: column;
       gap: 10px;
-      justify-content: center;
       align-items: center;
     }
     .search-toggle-btn {
-      background: rgba(255,255,255,0.2);
+      background: rgba(255,255,255,0.15);
       border: none;
-      color: #fff;
-      padding: 10px 20px;
+      color: rgba(255,255,255,0.6);
+      padding: 8px 16px;
       border-radius: 8px;
       cursor: pointer;
-      font-size: 0.9rem;
+      font-size: 0.8rem;
       transition: all 0.2s;
     }
-    .search-toggle-btn:hover { background: rgba(255,255,255,0.3); }
+    .search-toggle-btn:hover { background: rgba(255,255,255,0.25); color: #fff; }
     #toggleManual {
       background: linear-gradient(135deg, #27ae60, #2ecc71);
-      font-weight: 600;
-      box-shadow: 0 2px 8px rgba(39,174,96,0.4);
+      color: #fff;
+      font-weight: 700;
+      font-size: 1.1rem;
+      padding: 14px 36px;
+      border-radius: 12px;
+      box-shadow: 0 4px 16px rgba(39,174,96,0.5);
+      letter-spacing: 0.5px;
     }
     #toggleManual:hover {
       background: linear-gradient(135deg, #219a52, #27ae60);
-      box-shadow: 0 4px 12px rgba(39,174,96,0.5);
-      transform: translateY(-1px);
+      box-shadow: 0 6px 24px rgba(39,174,96,0.6);
+      transform: translateY(-2px);
+    }
+    #toggleManual.closing {
+      background: linear-gradient(135deg, #c0392b, #e74c3c);
+      box-shadow: 0 4px 16px rgba(231,76,60,0.5);
+    }
+    #toggleManual.closing:hover {
+      background: linear-gradient(135deg, #a93226, #c0392b);
+      box-shadow: 0 6px 24px rgba(231,76,60,0.6);
     }
     .search-panel {
       display: none;
@@ -441,7 +454,7 @@
 
     /* Responsive */
     @media (max-width: 700px) {
-      .main-content { padding: 16px; padding-bottom: 220px; }
+      .main-content { padding: 16px; padding-bottom: 20px; }
       .scan-hero { padding: 24px 20px; }
       .scan-input { font-size: 1.1rem; padding: 16px 20px; }
       .item-card { flex-wrap: wrap; }
@@ -450,10 +463,54 @@
       .item-price { order: 2; flex: 1; }
       .item-qty { order: 3; }
       .remove-btn { order: 4; }
+      /* Footer: stats section becomes inline, submit stays sticky */
+      .summary-footer {
+        position: static;
+        border-top: none;
+        border-radius: 16px;
+        margin: 20px 16px 100px 16px;
+        background: rgba(26,26,46,0.95);
+        backdrop-filter: none;
+      }
+      /* Hide the submit button inside the inline footer on mobile */
+      .summary-footer .submit-btn { display: none; }
+      /* Sticky mobile submit bar */
+      .mobile-submit-bar {
+        display: block !important;
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        padding: 12px 16px;
+        background: rgba(26,26,46,0.97);
+        border-top: 1px solid rgba(255,255,255,0.1);
+        z-index: 100;
+      }
+      .mobile-submit-bar .submit-btn { display: block; width: 100%; }
+      .main-content { padding: 16px; padding-bottom: 160px; }
+      /* Price needs more room on mobile */
+      .item-price {
+        width: auto;
+        min-width: 120px;
+      }
       .summary-inner { flex-direction: column; gap: 12px; }
       .summary-stats { width: 100%; justify-content: space-around; }
       .override-input { width: 100%; justify-content: center; }
-      .submit-btn { width: 100%; }
+      /* Manual entry wrapping on mobile */
+      .manual-entry-panel .search-row {
+        flex-wrap: wrap;
+      }
+      .manual-entry-panel .search-row #manualTitle {
+        flex: 1 1 100% !important;
+        min-width: 0;
+      }
+      .manual-entry-panel .search-row #manualPrice {
+        flex: 1 1 auto !important;
+        max-width: none !important;
+      }
+      .manual-entry-panel .search-row .manual-add-btn {
+        flex: 1 1 100%;
+      }
     }
     @media (max-width: 480px) {
       .navbar h1 { font-size: 1.1rem; }
@@ -527,6 +584,7 @@
     html.ss-theme-day .message.error { background: #f8d7da; color: #721c24; }
     html.ss-theme-day .manual-entry-panel { background: rgba(0,0,0,0.04); }
     html.ss-theme-day .manual-add-btn { background: #27ae60; color: #fff; }
+    html.ss-theme-day .mobile-submit-bar { background: rgba(255,255,255,0.97); border-top-color: #e2e8f0; }
   </style>
 </head>
 <body>
@@ -547,8 +605,8 @@
         <input id="scanInput" type="text" class="scan-input" placeholder="Scan or type barcode..." autofocus>
       </div>
       <div class="search-toggle">
-        <button class="search-toggle-btn" id="toggleSearch">🔍 Search by Name</button>
         <button class="search-toggle-btn" id="toggleManual">➕ Add Manually</button>
+        <button class="search-toggle-btn" id="toggleSearch">🔍 Search by Name</button>
       </div>
       <div class="search-panel" id="searchPanel">
         <div class="search-row">
@@ -611,6 +669,11 @@
     </div>
   </div>
 
+  <!-- Mobile-only sticky submit bar (hidden by default, shown via CSS on small screens) -->
+  <div class="mobile-submit-bar" style="display:none">
+    <button class="submit-btn" id="mobileSubmitBtn" disabled>Submit Sale</button>
+  </div>
+
   <script>
     const items = new Map();
     const scanInput = document.getElementById('scanInput');
@@ -621,6 +684,7 @@
     const finalTotalEl = document.getElementById('finalTotal');
     const finalTotalInput = document.getElementById('finalTotalInput');
     const submitBtn = document.getElementById('submitSession');
+    const mobileSubmitBtn = document.getElementById('mobileSubmitBtn');
     const clearBtn = document.getElementById('clearSession');
     const toggleSearch = document.getElementById('toggleSearch');
     const searchPanel = document.getElementById('searchPanel');
@@ -633,6 +697,7 @@
       manualPanel.classList.remove('open');
       toggleSearch.textContent = searchPanel.classList.contains('open') ? '✕ Close Search' : '🔍 Search by Name';
       toggleManual.textContent = '➕ Add Manually';
+      toggleManual.classList.remove('closing');
       if (searchPanel.classList.contains('open')) document.getElementById('searchName').focus();
     });
 
@@ -640,9 +705,11 @@
     toggleManual.addEventListener('click', () => {
       manualPanel.classList.toggle('open');
       searchPanel.classList.remove('open');
-      toggleManual.textContent = manualPanel.classList.contains('open') ? '✕ Close Manual' : '➕ Add Manually';
+      const isOpen = manualPanel.classList.contains('open');
+      toggleManual.textContent = isOpen ? '✕ Close Manual' : '➕ Add Manually';
+      toggleManual.classList.toggle('closing', isOpen);
       toggleSearch.textContent = '🔍 Search by Name';
-      if (manualPanel.classList.contains('open')) document.getElementById('manualTitle').focus();
+      if (isOpen) document.getElementById('manualTitle').focus();
     });
 
     function fmtMoney(v) {
@@ -786,7 +853,7 @@
     // Manual entry event listeners
     document.getElementById('manualAddBtn').addEventListener('click', addManualItem);
     document.getElementById('manualTitle').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') { e.preventDefault(); addManualItem(); }
+      if (e.key === 'Enter') { e.preventDefault(); document.getElementById('manualPrice').focus(); }
     });
     document.getElementById('manualPrice').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); addManualItem(); }
@@ -830,6 +897,7 @@
       if (items.size === 0) {
         itemsList.innerHTML = '<div class="empty-state" data-i18n="marketplace_empty">Scan items to start a session</div>';
         submitBtn.disabled = true;
+        mobileSubmitBtn.disabled = true;
         updateSummary();
         return;
       }
@@ -859,6 +927,7 @@
       itemsList.innerHTML = html.join('');
       attachRowHandlers();
       submitBtn.disabled = false;
+      mobileSubmitBtn.disabled = false;
       updateSummary();
     }
 
@@ -957,10 +1026,15 @@
       }
     });
 
+    // Mobile submit triggers main submit
+    mobileSubmitBtn.addEventListener('click', () => submitBtn.click());
+
     submitBtn.addEventListener('click', async () => {
       if (items.size === 0) return;
       submitBtn.disabled = true;
+      mobileSubmitBtn.disabled = true;
       submitBtn.textContent = 'Submitting...';
+      mobileSubmitBtn.textContent = 'Submitting...';
       hideMessage();
       const sessionId = 'session-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
       const { totalQty, autoTotal } = getTotals();
@@ -1027,6 +1101,7 @@
       }
 
       submitBtn.textContent = 'Submit Sale';
+      mobileSubmitBtn.textContent = 'Submit Sale';
       if (fail === 0) {
         showMessage((window.i18n && window.i18n.t) ? window.i18n.t('marketplace_submit_success') : 'Sale submitted successfully!', 'success');
         items.clear();
@@ -1040,6 +1115,7 @@
         showMessage(msg, 'error');
       }
       submitBtn.disabled = false;
+      mobileSubmitBtn.disabled = false;
       scanInput.focus();
     });
 
