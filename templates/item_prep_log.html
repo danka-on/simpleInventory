@@ -40,12 +40,21 @@
   </div>
 
   <div class="card">
+    <div style="margin-bottom:12px;">
+      <input type="text" id="searchUpc" placeholder="Search by barcode / UPC..." autocomplete="off" style="width:100%;padding:10px 14px;font-size:1.05rem;border:1px solid #ddd;border-radius:10px;box-sizing:border-box;">
+    </div>
     <div class="row" style="align-items:center;justify-content:space-between;">
       <div class="muted" id="summary">Loading...</div>
-      <label class="muted" style="display:flex;gap:10px;align-items:center;">
-        <input type="checkbox" id="hideUndone" checked>
-        Hide undone
-      </label>
+      <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;">
+        <label class="muted" style="display:flex;gap:6px;align-items:center;">
+          <input type="checkbox" id="showAll">
+          Show all
+        </label>
+        <label class="muted" style="display:flex;gap:6px;align-items:center;">
+          <input type="checkbox" id="hideUndone" checked>
+          Hide undone
+        </label>
+      </div>
     </div>
     <div id="list"></div>
     <div class="muted" id="err" style="margin-top:12px;"></div>
@@ -53,8 +62,8 @@
 
   <script>
     function esc(s){
-      return String(s ?? '').replace(/[&<>\"']/g, c => ({
-        '&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#039;'
+      return String(s ?? '').replace(/[&<>"']/g, c => ({
+        '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'
       })[c] || c);
     }
 
@@ -111,12 +120,96 @@
       }
     }
 
-    async function loadLog(){
+    let allItems = [];
+
+    function todayStr(){
+      const d = new Date();
+      return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+    }
+
+    function isToday(iso){
+      const s = String(iso ?? '').trim();
+      if(!s) return false;
+      return s.startsWith(todayStr());
+    }
+
+    function renderLog(items){
       const list = document.getElementById('list');
       const summary = document.getElementById('summary');
+      const search = document.getElementById('searchUpc').value.trim().toLowerCase();
+      const showAll = document.getElementById('showAll').checked;
+
+      let filtered = items;
+
+      // Filter to today only (unless "Show all" is checked)
+      if(!showAll){
+        filtered = filtered.filter(it => isToday(it.created_at));
+      }
+
+      // Filter by UPC search
+      if(search){
+        filtered = filtered.filter(it => {
+          const upc = String(it.upc ?? '').toLowerCase();
+          const base = String(it.base_upc ?? '').toLowerCase();
+          return upc.includes(search) || base.includes(search);
+        });
+      }
+
+      const label = showAll ? 'all time' : 'today';
+      summary.textContent = (search || !showAll) ? `${filtered.length} of ${items.length} entries (${label})` : `${items.length} entries`;
+
+      list.innerHTML = '';
+      if(filtered.length === 0){
+        list.innerHTML = '<div class="muted" style="margin-top:10px;">' + (search ? 'No entries matching that barcode.' : 'No prep log entries yet.') + '</div>';
+        return;
+      }
+
+      for(const it of filtered){
+        const id = it.id;
+        const st = String(it.status ?? '').toLowerCase().trim();
+        const qty = (it.quantity ?? it.qty ?? 1);
+        const upc = String(it.upc ?? '').trim();
+        const note = String(it.note ?? '').trim();
+        const reason = String(it.reason ?? '').trim();
+        const undone = !!it.undone;
+        const undoneAt = String(it.undone_at ?? '').trim();
+        const undoErr = String(it.undo_error ?? '').trim();
+
+        const row = document.createElement('div');
+        row.className = 'logRow' + (undone ? ' undone' : '');
+        row.innerHTML = `
+          <div class="logTop">
+            <div class="logLeft">
+              <span class="pill">#${esc(id)}</span>
+              <span class="pill">${esc(fmtTime(it.created_at))}</span>
+              <span class="badge ${esc(statusClass(st))}">${esc(statusLabel(st))}</span>
+              <span class="pill">Qty ${esc(qty)}</span>
+              <span class="pill">UPC ${esc(upc)}</span>
+              ${reason ? `<span class="pill">${esc(reason)}</span>` : ''}
+              ${undone && undoneAt ? `<span class="pill">Undone ${esc(fmtTime(undoneAt))}</span>` : ''}
+            </div>
+            <div style="display:flex;gap:10px;align-items:center;">
+              <button class="btn btn-danger btn-small" data-undo-id="${esc(id)}" ${undone ? 'disabled' : ''}>Undo</button>
+            </div>
+          </div>
+          ${note ? `<div class="noteBox"><strong>NOTE:</strong> ${esc(note)}</div>` : ''}
+          ${undoErr ? `<div class="muted" style="margin-top:10px;"><span class="bad">Undo error:</span> ${esc(undoErr)}</div>` : ''}
+        `;
+
+        const undoBtn = row.querySelector('button[data-undo-id]');
+        if(undoBtn){
+          undoBtn.onclick = () => undoEntry(id);
+        }
+
+        list.appendChild(row);
+      }
+    }
+
+    async function loadLog(){
+      const list = document.getElementById('list');
       const err = document.getElementById('err');
       err.textContent = '';
-      list.innerHTML = '<div class=\"muted\" style=\"margin-top:10px;\">Loading...</div>';
+      list.innerHTML = '<div class="muted" style="margin-top:10px;">Loading...</div>';
 
       const hideUndone = document.getElementById('hideUndone').checked;
       const qs = new URLSearchParams();
@@ -125,64 +218,19 @@
 
       try{
         const data = await apiGet('/api/preplog/recent?' + qs.toString());
-        const items = Array.isArray(data.items) ? data.items : [];
-        summary.textContent = `${items.length} entries`;
-
-        list.innerHTML = '';
-        if(items.length === 0){
-          list.innerHTML = '<div class=\"muted\" style=\"margin-top:10px;\">No prep log entries yet.</div>';
-          return;
-        }
-
-        for(const it of items){
-          const id = it.id;
-          const st = String(it.status ?? '').toLowerCase().trim();
-          const qty = (it.quantity ?? it.qty ?? 1);
-          const upc = String(it.upc ?? '').trim();
-          const note = String(it.note ?? '').trim();
-          const reason = String(it.reason ?? '').trim();
-          const undone = !!it.undone;
-          const undoneAt = String(it.undone_at ?? '').trim();
-          const undoErr = String(it.undo_error ?? '').trim();
-
-          const row = document.createElement('div');
-          row.className = 'logRow' + (undone ? ' undone' : '');
-          row.innerHTML = `
-            <div class=\"logTop\">
-              <div class=\"logLeft\">
-                <span class=\"pill\">#${esc(id)}</span>
-                <span class=\"pill\">${esc(fmtTime(it.created_at))}</span>
-                <span class=\"badge ${esc(statusClass(st))}\">${esc(statusLabel(st))}</span>
-                <span class=\"pill\">Qty ${esc(qty)}</span>
-                <span class=\"pill\">UPC ${esc(upc)}</span>
-                ${reason ? `<span class=\"pill\">${esc(reason)}</span>` : ''}
-                ${undone && undoneAt ? `<span class=\"pill\">Undone ${esc(fmtTime(undoneAt))}</span>` : ''}
-              </div>
-              <div style=\"display:flex;gap:10px;align-items:center;\">
-                <button class=\"btn btn-danger btn-small\" data-undo-id=\"${esc(id)}\" ${undone ? 'disabled' : ''}>Undo</button>
-              </div>
-            </div>
-            ${note ? `<div class=\"noteBox\"><strong>NOTE:</strong> ${esc(note)}</div>` : ''}
-            ${undoErr ? `<div class=\"muted\" style=\"margin-top:10px;\"><span class=\"bad\">Undo error:</span> ${esc(undoErr)}</div>` : ''}
-          `;
-
-          const undoBtn = row.querySelector('button[data-undo-id]');
-          if(undoBtn){
-            undoBtn.onclick = () => undoEntry(id);
-          }
-
-          list.appendChild(row);
-        }
-
+        allItems = Array.isArray(data.items) ? data.items : [];
+        renderLog(allItems);
       }catch(e){
         list.innerHTML = '';
-        summary.textContent = '—';
-        err.innerHTML = `<span class=\"bad\">Failed to load log:</span> ${esc(e.message)}`;
+        document.getElementById('summary').textContent = '—';
+        err.innerHTML = `<span class="bad">Failed to load log:</span> ${esc(e.message)}`;
       }
     }
 
     document.getElementById('refreshBtn').onclick = loadLog;
     document.getElementById('hideUndone').onchange = loadLog;
+    document.getElementById('showAll').onchange = () => renderLog(allItems);
+    document.getElementById('searchUpc').addEventListener('input', () => renderLog(allItems));
     loadLog();
   </script>
 </body>

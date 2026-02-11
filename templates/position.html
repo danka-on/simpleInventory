@@ -121,14 +121,7 @@
         box-sizing: border-box;
     }
     #reader {
-        width: 100%;
-        max-width: 300px; /* Square container */
-        margin-top: 0;
-        aspect-ratio: 1/1; /* Force square */
-        background: #222;
-        border-radius: 8px;
-        position: relative;
-        overflow: hidden;
+        display: none;
     }
     input[type="text"] {
         width: 100%;
@@ -164,44 +157,6 @@
     .back-fixed:hover{ filter: brightness(1.02); }
     .back-fixed:active{ transform: translateY(1px); }
 
-    /* Simple scanning line animation */
-    .qr-overlay {
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        pointer-events: none;
-        z-index: 9999;
-        display: none;
-    }
-
-    .qr-square {
-        position: absolute;
-        width: 200px;
-        height: 200px;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        border: 2px solid rgba(255, 255, 255, 0.8);
-    }
-
-    .qr-scan-line {
-        position: absolute;
-        width: 100%;
-        height: 2px;
-        background-color: #ff0000;
-        top: 0;
-        left: 0;
-        animation: scanAnimation 2s linear infinite;
-    }
-
-    @keyframes scanAnimation {
-        0% { top: 0; }
-        50% { top: calc(100% - 2px); }
-        50.001% { top: calc(100% - 2px); }
-        100% { top: 0; }
-    }
 
     .img-highlight {
         box-shadow: 0 0 0 2px #2ecc71;
@@ -314,23 +269,6 @@
             📦 EDIT MODE: Moving <span id="editModeQty">?</span> items
         </div>
         
-        <div id="reader"></div>
-
-        <!-- Simplified overlay with just the scanning line -->
-        <div class="qr-overlay" id="qrOverlay">
-            <div class="qr-square">
-                <div class="qr-scan-line"></div>
-            </div>
-        </div>
-
-        <!-- Notification for invalid QR code (hidden by default) -->
-        <div id="flashMsg" style="color:#d32f2f; background:#ffdddd; display:none; font-size:0.9em; font-weight:bold; text-align:center; border-radius:6px; padding:8px;"></div>
-
-        <div class="section" style="max-width:300px;">
-            <button id="restartScannerBtn" onclick="restartScanner()" style="background-color: #2196F3; color: white; border: none; padding: 12px; border-radius: 6px; cursor: pointer; font-size: 1.1em; display: flex; align-items: center; justify-content: center; gap: 8px; width:100%;">
-                <i class="fas fa-sync-alt"></i> <span data-i18n="restart_scanner">Restart Scanner</span>
-            </button>
-        </div>
     <form id="scan_form" action="/submitposition" method="POST" style="display: none;">
         <input name="scanned_result" type="text" id="scanned_result">
         <input name="for_diagnostic" type="hidden" id="for_diagnostic">
@@ -370,8 +308,6 @@
             </div>
         </div>
     </div>
-    <button id="flashBtn" type="button" style="display:none">Turn On Flashlight</button>
-    <div id="flashMsg" style="color:red; display:none; font-size:0.9em;"></div>
     <div id="green-screen">
         <i class="fas fa-check-circle checkmark"></i>
     </div>
@@ -388,7 +324,6 @@
     </div>
     </div>
 
-    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
     <script>
   // Lock Position button logic (replaces checkbox)
   let positionLocked = false;
@@ -518,10 +453,6 @@
   // Load state on page load
   loadLockState();
 
-    let scannerActive = false;
-    let html5QrCode = null;
-    let track = null;
-    let torchOn = false;
     let validShelves = [];
 
     // Fetch valid shelves from server
@@ -576,215 +507,11 @@
     window.addEventListener('touchstart', unlockAudio, { once: true });
     window.addEventListener('mousedown', unlockAudio, { once: true });
 
-    // Position overlay based on reader element position
-    function positionOverlay() {
-        const reader = document.getElementById('reader');
-        const overlay = document.getElementById('qrOverlay');
-        if (!reader || !overlay) return;
 
-        const rect = reader.getBoundingClientRect();
-
-        overlay.style.left = rect.left + 'px';
-        overlay.style.top = rect.top + 'px';
-        overlay.style.width = rect.width + 'px';
-        overlay.style.height = rect.height + 'px';
-        overlay.style.display = scannerActive ? 'block' : 'none';
-    }
-
-    function startScanner() {
-        if (scannerActive) return;
-
-        // Configure and start scanner
-        html5QrCode = new Html5Qrcode("reader");
-
-        html5QrCode.start(
-            { facingMode: "environment" },
-            {
-                fps: 10,
-                qrbox: { width: 200, height: 200 },
-                aspectRatio: 1.0,
-                showTorchButtonIfSupported: false,
-                showZoomSliderIfSupported: false,
-                hideQrBoxOnSuccess: false,
-                disableFlip: true
-            },
-            (decodedText) => {
-                const code = decodedText.trim();
-                let isValid = false;
-                
-                // Check dynamic list first
-                if (validShelves.length > 0) {
-                    if (validShelves.includes(code.toLowerCase())) isValid = true;
-                }
-                
-                // Also allow legacy codes if they match regex
-                if (!isValid && code.match(/^(gr[1-5]|or[1-3])s[2-6]$/i)) isValid = true;
-                
-                if (!isValid) {
-                    showInvalidModal();
-                    return;
-                }
-                
-                const posCode = code;
-                document.getElementById("scanned_result").value = posCode;
-                    // Set sessionStorage for additem checklist
-                    sessionStorage.setItem('item_position', posCode);
-                    stopScanner();
-                    playBeep();
-                    // Show green screen
-                    const greenScreen = document.getElementById('green-screen');
-                    greenScreen.classList.add('visible');
-                    // If this page was opened for editing a SEARCHRACK row, call API to set it and then return
-                    const urlParams = new URLSearchParams(window.location.search);
-                    const editId = urlParams.get('edit_rack_id');
-                    if(editId){
-                        // call API - include move_qty if provided in URL OR sessionStorage
-                        let moveQty = urlParams.get('move_qty');
-                        
-                        // Fallback: read from sessionStorage if not in URL (cache issue workaround)
-                        if(!moveQty && editId === sessionStorage.getItem('edit_rack_id')){
-                            moveQty = sessionStorage.getItem('edit_move_qty');
-                        }
-                        
-                        const payload = {id: editId, item_position: posCode};
-                        if(moveQty){
-                            payload.move_qty = parseInt(moveQty);
-                        }
-                        
-                        // Clear sessionStorage after reading
-                        sessionStorage.removeItem('edit_move_qty');
-                        sessionStorage.removeItem('edit_rack_id');
-                        fetch('/api/set_rack_location', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)})
-                        .then(r=>r.json())
-                        .then(j=>{
-                            console.log('✅ Location update response:', j);
-                            // restore search state if any
-                            const st = sessionStorage.getItem('searchrack_return_state');
-                            if(st){
-                                sessionStorage.removeItem('searchrack_return_state');
-                            }
-                            // briefly show green then redirect back with cache buster
-                            setTimeout(()=>{ window.location.href = '/searchrack?refresh=' + Date.now(); }, 600);
-                        }).catch(err=>{ console.error('Failed to set rack location', err); setTimeout(()=>{ window.location.href = '/searchrack?refresh=' + Date.now(); }, 600); });
-                    } else {
-                        // normal flow: submit form to /submitposition
-                        setTimeout(() => { document.getElementById("scan_form").submit(); }, 250);
-                    }
-            },
-            (error) => {}
-        ).then(() => {
-            scannerActive = true;
-
-            // Show overlay after scanner starts
-            setTimeout(() => {
-                positionOverlay();
-                window.addEventListener('resize', positionOverlay);
-
-                // Hide the library's built-in QR box
-                const qrRegion = document.querySelector("#reader div");
-                if (qrRegion) {
-                    // Add CSS to hide internal scanner box
-                    const style = document.createElement('style');
-                    style.id = 'qr-box-hider';
-                    style.innerHTML = `
-                        #reader div div {
-                            border: none !important;
-                            border-color: transparent !important;
-                            box-shadow: none !important;
-                        }
-                        #reader canvas + div {
-                            display: none !important;
-                        }
-                    `;
-                    document.head.appendChild(style);
-                }
-            }, 500);
-
-            // Get camera track for flashlight
-            const stream = html5QrCode._localMediaStream;
-            if (stream && stream.getVideoTracks) {
-                track = stream.getVideoTracks()[0];
-                checkTorchSupport();
-            }
-        }).catch((err) => {
-            console.error("Failed to start scanner:", err);
-            scannerActive = false;
-        });
-    }
-
-    function stopScanner() {
-        if (!scannerActive) return;
-        if (html5QrCode) {
-            html5QrCode.stop().then(() => {
-                document.getElementById('qrOverlay').style.display = 'none';
-                window.removeEventListener('resize', positionOverlay);
-
-                // Remove the style element we added
-                const styleElem = document.getElementById('qr-box-hider');
-                if (styleElem) styleElem.remove();
-
-                scannerActive = false;
-            }).catch((err) => {
-                console.error("Failed to stop scanner:", err);
-            });
-        }
-        scannerActive = false;
-    }
-
-    function restartScanner() {
-        stopScanner();
-        setTimeout(() => {
-            startScanner();
-        }, 300);
-    }
-
-    // Flashlight logic
-    function checkTorchSupport() {
-        if (!track) return;
-        const capabilities = track.getCapabilities ? track.getCapabilities() : {};
-        if (capabilities.torch) {
-            document.getElementById('flashBtn').style.display = '';
-        } else {
-            document.getElementById('flashBtn').style.display = 'none';
-            document.getElementById('flashMsg').textContent = 'Flashlight not supported on this device/browser.';
-            document.getElementById('flashMsg').style.display = '';
-        }
-    }
-
-    document.getElementById('flashBtn').addEventListener('click', async function() {
-        if (!track) return;
-        try {
-            torchOn = !torchOn;
-            await track.applyConstraints({
-                advanced: [{ torch: torchOn }]
-            });
-            this.textContent = torchOn ? 'Turn Off Flashlight' : 'Turn On Flashlight';
-        } catch (e) {
-            document.getElementById('flashMsg').textContent = 'Failed to toggle flashlight.';
-            document.getElementById('flashMsg').style.display = '';
-        }
-    });
-
-
-    function getDeviceType() {
-        const ua = navigator.userAgent;
-        if (/iPad|Macintosh/.test(ua) && 'ontouchend' in document) return 'iPad';
-        if (/Android/.test(ua) && !/Mobile/.test(ua)) return 'Android Tablet';
-        if (/iPhone|Android.*Mobile|Windows Phone|webOS|BlackBerry|Opera Mini|IEMobile|Mobile/.test(ua)) return 'Mobile';
-        return 'Desktop';
-    }
 
     function setupDeviceMode() {
-        var deviceType = getDeviceType();
         var qrInput = document.getElementById('qrTextInput');
-        var readerDiv = document.getElementById('reader');
-        var restartBtn = document.getElementById('restartScannerBtn');
-        // Check for scanner mode override
-        const scannerMode = localStorage.getItem('scannerMode');
-        const forceHandheld = scannerMode === 'handheld';
-        
-        // Always use scanner/handheld mode (no camera)
-        if (readerDiv) readerDiv.style.display = 'none';
+        // Always use handheld scanner mode (no camera)
         if (qrInput) {
             qrInput.style.display = '';
             qrInput.value = '';
@@ -792,13 +519,6 @@
                 qrInput.focus();
             });
         }
-        var overlay = document.getElementById('qrOverlay');
-        if (overlay) overlay.style.display = 'none';
-        document.getElementById('flashBtn').style.display = 'none';
-        document.getElementById('flashMsg').style.display = 'none';
-        window.startScanner = function(){};
-        stopScanner();
-        if (restartBtn) restartBtn.style.display = 'none';
     }
 
     window.addEventListener('DOMContentLoaded', setupDeviceMode);
@@ -934,7 +654,6 @@
             // Change form action to diagnostic endpoint
             document.getElementById('scan_form').action = '/position/diagnostic';
         }
-        setTimeout(startScanner, 500);
     });
     </script>
     

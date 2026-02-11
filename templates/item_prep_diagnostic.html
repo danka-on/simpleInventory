@@ -244,9 +244,7 @@
       <label style="font-weight:600;font-size:1.05rem">Defect:</label>
       <div class="reason-group" role="group" aria-label="Select defect">
         <button type="button" class="reason-btn" data-val="Missing pieces">Missing pieces</button>
-        <button type="button" class="reason-btn" data-val="Wrong item">Wrong item</button>
         <button type="button" class="reason-btn" data-val="Broken">Broken</button>
-        <button type="button" class="reason-btn" data-val="Return">Return</button>
         <button type="button" class="reason-btn" data-val="Replacement">Replacement</button>
         <button type="button" class="reason-btn" data-val="Other">Other</button>
       </div>
@@ -757,7 +755,7 @@
         // Only restore reason if NOT a new bad entry
         if(!isNewBadEntry && st){
           const val = (st.reason||'').trim();
-          const valid = ['Missing pieces','Wrong item','Broken','Return','Replacement','Other'];
+          const valid = ['Missing pieces','Broken','Replacement','Other'];
           reasonSelect.value = valid.includes(val) ? val : '';
           const targetBtn = reasonBtns.find(b=> b.dataset.val === reasonSelect.value);
           if(targetBtn){ reasonBtns.forEach(b=> b.classList.remove('active')); targetBtn.classList.add('active'); }

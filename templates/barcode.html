@@ -192,21 +192,25 @@
         }
 
         function playBeep() {
-            if (!audioCtx) return;
-            const duration = 0.1;
-            const oscillator = audioCtx.createOscillator();
-            const gain = audioCtx.createGain();
-            oscillator.type = 'sine';
-            oscillator.frequency.value = 880;
-            gain.gain.value = 0.2;
-            oscillator.connect(gain);
-            gain.connect(audioCtx.destination);
-            oscillator.start();
-            oscillator.stop(audioCtx.currentTime + duration);
-            oscillator.onended = () => {
-                oscillator.disconnect();
-                gain.disconnect();
-            };
+            try {
+                var ctx = window.audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+                window.audioCtx = ctx;
+                audioCtx = ctx;
+                const duration = 0.15;
+                const oscillator = ctx.createOscillator();
+                const gain = ctx.createGain();
+                oscillator.type = 'sine';
+                oscillator.frequency.value = 880;
+                gain.gain.value = 0.2;
+                oscillator.connect(gain);
+                gain.connect(ctx.destination);
+                oscillator.start();
+                oscillator.stop(ctx.currentTime + duration);
+                oscillator.onended = () => {
+                    oscillator.disconnect();
+                    gain.disconnect();
+                };
+            } catch(e) {}
         }
 
         // Show spinner/status if upload is in progress, or redirect if error
@@ -373,6 +377,7 @@
                 return;
             }
             scannedBarcodes.push(code);
+            playBeep();
             updateBarcodeList();
             resetAutoSubmitTimer();
         }
