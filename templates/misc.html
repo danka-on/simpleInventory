@@ -119,6 +119,23 @@
             padding: 8px 10px;
             font-size: 0.95rem;
             background: #fff;
+            color: #111827;
+        }
+        /* Night theme sets global color-scheme: dark; keep misc form controls readable. */
+        html.ss-theme-night input[type="number"],
+        html.ss-theme-night input[type="time"],
+        html.ss-theme-night select,
+        html.ss-theme-night textarea {
+            background: #fff;
+            color: #111827;
+            border-color: #cbd5e1;
+            color-scheme: light;
+        }
+        html.ss-theme-night input[type="time"]::-webkit-datetime-edit,
+        html.ss-theme-night input[type="time"]::-webkit-datetime-edit-text,
+        html.ss-theme-night input[type="time"]::-webkit-datetime-edit-hour-field,
+        html.ss-theme-night input[type="time"]::-webkit-datetime-edit-minute-field {
+            color: #111827;
         }
         input[type="checkbox"] {
             margin: 0;
