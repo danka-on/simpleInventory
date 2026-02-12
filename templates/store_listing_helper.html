@@ -82,6 +82,9 @@
       background: linear-gradient(135deg, #2563eb, #1d4ed8);
       color: #fff;
       box-shadow: 0 4px 14px rgba(37,99,235,0.35);
+      padding: 11px 12px;
+      min-width: 44px;
+      justify-content: center;
     }
     .btn-refresh-ebay:hover { box-shadow: 0 6px 20px rgba(37,99,235,0.45); }
     .btn[disabled] {
@@ -610,8 +613,8 @@
       <h1><span class="icon">🩺</span> <span data-i18n="store_listing_helper">Store Doctor</span></h1>
     </div>
     <div class="header-actions">
-      <button class="btn btn-refresh-ebay" id="btnSyncEbay" onclick="syncEbayLive()">
-        <i class="fab fa-ebay"></i> <span>Refresh eBay Live</span>
+      <button class="btn btn-refresh-ebay" id="btnSyncEbay" onclick="syncEbayLive()" title="Refresh eBay live listings" aria-label="Refresh eBay live listings">
+        <i class="fas fa-rotate-right"></i>
       </button>
       <button class="btn btn-scan" id="btnDiagnose" onclick="scanAlerts()">
         <i class="fas fa-stethoscope"></i> <span data-i18n="scan">Diagnose</span>
