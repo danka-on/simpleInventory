@@ -582,6 +582,7 @@ function render(results){
       ? upcRaw.padStart(12, '0') 
       : upcRaw;
     const upc = esc(upcPadded);
+    const apiUpc = esc((upcRaw || '').toString());
     // Extract base UPC without suffix for copy button (with padding)
     const baseUpc = upc.includes('-') ? upc.split('-')[0] : upc;
     // Listing Agent queue should use the raw base UPC (no padding) so /api/listingagent/upc/<upc> matches DB rows.
@@ -611,30 +612,31 @@ function render(results){
     const listedAmazon = Number(r.listed_amazon) === 1;
     const listedEbay = Number(r.listed_ebay) === 1;
     const listedFacebook = Number(r.listed_facebook) === 1;
+    const lotNumber = esc(r.lot_number||'');
     
     rowIndex++;
     
-    const amazonCheckbox = `<label style="display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap" title="${listedAmazon && r.listed_amazon_date ? 'Listed: ' + r.listed_amazon_date : ''}"><input type="checkbox" class="marketplace-checkbox" data-upc="${upc}" data-marketplace="amazon" ${listedAmazon ? 'checked' : ''}><span style="font-size:0.85rem">Amazon</span></label>`;
-    const ebayCheckbox = `<label style="display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap" title="${listedEbay && r.listed_ebay_date ? 'Listed: ' + r.listed_ebay_date : ''}"><input type="checkbox" class="marketplace-checkbox" data-upc="${upc}" data-marketplace="ebay" ${listedEbay ? 'checked' : ''}><span style="font-size:0.85rem">eBay</span></label>`;
-    const fbCheckbox = `<label style="display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap" title="${listedFacebook && r.listed_facebook_date ? 'Listed: ' + r.listed_facebook_date : ''}"><input type="checkbox" class="marketplace-checkbox" data-upc="${upc}" data-marketplace="facebook" ${listedFacebook ? 'checked' : ''}><span style="font-size:0.85rem">Facebook</span></label>`;
+    const amazonCheckbox = `<label style="display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap" title="${listedAmazon && r.listed_amazon_date ? 'Listed: ' + r.listed_amazon_date : ''}"><input type="checkbox" class="marketplace-checkbox" data-upc="${apiUpc}" data-lot="${lotNumber}" data-marketplace="amazon" ${listedAmazon ? 'checked' : ''}><span style="font-size:0.85rem">Amazon</span></label>`;
+    const ebayCheckbox = `<label style="display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap" title="${listedEbay && r.listed_ebay_date ? 'Listed: ' + r.listed_ebay_date : ''}"><input type="checkbox" class="marketplace-checkbox" data-upc="${apiUpc}" data-lot="${lotNumber}" data-marketplace="ebay" ${listedEbay ? 'checked' : ''}><span style="font-size:0.85rem">eBay</span></label>`;
+    const fbCheckbox = `<label style="display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap" title="${listedFacebook && r.listed_facebook_date ? 'Listed: ' + r.listed_facebook_date : ''}"><input type="checkbox" class="marketplace-checkbox" data-upc="${apiUpc}" data-lot="${lotNumber}" data-marketplace="facebook" ${listedFacebook ? 'checked' : ''}><span style="font-size:0.85rem">Facebook</span></label>`;
     
     const actionBtn = `<div style="display:flex;flex-direction:column;gap:4px;align-items:flex-start">${amazonCheckbox}${ebayCheckbox}${fbCheckbox}</div>`;
     
     // Diagnostic link moved into its own Info column (first column)
-    const diagLink = `<button class="btn btn-sm diag-link" style="background:transparent;border:1px solid #0066cc;color:#0066cc;border-radius:6px;padding:6px 10px;cursor:pointer" data-upc="${upc}" data-lot="${esc(r.lot_number||'')}">Open</button>`;
+    const diagLink = `<button class="btn btn-sm diag-link" style="background:transparent;border:1px solid #0066cc;color:#0066cc;border-radius:6px;padding:6px 10px;cursor:pointer" data-upc="${apiUpc}" data-lot="${esc(r.lot_number||'')}">Open</button>`;
     // Pics count — will be updated after fetching actual count. Start with "..." as loading indicator
-    const picsBtn = `<span class="pics-count" data-upc="${upc}" data-lot="${esc(r.lot_number||'')}" style="color:#2196F3;font-weight:600;cursor:pointer;font-size:0.9rem">...</span>`;
+    const picsBtn = `<span class="pics-count" data-upc="${apiUpc}" data-lot="${esc(r.lot_number||'')}" style="color:#2196F3;font-weight:600;cursor:pointer;font-size:0.9rem">...</span>`;
     // QTY display - make red if > 1 AND status is NOT "unchecked"
     const qty = r.quantity || 1;
     const qtyStyle = (qty > 1 && status !== 'unchecked') ? 'color:#e74c3c;font-weight:700;font-size:1.1rem' : '';
     const qtyCell = `<td style="text-align:center"><span style="${qtyStyle}">${qty}</span></td>`;
     // Notes icon - show 📝 if note exists and make it clickable
     const hasNote = r.note && String(r.note).trim().length > 0;
-    const noteCell = hasNote ? `<td style="text-align:center;font-size:1.2rem"><span class="note-icon" data-upc="${upc}" style="cursor:pointer" title="Click to view notes">📝</span></td>` : `<td style="text-align:center"></td>`;
+    const noteCell = hasNote ? `<td style="text-align:center;font-size:1.2rem"><span class="note-icon" data-upc="${apiUpc}" style="cursor:pointer" title="Click to view notes">📝</span></td>` : `<td style="text-align:center"></td>`;
     html += `<tr>`;
     if (selectMode) {
       // Allow selection of all items (base barcodes will be reset instead of deleted)
-      html += `<td><input type="checkbox" class="item-checkbox" data-id="${r.id}" data-upc="${upc}"></td>`;
+      html += `<td><input type="checkbox" class="item-checkbox" data-id="${r.id}" data-upc="${apiUpc}"></td>`;
     }
     html += `<td style="width:64px;text-align:center">${diagLink}</td>`+
       `<td><div style="display:flex;flex-direction:column;gap:4px;align-items:flex-start">`+
@@ -677,9 +679,11 @@ function render(results){
   // After rendering, for each displayed UPC, fetch the actual images count in the background and update the number
   document.querySelectorAll('.pics-count').forEach(async (el)=>{
     const upc = el.dataset.upc;
+    const lot = el.dataset.lot || '';
     if(!upc) return;
     try{
-      const res = await fetch('/api/items_prep/diagnostic/'+encodeURIComponent(upc));
+      const lotQ = lot ? ('?lot=' + encodeURIComponent(lot)) : '';
+      const res = await fetch('/api/items_prep/diagnostic/'+encodeURIComponent(upc)+lotQ);
       if(!res.ok) return;
       const j = await res.json();
       const n = (j.images || []).length;
@@ -867,7 +871,8 @@ async function onOpenPics(e){
   editLink.href = diagUrl;
   dlAll.href = '/api/items_prep/diagnostic/'+encodeURIComponent(upc)+'/photos.zip';
   try{
-    const res = await fetch('/api/items_prep/diagnostic/'+encodeURIComponent(upc));
+    const lotQ = lot ? ('?lot=' + encodeURIComponent(lot)) : '';
+    const res = await fetch('/api/items_prep/diagnostic/'+encodeURIComponent(upc)+lotQ);
     if(!res.ok){ area.innerHTML = '<div class="small-muted">Failed to load</div>'; modal.style.display='flex'; return; }
     const j = await res.json();
     const imgs = j.images || [];
@@ -922,12 +927,13 @@ async function onOpenNotes(e){
 async function onMarketplaceToggle(e){
   const checkbox = e.currentTarget;
   const upc = checkbox.dataset.upc;
+  const lot = checkbox.dataset.lot || '';
   const marketplace = checkbox.dataset.marketplace;
   const listed = checkbox.checked;
 
   if(!upc || !marketplace) return;
 
-  console.log(`[onMarketplaceToggle] ${listed ? 'Listing' : 'Unlisting'} ${upc} on ${marketplace}`);
+  console.log(`[onMarketplaceToggle] ${listed ? 'Listing' : 'Unlisting'} ${upc} lot=${lot} on ${marketplace}`);
 
   // Prompt for quantity when checking Facebook
   let quantity = 1;
@@ -946,7 +952,7 @@ async function onMarketplaceToggle(e){
     const response = await fetch('/api/bol_items/list_status', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ upc, marketplace, listed, quantity })
+      body: JSON.stringify({ upc, lot_number: lot, marketplace, listed, quantity })
     });
     const result = await response.json();
     console.log('[onMarketplaceToggle] API response:', result);

@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title data-i18n="alerts">Alerts</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: 'Inter', 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      padding: 20px;
+      min-height: 100vh;
+    }
+    .wrap {
+      max-width: 720px;
+      margin: 0 auto;
+    }
+
+    /* Header */
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 20px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 1.5rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      color: #f8fafc;
+    }
+    .btn {
+      border: 0;
+      border-radius: 10px;
+      padding: 10px 16px;
+      font-size: 0.85rem;
+      font-weight: 700;
+      text-decoration: none;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s ease;
+    }
+    .btn:hover { transform: translateY(-1px); }
+    .btn:active { transform: translateY(0); }
+    .btn.refresh {
+      background: linear-gradient(135deg, #10b981, #059669);
+      color: #fff;
+      box-shadow: 0 4px 14px rgba(16,185,129,0.3);
+    }
+    .btn.refresh:hover { box-shadow: 0 6px 20px rgba(16,185,129,0.4); }
+
+    /* Tabs */
+    .tabs {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 16px;
+      background: rgba(0,0,0,0.25);
+      padding: 5px;
+      border-radius: 12px;
+    }
+    .tab {
+      flex: 1;
+      border: none;
+      background: transparent;
+      color: #64748b;
+      border-radius: 9px;
+      padding: 10px 14px;
+      font-size: 0.85rem;
+      font-weight: 700;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: all 0.2s ease;
+    }
+    .tab:hover { background: rgba(255,255,255,0.06); color: #94a3b8; }
+    .tab.active {
+      background: rgba(255,255,255,0.1);
+      color: #f8fafc;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    }
+    .tab .badge {
+      min-width: 22px;
+      height: 22px;
+      border-radius: 11px;
+      font-size: 0.72rem;
+      font-weight: 800;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      padding: 0 6px;
+    }
+    .badge-red { background: #ef4444; }
+    .badge-gray { background: #475569; }
+
+    /* Panels */
+    .panel { display: none; }
+    .panel.active { display: block; }
+
+    /* Loading & Empty */
+    .loading,
+    .empty {
+      background: #1e293b;
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 14px;
+      padding: 48px 20px;
+      text-align: center;
+      color: #64748b;
+      font-weight: 600;
+      font-size: 0.92rem;
+    }
+    .spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid #334155;
+      border-top: 3px solid #10b981;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      margin: 0 auto 14px;
+    }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    .empty-icon {
+      font-size: 2.5rem;
+      margin-bottom: 12px;
+      display: block;
+      color: #10b981;
+    }
+
+    /* Alert Group Cards */
+    .list { display: grid; gap: 12px; }
+
+    .alert-group-card {
+      background: #1e293b;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.06);
+      overflow: hidden;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .alert-group-card:hover {
+      border-color: rgba(255,255,255,0.12);
+      box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+      transform: translateY(-1px);
+    }
+    .alert-group-card:active { transform: translateY(0); }
+    .alert-group-card.no-warehouse { border-top: 3px solid #ef4444; }
+    .alert-group-card.quantity-alert { border-top: 3px solid #eab308; }
+
+    .alert-group-inner {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 20px;
+    }
+    .alert-group-icon {
+      width: 48px;
+      height: 48px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.3rem;
+      flex-shrink: 0;
+    }
+    .alert-group-card.no-warehouse .alert-group-icon {
+      background: rgba(239,68,68,0.12);
+      color: #f87171;
+    }
+    .alert-group-card.quantity-alert .alert-group-icon {
+      background: rgba(234,179,8,0.12);
+      color: #eab308;
+    }
+    .alert-group-info {
+      flex: 1;
+      min-width: 0;
+    }
+    .alert-group-count-big {
+      font-size: 1.5rem;
+      font-weight: 800;
+      line-height: 1;
+      margin-bottom: 4px;
+      letter-spacing: -0.02em;
+    }
+    .alert-group-card.no-warehouse .alert-group-count-big { color: #f87171; }
+    .alert-group-card.quantity-alert .alert-group-count-big { color: #eab308; }
+    .alert-group-label {
+      font-size: 0.82rem;
+      color: #94a3b8;
+      font-weight: 600;
+    }
+    .alert-group-actions {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .btn-mark {
+      background: #334155;
+      color: #94a3b8;
+      border: none;
+      border-radius: 8px;
+      padding: 8px 14px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      white-space: nowrap;
+    }
+    .btn-mark:hover { background: #475569; color: #e2e8f0; }
+    .alert-group-arrow {
+      color: #475569;
+      font-size: 1.1rem;
+      transition: transform 0.15s ease;
+    }
+    .alert-group-card:hover .alert-group-arrow { transform: translateX(3px); color: #94a3b8; }
+
+    /* Marked Fixed rows */
+    .marked-card {
+      background: #1e293b;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.06);
+      border-top: 3px solid #475569;
+      padding: 16px 20px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      transition: all 0.15s ease;
+    }
+    .marked-card:hover {
+      border-color: rgba(255,255,255,0.1);
+    }
+    .marked-info { flex: 1; min-width: 0; }
+    .marked-upc {
+      font-family: 'JetBrains Mono', 'Consolas', monospace;
+      font-weight: 800;
+      font-size: 0.9rem;
+      color: #e2e8f0;
+      margin-bottom: 4px;
+    }
+    .marked-meta {
+      font-size: 0.8rem;
+      color: #64748b;
+      line-height: 1.5;
+    }
+    .marked-type {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 5px;
+      font-size: 0.68rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      background: rgba(71,85,105,0.2);
+      color: #94a3b8;
+      margin-bottom: 4px;
+    }
+    .btn-undo {
+      background: #334155;
+      color: #94a3b8;
+      border: none;
+      border-radius: 8px;
+      padding: 8px 14px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      white-space: nowrap;
+    }
+    .btn-undo:hover { background: #475569; color: #e2e8f0; }
+
+    /* Responsive */
+    @media (max-width: 640px) {
+      body { padding: 14px; }
+      h1 { font-size: 1.3rem; }
+      .alert-group-inner { padding: 16px; gap: 12px; }
+      .alert-group-icon { width: 40px; height: 40px; font-size: 1.1rem; }
+      .alert-group-count-big { font-size: 1.25rem; }
+      .marked-card { padding: 14px 16px; }
+    }
+
+    /* Day mode overrides */
+    html.ss-theme-day body { background: var(--bg, #f9f9f9); color: var(--ink, #111827); }
+    html.ss-theme-day h1 { color: #111827; }
+    html.ss-theme-day .btn.refresh { box-shadow: 0 4px 14px rgba(16,185,129,0.2); }
+    html.ss-theme-day .tabs { background: #e5e7eb; }
+    html.ss-theme-day .tab { color: #6b7280; }
+    html.ss-theme-day .tab:hover { background: rgba(0,0,0,0.04); color: #374151; }
+    html.ss-theme-day .tab.active { background: #fff; color: #111827; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    html.ss-theme-day .loading,
+    html.ss-theme-day .empty { background: #fff; border-color: #e5e7eb; color: #6b7280; }
+    html.ss-theme-day .spinner { border-color: #e5e7eb; border-top-color: #10b981; }
+    html.ss-theme-day .alert-group-card { background: #fff; border-color: #e5e7eb; }
+    html.ss-theme-day .alert-group-card:hover { border-color: #cbd5e1; box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
+    html.ss-theme-day .alert-group-card.no-warehouse .alert-group-icon { background: rgba(239,68,68,0.08); }
+    html.ss-theme-day .alert-group-card.quantity-alert .alert-group-icon { background: rgba(234,179,8,0.08); color: #b45309; }
+    html.ss-theme-day .alert-group-card.quantity-alert .alert-group-count-big { color: #b45309; }
+    html.ss-theme-day .alert-group-label { color: #6b7280; }
+    html.ss-theme-day .btn-mark { background: #e5e7eb; color: #475569; }
+    html.ss-theme-day .btn-mark:hover { background: #d1d5db; color: #111827; }
+    html.ss-theme-day .alert-group-arrow { color: #d1d5db; }
+    html.ss-theme-day .alert-group-card:hover .alert-group-arrow { color: #6b7280; }
+    html.ss-theme-day .marked-card { background: #fff; border-color: #e5e7eb; }
+    html.ss-theme-day .marked-card:hover { border-color: #cbd5e1; }
+    html.ss-theme-day .marked-upc { color: #111827; }
+    html.ss-theme-day .marked-meta { color: #6b7280; }
+    html.ss-theme-day .marked-type { background: rgba(0,0,0,0.05); color: #6b7280; }
+    html.ss-theme-day .btn-undo { background: #e5e7eb; color: #475569; }
+    html.ss-theme-day .btn-undo:hover { background: #d1d5db; color: #111827; }
+  </style>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+  <div class="wrap">
+    <div class="header">
+      <h1 data-i18n="alerts">Alerts</h1>
+      <button class="btn refresh" id="refreshBtn"><i class="fas fa-sync-alt"></i> Refresh</button>
+    </div>
+
+    <div class="tabs">
+      <button class="tab active" data-tab="active">
+        <i class="fas fa-bell"></i> <span data-i18n="active_alerts">Active</span>
+        <span class="badge badge-red" id="badgeActive" style="display:none">0</span>
+      </button>
+      <button class="tab" data-tab="marked">
+        <i class="fas fa-check-circle"></i> <span data-i18n="marked_fixed">Fixed</span>
+        <span class="badge badge-gray" id="badgeMarked" style="display:none">0</span>
+      </button>
+    </div>
+
+    <div id="loading" class="loading">
+      <div class="spinner"></div>
+      Loading...
+    </div>
+
+    <div class="panel active" id="panel-active">
+      <div id="activeEmpty" class="empty" style="display:none">
+        <span class="empty-icon"><i class="fas fa-check-circle"></i></span>
+        <span data-i18n="no_active_alerts">No active alerts right now.</span>
+      </div>
+      <div id="activeList" class="list" style="display:none"></div>
+    </div>
+
+    <div class="panel" id="panel-marked">
+      <div id="markedEmpty" class="empty" style="display:none">
+        <span class="empty-icon"><i class="fas fa-clipboard-check"></i></span>
+        <span data-i18n="no_marked_fixed">No marked fixed items</span>
+      </div>
+      <div id="markedList" class="list" style="display:none"></div>
+    </div>
+  </div>
+
+  <script>
+    function t(key){ return (window.i18n && window.i18n.t) ? window.i18n.t(key) : key; }
+    function esc(v){
+      const d = document.createElement('div');
+      d.textContent = v == null ? '' : String(v);
+      return d.innerHTML;
+    }
+    function formatTime(raw) {
+      if (!raw) return '';
+      try {
+        let s = String(raw).trim();
+        if (/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(s) && !s.includes('T')) s = s.replace(' ', 'T') + 'Z';
+        const d = new Date(s);
+        if (!isNaN(d.getTime())) return d.toLocaleString();
+      } catch (e) {}
+      return String(raw);
+    }
+    function alertTypeLabel(alertType) {
+      const tkey = String(alertType || '').toLowerCase();
+      if (tkey === 'no_warehouse') return t('no_stock_in_warehouse_alert');
+      if (tkey === 'quantity_alert') return t('listing_quantity_exceeds_warehouse_alert');
+      return tkey || t('alert_type');
+    }
+
+    const state = { active: [], marked: [] };
+
+    function syncGlobalAlertsBadge(count) {
+      try {
+        const n = Math.max(0, Number(count || 0));
+        if (window.ssNoWarehouseAlerts && typeof window.ssNoWarehouseAlerts.set === 'function') {
+          window.ssNoWarehouseAlerts.set(n);
+        } else if (window.ssAlertsCount && typeof window.ssAlertsCount.set === 'function') {
+          window.ssAlertsCount.set(n);
+        }
+      } catch (e) {}
+    }
+
+    function updateBadge(id, count) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      if (count > 0) {
+        el.textContent = count;
+        el.style.display = 'inline-flex';
+      } else {
+        el.style.display = 'none';
+      }
+    }
+
+    function setTab(tabName) {
+      document.querySelectorAll('.tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === tabName));
+      document.querySelectorAll('.panel').forEach((p) => p.classList.remove('active'));
+      const panel = document.getElementById('panel-' + tabName);
+      if (panel) panel.classList.add('active');
+    }
+
+    function renderActive() {
+      const listEl = document.getElementById('activeList');
+      const emptyEl = document.getElementById('activeEmpty');
+      updateBadge('badgeActive', state.active.length);
+
+      if (!state.active.length) {
+        listEl.style.display = 'none';
+        emptyEl.style.display = 'block';
+        return;
+      }
+
+      emptyEl.style.display = 'none';
+      listEl.style.display = 'grid';
+      const quantityAlerts = state.active.filter((a) => String(a.alert_type || '').toLowerCase() === 'quantity_alert');
+      const noWarehouseAlerts = state.active.filter((a) => String(a.alert_type || '').toLowerCase() === 'no_warehouse');
+
+      const cards = [];
+
+      if (noWarehouseAlerts.length) {
+        cards.push(`
+          <div class="alert-group-card no-warehouse" data-href="/store-listing-helper?tab=no_warehouse">
+            <div class="alert-group-inner">
+              <div class="alert-group-icon"><i class="fas fa-warehouse"></i></div>
+              <div class="alert-group-info">
+                <div class="alert-group-count-big">${noWarehouseAlerts.length}</div>
+                <div class="alert-group-label">${esc(t('no_stock_in_warehouse_alert'))}</div>
+              </div>
+              <div class="alert-group-actions">
+                <button class="btn-mark btn-mark-group" data-alert-type="no_warehouse">${esc(t('mark_fixed'))}</button>
+                <span class="alert-group-arrow"><i class="fas fa-chevron-right"></i></span>
+              </div>
+            </div>
+          </div>
+        `);
+      }
+
+      if (quantityAlerts.length) {
+        cards.push(`
+          <div class="alert-group-card quantity-alert" data-href="/store-listing-helper?tab=quantity_alert">
+            <div class="alert-group-inner">
+              <div class="alert-group-icon"><i class="fas fa-balance-scale-right"></i></div>
+              <div class="alert-group-info">
+                <div class="alert-group-count-big">${quantityAlerts.length}</div>
+                <div class="alert-group-label">${esc(t('listing_quantity_exceeds_warehouse_alert'))}</div>
+              </div>
+              <div class="alert-group-actions">
+                <button class="btn-mark btn-mark-group" data-alert-type="quantity_alert">${esc(t('mark_fixed'))}</button>
+                <span class="alert-group-arrow"><i class="fas fa-chevron-right"></i></span>
+              </div>
+            </div>
+          </div>
+        `);
+      }
+
+      listEl.innerHTML = cards.join('');
+
+      listEl.querySelectorAll('.alert-group-card').forEach((card) => {
+        card.addEventListener('click', (e) => {
+          if (e.target.closest('.btn-mark-group')) return;
+          window.location.href = card.getAttribute('data-href') || '/store-listing-helper';
+        });
+      });
+
+      listEl.querySelectorAll('.btn-mark-group').forEach((btn) => {
+        btn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          await dismissAlertGroup(btn.getAttribute('data-alert-type') || '');
+        });
+      });
+    }
+
+    function renderMarked() {
+      const listEl = document.getElementById('markedList');
+      const emptyEl = document.getElementById('markedEmpty');
+      updateBadge('badgeMarked', state.marked.length);
+
+      if (!state.marked.length) {
+        listEl.style.display = 'none';
+        emptyEl.style.display = 'block';
+        return;
+      }
+
+      emptyEl.style.display = 'none';
+      listEl.style.display = 'grid';
+      listEl.innerHTML = state.marked.map((m) => `
+        <div class="marked-card">
+          <div class="marked-info">
+            <div class="marked-type">${esc(alertTypeLabel(m.alert_type))}</div>
+            ${(m.upc || '').trim() ? `<div class="marked-upc">${esc(m.upc)}</div>` : ''}
+            <div class="marked-meta">${esc(t('dismissed_at'))}: ${esc(formatTime(m.dismissed_at))}</div>
+          </div>
+          <button class="btn-undo" data-hash="${esc(m.snapshot_hash || '')}"><i class="fas fa-undo"></i> ${esc(t('undo'))}</button>
+        </div>
+      `).join('');
+
+      listEl.querySelectorAll('.btn-undo').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          await undismissAlert(btn.getAttribute('data-hash') || '');
+        });
+      });
+    }
+
+    async function dismissAlertRequest(payload) {
+      const resp = await fetch('/api/listing-helper/dismiss', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload || {})
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data.success) throw new Error(data.error || 'Dismiss failed');
+    }
+
+    async function dismissAlertGroup(alertType) {
+      const tval = String(alertType || '').toLowerCase();
+      if (!tval) return;
+      const groupItems = state.active.filter((a) => String(a.alert_type || '').toLowerCase() === tval);
+      if (!groupItems.length) return;
+      try {
+        await Promise.all(groupItems.map((a) => {
+          const listings = Array.isArray(a.listings) ? a.listings : [];
+          const storeVal = (a.store || (((a.stores || [])[0]) || '') || ((listings[0] || {}).store) || '').toString();
+          return dismissAlertRequest({
+            alert_type: tval,
+            hash: a.hash || '',
+            upc: a.upc || '',
+            store: storeVal,
+            listing_ids: listings.map((l) => l.listing_id || '').filter(Boolean)
+          });
+        }));
+        await loadData();
+      } catch (err) {
+        alert((err && err.message) ? err.message : 'Dismiss failed');
+      }
+    }
+
+    async function undismissAlert(hash) {
+      if (!hash) return;
+      try {
+        const resp = await fetch('/api/listing-helper/undismiss', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ hash: hash })
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok || !data.success) throw new Error(data.error || 'Undo failed');
+        await loadData();
+      } catch (err) {
+        alert((err && err.message) ? err.message : 'Undo failed');
+      }
+    }
+
+    async function loadData() {
+      const loadingEl = document.getElementById('loading');
+      loadingEl.style.display = 'block';
+      document.getElementById('activeList').style.display = 'none';
+      document.getElementById('activeEmpty').style.display = 'none';
+      document.getElementById('markedList').style.display = 'none';
+      document.getElementById('markedEmpty').style.display = 'none';
+
+      try {
+        const [scanResp, dismissedResp] = await Promise.all([
+          fetch('/api/listing-helper/scan', { cache: 'no-store' }),
+          fetch('/api/listing-helper/dismissed', { cache: 'no-store' })
+        ]);
+        const scanData = await scanResp.json().catch(() => ({}));
+        const dismissedData = await dismissedResp.json().catch(() => ({}));
+
+        if (!scanResp.ok || !scanData.success) throw new Error((scanData && scanData.error) ? scanData.error : 'Scan failed');
+        if (!dismissedResp.ok || !dismissedData.success) throw new Error((dismissedData && dismissedData.error) ? dismissedData.error : 'Dismissed query failed');
+
+        const scanAlerts = (scanData.alerts || {});
+        const noWarehouse = Array.isArray(scanAlerts.no_warehouse) ? scanAlerts.no_warehouse : [];
+        const quantityAlerts = Array.isArray(scanAlerts.quantity_alert) ? scanAlerts.quantity_alert : [];
+
+        state.active = [
+          ...noWarehouse.map((a) => ({
+            ...a,
+            alert_type: 'no_warehouse',
+            listings: Array.isArray(a.listings) ? a.listings : []
+          })),
+          ...quantityAlerts.map((a) => ({
+            ...a,
+            alert_type: 'quantity_alert',
+            listings: Array.isArray(a.listings) ? a.listings : ((a.listing && typeof a.listing === 'object') ? [a.listing] : [])
+          }))
+        ];
+
+        state.marked = ((dismissedData.dismissed || [])).filter((r) => {
+          const tval = String(r.alert_type || '').toLowerCase();
+          return tval === 'no_warehouse' || tval === 'quantity_alert';
+        });
+
+        syncGlobalAlertsBadge(state.active.length);
+        renderActive();
+        renderMarked();
+      } catch (err) {
+        const activeEmpty = document.getElementById('activeEmpty');
+        activeEmpty.style.display = 'block';
+        activeEmpty.textContent = 'Failed to load alerts: ' + ((err && err.message) ? err.message : 'Unknown error');
+        updateBadge('badgeActive', 0);
+        updateBadge('badgeMarked', 0);
+      } finally {
+        loadingEl.style.display = 'none';
+      }
+    }
+
+    document.querySelectorAll('.tab').forEach((btn) => {
+      btn.addEventListener('click', () => setTab(btn.dataset.tab));
+    });
+    document.getElementById('refreshBtn').addEventListener('click', loadData);
+
+    window.addEventListener('load', () => {
+      if (window.i18n && window.i18n.applyTranslations) {
+        window.i18n.applyTranslations();
+      }
+      loadData();
+    });
+  </script>
+  <script src="/static/i18n.js"></script>
+</body>
+</html>

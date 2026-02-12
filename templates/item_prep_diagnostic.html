@@ -561,16 +561,59 @@
           // Also POST status (status, reason) - only if status is set (good or bad)
           try{
             const statusVal = statusInput.value || '';
+            let continuedWithoutLot = false;
             console.log('[SAVE] Status value:', statusVal);
             if(statusVal && (statusVal === 'good' || statusVal === 'bad')){
               const reasonVal = (document.getElementById('reasonSelect') && document.getElementById('reasonSelect').value) || '';
               // Read qty from URL parameter if provided (from bad flow)
               const urlParams = new URLSearchParams(window.location.search);
               const qtyParam = urlParams.get('qty');
+              const lotParam = (urlParams.get('lot') || '').trim();
+              const requestedLotParam = (urlParams.get('requested_lot') || '').trim();
               const qty = qtyParam ? parseInt(qtyParam, 10) : 1;
               console.log('[SAVE] Posting status:', statusVal, 'reason:', reasonVal, 'qty:', qty);
-              const statusRes = await fetch('/api/items_prep/status', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ upc: '{{ upc }}', status: statusVal, reason: reasonVal, note: '', qty: qty }) });
-              const statusData = await statusRes.json();
+              let statusPayload = {
+                upc: '{{ upc }}',
+                status: statusVal,
+                reason: reasonVal,
+                note: '',
+                qty: qty,
+                lot_number: lotParam,
+                requested_lot: requestedLotParam
+              };
+              let statusRes = await fetch('/api/items_prep/status', {
+                method: 'POST',
+                headers: {'Content-Type':'application/json'},
+                body: JSON.stringify(statusPayload)
+              });
+              let statusData = await statusRes.json();
+              if(statusData && statusData.lot_match_error && !statusPayload.allow_no_lot){
+                const reqLot = (statusData.requested_lot || lotParam || requestedLotParam || '').trim();
+                const sugLot = (statusData.suggested_lot || '').trim();
+                const proceed = confirm([
+                  'LOT matching error.',
+                  reqLot ? ('Requested LOT: ' + reqLot) : '',
+                  sugLot ? ('Most recent available LOT: ' + sugLot) : '',
+                  '',
+                  'Continue without LOT?'
+                ].filter(Boolean).join('\n'));
+                if(!proceed){
+                  msg.textContent = 'Status save cancelled.';
+                  return;
+                }
+                statusPayload.allow_no_lot = true;
+                statusPayload.lot_number = '';
+                statusPayload.requested_lot = '';
+                statusRes = await fetch('/api/items_prep/status', {
+                  method: 'POST',
+                  headers: {'Content-Type':'application/json'},
+                  body: JSON.stringify(statusPayload)
+                });
+                statusData = await statusRes.json();
+              if(statusData && typeof statusData === 'object'){
+                  statusData.continued_without_lot = true;
+                }
+              }
               console.log('[SAVE] Status API response:', statusData);
               
               if(!statusData.success){
@@ -578,6 +621,7 @@
                 msg.textContent = 'Status save failed: ' + (statusData.error || 'Unknown error');
                 return;
               }
+              continuedWithoutLot = !!statusData.continued_without_lot;
               
               // Update sessionStorage with the actual UPC that was created (important for bad status with suffixed UPCs)
               // SKIP this if editing from Item Manager - we don't want to change the original UPC
@@ -601,7 +645,7 @@
             return;
           }
           diagnosticCompleted = true; // Mark as completed to prevent cleanup
-          msg.textContent='Saved diagnostic';
+          msg.textContent = (typeof continuedWithoutLot !== 'undefined' && continuedWithoutLot) ? 'Saved diagnostic (continued without LOT)' : 'Saved diagnostic';
           // If a return URL was provided in query params, go back to it preserving filters
           try{
             const params = new URLSearchParams(window.location.search);

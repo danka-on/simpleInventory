@@ -333,7 +333,8 @@
     }
 
     async function lookup(upc){
-      const r = await fetch('/api/bol_lookup?upc='+encodeURIComponent(upc));
+      const lotQ = selectedLot ? ('&lot_number=' + encodeURIComponent(selectedLot)) : '';
+      const r = await fetch('/api/bol_lookup?upc='+encodeURIComponent(upc)+lotQ);
       const j = await r.json();
       const resEl = document.getElementById('result');
       const actions = document.getElementById('actions');
@@ -385,9 +386,35 @@
     }
 
     async function setStatus(upc, status, qty){
-      // Status endpoint now uses selected LOT from session
-      const r = await fetch('/api/items_prep/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({upc,status,qty})});
-      const j = await r.json();
+      return postWithLotFallback('/api/items_prep/status', {upc,status,qty,lot_number:selectedLot||''});
+    }
+
+    async function postWithLotFallback(url, payload){
+      let body = Object.assign({}, payload || {});
+      let r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+      let j = await r.json().catch(() => ({}));
+      if(j && j.lot_match_error && !body.allow_no_lot){
+        const reqLot = (j.requested_lot || body.lot_number || '').toString().trim();
+        const sugLot = (j.suggested_lot || '').toString().trim();
+        const msg = [
+          'LOT matching error.',
+          reqLot ? ('Requested LOT: ' + reqLot) : 'Requested LOT could not be matched.',
+          sugLot ? ('Most recent available LOT: ' + sugLot) : '',
+          '',
+          'Continue without LOT?'
+        ].filter(Boolean).join('\n');
+        const proceed = confirm(msg);
+        if(!proceed){
+          return {success:false, cancelled:true, error:'Cancelled by user'};
+        }
+        body.allow_no_lot = true;
+        body.lot_number = '';
+        r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+        j = await r.json().catch(() => ({}));
+        if(j && typeof j === 'object'){
+          j.continued_without_lot = true;
+        }
+      }
       return j;
     }
     
@@ -478,7 +505,8 @@
             action: lastEntry.action,
             previousQty: lastEntry.previousQty,
             base_upc: lastEntry.base_upc,
-            qty: lastEntry.qty
+            qty: lastEntry.qty,
+            lot_number: lastEntry.lot_number || selectedLot || ''
           })
         });
         
@@ -515,7 +543,8 @@
           status: 'good', 
           qty: currentQty,
           action: result.action, // 'incremented' or 'created'
-          previousQty: result.action === 'incremented' ? (result.quantity - currentQty) : 0
+          previousQty: result.action === 'incremented' ? (result.quantity - currentQty) : 0,
+          lot_number: result.lot_number || selectedLot || ''
         };
         showUndoButton();
         statusMsg.innerHTML='<span class="ok">Marked GOOD (Qty: '+currentQty+')</span>'; 
@@ -535,28 +564,32 @@
       
       // Create a suffixed entry with status "good" and reason "return"
       try {
-        const res = await fetch('/api/items_prep/create_return_entry', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({upc: currentUpc, qty: currentQty})
+        const data = await postWithLotFallback('/api/items_prep/create_return_entry', {
+          upc: currentUpc,
+          qty: currentQty,
+          lot_number: selectedLot || ''
         });
-        const data = await res.json();
         
         if (data.success) {
           const statusMsg = document.getElementById('statusMsg');
-          statusMsg.innerHTML='<span class="ok">Return entry created: ' + data.suffixed_upc + ' (Qty: '+currentQty+')</span>';
+          const autoHint = data.auto_assigned ? (` <span class="bad">(auto-assigned LOT ${esc(data.lot_number || '')})</span>`) : '';
+          const noLotHint = data.continued_without_lot ? ' <span class="bad">(continued with no LOT)</span>' : '';
+          statusMsg.innerHTML='<span class="ok">Return entry created: ' + data.suffixed_upc + ' (Qty: '+currentQty+')</span>' + autoHint + noLotHint;
           
           // Store for undo
           lastEntry = {
             upc: data.suffixed_upc,
             status: 'return', 
             qty: currentQty,
-            action: 'return'
+            action: 'return',
+            lot_number: data.lot_number || selectedLot || ''
           };
           showUndoButton();
         } else {
           hidePageLoading();
-          alert('Error creating return entry: ' + (data.error || 'Unknown error'));
+          if(!data.cancelled){
+            alert('Error creating return entry: ' + (data.error || 'Unknown error'));
+          }
         }
       } catch(e) {
         hidePageLoading();
@@ -586,27 +619,35 @@
       
       // Call API to create temporary suffixed entry for Bad flow
       try {
-        const res = await fetch('/api/items_prep/create_bad_entry', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({upc: currentUpc, qty: currentQty})
+        const data = await postWithLotFallback('/api/items_prep/create_bad_entry', {
+          upc: currentUpc,
+          qty: currentQty,
+          lot_number: selectedLot || ''
         });
-        const data = await res.json();
         
         if (data.success && data.suffixed_upc) {
           // Store for undo
-          lastEntry = {upc: data.suffixed_upc, status: 'bad', qty: currentQty, base_upc: currentUpc};
+          lastEntry = {upc: data.suffixed_upc, status: 'bad', qty: currentQty, base_upc: currentUpc, lot_number: data.lot_number || selectedLot || ''};
           sessionStorage.setItem('lastEntry', JSON.stringify(lastEntry));
           
           updateQtyDisplay(-1); // Show -1 animation
           
           setTimeout(() => {
-            window.location.href = '/item-prep/diagnostic?upc='+encodeURIComponent(data.suffixed_upc)+'&from=bad&qty='+currentQty+'&return='+encodeURIComponent('/item-prep?forceFocus=1&showUndo=1');
+            const lotParam = data.lot_number || selectedLot || '';
+            const lotQuery = lotParam ? ('&lot=' + encodeURIComponent(lotParam)) : '';
+            const requestedLotParam = data.requested_lot || selectedLot || '';
+            const requestedLotQuery = requestedLotParam ? ('&requested_lot=' + encodeURIComponent(requestedLotParam)) : '';
+            const noLotQuery = data.continued_without_lot ? '&continued_without_lot=1' : '';
+            window.location.href = '/item-prep/diagnostic?upc='+encodeURIComponent(data.suffixed_upc)+'&from=bad&qty='+currentQty+lotQuery+requestedLotQuery+noLotQuery+'&return='+encodeURIComponent('/item-prep?forceFocus=1&showUndo=1');
           }, 300);
         } else {
-          alert('Error creating bad entry: ' + (data.error || 'Unknown error'));
+          hidePageLoading();
+          if(!data.cancelled){
+            alert('Error creating bad entry: ' + (data.error || 'Unknown error'));
+          }
         }
       } catch(e) {
+        hidePageLoading();
         console.error('Bad button error:', e);
         alert('Error creating bad entry');
       }

@@ -427,6 +427,33 @@
     <script>
         let allReturns = [];
 
+        function safeText(value) {
+            if (value === null || value === undefined) return '';
+            return String(value);
+        }
+
+        function escapeHtml(value) {
+            return safeText(value)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function escapeJsString(value) {
+            return safeText(value)
+                .replace(/\\/g, '\\\\')
+                .replace(/'/g, "\\'")
+                .replace(/\r/g, '\\r')
+                .replace(/\n/g, '\\n');
+        }
+
+        function normalizeStoreKey(value) {
+            const normalized = safeText(value).toLowerCase().replace(/[^a-z0-9_-]/g, '');
+            return normalized || 'unknown';
+        }
+
         async function loadReturns() {
             const storeFilter = document.getElementById('storeFilter').value;
             const statusFilter = document.getElementById('statusFilter').value;
@@ -475,9 +502,14 @@
             }
             
             returns.forEach(ret => {
-                const totalCost = ret.refund_amount + ret.original_shipping_cost + ret.return_shipping_cost;
+                const refundAmount = Number(ret.refund_amount) || 0;
+                const originalShippingCost = Number(ret.original_shipping_cost) || 0;
+                const returnShippingCost = Number(ret.return_shipping_cost) || 0;
+                const totalCost = refundAmount + originalShippingCost + returnShippingCost;
                 const lifecycle = getLifecycleStatus(ret);
                 const cycleIndicator = ret.lifecycle_count > 1 ? `<span class="lifecycle-indicator" title="Returned ${ret.lifecycle_count} times">↻${ret.lifecycle_count}</span>` : '';
+                const storeKey = normalizeStoreKey(ret.store);
+                const storeLabel = escapeHtml((safeText(ret.store) || 'unknown').toUpperCase());
                 
                 // Determine action buttons based on lifecycle stage
                 let actionButtons = '';
@@ -498,17 +530,17 @@
                 actionButtons += `<button class="btn btn-info btn-lifecycle" onclick="openHistoryModal(${ret.id})" title="${historyTitle}"><i class="fas fa-history"></i></button>`;
                 
                 // Add edit button
-                actionButtons += `<button class="btn btn-secondary btn-lifecycle" onclick="openEditModal(${ret.id}, ${ret.restocked}, '${ret.location || ''}', '${encodeURIComponent(ret.return_reason || '')}', '${ret.received_date || ''}')" title="Edit return details"><i class="fas fa-gear"></i></button>`;
+                actionButtons += `<button class="btn btn-secondary btn-lifecycle" onclick="openEditModal(${ret.id}, ${ret.restocked ? 1 : 0}, '${escapeJsString(ret.location || '')}', '${escapeJsString(ret.return_reason || '')}', '${escapeJsString(ret.received_date || '')}')" title="Edit return details"><i class="fas fa-gear"></i></button>`;
                 
                 const row = `
                     <tr>
                         <td>${formatDate(ret.return_date)}</td>
-                        <td><code>${ret.order_id}</code></td>
-                        <td>${ret.title}</td>
-                        <td><span class="badge badge-${ret.store}">${ret.store.toUpperCase()}</span></td>
-                        <td>${ret.quantity}</td>
-                        <td>$${ret.refund_amount.toFixed(2)}</td>
-                        <td>$${(ret.original_shipping_cost + ret.return_shipping_cost).toFixed(2)}</td>
+                        <td><code>${escapeHtml(ret.order_id || '-')}</code></td>
+                        <td>${escapeHtml(ret.title || '')}</td>
+                        <td><span class="badge badge-${storeKey}">${storeLabel}</span></td>
+                        <td>${Number(ret.quantity) || 0}</td>
+                        <td>$${refundAmount.toFixed(2)}</td>
+                        <td>$${(originalShippingCost + returnShippingCost).toFixed(2)}</td>
                         <td><strong>$${totalCost.toFixed(2)}</strong></td>
                         <td><span class="badge ${lifecycle.badge}">${lifecycle.label}</span> ${cycleIndicator}</td>
                         <td style="text-align:right;white-space:nowrap;">
@@ -537,12 +569,111 @@
 
         function filterTable() {
             const searchTerm = document.getElementById('searchBox').value.toLowerCase();
-            const filtered = allReturns.filter(ret => 
-                ret.order_id.toLowerCase().includes(searchTerm) ||
-                ret.barcode.toLowerCase().includes(searchTerm) ||
-                ret.title.toLowerCase().includes(searchTerm)
-            );
+            const filtered = allReturns.filter(ret => {
+                const orderId = safeText(ret.order_id).toLowerCase();
+                const barcode = safeText(ret.barcode).toLowerCase();
+                const title = safeText(ret.title).toLowerCase();
+                return orderId.includes(searchTerm) || barcode.includes(searchTerm) || title.includes(searchTerm);
+            });
             renderReturns(filtered);
+        }
+
+        function showAddReturnModal() {
+            const modal = document.createElement('div');
+            modal.className = 'modal-overlay';
+            modal.innerHTML = `
+                <div class="modal-content">
+                    <h3 class="modal-header">Add Return</h3>
+                    <div class="form-group">
+                        <label for="addReturnOrderId">Order ID:</label>
+                        <input type="text" id="addReturnOrderId" placeholder="Order ID">
+                    </div>
+                    <div class="form-group">
+                        <label for="addReturnTitle">Title:</label>
+                        <input type="text" id="addReturnTitle" placeholder="Item title">
+                    </div>
+                    <div class="form-group">
+                        <label for="addReturnStore">Store:</label>
+                        <select id="addReturnStore">
+                            <option value="amazon">Amazon</option>
+                            <option value="ebay">eBay</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="addReturnBarcode">Barcode (optional):</label>
+                        <input type="text" id="addReturnBarcode" placeholder="UPC / barcode">
+                    </div>
+                    <div class="form-group">
+                        <label for="addReturnQuantity">Quantity:</label>
+                        <input type="number" id="addReturnQuantity" min="1" value="1">
+                    </div>
+                    <div class="form-group">
+                        <label for="addReturnRefund">Refund Amount:</label>
+                        <input type="number" id="addReturnRefund" min="0" step="0.01" value="0.00">
+                    </div>
+                    <div class="form-group">
+                        <label for="addReturnDate">Return Date (optional):</label>
+                        <input type="datetime-local" id="addReturnDate">
+                    </div>
+                    <div class="form-group">
+                        <label for="addReturnReason">Return Reason (optional):</label>
+                        <textarea id="addReturnReason" placeholder="Reason"></textarea>
+                    </div>
+                    <div class="modal-actions">
+                        <button onclick="this.closest('.modal-overlay').remove()" class="btn btn-secondary">Cancel</button>
+                        <button onclick="saveNewReturn()" class="btn btn-success">Save</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+            window.currentAddReturnModal = modal;
+        }
+
+        async function saveNewReturn() {
+            try {
+                const orderId = document.getElementById('addReturnOrderId').value.trim();
+                const title = document.getElementById('addReturnTitle').value.trim();
+                const store = document.getElementById('addReturnStore').value.trim();
+                const barcode = document.getElementById('addReturnBarcode').value.trim();
+                const quantity = Number(document.getElementById('addReturnQuantity').value || 1);
+                const refundAmount = Number(document.getElementById('addReturnRefund').value || 0);
+                const returnReason = document.getElementById('addReturnReason').value.trim();
+                const dateInput = document.getElementById('addReturnDate').value;
+                const returnDate = dateInput ? new Date(dateInput).toISOString() : '';
+
+                if (!orderId && !title) {
+                    throw new Error('Order ID or title is required');
+                }
+
+                const response = await fetch('/api/returns', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        order_id: orderId,
+                        title: title,
+                        store: store,
+                        barcode: barcode,
+                        quantity: Number.isFinite(quantity) ? quantity : 1,
+                        refund_amount: Number.isFinite(refundAmount) ? refundAmount : 0,
+                        return_reason: returnReason,
+                        return_date: returnDate
+                    })
+                });
+
+                const result = await response.json();
+                if (!result.success) {
+                    throw new Error(result.error || 'Failed to add return');
+                }
+
+                if (window.currentAddReturnModal) {
+                    window.currentAddReturnModal.remove();
+                }
+
+                showMessage('success', '✓ Return added successfully');
+                loadReturns();
+            } catch (error) {
+                showMessage('error', `Error: ${error.message}`);
+            }
         }
 
         async function syncAmazonReturns() {
@@ -661,7 +792,7 @@
             // Redirect to position/add to shelf page with pre-filled data
             const params = new URLSearchParams({
                 barcode: barcode,
-                title: decodeURIComponent(title),
+                title: safeText(title),
                 quantity: quantity,
                 from: 'returns'
             });
@@ -688,11 +819,11 @@
                     </div>
                     <div style="margin-bottom:16px;">
                         <label style="display:block;margin-bottom:4px;font-weight:500;">Location:</label>
-                        <input type="text" id="editLocation" value="${location}" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;">
+                        <input type="text" id="editLocation" value="${escapeHtml(location)}" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;">
                     </div>
                     <div style="margin-bottom:16px;">
                         <label style="display:block;margin-bottom:4px;font-weight:500;">Return Reason:</label>
-                        <textarea id="editReason" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;min-height:60px;">${decodeURIComponent(returnReason)}</textarea>
+                        <textarea id="editReason" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;min-height:60px;">${escapeHtml(returnReason)}</textarea>
                     </div>
                     <div style="display:flex;gap:8px;justify-content:space-between;">
                         <button onclick="deleteReturn(${returnId})" style="padding:10px 16px;background:#e74c3c;color:white;border:none;border-radius:8px;cursor:pointer;">Delete</button>
@@ -888,29 +1019,35 @@
                 
                 const ret = result.return;
                 const events = result.events || [];
+                const lifecycleCount = Number(ret.lifecycle_count) || 1;
                 
                 let timelineHTML = '';
                 events.forEach(event => {
                     const icon = event.auto_detected ? '🤖' : '👤';
                     const iconClass = event.auto_detected ? 'auto' : 'manual';
                     let eventText = '';
-                    
-                    if (event.event_type === 'received') {
+                    const eventType = safeText(event.event_type).toLowerCase();
+
+                    if (eventType === 'received') {
                         eventText = 'Return received';
-                    } else if (event.event_type === 'restocked') {
+                    } else if (eventType === 'restocked') {
                         eventText = 'Item restocked to inventory';
-                    } else if (event.event_type === 'relisted') {
-                        eventText = `Relisted on ${event.store || 'unknown'}`;
-                        if (event.item_id) eventText += ` (${event.item_id})`;
-                    } else if (event.event_type === 'resold') {
+                    } else if (eventType === 'relisted') {
+                        eventText = `Relisted on ${escapeHtml(event.store || 'unknown')}`;
+                        if (event.item_id) eventText += ` (${escapeHtml(event.item_id)})`;
+                    } else if (eventType === 'resold') {
                         eventText = 'Item resold';
-                        if (event.order_id) eventText += ` - Order ${event.order_id}`;
-                    } else if (event.event_type === 'lifecycle_restart') {
+                        if (event.order_id) eventText += ` - Order ${escapeHtml(event.order_id)}`;
+                    } else if (eventType === 'returned_again' || eventType === 'lifecycle_restart') {
                         eventText = 'Lifecycle restarted for next return cycle';
+                    } else if (eventType === 'sold') {
+                        eventText = 'Legacy sold marker (ignored)';
+                    } else {
+                        eventText = `Event: ${escapeHtml(event.event_type || 'unknown')}`;
                     }
                     
                     if (event.notes) {
-                        eventText += `<br><small style="color:#888;">${event.notes}</small>`;
+                        eventText += `<br><small style="color:#888;">${escapeHtml(event.notes)}</small>`;
                     }
                     
                     timelineHTML += `
@@ -930,9 +1067,9 @@
                     <div class="modal-content">
                         <h3 class="modal-header">Lifecycle History</h3>
                         <div style="margin-bottom:16px;padding:12px;background:#f8f9fa;border-radius:8px;">
-                            <div style="font-weight:600;margin-bottom:4px;">${ret.title}</div>
-                            <div style="color:#666;font-size:0.9rem;">Order: ${ret.order_id}</div>
-                            ${ret.lifecycle_count > 1 ? `<div style=\"color:#888;font-size:0.85rem;margin-top:4px;\">Return Cycle: ${ret.lifecycle_count}</div>` : ''}
+                            <div style="font-weight:600;margin-bottom:4px;">${escapeHtml(ret.title || 'Untitled return')}</div>
+                            <div style="color:#666;font-size:0.9rem;">Order: ${escapeHtml(ret.order_id || '-')}</div>
+                            ${lifecycleCount > 1 ? `<div style=\"color:#888;font-size:0.85rem;margin-top:4px;\">Return Cycle: ${lifecycleCount}</div>` : ''}
                         </div>
                         <div class="timeline">
                             ${timelineHTML || '<p style="color:#888;text-align:center;">No lifecycle events yet</p>'}
@@ -945,29 +1082,31 @@
                 `;
                 document.body.appendChild(modal);
                 window.currentLifecycleModal = modal;
-                    async function undoLastEvent(returnId, btn) {
-                        btn.disabled = true;
-                        btn.textContent = 'Undoing...';
-                        try {
-                            const response = await fetch(`/api/returns/${returnId}/undo-last-event`, { method: 'POST' });
-                            const result = await response.json();
-                            if (!result.success) {
-                                alert('Undo failed: ' + (result.error || 'Unknown error'));
-                                btn.disabled = false;
-                                btn.textContent = 'Undo Last';
-                                return;
-                            }
-                            if (window.currentLifecycleModal) window.currentLifecycleModal.remove();
-                            showMessage('success', '✓ Last lifecycle event undone');
-                            loadReturns();
-                        } catch (e) {
-                            alert('Undo failed');
-                            btn.disabled = false;
-                            btn.textContent = 'Undo Last';
-                        }
-                    }
             } catch (error) {
                 showMessage('error', `Error loading history: ${error.message}`);
+            }
+        }
+
+        async function undoLastEvent(returnId, btn) {
+            btn.disabled = true;
+            btn.textContent = 'Undoing...';
+            try {
+                const response = await fetch(`/api/returns/${returnId}/undo-last-event`, { method: 'POST' });
+                const result = await response.json();
+                if (!result.success) {
+                    throw new Error(result.error || 'Undo failed');
+                }
+
+                if (window.currentLifecycleModal) {
+                    window.currentLifecycleModal.remove();
+                }
+
+                showMessage('success', '✓ Last lifecycle event undone');
+                loadReturns();
+            } catch (error) {
+                showMessage('error', `Undo failed: ${error.message}`);
+                btn.disabled = false;
+                btn.textContent = 'Undo Last';
             }
         }
         

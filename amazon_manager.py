@@ -1331,21 +1331,66 @@ class AmazonManager:
                     return_data['return_shipping_cost']
                 )
 
-                # Insert or update return
+                # Update existing logical return when found; otherwise insert a new one.
                 cur.execute('''
-                    INSERT OR REPLACE INTO returns (
-                        original_order_id, order_id, item_id, barcode, title, quantity,
-                        original_price, refund_amount, original_shipping_cost, return_shipping_cost,
-                        original_seller_fee, seller_fee_refund,
-                        return_date, store, lot_number, location
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    SELECT id
+                    FROM returns
+                    WHERE store = 'amazon'
+                      AND COALESCE(order_id, '') = COALESCE(?, '')
+                      AND COALESCE(item_id, '') = COALESCE(?, '')
+                      AND COALESCE(barcode, '') = COALESCE(?, '')
+                      AND COALESCE(title, '') = COALESCE(?, '')
+                      AND COALESCE(return_date, '') = COALESCE(?, '')
+                    ORDER BY id DESC
+                    LIMIT 1
                 ''', (
-                    original_order_id, order_id, return_data['item_id'], barcode, title,
-                    return_data['quantity'], original_price, return_data['refund_amount'],
-                    original_shipping, return_data['return_shipping_cost'],
-                    original_fee, return_data['seller_fee_refund'],
-                    return_data['return_date'], 'amazon', lot_number, location
+                    order_id, return_data['item_id'], barcode, title, return_data['return_date']
                 ))
+                existing_return = cur.fetchone()
+
+                if existing_return:
+                    existing_id = existing_return[0]
+                    cur.execute('''
+                        UPDATE returns
+                        SET original_order_id = ?,
+                            order_id = ?,
+                            item_id = ?,
+                            barcode = ?,
+                            title = ?,
+                            quantity = ?,
+                            original_price = ?,
+                            refund_amount = ?,
+                            original_shipping_cost = ?,
+                            return_shipping_cost = ?,
+                            original_seller_fee = ?,
+                            seller_fee_refund = ?,
+                            return_date = ?,
+                            store = 'amazon',
+                            lot_number = COALESCE(lot_number, ?),
+                            location = COALESCE(location, ?)
+                        WHERE id = ?
+                    ''', (
+                        original_order_id, order_id, return_data['item_id'], barcode, title,
+                        return_data['quantity'], original_price, return_data['refund_amount'],
+                        original_shipping, return_data['return_shipping_cost'],
+                        original_fee, return_data['seller_fee_refund'],
+                        return_data['return_date'], lot_number, location, existing_id
+                    ))
+                else:
+                    cur.execute('''
+                        INSERT INTO returns (
+                            original_order_id, order_id, item_id, barcode, title, quantity,
+                            original_price, refund_amount, original_shipping_cost, return_shipping_cost,
+                            original_seller_fee, seller_fee_refund,
+                            return_date, store, lot_number, location
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        original_order_id, order_id, return_data['item_id'], barcode, title,
+                        return_data['quantity'], original_price, return_data['refund_amount'],
+                        original_shipping, return_data['return_shipping_cost'],
+                        original_fee, return_data['seller_fee_refund'],
+                        return_data['return_date'], 'amazon', lot_number, location
+                    ))
 
                 synced_count += 1
                 print(f"  {order_id}: ${total_return_cost:.2f} total return cost")

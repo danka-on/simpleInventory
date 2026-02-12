@@ -270,6 +270,14 @@
             background: #fff3e0;
             color: #ff9800;
         }
+        .store-badge.marketplace {
+            background: #f1f3f5;
+            color: #495057;
+        }
+        .store-badge.unknown {
+            background: #f8f9fa;
+            color: #6c757d;
+        }
         .profit-positive { color: var(--accent); font-weight: 600; }
         .profit-negative { color: var(--danger); font-weight: 600; }
         .no-data { color: var(--text-muted); font-style: italic; }
@@ -376,8 +384,7 @@
                     <label>Store</label>
                     <select id="storeFilter">
                         <option value="all">All Stores</option>
-                        <option value="ebay">eBay</option>
-                        <option value="amazon">Amazon</option>
+                        <!-- Populated dynamically -->
                     </select>
                 </div>
                 <div class="filter-group">
@@ -516,14 +523,74 @@
         let revenueChart = null;
         let storeChart = null;
         
-        // Helper function: For marketplace items, price is total (don't multiply by quantity)
-        // For other stores, price is per-unit (multiply by quantity)
+        function toNumber(value, fallback = 0) {
+            const parsed = Number(value);
+            return Number.isFinite(parsed) ? parsed : fallback;
+        }
+
+        function getQuantity(item) {
+            const quantity = toNumber(item && item.quantity, NaN);
+            if (Number.isFinite(quantity) && quantity > 0) {
+                return quantity;
+            }
+            return item && item.is_unmatched_return ? 0 : 1;
+        }
+
+        function parseItemDate(value) {
+            if (!value) return null;
+            const parsed = new Date(value);
+            return Number.isNaN(parsed.getTime()) ? null : parsed;
+        }
+
+        function getDateKey(dateObj) {
+            const year = dateObj.getFullYear();
+            const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+            const day = String(dateObj.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        }
+
+        function formatStoreLabel(store) {
+            const value = (store || 'unknown').toString().trim().toLowerCase();
+            if (!value) return 'Unknown';
+            if (value === 'ebay') return 'eBay';
+            if (value === 'amazon') return 'Amazon';
+            if (value === 'marketplace') return 'Marketplace';
+            return value.charAt(0).toUpperCase() + value.slice(1);
+        }
+
+        // Helper function: For marketplace items, price is total (don't multiply by quantity).
+        // For other stores, price is per-unit (multiply by quantity).
         function getRevenue(item) {
-            return item.store === 'marketplace' ? item.price : (item.price * item.quantity);
+            const price = toNumber(item && item.price);
+            const store = ((item && item.store) || '').toString().toLowerCase();
+            return store === 'marketplace' ? price : (price * getQuantity(item));
         }
         
         function getCost(item) {
-            return item.store === 'marketplace' ? 0 : ((item.cost || 0) * item.quantity);
+            const store = ((item && item.store) || '').toString().toLowerCase();
+            const hasCost = item && item.cost !== null && item.cost !== undefined;
+            if (store === 'marketplace' || !hasCost) return 0;
+            return toNumber(item.cost) * getQuantity(item);
+        }
+
+        function getNetFees(item) {
+            return (
+                toNumber(item && item.seller_fee) +
+                toNumber(item && item.taxes) -
+                toNumber(item && item.seller_fee_refund)
+            );
+        }
+
+        function getShipping(item) {
+            return toNumber(item && item.shipping_cost);
+        }
+
+        function getReturnCost(item) {
+            return toNumber(item && item.return_cost);
+        }
+
+        function getProfit(item) {
+            return getRevenue(item) - getCost(item) - getNetFees(item) - getShipping(item) - getReturnCost(item);
         }
         
         // Load data on page load
@@ -591,6 +658,7 @@
                     window.bolStats = data.bol_stats || {};
                     window.lotOptions = data.lot_options || [];
                     window.bolExtractTotals = data.bol_extract_totals || {};
+                    populateStoreFilter();
                     populateBOLFilter();
                     applyFilters();
                     document.getElementById('toggleSection').style.display = 'flex';
@@ -605,6 +673,28 @@
             }
         }
         
+        function populateStoreFilter() {
+            const storeFilter = document.getElementById('storeFilter');
+            const selectedStore = (storeFilter.value || 'all').toLowerCase();
+
+            storeFilter.innerHTML = '<option value="all">All Stores</option>';
+
+            const stores = [...new Set(
+                allData
+                    .map(item => ((item && item.store) || '').toString().trim().toLowerCase())
+                    .filter(Boolean)
+            )].sort();
+
+            stores.forEach(store => {
+                const option = document.createElement('option');
+                option.value = store;
+                option.textContent = formatStoreLabel(store);
+                storeFilter.appendChild(option);
+            });
+
+            storeFilter.value = stores.includes(selectedStore) ? selectedStore : 'all';
+        }
+
         function populateBOLFilter() {
             const bolFilter = document.getElementById('bolFilter');
             
@@ -640,7 +730,7 @@
         
         function applyFilters() {
             const dateRange = document.getElementById('dateRange').value;
-            const storeFilter = document.getElementById('storeFilter').value;
+            const storeFilter = (document.getElementById('storeFilter').value || 'all').toLowerCase();
             const costFilter = document.getElementById('costFilter').value;
             const bolFilter = document.getElementById('bolFilter').value;
             const returnsFilter = document.getElementById('returnsFilter').value;
@@ -648,26 +738,39 @@
             filteredData = allData.filter(item => {
                 // Date filter
                 if (dateRange !== 'all') {
-                    const itemDate = new Date(item.paid_time);
+                    const itemDate = parseItemDate(item && item.paid_time);
+                    if (!itemDate) return false;
                     const now = new Date();
                     
                     if (dateRange === 'custom') {
-                        const fromDate = new Date(document.getElementById('dateFrom').value);
-                        const toDate = new Date(document.getElementById('dateTo').value);
-                        if (itemDate < fromDate || itemDate > toDate) return false;
+                        const fromInput = document.getElementById('dateFrom').value;
+                        const toInput = document.getElementById('dateTo').value;
+
+                        if (fromInput) {
+                            const fromDate = new Date(`${fromInput}T00:00:00`);
+                            if (itemDate < fromDate) return false;
+                        }
+                        if (toInput) {
+                            const toDate = new Date(`${toInput}T23:59:59.999`);
+                            if (itemDate > toDate) return false;
+                        }
                     } else {
-                        const daysAgo = parseInt(dateRange);
-                        const cutoffDate = new Date(now - daysAgo * 24 * 60 * 60 * 1000);
-                        if (itemDate < cutoffDate) return false;
+                        const daysAgo = parseInt(dateRange, 10);
+                        if (!Number.isNaN(daysAgo)) {
+                            const cutoffDate = new Date(now.getTime() - daysAgo * 24 * 60 * 60 * 1000);
+                            if (itemDate < cutoffDate) return false;
+                        }
                     }
                 }
                 
                 // Store filter
-                if (storeFilter !== 'all' && item.store !== storeFilter) return false;
+                const itemStore = ((item && item.store) || '').toString().toLowerCase();
+                if (storeFilter !== 'all' && itemStore !== storeFilter) return false;
                 
                 // Cost filter
-                if (costFilter === 'with-cost' && !item.cost) return false;
-                if (costFilter === 'no-cost' && item.cost) return false;
+                const hasCost = item && item.cost !== null && item.cost !== undefined;
+                if (costFilter === 'with-cost' && !hasCost) return false;
+                if (costFilter === 'no-cost' && hasCost) return false;
                 
                 // BOL filter
                 if (bolFilter !== 'all') {
@@ -675,8 +778,9 @@
                 }
                 
                 // Returns filter
-                if (returnsFilter === 'no-returns' && item.return_cost > 0) return false;
-                if (returnsFilter === 'returned' && (!item.return_cost || item.return_cost <= 0)) return false;
+                const returnCost = getReturnCost(item);
+                if (returnsFilter === 'no-returns' && returnCost > 0) return false;
+                if (returnsFilter === 'returned' && returnCost <= 0) return false;
                 
                 return true;
             });
@@ -693,10 +797,13 @@
             
             const totalRevenue = filteredData.reduce((sum, item) => sum + getRevenue(item), 0);
             const totalCosts = filteredData.reduce((sum, item) => sum + getCost(item), 0);
-            const totalFees = filteredData.reduce((sum, item) => sum + (item.seller_fee || 0) + (item.taxes || 0), 0);
-            const totalShipping = filteredData.reduce((sum, item) => sum + (item.shipping_cost || 0), 0);
-            const totalReturns = filteredData.reduce((sum, item) => sum + (item.return_cost || 0), 0);
-            const totalFeesAndShipping = totalFees + totalShipping + totalReturns;
+            const totalSellerFees = filteredData.reduce((sum, item) => sum + toNumber(item && item.seller_fee), 0);
+            const totalTaxes = filteredData.reduce((sum, item) => sum + toNumber(item && item.taxes), 0);
+            const totalFeeRefunds = filteredData.reduce((sum, item) => sum + toNumber(item && item.seller_fee_refund), 0);
+            const totalNetFees = totalSellerFees + totalTaxes - totalFeeRefunds;
+            const totalShipping = filteredData.reduce((sum, item) => sum + getShipping(item), 0);
+            const totalReturns = filteredData.reduce((sum, item) => sum + getReturnCost(item), 0);
+            const totalFeesAndShipping = totalNetFees + totalShipping + totalReturns;
             
             // Calculate BOL extract cost
             let bolExtractCost = 0;
@@ -733,22 +840,23 @@
                 
                 // Update Total Cost card
                 document.getElementById('totalCostValue').textContent = '$' + totalCostWithBol.toFixed(2);
-                document.getElementById('totalCostBreakdown').textContent = `BOL: $${bolExtractCost.toFixed(2)} + Fees: $${totalFeesAndShipping.toFixed(2)}`;
+                document.getElementById('totalCostBreakdown').textContent = `BOL: $${bolExtractCost.toFixed(2)} + Adj Costs: $${totalFeesAndShipping.toFixed(2)}`;
             } else {
                 // When not toggled: use original item costs
                 netProfit = totalRevenue - totalCosts - totalFeesAndShipping;
             }
             
             const profitMargin = totalRevenue > 0 ? (netProfit / totalRevenue * 100) : 0;
-            const avgCost = filteredData.filter(i => i.cost).length > 0 
-                ? totalCosts / filteredData.filter(i => i.cost).reduce((sum, i) => sum + i.quantity, 0) 
-                : 0;
+            const soldItemCount = filteredData
+                .filter(item => !(item && item.is_unmatched_return))
+                .reduce((sum, item) => sum + getQuantity(item), 0);
             
             document.getElementById('totalRevenue').textContent = '$' + totalRevenue.toFixed(2);
-            document.getElementById('itemsSold').textContent = filteredData.reduce((sum, i) => sum + i.quantity, 0) + ' items sold';
+            document.getElementById('itemsSold').textContent = soldItemCount + ' items sold';
             
             document.getElementById('totalFees').textContent = '$' + totalFeesAndShipping.toFixed(2);
-            document.getElementById('feeBreakdown').textContent = `Fees: $${totalFees.toFixed(2)} + Ship: $${totalShipping.toFixed(2)} + Returns: $${totalReturns.toFixed(2)}`;
+            document.getElementById('feeBreakdown').textContent =
+                `Fees: $${totalSellerFees.toFixed(2)} + Taxes: $${totalTaxes.toFixed(2)} - Fee Refunds: $${totalFeeRefunds.toFixed(2)} + Ship: $${totalShipping.toFixed(2)} + Returns: $${totalReturns.toFixed(2)}`;
             document.getElementById('netProfit').textContent = '$' + netProfit.toFixed(2);
             document.getElementById('profitMargin').textContent = profitMargin.toFixed(1) + '% margin';
             
@@ -765,7 +873,9 @@
             const costsByDay = {};
             
             filteredData.forEach(item => {
-                const date = item.paid_time.split('T')[0];
+                const itemDate = parseItemDate(item && item.paid_time);
+                if (!itemDate) return;
+                const date = getDateKey(itemDate);
                 const revenue = getRevenue(item);
                 const cost = getCost(item);
                 
@@ -816,24 +926,27 @@
             });
             
             // Store Distribution Chart
-            const storeData = {
-                ebay: 0,
-                amazon: 0
-            };
+            const storeData = {};
             
             filteredData.forEach(item => {
-                storeData[item.store] = (storeData[item.store] || 0) + getRevenue(item);
+                const store = ((item && item.store) || 'unknown').toString().trim().toLowerCase() || 'unknown';
+                storeData[store] = (storeData[store] || 0) + getRevenue(item);
             });
+
+            const storeKeys = Object.keys(storeData).sort((a, b) => storeData[b] - storeData[a]);
+            const storeLabels = storeKeys.map(formatStoreLabel);
+            const storeValues = storeKeys.map(key => storeData[key]);
+            const storeColors = ['#0064d2', '#ff9800', '#00b894', '#6c5ce7', '#e17055', '#2d3436'];
             
             const storeCtx = document.getElementById('storeChart');
             if (storeChart) storeChart.destroy();
             storeChart = new Chart(storeCtx, {
                 type: 'doughnut',
                 data: {
-                    labels: ['eBay', 'Amazon'],
+                    labels: storeLabels.length > 0 ? storeLabels : ['No Data'],
                     datasets: [{
-                        data: [storeData.ebay, storeData.amazon],
-                        backgroundColor: ['#0064d2', '#ff9800']
+                        data: storeValues.length > 0 ? storeValues : [0],
+                        backgroundColor: (storeValues.length > 0 ? storeValues : [0]).map((_, idx) => storeColors[idx % storeColors.length])
                     }]
                 },
                 options: {
@@ -861,11 +974,13 @@
         function renderTable() {
             // Apply search filter
             const searchTerm = document.getElementById('searchTable').value.toLowerCase();
-            let displayData = filteredData.filter(item => 
-                item.title.toLowerCase().includes(searchTerm) ||
-                (item.upc && item.upc.toLowerCase().includes(searchTerm)) ||
-                (item.item_id && item.item_id.toLowerCase().includes(searchTerm))
-            );
+            let displayData = filteredData.filter(item => {
+                const title = ((item && item.title) || '').toString().toLowerCase();
+                const upc = ((item && item.upc) || '').toString().toLowerCase();
+                const itemId = ((item && item.item_id) || '').toString().toLowerCase();
+                const orderId = ((item && item.order_id) || '').toString().toLowerCase();
+                return title.includes(searchTerm) || upc.includes(searchTerm) || itemId.includes(searchTerm) || orderId.includes(searchTerm);
+            });
             
             // Apply sorting
             displayData.sort((a, b) => {
@@ -873,34 +988,62 @@
                 
                 switch(sortColumn) {
                     case 'date':
-                        valA = new Date(a.paid_time);
-                        valB = new Date(b.paid_time);
+                        valA = parseItemDate(a && a.paid_time) || new Date(0);
+                        valB = parseItemDate(b && b.paid_time) || new Date(0);
+                        break;
+                    case 'store':
+                        valA = ((a && a.store) || '').toString().toLowerCase();
+                        valB = ((b && b.store) || '').toString().toLowerCase();
+                        break;
+                    case 'title':
+                        valA = ((a && a.title) || '').toString().toLowerCase();
+                        valB = ((b && b.title) || '').toString().toLowerCase();
+                        break;
+                    case 'upc':
+                        valA = ((a && a.upc) || '').toString().toLowerCase();
+                        valB = ((b && b.upc) || '').toString().toLowerCase();
+                        break;
+                    case 'bol':
+                        valA = ((a && a.bol_number) || '').toString().toLowerCase();
+                        valB = ((b && b.bol_number) || '').toString().toLowerCase();
+                        break;
+                    case 'qty':
+                        valA = getQuantity(a);
+                        valB = getQuantity(b);
+                        break;
+                    case 'price':
+                        valA = getRevenue(a);
+                        valB = getRevenue(b);
+                        break;
+                    case 'cost':
+                        valA = getCost(a);
+                        valB = getCost(b);
                         break;
                     case 'fees':
-                        valA = (a.seller_fee || 0) + (a.taxes || 0);
-                        valB = (b.seller_fee || 0) + (b.taxes || 0);
+                        valA = getNetFees(a);
+                        valB = getNetFees(b);
                         break;
                     case 'shipping':
-                        valA = a.shipping_cost || 0;
-                        valB = b.shipping_cost || 0;
+                        valA = getShipping(a);
+                        valB = getShipping(b);
                         break;
                     case 'returns':
-                        valA = a.return_cost || 0;
-                        valB = b.return_cost || 0;
+                        valA = getReturnCost(a);
+                        valB = getReturnCost(b);
                         break;
                     case 'profit':
-                        valA = getRevenue(a) - getCost(a) - (a.seller_fee || 0) - (a.taxes || 0) - (a.shipping_cost || 0) - (a.return_cost || 0);
-                        valB = getRevenue(b) - getCost(b) - (b.seller_fee || 0) - (b.taxes || 0) - (b.shipping_cost || 0) - (b.return_cost || 0);
+                        valA = getProfit(a);
+                        valB = getProfit(b);
                         break;
                     case 'margin':
                         const revenueA = getRevenue(a);
                         const revenueB = getRevenue(b);
-                        valA = revenueA > 0 ? ((revenueA - getCost(a) - (a.seller_fee || 0) - (a.taxes || 0) - (a.shipping_cost || 0) - (a.return_cost || 0)) / revenueA * 100) : 0;
-                        valB = revenueB > 0 ? ((revenueB - getCost(b) - (b.seller_fee || 0) - (b.taxes || 0) - (b.shipping_cost || 0) - (b.return_cost || 0)) / revenueB * 100) : 0;
+                        valA = revenueA > 0 ? (getProfit(a) / revenueA * 100) : 0;
+                        valB = revenueB > 0 ? (getProfit(b) / revenueB * 100) : 0;
                         break;
                     default:
-                        valA = a[sortColumn];
-                        valB = b[sortColumn];
+                        valA = (a && a[sortColumn]) || '';
+                        valB = (b && b[sortColumn]) || '';
                 }
                 
                 if (valA < valB) return sortDirection === 'asc' ? -1 : 1;
@@ -918,23 +1061,31 @@
             tbody.innerHTML = pageData.map(item => {
                 const revenue = getRevenue(item);
                 const cost = getCost(item);
-                const fees = (item.seller_fee || 0) + (item.taxes || 0);
-                const shipping = item.shipping_cost || 0;
-                const returnCost = item.return_cost || 0;
-                const profit = revenue - cost - fees - shipping - returnCost;
+                const fees = getNetFees(item);
+                const shipping = getShipping(item);
+                const returnCost = getReturnCost(item);
+                const profit = getProfit(item);
                 const margin = revenue > 0 ? (profit / revenue * 100) : 0;
+                const qty = getQuantity(item);
+                const paidDate = parseItemDate(item && item.paid_time);
+                const displayDate = paidDate ? paidDate.toLocaleDateString() : '<span class="no-data">—</span>';
+                const storeValue = ((item && item.store) || 'unknown').toString().trim().toLowerCase() || 'unknown';
+                const storeLabel = formatStoreLabel(storeValue);
+                const title = item && item.title ? item.title : '<span class="no-data">Untitled</span>';
+                const hasCost = item && item.cost !== null && item.cost !== undefined;
+                const feesClass = fees < 0 ? 'profit-positive' : '';
                 
                 return `
                     <tr>
-                        <td>${new Date(item.paid_time).toLocaleDateString()}</td>
-                        <td><span class="store-badge ${item.store}">${item.store}</span></td>
-                        <td>${item.title}</td>
+                        <td>${displayDate}</td>
+                        <td><span class="store-badge ${storeValue}">${storeLabel}</span></td>
+                        <td>${title}</td>
                         <td>${item.upc || '<span class="no-data">N/A</span>'}</td>
                         <td>${item.bol_number || '<span class="no-data">—</span>'}</td>
-                        <td>${item.quantity}</td>
+                        <td>${qty}</td>
                         <td>$${revenue.toFixed(2)}</td>
-                        <td>${item.cost ? '$' + cost.toFixed(2) : '<span class="no-data">No data</span>'}</td>
-                        <td>$${fees.toFixed(2)}</td>
+                        <td>${hasCost ? '$' + cost.toFixed(2) : '<span class="no-data">No data</span>'}</td>
+                        <td class="${feesClass}">$${fees.toFixed(2)}</td>
                         <td>${shipping > 0 ? '$' + shipping.toFixed(2) : '<span class="no-data">$0.00</span>'}</td>
                         <td>${returnCost > 0 ? '<span style="color:var(--danger)">$' + returnCost.toFixed(2) + '</span>' : '<span class="no-data">—</span>'}</td>
                         <td class="${profit >= 0 ? 'profit-positive' : 'profit-negative'}">$${profit.toFixed(2)}</td>
@@ -944,8 +1095,10 @@
             }).join('');
             
             // Update pagination info
-            document.getElementById('paginationInfo').textContent = 
-                `Showing ${start + 1}-${Math.min(end, displayData.length)} of ${displayData.length}`;
+            document.getElementById('paginationInfo').textContent =
+                displayData.length === 0
+                    ? 'Showing 0-0 of 0'
+                    : `Showing ${start + 1}-${Math.min(end, displayData.length)} of ${displayData.length}`;
             document.getElementById('prevPage').disabled = currentPage === 1;
             document.getElementById('nextPage').disabled = end >= displayData.length;
         }

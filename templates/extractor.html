@@ -175,6 +175,7 @@
                         // Convert to EST (UTC - 4 hours for EDT, UTC - 5 hours for EST)
                         const uploadedDate = new Date(log.uploaded_at);
                         const uploadedAt = uploadedDate.toLocaleString('en-US', { timeZone: 'America/New_York' });
+                        const hasItems = Number(log.has_items || 0) === 1;
                         let totalQty = 0;
                         if (log.total_quantity !== undefined && log.total_quantity !== null) {
                             totalQty = parseInt(log.total_quantity) || 0;
@@ -203,12 +204,14 @@
                         const lotNumber = log.lot_number || '—';
                         const bolLocation = log.bol_location || '—';
                         const shippingForEdit = log.shipping_cost || '';
+                        const rowStyle = hasItems ? '' : ' style="background:#fff3cd"';
+                        const itemsDisplay = hasItems ? totalQty : `${totalQty} ⚠`;
                         console.log('Log data:', log, 'totalQty:', totalQty); // Debug logging
-                        html += `<tr>
+                        html += `<tr${rowStyle}>
                             <td>${bolLocation}</td>
                             <td>${log.filename}</td>
                             <td>${lotNumber}</td>
-                            <td>${totalQty}</td>
+                            <td>${itemsDisplay}</td>
                             <td>${totalCost}</td>
                             <td>${shippingCost}</td>
                             <td>${log.import_date}</td>

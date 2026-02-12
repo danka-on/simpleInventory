@@ -33,6 +33,9 @@
         .progress-high{background:linear-gradient(90deg,#27ae60,#229954)}
         .loading{text-align:center;padding:40px;color:#7f8c8d}
         .error{background:#fee;border:1px solid #fcc;color:#c00;padding:16px;border-radius:8px;margin:20px 0}
+        .flag-summary{display:none;background:#fff8e8;border:1px solid #f3d9a6;color:#8a5d00;padding:12px 14px;border-radius:10px;margin:10px 0 0}
+        .flag-link{display:inline-block;margin-left:8px;color:#8a5d00;font-weight:600;text-decoration:none;border-bottom:1px dashed #8a5d00}
+        .flag-link:hover{opacity:0.85}
         @media(max-width:768px){
             .stats-grid{grid-template-columns:1fr}
         }
@@ -54,6 +57,7 @@
         
         <div id="loading" class="loading" data-i18n="loading_statistics">Loading statistics...</div>
         <div id="error" class="error" style="display:none"></div>
+        <div id="flag-summary" class="flag-summary"></div>
         <div id="stats-container" class="stats-grid" style="display:none"></div>
     </div>
 
@@ -72,6 +76,8 @@
             
             const container = document.getElementById('stats-container');
             const stats = data.stats || [];
+            const totalAutoAssigned = Number(data.auto_assigned_total || 0);
+            const flagSummary = document.getElementById('flag-summary');
             
             if(stats.length === 0){
                 document.getElementById('loading').textContent = 'No LOT data available';
@@ -112,6 +118,13 @@
                             <div class="import-date">${esc(dateDisplay)}</div>
                         </div>
                     </div>
+
+                    ${stat.has_data_issue ? `
+                    <div class="stat-row" style="background:#fff3cd;border:1px solid #ffeeba;padding:8px 10px;border-radius:8px;margin-bottom:10px">
+                        <span class="stat-label" style="color:#856404">⚠ Data mismatch:</span>
+                        <span class="stat-value" style="color:#856404">${stat.quantity_delta > 0 ? '+' : ''}${stat.quantity_delta}</span>
+                    </div>
+                    ` : ''}
                     
                     <div class="stat-row">
                         <span class="stat-label">Unique Items:</span>
@@ -142,6 +155,16 @@
                         <span class="stat-label">Loss Rate:</span>
                         <span class="stat-value" style="color:${lossColor};font-weight:700">${lossRate.toFixed(1)}%</span>
                     </div>
+
+                    <div class="stat-row">
+                        <span class="stat-label" style="color:#b46d00">⚑ Auto-assigned:</span>
+                        <span class="stat-value" style="color:#b46d00">${Number(stat.auto_assigned_count || 0)}</span>
+                    </div>
+                    ${Number(stat.auto_assigned_count || 0) > 0 ? `
+                    <div style="text-align:right;margin-top:4px;">
+                        <a class="flag-link" href="/item-prep/log?auto_assigned=1&lot=${encodeURIComponent(stat.lot_number || '')}">Review flagged list</a>
+                    </div>
+                    ` : ''}
                     
                     <div class="progress-container">
                         <div class="progress-label">
@@ -164,6 +187,14 @@
             container.innerHTML = html;
             container.style.display = 'grid';
             document.getElementById('loading').style.display = 'none';
+
+            if(totalAutoAssigned > 0){
+                flagSummary.innerHTML = `⚑ ${totalAutoAssigned} auto-assigned prep entr${totalAutoAssigned === 1 ? 'y' : 'ies'} need review. <a class="flag-link" href="/item-prep/log?auto_assigned=1">Open flagged list</a>`;
+                flagSummary.style.display = 'block';
+            } else {
+                flagSummary.style.display = 'none';
+                flagSummary.textContent = '';
+            }
             
         } catch(err) {
             console.error('Error loading stats:', err);

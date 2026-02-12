@@ -20,6 +20,7 @@
     .badge-good{background:rgba(0,184,148,0.12);color:#00b894;border:1px solid rgba(0,184,148,0.25)}
     .badge-bad{background:rgba(231,76,60,0.12);color:#e74c3c;border:1px solid rgba(231,76,60,0.25)}
     .badge-return{background:rgba(52,152,219,0.12);color:#2980b9;border:1px solid rgba(52,152,219,0.25)}
+    .badge-auto{background:rgba(243,156,18,0.14);color:#b46d00;border:1px solid rgba(243,156,18,0.32)}
     .logRow{border:1px solid #eee;border-radius:14px;padding:12px 12px;margin-top:12px;background:#fff}
     .logRow.undone{opacity:0.55}
     .logTop{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}
@@ -27,6 +28,7 @@
     .noteBox{margin-top:10px;padding:10px 12px;border-radius:12px;border:1px dashed #ddd;background:#fcfcfc;white-space:pre-wrap;line-height:1.35}
     .bad{color:#e74c3c}
     .ok{color:#00b894}
+    .lotSel{min-width:140px;padding:8px 10px;border:1px solid #ddd;border-radius:8px;background:#fff}
     input[type="checkbox"]{width:18px;height:18px}
   </style>
 </head>
@@ -54,6 +56,11 @@
           <input type="checkbox" id="hideUndone" checked>
           Hide undone
         </label>
+        <label class="muted" style="display:flex;gap:6px;align-items:center;">
+          <input type="checkbox" id="autoOnly">
+          Auto-assigned only
+        </label>
+        <input type="text" id="filterLot" placeholder="LOT filter..." autocomplete="off" style="padding:8px 10px;border:1px solid #ddd;border-radius:8px;min-width:140px;">
       </div>
     </div>
     <div id="list"></div>
@@ -121,6 +128,52 @@
     }
 
     let allItems = [];
+    let allLots = [];
+
+    async function loadLots(){
+      try{
+        const data = await apiGet('/api/lots');
+        const rows = Array.isArray(data.lots) ? data.lots : [];
+        allLots = rows.map(r => String(r.lot_number || '').trim()).filter(Boolean);
+      }catch(_){
+        allLots = [];
+      }
+    }
+
+    function lotOptionsHtml(currentLot){
+      const current = String(currentLot || '').trim();
+      const values = [...allLots];
+      if(current && !values.some(v => v.toLowerCase() === current.toLowerCase())){
+        values.unshift(current);
+      }
+      if(values.length === 0){
+        return '<option value="">(no lots)</option>';
+      }
+      return values.map(v => {
+        const selected = current && v.toLowerCase() === current.toLowerCase() ? ' selected' : '';
+        return `<option value="${esc(v)}"${selected}>${esc(v)}</option>`;
+      }).join('');
+    }
+
+    async function reassignLot(id){
+      const sel = document.querySelector(`[data-lot-select=\"${id}\"]`);
+      if(!sel) return;
+      const lot = String(sel.value || '').trim();
+      if(!lot){
+        alert('Pick a LOT first.');
+        return;
+      }
+      if(!confirm(`Reassign log #${id} to LOT ${lot}?`)) return;
+      const btn = document.querySelector(`[data-reassign-id=\"${id}\"]`);
+      if(btn) btn.disabled = true;
+      try{
+        await apiPost('/api/preplog/reassign_lot', {id, lot_number: lot});
+        await loadLog();
+      }catch(e){
+        alert('Reassign failed: ' + e.message);
+        if(btn) btn.disabled = false;
+      }
+    }
 
     function todayStr(){
       const d = new Date();
@@ -138,6 +191,8 @@
       const summary = document.getElementById('summary');
       const search = document.getElementById('searchUpc').value.trim().toLowerCase();
       const showAll = document.getElementById('showAll').checked;
+      const autoOnly = document.getElementById('autoOnly').checked;
+      const lotFilter = document.getElementById('filterLot').value.trim().toLowerCase();
 
       let filtered = items;
 
@@ -152,6 +207,17 @@
           const upc = String(it.upc ?? '').toLowerCase();
           const base = String(it.base_upc ?? '').toLowerCase();
           return upc.includes(search) || base.includes(search);
+        });
+      }
+
+      if(autoOnly){
+        filtered = filtered.filter(it => !!it.auto_assigned);
+      }
+
+      if(lotFilter){
+        filtered = filtered.filter(it => {
+          const lot = String(it.lot_number ?? '').toLowerCase();
+          return lot.includes(lotFilter);
         });
       }
 
@@ -174,6 +240,10 @@
         const undone = !!it.undone;
         const undoneAt = String(it.undone_at ?? '').trim();
         const undoErr = String(it.undo_error ?? '').trim();
+        const lot = String(it.lot_number ?? '').trim();
+        const requestedLot = String(it.requested_lot ?? '').trim();
+        const autoAssigned = !!it.auto_assigned;
+        const canReassign = !undone && (st === 'good' || st === 'bad' || st === 'return');
 
         const row = document.createElement('div');
         row.className = 'logRow' + (undone ? ' undone' : '');
@@ -185,6 +255,8 @@
               <span class="badge ${esc(statusClass(st))}">${esc(statusLabel(st))}</span>
               <span class="pill">Qty ${esc(qty)}</span>
               <span class="pill">UPC ${esc(upc)}</span>
+              <span class="pill">LOT ${esc(lot || '—')}</span>
+              ${autoAssigned ? `<span class="badge badge-auto">AUTO-ASSIGNED${requestedLot ? ` (${esc(requestedLot)}→${esc(lot || '?')})` : ''}</span>` : ''}
               ${reason ? `<span class="pill">${esc(reason)}</span>` : ''}
               ${undone && undoneAt ? `<span class="pill">Undone ${esc(fmtTime(undoneAt))}</span>` : ''}
             </div>
@@ -192,6 +264,13 @@
               <button class="btn btn-danger btn-small" data-undo-id="${esc(id)}" ${undone ? 'disabled' : ''}>Undo</button>
             </div>
           </div>
+          ${canReassign ? `
+          <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <span class="muted">Reassign LOT:</span>
+            <select class="lotSel" data-lot-select="${esc(id)}">${lotOptionsHtml(lot)}</select>
+            <button class="btn btn-gray btn-small" data-reassign-id="${esc(id)}">Save LOT</button>
+          </div>
+          ` : ''}
           ${note ? `<div class="noteBox"><strong>NOTE:</strong> ${esc(note)}</div>` : ''}
           ${undoErr ? `<div class="muted" style="margin-top:10px;"><span class="bad">Undo error:</span> ${esc(undoErr)}</div>` : ''}
         `;
@@ -199,6 +278,10 @@
         const undoBtn = row.querySelector('button[data-undo-id]');
         if(undoBtn){
           undoBtn.onclick = () => undoEntry(id);
+        }
+        const reassignBtn = row.querySelector('button[data-reassign-id]');
+        if(reassignBtn){
+          reassignBtn.onclick = () => reassignLot(id);
         }
 
         list.appendChild(row);
@@ -212,9 +295,13 @@
       list.innerHTML = '<div class="muted" style="margin-top:10px;">Loading...</div>';
 
       const hideUndone = document.getElementById('hideUndone').checked;
+      const autoOnly = document.getElementById('autoOnly').checked;
+      const lotFilter = document.getElementById('filterLot').value.trim();
       const qs = new URLSearchParams();
-      qs.set('limit', '300');
+      qs.set('limit', '500');
       qs.set('include_undone', hideUndone ? '0' : '1');
+      if(autoOnly) qs.set('auto_assigned_only', '1');
+      if(lotFilter) qs.set('lot_number', lotFilter);
 
       try{
         const data = await apiGet('/api/preplog/recent?' + qs.toString());
@@ -227,12 +314,30 @@
       }
     }
 
+    function applyQueryDefaults(){
+      const params = new URLSearchParams(window.location.search || '');
+      if((params.get('auto_assigned') || '').trim() === '1'){
+        document.getElementById('autoOnly').checked = true;
+      }
+      const lotParam = (params.get('lot') || params.get('lot_number') || '').trim();
+      if(lotParam){
+        document.getElementById('filterLot').value = lotParam;
+      }
+    }
+
     document.getElementById('refreshBtn').onclick = loadLog;
     document.getElementById('hideUndone').onchange = loadLog;
     document.getElementById('showAll').onchange = () => renderLog(allItems);
+    document.getElementById('autoOnly').onchange = loadLog;
+    document.getElementById('filterLot').addEventListener('input', () => renderLog(allItems));
+    document.getElementById('filterLot').addEventListener('change', loadLog);
     document.getElementById('searchUpc').addEventListener('input', () => renderLog(allItems));
-    loadLog();
+
+    (async ()=>{
+      applyQueryDefaults();
+      await loadLots();
+      await loadLog();
+    })();
   </script>
 </body>
 </html>
-

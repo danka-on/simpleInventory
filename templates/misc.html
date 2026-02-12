@@ -6,154 +6,338 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <style>
-        body { font-family: sans-serif; max-width: 500px; margin: auto; padding: 20px; }
-        h1 { margin-bottom: 24px; }
-        label { font-weight: bold; margin-top: 18px; display: block; }
-        input[type="number"] { width: 80px; padding: 6px; font-size: 1.1em; margin-right: 10px; }
-        input[type="checkbox"] { margin-right: 8px; }
-        button { margin-top: 24px; padding: 10px 24px; font-size: 1.1em; background: #2196F3; color: #fff; border: none; border-radius: 6px; cursor: pointer; }
-        .desc { color: #555; font-size: 0.98em; margin-bottom: 18px; }
-        .preset-btn { 
-            margin-top: 0 !important; 
-            padding: 6px 12px !important; 
-            font-size: 0.9em !important; 
-            background: #666 !important; 
-            transition: background 0.2s;
+        :root {
+            --bg: #f6f7fb;
+            --card: #ffffff;
+            --text: #1f2937;
+            --muted: #6b7280;
+            --border: #e5e7eb;
+            --blue: #2563eb;
+            --green: #059669;
+            --orange: #d97706;
+            --red: #dc2626;
         }
-        .preset-btn:hover { background: #555 !important; }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: "Segoe UI", Arial, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+        }
+        .page {
+            max-width: 980px;
+            margin: 0 auto;
+            padding: 20px 14px 42px;
+        }
+        .page-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 14px;
+        }
+        .back-link {
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: var(--red);
+            color: #fff;
+            border-radius: 8px;
+            padding: 9px 12px;
+            font-weight: 600;
+        }
+        h1 {
+            margin: 0;
+            font-size: 1.55rem;
+            line-height: 1.2;
+        }
+        .subtitle {
+            margin: 4px 0 0;
+            color: var(--muted);
+            font-size: 0.95rem;
+        }
+        .quick-nav {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin: 12px 0 16px;
+        }
+        .quick-nav a {
+            text-decoration: none;
+            color: #1e3a8a;
+            background: #e8eefc;
+            border: 1px solid #cdd9ff;
+            border-radius: 999px;
+            padding: 7px 11px;
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+        .settings-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 16px;
+            margin-bottom: 14px;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.03);
+        }
+        .settings-card h2 {
+            margin: 0 0 8px;
+            font-size: 1.1rem;
+        }
+        .settings-card h3 {
+            margin: 14px 0 8px;
+            font-size: 1rem;
+        }
+        .desc {
+            color: var(--muted);
+            font-size: 0.95rem;
+            margin: 0 0 12px;
+        }
+        form {
+            margin: 0;
+        }
+        label {
+            display: block;
+            font-weight: 600;
+            margin: 8px 0 6px;
+        }
+        .check-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 600;
+            margin: 6px 0 10px;
+        }
+        input[type="number"],
+        input[type="time"],
+        select,
+        textarea {
+            width: 100%;
+            max-width: 420px;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            padding: 8px 10px;
+            font-size: 0.95rem;
+            background: #fff;
+        }
+        input[type="checkbox"] {
+            margin: 0;
+        }
+        .field-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 12px;
+        }
+        .field-help {
+            color: var(--muted);
+            font-size: 0.86rem;
+            margin-top: 6px;
+        }
+        .actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 12px;
+        }
+        .btn {
+            border: none;
+            border-radius: 8px;
+            padding: 9px 13px;
+            color: #fff;
+            font-size: 0.92rem;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .btn-primary { background: var(--blue); }
+        .btn-success { background: var(--green); }
+        .btn-warning { background: var(--orange); }
+        .btn-danger { background: var(--red); }
+        .preset-group {
+            margin-top: 10px;
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .preset-btn {
+            margin: 0;
+            padding: 6px 10px;
+            font-size: 0.85rem;
+            border-radius: 7px;
+            border: 1px solid #d1d5db;
+            background: #f3f4f6;
+            cursor: pointer;
+        }
+        .status-line {
+            margin-top: 10px;
+            color: #555;
+            display: none;
+        }
+        @media (max-width: 680px) {
+            .page {
+                padding: 14px 10px 28px;
+            }
+            .page-header {
+                align-items: flex-start;
+                flex-direction: column;
+            }
+            .quick-nav {
+                margin-top: 8px;
+            }
+        }
     </style>
 </head>
 <body>
-    <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;">
-        <a href="/tools" style="text-decoration:none;">
-            <button style="background:#e74c3c;color:#fff;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;display:flex;align-items:center;gap:8px;">
-                <i class="fas fa-arrow-left"></i> Back
-            </button>
-        </a>
-        <h1 style="flex:1;text-align:center;margin:0;">Miscellaneous Settings</h1>
-        <div style="width:84px"></div>
-    </div>
-
-    <h2 style="margin:18px 0 10px 0; font-size:1.1rem;">Theme (Day/Night)</h2>
-    <div class="desc">Toggle automatic day/night switching and set when Night Mode starts.</div>
-    <form id="themeSettingsForm">
-        <label style="display:flex;align-items:center;gap:8px;margin-bottom:10px;font-weight:600;">
-            <input type="checkbox" id="themeAutoEnabled" style="width:auto;">
-            <span>Automatic switching</span>
-        </label>
-
-        <label for="themeNightStart">Night Mode starts at:</label>
-        <input type="time" id="themeNightStart" step="60" value="19:00" style="padding:6px;font-size:1.05em;">
-
-        <button type="submit" style="background:#00b894;">Save Theme Settings</button>
-        <div id="themeSaveStatus" style="margin-top:10px;color:#555;display:none;"></div>
-    </form>
-
-    <h2 style="margin:18px 0 10px 0; font-size:1.1rem;">Auto-Submit Timer Settings</h2>
-    <div class="desc">Configure auto-submit timers for different pages.</div>
-    <form id="miscSettingsForm">
-        <label for="multibarcodeTimer">Multi-Barcode Page Timer (seconds):</label>
-        <input type="number" id="multibarcodeTimer" min="1" max="60" step="1">
-        <span style="color:#666; font-size:0.9em; margin-left:10px;">Time before auto-submitting scanned barcodes</span>
-        <br><br>
-        <label for="addItemTimer">Add Item Page Timer (seconds):</label>
-        <input type="number" id="addItemTimer" min="1" max="30" step="1">
-        <span style="color:#666; font-size:0.9em; margin-left:10px;">Time before auto-adding item to inventory</span>
-        <br>
-        <button type="submit">Save Timer Settings</button>
-    </form>
-    <div id="saveStatus" style="margin-top:18px;color:#388e3c;font-weight:bold;display:none;">Settings saved!</div>
-    <hr style="margin:24px 0;">
-    <h2 style="margin:0 0 10px 0; font-size:1.1rem;">Automatic Removal Settings</h2>
-    <div class="desc">Set the grace period before removing inventory for shipped sold orders.</div>
-    <form id="graceForm">
-        <label for="graceHours">Grace period (hours):</label>
-        <input type="number" id="graceHours" min="0" max="240" step="0.01" value="48">
-        <button type="submit">Save Grace Period</button>
-        <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
-            <button type="button" class="preset-btn" onclick="setGracePeriodPreset(0.0167)">1 min (testing)</button>
-            <button type="button" class="preset-btn" onclick="setGracePeriodPreset(0.0833)">5 min (testing)</button>
-            <button type="button" class="preset-btn" onclick="setGracePeriodPreset(1)">1 hour</button>
-            <button type="button" class="preset-btn" onclick="setGracePeriodPreset(24)">24 hours</button>
-            <button type="button" class="preset-btn" onclick="setGracePeriodPreset(48)">48 hours (default)</button>
-            <button type="button" class="preset-btn" onclick="setGracePeriodPreset(72)">72 hours</button>
+    <div class="page">
+        <div class="page-header">
+            <a href="/tools" class="back-link">
+                <i class="fas fa-arrow-left"></i>
+                <span>Back</span>
+            </a>
+            <div>
+                <h1>Miscellaneous Settings</h1>
+                <p class="subtitle">Timers, cleanup, cache, and maintenance tools in one place.</p>
+            </div>
         </div>
-        <div id="graceStatus" style="margin-top:10px;color:#555;display:none;"></div>
-    </form>
-    
-    <hr style="margin:24px 0;">
-    <h2 style="margin:0 0 10px 0; font-size:1.1rem;">Zero-Quantity Deletion Settings</h2>
-    <div class="desc">Configure automatic deletion of inventory items with 0 quantity. System scans every hour for unmarked items.</div>
-    
-    <label style="display:flex;align-items:center;gap:8px;margin-bottom:16px;">
-        <input type="checkbox" id="showZeroQtyPending" style="width:auto;">
-        <span>Show pending zero-quantity deletions</span>
-    </label>
-    
-    <label for="zeroQtyInterval">Deletion interval (after reaching 0 qty):</label>
-    <select id="zeroQtyInterval" style="padding:8px;font-size:1em;margin-bottom:16px;border-radius:4px;">
-        <option value="1">1 minute (testing)</option>
-        <option value="60">1 hour</option>
-        <option value="720">12 hours</option>
-        <option value="1440" selected>24 hours (default)</option>
-        <option value="2880">48 hours</option>
-    </select>
-    
-    <div style="display:flex;gap:8px;margin-bottom:16px;">
-        <button onclick="saveZeroQtySettings()" style="flex:1;">Save Settings</button>
-        <button onclick="scanZeroQtyNow()" style="flex:1;background:#00b894;">Scan Now</button>
-    </div>
-    
-    <div id="zeroQtyStatus" style="margin-top:10px;color:#555;display:none;"></div>
-    
-    <div id="zeroQtyPendingContainer" style="display:none;margin-top:20px;">
-        <h3 style="margin:0 0 12px 0;font-size:1rem;color:#e74c3c;">⏳ Pending Zero-Quantity Deletions</h3>
-        <div id="zeroQtyPendingList" style="font-size:0.95em;"></div>
-    </div>
 
-    <hr style="margin:24px 0;">
-    <h2 style="margin:0 0 10px 0; font-size:1.1rem;">System & Cache Management</h2>
-    <div class="desc">Manage database caching and automated reloads.</div>
+        <div class="quick-nav">
+            <a href="#section-theme">Theme</a>
+            <a href="#section-timers">Timers</a>
+            <a href="#section-removal">Auto Removal</a>
+            <a href="#section-zero-qty">Zero Qty</a>
+            <a href="#section-cache">Cache</a>
+            <a href="#section-enrichment">Data Enrichment</a>
+        </div>
 
-    <div style="margin-bottom:20px;">
-        <button onclick="clearCacheNow()" style="background:#ff9800;width:100%;">
-            <i class="fas fa-sync-alt"></i> Clear Cache & Reload Databases Now
-        </button>
-        <div id="clearCacheStatus" style="margin-top:10px;color:#555;display:none;text-align:center;"></div>
-    </div>
+        <section class="settings-card" id="section-theme">
+            <h2>Theme (Day/Night)</h2>
+            <p class="desc">Toggle automatic day/night switching and set when Night Mode starts.</p>
+            <form id="themeSettingsForm">
+                <label class="check-row">
+                    <input type="checkbox" id="themeAutoEnabled">
+                    <span>Automatic switching</span>
+                </label>
+                <label for="themeNightStart">Night Mode starts at</label>
+                <input type="time" id="themeNightStart" step="60" value="19:00">
+                <div class="actions">
+                    <button type="submit" class="btn btn-success">Save Theme Settings</button>
+                </div>
+                <div id="themeSaveStatus" class="status-line"></div>
+            </form>
+        </section>
 
-    <h3 style="margin:16px 0 10px 0; font-size:1rem;">Automated Reload Settings</h3>
-    <form id="cacheSettingsForm">
-        <label style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
-            <input type="checkbox" id="autoReloadEnabled" style="width:auto;">
-            <span>Enable Automated Reload</span>
-        </label>
+        <section class="settings-card" id="section-timers">
+            <h2>Auto-Submit Timer Settings</h2>
+            <p class="desc">Configure auto-submit timers for scanning and adding items.</p>
+            <form id="miscSettingsForm">
+                <div class="field-grid">
+                    <div>
+                        <label for="multibarcodeTimer">Multi-Barcode Page Timer (seconds)</label>
+                        <input type="number" id="multibarcodeTimer" min="1" max="60" step="1">
+                        <div class="field-help">Time before auto-submitting scanned barcodes.</div>
+                    </div>
+                    <div>
+                        <label for="addItemTimer">Add Item Page Timer (seconds)</label>
+                        <input type="number" id="addItemTimer" min="1" max="30" step="1">
+                        <div class="field-help">Time before auto-adding item to inventory.</div>
+                    </div>
+                </div>
+                <div class="actions">
+                    <button type="submit" class="btn btn-primary">Save Timer Settings</button>
+                </div>
+            </form>
+            <div id="saveStatus" class="status-line" style="color:#388e3c;font-weight:700;">Settings saved!</div>
+        </section>
 
-        <label for="reloadTime">Reload Time (24h format):</label>
-        <input type="time" id="reloadTime" style="padding:8px;font-size:1em;margin-bottom:12px;border-radius:4px;border:1px solid #ccc;">
-        
-        <label for="reloadTimezone">Timezone:</label>
-        <select id="reloadTimezone" style="padding:8px;font-size:1em;margin-bottom:16px;border-radius:4px;width:100%;">
-            <option value="US/Eastern">US/Eastern</option>
-            <option value="US/Central">US/Central</option>
-            <option value="US/Mountain">US/Mountain</option>
-            <option value="US/Pacific">US/Pacific</option>
-            <option value="UTC">UTC</option>
-        </select>
+        <section class="settings-card" id="section-removal">
+            <h2>Automatic Removal Settings</h2>
+            <p class="desc">Set the grace period before removing inventory for shipped sold orders.</p>
+            <form id="graceForm">
+                <label for="graceHours">Grace period (hours)</label>
+                <input type="number" id="graceHours" min="0" max="240" step="0.01" value="48">
+                <div class="actions">
+                    <button type="submit" class="btn btn-primary">Save Grace Period</button>
+                </div>
+                <div class="preset-group">
+                    <button type="button" class="preset-btn" onclick="setGracePeriodPreset(0.0167)">1 min (testing)</button>
+                    <button type="button" class="preset-btn" onclick="setGracePeriodPreset(0.0833)">5 min (testing)</button>
+                    <button type="button" class="preset-btn" onclick="setGracePeriodPreset(1)">1 hour</button>
+                    <button type="button" class="preset-btn" onclick="setGracePeriodPreset(24)">24 hours</button>
+                    <button type="button" class="preset-btn" onclick="setGracePeriodPreset(48)">48 hours (default)</button>
+                    <button type="button" class="preset-btn" onclick="setGracePeriodPreset(72)">72 hours</button>
+                </div>
+                <div id="graceStatus" class="status-line"></div>
+            </form>
+        </section>
 
-        <button type="submit" style="background:#2196F3;">Save Reload Settings</button>
-        <div id="cacheSettingsStatus" style="margin-top:10px;color:#555;display:none;"></div>
-    </form>
+        <section class="settings-card" id="section-zero-qty">
+            <h2>Zero-Quantity Deletion Settings</h2>
+            <p class="desc">Configure automatic deletion of inventory items with zero quantity.</p>
+            <label class="check-row">
+                <input type="checkbox" id="showZeroQtyPending">
+                <span>Show pending zero-quantity deletions</span>
+            </label>
+            <label for="zeroQtyInterval">Deletion interval (after reaching 0 qty)</label>
+            <select id="zeroQtyInterval">
+                <option value="1">1 minute (testing)</option>
+                <option value="60">1 hour</option>
+                <option value="720">12 hours</option>
+                <option value="1440" selected>24 hours (default)</option>
+                <option value="2880">48 hours</option>
+            </select>
+            <div class="actions">
+                <button type="button" class="btn btn-primary" onclick="saveZeroQtySettings()">Save Settings</button>
+                <button type="button" class="btn btn-success" onclick="scanZeroQtyNow()">Scan Now</button>
+            </div>
+            <div id="zeroQtyStatus" class="status-line"></div>
+            <div id="zeroQtyPendingContainer" style="display:none;margin-top:16px;">
+                <h3 style="margin-top:0;color:#e74c3c;">Pending Zero-Quantity Deletions</h3>
+                <div id="zeroQtyPendingList" style="font-size:0.95em;"></div>
+            </div>
+        </section>
 
-    <hr style="margin:24px 0;">
-    <h2 style="margin:0 0 10px 0; font-size:1.1rem;">Data Enrichment</h2>
-    <div class="desc">Enrich sold orders with missing images and titles from rawbol database.</div>
+        <section class="settings-card" id="section-cache">
+            <h2>System & Cache Management</h2>
+            <p class="desc">Manage database caching and automated reloads.</p>
+            <div class="actions" style="margin-top:0;">
+                <button type="button" class="btn btn-warning" onclick="clearCacheNow()">
+                    <i class="fas fa-sync-alt"></i> Clear Cache & Reload Databases Now
+                </button>
+            </div>
+            <div id="clearCacheStatus" class="status-line" style="text-align:center;"></div>
 
-    <div style="margin-bottom:20px;">
-        <button onclick="enrichSoldDb()" style="background:#9b59b6;width:100%;">
-            <i class="fas fa-magic"></i> Enrich Sold Orders (Images & Titles)
-        </button>
-        <div id="enrichStatus" style="margin-top:10px;color:#555;display:none;text-align:center;"></div>
+            <h3>Automated Reload Settings</h3>
+            <form id="cacheSettingsForm">
+                <label class="check-row">
+                    <input type="checkbox" id="autoReloadEnabled">
+                    <span>Enable Automated Reload</span>
+                </label>
+                <label for="reloadTime">Reload Time (24h format)</label>
+                <input type="time" id="reloadTime">
+                <label for="reloadTimezone">Timezone</label>
+                <select id="reloadTimezone">
+                    <option value="US/Eastern">US/Eastern</option>
+                    <option value="US/Central">US/Central</option>
+                    <option value="US/Mountain">US/Mountain</option>
+                    <option value="US/Pacific">US/Pacific</option>
+                    <option value="UTC">UTC</option>
+                </select>
+                <div class="actions">
+                    <button type="submit" class="btn btn-primary">Save Reload Settings</button>
+                </div>
+                <div id="cacheSettingsStatus" class="status-line"></div>
+            </form>
+        </section>
+
+        <section class="settings-card" id="section-enrichment">
+            <h2>Data Enrichment</h2>
+            <p class="desc">Enrich sold orders with missing images and titles from rawbol database.</p>
+            <div class="actions" style="margin-top:0;">
+                <button type="button" class="btn btn-primary" onclick="enrichSoldDb()" style="background:#7c3aed;">
+                    <i class="fas fa-magic"></i> Enrich Sold Orders (Images & Titles)
+                </button>
+            </div>
+            <div id="enrichStatus" class="status-line" style="text-align:center;"></div>
+        </section>
     </div>
 
     <script src="/static/i18n.js"></script>

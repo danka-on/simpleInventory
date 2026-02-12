@@ -111,6 +111,7 @@ const translations = {
   fb_log_manual_unlist: { en: 'Manual unlist', lt: 'Nuimta rankiniu būdu' },
   scan: { en: 'Scan', lt: 'Skenuoti' },
   no_warehouse: { en: 'No Warehouse', lt: 'Nėra sandėlyje' },
+  quantity_alert: { en: 'Quantity Alert', lt: 'Kiekio įspėjimas' },
   cross_store: { en: 'Cross-Store', lt: 'Tarp parduotuvių' },
   same_store_dup: { en: 'Same-Store Dup', lt: 'Tos pačios dublikatai' },
   qty_mismatch: { en: 'Qty Mismatch', lt: 'Kiekio neatitikimas' },
@@ -125,16 +126,23 @@ const translations = {
   no_cross_store_dups: { en: 'No cross-store duplicates', lt: 'Nėra dublikatų tarp parduotuvių' },
   no_same_store_dups: { en: 'No same-store duplicates', lt: 'Nėra dublikatų toje pačioje parduotuvėje' },
   all_quantities_match: { en: 'All quantities match', lt: 'Visi kiekiai sutampa' },
+  no_quantity_alerts: { en: 'No quantity alerts', lt: 'Nėra kiekio įspėjimų' },
+  listing_qty: { en: 'Listing qty', lt: 'Skelbimo kiekis' },
+  exceeds_warehouse_by: { en: 'Exceeds warehouse by', lt: 'Viršija sandėlį per' },
   listed_on: { en: 'Listed on', lt: 'Skelbta' },
   no_matching_upc: { en: 'No matching UPC in warehouse', lt: 'Nėra atitinkančio UPC sandėlyje' },
   finder: { en: 'Finder', lt: 'Ieškiklis' },
   same_upc_both_stores: { en: 'Same UPC listed on both eBay and Amazon', lt: 'Tas pats UPC skelbiamas ir eBay, ir Amazon' },
   ebay: { en: 'eBay', lt: 'eBay' },
   amazon: { en: 'Amazon', lt: 'Amazon' },
+  facebook: { en: 'Facebook', lt: 'Facebook' },
   listings_on: { en: 'Listings on', lt: 'Skelbimai parduotuvėje' },
   same_upc_listed: { en: 'Same UPC listed', lt: 'Tas pats UPC skelbiamas' },
   times_on: { en: 'times on', lt: 'kartų parduotuvėje' },
   oversold_by: { en: 'Oversold by', lt: 'Perparduota per' },
+  pending_auto_removal_sales: { en: 'Pending auto-removal sales', lt: 'Laukiantys automatinio nurašymo pardavimai' },
+  effective_after_sales: { en: 'Effective after sales', lt: 'Efektyvus kiekis po pardavimų' },
+  no_effective_stock_after_sales: { en: 'No effective stock after pending sales', lt: 'Po laukiančių pardavimų efektyvių atsargų nėra' },
   listing: { en: 'Listing', lt: 'Skelbimas' },
   marked_fixed: { en: 'Marked Fixed', lt: 'Pažymėta ištaisyta' },
   no_marked_fixed: { en: 'No marked fixed items', lt: 'Nėra pažymėtų ištaisytų' },
@@ -154,6 +162,14 @@ const translations = {
   ready_to_ship: { en: 'Ready to Ship', lt: 'Paruošta siųsti' },
   completed: { en: 'Completed', lt: 'Užbaigta' },
   loading_orders: { en: 'Loading orders...', lt: 'Kraunami užsakymai...' },
+  alerts: { en: 'Alerts', lt: 'Įspėjimai' },
+  no_warehouse_alerts: { en: 'No Warehouse Alerts', lt: 'Įspėjimai: nėra sandėlyje' },
+  no_stock_in_warehouse_alert: { en: 'No stock in warehouse alert', lt: 'Įspėjimas: nėra sandėlio likučio' },
+  listing_quantity_exceeds_warehouse_alert: { en: 'Listing quantity exceeds warehouse alert', lt: 'Įspėjimas: skelbimo kiekis viršija sandėlį' },
+  no_active_alerts: { en: 'No active alerts right now.', lt: 'Šiuo metu nėra aktyvių įspėjimų.' },
+  no_no_warehouse_alerts: { en: 'No no-warehouse alerts right now.', lt: 'Šiuo metu nėra įspėjimų apie sandėlį.' },
+  open_store_doctor: { en: 'Open Store Doctor', lt: 'Atidaryti Store Doctor' },
+  active_alerts: { en: 'Active Alerts', lt: 'Aktyvūs įspėjimai' },
   days: { en: 'Days:', lt: 'Dienos:' },
   info: { en: 'Info', lt: 'Informacija' },
   loc: { en: 'Loc', lt: 'Vieta' },
@@ -923,6 +939,30 @@ function ensureTopBannerStyles(){
       background: var(--muted-dim);
       box-shadow: none;
     }
+    .ss-pill.ss-alerts{
+      padding: 0 10px;
+      gap: 6px;
+    }
+    .ss-pill.ss-alerts .ss-count{
+      display: none;
+      background: #64748b;
+      box-shadow: none;
+    }
+    .ss-pill.ss-alerts.has-alerts{
+      background: #dc2626 !important;
+      border-color: #dc2626 !important;
+      color: #fff !important;
+      box-shadow: 0 0 0 3px rgba(220,38,38,0.16);
+    }
+    .ss-pill.ss-alerts.has-alerts .ss-count{
+      display: inline-flex;
+      background: #fff;
+      color: #dc2626;
+      min-width: 18px;
+      height: 18px;
+      line-height: 18px;
+      box-shadow: none;
+    }
 
     .ss-theme-wrap{
       display: inline-flex;
@@ -1040,6 +1080,7 @@ function ensureTopBannerStyles(){
       .ss-search{ height: 26px; }
       .ss-search input{ width: 90px; }
       .ss-icon svg{ width: 14px; height: 14px; }
+      .ss-pill.ss-alerts{ display: none !important; }
 
       #ss-top-banner .ss-left{
         flex: 1 1 auto;
@@ -1243,6 +1284,17 @@ function createTopBanner(){
     <span class="ss-ready-label" data-i18n="ready_to_ship">Ready to Ship</span>
     <span class="ss-count" id="ss-ready-count">0</span>
   `;
+
+  const alertsBtn = document.createElement('a');
+  alertsBtn.className = 'ss-pill ss-alerts';
+  alertsBtn.href = '/alerts';
+  alertsBtn.title = 'Alerts';
+  alertsBtn.setAttribute('aria-label', 'Alerts');
+  alertsBtn.style.display = 'none';
+  alertsBtn.innerHTML = `
+    <span class="ss-alerts-label" data-i18n="alerts">Alerts</span>
+    <span class="ss-count" id="ss-alerts-count">0</span>
+  `;
   const searchWrap = document.createElement('div');
   searchWrap.className = 'ss-search';
   searchWrap.innerHTML = `
@@ -1251,6 +1303,7 @@ function createTopBanner(){
   `;
 
   left.appendChild(homeBtn);
+  left.appendChild(alertsBtn);
   left.appendChild(readyBtn);
   left.appendChild(searchWrap);
 
@@ -1378,6 +1431,66 @@ function createTopBanner(){
 
     window.ssReadyCount = { set: setCount, refresh, setDays, getDays };
   }
+
+  // Store-listing alert badge (no_warehouse + quantity_alert)
+  if(!window.ssNoWarehouseAlerts){
+    const countEl = alertsBtn.querySelector('.ss-count');
+    const state = { count: 0, ts: 0, inflight: false };
+
+    const setCount = (val) => {
+      const count = Number.isFinite(val) ? Math.max(0, Math.round(val)) : 0;
+      state.count = count;
+      if(countEl){
+        countEl.textContent = String(count);
+        countEl.style.display = count > 0 ? 'inline-flex' : 'none';
+      }
+      alertsBtn.classList.toggle('has-alerts', count > 0);
+      alertsBtn.style.display = count > 0 ? 'inline-flex' : 'none';
+      alertsBtn.setAttribute('aria-label', `Alerts (${count})`);
+      try{
+        localStorage.setItem('ss_store_alert_count', String(count));
+        localStorage.setItem('ss_store_alert_count_ts', String(Date.now()));
+      }catch(e){}
+    };
+
+    const refresh = async (force = false) => {
+      const now = Date.now();
+      if(!force && state.ts && (now - state.ts) < 60 * 1000) return;
+      if(state.inflight) return;
+      state.inflight = true;
+      try{
+        const resp = await fetch('/api/listing-helper/scan', { cache: 'no-store' });
+        const data = await resp.json().catch(()=> ({}));
+        if(resp.ok && data && data.success){
+          const counts = data.counts || {};
+          const noWarehouse = parseInt(counts.no_warehouse, 10) || 0;
+          const qtyAlert = parseInt(counts.quantity_alert, 10) || 0;
+          setCount(noWarehouse + qtyAlert);
+        }
+      }catch(e){}
+      finally{
+        state.ts = Date.now();
+        state.inflight = false;
+      }
+    };
+
+    try{
+      const cached = parseInt(localStorage.getItem('ss_store_alert_count') || localStorage.getItem('ss_no_warehouse_alert_count') || '0', 10);
+      const cachedTs = parseInt(localStorage.getItem('ss_store_alert_count_ts') || localStorage.getItem('ss_no_warehouse_alert_count_ts') || '0', 10);
+      if(cachedTs && (Date.now() - cachedTs) < 60 * 1000){
+        setCount(cached);
+        state.ts = cachedTs;
+      } else {
+        refresh(true);
+      }
+    }catch(e){ refresh(true); }
+
+    setInterval(() => refresh(false), 60 * 1000);
+    window.addEventListener('focus', () => refresh(true));
+
+    window.ssNoWarehouseAlerts = { set: setCount, refresh };
+    window.ssAlertsCount = window.ssNoWarehouseAlerts;
+  }
 }
 
 function updateToggleUI() {
@@ -1433,4 +1546,3 @@ applyThemeFromStorage();
 _startAutoThemeTimer();
 
 })();
-

@@ -328,20 +328,67 @@ class EbayManager:
                 )
 
                 cur.execute('''
-                    INSERT OR REPLACE INTO returns (
-                        original_order_id, order_id, item_id, barcode, title, quantity,
-                        original_price, refund_amount, original_shipping_cost, return_shipping_cost,
-                        original_seller_fee, seller_fee_refund,
-                        return_date, store, return_reason, lot_number, location
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    SELECT id
+                    FROM returns
+                    WHERE store = 'ebay'
+                      AND COALESCE(order_id, '') = COALESCE(?, '')
+                      AND COALESCE(item_id, '') = COALESCE(?, '')
+                      AND COALESCE(barcode, '') = COALESCE(?, '')
+                      AND COALESCE(title, '') = COALESCE(?, '')
+                      AND COALESCE(return_date, '') = COALESCE(?, '')
+                    ORDER BY id DESC
+                    LIMIT 1
                 ''', (
-                    original_order_id, order_id, return_data['item_id'], barcode, title,
-                    return_data['quantity'], original_price, return_data['refund_amount'],
-                    original_shipping, return_data['return_shipping_cost'],
-                    original_fee, 0,
-                    return_data['return_date'], 'ebay', return_data['return_reason'],
-                    lot_number, location
+                    order_id, return_data['item_id'], barcode, title, return_data['return_date']
                 ))
+                existing_return = cur.fetchone()
+
+                if existing_return:
+                    existing_id = existing_return[0]
+                    cur.execute('''
+                        UPDATE returns
+                        SET original_order_id = ?,
+                            order_id = ?,
+                            item_id = ?,
+                            barcode = ?,
+                            title = ?,
+                            quantity = ?,
+                            original_price = ?,
+                            refund_amount = ?,
+                            original_shipping_cost = ?,
+                            return_shipping_cost = ?,
+                            original_seller_fee = ?,
+                            seller_fee_refund = ?,
+                            return_date = ?,
+                            store = 'ebay',
+                            return_reason = COALESCE(NULLIF(?, ''), return_reason),
+                            lot_number = COALESCE(lot_number, ?),
+                            location = COALESCE(location, ?)
+                        WHERE id = ?
+                    ''', (
+                        original_order_id, order_id, return_data['item_id'], barcode, title,
+                        return_data['quantity'], original_price, return_data['refund_amount'],
+                        original_shipping, return_data['return_shipping_cost'],
+                        original_fee, 0,
+                        return_data['return_date'], return_data['return_reason'],
+                        lot_number, location, existing_id
+                    ))
+                else:
+                    cur.execute('''
+                        INSERT INTO returns (
+                            original_order_id, order_id, item_id, barcode, title, quantity,
+                            original_price, refund_amount, original_shipping_cost, return_shipping_cost,
+                            original_seller_fee, seller_fee_refund,
+                            return_date, store, return_reason, lot_number, location
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        original_order_id, order_id, return_data['item_id'], barcode, title,
+                        return_data['quantity'], original_price, return_data['refund_amount'],
+                        original_shipping, return_data['return_shipping_cost'],
+                        original_fee, 0,
+                        return_data['return_date'], 'ebay', return_data['return_reason'],
+                        lot_number, location
+                    ))
 
                 synced_count += 1
                 if original_order:

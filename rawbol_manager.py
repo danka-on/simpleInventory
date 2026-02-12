@@ -348,12 +348,16 @@ def get_upload_logs():
         try:
             conn.row_factory = sqlite3.Row
             cur = conn.cursor()
-            # Join with a subquery to get total quantity per lot
+            # Join with a subquery to get total quantity and row count per LOT.
             cur.execute('''
-                SELECT ul.*, COALESCE(lot_totals.total_quantity, 0) as total_quantity
+                SELECT 
+                    ul.*,
+                    COALESCE(lot_totals.total_quantity, 0) as total_quantity,
+                    COALESCE(lot_totals.item_rows, 0) as item_rows,
+                    CASE WHEN lot_totals.item_rows IS NULL THEN 0 ELSE 1 END as has_items
                 FROM upload_logs ul
                 LEFT JOIN (
-                    SELECT lot_number, SUM(quantity) as total_quantity
+                    SELECT lot_number, SUM(quantity) as total_quantity, COUNT(*) as item_rows
                     FROM raw_bol_items
                     GROUP BY lot_number
                 ) lot_totals ON ul.lot_number = lot_totals.lot_number
@@ -395,11 +399,12 @@ def get_rawbol_stats():
 
 def sync_rawbol_to_bol(specific_lot=None):
     """
-    Sync rawbol.db to bol.db with duplicate lot protection:
+    Sync rawbol.db to bol.db with lot-aware identity:
     - If specific_lot is provided, only sync that lot
     - Checks if lot numbers have already been synced
-    - If UPC exists in bol.db, ADD the quantity from rawbol
-    - If UPC is new, insert the item with quantity
+    - Upserts by (upc, lot_number), never cross-merges different lots
+    - If (upc, lot_number) exists in bol.db, ADD the quantity from rawbol
+    - If pair is new, insert the item with quantity
     - Records synced lots to prevent duplicate syncing
     Returns: {'success': True, 'updated': n, 'inserted': m, 'skipped_lots': []} or error
     """
@@ -454,46 +459,82 @@ def sync_rawbol_to_bol(specific_lot=None):
 
                 updated = 0
                 inserted = 0
+                cross_lot_merges = 0
                 import json
                 changes = []
+                has_original_qty = 'original_qty' in cols
+                has_good_qty = 'good_qty' in cols
+                has_bad_qty = 'bad_qty' in cols
+                has_unchecked_qty = 'unchecked_qty' in cols
 
                 for item in raw_items:
                     upc = item['upc']
                     qty = item['quantity'] or 1
                     lot_num = item['lot_number']
+                    import_date = item['import_date']
+                    item_desc = item['item_description']
+                    image_url = item['image_url']
 
-                    # Check if exists in bol.db
-                    bol_cur.execute('SELECT id, quantity, lot_number FROM bol_items WHERE upc = ? COLLATE NOCASE', (upc,))
+                    # Check if this exact UPC+LOT exists in bol.db
+                    bol_cur.execute('''
+                        SELECT id, quantity, original_qty, good_qty, bad_qty, unchecked_qty
+                        FROM bol_items
+                        WHERE upc = ? COLLATE NOCASE
+                          AND lot_number = ? COLLATE NOCASE
+                        ORDER BY import_date DESC, id DESC
+                        LIMIT 1
+                    ''', (upc, lot_num))
                     existing = bol_cur.fetchone()
 
                     if existing:
                         existing_id = existing[0]
                         existing_qty = existing[1] or 0
-                        existing_lot = existing[2]
+                        new_qty = existing_qty + qty
 
-                        # Check if this item is from the same LOT or different LOT
-                        if existing_lot == lot_num:
-                            # Same LOT - this shouldn't happen if synced_lots tracking works
-                            # Skip to avoid double-counting
-                            print(f"WARNING: UPC {upc} from LOT {lot_num} already exists in bol.db - skipping to prevent duplicate")
-                            continue
-                        else:
-                            # Different LOT - add quantity (items can appear in multiple LOTs)
-                            new_qty = existing_qty + qty
-                            bol_cur.execute('UPDATE bol_items SET quantity = ? WHERE upc = ? COLLATE NOCASE', (new_qty, upc))
-                            updated += 1
-                            changes.append({'upc': upc, 'action': 'updated', 'old_qty': existing_qty, 'added_qty': qty, 'new_qty': new_qty, 'old_lot': existing_lot, 'new_lot': lot_num})
+                        set_clauses = ['quantity = ?', 'item_description = COALESCE(NULLIF(item_description, \'\'), ?)', 'image_url = COALESCE(NULLIF(image_url, \'\'), ?)']
+                        params = [new_qty, item_desc or '', image_url or '']
+                        if has_original_qty:
+                            existing_original = existing[2] if existing[2] is not None else existing_qty
+                            set_clauses.append('original_qty = ?')
+                            params.append((existing_original or 0) + qty)
+                        if has_unchecked_qty:
+                            existing_unchecked = existing[5]
+                            if existing_unchecked is None:
+                                existing_good = existing[3] or 0
+                                existing_bad = existing[4] or 0
+                                baseline = (existing[2] if existing[2] is not None else existing_qty)
+                                existing_unchecked = max(0, (baseline or 0) - existing_good - existing_bad)
+                            set_clauses.append('unchecked_qty = ?')
+                            params.append((existing_unchecked or 0) + qty)
+                        if has_good_qty and existing[3] is None:
+                            set_clauses.append('good_qty = 0')
+                        if has_bad_qty and existing[4] is None:
+                            set_clauses.append('bad_qty = 0')
+                        params.append(existing_id)
+                        bol_cur.execute(f'UPDATE bol_items SET {", ".join(set_clauses)} WHERE id = ?', tuple(params))
+                        updated += 1
+                        changes.append({'upc': upc, 'lot': lot_num, 'action': 'updated', 'old_qty': existing_qty, 'added_qty': qty, 'new_qty': new_qty})
                     else:
                         # Insert new item - use columns that actually exist in bol.db
-                        bol_cur.execute('''INSERT INTO bol_items
-                            (upc, item_description, image_url, quantity, lot_number, import_date)
-                            VALUES (?, ?, ?, ?, ?, ?)''',
-                            (upc,
-                             item['item_description'],
-                             item['image_url'],
-                             qty,
-                             lot_num,
-                             item['import_date']))
+                        insert_cols = ['upc', 'item_description', 'image_url', 'quantity', 'lot_number', 'import_date']
+                        insert_vals = [upc, item_desc, image_url, qty, lot_num, import_date]
+                        if has_original_qty:
+                            insert_cols.append('original_qty')
+                            insert_vals.append(qty)
+                        if has_good_qty:
+                            insert_cols.append('good_qty')
+                            insert_vals.append(0)
+                        if has_bad_qty:
+                            insert_cols.append('bad_qty')
+                            insert_vals.append(0)
+                        if has_unchecked_qty:
+                            insert_cols.append('unchecked_qty')
+                            insert_vals.append(qty)
+                        placeholders = ','.join('?' for _ in insert_cols)
+                        bol_cur.execute(
+                            f'''INSERT INTO bol_items ({",".join(insert_cols)}) VALUES ({placeholders})''',
+                            tuple(insert_vals)
+                        )
                         inserted += 1
                         changes.append({'upc': upc, 'action': 'inserted', 'qty': qty, 'lot': lot_num})
 
@@ -513,7 +554,14 @@ def sync_rawbol_to_bol(specific_lot=None):
                 bol_conn.commit()
                 raw_conn.commit()
 
-                return {'success': True, 'updated': updated, 'inserted': inserted, 'synced_lots': lots_to_sync, 'skipped_lots': skipped_lots}
+                return {
+                    'success': True,
+                    'updated': updated,
+                    'inserted': inserted,
+                    'cross_lot_merges': cross_lot_merges,
+                    'synced_lots': lots_to_sync,
+                    'skipped_lots': skipped_lots
+                }
             finally:
                 raw_conn.close()
         finally:
@@ -546,33 +594,83 @@ def delete_lot(lot_number):
                 # Get all items from this lot before deleting
                 raw_cur.execute('SELECT * FROM raw_bol_items WHERE lot_number = ?', (lot_number,))
                 lot_items = raw_cur.fetchall()
+                deleted_items = len(lot_items)
+
+                # Check metadata presence (can exist even when lot items were already removed).
+                raw_cur.execute('SELECT COUNT(*) FROM upload_logs WHERE lot_number = ?', (lot_number,))
+                has_upload_log = (raw_cur.fetchone()[0] or 0) > 0
+                raw_cur.execute('SELECT COUNT(*) FROM synced_lots WHERE lot_number = ?', (lot_number,))
+                has_synced_row = (raw_cur.fetchone()[0] or 0) > 0
 
                 if not lot_items:
+                    if has_upload_log or has_synced_row:
+                        raw_cur.execute('DELETE FROM synced_lots WHERE lot_number = ?', (lot_number,))
+                        raw_cur.execute('DELETE FROM upload_logs WHERE lot_number = ?', (lot_number,))
+                        raw_conn.commit()
+                        return {
+                            'success': True,
+                            'updated': 0,
+                            'removed': 0,
+                            'deleted_items': 0,
+                            'lot': lot_number,
+                            'orphan_cleanup': True
+                        }
                     return {'success': False, 'error': f'Lot {lot_number} not found'}
 
                 updated = 0
                 removed = 0
+                bol_cur.execute("PRAGMA table_info(bol_items)")
+                bol_cols = [c[1] for c in bol_cur.fetchall()]
+                has_original_qty = 'original_qty' in bol_cols
+                has_good_qty = 'good_qty' in bol_cols
+                has_bad_qty = 'bad_qty' in bol_cols
+                has_unchecked_qty = 'unchecked_qty' in bol_cols
 
                 # Desync from bol.db
                 for item in lot_items:
                     upc = item['upc']
                     qty = item['quantity'] or 1
+                    lot = item['lot_number']
 
-                    # Check if exists in bol.db
-                    bol_cur.execute('SELECT id, quantity FROM bol_items WHERE upc = ? COLLATE NOCASE', (upc,))
+                    # Check if this exact UPC+LOT exists in bol.db
+                    bol_cur.execute('''
+                        SELECT id, quantity, original_qty, good_qty, bad_qty, unchecked_qty
+                        FROM bol_items
+                        WHERE upc = ? COLLATE NOCASE
+                          AND lot_number = ? COLLATE NOCASE
+                        ORDER BY import_date DESC, id DESC
+                        LIMIT 1
+                    ''', (upc, lot))
                     existing = bol_cur.fetchone()
 
                     if existing:
+                        existing_id = existing[0]
                         existing_qty = existing[1] or 0
                         new_qty = existing_qty - qty
 
                         if new_qty <= 0:
                             # Remove item if quantity goes to 0 or negative
-                            bol_cur.execute('DELETE FROM bol_items WHERE upc = ? COLLATE NOCASE', (upc,))
+                            bol_cur.execute('DELETE FROM bol_items WHERE id = ?', (existing_id,))
                             removed += 1
                         else:
                             # Subtract quantity
-                            bol_cur.execute('UPDATE bol_items SET quantity = ? WHERE upc = ? COLLATE NOCASE', (new_qty, upc))
+                            set_parts = ['quantity = ?']
+                            params = [new_qty]
+                            if has_original_qty:
+                                existing_original = existing[2] if existing[2] is not None else existing_qty
+                                set_parts.append('original_qty = ?')
+                                params.append(max(0, (existing_original or 0) - qty))
+                            if has_unchecked_qty:
+                                existing_unchecked = existing[5]
+                                if existing_unchecked is None:
+                                    baseline = existing[2] if existing[2] is not None else existing_qty
+                                    existing_good = existing[3] if (has_good_qty and existing[3] is not None) else 0
+                                    existing_bad = existing[4] if (has_bad_qty and existing[4] is not None) else 0
+                                    existing_unchecked = max(0, (baseline or 0) - existing_good - existing_bad)
+                                set_parts.append('unchecked_qty = ?')
+                                params.append(max(0, (existing_unchecked or 0) - qty))
+                            params.append(existing_id)
+                            bol_cur.execute(f'UPDATE bol_items SET {", ".join(set_parts)} WHERE id = ?', tuple(params))
                             updated += 1
 
                 # Delete from rawbol.db tables
@@ -583,7 +681,13 @@ def delete_lot(lot_number):
                 bol_conn.commit()
                 raw_conn.commit()
 
-                return {'success': True, 'updated': updated, 'removed': removed, 'lot': lot_number}
+                return {
+                    'success': True,
+                    'updated': updated,
+                    'removed': removed,
+                    'deleted_items': deleted_items,
+                    'lot': lot_number
+                }
             finally:
                 raw_conn.close()
         finally:
@@ -617,26 +721,57 @@ def desync_all_rawbol():
 
                 updated = 0
                 removed = 0
+                bol_cur.execute("PRAGMA table_info(bol_items)")
+                bol_cols = [c[1] for c in bol_cur.fetchall()]
+                has_original_qty = 'original_qty' in bol_cols
+                has_good_qty = 'good_qty' in bol_cols
+                has_bad_qty = 'bad_qty' in bol_cols
+                has_unchecked_qty = 'unchecked_qty' in bol_cols
 
                 for item in raw_items:
                     upc = item['upc']
                     qty = item['quantity'] or 1
+                    lot = item['lot_number']
 
-                    # Check if exists in bol.db
-                    bol_cur.execute('SELECT id, quantity FROM bol_items WHERE upc = ? COLLATE NOCASE', (upc,))
+                    # Check if this exact UPC+LOT exists in bol.db
+                    bol_cur.execute('''
+                        SELECT id, quantity, original_qty, good_qty, bad_qty, unchecked_qty
+                        FROM bol_items
+                        WHERE upc = ? COLLATE NOCASE
+                          AND lot_number = ? COLLATE NOCASE
+                        ORDER BY import_date DESC, id DESC
+                        LIMIT 1
+                    ''', (upc, lot))
                     existing = bol_cur.fetchone()
 
                     if existing:
+                        existing_id = existing[0]
                         existing_qty = existing[1] or 0
                         new_qty = existing_qty - qty
 
                         if new_qty <= 0:
                             # Remove item if quantity goes to 0 or negative
-                            bol_cur.execute('DELETE FROM bol_items WHERE upc = ? COLLATE NOCASE', (upc,))
+                            bol_cur.execute('DELETE FROM bol_items WHERE id = ?', (existing_id,))
                             removed += 1
                         else:
                             # Subtract quantity
-                            bol_cur.execute('UPDATE bol_items SET quantity = ? WHERE upc = ? COLLATE NOCASE', (new_qty, upc))
+                            set_parts = ['quantity = ?']
+                            params = [new_qty]
+                            if has_original_qty:
+                                existing_original = existing[2] if existing[2] is not None else existing_qty
+                                set_parts.append('original_qty = ?')
+                                params.append(max(0, (existing_original or 0) - qty))
+                            if has_unchecked_qty:
+                                existing_unchecked = existing[5]
+                                if existing_unchecked is None:
+                                    baseline = existing[2] if existing[2] is not None else existing_qty
+                                    existing_good = existing[3] if (has_good_qty and existing[3] is not None) else 0
+                                    existing_bad = existing[4] if (has_bad_qty and existing[4] is not None) else 0
+                                    existing_unchecked = max(0, (baseline or 0) - existing_good - existing_bad)
+                                set_parts.append('unchecked_qty = ?')
+                                params.append(max(0, (existing_unchecked or 0) - qty))
+                            params.append(existing_id)
+                            bol_cur.execute(f'UPDATE bol_items SET {", ".join(set_parts)} WHERE id = ?', tuple(params))
                             updated += 1
 
                 # Clear synced lots tracking

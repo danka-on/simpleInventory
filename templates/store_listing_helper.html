@@ -28,6 +28,12 @@
       flex-wrap: wrap;
       gap: 16px;
     }
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
     .header h1 {
       color: #f8fafc;
       margin: 0;
@@ -69,53 +75,21 @@
       background: linear-gradient(135deg, #10b981, #059669);
       color: #fff;
       box-shadow: 0 4px 14px rgba(16,185,129,0.35);
-      margin-right: 80px;
+      margin-right: 0;
     }
     .btn-scan:hover { box-shadow: 0 6px 20px rgba(16,185,129,0.45); }
-
-    /* Summary Cards */
-    .summary-grid {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 16px;
-      margin-bottom: 24px;
+    .btn-refresh-ebay {
+      background: linear-gradient(135deg, #2563eb, #1d4ed8);
+      color: #fff;
+      box-shadow: 0 4px 14px rgba(37,99,235,0.35);
     }
-    .summary-card {
-      background: #1e293b;
-      border-radius: 14px;
-      padding: 20px;
-      text-align: center;
-      border: 1px solid rgba(255,255,255,0.06);
-      transition: all 0.2s ease;
+    .btn-refresh-ebay:hover { box-shadow: 0 6px 20px rgba(37,99,235,0.45); }
+    .btn[disabled] {
+      opacity: 0.65;
+      cursor: not-allowed;
+      transform: none !important;
+      box-shadow: none !important;
     }
-    .summary-card:hover {
-      border-color: rgba(255,255,255,0.12);
-      background: #263445;
-    }
-    .summary-card .icon {
-      font-size: 1.5rem;
-      margin-bottom: 10px;
-      display: block;
-      opacity: 0.7;
-    }
-    .summary-card .count {
-      font-size: 2.25rem;
-      font-weight: 800;
-      line-height: 1;
-      margin-bottom: 6px;
-      letter-spacing: -0.02em;
-    }
-    .summary-card .label {
-      font-size: 0.75rem;
-      color: #64748b;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-    }
-    .summary-card.danger .count { color: #f87171; }
-    .summary-card.danger .icon { color: #f87171; }
-    .summary-card.warning .count { color: #fbbf24; }
-    .summary-card.warning .icon { color: #fbbf24; }
 
     /* Main Content Card */
     .main-card {
@@ -128,48 +102,51 @@
     /* Tabs */
     .tabs {
       display: flex;
-      background: rgba(0,0,0,0.2);
-      padding: 10px;
-      gap: 6px;
+      background: rgba(0,0,0,0.25);
+      padding: 6px;
+      gap: 4px;
       overflow-x: auto;
       border-bottom: 1px solid rgba(255,255,255,0.06);
     }
     .tabs::-webkit-scrollbar { height: 4px; }
     .tabs::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 2px; }
     .tab {
-      padding: 10px 18px;
+      padding: 10px 16px;
       border: none;
       background: transparent;
-      border-radius: 8px;
+      border-radius: 10px;
       cursor: pointer;
       font-size: 0.85rem;
       font-weight: 600;
       color: #64748b;
-      transition: all 0.15s ease;
+      transition: all 0.2s ease;
       white-space: nowrap;
-      position: relative;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex: 1;
+      justify-content: center;
     }
-    .tab:hover { background: rgba(255,255,255,0.05); color: #94a3b8; }
+    .tab:hover { background: rgba(255,255,255,0.06); color: #94a3b8; }
     .tab.active {
-      background: #334155;
+      background: rgba(255,255,255,0.1);
       color: #f8fafc;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.2);
     }
     .tab .badge {
-      position: absolute;
-      top: 2px;
-      right: 2px;
-      min-width: 18px;
-      height: 18px;
-      border-radius: 9px;
-      font-size: 0.65rem;
+      min-width: 20px;
+      height: 20px;
+      border-radius: 10px;
+      font-size: 0.7rem;
       font-weight: 700;
-      display: flex;
+      display: inline-flex;
       align-items: center;
       justify-content: center;
       color: #fff;
+      padding: 0 6px;
     }
     .badge-red { background: #ef4444; }
-    .badge-yellow { background: #f59e0b; }
+    .badge-yellow { background: #eab308; }
     .badge-gray { background: #475569; }
 
     /* Tab Content */
@@ -183,113 +160,215 @@
     /* Alert Cards */
     .alert-card {
       background: #0f172a;
-      border-radius: 12px;
-      padding: 20px;
-      margin-bottom: 14px;
+      border-radius: 14px;
+      padding: 0;
+      margin-bottom: 16px;
       border: 1px solid rgba(255,255,255,0.06);
-      transition: all 0.15s ease;
+      transition: all 0.2s ease;
+      overflow: hidden;
     }
     .alert-card:hover {
       border-color: rgba(255,255,255,0.12);
+      box-shadow: 0 4px 20px rgba(0,0,0,0.2);
     }
-    .alert-card.red { border-left: 3px solid #ef4444; }
-    .alert-card.yellow { border-left: 3px solid #f59e0b; }
+    .alert-card.red { border-top: 3px solid #ef4444; }
+    .alert-card.yellow { border-top: 3px solid #eab308; }
 
-    .alert-header {
+    /* Card top section: hero with image + title + meta */
+    .alert-hero {
       display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 14px;
-      flex-wrap: wrap;
-      gap: 10px;
+      gap: 16px;
+      padding: 18px 20px 14px;
+      align-items: flex-start;
     }
-    .alert-upc {
+    .alert-hero-img {
+      width: 56px;
+      height: 56px;
+      border-radius: 10px;
+      object-fit: cover;
+      flex-shrink: 0;
+      cursor: pointer;
+      transition: transform 0.15s ease;
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+    .alert-hero-img:hover { transform: scale(1.06); }
+    .alert-hero-info {
+      flex: 1;
+      min-width: 0;
+    }
+    .alert-hero-title {
+      font-size: 0.95rem;
       font-weight: 700;
-      font-size: 1.1rem;
-      font-family: 'JetBrains Mono', 'SF Mono', Monaco, monospace;
-      color: #f8fafc;
-      background: #334155;
-      padding: 8px 14px;
-      border-radius: 8px;
-      letter-spacing: 0.02em;
+      color: #e2e8f0;
+      line-height: 1.4;
+      margin-bottom: 8px;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .alert-hero-title a {
+      color: #e2e8f0;
+      text-decoration: none;
+    }
+    .alert-hero-title a:hover {
+      color: #93c5fd;
+      text-decoration: underline;
+    }
+    .alert-hero-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
     }
     .alert-severity {
-      padding: 6px 12px;
+      padding: 4px 10px;
       border-radius: 6px;
-      font-size: 0.72rem;
+      font-size: 0.68rem;
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.5px;
     }
     .alert-severity.red { background: rgba(239,68,68,0.15); color: #fca5a5; }
-    .alert-severity.yellow { background: rgba(245,158,11,0.15); color: #fcd34d; }
+    .alert-severity.yellow { background: rgba(234,179,8,0.15); color: #eab308; }
 
-    .alert-details {
-      color: #94a3b8;
-      font-size: 0.9rem;
-      margin-bottom: 16px;
-      padding: 14px 16px;
-      background: rgba(255,255,255,0.03);
-      border-radius: 8px;
-      line-height: 1.7;
+    .alert-upc-link {
+      font-family: 'JetBrains Mono', 'SF Mono', Monaco, monospace;
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      color: #93c5fd;
+      background: rgba(59,130,246,0.12);
+      border: 1px solid rgba(59,130,246,0.2);
+      border-radius: 999px;
+      padding: 3px 10px;
+      text-decoration: none;
+      transition: all 0.15s ease;
+    }
+    .alert-upc-link:hover {
+      text-decoration: underline;
+      color: #bfdbfe;
+      background: rgba(59,130,246,0.2);
+    }
+
+    /* Stats grid */
+    .alert-stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+      gap: 1px;
+      background: rgba(255,255,255,0.04);
+      margin: 0 20px;
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .stat-cell {
+      background: #0f172a;
+      padding: 12px 14px;
+      text-align: center;
+    }
+    .stat-cell .stat-value {
+      font-size: 1.15rem;
+      font-weight: 800;
+      color: #e2e8f0;
+      line-height: 1;
+      margin-bottom: 4px;
+    }
+    .stat-cell .stat-value.danger { color: #f87171; }
+    .stat-cell .stat-value.warning { color: #fbbf24; }
+    .stat-cell .stat-value.success { color: #34d399; }
+    .stat-cell .stat-label {
+      font-size: 0.68rem;
+      color: #64748b;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+
+    /* Location row */
+    .alert-location-row {
       display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 20px;
+      font-size: 0.82rem;
+      color: #64748b;
       flex-wrap: wrap;
-      gap: 8px 20px;
+    }
+    .alert-location-row i { color: #34d399; }
+    .location-links {
+      display: inline-flex;
+      flex-wrap: wrap;
+      gap: 6px;
       align-items: center;
     }
-    .alert-details strong { color: #e2e8f0; }
-    .detail-divider {
-      width: 1px;
-      height: 16px;
-      background: #334155;
+    .location-link {
+      font-family: 'JetBrains Mono', 'SF Mono', Monaco, monospace;
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: #86efac;
+      background: rgba(22, 163, 74, 0.15);
+      border: 1px solid rgba(22, 163, 74, 0.3);
+      border-radius: 999px;
+      padding: 3px 10px;
+      text-decoration: none;
+      transition: all 0.15s ease;
+    }
+    .location-link:hover {
+      text-decoration: underline;
+      color: #bbf7d0;
+      background: rgba(22, 163, 74, 0.24);
     }
 
-    /* Listing Items */
+    /* Additional listings (when more than 1) */
+    .alert-listings-section {
+      padding: 0 20px;
+      margin-top: 4px;
+    }
+    .alert-listings-label {
+      font-size: 0.72rem;
+      font-weight: 600;
+      color: #475569;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
+      padding-top: 8px;
+      border-top: 1px solid rgba(255,255,255,0.04);
+    }
     .listing-list {
       display: flex;
       flex-direction: column;
-      gap: 8px;
-      margin-top: 12px;
+      gap: 6px;
     }
     .listing-item {
       display: flex;
       align-items: center;
-      gap: 12px;
-      background: rgba(255,255,255,0.02);
-      padding: 12px 14px;
-      border-radius: 10px;
-      font-size: 0.88rem;
+      gap: 10px;
+      background: rgba(255,255,255,0.025);
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-size: 0.85rem;
       border: 1px solid rgba(255,255,255,0.04);
       transition: all 0.15s ease;
     }
     .listing-item:hover {
-      background: rgba(255,255,255,0.04);
+      background: rgba(255,255,255,0.05);
       border-color: rgba(255,255,255,0.08);
     }
     .listing-item img {
-      width: 44px;
-      height: 44px;
+      width: 36px;
+      height: 36px;
       object-fit: cover;
-      border-radius: 8px;
+      border-radius: 6px;
       cursor: pointer;
       flex-shrink: 0;
       transition: transform 0.15s ease;
     }
     .listing-item img:hover { transform: scale(1.08); }
 
-    .listing-num {
-      font-size: 0.7rem;
-      color: #64748b;
-      background: #334155;
-      border-radius: 5px;
-      padding: 3px 7px;
-      font-weight: 600;
-      flex-shrink: 0;
-    }
     .store-badge {
-      padding: 4px 9px;
+      padding: 3px 8px;
       border-radius: 5px;
-      font-size: 0.68rem;
+      font-size: 0.65rem;
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.3px;
@@ -297,52 +376,48 @@
     }
     .store-badge.ebay { background: #0064d2; color: #fff; }
     .store-badge.amazon { background: #ff9900; color: #111; }
+    .store-badge.facebook { background: #1877f2; color: #fff; }
     .listing-qty {
       font-weight: 700;
       color: #34d399;
       background: rgba(52,211,153,0.1);
-      padding: 4px 9px;
+      padding: 3px 8px;
       border-radius: 5px;
-      font-size: 0.85rem;
+      font-size: 0.82rem;
       flex-shrink: 0;
     }
     .listing-title {
       flex: 1;
       color: #cbd5e1;
       line-height: 1.4;
-      font-size: 0.88rem;
+      font-size: 0.85rem;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
+    .listing-title-link {
+      color: #60a5fa;
+      text-decoration: none;
+      font-weight: 600;
+    }
+    .listing-title-link:hover {
+      text-decoration: underline;
+      color: #93c5fd;
+    }
 
-    /* Action Buttons */
-    .alert-actions {
-      margin-top: 16px;
+    /* Card footer: actions */
+    .alert-footer {
       display: flex;
-      gap: 10px;
       justify-content: flex-end;
+      gap: 8px;
+      padding: 12px 20px 16px;
       flex-wrap: wrap;
     }
-    .btn-finder {
-      background: linear-gradient(135deg, #8b5cf6, #7c3aed);
-      color: #fff;
-      text-decoration: none;
-      padding: 10px 16px;
-      border-radius: 8px;
-      font-size: 0.85rem;
-      font-weight: 600;
-      display: inline-flex;
-      align-items: center;
-      gap: 7px;
-      transition: all 0.15s ease;
-    }
-    .btn-finder:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(139,92,246,0.35); }
     .btn-dismiss {
       background: #334155;
       color: #94a3b8;
-      font-size: 0.85rem;
-      padding: 10px 16px;
+      font-size: 0.82rem;
+      padding: 8px 14px;
       border-radius: 8px;
       border: none;
       cursor: pointer;
@@ -350,23 +425,6 @@
       transition: all 0.15s ease;
     }
     .btn-dismiss:hover { background: #475569; color: #e2e8f0; }
-
-    /* Warehouse */
-    .warehouse-label { font-weight: 600; color: #94a3b8; }
-    .warehouse-qty { font-weight: 700; color: #34d399; }
-    .warehouse-qty.zero { color: #f87171; }
-
-    /* Store Section Labels */
-    .store-section {
-      margin: 16px 0 10px;
-      font-weight: 700;
-      font-size: 0.85rem;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .store-section.ebay { color: #60a5fa; }
-    .store-section.amazon { color: #fbbf24; }
 
     /* Empty State */
     .empty-state {
@@ -457,34 +515,33 @@
     .btn-close:hover { background: #475569; color: #e2e8f0; }
 
     /* Responsive */
-    @media (max-width: 1024px) {
-      .summary-grid { grid-template-columns: repeat(2, 1fr); }
-    }
     @media (max-width: 640px) {
       body { padding: 14px; }
       .header { gap: 12px; }
       .header h1 { font-size: 1.35rem; }
       .btn-scan { margin-right: 0; }
-      .summary-grid { gap: 12px; }
-      .summary-card { padding: 16px; }
-      .summary-card .icon { font-size: 1.25rem; }
-      .summary-card .count { font-size: 1.75rem; }
-      .summary-card .label { font-size: 0.68rem; }
-      .tabs { padding: 8px; }
-      .tab { padding: 9px 14px; font-size: 0.8rem; }
-      .tab-content { padding: 16px; }
-      .alert-card { padding: 16px; }
-      .alert-upc { font-size: 0.95rem; padding: 6px 10px; }
-      .alert-details { font-size: 0.85rem; padding: 12px; flex-direction: column; align-items: flex-start; gap: 8px; }
-      .detail-divider { display: none; }
-      .listing-item { padding: 10px; flex-wrap: wrap; }
-      .listing-item img { width: 38px; height: 38px; }
-      .listing-title { flex-basis: 100%; margin-top: 6px; white-space: normal; }
+      .header-actions { width: 100%; }
+      .header-actions .btn { flex: 1; justify-content: center; }
+      .tabs { padding: 4px; }
+      .tab { padding: 8px 10px; font-size: 0.78rem; gap: 5px; }
+      .tab .badge { min-width: 18px; height: 18px; font-size: 0.65rem; }
+      .tab-content { padding: 14px; }
+      .alert-hero { padding: 14px 16px 10px; gap: 12px; }
+      .alert-hero-img { width: 44px; height: 44px; }
+      .alert-hero-title { font-size: 0.88rem; }
+      .alert-stats { margin: 0 16px; grid-template-columns: repeat(2, 1fr); }
+      .stat-cell { padding: 10px; }
+      .stat-cell .stat-value { font-size: 1rem; }
+      .alert-location-row { padding: 8px 16px; }
+      .alert-listings-section { padding: 0 16px; }
+      .alert-footer { padding: 10px 16px 14px; }
+      .listing-item { padding: 8px; flex-wrap: wrap; }
+      .listing-item img { width: 32px; height: 32px; }
+      .listing-title { flex-basis: 100%; margin-top: 4px; white-space: normal; }
     }
     @media (max-width: 400px) {
-      .summary-card .count { font-size: 1.5rem; }
-      .tab { padding: 8px 10px; font-size: 0.75rem; }
-      .tab .badge { min-width: 16px; height: 16px; font-size: 0.6rem; }
+      .tab { padding: 7px 6px; font-size: 0.72rem; }
+      .alert-stats { grid-template-columns: repeat(2, 1fr); }
     }
 
     /* Day mode overrides */
@@ -492,27 +549,52 @@
     html.ss-theme-day .header h1 { color: #111827; }
     html.ss-theme-day .btn-back { background: rgba(0,0,0,0.05); color: #475569; border-color: #e2e8f0; }
     html.ss-theme-day .btn-back:hover { background: rgba(0,0,0,0.08); color: #111827; }
-    html.ss-theme-day .summary-card { background: #fff; border-color: #e2e8f0; }
-    html.ss-theme-day .summary-card:hover { background: #f8fafc; border-color: #cbd5e1; }
-    html.ss-theme-day .summary-card .label { color: #64748b; }
+    html.ss-theme-day .btn-refresh-ebay {
+      background: linear-gradient(135deg, #3b82f6, #2563eb);
+      color: #fff;
+    }
     html.ss-theme-day .main-card { background: #fff; border-color: #e2e8f0; }
     html.ss-theme-day .tabs { background: #f1f5f9; border-bottom-color: #e2e8f0; }
     html.ss-theme-day .tab { color: #64748b; }
     html.ss-theme-day .tab:hover { background: rgba(0,0,0,0.04); color: #475569; }
-    html.ss-theme-day .tab.active { background: #fff; color: #111827; }
-    html.ss-theme-day .alert-card { background: #f8fafc; border-color: #e2e8f0; }
-    html.ss-theme-day .alert-card:hover { border-color: #cbd5e1; }
-    html.ss-theme-day .alert-upc { color: #111827; background: #e2e8f0; }
-    html.ss-theme-day .alert-details { color: #475569; background: rgba(0,0,0,0.02); }
-    html.ss-theme-day .alert-details strong { color: #111827; }
-    html.ss-theme-day .detail-divider { background: #e2e8f0; }
-    html.ss-theme-day .listing-item { background: rgba(0,0,0,0.02); border-color: #e2e8f0; }
-    html.ss-theme-day .listing-item:hover { background: rgba(0,0,0,0.04); border-color: #cbd5e1; }
-    html.ss-theme-day .listing-num { color: #64748b; background: #e2e8f0; }
+    html.ss-theme-day .tab.active { background: #fff; color: #111827; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    html.ss-theme-day .alert-card { background: #fff; border-color: #e5e7eb; }
+    html.ss-theme-day .alert-card:hover { border-color: #cbd5e1; box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
+    html.ss-theme-day .alert-hero-title { color: #111827; }
+    html.ss-theme-day .alert-hero-title a { color: #111827; }
+    html.ss-theme-day .alert-hero-title a:hover { color: #2563eb; }
+    html.ss-theme-day .alert-stats { background: #e5e7eb; }
+    html.ss-theme-day .stat-cell { background: #fff; }
+    html.ss-theme-day .stat-cell .stat-value { color: #111827; }
+    html.ss-theme-day .stat-cell .stat-label { color: #6b7280; }
+    html.ss-theme-day .alert-location-row { color: #6b7280; }
+    html.ss-theme-day .location-link {
+      color: #166534;
+      background: rgba(34,197,94,0.12);
+      border-color: rgba(34,197,94,0.24);
+    }
+    html.ss-theme-day .location-link:hover {
+      color: #14532d;
+      background: rgba(34,197,94,0.2);
+    }
+    html.ss-theme-day .alert-upc-link {
+      color: #1d4ed8;
+      background: rgba(59,130,246,0.1);
+      border-color: rgba(59,130,246,0.2);
+    }
+    html.ss-theme-day .alert-upc-link:hover {
+      color: #1e40af;
+      background: rgba(59,130,246,0.16);
+    }
+    html.ss-theme-day .alert-severity.yellow { background: rgba(234,179,8,0.12); color: #92400e; }
+    html.ss-theme-day .alert-listings-label { color: #9ca3af; border-top-color: #e5e7eb; }
+    html.ss-theme-day .listing-item { background: #f9fafb; border-color: #e5e7eb; }
+    html.ss-theme-day .listing-item:hover { background: #f1f5f9; border-color: #cbd5e1; }
     html.ss-theme-day .listing-title { color: #334155; }
-    html.ss-theme-day .btn-dismiss { background: #e2e8f0; color: #475569; }
-    html.ss-theme-day .btn-dismiss:hover { background: #cbd5e1; color: #111827; }
-    html.ss-theme-day .warehouse-label { color: #475569; }
+    html.ss-theme-day .listing-title-link { color: #2563eb; }
+    html.ss-theme-day .listing-title-link:hover { color: #1d4ed8; }
+    html.ss-theme-day .btn-dismiss { background: #e5e7eb; color: #475569; }
+    html.ss-theme-day .btn-dismiss:hover { background: #d1d5db; color: #111827; }
     html.ss-theme-day .empty-state p { color: #64748b; }
     html.ss-theme-day #loading { color: #64748b; }
     html.ss-theme-day .spinner { border-color: #e2e8f0; border-top-color: #10b981; }
@@ -527,29 +609,13 @@
       <a href="/store-manager" class="btn btn-back">← Back</a>
       <h1><span class="icon">🩺</span> <span data-i18n="store_listing_helper">Store Doctor</span></h1>
     </div>
-    <button class="btn btn-scan" onclick="scanAlerts()"><i class="fas fa-stethoscope"></i> <span data-i18n="scan">Diagnose</span></button>
-  </div>
-
-  <div class="summary-grid">
-    <div class="summary-card danger">
-      <span class="icon"><i class="fas fa-warehouse"></i></span>
-      <div class="count" id="count-no-warehouse">-</div>
-      <div class="label" data-i18n="no_warehouse">No Warehouse</div>
-    </div>
-    <div class="summary-card warning">
-      <span class="icon"><i class="fas fa-clone"></i></span>
-      <div class="count" id="count-cross-store">-</div>
-      <div class="label" data-i18n="cross_store">Cross-Store</div>
-    </div>
-    <div class="summary-card danger">
-      <span class="icon"><i class="fas fa-copy"></i></span>
-      <div class="count" id="count-same-store">-</div>
-      <div class="label" data-i18n="same_store_dup">Same-Store Dup</div>
-    </div>
-    <div class="summary-card danger">
-      <span class="icon"><i class="fas fa-balance-scale-right"></i></span>
-      <div class="count" id="count-qty-mismatch">-</div>
-      <div class="label" data-i18n="qty_mismatch">Qty Mismatch</div>
+    <div class="header-actions">
+      <button class="btn btn-refresh-ebay" id="btnSyncEbay" onclick="syncEbayLive()">
+        <i class="fab fa-ebay"></i> <span>Refresh eBay Live</span>
+      </button>
+      <button class="btn btn-scan" id="btnDiagnose" onclick="scanAlerts()">
+        <i class="fas fa-stethoscope"></i> <span data-i18n="scan">Diagnose</span>
+      </button>
     </div>
   </div>
 
@@ -559,17 +625,9 @@
         <i class="fas fa-warehouse" style="margin-right:6px"></i><span data-i18n="no_warehouse">No Warehouse</span>
         <span class="badge badge-red" id="badge-no-warehouse" style="display:none">0</span>
       </button>
-      <button class="tab" data-tab="cross_store">
-        <i class="fas fa-clone" style="margin-right:6px"></i><span data-i18n="cross_store">Cross-Store</span>
-        <span class="badge badge-yellow" id="badge-cross-store" style="display:none">0</span>
-      </button>
-      <button class="tab" data-tab="same_store_dup">
-        <i class="fas fa-copy" style="margin-right:6px"></i><span data-i18n="same_store_dup">Same-Store Dup</span>
-        <span class="badge badge-red" id="badge-same-store" style="display:none">0</span>
-      </button>
-      <button class="tab" data-tab="qty_mismatch">
-        <i class="fas fa-balance-scale-right" style="margin-right:6px"></i><span data-i18n="qty_mismatch">Qty Mismatch</span>
-        <span class="badge badge-red" id="badge-qty-mismatch" style="display:none">0</span>
+      <button class="tab" data-tab="quantity_alert">
+        <i class="fas fa-balance-scale-right" style="margin-right:6px"></i><span data-i18n="quantity_alert">Quantity Alert</span>
+        <span class="badge badge-yellow" id="badge-quantity-alert" style="display:none">0</span>
       </button>
       <button class="tab" data-tab="dismissed">
         <i class="fas fa-check-circle" style="margin-right:6px"></i><span data-i18n="marked_fixed">Marked Fixed</span>
@@ -579,13 +637,11 @@
 
     <div id="loading" style="display:none">
       <div class="spinner"></div>
-      <span data-i18n="scanning_listings">Running diagnostics...</span>
+      <span id="loadingText" data-i18n="scanning_listings">Running diagnostics...</span>
     </div>
 
     <div class="tab-content active" id="content-no_warehouse"></div>
-    <div class="tab-content" id="content-cross_store"></div>
-    <div class="tab-content" id="content-same_store_dup"></div>
-    <div class="tab-content" id="content-qty_mismatch"></div>
+    <div class="tab-content" id="content-quantity_alert"></div>
     <div class="tab-content" id="content-dismissed"></div>
   </div>
 </div>
@@ -606,6 +662,7 @@ function storeLabel(store) {
   const s = String(store || '').toLowerCase();
   if (s === 'ebay') return t('ebay');
   if (s === 'amazon') return t('amazon');
+  if (s === 'facebook' || s === 'fb') return t('facebook');
   return store || '';
 }
 function missingImgSvg(){
@@ -618,25 +675,129 @@ function esc(s) {
   d.textContent = s || '';
   return d.innerHTML;
 }
+function allSearchHref(upc) {
+  const q = String(upc || '').trim();
+  return `/unified-search?q=${encodeURIComponent(q)}`;
+}
+function _locationPathParts(rawPath) {
+  return String(rawPath || '')
+    .replace(/\\/g, '/')
+    .replace(/^\/+/, '')
+    .split('/')
+    .filter(Boolean)
+    .map(p => encodeURIComponent(p));
+}
+function _locationImageCandidates(location) {
+  const raw = String(location || '').trim();
+  if (!raw) return [];
+
+  const clean = raw.replace(/\\/g, '/').replace(/^\/+/, '');
+  const lower = clean.toLowerCase();
+  const hasExt = /\.[a-z0-9]{2,5}$/i.test(clean);
+  const isPathLike = clean.includes('/');
+  const candidates = [];
+  const add = (path) => {
+    const p = String(path || '').trim();
+    if (!p) return;
+    if (!candidates.includes(p)) candidates.push(p);
+  };
+
+  const parts = _locationPathParts(clean);
+  const encodedPath = parts.join('/');
+  const baseName = parts.length ? parts[parts.length - 1] : encodeURIComponent(clean);
+
+  if (lower.startsWith('static/pictureposition/')) {
+    add('/' + encodedPath);
+  } else if (lower.startsWith('pictureposition/')) {
+    add('/static/' + encodedPath);
+  } else if (lower.startsWith('static/shelves/')) {
+    add('/' + encodedPath);
+  } else if (lower.startsWith('shelves/')) {
+    add('/static/' + encodedPath);
+  }
+
+  if (isPathLike || hasExt) {
+    add('/static/pictureposition/' + baseName);
+    const shelfStem = decodeURIComponent(baseName).replace(/\.[a-z0-9]{2,5}$/i, '').toLowerCase();
+    if (shelfStem) add('/static/shelves/' + encodeURIComponent(shelfStem) + '.png');
+  } else {
+    const code = clean.toLowerCase();
+    add('/static/shelves/' + encodeURIComponent(code) + '.png');
+    add('/static/pictureposition/' + encodeURIComponent(clean));
+  }
+
+  const bust = Date.now();
+  return candidates.map(src => `${src}${src.includes('?') ? '&' : '?'}t=${bust}`);
+}
+function renderLocationLinks(locations) {
+  const items = (Array.isArray(locations) ? locations : [])
+    .map(loc => String(loc || '').trim())
+    .filter(Boolean);
+  if (!items.length) return `<strong>${esc(t('location_not_set'))}</strong>`;
+  return `<span class="location-links">${items.map(loc =>
+    `<a class="location-link js-location-link" href="#" data-location="${esc(encodeURIComponent(loc))}" title="${esc(t('location'))}: ${esc(loc)}">${esc(loc)}</a>`
+  ).join('')}</span>`;
+}
 
 // Tab switching
+function activateTab(tabName) {
+  const tabKey = String(tabName || '').trim();
+  if (!tabKey) return;
+  const targetBtn = document.querySelector(`.tab[data-tab="${tabKey}"]`);
+  const targetPanel = document.getElementById('content-' + tabKey);
+  if (!targetBtn || !targetPanel) return;
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+  targetBtn.classList.add('active');
+  targetPanel.classList.add('active');
+}
+function openTabFromUrl() {
+  try {
+    const params = new URLSearchParams(window.location.search || '');
+    const tab = String(params.get('tab') || '').trim();
+    if (tab) activateTab(tab);
+  } catch (e) {}
+}
 document.querySelectorAll('.tab').forEach(tab => {
-  tab.addEventListener('click', () => {
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-    tab.classList.add('active');
-    document.getElementById('content-' + tab.dataset.tab).classList.add('active');
-  });
+  tab.addEventListener('click', () => activateTab(tab.dataset.tab));
 });
 
 let alertsData = null;
+let isEbaySyncing = false;
 
-async function scanAlerts() {
+function setLoadingText(message) {
+  const el = document.getElementById('loadingText');
+  if (el) el.textContent = message || t('scanning_listings');
+}
+
+function setActionButtonsDisabled(disabled) {
+  const syncBtn = document.getElementById('btnSyncEbay');
+  const diagBtn = document.getElementById('btnDiagnose');
+  if (syncBtn) syncBtn.disabled = !!disabled;
+  if (diagBtn) diagBtn.disabled = !!disabled;
+}
+
+function syncGlobalAlertsBadge(counts) {
+  try {
+    const noWarehouse = Number((counts || {}).no_warehouse || 0);
+    const quantityAlert = Number((counts || {}).quantity_alert || 0);
+    const total = Math.max(0, noWarehouse + quantityAlert);
+    if (window.ssNoWarehouseAlerts && typeof window.ssNoWarehouseAlerts.set === 'function') {
+      window.ssNoWarehouseAlerts.set(total);
+    } else if (window.ssAlertsCount && typeof window.ssAlertsCount.set === 'function') {
+      window.ssAlertsCount.set(total);
+    }
+  } catch (e) {}
+}
+
+async function scanAlerts(forceRefresh = false) {
   document.getElementById('loading').style.display = 'block';
+  setLoadingText(t('scanning_listings'));
   document.querySelectorAll('.tab-content').forEach(c => c.innerHTML = '');
 
   try {
-    const resp = await fetch('/api/listing-helper/scan');
+    const url = forceRefresh ? '/api/listing-helper/scan?refresh=1' : '/api/listing-helper/scan';
+    const resp = await fetch(url, { cache: 'no-store' });
     const data = await resp.json();
 
     if (!data.success) {
@@ -647,28 +808,49 @@ async function scanAlerts() {
     alertsData = data.alerts;
     const counts = data.counts;
 
-    // Update counts
-    document.getElementById('count-no-warehouse').textContent = counts.no_warehouse;
-    document.getElementById('count-cross-store').textContent = counts.cross_store;
-    document.getElementById('count-same-store').textContent = counts.same_store_dup;
-    document.getElementById('count-qty-mismatch').textContent = counts.qty_mismatch;
-
     // Update badges
     updateBadge('badge-no-warehouse', counts.no_warehouse);
-    updateBadge('badge-cross-store', counts.cross_store);
-    updateBadge('badge-same-store', counts.same_store_dup);
-    updateBadge('badge-qty-mismatch', counts.qty_mismatch);
+    updateBadge('badge-quantity-alert', counts.quantity_alert);
+    syncGlobalAlertsBadge(counts);
 
     // Render alerts
-    renderNoWarehouse(alertsData.no_warehouse);
-    renderCrossStore(alertsData.cross_store);
-    renderSameStoreDup(alertsData.same_store_dup);
-    renderQtyMismatch(alertsData.qty_mismatch);
+    renderNoWarehouse(alertsData.no_warehouse || []);
+    renderQuantityAlert(alertsData.quantity_alert || []);
 
   } catch (e) {
     alert(t('error_scanning') + ': ' + e.message);
   } finally {
     document.getElementById('loading').style.display = 'none';
+    setLoadingText(t('scanning_listings'));
+  }
+}
+
+async function syncEbayLive() {
+  if (isEbaySyncing) return;
+  isEbaySyncing = true;
+  setActionButtonsDisabled(true);
+  document.getElementById('loading').style.display = 'block';
+  setLoadingText('Refreshing eBay live listings...');
+
+  try {
+    const resp = await fetch('/api/sync/ebay-orders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || !data.success) {
+      throw new Error(data.message || data.error || t('unknown'));
+    }
+
+    await scanAlerts(true);
+    await loadDismissed();
+  } catch (e) {
+    alert('eBay refresh failed: ' + (e && e.message ? e.message : t('unknown')));
+  } finally {
+    isEbaySyncing = false;
+    setActionButtonsDisabled(false);
+    document.getElementById('loading').style.display = 'none';
+    setLoadingText(t('scanning_listings'));
   }
 }
 
@@ -683,15 +865,52 @@ function updateBadge(id, count) {
 }
 
 function renderListings(listings) {
-  return listings.map((l, idx) => `
-    <div class="listing-item">
-      <img src="${esc(l.image || '') || missingImgSvg()}" data-img="${encodeURIComponent(l.image || '')}" data-title="${encodeURIComponent(l.title || '')}" onclick="openListingImg(this)" onerror="this.src='${missingImgSvg()}'">
-      <span class="listing-num">#${idx + 1}</span>
-      <span class="store-badge ${l.store}">${esc(storeLabel(l.store))}</span>
-      <span class="listing-qty">×${l.qty}</span>
-      <span class="listing-title" title="${esc(l.title || t('untitled'))}">${esc(l.title || t('untitled'))}</span>
-    </div>
-  `).join('');
+  function listingUrl(l) {
+    const raw = String((l && l.url) || '').trim();
+    if (raw && /^https?:\/\//i.test(raw)) return raw;
+
+    const store = String((l && l.store) || '').toLowerCase();
+    if (store === 'ebay') {
+      const itemId = String((l && l.item_id) || '').trim();
+      if (itemId) return `https://www.ebay.com/itm/${encodeURIComponent(itemId)}`;
+      const listingId = String((l && l.listing_id) || '').trim();
+      if (listingId.startsWith('ebay:') && !listingId.includes('ebay_row:')) {
+        const idPart = listingId.slice(5);
+        if (idPart) return `https://www.ebay.com/itm/${encodeURIComponent(idPart)}`;
+      }
+      return '';
+    }
+
+    if (store === 'amazon') {
+      const asin = String((l && l.asin) || '').trim();
+      if (asin) return `https://www.amazon.com/dp/${encodeURIComponent(asin)}`;
+      const listingId = String((l && l.listing_id) || '').trim();
+      if (listingId.startsWith('amazon:') && !listingId.includes('amazon_row:')) {
+        const idPart = listingId.slice(7);
+        if (idPart) return `https://www.amazon.com/dp/${encodeURIComponent(idPart)}`;
+      }
+      return '';
+    }
+
+    return '';
+  }
+
+  return listings.map((l, idx) => {
+    const href = listingUrl(l);
+    const title = esc(l.title || t('untitled'));
+    const titleHtml = href
+      ? `<a class="listing-title-link" href="${esc(href)}" target="_blank" rel="noopener">${title}</a>`
+      : title;
+    return `
+      <div class="listing-item">
+        <img src="${esc(l.image || '') || missingImgSvg()}" data-img="${encodeURIComponent(l.image || '')}" data-title="${encodeURIComponent(l.title || '')}" onclick="openListingImg(this)" onerror="this.src='${missingImgSvg()}'">
+        <span class="listing-num">#${idx + 1}</span>
+        <span class="store-badge ${l.store}">${esc(storeLabel(l.store))}</span>
+        <span class="listing-qty">×${l.qty}</span>
+        <span class="listing-title" title="${title}">${titleHtml}</span>
+      </div>
+    `;
+  }).join('');
 }
 
 function renderNoWarehouse(alerts) {
@@ -702,27 +921,51 @@ function renderNoWarehouse(alerts) {
   }
   el.innerHTML = alerts.map(a => {
     const first = (a.listings && a.listings.length) ? a.listings[0] : {};
-    const finderParams = new URLSearchParams({
-      title: first.title || '',
-      barcode: a.upc || '',
-      image: first.image || '',
-      return: '/store-listing-helper'
-    }).toString();
-    const finderHref = `/finder?${finderParams}`;
+    const warehouseQty = Number(a.warehouse_qty || 0);
+    const pendingQty = Number(a.pending_sale_qty || 0);
+    const effectiveQty = Number(a.effective_qty || 0);
+    const totalListingQty = (a.listings || []).reduce((s, l) => s + Number(l.qty || 0), 0);
+    const locationHtml = renderLocationLinks(a.warehouse_locations);
+    const heroImg = first.image || '';
+    const heroTitle = first.title || t('untitled');
+    // Build stats cells
+    let statsHtml = `
+      <div class="stat-cell"><div class="stat-value danger">${warehouseQty}</div><div class="stat-label">\u{1F3ED} ${esc(t('warehouse'))}</div></div>
+      <div class="stat-cell"><div class="stat-value warning">${totalListingQty}</div><div class="stat-label">${esc(t('listed'))}</div></div>`;
+    if (pendingQty > 0) {
+      statsHtml += `<div class="stat-cell"><div class="stat-value warning">${pendingQty}</div><div class="stat-label">${esc(t('pending'))}</div></div>`;
+    }
+    statsHtml += `<div class="stat-cell"><div class="stat-value danger">${effectiveQty}</div><div class="stat-label">${esc(t('effective'))}</div></div>`;
+
+    // Extra listings beyond the first
+    const extraListings = (a.listings || []).length > 1
+      ? `<div class="alert-listings-section">
+          <div class="alert-listings-label">${esc(t('all_listings'))} (${a.listings.length})</div>
+          <div class="listing-list">${renderListings(a.listings)}</div>
+        </div>`
+      : (a.listings || []).length === 1
+        ? `<div class="alert-listings-section"><div class="listing-list">${renderListings(a.listings)}</div></div>`
+        : '';
+
     return `
     <div class="alert-card ${a.severity}">
-      <div class="alert-header">
-        <span class="alert-upc">${esc(a.upc)}</span>
-        <span class="alert-severity ${a.severity}">${a.severity === 'red' ? '<i class="fas fa-exclamation-triangle"></i> ' + esc(t('multi_store')) : '<i class="fas fa-info-circle"></i> ' + esc(t('single_store'))}</span>
+      <div class="alert-hero">
+        <img class="alert-hero-img" src="${esc(heroImg) || missingImgSvg()}" data-img="${encodeURIComponent(heroImg)}" data-title="${encodeURIComponent(heroTitle)}" onclick="openListingImg(this)" onerror="this.src='${missingImgSvg()}'">
+        <div class="alert-hero-info">
+          <div class="alert-hero-title">${esc(heroTitle)}</div>
+          <div class="alert-hero-meta">
+            <span class="alert-severity ${a.severity}">${a.severity === 'red' ? '<i class="fas fa-exclamation-triangle"></i> ' + esc(t('multi_store')) : '<i class="fas fa-info-circle"></i> ' + esc(t('single_store'))}</span>
+            <a class="alert-upc-link" href="${esc(allSearchHref(a.upc))}">${esc(a.upc)}</a>
+            ${a.stores.map(s => `<span class="store-badge ${s.toLowerCase()}">${esc(storeLabel(s))}</span>`).join('')}
+          </div>
+        </div>
       </div>
-      <div class="alert-details">
-        <span><i class="fas fa-store" style="margin-right:6px;color:#60a5fa"></i>${esc(t('listed_on'))}: <strong>${a.stores.map(s => esc(storeLabel(s))).join(', ')}</strong></span>
-        <span class="detail-divider"></span>
-        <span><i class="fas fa-warehouse" style="margin-right:6px;color:#f87171"></i>${esc(t('no_matching_upc'))}</span>
+      <div class="alert-stats">${statsHtml}</div>
+      <div class="alert-location-row">
+        <i class="fas fa-map-marker-alt"></i> ${locationHtml}
       </div>
-      <div class="listing-list">${renderListings(a.listings)}</div>
-      <div class="alert-actions">
-        <a class="btn-finder" href="${esc(finderHref)}" target="_blank" rel="noopener"><i class="fas fa-search"></i> ${esc(t('finder'))}</a>
+      ${extraListings}
+      <div class="alert-footer">
         <button class="btn-dismiss" onclick="dismissAlert('no_warehouse', '${a.hash}', '${esc(a.upc)}')">
           <i class="fas fa-check"></i> ${esc(t('mark_fixed'))}
         </button>
@@ -731,94 +974,51 @@ function renderNoWarehouse(alerts) {
   `}).join('');
 }
 
-function renderCrossStore(alerts) {
-  const el = document.getElementById('content-cross_store');
+function renderQuantityAlert(alerts) {
+  const el = document.getElementById('content-quantity_alert');
   if (!alerts.length) {
-    el.innerHTML = `<div class="empty-state"><span class="icon"><i class="fas fa-check-circle"></i></span><p>${esc(t('no_cross_store_dups'))}</p></div>`;
+    el.innerHTML = `<div class="empty-state"><span class="icon"><i class="fas fa-check-circle"></i></span><p>${esc(t('no_quantity_alerts'))}</p></div>`;
     return;
   }
   el.innerHTML = alerts.map(a => {
-    const warehouseQty = a.warehouse_qty || 0;
-    const warehouseQtyClass = warehouseQty === 0 ? 'warehouse-qty zero' : 'warehouse-qty';
+    const warehouseQty = Number(a.warehouse_qty || 0);
+    const listingQty = Number(a.listing_qty || 0);
+    const overage = Number(a.overage || Math.max(0, listingQty - warehouseQty));
+    const locationHtml = renderLocationLinks(a.warehouse_locations);
+    const listing = a.listing || {};
+    const heroImg = listing.image || '';
+    const heroTitle = listing.title || t('untitled');
+
     return `
     <div class="alert-card yellow">
-      <div class="alert-header">
-        <span class="alert-upc">${esc(a.upc)}</span>
-        <span class="alert-severity yellow"><i class="fas fa-clone"></i> ${esc(t('cross_store'))}</span>
+      <div class="alert-hero">
+        <img class="alert-hero-img" src="${esc(heroImg) || missingImgSvg()}" data-img="${encodeURIComponent(heroImg)}" data-title="${encodeURIComponent(heroTitle)}" onclick="openListingImg(this)" onerror="this.src='${missingImgSvg()}'">
+        <div class="alert-hero-info">
+          <div class="alert-hero-title">${esc(heroTitle)}</div>
+          <div class="alert-hero-meta">
+            <span class="alert-severity yellow"><i class="fas fa-balance-scale-right"></i> ${esc(t('quantity_alert'))}</span>
+            <a class="alert-upc-link" href="${esc(allSearchHref(a.upc))}">${esc(a.upc)}</a>
+            <span class="store-badge ${(a.store || listing.store || '').toLowerCase()}">${esc(storeLabel(a.store || listing.store))}</span>
+          </div>
+        </div>
       </div>
-      <div class="alert-details">
-        <span><i class="fas fa-info-circle" style="margin-right:6px;color:#fbbf24"></i>${esc(t('same_upc_both_stores'))}</span>
-        <span class="detail-divider"></span>
-        <span><span class="warehouse-label"><i class="fas fa-warehouse" style="margin-right:5px"></i>${esc(t('warehouse'))}:</span> <span class="${warehouseQtyClass}">${warehouseQty}</span></span>
+      <div class="alert-stats">
+        <div class="stat-cell"><div class="stat-value success">${warehouseQty}</div><div class="stat-label">\u{1F3ED} ${esc(t('warehouse'))}</div></div>
+        <div class="stat-cell"><div class="stat-value warning">${listingQty}</div><div class="stat-label">${esc(t('listed'))}</div></div>
+        <div class="stat-cell" style="background:rgba(239,68,68,0.08);"><div class="stat-value danger">+${overage}</div><div class="stat-label" style="color:#f87171;">${esc(t('over'))}</div></div>
       </div>
-      <div class="store-section ebay"><i class="fab fa-ebay" style="margin-right:6px"></i>${esc(t('ebay'))}</div>
-      <div class="listing-list">${renderListings(a.ebay_listings)}</div>
-      <div class="store-section amazon"><i class="fab fa-amazon" style="margin-right:6px"></i>${esc(t('amazon'))}</div>
-      <div class="listing-list">${renderListings(a.amazon_listings)}</div>
-      <div class="alert-actions">
-        <button class="btn-dismiss" onclick="dismissAlert('cross_store', '${a.hash}', '${esc(a.upc)}')">
-          <i class="fas fa-check"></i> ${esc(t('acknowledge'))}
-        </button>
+      <div class="alert-location-row">
+        <i class="fas fa-map-marker-alt"></i> ${locationHtml}
       </div>
-    </div>
-  `}).join('');
-}
-
-function renderSameStoreDup(alerts) {
-  const el = document.getElementById('content-same_store_dup');
-  if (!alerts.length) {
-    el.innerHTML = `<div class="empty-state"><span class="icon"><i class="fas fa-check-circle"></i></span><p>${esc(t('no_same_store_dups'))}</p></div>`;
-    return;
-  }
-  el.innerHTML = alerts.map(a => `
-    <div class="alert-card red">
-      <div class="alert-header">
-        <span class="alert-upc">${esc(a.upc)}</span>
-        <span class="alert-severity red"><i class="fas fa-copy"></i> ${a.count} ${esc(t('listings_on'))} ${esc(storeLabel(a.store))}</span>
-      </div>
-      <div class="alert-details">
-        <span><i class="fas fa-exclamation-triangle" style="margin-right:6px;color:#f87171"></i>${esc(t('same_upc_listed'))} <strong>${a.count}</strong> ${esc(t('times_on'))} <strong>${esc(storeLabel(a.store))}</strong></span>
-      </div>
-      <div class="listing-list">${renderListings(a.listings)}</div>
-      <div class="alert-actions">
-        <button class="btn-dismiss" onclick="dismissAlert('same_store_dup', '${a.hash}', '${esc(a.upc)}', '${a.store}')">
+      <div class="alert-listings-section"><div class="listing-list">${renderListings([listing])}</div></div>
+      <div class="alert-footer">
+        <button class="btn-dismiss" onclick="dismissAlert('quantity_alert', '${a.hash}', '${esc(a.upc)}', '${esc(a.store || '')}')">
           <i class="fas fa-check"></i> ${esc(t('mark_fixed'))}
         </button>
       </div>
     </div>
-  `).join('');
-}
-
-function renderQtyMismatch(alerts) {
-  const el = document.getElementById('content-qty_mismatch');
-  if (!alerts.length) {
-    el.innerHTML = `<div class="empty-state"><span class="icon"><i class="fas fa-check-circle"></i></span><p>${esc(t('all_quantities_match'))}</p></div>`;
-    return;
-  }
-  el.innerHTML = alerts.map(a => {
-    const warehouseQty = a.warehouse_qty || 0;
-    const warehouseQtyClass = warehouseQty === 0 ? 'warehouse-qty zero' : 'warehouse-qty';
-    return `
-    <div class="alert-card red">
-      <div class="alert-header">
-        <span class="alert-upc">${esc(a.upc)}</span>
-        <span class="alert-severity red"><i class="fas fa-exclamation-circle"></i> ${esc(t('oversold_by'))} ${a.overage}</span>
-      </div>
-      <div class="alert-details">
-        <span><i class="fas fa-list-ol" style="margin-right:6px;color:#60a5fa"></i>${esc(t('listing_total'))}: <strong>${a.listing_qty}</strong></span>
-        <span class="detail-divider"></span>
-        <span><span class="warehouse-label"><i class="fas fa-warehouse" style="margin-right:5px"></i>${esc(t('warehouse'))}:</span> <span class="${warehouseQtyClass}">${warehouseQty}</span></span>
-        <span class="detail-divider"></span>
-        <span><i class="fas fa-arrow-up" style="margin-right:5px;color:#f87171"></i>${esc(t('overage'))}: <strong style="color:#f87171">+${a.overage}</strong></span>
-      </div>
-      <div class="listing-list">${renderListings(a.listings)}</div>
-      <div class="alert-actions">
-        <button class="btn-dismiss" onclick="dismissAlert('qty_mismatch', '${a.hash}', '${esc(a.upc)}')">
-          <i class="fas fa-check"></i> ${esc(t('mark_fixed'))}
-        </button>
-      </div>
-    </div>
-  `}).join('');
+  `;
+  }).join('');
 }
 
 function formatDismissedAt(raw) {
@@ -848,18 +1048,21 @@ function renderDismissed(items) {
     const storeLabelText = d.store ? storeLabel(d.store) : '';
     const dismissedAt = formatDismissedAt(d.dismissed_at);
     return `
-      <div class="alert-card">
-        <div class="alert-header">
-          <span class="alert-upc">${esc(d.upc || '')}</span>
-          <span class="alert-severity yellow"><i class="fas fa-check"></i> ${esc(typeLabel)}</span>
+      <div class="alert-card" style="border-top:3px solid #475569;">
+        <div class="alert-hero" style="padding-bottom:0;">
+          <div class="alert-hero-info">
+            <div class="alert-hero-meta" style="margin-bottom:0;">
+              <span class="alert-severity" style="background:rgba(71,85,105,0.2);color:#94a3b8;"><i class="fas fa-check"></i> ${esc(typeLabel)}</span>
+              ${(d.upc || '').trim() ? `<a class="alert-upc-link" href="${esc(allSearchHref(d.upc))}">${esc(d.upc)}</a>` : ''}
+              ${storeLabelText ? `<span class="store-badge ${(d.store || '').toLowerCase()}">${esc(storeLabelText)}</span>` : ''}
+            </div>
+          </div>
         </div>
-        <div class="alert-details">
-          <span><i class="fas fa-tag" style="margin-right:6px;color:#60a5fa"></i><strong>${esc(t('alert_type'))}:</strong> ${esc(typeLabel)}</span>
-          ${storeLabelText ? `<span class="detail-divider"></span><span><i class="fas fa-store" style="margin-right:5px"></i><strong>${esc(t('store'))}:</strong> ${esc(storeLabelText)}</span>` : ''}
-          ${listingIds.length ? `<span class="detail-divider"></span><span><i class="fas fa-list" style="margin-right:5px"></i><strong>${esc(t('listings'))}:</strong> ${listingIds.length}</span>` : ''}
-          ${dismissedAt ? `<span class="detail-divider"></span><span><i class="fas fa-clock" style="margin-right:5px"></i><strong>${esc(t('dismissed_at'))}:</strong> ${esc(dismissedAt)}</span>` : ''}
+        <div class="alert-stats" style="margin-top:12px;">
+          ${listingIds.length ? `<div class="stat-cell"><div class="stat-value">${listingIds.length}</div><div class="stat-label">${esc(t('listings'))}</div></div>` : ''}
+          ${dismissedAt ? `<div class="stat-cell"><div class="stat-value" style="font-size:0.82rem;color:#94a3b8;">${esc(dismissedAt)}</div><div class="stat-label">${esc(t('dismissed_at'))}</div></div>` : ''}
         </div>
-        <div class="alert-actions">
+        <div class="alert-footer">
           <button class="btn-dismiss" onclick="undismissAlert('${d.snapshot_hash}')">
             <i class="fas fa-undo"></i> ${esc(t('undo'))}
           </button>
@@ -888,13 +1091,48 @@ function openListingImg(el) {
   const imgEl = document.getElementById('imgModalImg');
   const titleEl = document.getElementById('imgModalTitle');
   if (!modal || !imgEl || !titleEl) return;
+  imgEl.onerror = function() {
+    this.onerror = null;
+    this.src = missingImgSvg();
+  };
   imgEl.src = img || missingImgSvg();
   titleEl.textContent = title || t('listing');
   modal.style.display = 'flex';
 }
+function openLocationImage(location) {
+  const modal = document.getElementById('imgModal');
+  const imgEl = document.getElementById('imgModalImg');
+  const titleEl = document.getElementById('imgModalTitle');
+  if (!modal || !imgEl || !titleEl) return false;
+
+  const loc = String(location || '').trim();
+  if (!loc) return false;
+
+  const candidates = _locationImageCandidates(loc);
+  if (!candidates.length) return false;
+
+  titleEl.textContent = `${t('location')}: ${loc}`;
+  modal.style.display = 'flex';
+
+  let idx = 0;
+  const tryNext = () => {
+    if (idx >= candidates.length) {
+      imgEl.onerror = null;
+      imgEl.src = missingImgSvg();
+      return;
+    }
+    const src = candidates[idx++];
+    imgEl.onerror = tryNext;
+    imgEl.src = src;
+  };
+  tryNext();
+  return false;
+}
 
 function closeImgModal() {
   const modal = document.getElementById('imgModal');
+  const imgEl = document.getElementById('imgModalImg');
+  if (imgEl) imgEl.onerror = null;
   if (modal) modal.style.display = 'none';
 }
 
@@ -907,8 +1145,8 @@ async function dismissAlert(alertType, hash, upc, store = '') {
     });
     const data = await resp.json();
     if (data.success) {
-      scanAlerts();
-      loadDismissed();
+      await scanAlerts();
+      await loadDismissed();
     } else {
       alert(t('failed_to_dismiss') + ': ' + (data.error || t('unknown')));
     }
@@ -926,8 +1164,8 @@ async function undismissAlert(hash) {
     });
     const data = await resp.json();
     if (data.success) {
-      scanAlerts();
-      loadDismissed();
+      await scanAlerts();
+      await loadDismissed();
     } else {
       alert(t('error') + ': ' + (data.error || t('unknown')));
     }
@@ -954,6 +1192,7 @@ window.addEventListener('load', () => {
     window.i18n.applyTranslations();
   }
   hookLangToggle();
+  openTabFromUrl();
   scanAlerts();
   loadDismissed();
 });
@@ -961,6 +1200,19 @@ window.addEventListener('load', () => {
 // Close image modal when clicking outside
 document.getElementById('imgModal').addEventListener('click', function(e) {
   if (e.target === this) closeImgModal();
+});
+document.addEventListener('click', function(e) {
+  const link = e.target.closest('.js-location-link');
+  if (!link) return;
+  e.preventDefault();
+  const encoded = link.getAttribute('data-location') || '';
+  let location = '';
+  try {
+    location = decodeURIComponent(encoded);
+  } catch (_) {
+    location = encoded;
+  }
+  openLocationImage(location);
 });
 </script>
 <script src="/static/i18n.js"></script>

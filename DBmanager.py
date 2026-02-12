@@ -222,9 +222,26 @@ def ebayStoreDB(title, item_id, sku=None, price=None, quantity=None, image=None,
             Price TEXT, Quantity TEXT, Image TEXT, URL TEXT,
             List_State TEXT, Sold_Date TEXT, List_Date TEXT, isFound TEXT
         )''')
-        cursor.execute("SELECT 1 FROM INVENTORY WHERE ItemID = ?", (item_id,))
-        if cursor.fetchone() is not None:
-            print("item already in inventory database, skipping")
+        cursor.execute("SELECT ID FROM INVENTORY WHERE ItemID = ?", (item_id,))
+        existing = cursor.fetchone()
+        if existing is not None:
+            try:
+                cursor.execute("""
+                    UPDATE INVENTORY
+                    SET Title = ?,
+                        SKU = ?,
+                        Price = ?,
+                        Quantity = ?,
+                        Image = ?,
+                        URL = ?,
+                        List_State = ?,
+                        Sold_Date = ?,
+                        List_Date = ?
+                    WHERE ItemID = ?
+                """, (title, sku, price, quantity, image, URL, List_State, Sold_Date, List_Date, item_id))
+                print(f"Updated existing eBay listing {item_id}")
+            except sqlite3.Error as e:
+                print("something went wrong during eBay update", e)
             return
         try:
             cursor.execute("INSERT INTO INVENTORY (Title, ItemID, SKU, Price, Quantity, Image, List_State, Sold_Date, List_Date, URL) VALUES (?,?,?,?,?,?,?,?,?,?)",
