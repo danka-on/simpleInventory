@@ -15387,6 +15387,16 @@ def api_listing_helper_scan():
                         'hash': snap_hash
                     })
 
+        # Keep Quantity Alert cards ordered by the largest overage first.
+        alerts['quantity_alert'].sort(
+            key=lambda a: (
+                -_safe_int(a.get('overage'), 0),
+                -_safe_int(a.get('listing_qty'), 0),
+                str(a.get('upc') or '').lower(),
+                str((a.get('listing') or {}).get('title') or '').lower()
+            )
+        )
+
         # Count totals
         counts = {
             'no_warehouse': len(alerts['no_warehouse']),
