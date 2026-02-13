@@ -408,6 +408,15 @@
       background: rgba(255,255,255,0.05);
       border-color: rgba(255,255,255,0.12);
       color: var(--mc-ink);
+      color-scheme: dark;
+    }
+    html.ss-theme-night .tbField select option {
+      background-color: #0f172a;
+      color: #e2e8f0;
+    }
+    html.ss-theme-night .tbField select option:checked {
+      background-color: #334155;
+      color: #f8fafc;
     }
     html.ss-theme-night .panel {
       box-shadow: 0 8px 32px rgba(0,0,0,0.3);
@@ -522,21 +531,6 @@
           <div class="panelHead" style="margin:-14px -14px 0 -14px;" data-i18n="send_message">Send Message</div>
           <input id="replyToId" type="hidden">
           <div class="composeGrid">
-            <div class="field">
-              <label for="composeStore" data-i18n="store">Store</label>
-              <select id="composeStore">
-                <option value="ebay">eBay</option>
-                <option value="amazon">Amazon</option>
-              </select>
-            </div>
-            <div class="field">
-              <label for="composeTo" data-i18n="recipient">Recipient</label>
-              <input id="composeTo" type="text" data-i18n="recipient_placeholder" placeholder="Recipient name/email">
-            </div>
-            <div class="field">
-              <label for="composeSubject" data-i18n="subject">Subject</label>
-              <input id="composeSubject" type="text" data-i18n="subject_placeholder" placeholder="Subject">
-            </div>
             <div class="field full">
               <label for="composeBody" data-i18n="message_body">Message Body</label>
               <textarea id="composeBody" rows="5" data-i18n="message_body_placeholder" placeholder="Type your message"></textarea>
@@ -613,6 +607,25 @@
         const unread = state.messages.filter(m => m.direction === 'inbound' && m.status === 'unread').length;
         $('kpiTotal').textContent = total + ' message' + (total !== 1 ? 's' : '');
         $('kpiUnread').textContent = unread + ' unread';
+      }
+
+      function applyInitialFiltersFromUrl(){
+        try{
+          const p = new URLSearchParams(window.location.search || '');
+          const store = (p.get('store') || '').trim().toLowerCase();
+          const box = (p.get('box') || '').trim().toLowerCase();
+          const q = (p.get('q') || '').trim();
+
+          if(['all', 'ebay', 'amazon'].includes(store)){
+            storeFilterEl.value = store;
+          }
+          if(['inbox', 'sent', 'all'].includes(box)){
+            boxFilterEl.value = box;
+          }
+          if(q){
+            searchInputEl.value = q;
+          }
+        }catch(_e){}
       }
 
       function buildQuery(){
@@ -700,18 +713,12 @@
 
       function clearCompose(){
         $('replyToId').value = '';
-        $('composeTo').value = '';
-        $('composeSubject').value = '';
         $('composeBody').value = '';
         setStatus('');
       }
 
       function prepareReply(m){
         $('replyToId').value = String(m.id);
-        $('composeStore').value = fmtStore(m.store) === 'eBay' ? 'ebay' : 'amazon';
-        $('composeTo').value = m.sender_name || m.recipient_name || '';
-        const subj = (m.subject || '').trim();
-        $('composeSubject').value = subj.toLowerCase().startsWith('re:') ? subj : ('Re: ' + (subj || 'Message'));
         $('composeBody').focus();
       }
 
@@ -811,11 +818,20 @@
       async function sendMessage(ev){
         ev.preventDefault();
         setStatus('');
-        const store = $('composeStore').value || '';
-        const recipient_name = ($('composeTo').value || '').trim();
-        const subject = ($('composeSubject').value || '').trim();
         const body = ($('composeBody').value || '').trim();
         const reply_to_id = $('replyToId').value ? parseInt($('replyToId').value, 10) : null;
+        const replyMsg = reply_to_id ? state.messages.find((m) => m.id === reply_to_id) : null;
+        let store = 'ebay';
+        if(replyMsg){
+          store = fmtStore(replyMsg.store) === 'Amazon' ? 'amazon' : 'ebay';
+        } else if((storeFilterEl.value || '').toLowerCase() === 'amazon'){
+          store = 'amazon';
+        }
+        const recipient_name = (replyMsg ? (replyMsg.sender_name || replyMsg.recipient_name || '') : '').trim();
+        const baseSubject = ((replyMsg && replyMsg.subject) ? replyMsg.subject : '').trim();
+        const subject = baseSubject
+          ? (baseSubject.toLowerCase().startsWith('re:') ? baseSubject : ('Re: ' + baseSubject))
+          : (store === 'amazon' ? 'Message from Sweet Shelves' : 'Re: eBay Message');
         if(!body){
           setStatus(t('message_body_required'), 'err');
           return;
@@ -834,7 +850,6 @@
 
           setStatus(t('message_sent_ok'), 'ok');
           $('replyToId').value = '';
-          $('composeSubject').value = '';
           $('composeBody').value = '';
           if((boxFilterEl.value || 'inbox') === 'sent'){
             await loadMessages({ keepSelection: false });
@@ -864,6 +879,7 @@
         });
       }
 
+      applyInitialFiltersFromUrl();
       wireEvents();
       (async () => {
         await syncLive({ silent: true });

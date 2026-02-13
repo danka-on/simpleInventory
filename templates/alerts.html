@@ -155,6 +155,8 @@
     .alert-group-card:active { transform: translateY(0); }
     .alert-group-card.no-warehouse { border-top: 3px solid #ef4444; }
     .alert-group-card.quantity-alert { border-top: 3px solid #eab308; }
+    .alert-group-card.ebay-messages { border-top: 3px solid #3b82f6; }
+    .alert-group-card.amazon-messages { border-top: 3px solid #f59e0b; }
 
     .alert-group-inner {
       display: flex;
@@ -180,6 +182,14 @@
       background: rgba(234,179,8,0.12);
       color: #eab308;
     }
+    .alert-group-card.ebay-messages .alert-group-icon {
+      background: rgba(59,130,246,0.12);
+      color: #60a5fa;
+    }
+    .alert-group-card.amazon-messages .alert-group-icon {
+      background: rgba(245,158,11,0.12);
+      color: #fbbf24;
+    }
     .alert-group-info {
       flex: 1;
       min-width: 0;
@@ -193,6 +203,8 @@
     }
     .alert-group-card.no-warehouse .alert-group-count-big { color: #f87171; }
     .alert-group-card.quantity-alert .alert-group-count-big { color: #eab308; }
+    .alert-group-card.ebay-messages .alert-group-count-big { color: #60a5fa; }
+    .alert-group-card.amazon-messages .alert-group-count-big { color: #fbbf24; }
     .alert-group-label {
       font-size: 0.82rem;
       color: #94a3b8;
@@ -303,6 +315,10 @@
     html.ss-theme-day .alert-group-card.no-warehouse .alert-group-icon { background: rgba(239,68,68,0.08); }
     html.ss-theme-day .alert-group-card.quantity-alert .alert-group-icon { background: rgba(234,179,8,0.08); color: #b45309; }
     html.ss-theme-day .alert-group-card.quantity-alert .alert-group-count-big { color: #b45309; }
+    html.ss-theme-day .alert-group-card.ebay-messages .alert-group-icon { background: rgba(59,130,246,0.08); color: #1d4ed8; }
+    html.ss-theme-day .alert-group-card.ebay-messages .alert-group-count-big { color: #1d4ed8; }
+    html.ss-theme-day .alert-group-card.amazon-messages .alert-group-icon { background: rgba(245,158,11,0.08); color: #b45309; }
+    html.ss-theme-day .alert-group-card.amazon-messages .alert-group-count-big { color: #b45309; }
     html.ss-theme-day .alert-group-label { color: #6b7280; }
     html.ss-theme-day .btn-mark { background: #e5e7eb; color: #475569; }
     html.ss-theme-day .btn-mark:hover { background: #d1d5db; color: #111827; }
@@ -382,7 +398,7 @@
       return tkey || t('alert_type');
     }
 
-    const state = { active: [], marked: [] };
+    const state = { active: [], marked: [], ebayUnread: 0, amazonUnread: 0 };
 
     function syncGlobalAlertsBadge(count) {
       try {
@@ -416,9 +432,13 @@
     function renderActive() {
       const listEl = document.getElementById('activeList');
       const emptyEl = document.getElementById('activeEmpty');
-      updateBadge('badgeActive', state.active.length);
+      const listingAlertsCount = Math.max(0, Number(state.active.length || 0));
+      const ebayUnreadCount = Math.max(0, Number(state.ebayUnread || 0));
+      const amazonUnreadCount = Math.max(0, Number(state.amazonUnread || 0));
+      const totalActiveCount = listingAlertsCount + ebayUnreadCount + amazonUnreadCount;
+      updateBadge('badgeActive', totalActiveCount);
 
-      if (!state.active.length) {
+      if (!totalActiveCount) {
         listEl.style.display = 'none';
         emptyEl.style.display = 'block';
         return;
@@ -430,6 +450,42 @@
       const noWarehouseAlerts = state.active.filter((a) => String(a.alert_type || '').toLowerCase() === 'no_warehouse');
 
       const cards = [];
+
+      if (amazonUnreadCount > 0) {
+        cards.push(`
+          <div class="alert-group-card amazon-messages" data-href="/mail-center?store=amazon&box=inbox">
+            <div class="alert-group-inner">
+              <div class="alert-group-icon"><i class="fas fa-envelope-open-text"></i></div>
+              <div class="alert-group-info">
+                <div class="alert-group-count-big">${amazonUnreadCount}</div>
+                <div class="alert-group-label">${esc(t('amazon_unread_messages_alert'))}</div>
+              </div>
+              <div class="alert-group-actions">
+                <button class="btn-mark">${esc(t('open_mail_center'))}</button>
+                <span class="alert-group-arrow"><i class="fas fa-chevron-right"></i></span>
+              </div>
+            </div>
+          </div>
+        `);
+      }
+
+      if (ebayUnreadCount > 0) {
+        cards.push(`
+          <div class="alert-group-card ebay-messages" data-href="/mail-center?store=ebay&box=inbox">
+            <div class="alert-group-inner">
+              <div class="alert-group-icon"><i class="fas fa-envelope"></i></div>
+              <div class="alert-group-info">
+                <div class="alert-group-count-big">${ebayUnreadCount}</div>
+                <div class="alert-group-label">${esc(t('ebay_unread_messages_alert'))}</div>
+              </div>
+              <div class="alert-group-actions">
+                <button class="btn-mark">${esc(t('open_mail_center'))}</button>
+                <span class="alert-group-arrow"><i class="fas fa-chevron-right"></i></span>
+              </div>
+            </div>
+          </div>
+        `);
+      }
 
       if (noWarehouseAlerts.length) {
         cards.push(`
@@ -573,10 +629,17 @@
       document.getElementById('markedEmpty').style.display = 'none';
 
       try {
-        const [scanResp, dismissedResp] = await Promise.all([
+        const [scanResult, dismissedResult, mailResult] = await Promise.allSettled([
           fetch('/api/listing-helper/scan', { cache: 'no-store' }),
-          fetch('/api/listing-helper/dismissed', { cache: 'no-store' })
+          fetch('/api/listing-helper/dismissed', { cache: 'no-store' }),
+          fetch('/api/mail-center/messages?store=all&box=inbox&limit=300', { cache: 'no-store' })
         ]);
+
+        if (scanResult.status !== 'fulfilled') throw new Error('Scan failed');
+        if (dismissedResult.status !== 'fulfilled') throw new Error('Dismissed query failed');
+
+        const scanResp = scanResult.value;
+        const dismissedResp = dismissedResult.value;
         const scanData = await scanResp.json().catch(() => ({}));
         const dismissedData = await dismissedResp.json().catch(() => ({}));
 
@@ -604,6 +667,24 @@
           const tval = String(r.alert_type || '').toLowerCase();
           return tval === 'no_warehouse' || tval === 'quantity_alert';
         });
+
+        state.ebayUnread = 0;
+        state.amazonUnread = 0;
+        if (mailResult.status === 'fulfilled') {
+          const mailResp = mailResult.value;
+          const mailData = await mailResp.json().catch(() => ({}));
+          if (mailResp.ok && mailData && mailData.success) {
+            const messages = Array.isArray(mailData.messages) ? mailData.messages : [];
+            messages.forEach((m) => {
+              const direction = String((m || {}).direction || '').toLowerCase();
+              const status = String((m || {}).status || '').toLowerCase();
+              const store = String((m || {}).store || '').toLowerCase();
+              if (direction !== 'inbound' || status !== 'unread') return;
+              if (store.includes('ebay')) state.ebayUnread += 1;
+              if (store.includes('amazon')) state.amazonUnread += 1;
+            });
+          }
+        }
 
         syncGlobalAlertsBadge(state.active.length);
         renderActive();

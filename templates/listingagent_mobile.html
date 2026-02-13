@@ -320,6 +320,114 @@
     }
     .imgModalPrev{ left: 10px; }
     .imgModalNext{ right: 10px; }
+
+    /* Night mode overrides (theme class applied by injected i18n.js) */
+    html.ss-theme-night{
+      --ink:#e2e8f0;
+      --muted:#94a3b8;
+      --bg:#0f172a;
+      --card: rgba(30,41,59,0.95);
+      --border: rgba(148,163,184,0.26);
+      --shadow: 0 18px 38px rgba(0,0,0,0.45);
+      --blue:#60a5fa;
+      --green:#10b981;
+      --danger:#f87171;
+    }
+    html.ss-theme-night body{
+      background:
+        radial-gradient(900px 520px at 12% -20%, rgba(30,64,175,0.26), transparent 55%),
+        radial-gradient(700px 420px at 112% 18%, rgba(22,163,74,0.12), transparent 55%),
+        linear-gradient(180deg, #0b1220, #0f172a 55%, #111827);
+      color: var(--ink);
+    }
+    html.ss-theme-night .back{
+      color: var(--ink);
+      border-color: rgba(148,163,184,0.30);
+      background: rgba(30,41,59,0.88);
+      box-shadow: none;
+    }
+    html.ss-theme-night .pill{
+      background: rgba(96,165,250,0.16);
+      border-color: rgba(96,165,250,0.34);
+      color: #bfdbfe;
+    }
+    html.ss-theme-night .card{
+      border-color: rgba(148,163,184,0.24);
+      box-shadow: 0 22px 48px rgba(0,0,0,0.46);
+    }
+    html.ss-theme-night .head{
+      border-bottom-color: rgba(148,163,184,0.18);
+      background: linear-gradient(180deg, rgba(30,41,59,0.95), rgba(17,24,39,0.92));
+    }
+    html.ss-theme-night .meta{
+      color: rgba(226,232,240,0.82);
+    }
+    html.ss-theme-night .badge{
+      border-color: rgba(148,163,184,0.30);
+      background: rgba(15,23,42,0.60);
+      color: #cbd5e1;
+    }
+    html.ss-theme-night .badgeBlue{
+      background: rgba(59,130,246,0.18);
+      border-color: rgba(96,165,250,0.34);
+      color: #bfdbfe;
+    }
+    html.ss-theme-night .titleBox{
+      border-color: rgba(148,163,184,0.28);
+      background: rgba(15,23,42,0.58);
+      color: #f8fafc;
+    }
+    html.ss-theme-night .btnGhost{
+      border-color: rgba(148,163,184,0.30);
+      background: rgba(15,23,42,0.60);
+      color: #e2e8f0;
+    }
+    html.ss-theme-night .btnDanger{
+      background: rgba(225,29,72,0.18);
+      border-color: rgba(248,113,113,0.34);
+      color: #fda4af;
+    }
+    html.ss-theme-night .hint{
+      color: var(--muted);
+    }
+    html.ss-theme-night .thumb{
+      border-color: rgba(148,163,184,0.28);
+      background: #0f172a;
+    }
+    html.ss-theme-night .thumb .x{
+      border-color: rgba(148,163,184,0.34);
+      background: rgba(15,23,42,0.86);
+      color: #e2e8f0;
+      box-shadow: 0 10px 24px rgba(2,6,23,0.55);
+    }
+    html.ss-theme-night .thumbPlus{
+      border-color: rgba(96,165,250,0.40);
+      background: rgba(15,23,42,0.62);
+      color: #93c5fd;
+    }
+    html.ss-theme-night .thumbPlusBig{
+      background: linear-gradient(135deg, rgba(59,130,246,0.18), rgba(22,163,74,0.16));
+      border-color: rgba(96,165,250,0.42);
+    }
+    html.ss-theme-night .imgModalInner{
+      border-color: rgba(148,163,184,0.30);
+      background: rgba(15,23,42,0.95);
+      box-shadow: 0 32px 86px rgba(0,0,0,0.62);
+    }
+    html.ss-theme-night .imgModalInner img{
+      background: rgba(2,6,23,0.85);
+    }
+    html.ss-theme-night .imgModalCaption{
+      color: #cbd5e1;
+      border-top-color: rgba(148,163,184,0.24);
+    }
+    html.ss-theme-night .imgModalClose,
+    html.ss-theme-night .imgModalNav{
+      border-color: rgba(148,163,184,0.34);
+      background: rgba(15,23,42,0.86);
+      color: #e2e8f0;
+      box-shadow: 0 10px 24px rgba(2,6,23,0.55);
+    }
   </style>
 </head>
 <body>

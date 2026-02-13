@@ -99,6 +99,7 @@
     html.ss-theme-night body { background: #0f172a; color: #e2e8f0; }
     html.ss-theme-night h1 { color: #e2e8f0; }
     html.ss-theme-night .tool-btn { color: #f8fafc; }
+    html.ss-theme-night .tool-btn .hint { color: #ffffff !important; }
     html.ss-theme-night .section-divider { color: #94a3b8; }
     html.ss-theme-night .section-divider::before,
     html.ss-theme-night .section-divider::after { background: rgba(255,255,255,0.1); }
@@ -132,13 +133,6 @@
           <div class="hint" data-i18n="listing_agent_desc">Draft and publish listings from UPCs</div>
         </div>
       </a>
-      <a class="tool-btn label" href="/label-master">
-        <span class="icon">🏷️</span>
-        <div>
-          <div data-i18n="label_master">Label Master</div>
-          <div class="hint">Buy & print labels</div>
-        </div>
-      </a>
       <a class="tool-btn price" href="/price-master">
         <span class="icon">💲</span>
         <div>
@@ -163,6 +157,18 @@
         <div>
           <div data-i18n="store_helper">Store Doctor</div>
           <div class="hint">Listings diagnostics</div>
+        </div>
+      </a>
+    </div>
+
+    <!-- ── IN CONSTRUCTION ── -->
+    <div class="section-divider"><span class="sec-icon">🚧</span> In Construction</div>
+    <div class="grid">
+      <a class="tool-btn label" href="/label-master">
+        <span class="icon">🏷️</span>
+        <div>
+          <div data-i18n="label_master">Label Master</div>
+          <div class="hint">Buy & print labels</div>
         </div>
       </a>
       <a class="tool-btn fb" href="/fb-listings?return=/store-manager">

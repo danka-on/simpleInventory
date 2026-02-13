@@ -613,12 +613,24 @@ function render(results){
     const listedEbay = Number(r.listed_ebay) === 1;
     const listedFacebook = Number(r.listed_facebook) === 1;
     const lotNumber = esc(r.lot_number||'');
+    const amazonTitle = [
+      (listedAmazon && r.listed_amazon_date) ? ('Listed: ' + String(r.listed_amazon_date)) : '',
+      (listedAmazon && r.listed_amazon_source_label) ? ('Set by: ' + String(r.listed_amazon_source_label)) : ''
+    ].filter(Boolean).join(' | ');
+    const ebayTitle = [
+      (listedEbay && r.listed_ebay_date) ? ('Listed: ' + String(r.listed_ebay_date)) : '',
+      (listedEbay && r.listed_ebay_source_label) ? ('Set by: ' + String(r.listed_ebay_source_label)) : ''
+    ].filter(Boolean).join(' | ');
+    const facebookTitle = [
+      (listedFacebook && r.listed_facebook_date) ? ('Listed: ' + String(r.listed_facebook_date)) : '',
+      (listedFacebook && r.listed_facebook_source_label) ? ('Set by: ' + String(r.listed_facebook_source_label)) : ''
+    ].filter(Boolean).join(' | ');
     
     rowIndex++;
     
-    const amazonCheckbox = `<label style="display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap" title="${listedAmazon && r.listed_amazon_date ? 'Listed: ' + r.listed_amazon_date : ''}"><input type="checkbox" class="marketplace-checkbox" data-upc="${apiUpc}" data-lot="${lotNumber}" data-marketplace="amazon" ${listedAmazon ? 'checked' : ''}><span style="font-size:0.85rem">Amazon</span></label>`;
-    const ebayCheckbox = `<label style="display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap" title="${listedEbay && r.listed_ebay_date ? 'Listed: ' + r.listed_ebay_date : ''}"><input type="checkbox" class="marketplace-checkbox" data-upc="${apiUpc}" data-lot="${lotNumber}" data-marketplace="ebay" ${listedEbay ? 'checked' : ''}><span style="font-size:0.85rem">eBay</span></label>`;
-    const fbCheckbox = `<label style="display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap" title="${listedFacebook && r.listed_facebook_date ? 'Listed: ' + r.listed_facebook_date : ''}"><input type="checkbox" class="marketplace-checkbox" data-upc="${apiUpc}" data-lot="${lotNumber}" data-marketplace="facebook" ${listedFacebook ? 'checked' : ''}><span style="font-size:0.85rem">Facebook</span></label>`;
+    const amazonCheckbox = `<label style="display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap" title="${esc(amazonTitle)}"><input type="checkbox" class="marketplace-checkbox" data-upc="${apiUpc}" data-lot="${lotNumber}" data-marketplace="amazon" ${listedAmazon ? 'checked' : ''}><span style="font-size:0.85rem">Amazon</span></label>`;
+    const ebayCheckbox = `<label style="display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap" title="${esc(ebayTitle)}"><input type="checkbox" class="marketplace-checkbox" data-upc="${apiUpc}" data-lot="${lotNumber}" data-marketplace="ebay" ${listedEbay ? 'checked' : ''}><span style="font-size:0.85rem">eBay</span></label>`;
+    const fbCheckbox = `<label style="display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap" title="${esc(facebookTitle)}"><input type="checkbox" class="marketplace-checkbox" data-upc="${apiUpc}" data-lot="${lotNumber}" data-marketplace="facebook" ${listedFacebook ? 'checked' : ''}><span style="font-size:0.85rem">Facebook</span></label>`;
     
     const actionBtn = `<div style="display:flex;flex-direction:column;gap:4px;align-items:flex-start">${amazonCheckbox}${ebayCheckbox}${fbCheckbox}</div>`;
     
@@ -952,7 +964,7 @@ async function onMarketplaceToggle(e){
     const response = await fetch('/api/bol_items/list_status', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ upc, lot_number: lot, marketplace, listed, quantity })
+      body: JSON.stringify({ upc, lot_number: lot, marketplace, listed, quantity, source: 'user' })
     });
     const result = await response.json();
     console.log('[onMarketplaceToggle] API response:', result);
@@ -982,7 +994,8 @@ async function onMarketplaceToggle(e){
     // Update checkbox title with timestamp
     if(listed) {
       const now = new Date().toISOString();
-      checkbox.parentElement.title = `Listed: ${now}`;
+      const sourceLabel = (result.current_state && result.current_state.source_label) ? result.current_state.source_label : 'User';
+      checkbox.parentElement.title = `Listed: ${now} | Set by: ${sourceLabel}`;
     } else {
       checkbox.parentElement.title = '';
     }

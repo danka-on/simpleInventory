@@ -502,8 +502,10 @@
     }
 
     .tableWrap{
+      position: relative;
       overflow:auto;
       max-height: 65vh;
+      overscroll-behavior: contain;
     }
     table{
       width: 100%;
@@ -511,12 +513,18 @@
       border-spacing: 0;
       font-size: 0.9rem;
     }
+    thead{
+      position: sticky;
+      top: 0;
+      z-index: 4;
+    }
     thead th{
       position: sticky;
       top: 0;
-      z-index: 3;
+      z-index: 5;
       background: var(--lm-card);
       border-bottom: 2px solid var(--lm-border);
+      box-shadow: 0 1px 0 rgba(0,0,0,0.04);
       padding: 6px 12px;
       text-align: left;
       font-weight: 800;
@@ -977,7 +985,7 @@
             <label for="dfPkgHeight">Height (in)</label>
             <input id="dfPkgHeight" type="number" step="0.1" min="0.1" placeholder="4" />
           </div>
-          <div class="field" style="min-width:200px;">
+          <div class="field" id="dfAmazonDeliveryField" style="min-width:200px;">
             <label for="dfAmazonDelivery">Amazon Delivery</label>
             <select id="dfAmazonDelivery">
               <option value="NoTracking">No Tracking</option>
@@ -1062,7 +1070,7 @@
   <div class="addr-overlay" id="addrOverlay">
     <div class="addr-modal">
       <h3>📬 Buyer Shipping Address</h3>
-      <p style="font-size:0.82rem;color:var(--lm-muted);margin:0 0 6px;">Paste from Amazon Seller Central order page.</p>
+      <p style="font-size:0.82rem;color:var(--lm-muted);margin:0 0 6px;">Paste buyer shipping address when it is missing from the order.</p>
       <label>Full Name</label>
       <input id="addrName" placeholder="Buyer name">
       <label>Street Address</label>
@@ -1087,6 +1095,10 @@
   <script>
     const $ = (id) => document.getElementById(id);
 
+    // NOTE (2026-02-13): Amazon label flow is temporarily disabled in UI only.
+    // Re-activate by setting this to true after Amazon label purchase flow is stable again.
+    const LABELMASTER_UI_ENABLE_AMAZON = false;
+
     const state = {
       orders: [],
       store: 'all',
@@ -1095,11 +1107,33 @@
       selected: new Set(),
       lastRenderKeys: [],
       defaults: {},
+      amazonUiNoticeShown: false,
       status: {
         ebay: { connected: false, supported: false, reason: '' },
         amazon: { connected: false, supported: false, reason: '' }
       }
     };
+
+    function normalizeStore(raw){
+      return String(raw || '').trim().toLowerCase();
+    }
+
+    function isUiVisibleStore(raw){
+      const store = normalizeStore(raw);
+      if(!LABELMASTER_UI_ENABLE_AMAZON && store === 'amazon') return false;
+      return true;
+    }
+
+    function applyUiVisibility(){
+      if(LABELMASTER_UI_ENABLE_AMAZON) return;
+      const amPill = $('kpiAmazonPill');
+      const amStatus = $('amazonStatus');
+      const amDeliveryField = $('dfAmazonDeliveryField');
+      if(amPill) amPill.style.display = 'none';
+      if(amStatus) amStatus.style.display = 'none';
+      if(amDeliveryField) amDeliveryField.style.display = 'none';
+      if(state.store === 'amazon') state.store = 'all';
+    }
 
     function keyFor(o){
       const id = o.id || o.order_id || '';
@@ -1225,9 +1259,10 @@
     function applyFilters(){
       const q = (state.q || '').trim().toLowerCase();
       let rows = Array.isArray(state.orders) ? state.orders.slice() : [];
+      rows = rows.filter(it => isUiVisibleStore(it.store));
 
       if(state.store !== 'all'){
-        rows = rows.filter(it => (it.store || '').toLowerCase() === state.store);
+        rows = rows.filter(it => normalizeStore(it.store) === state.store);
       }
 
       if(q){
@@ -1269,18 +1304,19 @@
       let ebay = 0, amazon = 0, ebSel = 0, amSel = 0;
       for(const it of shown){
         const k = keyFor(it);
-        const store = (it.store || '').toLowerCase();
+        const store = normalizeStore(it.store);
         if(store === 'ebay'){ ebay++; if(state.selected.has(k)) ebSel++; }
         else if(store === 'amazon'){ amazon++; if(state.selected.has(k)) amSel++; }
       }
       const hasSel = state.selected.size > 0;
-      $('kpiAll').textContent = String(ebay + amazon);
+      $('kpiAll').textContent = String(ebay + (LABELMASTER_UI_ENABLE_AMAZON ? amazon : 0));
       $('kpiEbay').textContent = hasSel ? `${ebSel}/${ebay}` : String(ebay);
-      $('kpiAmazon').textContent = hasSel ? `${amSel}/${amazon}` : String(amazon);
+      const kpiAmazon = $('kpiAmazon');
+      if(kpiAmazon) kpiAmazon.textContent = hasSel ? `${amSel}/${amazon}` : String(amazon);
       const ebPill = $('kpiEbayPill');
       const amPill = $('kpiAmazonPill');
       if(ebPill) ebPill.classList.toggle('has-sel', ebSel > 0 && state.store !== 'ebay');
-      if(amPill) amPill.classList.toggle('has-sel', amSel > 0 && state.store !== 'amazon');
+      if(amPill) amPill.classList.toggle('has-sel', LABELMASTER_UI_ENABLE_AMAZON && amSel > 0 && state.store !== 'amazon');
       updateFab();
     }
 
@@ -1294,6 +1330,7 @@
       const tbody = $('lmTbody');
       if(!tbody) return;
 
+      constrainSelectionToStore();
       const rows = applyFilters();
       state.lastRenderKeys = rows.map(keyFor);
       updateKpis(rows);
@@ -1304,7 +1341,7 @@
       for(const it of rows){
         const k = keyFor(it);
         const selected = state.selected.has(k);
-        const store = (it.store || '').toLowerCase();
+        const store = normalizeStore(it.store);
         const cap = store === 'ebay' ? state.status.ebay : (store === 'amazon' ? state.status.amazon : null);
         const canAction = cap ? (cap.connected && cap.supported) : false;
         const reason = cap ? (cap.reason || (cap.connected ? 'Not supported' : 'Not connected')) : 'Not supported';
@@ -1387,11 +1424,15 @@
       const ebEl = $('ebayStatus');
       const amEl = $('amazonStatus');
 
-      ebDot.className = 'statusDot ' + (eb.connected ? (eb.supported ? 'ok' : 'warn') : 'bad');
-      amDot.className = 'statusDot ' + (am.connected ? (am.supported ? 'ok' : 'warn') : 'bad');
+      if(ebDot) ebDot.className = 'statusDot ' + (eb.connected ? (eb.supported ? 'ok' : 'warn') : 'bad');
+      if(amDot) amDot.className = 'statusDot ' + (am.connected ? (am.supported ? 'ok' : 'warn') : 'bad');
 
-      ebEl.lastElementChild.textContent = eb.connected ? (eb.supported ? 'eBay' : 'eBay ⚠') : 'eBay ✕';
-      amEl.lastElementChild.textContent = am.connected ? (am.supported ? 'Amazon' : 'Amz ⚠') : 'Amz ✕';
+      if(ebEl && ebEl.lastElementChild){
+        ebEl.lastElementChild.textContent = eb.connected ? (eb.supported ? 'eBay' : 'eBay ⚠') : 'eBay ✕';
+      }
+      if(amEl && amEl.lastElementChild){
+        amEl.lastElementChild.textContent = am.connected ? (am.supported ? 'Amazon' : 'Amz ⚠') : 'Amz ✕';
+      }
     }
 
     async function loadOrders(){
@@ -1402,7 +1443,11 @@
         const r = await fetch(`/api/labelmaster/orders?${qs.toString()}`, {cache:'no-store'});
         const j = await r.json();
         if(!r.ok || j.success === false) throw new Error(j.error || `Request failed (${r.status})`);
-        state.orders = j.orders || [];
+        state.orders = (j.orders || []).filter(it => isUiVisibleStore(it.store));
+        if(!LABELMASTER_UI_ENABLE_AMAZON && !state.amazonUiNoticeShown){
+          log('Amazon labels are temporarily hidden in UI. Showing eBay orders only.');
+          state.amazonUiNoticeShown = true;
+        }
         log(`Loaded ${state.orders.length} order(s).`);
         render();
       }catch(e){
@@ -1556,6 +1601,9 @@
     }
 
     function setStoreFilter(store){
+      if(!LABELMASTER_UI_ENABLE_AMAZON && store === 'amazon'){
+        store = 'all';
+      }
       state.store = store;
       document.querySelectorAll('.spill').forEach(b => b.classList.toggle('active', b.getAttribute('data-store') === store));
       constrainSelectionToStore();
@@ -1563,9 +1611,14 @@
     }
 
     function constrainSelectionToStore(){
-      if(state.store === 'all') return;
-      const prefix = `${state.store}:`;
       for(const key of Array.from(state.selected)){
+        const lower = String(key || '').toLowerCase();
+        if(!LABELMASTER_UI_ENABLE_AMAZON && lower.startsWith('amazon:')){
+          state.selected.delete(key);
+          continue;
+        }
+        if(state.store === 'all') continue;
+        const prefix = `${state.store}:`;
         if(!key.startsWith(prefix)) state.selected.delete(key);
       }
     }
@@ -1612,6 +1665,7 @@
 
     document.addEventListener('DOMContentLoaded', () => {
       try{ if(window.applyTranslations) window.applyTranslations(); }catch(e){}
+      applyUiVisibility();
       loadDefaults();
       loadStatus();
       loadOrders();

@@ -180,6 +180,15 @@
 
     .sidebar{
       align-self: start;
+      min-width: 0;
+    }
+    @media (max-width: 980px){
+      .sidebar{
+        position: static;
+        max-height: none;
+        overflow: visible;
+        padding-right: 0;
+      }
     }
     .main{
       display: grid;
@@ -190,6 +199,11 @@
       .sidebar{
         position: sticky;
         top: 86px;
+        max-height: calc(100vh - 98px);
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        padding-right: 6px;
+        scrollbar-gutter: stable;
       }
     }
 
@@ -237,6 +251,30 @@
       gap: 9px;
       transition: all .15s ease;
       white-space: nowrap;
+      position: relative;
+    }
+    .tabIconWrap{
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 1.05em;
+      height: 1.05em;
+      flex: 0 0 auto;
+    }
+    .tabBtnGated{
+      border-color: rgba(239, 68, 68, 0.75);
+      box-shadow: inset 0 0 0 1px rgba(239, 68, 68, 0.25);
+    }
+    .tabBtnGated .tabIconWrap::after{
+      content: '';
+      position: absolute;
+      left: -2px;
+      right: -2px;
+      top: 50%;
+      border-top: 2px solid #ef4444;
+      transform: rotate(-35deg);
+      pointer-events: none;
     }
     .tabBtn:hover{
       transform: translateY(-1px);
@@ -691,6 +729,39 @@
       border-radius: 8px;
       font-size: 0.86rem;
     }
+    .listedBar{
+      margin-top: 12px;
+      border-radius: 10px;
+      border: 1px solid rgba(16, 185, 129, 0.55);
+      background: linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(5, 150, 105, 0.16));
+      color: #34d399;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      padding: 10px 12px;
+      text-align: center;
+    }
+    .searchQueueAction{
+      margin-top: 10px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px dashed var(--border-hover);
+      background: var(--bg0);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .searchQueueAction .hint{
+      margin: 0;
+      flex: 1;
+    }
+    @media (max-width: 640px){
+      .searchQueueAction{
+        flex-direction: column;
+        align-items: flex-start;
+      }
+    }
     .detailBox{
       border: 1px solid var(--border);
       background: var(--bg0);
@@ -839,6 +910,54 @@
     }
     .imgModalPrev{ left: 10px; }
     .imgModalNext{ right: 10px; }
+
+    /* Rejection popup */
+    .issueModal{
+      position: fixed;
+      inset: 0;
+      z-index: 10020;
+      display: grid;
+      place-items: center;
+      padding: 18px;
+      background: rgba(0, 0, 0, 0.72);
+      backdrop-filter: blur(6px);
+    }
+    .issueModalInner{
+      width: min(680px, 96vw);
+      border-radius: 14px;
+      border: 1px solid rgba(239, 68, 68, 0.35);
+      background: var(--card);
+      box-shadow: 0 28px 70px rgba(0, 0, 0, 0.55);
+      padding: 16px 16px 14px;
+      display: grid;
+      gap: 12px;
+    }
+    .issueModalTitle{
+      margin: 0;
+      font-size: 1.02rem;
+      font-weight: 800;
+      color: #fca5a5;
+      letter-spacing: -0.01em;
+    }
+    .issueModalText{
+      margin: 0;
+      padding: 12px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: var(--bg0);
+      color: var(--ink);
+      white-space: pre-wrap;
+      max-height: 52vh;
+      overflow: auto;
+      font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.86rem;
+      line-height: 1.35;
+    }
+    .issueModalActions{
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+    }
 
     /* Platform themes */
     .ebayTheme .card{
@@ -1138,6 +1257,124 @@
       color: var(--muted);
       font-size: 0.92rem;
     }
+    .imageCards{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .imageCard{
+      width: 170px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--bg2);
+      overflow: hidden;
+      transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease, opacity .15s ease;
+    }
+    .imageCard:hover{
+      transform: translateY(-1px);
+      border-color: var(--border-hover);
+    }
+    .imageCard[draggable="true"]{
+      cursor: grab;
+    }
+    .imageCard[draggable="true"]:active{
+      cursor: grabbing;
+    }
+    .imageCardThumb{
+      border-color: rgba(16, 185, 129, 0.65);
+      box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);
+      background: linear-gradient(180deg, rgba(16, 185, 129, 0.14), rgba(0,0,0,0) 34%), var(--bg2);
+    }
+    .imageCardDragging{
+      opacity: 0.45;
+      transform: scale(0.98);
+    }
+    .imageCardDragOver{
+      border-color: rgba(96, 165, 250, 0.65);
+      box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.22);
+    }
+    .imageCardTop{
+      position: relative;
+      width: 100%;
+      aspect-ratio: 1 / 1;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg0);
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+    }
+    .imageCardTop img{
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+      cursor: zoom-in;
+    }
+    .imageCardBadge{
+      position: absolute;
+      left: 8px;
+      top: 8px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.68rem;
+      font-weight: 800;
+      letter-spacing: .07em;
+      text-transform: uppercase;
+      border-radius: 999px;
+      padding: 4px 8px;
+      border: 1px solid rgba(16, 185, 129, 0.45);
+      background: rgba(16, 185, 129, 0.2);
+      color: #34d399;
+      pointer-events: none;
+    }
+    .imageCardMeta{
+      padding: 8px 9px;
+      display: grid;
+      gap: 8px;
+    }
+    .imageCardLabel{
+      font-size: 0.82rem;
+      color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      cursor: zoom-in;
+    }
+    .imageCardActions{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+    }
+    .imageCardDragText{
+      font-size: 0.72rem;
+      color: var(--muted-dim);
+      font-weight: 700;
+      letter-spacing: .03em;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .imageCardRemove{
+      appearance: none;
+      border: 1px solid var(--border);
+      background: var(--bg0);
+      color: var(--muted);
+      border-radius: 8px;
+      width: 30px;
+      height: 30px;
+      display: grid;
+      place-items: center;
+      cursor: pointer;
+      transition: all .15s ease;
+      flex: 0 0 auto;
+    }
+    .imageCardRemove:hover{
+      color: #fca5a5;
+      border-color: rgba(239, 68, 68, 0.45);
+      background: rgba(239, 68, 68, 0.10);
+    }
 
     /* Store listing status indicators */
     .storeStatus{
@@ -1187,6 +1424,7 @@
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.5px;
+      border: 1px solid transparent;
     }
     .storeStatus.ebayFound .statusBadge{
       background: rgba(0, 100, 210, 0.25);
@@ -1195,6 +1433,16 @@
     .storeStatus.amazonFound .statusBadge{
       background: rgba(255, 153, 0, 0.25);
       color: #fcd34d;
+    }
+    html.ss-theme-day .storeStatus.ebayFound .statusBadge{
+      background: rgba(37, 99, 235, 0.14);
+      color: #1e3a8a;
+      border-color: rgba(37, 99, 235, 0.32);
+    }
+    html.ss-theme-day .storeStatus.ebayFound .statusBadge.state-unsold{
+      background: rgba(244, 63, 94, 0.14);
+      color: #9f1239;
+      border-color: rgba(244, 63, 94, 0.34);
     }
   </style>
 </head>
@@ -1232,6 +1480,10 @@
             <div class="field">
               <label for="upcSearch">Scan / Search</label>
               <input id="upcSearch" type="text" placeholder="Scan UPC + Enter or type to search..." autocomplete="off" />
+              <div id="searchQueueAction" class="searchQueueAction" style="display:none;">
+                <div id="searchQueueActionText" class="hint"></div>
+                <button class="btn btnGhost btnMini" id="btnSearchQueueAction" type="button" style="display:none;"></button>
+              </div>
             </div>
 
             <div class="field" style="margin-top:12px;">
@@ -1265,8 +1517,8 @@
         <div class="storeBar">
           <div class="storeTabs">
             <span class="storeLabel">Store:</span>
-            <button class="tabBtn tabBtnActive" id="tabEbay" type="button"><i class="fab fa-ebay"></i>eBay</button>
-            <button class="tabBtn" id="tabAmazon" type="button"><i class="fab fa-amazon"></i>Amazon</button>
+            <button class="tabBtn tabBtnActive" id="tabEbay" type="button"><span class="tabIconWrap"><i class="fab fa-ebay"></i></span>eBay</button>
+            <button class="tabBtn" id="tabAmazon" type="button"><span class="tabIconWrap"><i class="fab fa-amazon"></i></span>Amazon</button>
           </div>
           <div style="flex:1;"></div>
           <div class="btnRow" style="margin:0;">
@@ -1328,8 +1580,8 @@
                   </div>
                 </div>
 
-                <div id="images" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
-                <div class="hint">eBay supports up to 12 images on the inventory item.</div>
+                <div id="images" class="imageCards"></div>
+                <div id="imageStoreHint" class="hint">Showing eBay images to send (catalog + uploaded, max 12). Drag cards to reorder; first card is the thumbnail.</div>
 
                 <div class="btnRow" style="margin-top:12px;justify-content:flex-end;">
                   <button class="btn btnPrimary" type="button" onclick="toggleCard('cardItemPreview')"><i class="fas fa-check"></i>Complete</button>
@@ -1461,6 +1713,7 @@
                     <button class="btn btnGhost btnMini" id="btnDescItalic" title="Italic"><i class="fas fa-italic"></i></button>
                     <button class="btn btnGhost btnMini" id="btnDescUnderline" title="Underline"><i class="fas fa-underline"></i></button>
                     <button class="btn btnGhost btnMini" id="btnDescLink" title="Link"><i class="fas fa-link"></i></button>
+                    <button class="btn btnGhost btnMini" id="btnDescFix" title="Fix spacing, grammar, and formatting"><i class="fas fa-wand-magic-sparkles"></i>Fix</button>
                     <button class="btn btnGhost btnMini" id="btnDescClearFmt" title="Clear formatting"><i class="fas fa-eraser"></i></button>
                     <button class="btn btnGhost btnMini" id="btnDescShowHtml" title="Toggle HTML view"><i class="fas fa-code"></i></button>
                   </div>
@@ -1553,15 +1806,11 @@
                 </div>
               </div>
 
-              <div class="checkRow" style="margin-top:14px;border-color:rgba(239,68,68,0.25);background:rgba(239,68,68,0.08);">
-                <input id="confirmPublish" type="checkbox" />
-                <label for="confirmPublish" style="margin:0;">I understand Publish creates a live eBay listing</label>
-              </div>
-
               <div class="btnRow" style="margin-top:12px;">
                 <button class="btn btnPrimary" id="btnDraft"><i class="fas fa-file-circle-plus"></i>Create Draft Offer</button>
                 <button class="btn btnDanger" id="btnPublish"><i class="fas fa-rocket"></i>Publish to eBay</button>
               </div>
+              <div id="ebayListedBar" class="listedBar" style="display:none;">Listed</div>
 
             </div>
           </div>
@@ -1590,7 +1839,7 @@
                 <div id="amazonTemplatesBox" class="miniBox" style="margin-top:10px;">
                   <div class="muted">Select a UPC to load catalog matches.</div>
                 </div>
-                <div id="amazonCatalogDetail" style="margin-top:10px;"></div>
+                <div id="amazonCatalogDetail" style="display:none;"></div>
               </div>
             </div>
           </div>
@@ -1602,6 +1851,7 @@
                 <h2><i class="fab fa-amazon" style="color:#ff9900"></i>Amazon Offer</h2>
               </div>
               <div class="cardHeaderRight">
+                <button class="btn btnPrimary btnMini" id="btnSaveAmazonDefaults"><i class="fas fa-save"></i>Save Amazon Defaults</button>
                 <div class="badge badgeBlue" id="amazonFoundBadge" style="display:none;">Found in amazonStore.db</div>
               </div>
             </div>
@@ -1621,6 +1871,7 @@
                 <div class="field">
                   <label for="amazonAsin">ASIN</label>
                   <input id="amazonAsin" type="text" placeholder="B0..." />
+                  <div id="amazonRestrictionHint" class="hint" style="margin-top:6px;"></div>
                 </div>
                 <div class="field">
                   <label for="amazonConditionType">Condition</label>
@@ -1681,18 +1932,10 @@
                 </div>
               </div>
 
-              <div class="btnRow" style="margin-top:0;justify-content:flex-end;">
-                <button class="btn btnPrimary" id="btnSaveAmazonDefaults"><i class="fas fa-save"></i>Save Amazon Defaults</button>
-              </div>
-
-              <div class="checkRow" style="margin-top:12px;border-color:rgba(251,191,36,0.25);background:rgba(251,191,36,0.08);">
-                <input id="amazonConfirm" type="checkbox" />
-                <label for="amazonConfirm" style="margin:0;">I understand Put Offer updates Seller Central</label>
-              </div>
-
               <div class="btnRow" style="margin-top:12px;">
                 <button class="btn btnDanger" id="btnAmazonPut"><i class="fas fa-upload"></i>Put Offer</button>
               </div>
+              <div id="amazonListedBar" class="listedBar" style="display:none;">Listed</div>
               <div class="hint">Amazon listing fields vary by product type. This is a best-effort offer builder.</div>
             </div>
           </div>
@@ -1710,6 +1953,9 @@
       settings: {},
       settingsLoaded: false,
       item: null,
+      baseImages: [],
+      storeTemplateImages: {ebay: [], amazon: []},
+      imageOrder: {ebay: [], amazon: []},
       images: [],
       removedImages: new Set(),
       queue: [],
@@ -1735,6 +1981,22 @@
       imgModalWired: false,
       imgModalList: [],
       imgModalIndex: 0,
+      amazonRestriction: {
+        key: '',
+        asin: '',
+        marketplaceId: '',
+        conditionType: '',
+        checked: false,
+        restricted: false,
+        reasons: [],
+        warning: '',
+        cached: false,
+        ts: 0,
+      },
+      amazonRestrictionLastLogKey: '',
+      issueModalWired: false,
+      dragImageUrl: '',
+      sessionListedForCurrent: {ebay: false, amazon: false},
     };
 
     function getReturnParam(){
@@ -1913,6 +2175,119 @@
       return '';
     }
 
+    function isCurrentItemListedOnStore(store){
+      const s = (store || '').toString().trim().toLowerCase();
+      const row = state.sessionListedForCurrent || {};
+      return !!row[s];
+    }
+
+    function _setStoreListedUi(store, listed){
+      const isListed = !!listed;
+      if(store === 'ebay'){
+        const draftBtn = $('btnDraft');
+        const publishBtn = $('btnPublish');
+        const bar = $('ebayListedBar');
+        const row = draftBtn?.closest('.btnRow') || publishBtn?.closest('.btnRow');
+        if(row) row.style.display = isListed ? 'none' : 'flex';
+        if(bar) bar.style.display = isListed ? 'block' : 'none';
+        return;
+      }
+      if(store === 'amazon'){
+        const putBtn = $('btnAmazonPut');
+        const bar = $('amazonListedBar');
+        const row = putBtn?.closest('.btnRow');
+        if(row) row.style.display = isListed ? 'none' : 'flex';
+        if(bar) bar.style.display = isListed ? 'block' : 'none';
+      }
+    }
+
+    function updateListingActionState(){
+      if(!state.item && !state.activeUpc){
+        _setStoreListedUi('ebay', false);
+        _setStoreListedUi('amazon', false);
+        return;
+      }
+      _setStoreListedUi('ebay', isCurrentItemListedOnStore('ebay'));
+      _setStoreListedUi('amazon', isCurrentItemListedOnStore('amazon'));
+    }
+
+    function markStoreListedForActiveItem(store){
+      const s = (store || '').toString().trim().toLowerCase();
+      if(s !== 'ebay' && s !== 'amazon') return;
+      const prev = state.sessionListedForCurrent || {ebay: false, amazon: false};
+      state.sessionListedForCurrent = {...prev, [s]: true};
+      updateListingActionState();
+    }
+
+    function _isUpcInQueue(upc){
+      const clean = normalizeUpc(upc) || (upc ?? '').toString().trim();
+      if(!clean || !Array.isArray(state.queue)) return false;
+      return state.queue.some(it => _upcEquals((it.upc || '').toString().trim(), clean));
+    }
+
+    function updateSearchQueueAction(){
+      const wrap = $('searchQueueAction');
+      const txt = $('searchQueueActionText');
+      const btn = $('btnSearchQueueAction');
+      const input = $('upcSearch');
+      if(!wrap || !txt || !btn || !input) return;
+
+      const raw = (input.value || '').toString().trim();
+      const clean = normalizeUpc(raw);
+      if(!raw || !clean){
+        wrap.style.display = 'none';
+        txt.textContent = '';
+        btn.style.display = 'none';
+        btn.dataset.action = '';
+        btn.dataset.upc = '';
+        return;
+      }
+
+      const upc = formatUpc12(clean);
+      const inQueue = _isUpcInQueue(clean);
+      wrap.style.display = 'flex';
+
+      if(inQueue){
+        txt.textContent = `${upc} is already in queue.`;
+        btn.innerHTML = '<i class="fas fa-arrow-right"></i>Open';
+        btn.title = 'Open this queued item';
+        btn.dataset.action = 'open';
+        btn.dataset.upc = clean;
+        btn.style.display = 'inline-flex';
+      } else {
+        txt.textContent = `${upc} is not in queue.`;
+        btn.innerHTML = '<i class="fas fa-plus"></i>Add to Queue';
+        btn.title = 'Add this item to Listing Agent queue';
+        btn.dataset.action = 'add';
+        btn.dataset.upc = clean;
+        btn.style.display = 'inline-flex';
+      }
+    }
+
+    async function onSearchQueueAction(){
+      const btn = $('btnSearchQueueAction');
+      if(!btn) return;
+      const action = (btn.dataset.action || '').toString().trim();
+      const upc = (btn.dataset.upc || '').toString().trim();
+      if(!action || !upc) return;
+
+      if(action === 'open'){
+        await selectUPC(upc);
+        return;
+      }
+
+      if(action === 'add'){
+        btn.disabled = true;
+        try{
+          await queueAdd(upc, {source: 'search'});
+          await selectUPC(upc);
+        } finally {
+          btn.disabled = false;
+          updateSearchQueueAction();
+        }
+      }
+    }
+
     async function loadQueue(){
       try{
         const data = await apiGet('/api/listingagent/queue?limit=120');
@@ -2012,6 +2387,7 @@
 
       if(!state.queue || state.queue.length === 0){
         empty.style.display = 'block';
+        updateSearchQueueAction();
         return;
       }
       empty.style.display = 'none';
@@ -2077,6 +2453,8 @@
 
         box.appendChild(row);
       });
+      updateSearchQueueAction();
+      updateListingActionState();
     }
 
     async function removeFromQueue(upc){
@@ -2330,7 +2708,6 @@
       $('price').value = '';
       $('listingDescription').value = '';
       if(descEditor()) setDescHtml('');
-      $('confirmPublish').checked = false;
       $('suggestedPriceHint').style.display = 'none';
       state.priceManuallySet = false;
 
@@ -2341,7 +2718,6 @@
       $('amazonAsin').value = '';
       $('amazonPrice').value = '';
       $('amazonQuantity').value = 1;
-      $('amazonConfirm').checked = false;
       $('amazonSuggestedPriceHint').style.display = 'none';
       state.amazonPriceManuallySet = false;
 
@@ -2354,6 +2730,7 @@
       if($('amazonCatalogSelectHint')) $('amazonCatalogSelectHint').textContent = 'Select a UPC or search to see available catalog listings.';
       if($('amazonTemplatesBox')) $('amazonTemplatesBox').innerHTML = '<div class=\"muted\">Select a UPC to load catalog matches.</div>';
       $('amazonCatalogDetail').innerHTML = '';
+      resetAmazonRestrictionHint({clearState:true});
 
       resetCategorySuggestions();
     }
@@ -2365,9 +2742,14 @@
       resetFormsForNewUPC(clean);
       state.manualRequiredAspects = [];
       state.removedImages = new Set();
+      state.imageOrder = {ebay: [], amazon: []};
+      state.dragImageUrl = '';
+      resetAmazonRestrictionHint({clearState:true});
+      state.sessionListedForCurrent = {ebay: false, amazon: false};
       state.activeUpc = clean;
       renderQueue();
       $('upcSearch').value = clean;
+      updateSearchQueueAction();
       const resultsEl = $('results');
       if(resultsEl) resultsEl.innerHTML = '';
       state.mobileUploadUrl = '';
@@ -2389,7 +2771,11 @@
         }
         if(!data) throw new Error(`No local item found for UPC (${tried.join(', ')})`);
         state.item = data.item || {};
-        state.images = Array.isArray(state.item.images) ? [...state.item.images] : [];
+        state.baseImages = Array.isArray(state.item.images) ? [...state.item.images] : [];
+        state.storeTemplateImages = {ebay: [], amazon: []};
+        state.imageOrder = {ebay: [], amazon: []};
+        state.dragImageUrl = '';
+        rebuildImagesForActiveStore();
         renderPreview();
         setupMobileUploadForUPC(state.item.upc || clean);
         autofillForm();
@@ -2407,6 +2793,7 @@
         $('preview').style.display = 'none';
         const noteCard = $('cardNote');
         if(noteCard) noteCard.style.display = 'none';
+        updateListingActionState();
         return;
       }
       $('previewEmpty').style.display = 'none';
@@ -2417,7 +2804,8 @@
 
       renderNoteCard();
 
-      const firstImg = state.images[0] || '';
+      const previewImages = _previewImagesForStore(_activeStoreKey());
+      const firstImg = previewImages[0] || '';
       const imgEl = $('previewImg');
       if(firstImg){
         imgEl.style.display = 'block';
@@ -2446,10 +2834,20 @@
       if(ebayListings.length){
         const top = ebayListings[0];
         const url = top.url || '';
-        $('previewEbay').innerHTML = `<div class="storeStatus ebayFound"><i class="fab fa-ebay" style="font-size:1.1rem;"></i><span>Listed on eBay</span><span class="statusBadge">${escapeHtml(top.state || 'active')}</span>${url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noreferrer"><i class="fas fa-external-link-alt"></i> View</a>` : ''}</div>`;
+        const ebayState = (top.state || 'active').toString().trim() || 'active';
+        const ebayStateSlug = ebayState.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-+|-+$)/g, '');
+        const ebayStateClass = ebayStateSlug ? ` state-${ebayStateSlug}` : '';
+        $('previewEbay').innerHTML = `<div class="storeStatus ebayFound"><i class="fab fa-ebay" style="font-size:1.1rem;"></i><span>Listed on eBay</span><span class="statusBadge${ebayStateClass}">${escapeHtml(ebayState)}</span>${url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noreferrer"><i class="fas fa-external-link-alt"></i> View</a>` : ''}</div>`;
       } else {
         $('previewEbay').innerHTML = `<div class="storeStatus notFound"><i class="fab fa-ebay" style="font-size:1rem;opacity:0.5;"></i><span>Not listed on eBay</span></div>`;
       }
+
+      const restriction = state.amazonRestriction || {};
+      const restrictionReasons = Array.isArray(restriction.reasons) ? restriction.reasons.filter(Boolean) : [];
+      const showAmazonRestrictionInPreview = state.activeStore === 'amazon';
+      const amazonRestrictedMsg = (showAmazonRestrictionInPreview && restriction.checked && restriction.restricted)
+        ? `Restricted for this account/marketplace.${restrictionReasons.length ? ` ${restrictionReasons.join(' | ')}` : ''}`
+        : '';
 
       const amazonListings = (item.amazon_store?.listings || []);
       if(amazonListings.length){
@@ -2457,12 +2855,17 @@
         const asin = (top.asin || '').toString().trim();
         const url = (top.product_url || (asin ? `https://www.amazon.com/dp/${asin}` : '')).toString();
         const status = (top.status || 'active').toString();
-        $('previewAmazon').innerHTML = `<div class="storeStatus amazonFound"><i class="fab fa-amazon" style="font-size:1.1rem;"></i><span>Listed on Amazon</span><span class="statusBadge">${escapeHtml(status)}</span>${asin ? `<span class="statusBadge">${escapeHtml(asin)}</span>` : ''}${url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noreferrer"><i class="fas fa-external-link-alt"></i> View</a>` : ''}</div>`;
+        $('previewAmazon').innerHTML =
+          `<div class="storeStatus amazonFound"><i class="fab fa-amazon" style="font-size:1.1rem;"></i><span>Listed on Amazon</span><span class="statusBadge">${escapeHtml(status)}</span>${asin ? `<span class="statusBadge">${escapeHtml(asin)}</span>` : ''}${url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noreferrer"><i class="fas fa-external-link-alt"></i> View</a>` : ''}</div>` +
+          (amazonRestrictedMsg ? `<div class="hint hintDanger" style="margin-top:6px;">${escapeHtml(amazonRestrictedMsg)}</div>` : '');
       } else {
-        $('previewAmazon').innerHTML = `<div class="storeStatus notFound"><i class="fab fa-amazon" style="font-size:1rem;opacity:0.5;"></i><span>Not listed on Amazon</span></div>`;
+        $('previewAmazon').innerHTML =
+          `<div class="storeStatus notFound"><i class="fab fa-amazon" style="font-size:1rem;opacity:0.5;"></i><span>Not listed on Amazon</span></div>` +
+          (amazonRestrictedMsg ? `<div class="hint hintDanger" style="margin-top:6px;">${escapeHtml(amazonRestrictedMsg)}</div>` : '');
       }
 
       renderImages();
+      updateListingActionState();
     }
 
     function renderNoteCard(){
@@ -2534,6 +2937,7 @@
       if($('amazonCatalogQ')) $('amazonCatalogQ').value = '';
       if($('amazonCatalogSelectHint')) $('amazonCatalogSelectHint').textContent = 'Select a UPC or search to see available catalog listings.';
       $('amazonCatalogDetail').innerHTML = '';
+      resetAmazonRestrictionHint({clearState:true});
     }
 
     function _toNumber(val){
@@ -2547,13 +2951,235 @@
       return `$${n.toFixed(2)}`;
     }
 
-    function addImageUrl(url){
+    function _normalizeImageList(list){
+      const out = [];
+      const seen = new Set();
+      const src = Array.isArray(list) ? list : [];
+      for(const raw of src){
+        const u = (raw ?? '').toString().trim();
+        if(!u) continue;
+        if(seen.has(u)) continue;
+        if(state.removedImages && state.removedImages.has(u)) continue;
+        seen.add(u);
+        out.push(u);
+      }
+      return out;
+    }
+
+    function _mergeImageLists(...lists){
+      const out = [];
+      const seen = new Set();
+      for(const list of lists){
+        const src = Array.isArray(list) ? list : [];
+        for(const raw of src){
+          const u = (raw ?? '').toString().trim();
+          if(!u) continue;
+          if(seen.has(u)) continue;
+          if(state.removedImages && state.removedImages.has(u)) continue;
+          seen.add(u);
+          out.push(u);
+        }
+      }
+      return out;
+    }
+
+    function _activeStoreKey(){
+      return state.activeStore === 'amazon' ? 'amazon' : 'ebay';
+    }
+
+    function _applyStoreImageOrder(store, urls){
+      const key = store === 'amazon' ? 'amazon' : 'ebay';
+      const list = _normalizeImageList(urls);
+      const prefRaw = (state.imageOrder && Array.isArray(state.imageOrder[key])) ? state.imageOrder[key] : [];
+      const pref = _normalizeImageList(prefRaw).filter(u => list.includes(u));
+      const rest = list.filter(u => !pref.includes(u));
+      return [...pref, ...rest];
+    }
+
+    function _setStoreImageOrder(store, orderedVisible){
+      const key = store === 'amazon' ? 'amazon' : 'ebay';
+      const storeImgs = state.storeTemplateImages?.[key] || [];
+      const baseImgs = Array.isArray(state.baseImages) ? state.baseImages : [];
+      const merged = _mergeImageLists(storeImgs, baseImgs);
+      const current = _applyStoreImageOrder(key, merged);
+      const head = _normalizeImageList(orderedVisible).filter(u => current.includes(u));
+      const rest = current.filter(u => !head.includes(u));
+      state.imageOrder = {
+        ...state.imageOrder,
+        [key]: [...head, ...rest]
+      };
+    }
+
+    function _promoteStoreImages(store, urls){
+      const key = store === 'amazon' ? 'amazon' : 'ebay';
+      const list = _normalizeImageList(urls);
+      if(!list.length) return;
+      const cur = (state.imageOrder && Array.isArray(state.imageOrder[key])) ? state.imageOrder[key] : [];
+      state.imageOrder = {
+        ...state.imageOrder,
+        [key]: [...list, ...cur.filter(u => !list.includes(u))]
+      };
+    }
+
+    function reorderActiveStoreVisibleImages(nextVisible, {logChange=false} = {}){
+      const key = _activeStoreKey();
+      if(key !== 'ebay') return;
+      const visible = _normalizeImageList(nextVisible);
+      if(!visible.length) return;
+      const before = (Array.isArray(state.images) ? state.images : []).join('||');
+      const after = visible.join('||');
+      if(before === after) return;
+      _setStoreImageOrder(key, visible);
+      rebuildImagesForActiveStore();
+      renderPreview();
+      if(logChange) log('Reordered eBay images. First card is thumbnail.');
+    }
+
+    function _isAmazonImageUrl(url){
+      const s = (url || '').toString().trim();
+      if(!s) return false;
+      try{
+        const u = new URL(s, window.location.origin);
+        const host = (u.host || '').toLowerCase();
+        const path = (u.pathname || '').toLowerCase();
+        return (
+          host.includes('media-amazon.com')
+          || host.includes('ssl-images-amazon')
+          || host.includes('images-na.ssl-images-amazon')
+          || host.includes('images-amazon')
+          || (host.includes('amazon.') && path.includes('/images/'))
+        );
+      }catch(e){
+        return false;
+      }
+    }
+
+    function _isEbayEpsUrl(url){
+      const s = (url || '').toString().trim();
+      if(!s) return false;
+      try{
+        const u = new URL(s, window.location.origin);
+        const host = (u.host || '').toLowerCase();
+        if(host.includes('ebayimg.com') || host.includes('ebaystatic.com')) return true;
+        // Catch proxied/encoded EPS URLs where hostname is not directly ebayimg.
+        const low = s.toLowerCase();
+        return low.includes('ebayimg.com') || low.includes('ebaystatic.com');
+      }catch(e){
+        const low = s.toLowerCase();
+        return low.includes('ebayimg.com') || low.includes('ebaystatic.com');
+      }
+    }
+
+    function _effectiveEbayImages(images){
+      let list = _normalizeImageList(images);
+
+      const nonAmazon = list.filter(u => !_isAmazonImageUrl(u));
+      if(nonAmazon.length) list = nonAmazon;
+
+      // eBay rejects mixed EPS + self-hosted image sets; prefer self-hosted when mixed.
+      const nonEps = list.filter(u => !_isEbayEpsUrl(u));
+      if(nonEps.length && nonEps.length !== list.length){
+        list = nonEps;
+      }
+
+      return list.slice(0, 12);
+    }
+
+    function _effectiveImagesForStore(store, images){
+      const key = store === 'amazon' ? 'amazon' : 'ebay';
+      if(key === 'amazon'){
+        // Current Amazon Put Offer flow does not submit images.
+        return [];
+      }
+      return _effectiveEbayImages(images);
+    }
+
+    function _previewImagesForStore(store){
+      const key = store === 'amazon' ? 'amazon' : 'ebay';
+      const storeImgs = state.storeTemplateImages?.[key] || [];
+      const baseImgs = Array.isArray(state.baseImages) ? state.baseImages : [];
+      const merged = _mergeImageLists(storeImgs, baseImgs);
+      const ordered = _applyStoreImageOrder(key, merged);
+      if(key === 'amazon'){
+        // Amazon preview is visual-only: selected catalog image first, then local/base image fallback.
+        return ordered;
+      }
+      // Keep preview exactly aligned with what will be sent to eBay.
+      if(Array.isArray(state.images) && state.images.length){
+        return _effectiveEbayImages(state.images);
+      }
+      return _effectiveEbayImages(ordered);
+    }
+
+    function renderImageStoreHint(){
+      const el = $('imageStoreHint');
+      if(!el) return;
+      if(_activeStoreKey() === 'amazon'){
+        el.textContent = 'Amazon preview uses selected catalog image first, then your local thumbnail.';
+      } else {
+        el.textContent = 'Showing eBay images to send (max 12). If EPS/catalog and uploaded images are mixed, uploaded/self-hosted are preferred. First card is the thumbnail.';
+      }
+    }
+
+    function rebuildImagesForActiveStore(){
+      const key = _activeStoreKey();
+      const storeImgs = state.storeTemplateImages?.[key] || [];
+      const baseImgs = Array.isArray(state.baseImages) ? state.baseImages : [];
+      const merged = _mergeImageLists(storeImgs, baseImgs);
+      const ordered = _applyStoreImageOrder(key, merged);
+      state.images = _effectiveImagesForStore(key, ordered);
+      renderImageStoreHint();
+      return state.images;
+    }
+
+    function setStoreTemplateImages(store, urls){
+      const key = store === 'amazon' ? 'amazon' : 'ebay';
+      const next = _normalizeImageList(urls);
+      state.storeTemplateImages = {
+        ...state.storeTemplateImages,
+        [key]: next
+      };
+      if(_activeStoreKey() === key){
+        rebuildImagesForActiveStore();
+      }
+    }
+
+    function addImageUrl(url, {scope='store'} = {}){
       const clean = (url ?? '').toString().trim();
       if(!clean) return false;
-      if(state.images.includes(clean)) return false;
-      state.images.unshift(clean);
-      renderImages();
+      if(state.removedImages && state.removedImages.has(clean)){
+        state.removedImages.delete(clean);
+      }
+      const key = _activeStoreKey();
+      if(scope === 'base'){
+        state.baseImages = _mergeImageLists([clean], state.baseImages);
+      } else {
+        const cur = state.storeTemplateImages?.[key] || [];
+        state.storeTemplateImages = {
+          ...state.storeTemplateImages,
+          [key]: _mergeImageLists([clean], cur)
+        };
+      }
+      _promoteStoreImages(key, [clean]);
+      rebuildImagesForActiveStore();
+      renderPreview();
       return true;
+    }
+
+    function removeImageUrl(url){
+      const clean = (url ?? '').toString().trim();
+      if(!clean) return;
+      if(state.removedImages) state.removedImages.add(clean);
+      state.baseImages = (Array.isArray(state.baseImages) ? state.baseImages : []).filter(u => u !== clean);
+      state.storeTemplateImages = {
+        ebay: (state.storeTemplateImages?.ebay || []).filter(u => u !== clean),
+        amazon: (state.storeTemplateImages?.amazon || []).filter(u => u !== clean),
+      };
+      state.imageOrder = {
+        ebay: (state.imageOrder?.ebay || []).filter(u => u !== clean),
+        amazon: (state.imageOrder?.amazon || []).filter(u => u !== clean),
+      };
+      rebuildImagesForActiveStore();
     }
 
     function setFieldValue(id, value, label){
@@ -2634,6 +3260,168 @@
       else if(k === 'ul') execRich('insertUnorderedList');
       else if(k === 'ol') execRich('insertOrderedList');
       else if(k === 'hr') execRich('insertHorizontalRule');
+    }
+
+    function _descNormalizeSpaces(text){
+      return (text ?? '').toString()
+        .replace(/\u00A0/g, ' ')
+        .replace(/[ \t]+/g, ' ')
+        .replace(/\s+([,.;:!?])/g, '$1')
+        .replace(/([,.;:!?])([^\s])/g, '$1 $2')
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
+
+    function _descFixTypos(text){
+      let out = (text ?? '').toString();
+      const reps = [
+        [/\bteh\b/gi, 'the'],
+        [/\brecieve\b/gi, 'receive'],
+        [/\bseperate\b/gi, 'separate'],
+        [/\bseperately\b/gi, 'separately'],
+        [/\bavailble\b/gi, 'available'],
+        [/\bconditon\b/gi, 'condition'],
+        [/\bdefinately\b/gi, 'definitely'],
+        [/\bneccessary\b/gi, 'necessary'],
+        [/\bwierd\b/gi, 'weird'],
+        [/\bw\/\b/gi, 'with '],
+      ];
+      for(const [rx, rep] of reps){
+        out = out.replace(rx, rep);
+      }
+      out = out.replace(/\bi\b/g, 'I');
+      return out;
+    }
+
+    function _descCapSentenceStarts(text){
+      const s = (text ?? '').toString();
+      let out = '';
+      let capNext = true;
+      for(let i = 0; i < s.length; i += 1){
+        const ch = s[i];
+        if(capNext && /[a-z]/.test(ch)){
+          out += ch.toUpperCase();
+          capNext = false;
+          continue;
+        }
+        out += ch;
+        if(/[.!?]/.test(ch)) capNext = true;
+      }
+      return out;
+    }
+
+    function _descFixLine(line, {sentence=true} = {}){
+      let txt = _descNormalizeSpaces(line);
+      if(!txt) return '';
+      txt = _descFixTypos(txt);
+      txt = _descCapSentenceStarts(txt);
+      if(sentence && !/[.!?]$/.test(txt)) txt += '.';
+      return txt;
+    }
+
+    function _descInlineBeautify(text){
+      let out = escapeHtml(text || '');
+      out = out.replace(/\b(Condition|Includes|Included|Features|Brand|Model|Color|Size|Material|UPC|SKU)\b/gi, '<strong>$1</strong>');
+      out = out.replace(/\b(New|Open Box|Used|Refurbished|Excellent|Very Good|Good|Acceptable)\b/gi, '<strong>$1</strong>');
+      out = out.replace(/\b(Please see photos|See photos|Fast shipping|Ships fast|Tested|Working)\b/gi, '<em>$1</em>');
+      return out;
+    }
+
+    function _descBuildFixedHtml(rawText){
+      const lines = (rawText ?? '').toString().replace(/\r/g, '').split('\n');
+      const blocks = [];
+      let para = [];
+      let listMode = '';
+      let listItems = [];
+
+      const flushPara = () => {
+        if(!para.length) return;
+        const txt = _descFixLine(para.join(' '), {sentence:true});
+        if(txt) blocks.push({type:'p', text:txt});
+        para = [];
+      };
+      const flushList = () => {
+        if(!listItems.length) return;
+        blocks.push({type:listMode || 'ul', items:[...listItems]});
+        listMode = '';
+        listItems = [];
+      };
+
+      for(const rawLine of lines){
+        const line = _descNormalizeSpaces(rawLine);
+        if(!line){
+          flushPara();
+          flushList();
+          continue;
+        }
+
+        const bullet = line.match(/^[-*•]\s+(.+)$/);
+        const numbered = line.match(/^\d+[\).\-\s]+(.+)$/);
+        if(bullet || numbered){
+          flushPara();
+          const mode = numbered ? 'ol' : 'ul';
+          if(listMode && listMode !== mode){
+            flushList();
+          }
+          listMode = mode;
+          const itemRaw = (bullet ? bullet[1] : numbered[1]) || '';
+          const item = _descFixLine(itemRaw, {sentence:false});
+          if(item) listItems.push(item);
+          continue;
+        }
+
+        flushList();
+        para.push(line);
+      }
+      flushPara();
+      flushList();
+
+      if(!blocks.length) return '';
+
+      let headingHtml = '';
+      if(blocks[0].type === 'p'){
+        const first = (blocks[0].text || '').trim();
+        if(first && first.length <= 90 && first.split(/\s+/).length <= 14){
+          headingHtml = `<h3>${_descInlineBeautify(first.replace(/[.!?]+$/, ''))}</h3>`;
+          blocks.shift();
+        }
+      }
+
+      const body = [];
+      if(headingHtml) body.push(headingHtml);
+      for(const b of blocks){
+        if(b.type === 'p'){
+          const isNote = /\b(please see photos|sold as is|minor wear|normal wear)\b/i.test(b.text || '');
+          const content = _descInlineBeautify(b.text || '');
+          body.push(isNote ? `<p><em>${content}</em></p>` : `<p>${content}</p>`);
+          continue;
+        }
+        const tag = (b.type === 'ol') ? 'ol' : 'ul';
+        const lis = (b.items || []).map(it => `<li>${_descInlineBeautify(it)}</li>`).join('');
+        body.push(`<${tag}>${lis}</${tag}>`);
+      }
+      return body.join('');
+    }
+
+    function fixListingDescription(){
+      const ed = descEditor();
+      if(!ed){
+        log('Description fix failed: editor unavailable.');
+        return;
+      }
+      const rawText = (ed.innerText || '').toString();
+      if(!rawText.replace(/\u00A0/g, ' ').trim()){
+        log('Description fix skipped: description is empty.');
+        return;
+      }
+      const fixedHtml = _descBuildFixedHtml(rawText);
+      if(!fixedHtml){
+        log('Description fix skipped: nothing to update.');
+        return;
+      }
+      setDescHtml(fixedHtml);
+      try{ ed.focus({preventScroll:true}); } catch(e){}
+      log('Description fixed: spacing, grammar, spelling, and formatting updated.');
     }
 
     function categorySelect(){
@@ -2935,7 +3723,10 @@
           let inputEl = null;
 
           // If the values list is reasonably small, use a <select> (true dropdown).
-          const canSelect = values.length > 0 && values.length <= 120;
+          // Brand is commonly expected as a dropdown, so allow a larger options set for it.
+          const nameLow = name.toLowerCase();
+          const isBrandLike = nameLow.includes('brand');
+          const canSelect = values.length > 0 && (values.length <= 120 || (isBrandLike && values.length <= 250));
           if(canSelect){
             const sel = document.createElement('select');
             sel.dataset.ebayAspect = name;
@@ -3060,7 +3851,7 @@
 
       const mp = ($('marketplaceId')?.value || state.settings?.ebay_marketplace_id || 'EBAY_US').toString().trim() || 'EBAY_US';
       try{
-        const res = await apiGet(`/api/listingagent/ebay/category_aspects?categoryId=${encodeURIComponent(categoryId)}&valuesLimit=160&marketplaceId=${encodeURIComponent(mp)}`);
+        const res = await apiGet(`/api/listingagent/ebay/category_aspects?categoryId=${encodeURIComponent(categoryId)}&valuesLimit=250&marketplaceId=${encodeURIComponent(mp)}`);
         if(reqId !== state.ebayAspectsReqId) return;
 
         state.ebayAspectsCategoryId = categoryId;
@@ -3217,6 +4008,7 @@
         if(first){
           $('amazonAsin').value = first;
           loadAmazonCatalogDetail(first);
+          checkAmazonRestrictionForCurrentAsin({force:true, silent:true});
         }
       }
 
@@ -3232,10 +4024,8 @@
         const brand = (r.brand || '').toString().trim();
         const imgUrl = (r.image || '').toString().trim();
         const url = asin ? `https://www.amazon.com/dp/${asin}` : '';
-        const isSel = !!(selected && asin === selected);
-
         const row = document.createElement('div');
-        row.className = 'compRow' + (isSel ? ' compRowSelected' : '');
+        row.className = 'compRow' + ((selected && asin === selected) ? ' compRowSelected' : '');
 
         const thumb = document.createElement('div');
         thumb.className = 'compThumb';
@@ -3256,7 +4046,6 @@
           <div class=\"compMeta\">
             <span class=\"badge badgeBlue\">ASIN ${escapeHtml(asin)}</span>
             ${brand ? `<span class=\"badge\">${escapeHtml(brand)}</span>` : ''}
-            ${isSel ? `<span class=\"badge badgeGreen\">Selected</span>` : ''}
             ${url ? `<a class=\"badge\" href=\"${escapeHtml(url)}\" target=\"_blank\" rel=\"noreferrer\" style=\"text-decoration:none;\">open</a>` : ''}
           </div>
         `;
@@ -3266,8 +4055,10 @@
 
         row.onclick = () => {
           $('amazonAsin').value = asin;
+          setStoreTemplateImages('amazon', imgUrl ? [imgUrl] : []);
           applyCommonSpecificsFromAvailableData({asin, brand, title});
           loadAmazonCatalogDetail(asin);
+          checkAmazonRestrictionForCurrentAsin({force:true, silent:false});
           renderAmazonTemplates(); // update selection highlight
           log(`Selected Amazon catalog ASIN ${asin} for listing.`);
 
@@ -3478,9 +4269,6 @@
       const brand = (s0.brandName || s0.brand_name || '').toString().trim();
       const asin = (d.asin || '').toString().trim();
       const url = asin ? `https://www.amazon.com/dp/${asin}` : '';
-      const selectedAsin = ($('amazonAsin')?.value || '').toString().trim();
-      const isSelected = !!(asin && selectedAsin && asin === selectedAsin);
-
       const images = extractAmazonImages(d);
       const bullets = extractAmazonBullets(d.attributes || {});
 
@@ -3497,7 +4285,6 @@
             <div class=\"compMeta\">
               ${asin ? `<span class=\"badge badgeBlue\">ASIN ${escapeHtml(asin)}</span>` : ''}
               ${brand ? `<span class=\"badge\">${escapeHtml(brand)}</span>` : ''}
-              ${isSelected ? `<span class=\"badge badgeGreen\">Selected for listing</span>` : ''}
               ${url ? `<a class=\"badge\" href=\"${escapeHtml(url)}\" target=\"_blank\" rel=\"noreferrer\" style=\"text-decoration:none;\">open</a>` : ''}
             </div>
           </div>
@@ -3515,6 +4302,13 @@
       try{
         const res = await apiGet(`/api/listingagent/amazon/catalog_item?asin=${encodeURIComponent(clean)}&includedData=summaries,images,attributes`);
         state.amazonCatalogDetail = res.data || null;
+        const selectedAsin = ($('amazonAsin')?.value || '').toString().trim();
+        if(!selectedAsin || selectedAsin === clean){
+          const detailImages = extractAmazonImages(state.amazonCatalogDetail);
+          if(detailImages.length){
+            setStoreTemplateImages('amazon', detailImages);
+          }
+        }
         applyCommonSpecificsFromAvailableData({asin: clean});
         renderAmazonDetail();
       } catch(e){
@@ -3615,42 +4409,132 @@
 
     function renderImages(){
       const wrap = $('images');
+      if(!wrap) return;
       wrap.innerHTML = '';
+      state.dragImageUrl = '';
+      wrap.ondragover = null;
+      wrap.ondrop = null;
 
       if(!state.images || state.images.length === 0){
         return;
       }
-      const labels = buildImageLabels(state.images);
-      state.images.forEach((url, idx) => {
+      const isEbayMode = _activeStoreKey() === 'ebay';
+      const visible = Array.isArray(state.images) ? state.images.filter(Boolean) : [];
+      const labels = buildImageLabels(visible);
+
+      visible.forEach((url, idx) => {
         const label = labels[url] || `img${idx + 1}`;
-        const chip = document.createElement('div');
-        chip.style.cssText = 'display:inline-flex;align-items:center;gap:8px;border:1px solid var(--border);background:var(--bg2);border-radius:10px;padding:6px 10px 6px 6px;max-width:100%;';
-        chip.innerHTML = `
-          <img src=\"${escapeHtml(url)}\" alt=\"\" style=\"width:28px;height:28px;border-radius:8px;border:1px solid var(--border);object-fit:cover;background:var(--bg0)\" onerror=\"this.style.display='none'\" />
-          <span title=\"${escapeHtml(label)}\" style=\"max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:0.86rem;color:var(--muted);\">${escapeHtml(label)}</span>
-          <button title=\"Remove\" aria-label=\"Remove\" style=\"appearance:none;border:none;background:var(--bg0);color:var(--muted);border-radius:6px;width:28px;height:28px;cursor:pointer;display:grid;place-items:center;\">&times;</button>
+        const isThumb = isEbayMode && idx === 0;
+        const card = document.createElement('div');
+        card.className = `imageCard${isThumb ? ' imageCardThumb' : ''}`;
+        card.dataset.url = url;
+        card.innerHTML = `
+          <div class="imageCardTop">
+            <img src="${escapeHtml(url)}" alt="" onerror="this.style.display='none'" />
+            ${isThumb ? '<span class="imageCardBadge">THUMBNAIL</span>' : ''}
+          </div>
+          <div class="imageCardMeta">
+            <div class="imageCardLabel" title="${escapeHtml(label)}">${escapeHtml(label)}</div>
+            <div class="imageCardActions">
+              ${isEbayMode ? '<div class="imageCardDragText"><i class="fas fa-grip-lines"></i> Drag to reorder</div>' : '<div></div>'}
+              <button type="button" class="imageCardRemove" data-act="remove" title="Remove image" aria-label="Remove image">&times;</button>
+            </div>
+          </div>
         `;
 
-        // Click thumbnail (or URL) to open a larger preview.
-        const thumb = chip.querySelector('img');
+        const thumb = card.querySelector('img');
         if(thumb){
-          try{ thumb.style.cursor = 'zoom-in'; }catch(e){}
-          thumb.onclick = (e) => { e.stopPropagation(); openImageModal(url); };
-        }
-        const txt = chip.querySelector('span');
-        if(txt){
-          try{ txt.style.cursor = 'zoom-in'; }catch(e){}
-          txt.onclick = (e) => { e.stopPropagation(); openImageModal(url); };
+          thumb.onclick = (e) => { e.preventDefault(); e.stopPropagation(); openImageModal(url); };
         }
 
-        chip.querySelector('button').onclick = () => {
-          const removed = state.images[idx];
-          if(removed) state.removedImages.add(removed);
-          state.images.splice(idx, 1);
-          renderPreview(); // refresh hero image too
-        };
-        wrap.appendChild(chip);
+        const labelEl = card.querySelector('.imageCardLabel');
+        if(labelEl){
+          labelEl.onclick = (e) => { e.preventDefault(); e.stopPropagation(); openImageModal(url); };
+        }
+
+        const removeBtn = card.querySelector('button[data-act="remove"]');
+        if(removeBtn){
+          removeBtn.onclick = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            removeImageUrl(url);
+            renderPreview();
+          };
+        }
+
+        if(isEbayMode){
+          card.draggable = true;
+          card.addEventListener('dragstart', (e) => {
+            state.dragImageUrl = url;
+            card.classList.add('imageCardDragging');
+            if(e.dataTransfer){
+              e.dataTransfer.effectAllowed = 'move';
+              try{ e.dataTransfer.setData('text/plain', url); }catch(err){}
+            }
+          });
+          card.addEventListener('dragend', () => {
+            state.dragImageUrl = '';
+            card.classList.remove('imageCardDragging');
+            wrap.querySelectorAll('.imageCardDragOver').forEach(el => el.classList.remove('imageCardDragOver'));
+          });
+          card.addEventListener('dragover', (e) => {
+            const dragging = (state.dragImageUrl || '').toString().trim();
+            if(!dragging || dragging === url) return;
+            e.preventDefault();
+            if(e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+            card.classList.add('imageCardDragOver');
+          });
+          card.addEventListener('dragleave', () => {
+            card.classList.remove('imageCardDragOver');
+          });
+          card.addEventListener('drop', (e) => {
+            e.preventDefault();
+            card.classList.remove('imageCardDragOver');
+            const dragging = (state.dragImageUrl || '').toString().trim();
+            if(!dragging || dragging === url) return;
+            const current = Array.isArray(state.images) ? state.images.slice() : [];
+            const from = current.indexOf(dragging);
+            const toRaw = current.indexOf(url);
+            if(from < 0 || toRaw < 0) return;
+            current.splice(from, 1);
+            let to = toRaw;
+            if(from < to) to -= 1;
+            try{
+              const rect = card.getBoundingClientRect();
+              if(Number.isFinite(e.clientX) && e.clientX > rect.left + (rect.width / 2)){
+                to += 1;
+              }
+            }catch(err){}
+            to = Math.max(0, Math.min(to, current.length));
+            current.splice(to, 0, dragging);
+            reorderActiveStoreVisibleImages(current, {logChange:true});
+          });
+        }
+
+        wrap.appendChild(card);
       });
+
+      if(isEbayMode){
+        wrap.ondragover = (e) => {
+          const dragging = (state.dragImageUrl || '').toString().trim();
+          if(!dragging) return;
+          e.preventDefault();
+          if(e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+        };
+        wrap.ondrop = (e) => {
+          const dragging = (state.dragImageUrl || '').toString().trim();
+          if(!dragging) return;
+          const dropTargetCard = e.target && e.target.closest ? e.target.closest('.imageCard') : null;
+          if(dropTargetCard) return; // handled in card drop
+          e.preventDefault();
+          const current = Array.isArray(state.images) ? state.images.slice() : [];
+          const from = current.indexOf(dragging);
+          if(from < 0) return;
+          current.splice(from, 1);
+          current.push(dragging);
+          reorderActiveStoreVisibleImages(current, {logChange:true});
+        };
+      }
     }
 
     function _renderImageModal(){
@@ -3757,6 +4641,61 @@
       try{ document.body.style.overflow = ''; }catch(e){}
     }
 
+    function closeIssueModal(){
+      const modal = $('issueModal');
+      if(!modal || modal.style.display === 'none') return;
+      modal.style.display = 'none';
+    }
+
+    function showIssueModal(title, message){
+      const modal = $('issueModal');
+      const ttl = $('issueModalTitle');
+      const txt = $('issueModalText');
+      if(!modal || !ttl || !txt) return;
+
+      if(!state.issueModalWired){
+        try{
+          const inner = $('issueModalInner');
+          if(inner) inner.addEventListener('click', (e) => e.stopPropagation());
+          const ok = $('issueModalOk');
+          if(ok) ok.onclick = (e) => { e.preventDefault(); closeIssueModal(); };
+          state.issueModalWired = true;
+        }catch(e){}
+      }
+
+      ttl.textContent = (title || 'Listing Rejected').toString();
+      txt.textContent = (message || '').toString().trim() || 'Unknown error.';
+      modal.style.display = 'grid';
+      try{
+        const ok = $('issueModalOk');
+        if(ok) ok.focus({preventScroll:true});
+      }catch(e){}
+    }
+
+    function isRejectedListingMessage(message){
+      const s = (message || '').toString().trim().toLowerCase();
+      if(!s) return false;
+      if(s.includes('missing required fields')) return false;
+      return (
+        s.includes('rejected')
+        || s.includes('reject')
+        || s.includes('restricted')
+        || s.includes('gated')
+        || s.includes('invalid pictures')
+        || s.includes('invalid image')
+        || s.includes('mixture of self hosted')
+        || s.includes('not allowed')
+        || s.includes('cannot be listed')
+        || s.includes('listing policy')
+        || s.includes('compliance')
+      );
+    }
+
+    function maybeShowRejectedIssue(message, title='Listing Rejected'){
+      if(!isRejectedListingMessage(message)) return;
+      showIssueModal(title, message);
+    }
+
     function isProbablyMobile(){
       try{
         if(window.matchMedia && window.matchMedia('(pointer: coarse)').matches) return true;
@@ -3812,9 +4751,12 @@
           $('mobileUploadStatus').textContent = urls.length ? `Uploaded: ${urls.length}` : '';
         }
 
-        const newUrls = urls.filter(u => u && !state.images.includes(u) && !(state.removedImages && state.removedImages.has(u)));
+        const existing = _mergeImageLists(state.baseImages, state.storeTemplateImages?.ebay || [], state.storeTemplateImages?.amazon || []);
+        const newUrls = urls.filter(u => u && !existing.includes(u) && !(state.removedImages && state.removedImages.has(u)));
         if(newUrls.length){
-          state.images = [...newUrls, ...state.images];
+          state.baseImages = _mergeImageLists(newUrls, state.baseImages);
+          _promoteStoreImages('ebay', newUrls);
+          rebuildImagesForActiveStore();
           renderPreview();
           if(!silent) log(`Added ${newUrls.length} uploaded photo${newUrls.length===1?'':'s'}.`);
         }
@@ -3866,9 +4808,12 @@
         if(!res.ok || data.success === false) throw new Error(data.error || `Upload failed (${res.status})`);
 
         const urls = Array.isArray(data.saved) ? data.saved : [];
-        const newUrls = urls.filter(u => u && !state.images.includes(u) && !(state.removedImages && state.removedImages.has(u)));
+        const existing = _mergeImageLists(state.baseImages, state.storeTemplateImages?.ebay || [], state.storeTemplateImages?.amazon || []);
+        const newUrls = urls.filter(u => u && !existing.includes(u) && !(state.removedImages && state.removedImages.has(u)));
         if(newUrls.length){
-          state.images = [...newUrls, ...state.images];
+          state.baseImages = _mergeImageLists(newUrls, state.baseImages);
+          _promoteStoreImages('ebay', newUrls);
+          rebuildImagesForActiveStore();
           renderPreview();
         }
 
@@ -3896,7 +4841,8 @@
       if(!panel){
         return;
       }
-      if(!clean || isProbablyMobile()){
+      const isAmazonView = _activeStoreKey() === 'amazon';
+      if(!clean || isProbablyMobile() || isAmazonView){
         panel.style.display = 'none';
         if(top) top.classList.remove('withQr');
         state.mobileUploadUrl = '';
@@ -4096,6 +5042,7 @@
       }
       if(!$('amazonAsin').value.trim() && amazonListings[0]?.asin){
         $('amazonAsin').value = (amazonListings[0].asin || '').toString();
+        runAmazonRestrictionCheck();
       }
       if($('amazonPrice').value === '' && amazonListings[0]?.price !== null && amazonListings[0]?.price !== undefined){
         const p = Number(amazonListings[0].price);
@@ -4141,7 +5088,7 @@
         `<p><strong>UPC:</strong> ${escapeHtml(upc)}</p>`,
         `<p><strong>Condition:</strong> ${escapeHtml(cond)}</p>`,
         `<p>Ships fast. Message with any questions.</p>`
-      ].join('\\n');
+      ].join('');
     }
 
     function collectPayload(){
@@ -4155,7 +5102,7 @@
         condition: $('condition').value,
         quantity: Number($('quantity').value || 1),
         price: $('price').value === '' ? null : Number($('price').value),
-        images: state.images,
+        images: _effectiveEbayImages(state.images),
         aspects: collectEbayAspects(),
         categoryId: $('categoryId').value.trim(),
         listingDescription: getDescHtml().trim(),
@@ -4190,10 +5137,6 @@
     function clearFieldHighlights(){
       const invalidEls = document.querySelectorAll('.fieldInvalid');
       invalidEls.forEach(el => el.classList.remove('fieldInvalid'));
-      const confirmRow = $('confirmPublish')?.closest('.checkRow');
-      if(confirmRow) confirmRow.classList.remove('checkRowInvalid');
-      const amazonRow = $('amazonConfirm')?.closest('.checkRow');
-      if(amazonRow) amazonRow.classList.remove('checkRowInvalid');
     }
 
     function markFieldInvalid(id){
@@ -4202,10 +5145,33 @@
       el.classList.add('fieldInvalid');
     }
 
-    function markConfirmInvalid(id){
-      const cb = $(id);
-      const row = cb?.closest('.checkRow');
-      if(row) row.classList.add('checkRowInvalid');
+    function _expandCardForElement(el){
+      if(!el || !el.closest) return;
+      const card = el.closest('.card');
+      if(!card || !card.classList || !card.classList.contains('collapsed')) return;
+      card.classList.remove('collapsed');
+      try{
+        const collapsed = JSON.parse(localStorage.getItem('listingAgentCollapsed') || '{}');
+        if(card.id) collapsed[card.id] = false;
+        localStorage.setItem('listingAgentCollapsed', JSON.stringify(collapsed));
+      }catch(e){}
+    }
+
+    function scrollToFirstInvalidField(){
+      const first = document.querySelector('.fieldInvalid, .checkRowInvalid');
+      if(!first) return false;
+      _expandCardForElement(first);
+      try{ first.scrollIntoView({behavior: 'smooth', block: 'center'}); }catch(e){}
+
+      let focusEl = first;
+      if(!(focusEl instanceof HTMLElement)) return true;
+      if(!('focus' in focusEl) || focusEl.classList.contains('checkRowInvalid')){
+        focusEl = first.querySelector('input, select, textarea, [contenteditable="true"]') || first;
+      }
+      try{ focusEl.focus({preventScroll: true}); }catch(e){
+        try{ focusEl.focus(); }catch(err){}
+      }
+      return true;
     }
 
     function _isBlank(v){
@@ -4225,10 +5191,6 @@
       };
 
       if(mode === 'publish'){
-        if(!payload.confirm){
-          missing.push('confirmation');
-          markConfirmInvalid('confirmPublish');
-        }
         if(!payload.upc && !payload.offerId){
           add('upc', 'UPC');
           add('offerId', 'Offer ID');
@@ -4277,10 +5239,6 @@
         missing.push(label);
         markFieldInvalid(fieldId);
       };
-      if(!payload.confirm){
-        missing.push('confirmation');
-        markConfirmInvalid('amazonConfirm');
-      }
       if(_isBlank(payload.sku)) add('amazonSku', 'Amazon SKU');
       if(payload.price === null || Number.isNaN(payload.price)) add('amazonPrice', 'Amazon Price');
       return { ok: missing.length === 0, missing };
@@ -4365,10 +5323,16 @@
 
     async function createDraft(){
       const payload = collectPayload();
-      if(!payload.upc){ log('Pick a UPC first.'); markFieldInvalid('upc'); return; }
+      if(!payload.upc){
+        log('Pick a UPC first.');
+        markFieldInvalid('upc');
+        scrollToFirstInvalidField();
+        return;
+      }
       const v = validateEbayPayload(payload, 'draft');
       if(!v.ok){
         log(`Missing required fields: ${v.missing.join(', ')}`);
+        scrollToFirstInvalidField();
         return;
       }
       setBusy(true);
@@ -4384,6 +5348,7 @@
       } catch(e){
         highlightMissingEbayAspectFromError(e);
         log(`Draft failed: ${e.message}`);
+        maybeShowRejectedIssue(e.message, 'Draft Rejected');
       } finally {
         setBusy(false);
       }
@@ -4391,14 +5356,10 @@
 
     async function publish(){
       const payload = collectPayload();
-      payload.confirm = $('confirmPublish').checked;
       const v = validateEbayPayload(payload, 'publish');
       if(!v.ok){
-        if(!payload.confirm){
-          log('Publish blocked: check the confirmation box first.');
-        } else {
-          log(`Missing required fields: ${v.missing.join(', ')}`);
-        }
+        log(`Missing required fields: ${v.missing.join(', ')}`);
+        scrollToFirstInvalidField();
         return;
       }
       setBusy(true);
@@ -4406,6 +5367,7 @@
       try{
         const res = await apiPost('/api/listingagent/ebay/publish', payload);
         log(`Published. ListingId: ${res.listingId || '(see raw)'}`);
+        markStoreListedForActiveItem('ebay', {listingId: res.listingId || ''});
         if(payload.upc){
           markQueueDone(payload.upc, 'ebay', {listingId: res.listingId, offerId: payload.offerId, sku: payload.sku});
           await loadQueue();
@@ -4413,6 +5375,7 @@
       } catch(e){
         highlightMissingEbayAspectFromError(e);
         log(`Publish failed: ${e.message}`);
+        maybeShowRejectedIssue(e.message, 'Publish Rejected');
       } finally {
         setBusy(false);
       }
@@ -4520,6 +5483,155 @@
       }
     }
 
+    function _amazonRestrictionKey(asin, marketplaceId, conditionType){
+      const a = (asin || '').toString().trim().toUpperCase();
+      const mp = (marketplaceId || '').toString().trim().toUpperCase();
+      const c = (conditionType || '').toString().trim().toLowerCase();
+      return `${a}|${mp}|${c}`;
+    }
+
+    function updateAmazonTabGateIndicator(){
+      const amazonBtn = $('tabAmazon');
+      if(!amazonBtn) return;
+      const info = state.amazonRestriction || {};
+      const reasons = Array.isArray(info.reasons) ? info.reasons.filter(Boolean) : [];
+      const gated = !!(info.checked && info.restricted);
+      amazonBtn.classList.toggle('tabBtnGated', gated);
+      if(gated){
+        amazonBtn.title = `Amazon gated: ${reasons.length ? reasons.join(' | ') : 'Approval required'}`;
+      } else {
+        amazonBtn.title = '';
+      }
+    }
+
+    function resetAmazonRestrictionHint({clearState=true} = {}){
+      const el = $('amazonRestrictionHint');
+      if(el){
+        el.textContent = '';
+        el.classList.remove('hintDanger');
+        el.style.color = '';
+      }
+      if(clearState){
+        state.amazonRestriction = {
+          key: '',
+          asin: '',
+          marketplaceId: '',
+          conditionType: '',
+          checked: false,
+          restricted: false,
+          reasons: [],
+          warning: '',
+          cached: false,
+          ts: 0,
+        };
+      }
+      updateAmazonTabGateIndicator();
+      try{ renderPreview(); }catch(e){}
+    }
+
+    function _setAmazonRestrictionHint(text, {danger=false, ok=false} = {}){
+      const el = $('amazonRestrictionHint');
+      if(!el) return;
+      el.textContent = (text || '').toString();
+      el.classList.toggle('hintDanger', !!danger);
+      el.style.color = ok ? 'var(--green)' : '';
+    }
+
+    async function checkAmazonRestrictionForCurrentAsin({force=false, silent=true} = {}){
+      const asinRaw = (($('amazonAsin')?.value || '') + '').trim();
+      const asin = asinRaw.toUpperCase();
+      const mp = (($('amazonMarketplaceId')?.value || state.settings?.amazon_marketplace_id || 'ATVPDKIKX0DER') + '').trim();
+      const conditionType = (($('amazonConditionType')?.value || 'used_good') + '').trim();
+      const key = _amazonRestrictionKey(asin, mp, conditionType);
+
+      if(!asin){
+        resetAmazonRestrictionHint({clearState:true});
+        return null;
+      }
+
+      const cachedLocal = state.amazonRestriction || {};
+      const localFresh = (Date.now() - Number(cachedLocal.ts || 0)) < 120000;
+      if(!force && cachedLocal.key === key && localFresh){
+        return cachedLocal;
+      }
+
+      _setAmazonRestrictionHint('Checking catalog restrictions...');
+      try{
+        const res = await apiGet(
+          `/api/listingagent/amazon/restriction_check?asin=${encodeURIComponent(asin)}&marketplaceId=${encodeURIComponent(mp)}&conditionType=${encodeURIComponent(conditionType)}`
+        );
+        const info = res?.restriction || {};
+        const checked = !!info.checked;
+        const restricted = !!info.restricted;
+        const reasons = Array.isArray(info.reasons) ? info.reasons : [];
+        const warning = (res?.warning || '').toString().trim();
+        const cached = !!res?.cached;
+
+        state.amazonRestriction = {
+          key,
+          asin,
+          marketplaceId: mp,
+          conditionType,
+          checked,
+          restricted,
+          reasons: reasons.slice(0, 12),
+          warning,
+          cached,
+          ts: Date.now(),
+        };
+
+        if(checked && restricted){
+          const reasonTxt = reasons.length ? ` ${reasons.slice(0, 2).join(' | ')}` : '';
+          _setAmazonRestrictionHint(`Restricted for this account/marketplace.${reasonTxt}`, {danger:true});
+        } else if(checked){
+          _setAmazonRestrictionHint('Restriction check passed for this ASIN/account.', {ok:true});
+        } else if(warning){
+          _setAmazonRestrictionHint(`Restriction check unavailable: ${warning}`, {danger:true});
+        } else {
+          _setAmazonRestrictionHint('Restriction check unavailable right now.');
+        }
+
+        if(!silent){
+          const logKey = `${key}|${checked ? '1' : '0'}|${restricted ? '1' : '0'}|${reasons.join('|')}|${warning}`;
+          if(state.amazonRestrictionLastLogKey !== logKey){
+            state.amazonRestrictionLastLogKey = logKey;
+            if(checked && restricted){
+              log(`Amazon catalog restriction: ${reasons.length ? reasons.join(' | ') : 'ASIN is restricted/gated.'}`);
+            } else if(checked){
+              log(`Amazon restriction check passed for ASIN ${asin}.`);
+            } else if(warning){
+              log(`Amazon restriction check warning: ${warning}`);
+            }
+          }
+        }
+        updateAmazonTabGateIndicator();
+        try{ renderPreview(); }catch(e){}
+        return state.amazonRestriction;
+      } catch(e){
+        state.amazonRestriction = {
+          key,
+          asin,
+          marketplaceId: mp,
+          conditionType,
+          checked: false,
+          restricted: false,
+          reasons: [],
+          warning: e.message || 'request_failed',
+          cached: false,
+          ts: Date.now(),
+        };
+        _setAmazonRestrictionHint(`Restriction check failed: ${e.message}`, {danger:true});
+        if(!silent) log(`Amazon restriction check failed: ${e.message}`);
+        updateAmazonTabGateIndicator();
+        try{ renderPreview(); }catch(err){}
+        return state.amazonRestriction;
+      }
+    }
+
+    const runAmazonRestrictionCheck = debounce(() => {
+      checkAmazonRestrictionForCurrentAsin({force:false, silent:true});
+    }, 260);
+
     async function amazonCatalogSearch(){
       const typed = ($('amazonCatalogQ')?.value || '').trim();
       const upc12 = formatUpc12((($('amazonUpc')?.value || '').trim() || ($('upc')?.value || '').trim()));
@@ -4595,16 +5707,26 @@
 
     async function amazonPutOffer(){
       const payload = collectAmazonPayload();
-      payload.confirm = $('amazonConfirm').checked;
       const v = validateAmazonPayload(payload);
       if(!v.ok){
-        if(!payload.confirm){
-          log('Amazon Put Offer blocked: check confirmation box.');
-        } else {
-          log(`Missing required fields: ${v.missing.join(', ')}`);
-        }
+        log(`Missing required fields: ${v.missing.join(', ')}`);
+        scrollToFirstInvalidField();
         return;
       }
+
+      if(payload.asin){
+        const restrictionState = await checkAmazonRestrictionForCurrentAsin({force:false, silent:true});
+        const keyNow = _amazonRestrictionKey(payload.asin, payload.marketplaceId, payload.conditionType);
+        if(restrictionState && restrictionState.key === keyNow && restrictionState.checked && restrictionState.restricted){
+          const reasons = Array.isArray(restrictionState.reasons) ? restrictionState.reasons : [];
+          const reasonTxt = reasons.length ? ` Reasons: ${reasons.join(' | ')}` : '';
+          const msg = `ASIN appears restricted/gated for this account/marketplace.${reasonTxt}`;
+          log(msg);
+          showIssueModal('Amazon Catalog Restricted', msg);
+          return;
+        }
+      }
+
       setBusy(true);
       log('Putting Amazon offer...');
       try{
@@ -4615,12 +5737,14 @@
           log(`Amazon used existing SKU ${ctx.effective_sku} (requested ${ctx.requested_sku}).`);
         }
         log(`Amazon offer submitted${sub ? `: ${sub}` : ''}`);
+        markStoreListedForActiveItem('amazon', {asin: (res?.resolved_asin || payload.asin || '')});
         if(payload.upc){
           markQueueDone(payload.upc, 'amazon', {sku: (ctx?.effective_sku || payload.sku), asin: (res?.resolved_asin || payload.asin)});
           await loadQueue();
         }
       } catch(e){
         log(`Amazon Put Offer failed: ${e.message}`);
+        maybeShowRejectedIssue(e.message, 'Amazon Offer Rejected');
         if(AMAZON_VERBOSE_DEBUG){
           const api = e?.api || {};
           const ctx = api?.context || {};
@@ -4659,7 +5783,13 @@
       state.manualRequiredAspects = [];
       stopMobilePhotoPoll();
       state.item = null;
+      state.baseImages = [];
+      state.storeTemplateImages = {ebay: [], amazon: []};
+      state.imageOrder = {ebay: [], amazon: []};
       state.images = [];
+      state.dragImageUrl = '';
+      resetAmazonRestrictionHint({clearState:true});
+      state.sessionListedForCurrent = {ebay: false, amazon: false};
       state.activeUpc = '';
       state.mobileUploadUrl = '';
       state.removedImages = new Set();
@@ -4678,7 +5808,6 @@
       $('price').value = '';
       $('listingDescription').value = '';
       if(descEditor()) setDescHtml('');
-      $('confirmPublish').checked = false;
       $('suggestedPriceHint').style.display = 'none';
       state.priceManuallySet = false;
 
@@ -4687,7 +5816,6 @@
       $('amazonAsin').value = '';
       $('amazonPrice').value = '';
       $('amazonQuantity').value = 1;
-      $('amazonConfirm').checked = false;
       $('amazonSuggestedPriceHint').style.display = 'none';
       $('amazonFoundBadge').style.display = 'none';
       state.amazonPriceManuallySet = false;
@@ -4699,7 +5827,11 @@
       log('Cleared.');
     }
 
-    $('upcSearch').addEventListener('input', runSearch);
+    $('upcSearch').addEventListener('input', () => {
+      updateSearchQueueAction();
+      runSearch();
+    });
+    if($('btnSearchQueueAction')) $('btnSearchQueueAction').addEventListener('click', onSearchQueueAction);
     $('upcSearch').addEventListener('keydown', async (e) => {
       if(e.key === 'Enter'){
         e.preventDefault();
@@ -4759,9 +5891,17 @@
       state.amazonCatalogDetail = null;
       if($('amazonCatalogSelectHint')) $('amazonCatalogSelectHint').textContent = 'Search to see available catalog listings.';
       if($('amazonCatalogDetail')) $('amazonCatalogDetail').innerHTML = '';
+      resetAmazonRestrictionHint({clearState:true});
       renderAmazonTemplates();
       log('Cleared Amazon catalog search.');
     };
+    if($('amazonAsin')){
+      $('amazonAsin').addEventListener('input', () => runAmazonRestrictionCheck());
+      $('amazonAsin').addEventListener('change', () => checkAmazonRestrictionForCurrentAsin({force:true, silent:true}));
+      $('amazonAsin').addEventListener('blur', () => checkAmazonRestrictionForCurrentAsin({force:true, silent:true}));
+    }
+    if($('amazonConditionType')) $('amazonConditionType').addEventListener('change', () => runAmazonRestrictionCheck());
+    if($('amazonMarketplaceId')) $('amazonMarketplaceId').addEventListener('change', () => runAmazonRestrictionCheck());
     // Photo upload (desktop file picker / mobile camera)
     configurePhotoInput();
     if($('photoInput')) $('photoInput').addEventListener('change', async (e) => {
@@ -4808,6 +5948,7 @@
 
       if(ebayBtn) ebayBtn.classList.toggle('tabBtnActive', store === 'ebay');
       if(amazonBtn) amazonBtn.classList.toggle('tabBtnActive', store === 'amazon');
+      updateAmazonTabGateIndicator();
 
       if(ebayPage) ebayPage.style.display = store === 'ebay' ? 'grid' : 'none';
       if(amazonPage) amazonPage.style.display = store === 'amazon' ? 'grid' : 'none';
@@ -4843,6 +5984,17 @@
           if(state.settingsLoaded && !state.ebayLocationsLoaded) loadLocationKeys({silent: true});
         }catch(e){}
       }
+
+      renderImageStoreHint();
+
+      // Image stack is store-specific for template photos; rebuild when switching tabs.
+      if(state.item){
+        rebuildImagesForActiveStore();
+        renderPreview();
+      }
+      updateListingActionState();
+      const upcForPreviewTools = ((state.item?.upc || state.activeUpc || '') + '').trim();
+      setupMobileUploadForUPC(upcForPreviewTools);
     }
 
     if($('tabEbay')) $('tabEbay').onclick = (e) => { e.preventDefault(); setStore('ebay'); };
@@ -4917,9 +6069,6 @@
         el.addEventListener('change', () => el.classList.remove('fieldInvalid'));
       }
     });
-    if($('confirmPublish')) $('confirmPublish').addEventListener('change', () => $('confirmPublish').closest('.checkRow')?.classList.remove('checkRowInvalid'));
-    if($('amazonConfirm')) $('amazonConfirm').addEventListener('change', () => $('amazonConfirm').closest('.checkRow')?.classList.remove('checkRowInvalid'));
-
     // Rich description editor wiring (WYSIWYG -> hidden HTML textarea)
     if(descEditor()){
       try{ document.execCommand('defaultParagraphSeparator', false, 'p'); } catch(e){}
@@ -4929,6 +6078,7 @@
       if($('btnDescBold')) $('btnDescBold').onclick = (e) => { e.preventDefault(); execRich('bold'); };
       if($('btnDescItalic')) $('btnDescItalic').onclick = (e) => { e.preventDefault(); execRich('italic'); };
       if($('btnDescUnderline')) $('btnDescUnderline').onclick = (e) => { e.preventDefault(); execRich('underline'); };
+      if($('btnDescFix')) $('btnDescFix').onclick = (e) => { e.preventDefault(); fixListingDescription(); };
       if($('btnDescClearFmt')) $('btnDescClearFmt').onclick = (e) => { e.preventDefault(); execRich('removeFormat'); execRich('unlink'); };
       if($('btnDescLink')) $('btnDescLink').onclick = (e) => {
         e.preventDefault();
@@ -4993,6 +6143,16 @@
       <button class="imgModalNav imgModalNext" id="imgModalNext" type="button" aria-label="Next">&#x2192;</button>
       <img id="imgModalImg" alt="Preview" src="" />
       <div class="imgModalCaption" id="imgModalCaption"></div>
+    </div>
+  </div>
+
+  <div id="issueModal" class="issueModal" style="display:none;" role="dialog" aria-modal="true" aria-label="Listing issue">
+    <div id="issueModalInner" class="issueModalInner">
+      <h3 id="issueModalTitle" class="issueModalTitle">Listing Rejected</h3>
+      <div id="issueModalText" class="issueModalText"></div>
+      <div class="issueModalActions">
+        <button id="issueModalOk" class="btn btnPrimary" type="button">OK</button>
+      </div>
     </div>
   </div>
 

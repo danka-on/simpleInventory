@@ -15,8 +15,14 @@ from dotenv import load_dotenv
 load_dotenv()
 import xml.dom.minidom as minidom
 import smtplib
+import imaplib
+import email
+import html
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email import policy
+from email.header import decode_header
+from email.utils import parseaddr, parsedate_to_datetime
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -2867,6 +2873,9 @@ _LISTINGAGENT_EBAY_LOCATIONS_CACHE = {'ts': 0.0, 'keys': []}
 _LISTINGAGENT_EBAY_LOCATIONS_LOCK = threading.Lock()
 _LISTINGAGENT_EBAY_CONDITIONS_CACHE = {}
 _LISTINGAGENT_EBAY_CONDITIONS_LOCK = threading.Lock()
+_LISTINGAGENT_AMAZON_RESTRICTIONS_CACHE = {}
+_LISTINGAGENT_AMAZON_RESTRICTIONS_LOCK = threading.Lock()
+_LISTINGAGENT_AMAZON_RESTRICTIONS_TTL = 300
 
 def _listingagent_get_ebay_business_policies(marketplace_id: str):
     """Fetch eBay business policies (fulfillment/payment/return). Cached in-memory."""
@@ -3053,37 +3062,104 @@ def api_listingagent_ebay_offers_for_sku():
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e, 'listingagent:ebay_offers_for_sku')}), 500
 
-def _build_ebay_inventory_item_payload(upc, title, description, images, quantity, condition, *, aspects=None):
-    def _is_ebay_eps_url(url: str) -> bool:
-        """
-        eBay EPS-hosted image URLs are typically on ebayimg/ebaystatic domains.
-        """
-        try:
-            from urllib.parse import urlparse
-            u = urlparse((url or '').strip())
-            host = (u.netloc or '').lower()
-            return ('ebayimg.com' in host) or ('ebaystatic.com' in host)
-        except Exception:
-            return False
+def _listingagent_is_ebay_eps_url(url: str) -> bool:
+    """
+    eBay EPS-hosted image URLs are typically on ebayimg/ebaystatic domains.
+    """
+    s = (url or '').strip()
+    if not s:
+        return False
+    try:
+        from urllib.parse import urlparse
+        u = urlparse(s)
+        host = (u.netloc or '').lower()
+        if ('ebayimg.com' in host) or ('ebaystatic.com' in host):
+            return True
+        # Catch proxied/encoded EPS URLs where host is not directly ebayimg.
+        low = s.lower()
+        return ('ebayimg.com' in low) or ('ebaystatic.com' in low)
+    except Exception:
+        low = s.lower()
+        return ('ebayimg.com' in low) or ('ebaystatic.com' in low)
 
-    images = [i.strip() for i in (images or []) if isinstance(i, str) and i.strip()]
-    # De-duplicate while preserving order.
+def _listingagent_is_amazon_image_url(url: str) -> bool:
+    """
+    Amazon-hosted catalog/listing image host detection.
+    """
+    try:
+        from urllib.parse import urlparse
+        u = urlparse((url or '').strip())
+        host = (u.netloc or '').lower()
+        path = (u.path or '').lower()
+        return (
+            ('media-amazon.com' in host)
+            or ('ssl-images-amazon' in host)
+            or ('images-na.ssl-images-amazon' in host)
+            or ('images-amazon' in host)
+            or (('amazon.' in host) and ('/images/' in path))
+        )
+    except Exception:
+        return False
+
+def _listingagent_dedupe_image_urls(images):
+    urls = [i.strip() for i in (images or []) if isinstance(i, str) and i.strip()]
     deduped = []
     seen = set()
-    for u in images:
+    for u in urls:
         if u in seen:
             continue
         seen.add(u)
         deduped.append(u)
-    images = deduped
+    return deduped
 
-    # eBay disallows mixing EPS-hosted and self-hosted images in one payload.
-    eps_images = [u for u in images if _is_ebay_eps_url(u)]
-    self_images = [u for u in images if not _is_ebay_eps_url(u)]
-    if eps_images and self_images:
-        # Prefer self-hosted images when mixed, since current editing flow typically
-        # reflects the user's active image set and avoids stale EPS leftovers.
-        images = self_images
+def _listingagent_has_mixed_ebay_image_sources(images):
+    urls = _listingagent_dedupe_image_urls(images)
+    eps = [u for u in urls if _listingagent_is_ebay_eps_url(u)]
+    non_eps = [u for u in urls if not _listingagent_is_ebay_eps_url(u)]
+    return bool(eps and non_eps)
+
+def _listingagent_prefer_single_ebay_image_source(images):
+    """
+    Fallback selector when eBay rejects mixed EPS + non-EPS image sets.
+    """
+    urls = _listingagent_dedupe_image_urls(images)
+    eps = [u for u in urls if _listingagent_is_ebay_eps_url(u)]
+    non_eps = [u for u in urls if not _listingagent_is_ebay_eps_url(u)]
+    if not eps or not non_eps:
+        return urls
+    # Prefer self-hosted/non-EPS when mixed so local/uploaded images win.
+    return non_eps
+
+def _listingagent_is_likely_ebay_image_mix_error(error_text: str) -> bool:
+    s = (error_text or '').strip().lower()
+    if not s:
+        return False
+    if not any(k in s for k in ('image', 'picture', 'imageurl', 'image urls')):
+        return False
+    return any(k in s for k in (
+        'only one',
+        'one type',
+        'mixed',
+        'self-hosted',
+        'self hosted',
+        'not supported',
+        'not allowed',
+        'invalid'
+    ))
+
+def _build_ebay_inventory_item_payload(upc, title, description, images, quantity, condition, *, aspects=None):
+    images = _listingagent_dedupe_image_urls(images)
+
+    # Remove Amazon-hosted images for eBay listings when other candidates exist.
+    non_amazon_images = [u for u in images if not _listingagent_is_amazon_image_url(u)]
+    if non_amazon_images:
+        images = non_amazon_images
+
+    # eBay does not allow mixing EPS and self-hosted image URLs in one listing.
+    # Prefer self-hosted/non-EPS when mixed.
+    non_eps_images = [u for u in images if not _listingagent_is_ebay_eps_url(u)]
+    if non_eps_images and len(non_eps_images) != len(images):
+        images = non_eps_images
 
     # eBay limits imageUrls to 12
     images = images[:12]
@@ -3359,6 +3435,22 @@ def _listingagent_put_inventory_item_with_condition_fallback(sku: str, inventory
     err_item = _ebay_extract_error(resp_item)
     err_item_l = err_item.lower()
     if ('invalid item condition information' not in err_item_l) and ('condition id is invalid' not in err_item_l):
+        # If mixed EPS + non-EPS images trigger a rejection, retry once with a single source set.
+        product_obj = payload.get('product') if isinstance(payload.get('product'), dict) else {}
+        image_urls = _listingagent_dedupe_image_urls((product_obj or {}).get('imageUrls') or [])
+        if image_urls and _listingagent_has_mixed_ebay_image_sources(image_urls) and _listingagent_is_likely_ebay_image_mix_error(err_item):
+            fallback_images = _listingagent_prefer_single_ebay_image_source(image_urls)[:12]
+            if fallback_images and fallback_images != image_urls:
+                retry_payload = dict(payload)
+                product_retry = dict(product_obj or {})
+                product_retry['imageUrls'] = fallback_images
+                retry_payload['product'] = product_retry
+                resp_item_retry = _ebay_api_request('PUT', f'/sell/inventory/v1/inventory_item/{sku_encoded}', payload=retry_payload)
+                if resp_item_retry.status_code < 400:
+                    payload = retry_payload
+                    return payload, condition_autofixed, original_condition, tried
+                err_item = _ebay_extract_error(resp_item_retry)
+
         missing_aspect = _extract_missing_ebay_aspect(err_item)
         raise _ListingAgentUserError(
             err_item,
@@ -3700,7 +3792,13 @@ def _listingagent_get_ebay_category_aspects(category_id: str, marketplace_id: st
             for a in aspects:
                 if not isinstance(a, dict):
                     continue
-                name = (a.get('aspectName') or a.get('aspect_name') or '').strip()
+                name = (
+                    a.get('aspectName')
+                    or a.get('localizedAspectName')
+                    or a.get('aspect_name')
+                    or a.get('localized_aspect_name')
+                    or ''
+                ).strip()
                 if not name:
                     continue
                 constraint = a.get('aspectConstraint') or a.get('aspect_constraint') or {}
@@ -3726,8 +3824,18 @@ def _listingagent_get_ebay_category_aspects(category_id: str, marketplace_id: st
                     for v in values_raw[:values_limit]:
                         if not isinstance(v, dict):
                             continue
-                        val = (v.get('localizedAspectValue') or v.get('localized_aspect_value') or v.get('value') or '').strip()
-                        if val:
+                        if isinstance(v, dict):
+                            val = (
+                                v.get('localizedAspectValue')
+                                or v.get('localized_aspect_value')
+                                or v.get('localizedValue')
+                                or v.get('localized_value')
+                                or v.get('value')
+                                or ''
+                            ).strip()
+                        else:
+                            val = str(v or '').strip()
+                        if val and val not in values:
                             values.append(val)
 
                 results.append({
@@ -3890,14 +3998,56 @@ def _listingagent_ebay_create_draft_offer(data, *, dry_run=False):
         if 'offer entity already exists' in err_text.lower():
             existing = _listingagent_find_existing_offer_for_sku(sku, marketplace_id=marketplace_id)
             if existing:
+                existing_offer_id = (existing.get('offerId') or existing.get('offer_id') or '').strip()
+                existing_offer_updated = False
+                existing_location_autofixed = bool(location_autofixed)
+                if existing_offer_id:
+                    resp_put_existing = _ebay_api_request('PUT', f'/sell/inventory/v1/offer/{existing_offer_id}', payload=offer_payload)
+                    put_ok = resp_put_existing.status_code < 400
+                    if not put_ok:
+                        put_err = _ebay_extract_error(resp_put_existing)
+                        put_offer_payload = dict(offer_payload)
+                        # Same stale-location recovery used for POST create path.
+                        if 'location information not found' in put_err.lower():
+                            fresh_key, _fixed, keys = _listingagent_resolve_ebay_location_key('', force_refresh=True)
+                            if fresh_key and fresh_key != str(offer_payload.get('merchantLocationKey') or '').strip():
+                                put_offer_payload['merchantLocationKey'] = fresh_key
+                                resp_put_retry = _ebay_api_request('PUT', f'/sell/inventory/v1/offer/{existing_offer_id}', payload=put_offer_payload)
+                                if resp_put_retry.status_code < 400:
+                                    offer_payload = put_offer_payload
+                                    existing_location_autofixed = True
+                                    put_ok = True
+                                    try:
+                                        _listingagent_upsert_settings({'ebay_location_key': fresh_key})
+                                    except Exception:
+                                        pass
+                                else:
+                                    put_err = _ebay_extract_error(resp_put_retry)
+                        if not put_ok:
+                            raise _ListingAgentUserError(
+                                f"Existing offer found for SKU, but updating it failed: {put_err}",
+                                status_code=400,
+                                extra={
+                                    'offer': offer_payload,
+                                    'resolvedMerchantLocationKey': merchant_location_key,
+                                    'locationAutoFixed': existing_location_autofixed,
+                                    'conditionAutoFixed': bool(condition_autofixed),
+                                    'resolvedCondition': (inventory_item_payload.get('condition') or '').strip(),
+                                    'originalCondition': original_condition,
+                                    'missingAspect': _extract_missing_ebay_aspect(put_err),
+                                    'existingOfferId': existing_offer_id,
+                                    'availableLocationKeys': all_location_keys[:50]
+                                }
+                            )
+                    existing_offer_updated = True
                 return {
                     'success': True,
-                    'offerId': (existing.get('offerId') or existing.get('offer_id') or '').strip(),
+                    'offerId': existing_offer_id or (existing.get('offerId') or existing.get('offer_id') or '').strip(),
                     'inventoryItem': inventory_item_payload,
                     'offer': offer_payload,
-                    'raw': {'reusedExistingOffer': True, 'existingOffer': existing},
+                    'raw': {'reusedExistingOffer': True, 'updatedExistingOffer': existing_offer_updated, 'existingOffer': existing},
                     'resolvedMerchantLocationKey': merchant_location_key,
-                    'locationAutoFixed': bool(location_autofixed),
+                    'locationAutoFixed': existing_location_autofixed,
                     'conditionAutoFixed': bool(condition_autofixed),
                     'resolvedCondition': (inventory_item_payload.get('condition') or '').strip(),
                     'originalCondition': original_condition,
@@ -3955,12 +4105,9 @@ def api_listingagent_ebay_publish():
     try:
         data = request.json or {}
         settings = _listingagent_get_settings()
-        confirm = bool(data.get('confirm', False))
         dry_run = bool(data.get('dry_run', False))
 
         offer_id = (data.get('offerId') or '').strip()
-        if not confirm and not dry_run:
-            return jsonify({'success': False, 'error': 'Confirmation required to publish'}), 400
  
         inventory_payload = None
         offer_payload = None
@@ -4029,6 +4176,63 @@ def api_listingagent_ebay_publish():
         if resp_pub.status_code >= 400:
             err_pub = _ebay_extract_error(resp_pub)
             low = err_pub.lower()
+            # Publish-time mixed image source recovery:
+            # eBay can reject at publish even if the prior inventory PUT accepted the payload.
+            if _listingagent_is_likely_ebay_image_mix_error(err_pub) and offer_id:
+                try:
+                    from urllib.parse import quote
+
+                    sku_local = (data.get('sku') or (offer_payload or {}).get('sku') or data.get('upc') or '').strip()
+                    if not sku_local:
+                        # Resolve SKU from the offer when client payload omitted it.
+                        resp_offer_state = _ebay_api_request('GET', f'/sell/inventory/v1/offer/{offer_id}')
+                        if resp_offer_state.status_code < 400:
+                            offer_state = resp_offer_state.json() if resp_offer_state.text else {}
+                            sku_local = (offer_state.get('sku') or '').strip()
+
+                    if sku_local:
+                        sku_encoded = quote(sku_local, safe='')
+                        inv_payload = dict(inventory_payload or {})
+                        if not inv_payload:
+                            # No local copy (e.g. offerId publish without update path); fetch inventory item.
+                            resp_inv_get = _ebay_api_request('GET', f'/sell/inventory/v1/inventory_item/{sku_encoded}')
+                            if resp_inv_get.status_code < 400:
+                                inv_payload = resp_inv_get.json() if resp_inv_get.text else {}
+
+                        product_obj = inv_payload.get('product') if isinstance(inv_payload.get('product'), dict) else {}
+                        image_urls = _listingagent_dedupe_image_urls((product_obj or {}).get('imageUrls') or [])
+                        if image_urls and _listingagent_has_mixed_ebay_image_sources(image_urls):
+                            fallback_images = _listingagent_prefer_single_ebay_image_source(image_urls)[:12]
+                            if fallback_images and fallback_images != image_urls:
+                                retry_inv_payload = dict(inv_payload)
+                                product_retry = dict(product_obj or {})
+                                product_retry['imageUrls'] = fallback_images
+                                retry_inv_payload['product'] = product_retry
+                                resp_item_retry = _ebay_api_request(
+                                    'PUT',
+                                    f'/sell/inventory/v1/inventory_item/{sku_encoded}',
+                                    payload=retry_inv_payload
+                                )
+                                if resp_item_retry.status_code < 400:
+                                    inventory_payload = retry_inv_payload
+                                    resp_pub_retry = _ebay_api_request('POST', f'/sell/inventory/v1/offer/{offer_id}/publish')
+                                    if resp_pub_retry.status_code < 400:
+                                        pub_data = resp_pub_retry.json() if resp_pub_retry.text else {}
+                                        listing_id = pub_data.get('listingId')
+                                        return jsonify({
+                                            'success': True,
+                                            'listingId': listing_id,
+                                            'raw': pub_data,
+                                            'imageSourceAutoFixed': True,
+                                            'imageCount': len(fallback_images)
+                                        })
+                                    err_pub = _ebay_extract_error(resp_pub_retry)
+                                    low = err_pub.lower()
+                                else:
+                                    err_pub = _ebay_extract_error(resp_item_retry)
+                                    low = err_pub.lower()
+                except Exception:
+                    pass
             # Publish-time condition/category mismatch recovery:
             # try fallback condition updates even when initial inventory PUT succeeded.
             if (('invalid item condition information' in low) or ('condition id is invalid' in low)) and offer_id and inventory_payload:
@@ -4129,7 +4333,7 @@ def api_listingagent_ebay_publish():
                     cur = conn.cursor()
                     cur.execute('''
                         UPDATE bol_items
-                        SET listed_ebay = 1, listed_ebay_date = ?
+                        SET listed_ebay = 1, listed_ebay_date = ?, listed_ebay_source = 'listing_center'
                         WHERE TRIM(upc) = ? COLLATE NOCASE
                            OR TRIM(upc) LIKE ? COLLATE NOCASE
                     ''', (now_iso, upc, like_upc))
@@ -4703,6 +4907,54 @@ def api_listingagent_amazon_account_check():
         return jsonify(out)
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e, 'listingagent:amazon_account_check')}), 500
+
+@app.route('/api/listingagent/amazon/restriction_check', methods=['GET'])
+def api_listingagent_amazon_restriction_check():
+    """Lightweight pre-check for ASIN gating/restrictions (cached)."""
+    try:
+        asin = (request.args.get('asin') or '').strip().upper()
+        if not asin:
+            return jsonify({'success': False, 'error': 'asin is required'}), 400
+
+        condition_type = (request.args.get('conditionType') or '').strip()
+        mp_override = (request.args.get('marketplaceId') or '').strip()
+        force_refresh = (request.args.get('refresh') or '').strip().lower() in ('1', 'true', 'yes', 'on')
+
+        credentials, seller_id, marketplace_id, marketplace = _amazon_spapi_context()
+        if marketplace is None:
+            return jsonify({'success': False, 'error': 'Amazon SP-API not available'}), 503
+
+        mp_id = mp_override or marketplace_id
+        info = _amazon_check_listing_restrictions_cached(
+            credentials,
+            marketplace,
+            seller_id,
+            mp_id,
+            asin,
+            condition_type=condition_type,
+            force_refresh=force_refresh
+        ) or {}
+
+        warning = ''
+        if not bool(info.get('checked')):
+            hints = _amazon_restriction_error_hints(info, mp_id)
+            warning = ' '.join(hints).strip()
+
+        return jsonify({
+            'success': True,
+            'asin': asin,
+            'marketplaceId': mp_id,
+            'conditionType': condition_type,
+            'restriction': {
+                'checked': bool(info.get('checked')),
+                'restricted': bool(info.get('restricted')),
+                'reasons': (info.get('reasons') or [])[:12]
+            },
+            'cached': bool(info.get('_cached')),
+            'warning': warning
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'listingagent:amazon_restriction_check')}), 500
 
 @app.route('/api/listingagent/amazon/catalog_search', methods=['GET'])
 def api_listingagent_amazon_catalog_search():
@@ -5353,6 +5605,56 @@ def _amazon_check_listing_restrictions(credentials, marketplace, seller_id, mark
         out['raw'] = {'error': str(e)}
         return out
 
+def _amazon_check_listing_restrictions_cached(credentials, marketplace, seller_id, marketplace_id, asin, condition_type='', force_refresh=False):
+    asin_clean = (asin or '').strip().upper()
+    mp = (marketplace_id or '').strip()
+    cond = (condition_type or '').strip().lower()
+    sid = (seller_id or '').strip()
+    if not asin_clean:
+        return {'checked': False, 'restricted': False, 'reasons': [], 'raw': {}}
+
+    key = f'{sid}|{mp}|{asin_clean}|{cond}'
+    now = time.time()
+    if not force_refresh:
+        cached = _LISTINGAGENT_AMAZON_RESTRICTIONS_CACHE.get(key)
+        if cached and (now - float(cached.get('ts') or 0)) < _LISTINGAGENT_AMAZON_RESTRICTIONS_TTL:
+            out = dict(cached.get('data') or {})
+            out['_cached'] = True
+            return out
+
+    with _LISTINGAGENT_AMAZON_RESTRICTIONS_LOCK:
+        if not force_refresh:
+            cached = _LISTINGAGENT_AMAZON_RESTRICTIONS_CACHE.get(key)
+            now = time.time()
+            if cached and (now - float(cached.get('ts') or 0)) < _LISTINGAGENT_AMAZON_RESTRICTIONS_TTL:
+                out = dict(cached.get('data') or {})
+                out['_cached'] = True
+                return out
+
+        result = _amazon_check_listing_restrictions(
+            credentials,
+            marketplace,
+            seller_id,
+            marketplace_id,
+            asin_clean,
+            condition_type=condition_type
+        )
+        now_store = time.time()
+        if len(_LISTINGAGENT_AMAZON_RESTRICTIONS_CACHE) > 2000:
+            expired = []
+            for k, v in _LISTINGAGENT_AMAZON_RESTRICTIONS_CACHE.items():
+                if (now_store - float((v or {}).get('ts') or 0)) > (_LISTINGAGENT_AMAZON_RESTRICTIONS_TTL * 3):
+                    expired.append(k)
+            for k in expired[:1000]:
+                _LISTINGAGENT_AMAZON_RESTRICTIONS_CACHE.pop(k, None)
+        _LISTINGAGENT_AMAZON_RESTRICTIONS_CACHE[key] = {
+            'ts': now_store,
+            'data': dict(result or {})
+        }
+        out = dict(result or {})
+        out['_cached'] = False
+        return out
+
 def _build_amazon_offer_attributes(
     *,
     upc,
@@ -5495,11 +5797,7 @@ def api_listingagent_amazon_put_offer():
     try:
         data = request.json or {}
         dry_run = bool(data.get('dry_run', False))
-        confirm = bool(data.get('confirm', False))
         debug_mode = str(data.get('debug', '')).strip().lower() in ('1', 'true', 'yes', 'on')
-
-        if not confirm and not dry_run:
-            return jsonify({'success': False, 'error': 'Confirmation required'}), 400
 
         settings = _listingagent_get_settings()
 
@@ -5618,7 +5916,7 @@ def api_listingagent_amazon_put_offer():
 
         restriction_info = None
         if resolved_asin:
-            restriction_info = _amazon_check_listing_restrictions(
+            restriction_info = _amazon_check_listing_restrictions_cached(
                 credentials,
                 marketplace,
                 seller_id,
@@ -5762,6 +6060,17 @@ def api_listingagent_amazon_put_offer():
             err_low = (err_detail or '').lower()
             is_invalid_input = ('invalidinput' in err_low) or ('invalid parameters' in err_low) or ('invalid parameter' in err_low)
             is_schema_price_error = ('99022' in err_low) or ('invalid_attribute' in err_low) or ('value_with_tax' in err_low)
+            is_missing_identifier_error = (
+                ('90220' in err_low or 'missing_attribute' in err_low)
+                and (
+                    'merchant_suggested_asin' in err_low
+                    or 'externally_assigned_product_identifier' in err_low
+                    or 'merchant suggested asin' in err_low
+                    or 'external product id' in err_low
+                )
+            )
+            if is_missing_identifier_error:
+                is_invalid_input = True
             resolved_pt = (
                 _amazon_get_catalog_product_type(credentials, marketplace, mp_id, resolved_asin)
                 or _amazon_get_listing_product_type(li, seller_id, sku, mp_id)
@@ -5820,6 +6129,25 @@ def api_listingagent_amazon_put_offer():
                                 'identifier_mode': 'asin',
                                 'include_identifier_marketplace': False,
                             })
+                            if is_missing_identifier_error:
+                                id_modes = ['both', 'asin'] if upc_digits_ctx else ['asin']
+                                for id_mode in id_modes:
+                                    fallback_specs.append({
+                                        'label': f'fallback:update:{pt}:with_identifiers:{id_mode}:{pkey}',
+                                        'product_type': pt,
+                                        'requirements': 'LISTING_OFFER_ONLY',
+                                        'include_identifiers': True,
+                                        'include_condition': True,
+                                        'condition_value': condition_type,
+                                        'include_qty': True,
+                                        'merchant_shipping_group': '',
+                                        'price_value_key': pkey,
+                                        'price_model': 'purchasable_offer',
+                                        'include_marketplace_fields': False,
+                                        'include_offer_audience': False,
+                                        'identifier_mode': id_mode,
+                                        'include_identifier_marketplace': False,
+                                    })
                 else:
                     for pt in product_type_plan:
                         for pkey in price_key_candidates:
@@ -5947,7 +6275,7 @@ def api_listingagent_amazon_put_offer():
                 if resolved_asin:
                     try:
                         if not restriction_info:
-                            restriction_info = _amazon_check_listing_restrictions(
+                            restriction_info = _amazon_check_listing_restrictions_cached(
                                 credentials, marketplace, seller_id, mp_id, resolved_asin, condition_type=condition_type
                             )
                     except Exception:
@@ -6002,7 +6330,7 @@ def api_listingagent_amazon_put_offer():
                     cur = conn.cursor()
                     cur.execute('''
                         UPDATE bol_items
-                        SET listed_amazon = 1, listed_amazon_date = ?
+                        SET listed_amazon = 1, listed_amazon_date = ?, listed_amazon_source = 'listing_center'
                         WHERE TRIM(upc) = ? COLLATE NOCASE
                            OR TRIM(upc) LIKE ? COLLATE NOCASE
                     ''', (now_iso, upc, like_upc))
@@ -7855,6 +8183,193 @@ def _normalize_upc_preserve_suffix_for_match(value):
 def _normalize_lot_number(value):
     return str(value or '').strip()
 
+def _normalize_listing_source(value, default='system'):
+    """Normalize listing source into one of: system, user, listing_center."""
+    raw = (str(value or '').strip().lower().replace('-', '_').replace(' ', '_'))
+    if not raw:
+        return default
+    if raw in ('listingagent', 'listing_agent', 'listing_center', 'listingcenter', 'list_manager', 'listing_centre', 'listingcentre'):
+        return 'listing_center'
+    if raw in ('user', 'manual', 'list_status_api', 'list_status', 'mail_center', 'mailcenter'):
+        return 'user'
+    if raw in ('system', 'auto', 'automated', 'sync', 'migration', 'unknown'):
+        return 'system'
+    return default or 'system'
+
+def _listing_source_label(value):
+    norm = _normalize_listing_source(value, default='system')
+    if norm == 'listing_center':
+        return 'Listing Center'
+    if norm == 'user':
+        return 'User'
+    return 'System'
+
+def _marketplace_upc_lookup_variants(raw_upc):
+    """
+    UPC matching helper for cross-db marketplace checks:
+    supports suffix variants and zero-padded/stripped numeric forms.
+    """
+    upc = _normalize_upc(raw_upc)
+    if not upc:
+        return []
+    out = []
+
+    def add(v):
+        vv = str(v or '').strip().lower()
+        if vv and vv not in out:
+            out.append(vv)
+
+    add(upc)
+    if '-' in upc:
+        base, suffix = upc.split('-', 1)
+    else:
+        base, suffix = upc, ''
+
+    base = (base or '').strip()
+    suffix = (suffix or '').strip()
+    stripped_base = _strip_leading_zeros_numeric(base) or base
+
+    add(base)
+    add(stripped_base)
+    if suffix:
+        add(f'{base}-{suffix}')
+        add(f'{stripped_base}-{suffix}')
+
+    if base.isdigit() and len(base) <= 12:
+        add(base.zfill(12))
+    if stripped_base.isdigit() and len(stripped_base) <= 12:
+        add(stripped_base.zfill(12))
+    return out
+
+def _is_marketplace_live_for_upc(upc, live_key_set):
+    if not upc or not live_key_set:
+        return False
+    for key in _marketplace_upc_lookup_variants(upc):
+        if key in live_key_set:
+            return True
+    return False
+
+def _chunk_list(items, size):
+    for i in range(0, len(items), size):
+        yield items[i:i + size]
+
+def _fetch_live_marketplace_upc_keys(upcs, *, max_lookup_keys=4000):
+    """
+    Return active listing key sets for eBay/Amazon from store DBs.
+    Keeps /items-to-list checkboxes aligned with currently live listings.
+    """
+    key_pool = set()
+    for upc in upcs or []:
+        for key in _marketplace_upc_lookup_variants(upc):
+            key_pool.add(key)
+
+    payload = {
+        'ebay': set(),
+        'amazon': set(),
+        'ebay_checked': False,
+        'amazon_checked': False,
+    }
+    if not key_pool:
+        return payload
+
+    # Avoid expensive cross-db scans on huge pages (ex: analytics calls with limit=50000).
+    if len(key_pool) > max_lookup_keys:
+        return payload
+
+    keys = sorted(key_pool)
+    chunk_size = 700  # stay below SQLite parameter limits
+
+    try:
+        with sqlite3.connect('ebayStore.db') as conn:
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            for part in _chunk_list(keys, chunk_size):
+                placeholders = ','.join('?' for _ in part)
+                cur.execute(f'''
+                    SELECT UPC
+                    FROM INVENTORY
+                    WHERE UPC IS NOT NULL
+                      AND TRIM(UPC) != ''
+                      AND LOWER(TRIM(COALESCE(List_State, ''))) = 'active'
+                      AND TRIM(COALESCE(ItemID, '')) != ''
+                      AND (Quantity > 0 OR Quantity IS NULL)
+                      AND LOWER(TRIM(UPC)) IN ({placeholders})
+                ''', tuple(part))
+                for row in cur.fetchall():
+                    for key in _marketplace_upc_lookup_variants(row['UPC']):
+                        payload['ebay'].add(key)
+            payload['ebay_checked'] = True
+    except Exception as e:
+        print(f"[_fetch_live_marketplace_upc_keys] eBay lookup failed: {e}")
+
+    try:
+        with sqlite3.connect('amazonStore.db') as conn:
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            for part in _chunk_list(keys, chunk_size):
+                placeholders = ','.join('?' for _ in part)
+                cur.execute(f'''
+                    SELECT UPC
+                    FROM ITEMS
+                    WHERE UPC IS NOT NULL
+                      AND TRIM(UPC) != ''
+                      AND TRIM(COALESCE(STATUS, '')) = 'Active'
+                      AND TRIM(COALESCE(ASIN, '')) != ''
+                      AND (QUANTITY > 0 OR QUANTITY IS NULL)
+                      AND LOWER(TRIM(UPC)) IN ({placeholders})
+                ''', tuple(part))
+                for row in cur.fetchall():
+                    for key in _marketplace_upc_lookup_variants(row['UPC']):
+                        payload['amazon'].add(key)
+            payload['amazon_checked'] = True
+    except Exception as e:
+        print(f"[_fetch_live_marketplace_upc_keys] Amazon lookup failed: {e}")
+
+    return payload
+
+def _apply_marketplace_status_overlay(rows):
+    """
+    Normalize marketplace status + source payload for UI rows.
+    - eBay/Amazon listed flags prefer currently-live marketplace DB state when available.
+    - Source labels are always included for listed rows.
+    """
+    if not rows:
+        return
+
+    upcs = [str(r.get('upc') or '').strip() for r in rows if str(r.get('upc') or '').strip()]
+    live = _fetch_live_marketplace_upc_keys(upcs)
+    ebay_keys = live.get('ebay') or set()
+    amazon_keys = live.get('amazon') or set()
+    ebay_checked = bool(live.get('ebay_checked'))
+    amazon_checked = bool(live.get('amazon_checked'))
+
+    for row in rows:
+        upc = str(row.get('upc') or '').strip()
+        if ebay_checked:
+            is_live = _is_marketplace_live_for_upc(upc, ebay_keys)
+            row['listed_ebay'] = 1 if is_live else 0
+            row['listed_ebay_live'] = 1 if is_live else 0
+        else:
+            row['listed_ebay_live'] = None
+
+        if amazon_checked:
+            is_live = _is_marketplace_live_for_upc(upc, amazon_keys)
+            row['listed_amazon'] = 1 if is_live else 0
+            row['listed_amazon_live'] = 1 if is_live else 0
+        else:
+            row['listed_amazon_live'] = None
+
+        for mp in ('amazon', 'ebay', 'facebook'):
+            listed_key = f'listed_{mp}'
+            source_key = f'listed_{mp}_source'
+            source_label_key = f'{source_key}_label'
+            listed = int(row.get(listed_key) or 0) == 1
+            source = (row.get(source_key) or '').strip()
+            if listed and not source:
+                source = 'system'
+            row[source_key] = source
+            row[source_label_key] = _listing_source_label(source) if listed else ''
+
 def _coerce_bool(value):
     if isinstance(value, bool):
         return value
@@ -8863,7 +9378,49 @@ def _ensure_bol_list_status_column():
                 ''')
             except Exception:
                 pass
-        
+
+        if 'listed_amazon_source' not in cols:
+            print("🛒 Adding Amazon listing source column...")
+            cur.execute("ALTER TABLE bol_items ADD COLUMN listed_amazon_source TEXT")
+        if 'listed_ebay_source' not in cols:
+            print("🏷️ Adding eBay listing source column...")
+            cur.execute("ALTER TABLE bol_items ADD COLUMN listed_ebay_source TEXT")
+        if 'listed_facebook_source' not in cols:
+            print("📘 Adding Facebook listing source column...")
+            cur.execute("ALTER TABLE bol_items ADD COLUMN listed_facebook_source TEXT")
+
+        # One-time source backfill so future requests avoid full-table updates.
+        try:
+            cur.execute('CREATE TABLE IF NOT EXISTS app_metadata (key TEXT PRIMARY KEY, value TEXT)')
+            cur.execute('SELECT value FROM app_metadata WHERE key = ? LIMIT 1', ('listing_source_backfill_v1',))
+            marker_row = cur.fetchone()
+            marker = (marker_row[0] if marker_row else '')
+            if str(marker) != '1':
+                cur.execute('''
+                    UPDATE bol_items
+                    SET listed_amazon_source = 'system'
+                    WHERE COALESCE(listed_amazon, 0) = 1
+                      AND (listed_amazon_source IS NULL OR TRIM(listed_amazon_source) = '')
+                ''')
+                cur.execute('''
+                    UPDATE bol_items
+                    SET listed_ebay_source = 'system'
+                    WHERE COALESCE(listed_ebay, 0) = 1
+                      AND (listed_ebay_source IS NULL OR TRIM(listed_ebay_source) = '')
+                ''')
+                cur.execute('''
+                    UPDATE bol_items
+                    SET listed_facebook_source = 'system'
+                    WHERE COALESCE(listed_facebook, 0) = 1
+                      AND (listed_facebook_source IS NULL OR TRIM(listed_facebook_source) = '')
+                ''')
+                cur.execute(
+                    'INSERT OR REPLACE INTO app_metadata (key, value) VALUES (?, ?)',
+                    ('listing_source_backfill_v1', '1')
+                )
+        except Exception as src_backfill_err:
+            print(f"Warning: Could not backfill listing source columns: {src_backfill_err}")
+
         # One-time migration: convert existing list_status='listed' to listed_amazon=1
         # This runs even if columns already exist, but only for items that haven't been migrated
         print("[_ensure_bol_list_status_column] Running migration for list_status='listed' items...")
@@ -8872,7 +9429,8 @@ def _ensure_bol_list_status_column():
             cur.execute("""
                 UPDATE bol_items 
                 SET listed_amazon = 1, 
-                    listed_amazon_date = datetime('now')
+                    listed_amazon_date = datetime('now'),
+                    listed_amazon_source = COALESCE(NULLIF(TRIM(listed_amazon_source), ''), 'system')
                 WHERE (list_status = 'listed' OR list_status = 'Listed')
                 AND (listed_amazon IS NULL OR listed_amazon = 0)
             """)
@@ -8935,6 +9493,7 @@ def item_prep_diagnostic_view_page():
     status = None
     images = []
     bol = None
+    conn = None
     try:
         _ensure_items_prep_tables()
         _ensure_bol_list_status_column()
@@ -8949,7 +9508,9 @@ def item_prep_diagnostic_view_page():
         if selected_lot:
             cur.execute('''
                 SELECT id, upc, item_description, image_url, lot_number, bol_number, import_date, list_status, quantity,
-                       listed_amazon, listed_amazon_date, listed_ebay, listed_ebay_date, listed_facebook, listed_facebook_date
+                       listed_amazon, listed_amazon_date, listed_amazon_source,
+                       listed_ebay, listed_ebay_date, listed_ebay_source,
+                       listed_facebook, listed_facebook_date, listed_facebook_source
                 FROM bol_items
                 WHERE upc = ? COLLATE NOCASE
                   AND lot_number = ? COLLATE NOCASE
@@ -8960,7 +9521,9 @@ def item_prep_diagnostic_view_page():
             if not b:
                 cur.execute('''
                     SELECT id, upc, item_description, image_url, lot_number, bol_number, import_date, list_status, quantity,
-                           listed_amazon, listed_amazon_date, listed_ebay, listed_ebay_date, listed_facebook, listed_facebook_date
+                           listed_amazon, listed_amazon_date, listed_amazon_source,
+                           listed_ebay, listed_ebay_date, listed_ebay_source,
+                           listed_facebook, listed_facebook_date, listed_facebook_source
                     FROM bol_items
                     WHERE upc = ? COLLATE NOCASE
                     ORDER BY import_date DESC, id DESC
@@ -8970,7 +9533,9 @@ def item_prep_diagnostic_view_page():
         else:
             cur.execute('''
                 SELECT id, upc, item_description, image_url, lot_number, bol_number, import_date, list_status, quantity,
-                       listed_amazon, listed_amazon_date, listed_ebay, listed_ebay_date, listed_facebook, listed_facebook_date
+                       listed_amazon, listed_amazon_date, listed_amazon_source,
+                       listed_ebay, listed_ebay_date, listed_ebay_source,
+                       listed_facebook, listed_facebook_date, listed_facebook_source
                 FROM bol_items 
                 WHERE upc = ? COLLATE NOCASE
                 ORDER BY import_date DESC, id DESC
@@ -8982,11 +9547,14 @@ def item_prep_diagnostic_view_page():
         # If item has prep status with quantity, use that instead of bol quantity
         if bol and status and status.get('quantity') is not None:
             bol['quantity'] = status['quantity']
+        if bol:
+            _apply_marketplace_status_overlay([bol])
         
     except Exception as e:
         print('Diagnostic view load error:', e)
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
     return render_template('item_prep_diagnostic_view.html', upc=upc, status=status, images=images, bol=bol)
 
 @app.route('/item-prep-no-barcode')
@@ -11988,12 +12556,21 @@ def _mail_store_upsert_external(*, store, direction, status, sender_name, recipi
     with db_connection('storemail.db') as conn:
         cur = conn.cursor()
         existing = cur.execute('''
-            SELECT id FROM store_messages
+            SELECT id, direction, status FROM store_messages
             WHERE external_source = ? AND external_id = ?
             LIMIT 1
         ''', (external_source, external_id)).fetchone()
         payload_json = json.dumps(external_payload or {}, ensure_ascii=True)
         if existing:
+            effective_status = status
+            if (
+                str(existing['direction'] or '').lower() == 'inbound'
+                and str(existing['status'] or '').lower() == 'read'
+                and str(status or '').lower() == 'unread'
+            ):
+                # Keep local read state when upstream cannot reliably report read/unread.
+                effective_status = 'read'
+
             cur.execute('''
                 UPDATE store_messages
                 SET store = ?,
@@ -12004,11 +12581,15 @@ def _mail_store_upsert_external(*, store, direction, status, sender_name, recipi
                     subject = ?,
                     body = ?,
                     external_payload = ?,
+                    read_at = CASE
+                        WHEN ? = 'read' AND direction = 'inbound' THEN COALESCE(read_at, CURRENT_TIMESTAMP)
+                        ELSE read_at
+                    END,
                     last_synced_at = CURRENT_TIMESTAMP
                 WHERE id = ?
             ''', (
-                store, direction, status, sender_name, recipient_name, subject, body,
-                payload_json, existing['id']
+                store, direction, effective_status, sender_name, recipient_name, subject, body,
+                payload_json, str(effective_status or '').lower(), existing['id']
             ))
             return existing['id'], False
 
@@ -12182,88 +12763,387 @@ def _mail_sync_ebay(hours_back=72, max_pages=3):
         page += 1
     return {'fetched': fetched, 'inserted': inserted, 'updated': updated, 'pages': page - 1}
 
-def _mail_sync_amazon(days_back=7, max_orders=60):
+_MAIL_AMAZON_ORDER_ID_RE = _re.compile(r'\b(?:\d{3}-\d{7}-\d{7}|[A-Z0-9]{3}-[A-Z0-9]{7}-[A-Z0-9]{7})\b')
+_MAIL_AMAZON_HINTS = (
+    'amazon',
+    'amazon.com',
+    'sellercentral.amazon',
+    '@amazon.',
+    'seller central',
+    'amazon marketplace',
+)
+_MAIL_AMAZON_BUYER_HINTS = (
+    'buyer-seller messaging',
+    'buyer seller messaging',
+    'new message from a buyer',
+    'you have received a new message from a buyer',
+    'you received a new message from a buyer',
+    'customer sent you a message',
+    'message from buyer',
+    'respond to buyer',
+    'reply to buyer',
+    'sent you a message',
+)
+
+def _mail_decode_header_value(value):
+    if value is None:
+        return ''
+    raw = str(value)
     try:
-        from sp_api.api import Messaging
+        decoded = decode_header(raw)
     except Exception:
-        raise Exception("Amazon SP-API messaging client unavailable")
+        return raw
+    out = []
+    for part, enc in decoded:
+        if isinstance(part, bytes):
+            charset = enc or 'utf-8'
+            try:
+                out.append(part.decode(charset, errors='replace'))
+            except Exception:
+                out.append(part.decode('utf-8', errors='replace'))
+        else:
+            out.append(str(part))
+    return ''.join(out).strip()
 
-    credentials, _seller_id, marketplace_id, marketplace = _amazon_spapi_context()
-    msg_api = Messaging(credentials=credentials, marketplace=marketplace)
-    with db_connection('sold.db') as conn:
-        rows = conn.execute('''
-            SELECT order_id, MAX(COALESCE(paid_time, shipped_time)) AS ts
-            FROM orders
-            WHERE store = 'amazon'
-              AND order_id IS NOT NULL
-              AND TRIM(order_id) != ''
-              AND date(COALESCE(paid_time, shipped_time, date('now'))) >= date('now', '-' || ? || ' days')
-            GROUP BY order_id
-            ORDER BY datetime(ts) DESC
-            LIMIT ?
-        ''', (int(days_back or 7), int(max_orders or 60))).fetchall()
+def _mail_date_to_iso(value):
+    raw = (value or '').strip()
+    if not raw:
+        return None
+    try:
+        dt = parsedate_to_datetime(raw)
+        if dt is None:
+            return None
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=datetime.UTC)
+        else:
+            dt = dt.astimezone(datetime.UTC)
+        return dt.isoformat().replace('+00:00', 'Z')
+    except Exception:
+        return None
 
+def _mail_clean_message_id(value):
+    v = (value or '').strip()
+    if not v:
+        return ''
+    return v.strip('<>').strip()
+
+def _mail_strip_subject_prefixes(value):
+    s = (value or '').strip()
+    for _ in range(6):
+        next_s = _re.sub(r'^(?:re|fw|fwd)\s*:\s*', '', s, flags=_re.IGNORECASE).strip()
+        if next_s == s:
+            break
+        s = next_s
+    return s
+
+def _mail_html_to_text(html_body):
+    raw = html_body or ''
+    raw = _re.sub(r'(?is)<(script|style).*?>.*?</\1>', ' ', raw)
+    raw = _re.sub(r'(?i)<br\s*/?>', '\n', raw)
+    raw = _re.sub(r'(?i)</p\s*>', '\n', raw)
+    raw = _re.sub(r'<[^>]+>', ' ', raw)
+    raw = html.unescape(raw)
+    raw = raw.replace('\r', '')
+    raw = _re.sub(r'[ \t]{2,}', ' ', raw)
+    raw = _re.sub(r'\n{3,}', '\n\n', raw)
+    return raw.strip()
+
+def _mail_extract_text_body(msg_obj):
+    plain_parts = []
+    html_parts = []
+    parts = msg_obj.walk() if msg_obj.is_multipart() else [msg_obj]
+    for part in parts:
+        ctype = (part.get_content_type() or '').lower()
+        disp = (part.get_content_disposition() or '').lower()
+        if disp == 'attachment' or ctype not in ('text/plain', 'text/html'):
+            continue
+        text = ''
+        try:
+            text = part.get_content()
+        except Exception:
+            payload = part.get_payload(decode=True) or b''
+            charset = part.get_content_charset() or 'utf-8'
+            try:
+                text = payload.decode(charset, errors='replace')
+            except Exception:
+                text = payload.decode('utf-8', errors='replace')
+        if not text:
+            continue
+        if ctype == 'text/plain':
+            plain_parts.append(str(text))
+        else:
+            html_parts.append(str(text))
+    body = '\n'.join(plain_parts).strip() if plain_parts else _mail_html_to_text('\n'.join(html_parts))
+    body = body.replace('\r', '')
+    body = _re.sub(r'\n{3,}', '\n\n', body)
+    return body.strip()
+
+def _mail_parse_forwarded_amazon_email(raw_bytes, *, uid='', flags=''):
+    try:
+        msg_obj = email.message_from_bytes(raw_bytes, policy=policy.default)
+    except Exception:
+        return None
+
+    subject_raw = _mail_decode_header_value(msg_obj.get('Subject'))
+    subject = _mail_strip_subject_prefixes(subject_raw) or subject_raw
+    from_raw = _mail_decode_header_value(msg_obj.get('From'))
+    from_name, from_email = parseaddr(from_raw)
+    body = _mail_extract_text_body(msg_obj)
+
+    search_blob = '\n'.join([subject_raw or '', from_raw or '', body or ''])
+    low = search_blob.lower()
+    has_amazon_hint = any(h in low for h in _MAIL_AMAZON_HINTS)
+    has_buyer_hint = any(h in low for h in _MAIL_AMAZON_BUYER_HINTS)
+    order_match = _MAIL_AMAZON_ORDER_ID_RE.search(search_blob or '')
+    order_id = order_match.group(0) if order_match else ''
+
+    if not has_amazon_hint:
+        return None
+    if not has_buyer_hint and not (order_id and ('message' in low or 'buyer' in low)):
+        return None
+
+    status = 'read' if '\\Seen' in (flags or '') else 'unread'
+    msg_id = _mail_clean_message_id(_mail_decode_header_value(msg_obj.get('Message-ID')))
+    created_at = _mail_date_to_iso(_mail_decode_header_value(msg_obj.get('Date')))
+    if not subject:
+        subject = f"Amazon buyer message for order {order_id}" if order_id else 'Amazon buyer message'
+
+    sender_name = from_name or from_email or 'Amazon Buyer Message'
+    if 'amazon.' not in (from_email or '').lower():
+        sender_name = 'Amazon Buyer Message (forwarded)'
+
+    body_text = body or '(No body)'
+    if len(body_text) > 9000:
+        body_text = body_text[:9000].rstrip() + '\n...[truncated]'
+
+    ext_id = msg_id or hashlib.sha1(
+        f"{uid}|{from_raw}|{subject}|{created_at}|{body_text[:400]}".encode('utf-8', errors='ignore')
+    ).hexdigest()[:32]
+    payload = {
+        'imap_uid': str(uid or ''),
+        'order_id': order_id or '',
+        'from': from_raw or '',
+        'from_email': from_email or '',
+        'message_id_header': msg_id or '',
+        'flags': flags or '',
+        'source': 'forwarded_email',
+    }
+    return {
+        'external_id': ext_id,
+        'subject': subject,
+        'body': body_text,
+        'sender_name': sender_name,
+        'recipient_name': 'Sweet Shelves',
+        'created_at': created_at,
+        'status': status,
+        'payload': payload,
+    }
+
+def _mail_sync_amazon_forwarded_emails(days_back=7, max_messages=120):
+    imap_server = (os.getenv('IMAP_SERVER') or 'imap.gmail.com').strip() or 'imap.gmail.com'
+    imap_port_raw = (os.getenv('IMAP_PORT') or '993').strip() or '993'
+    imap_user = (os.getenv('IMAP_USER') or os.getenv('SMTP_USER') or '').strip()
+    imap_password = (os.getenv('IMAP_PASSWORD') or os.getenv('SMTP_PASSWORD') or '').strip()
+    imap_mailbox = (os.getenv('IMAP_MAILBOX') or 'INBOX').strip() or 'INBOX'
+
+    if not imap_user or not imap_password:
+        raise Exception("IMAP credentials missing (set IMAP_USER/IMAP_PASSWORD or SMTP_USER/SMTP_PASSWORD)")
+
+    try:
+        imap_port = int(imap_port_raw)
+    except Exception:
+        imap_port = 993
+    days_back = max(1, min(30, int(days_back or 7)))
+    max_messages = max(1, min(500, int(max_messages or 120)))
+
+    since_dt = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=days_back)
+    since_arg = since_dt.strftime('%d-%b-%Y')
+
+    scanned = 0
+    matched = 0
+    inserted = 0
+    updated = 0
+    first_error = None
+    client = None
+    try:
+        client = imaplib.IMAP4_SSL(imap_server, imap_port)
+        client.login(imap_user, imap_password)
+        status, _ = client.select(imap_mailbox, readonly=True)
+        if status != 'OK':
+            raise Exception(f"Failed to select mailbox '{imap_mailbox}'")
+
+        status, data = client.uid('search', None, 'SINCE', since_arg)
+        if status != 'OK':
+            raise Exception('IMAP search failed')
+
+        uid_list = [u for u in ((data[0] or b'').split()) if u]
+        if len(uid_list) > max_messages:
+            uid_list = uid_list[-max_messages:]
+
+        for uid_bytes in reversed(uid_list):
+            scanned += 1
+            uid = uid_bytes.decode('utf-8', errors='ignore')
+            try:
+                f_status, fetched = client.uid('fetch', uid, '(BODY.PEEK[] FLAGS)')
+                if f_status != 'OK' or not fetched:
+                    continue
+
+                raw_bytes = b''
+                flags_raw = ''
+                for part in fetched:
+                    if not isinstance(part, tuple):
+                        continue
+                    if len(part) > 0 and isinstance(part[0], (bytes, bytearray)):
+                        flags_raw += bytes(part[0]).decode('utf-8', errors='ignore')
+                    if len(part) > 1 and isinstance(part[1], (bytes, bytearray)):
+                        raw_bytes = bytes(part[1])
+                if not raw_bytes:
+                    continue
+
+                parsed = _mail_parse_forwarded_amazon_email(raw_bytes, uid=uid, flags=flags_raw)
+                if not parsed:
+                    continue
+
+                matched += 1
+                _id, is_new = _mail_store_upsert_external(
+                    store='Amazon',
+                    direction='inbound',
+                    status=parsed['status'],
+                    sender_name=parsed['sender_name'],
+                    recipient_name=parsed['recipient_name'],
+                    subject=parsed['subject'],
+                    body=parsed['body'],
+                    external_source='amazon_forwarded_email',
+                    external_id=parsed['external_id'],
+                    external_payload=parsed['payload'],
+                    created_at=parsed.get('created_at'),
+                )
+                if is_new:
+                    inserted += 1
+                else:
+                    updated += 1
+            except Exception as e:
+                if first_error is None:
+                    first_error = str(e)
+                continue
+    finally:
+        if client is not None:
+            try:
+                client.close()
+            except Exception:
+                pass
+            try:
+                client.logout()
+            except Exception:
+                pass
+
+    result = {'scanned': scanned, 'matched': matched, 'inserted': inserted, 'updated': updated}
+    if first_error:
+        result['error'] = first_error
+    return result
+
+def _mail_sync_amazon(days_back=7, max_orders=60):
+    days_back = max(1, int(days_back or 7))
+    max_orders = max(1, int(max_orders or 60))
     checked = 0
     inserted = 0
     updated = 0
     first_error = None
-    for r in rows:
-        order_id = (r['order_id'] or '').strip()
-        if not order_id:
-            continue
-        checked += 1
-        try:
-            resp = msg_api.get_messaging_actions_for_order(order_id, marketplaceIds=[marketplace_id])
-            payload = getattr(resp, 'payload', None) or {}
-        except Exception as e:
-            # Capture first error for reporting, but continue processing other orders
-            if first_error is None:
-                first_error = str(e)
-            continue
 
-        actions = []
-        links = (payload.get('_links') or {}) if isinstance(payload, dict) else {}
-        raw_actions = links.get('actions') or []
-        for a in raw_actions:
-            if not isinstance(a, dict):
+    try:
+        from sp_api.api import Messaging
+        credentials, _seller_id, marketplace_id, marketplace = _amazon_spapi_context()
+        msg_api = Messaging(credentials=credentials, marketplace=marketplace)
+        with db_connection('sold.db') as conn:
+            rows = conn.execute('''
+                SELECT order_id, MAX(COALESCE(paid_time, shipped_time)) AS ts
+                FROM orders
+                WHERE store = 'amazon'
+                  AND order_id IS NOT NULL
+                  AND TRIM(order_id) != ''
+                  AND date(COALESCE(paid_time, shipped_time, date('now'))) >= date('now', '-' || ? || ' days')
+                GROUP BY order_id
+                ORDER BY datetime(ts) DESC
+                LIMIT ?
+            ''', (days_back, max_orders)).fetchall()
+
+        for r in rows:
+            order_id = (r['order_id'] or '').strip()
+            if not order_id:
                 continue
-            href = (a.get('href') or '').strip()
-            name = (a.get('name') or '').strip() or href.split('/')[-1]
-            if href:
-                actions.append({'name': name, 'href': href})
+            checked += 1
+            try:
+                resp = msg_api.get_messaging_actions_for_order(order_id, marketplaceIds=[marketplace_id])
+                payload = getattr(resp, 'payload', None) or {}
+            except Exception as e:
+                if first_error is None:
+                    first_error = str(e)
+                continue
 
-        if not actions:
-            continue
+            actions = []
+            links = (payload.get('_links') or {}) if isinstance(payload, dict) else {}
+            raw_actions = links.get('actions') or []
+            for a in raw_actions:
+                if not isinstance(a, dict):
+                    continue
+                href = (a.get('href') or '').strip()
+                name = (a.get('name') or '').strip() or href.split('/')[-1]
+                if href:
+                    actions.append({'name': name, 'href': href})
 
-        digest = hashlib.sha1(json.dumps(actions, sort_keys=True).encode('utf-8', errors='ignore')).hexdigest()[:16]
-        ext_id = f"{order_id}:{digest}"
-        subject = f"Amazon Order {order_id}: messaging actions updated"
-        body_lines = ["Available Amazon messaging actions:"]
-        for a in actions:
-            body_lines.append(f"- {a.get('name')}: {a.get('href')}")
-        body = '\n'.join(body_lines)
-        _id, is_new = _mail_store_upsert_external(
-            store='Amazon',
-            direction='inbound',
-            status='unread',
-            sender_name='Amazon Messaging API',
-            recipient_name='Sweet Shelves',
-            subject=subject,
-            body=body,
-            external_source='amazon_order_actions',
-            external_id=ext_id,
-            external_payload={'order_id': order_id, 'actions': actions},
-            created_at=None,
+            if not actions:
+                continue
+
+            digest = hashlib.sha1(json.dumps(actions, sort_keys=True).encode('utf-8', errors='ignore')).hexdigest()[:16]
+            ext_id = f"{order_id}:{digest}"
+            subject = f"Amazon Order {order_id}: messaging actions updated"
+            body_lines = ["Available Amazon messaging actions:"]
+            for a in actions:
+                body_lines.append(f"- {a.get('name')}: {a.get('href')}")
+            body = '\n'.join(body_lines)
+            _id, is_new = _mail_store_upsert_external(
+                store='Amazon',
+                direction='inbound',
+                status='unread',
+                sender_name='Amazon Messaging API',
+                recipient_name='Sweet Shelves',
+                subject=subject,
+                body=body,
+                external_source='amazon_order_actions',
+                external_id=ext_id,
+                external_payload={'order_id': order_id, 'actions': actions},
+                created_at=None,
+            )
+            if is_new:
+                inserted += 1
+            else:
+                updated += 1
+    except Exception as e:
+        if first_error is None:
+            first_error = str(e)
+
+    forwarded_result = {}
+    try:
+        forwarded_result = _mail_sync_amazon_forwarded_emails(
+            days_back=days_back,
+            max_messages=max(max_orders, min(max_orders * 4, 500)),
         )
-        if is_new:
-            inserted += 1
-        else:
-            updated += 1
-    
-    result = {'checked_orders': checked, 'inserted': inserted, 'updated': updated}
+    except Exception as e:
+        forwarded_result = {'error': str(e)}
+        if first_error is None:
+            first_error = str(e)
+
+    result = {
+        'checked_orders': checked,
+        'inserted': inserted,
+        'updated': updated,
+        'forwarded_email': forwarded_result,
+        'inserted_total': inserted + int(forwarded_result.get('inserted') or 0),
+        'updated_total': updated + int(forwarded_result.get('updated') or 0),
+    }
     if first_error:
         result['error'] = first_error
-        result['note'] = 'Authorization error: Check Amazon SP-API permissions. See MAIL_CENTER_AMAZON_FIX.md'
+        result['note'] = 'Amazon SP-API messaging may be limited. Forwarded-email sync can still ingest buyer messages.'
     return result
 
 def _verify_sns_signature(message):
@@ -12487,6 +13367,12 @@ def api_mail_center_sync():
         if store_req in ('all', 'amazon'):
             try:
                 out['amazon'] = _mail_sync_amazon(days_back=amazon_days, max_orders=amazon_orders)
+                if isinstance(out.get('amazon'), dict):
+                    if out['amazon'].get('error'):
+                        out['warnings'].append('Amazon SP-API sync had issues')
+                    forwarded = out['amazon'].get('forwarded_email') or {}
+                    if isinstance(forwarded, dict) and forwarded.get('error'):
+                        out['warnings'].append('Amazon forwarded-email sync had issues')
             except Exception as e:
                 out['amazon'] = {'error': _safe_error(e, 'mail_center:sync_amazon')}
                 out['warnings'].append('Amazon sync failed')
@@ -13000,6 +13886,84 @@ def _labelmaster_pick_cheapest_rate(rates):
             best_amount = val
     return best
 
+def _labelmaster_collect_scope_tokens(*values):
+    tokens = set()
+    for value in values:
+        if value is None:
+            continue
+        if isinstance(value, (list, tuple, set)):
+            parts = value
+        else:
+            parts = str(value).replace(',', ' ').split()
+        for p in parts:
+            s = str(p or '').strip()
+            if s:
+                tokens.add(s.lower())
+    return tokens
+
+def _labelmaster_ebay_scope_state():
+    ebay_connected = False
+    token_scope = ''
+    tokens_path = BASE_DIR / 'tokens.json'
+    if tokens_path.exists():
+        try:
+            with open(tokens_path, 'r', encoding='utf-8') as f:
+                tokens = json.load(f)
+            ebay_connected = bool(tokens.get('refresh_token'))
+            token_scope = tokens.get('scope') or ''
+        except Exception:
+            ebay_connected = False
+
+    env_scope = (os.getenv('EBAY_SCOPE') or '')
+    env_scope_tokens = _labelmaster_collect_scope_tokens(env_scope)
+    token_scope_tokens = _labelmaster_collect_scope_tokens(token_scope)
+
+    scope_known = bool(token_scope_tokens)
+    has_logistics_scope = any('sell.logistics' in s for s in token_scope_tokens)
+    env_has_logistics_scope = any('sell.logistics' in s for s in env_scope_tokens)
+    has_effective_logistics_scope = has_logistics_scope or (not scope_known and env_has_logistics_scope)
+
+    return {
+        'connected': ebay_connected,
+        'scope_known': scope_known,
+        'has_sell_logistics_scope': has_logistics_scope,
+        'env_has_sell_logistics_scope': env_has_logistics_scope,
+        'has_effective_sell_logistics_scope': has_effective_logistics_scope
+    }
+
+def _labelmaster_ebay_error_message(payload, status_code, *, stage='request'):
+    if isinstance(payload, dict):
+        errors = payload.get('errors')
+        if isinstance(errors, list) and errors:
+            access_denied = False
+            first_msg = ''
+            for entry in errors:
+                if not isinstance(entry, dict):
+                    continue
+                try:
+                    err_id = int(entry.get('errorId'))
+                except Exception:
+                    err_id = None
+                domain = str(entry.get('domain') or '').strip().upper()
+                category = str(entry.get('category') or '').strip().upper()
+                if err_id == 1100 or (domain == 'ACCESS' and category == 'REQUEST'):
+                    access_denied = True
+                if not first_msg:
+                    first_msg = (entry.get('longMessage') or entry.get('message') or '').strip()
+            if access_denied:
+                return (
+                    'eBay Logistics API access denied (ACCESS 1100). Re-authorize eBay with '
+                    'https://api.ebay.com/oauth/api_scope/sell.logistics and include it in EBAY_SCOPE.'
+                )
+            if first_msg:
+                return f"eBay {stage} failed: {first_msg}"
+        msg = str(payload.get('message') or '').strip()
+        if msg:
+            return f"eBay {stage} failed: {msg}"
+    if payload:
+        return str(payload)
+    return f"eBay {stage} failed (HTTP {status_code})"
+
 def _labelmaster_ebay_request(method, path, token, *, json_payload=None, marketplace_id='EBAY_US', timeout=30):
     url = f"https://api.ebay.com/sell/logistics/v1_beta{path}"
     headers = {
@@ -13063,7 +14027,7 @@ def _labelmaster_buy_ebay(order, settings):
         quote_json = {}
 
     if quote_resp.status_code >= 400:
-        raise Exception(str(quote_json.get('errors') or quote_json or f"eBay error {quote_resp.status_code}"))
+        raise Exception(_labelmaster_ebay_error_message(quote_json, quote_resp.status_code, stage='shipping quote'))
 
     quote_id = quote_json.get('shippingQuoteId')
     rates = quote_json.get('rates') or []
@@ -13097,7 +14061,7 @@ def _labelmaster_buy_ebay(order, settings):
         ship_json = {}
 
     if ship_resp.status_code >= 400:
-        raise Exception(str(ship_json.get('errors') or ship_json or f"eBay error {ship_resp.status_code}"))
+        raise Exception(_labelmaster_ebay_error_message(ship_json, ship_resp.status_code, stage='shipment'))
 
     label_url = ship_json.get('labelDownloadUrl') or ship_json.get('labelUrl')
     label_bytes = None
@@ -13342,7 +14306,7 @@ def _labelmaster_buy_amazon(order, settings, ship_to=None):
                 'serviceTypes': ['Amazon Shipping Ground', 'Amazon Shipping Standard', 'Amazon Shipping Premium'],
                 'containerSpecifications': [{
                     'dimensions': {'length': dims['length'], 'width': dims['width'], 'height': dims['height'], 'unit': 'IN'},
-                    'weight': {'unit': 'OZ', 'value': weight['value']}
+                    'weight': {'unit': 'oz', 'value': weight['value']}
                 }]
             }
             rates_resp = v1_api.get_rates(**v1_body)
@@ -13567,26 +14531,25 @@ def api_labelmaster_status():
     settings = _labelmaster_get_settings()
     missing = _labelmaster_missing_settings(settings)
 
-    ebay_connected = False
+    scope_state = _labelmaster_ebay_scope_state()
+    ebay_connected = bool(scope_state.get('connected'))
     ebay_reason = ''
-    ebay_scope = (os.getenv('EBAY_SCOPE') or '')
-    has_logistics_scope = 'sell.logistics' in ebay_scope
-
-    tokens_path = BASE_DIR / 'tokens.json'
-    if tokens_path.exists():
-        try:
-            with open(tokens_path, 'r', encoding='utf-8') as f:
-                tokens = json.load(f)
-            ebay_connected = bool(tokens.get('refresh_token'))
-        except Exception:
-            ebay_connected = False
+    scope_known = bool(scope_state.get('scope_known'))
+    has_logistics_scope = bool(scope_state.get('has_sell_logistics_scope'))
+    env_has_logistics_scope = bool(scope_state.get('env_has_sell_logistics_scope'))
+    has_effective_logistics_scope = bool(scope_state.get('has_effective_sell_logistics_scope'))
 
     if not ebay_connected:
         ebay_reason = 'eBay OAuth token missing (run ebay_oauth_setup.py)'
-    elif not has_logistics_scope:
+    elif not env_has_logistics_scope:
+        ebay_reason = 'EBAY_SCOPE is missing sell.logistics (update .env and reauthorize eBay)'
+    elif scope_known and not has_logistics_scope:
         ebay_reason = 'Missing sell.logistics scope (reauthorize eBay app)'
     elif missing:
         ebay_reason = f"Missing defaults: {', '.join(missing)}"
+    elif not scope_known:
+        # Some refresh-token responses omit scope in tokens.json; treat as unknown instead of hard-failing.
+        ebay_reason = 'Scope could not be introspected from token metadata (not blocking)'
 
     amazon_connected = False
     amazon_reason = ''
@@ -13608,8 +14571,11 @@ def api_labelmaster_status():
         'success': True,
         'ebay': {
             'connected': ebay_connected,
-            'supported': ebay_connected and has_logistics_scope and not missing,
-            'reason': ebay_reason
+            'supported': ebay_connected and has_effective_logistics_scope and not missing,
+            'reason': ebay_reason,
+            'scope_known': scope_known,
+            'has_sell_logistics_scope': has_logistics_scope,
+            'env_has_sell_logistics_scope': env_has_logistics_scope
         },
         'amazon': {
             'connected': amazon_connected,
@@ -13703,6 +14669,22 @@ def api_labelmaster_buy():
             return jsonify({'success': False, 'error': 'Order not found'}), 404
 
         if store == 'ebay':
+            scope_state = _labelmaster_ebay_scope_state()
+            if not scope_state.get('env_has_sell_logistics_scope'):
+                return jsonify({
+                    'success': False,
+                    'error': (
+                        'EBAY_SCOPE is missing sell.logistics. Add '
+                        'https://api.ebay.com/oauth/api_scope/sell.logistics to .env and reauthorize eBay.'
+                    )
+                }), 400
+            if scope_state.get('scope_known') and not scope_state.get('has_sell_logistics_scope'):
+                return jsonify({
+                    'success': False,
+                    'error': (
+                        'eBay token does not include sell.logistics. Reauthorize eBay OAuth and retry.'
+                    )
+                }), 400
             result = _labelmaster_buy_ebay(order, settings)
         else:
             ship_to = data.get('ship_to')
@@ -14531,53 +15513,181 @@ def api_pricemaster_bulk_update():
                     price = float(j.get('new_price'))
 
                     try:
-                        debug = None
+                        debug = {'attempts': []}
+                        product_type = default_product_type
                         product_type = _amazon_get_listing_product_type(li, seller_id, sku, mp_id, product_type_cache)
                         if not product_type:
                             product_type = _amazon_get_catalog_product_type(credentials, marketplace, mp_id, asin)
                         product_type = product_type or default_product_type
 
-                        # Price-only update first (avoid touching condition/fulfillment identifiers)
-                        attrs_price = _amazon_offer_price_attrs(currency, price, mp_id, offer_audience=offer_audience)
-                        ok, debug, err = _amazon_update_price_spapi(
-                            li,
-                            seller_id,
-                            sku,
-                            mp_id,
-                            product_type=product_type,
-                            requirements=requirements,
-                            attrs=attrs_price
-                        )
-                        if not ok:
-                            # Fallback: include condition + fulfillment for strict validators
-                            attrs_full = _build_amazon_offer_attributes(
-                                upc=upc,
-                                asin=asin,
-                                condition_type=condition_type,
-                                fulfillment_channel_code=fc_code,
-                                quantity=qty,
-                                currency=currency,
-                                price=price,
-                                include_identifiers=False,
-                                marketplace_id=mp_id,
-                                offer_audience=offer_audience
+                        def _append_attempts(plan_name, req_used, pt_used, attempt_debug):
+                            try:
+                                at = (attempt_debug or {}).get('attempts') or []
+                            except Exception:
+                                at = []
+                            for entry in at:
+                                item = {
+                                    'plan': plan_name,
+                                    'requirements': req_used,
+                                    'product_type': pt_used,
+                                }
+                                if isinstance(entry, dict):
+                                    item.update(entry)
+                                debug['attempts'].append(item)
+
+                        def _format_err_text(err_obj):
+                            try:
+                                return _amazon_format_spapi_error(err_obj)
+                            except Exception:
+                                return str(err_obj or '')
+
+                        def _is_retryable_schema_error(err_text):
+                            low = str(err_text or '').lower()
+                            return (
+                                ('invalidinput' in low)
+                                or ('invalid parameters' in low)
+                                or ('status=invalid' in low)
+                                or ('issues=' in low)
                             )
-                            ok2, debug2, err2 = _amazon_update_price_spapi(
+
+                        def _is_non_retryable_error(err_text):
+                            low = str(err_text or '').lower()
+                            markers = (
+                                'unauthorized',
+                                'forbidden',
+                                'accessdenied',
+                                'access denied',
+                                "invalid 'sellerid' provided",
+                                'invalid "sellerid" provided',
+                                "invalid 'marketplaceids' provided",
+                                'invalid "marketplaceids" provided',
+                                'quota',
+                                'throttl',
+                            )
+                            return any(m in low for m in markers)
+
+                        req_primary = requirements or 'LISTING_OFFER_ONLY'
+                        req_fallback = 'LISTING_OFFER_ONLY'
+                        pt_primary = product_type
+                        pt_fallback = 'PRODUCT'
+
+                        attrs_full = _build_amazon_offer_attributes(
+                            upc=upc,
+                            asin=asin,
+                            condition_type=condition_type,
+                            fulfillment_channel_code=fc_code,
+                            quantity=qty,
+                            currency=currency,
+                            price=price,
+                            include_identifiers=False,
+                            marketplace_id=mp_id,
+                            offer_audience=offer_audience
+                        )
+
+                        attrs_list_price = _build_amazon_offer_attributes(
+                            upc=upc,
+                            asin=asin,
+                            condition_type='',
+                            fulfillment_channel_code='',
+                            quantity=qty,
+                            currency=currency,
+                            price=price,
+                            include_identifiers=False,
+                            marketplace_id=mp_id,
+                            offer_audience=offer_audience,
+                            include_marketplace_fields=False,
+                            include_offer_audience=False,
+                            price_model='list_price'
+                        )
+
+                        attempt_plans = [
+                            {
+                                'name': 'price_default',
+                                'requirements': req_primary,
+                                'product_type': pt_primary,
+                                'attrs': _amazon_offer_price_attrs(
+                                    currency, price, mp_id,
+                                    offer_audience=offer_audience,
+                                    include_marketplace_fields=True,
+                                    include_offer_audience=True
+                                ),
+                            },
+                            {
+                                'name': 'price_no_audience',
+                                'requirements': req_primary,
+                                'product_type': pt_primary,
+                                'attrs': _amazon_offer_price_attrs(
+                                    currency, price, mp_id,
+                                    offer_audience=offer_audience,
+                                    include_marketplace_fields=True,
+                                    include_offer_audience=False
+                                ),
+                            },
+                            {
+                                'name': 'price_no_marketplace',
+                                'requirements': req_primary,
+                                'product_type': pt_primary,
+                                'attrs': _amazon_offer_price_attrs(
+                                    currency, price, mp_id,
+                                    offer_audience=offer_audience,
+                                    include_marketplace_fields=False,
+                                    include_offer_audience=True
+                                ),
+                            },
+                            {
+                                'name': 'price_minimal_listing_offer',
+                                'requirements': req_fallback,
+                                'product_type': pt_primary,
+                                'attrs': _amazon_offer_price_attrs(
+                                    currency, price, mp_id,
+                                    offer_audience=offer_audience,
+                                    include_marketplace_fields=False,
+                                    include_offer_audience=False
+                                ),
+                            },
+                            {
+                                'name': 'full_offer_listing_offer',
+                                'requirements': req_fallback,
+                                'product_type': pt_primary,
+                                'attrs': attrs_full,
+                            },
+                            {
+                                'name': 'list_price_product',
+                                'requirements': req_fallback,
+                                'product_type': pt_fallback,
+                                'attrs': attrs_list_price,
+                            },
+                        ]
+
+                        ok = False
+                        last_err = None
+                        for plan in attempt_plans:
+                            req_used = plan['requirements']
+                            pt_used = plan['product_type']
+                            attrs_used = plan['attrs']
+                            ok_try, debug_try, err_try = _amazon_update_price_spapi(
                                 li,
                                 seller_id,
                                 sku,
                                 mp_id,
-                                product_type=product_type,
-                                requirements=requirements,
-                                attrs=attrs_full
+                                product_type=pt_used,
+                                requirements=req_used,
+                                attrs=attrs_used
                             )
-                            if debug2:
-                                try:
-                                    debug['attempts'].extend(debug2.get('attempts') or [])
-                                except Exception:
-                                    debug = debug2
-                            if not ok2:
-                                raise Exception(str(err2) if err2 else str(err) if err else 'Amazon price update failed')
+                            _append_attempts(plan.get('name') or 'attempt', req_used, pt_used, debug_try)
+                            if ok_try:
+                                ok = True
+                                break
+
+                            last_err = err_try
+                            err_text = _format_err_text(err_try)
+                            if _is_non_retryable_error(err_text):
+                                break
+                            if not _is_retryable_schema_error(err_text):
+                                break
+
+                        if not ok:
+                            raise Exception(_format_err_text(last_err) if last_err else 'Amazon price update failed')
 
                         ok_skus.add(sku)
                         _pricemaster_record_change(platform='amazon', listing_key=sku, old_price=j['old_price'], new_price=j['new_price'], mode=mode, value=value_d, success=True)
@@ -15685,7 +16795,8 @@ def api_fb_listings_add():
             UPDATE bol_items
             SET listed_facebook = 1,
                 listed_facebook_date = datetime("now"),
-                listed_facebook_qty = ?
+                listed_facebook_qty = ?,
+                listed_facebook_source = 'user'
             WHERE upc = ? COLLATE NOCASE
         ''', (1, upc))
 
@@ -15834,12 +16945,17 @@ def api_fb_listings_sync_sold():
             if new_qty <= 0:
                 bol_cur.execute('''
                     UPDATE bol_items
-                    SET listed_facebook=0, listed_facebook_date=NULL, listed_facebook_qty=0
+                    SET listed_facebook=0, listed_facebook_date=NULL, listed_facebook_qty=0, listed_facebook_source=NULL
                     WHERE upc = ? COLLATE NOCASE
                 ''', (upc,))
                 note = 'Auto-unlisted'
             else:
-                bol_cur.execute('UPDATE bol_items SET listed_facebook_qty=? WHERE upc = ? COLLATE NOCASE', (new_qty, upc))
+                bol_cur.execute('''
+                    UPDATE bol_items
+                    SET listed_facebook_qty=?,
+                        listed_facebook_source=COALESCE(NULLIF(TRIM(listed_facebook_source), ''), 'system')
+                    WHERE upc = ? COLLATE NOCASE
+                ''', (new_qty, upc))
 
             bol_cur.execute('''
                 UPDATE bol_items
@@ -15951,7 +17067,8 @@ def api_fb_listings_log_undo():
                 UPDATE bol_items
                 SET listed_facebook = 1,
                     listed_facebook_date = ?,
-                    listed_facebook_qty = ?
+                    listed_facebook_qty = ?,
+                    listed_facebook_source = 'user'
                 WHERE upc = ? COLLATE NOCASE
             ''', (prev_date or datetime.datetime.now().isoformat(), qty_val, upc))
         else:
@@ -15959,7 +17076,8 @@ def api_fb_listings_log_undo():
                 UPDATE bol_items
                 SET listed_facebook = 0,
                     listed_facebook_date = NULL,
-                    listed_facebook_qty = NULL
+                    listed_facebook_qty = NULL,
+                    listed_facebook_source = NULL
                 WHERE upc = ? COLLATE NOCASE
             ''', (upc,))
 
@@ -16089,7 +17207,12 @@ def api_fb_listings_quantity():
         prev_qty = int(row[1] or 1)
         prev_listed_date = row[2]
 
-        cur.execute('UPDATE bol_items SET listed_facebook_qty=? WHERE upc = ? COLLATE NOCASE', (qty, upc))
+        cur.execute('''
+            UPDATE bol_items
+            SET listed_facebook_qty=?,
+                listed_facebook_source=COALESCE(NULLIF(TRIM(listed_facebook_source), ''), 'user')
+            WHERE upc = ? COLLATE NOCASE
+        ''', (qty, upc))
         conn.commit()
         conn.close()
         cache.clear()
@@ -16124,7 +17247,11 @@ def api_fb_listings_unlist():
         prev_listed = int(prev_row[0] or 0) if prev_row else 0
         prev_qty = int(prev_row[1] or 0) if prev_row else 0
         prev_listed_date = prev_row[2] if prev_row else None
-        cur.execute('UPDATE bol_items SET listed_facebook=0, listed_facebook_date=NULL, listed_facebook_qty=NULL WHERE upc = ? COLLATE NOCASE', (upc,))
+        cur.execute('''
+            UPDATE bol_items
+            SET listed_facebook=0, listed_facebook_date=NULL, listed_facebook_qty=NULL, listed_facebook_source=NULL
+            WHERE upc = ? COLLATE NOCASE
+        ''', (upc,))
         updated = cur.rowcount
 
         # Update legacy list_status column for backward compatibility
@@ -16327,6 +17454,7 @@ def api_debug_db_check():
 # NO CACHE - Items-to-list needs fresh data for marketplace checkboxes
 def api_bol_items():
     """Return BOL items with sorting and filters: lot (exact), import_date (exact), sort by date/name/qty."""
+    conn = None
     try:
         _ensure_bol_list_status_column()
         sort = request.args.get('sort', 'date_desc')
@@ -16478,6 +17606,9 @@ def api_bol_items():
         has_listed_amazon = any(c.lower() == 'listed_amazon' for c in cols)
         has_listed_ebay = any(c.lower() == 'listed_ebay' for c in cols)
         has_listed_facebook = any(c.lower() == 'listed_facebook' for c in cols)
+        has_listed_amazon_source = any(c.lower() == 'listed_amazon_source' for c in cols)
+        has_listed_ebay_source = any(c.lower() == 'listed_ebay_source' for c in cols)
+        has_listed_facebook_source = any(c.lower() == 'listed_facebook_source' for c in cols)
         
         # DEBUG: Log marketplace column detection
         print(f"[api_bol_items] Marketplace column detection:")
@@ -16494,8 +17625,11 @@ def api_bol_items():
             ('b.bad_qty, ' if has_bad_qty else '') +
             ('b.unchecked_qty, ' if has_unchecked_qty else '') +
             ('b.listed_amazon, b.listed_amazon_date, ' if has_listed_amazon else '') +
+            ('b.listed_amazon_source, ' if has_listed_amazon_source else '') +
             ('b.listed_ebay, b.listed_ebay_date, ' if has_listed_ebay else '') +
+            ('b.listed_ebay_source, ' if has_listed_ebay_source else '') +
             ('b.listed_facebook, b.listed_facebook_date, ' if has_listed_facebook else '') +
+            ('b.listed_facebook_source, ' if has_listed_facebook_source else '') +
             "s.status as prep_status, s.reason as prep_reason, s.note as prep_note, s.updated_at as prep_updated_at, "
             "s.quantity as prep_quantity, COALESCE(s.lot_number, '') as prep_lot_number "
             + prep_join
@@ -16620,16 +17754,21 @@ def api_bol_items():
                 # Marketplace listing columns
                 'listed_amazon': r.get('listed_amazon'),
                 'listed_amazon_date': r.get('listed_amazon_date'),
+                'listed_amazon_source': r.get('listed_amazon_source'),
                 'listed_ebay': r.get('listed_ebay'),
                 'listed_ebay_date': r.get('listed_ebay_date'),
+                'listed_ebay_source': r.get('listed_ebay_source'),
                 'listed_facebook': r.get('listed_facebook'),
-                'listed_facebook_date': r.get('listed_facebook_date')
+                'listed_facebook_date': r.get('listed_facebook_date'),
+                'listed_facebook_source': r.get('listed_facebook_source')
             })
+        _apply_marketplace_status_overlay(results)
         return jsonify({'results': results, 'total': total, 'unique_items': unique_items, 'total_quantity': total_quantity, 'page': page, 'limit': limit})
     except Exception as e:
         return jsonify({'error': _safe_error(e)}), 500
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
 
 @app.route('/api/bulk_delete_bol_items', methods=['POST'])
 def api_bulk_delete_bol_items():
@@ -16786,11 +17925,14 @@ def api_bulk_delete_bol_items():
                                 list_status = NULL,
                                 listed_amazon = 0,
                                 listed_amazon_date = NULL,
+                                listed_amazon_source = NULL,
                                 listed_ebay = 0,
                                 listed_ebay_date = NULL,
+                                listed_ebay_source = NULL,
                                 listed_facebook = 0,
                                 listed_facebook_date = NULL,
-                                listed_facebook_qty = NULL
+                                listed_facebook_qty = NULL,
+                                listed_facebook_source = NULL
                             WHERE id = ?
                         ''', (rawbol_qty, rawbol_qty, rawbol_qty, row_id))
                     else:
@@ -16885,6 +18027,7 @@ def api_bol_lots():
 def api_bol_items_set_list_status():
     """Set marketplace listing status for a BOL item by UPC.
     JSON: { upc, marketplace, listed, quantity (for facebook) } where marketplace in ['amazon', 'ebay', 'facebook'] and listed is boolean"""
+    conn = None
     try:
         data = request.get_json() or {}
         upc = _strip_leading_zeros_numeric(_normalize_upc(data.get('upc')))
@@ -16894,8 +18037,9 @@ def api_bol_items_set_list_status():
         marketplace = (data.get('marketplace') or '').strip().lower()
         listed = bool(data.get('listed', True))
         quantity = int(data.get('quantity', 1)) if data.get('quantity') else 1
+        source = _normalize_listing_source(data.get('source'), default='user')
 
-        print(f"[list_status] UPC: {upc}, LOT: {lot_number}, Marketplace: {marketplace}, Listed: {listed}, Qty: {quantity}")
+        print(f"[list_status] UPC: {upc}, LOT: {lot_number}, Marketplace: {marketplace}, Listed: {listed}, Qty: {quantity}, Source: {source}")
 
         if not upc:
             return jsonify({'success': False, 'error': 'Missing upc'}), 400
@@ -16940,19 +18084,19 @@ def api_bol_items_set_list_status():
         # Update marketplace-specific column and timestamp
         if marketplace == 'amazon':
             if listed:
-                cur.execute('UPDATE bol_items SET listed_amazon=1, listed_amazon_date=datetime("now") WHERE id = ?', (target_id,))
+                cur.execute('UPDATE bol_items SET listed_amazon=1, listed_amazon_date=datetime("now"), listed_amazon_source=? WHERE id = ?', (source, target_id))
                 print(f"[list_status] Set listed_amazon=1 for {upc}")
             else:
-                cur.execute('UPDATE bol_items SET listed_amazon=0, listed_amazon_date=NULL WHERE id = ?', (target_id,))
+                cur.execute('UPDATE bol_items SET listed_amazon=0, listed_amazon_date=NULL, listed_amazon_source=NULL WHERE id = ?', (target_id,))
                 print(f"[list_status] Set listed_amazon=0 for {upc}")
         elif marketplace == 'ebay':
             if listed:
-                cur.execute('UPDATE bol_items SET listed_ebay=1, listed_ebay_date=datetime("now") WHERE id = ?', (target_id,))
+                cur.execute('UPDATE bol_items SET listed_ebay=1, listed_ebay_date=datetime("now"), listed_ebay_source=? WHERE id = ?', (source, target_id))
             else:
-                cur.execute('UPDATE bol_items SET listed_ebay=0, listed_ebay_date=NULL WHERE id = ?', (target_id,))
+                cur.execute('UPDATE bol_items SET listed_ebay=0, listed_ebay_date=NULL, listed_ebay_source=NULL WHERE id = ?', (target_id,))
         elif marketplace == 'facebook':
             if listed:
-                cur.execute('UPDATE bol_items SET listed_facebook=1, listed_facebook_date=datetime("now"), listed_facebook_qty=? WHERE id = ?', (quantity, target_id))
+                cur.execute('UPDATE bol_items SET listed_facebook=1, listed_facebook_date=datetime("now"), listed_facebook_qty=?, listed_facebook_source=? WHERE id = ?', (quantity, source, target_id))
                 # Track in fbstore.db
                 _track_fb_listing(upc, quantity, listed=True)
                 action = 'manual_add' if prev_fb_listed == 0 else ('manual_qty_change' if prev_fb_qty != quantity else 'manual_add')
@@ -16967,7 +18111,7 @@ def api_bol_items_set_list_status():
                     note='list_status api'
                 )
             else:
-                cur.execute('UPDATE bol_items SET listed_facebook=0, listed_facebook_date=NULL, listed_facebook_qty=NULL WHERE id = ?', (target_id,))
+                cur.execute('UPDATE bol_items SET listed_facebook=0, listed_facebook_date=NULL, listed_facebook_qty=NULL, listed_facebook_source=NULL WHERE id = ?', (target_id,))
                 # Mark as unlisted in fbstore.db
                 _track_fb_listing(upc, quantity, listed=False)
                 _log_fb_listing_action(
@@ -16995,6 +18139,20 @@ def api_bol_items_set_list_status():
         
         conn.commit()
         updated = 1
+
+        # Best-effort listing audit trail for manual/system status toggles.
+        try:
+            _listinglog_add_entry(
+                upc=upc,
+                platform=marketplace,
+                action='listed' if listed else 'unlisted',
+                source=source,
+                quantity=quantity if marketplace == 'facebook' else None,
+                success=True,
+                meta={'lot_number': target_lot, 'via': 'api_bol_items_set_list_status'}
+            )
+        except Exception:
+            pass
         
         # Fetch the updated state to return it
         cur.execute('SELECT listed_amazon, listed_ebay, listed_facebook FROM bol_items WHERE id = ?', (target_id,))
@@ -17002,7 +18160,9 @@ def api_bol_items_set_list_status():
         current_state = {
             'listed_amazon': row[0] if row else 0,
             'listed_ebay': row[1] if row else 0,
-            'listed_facebook': row[2] if row else 0
+            'listed_facebook': row[2] if row else 0,
+            'source': source,
+            'source_label': _listing_source_label(source)
         }
         
         
@@ -17021,7 +18181,8 @@ def api_bol_items_set_list_status():
         traceback.print_exc()
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
 
 @app.route('/api/debug/migrate_listings', methods=['GET'])
 @require_debug_mode
@@ -17237,8 +18398,15 @@ def home():
 @app.route("/callback")
 def callback():
     code = request.args.get("code")
+    error = (request.args.get("error") or "").strip()
+    error_desc = (request.args.get("error_description") or "").strip()
     if not code:
-        return "Authorization failed or cancelled."
+        if error:
+            detail = f"error={error}"
+            if error_desc:
+                detail += f", description={error_desc}"
+            return f"Authorization failed: {detail}"
+        return "Authorization failed or cancelled. No authorization code was returned."
 
     # Step 5: exchange this code for an access token
     from markupsafe import escape
@@ -17920,6 +19088,18 @@ def orders():
         def _process_ebay_items(items, list_state):
             """Parse eBay XML items, store in DB, and print debug info."""
             nonlocal count
+
+            def _parse_int_text(node):
+                if node is None or node.text is None:
+                    return None
+                txt = str(node.text).strip()
+                if not txt:
+                    return None
+                try:
+                    return int(float(txt))
+                except Exception:
+                    return None
+
             for item in items:
                 title = item.find('ebay:Title', ns)
                 item_id = item.find('ebay:ItemID', ns)
@@ -17927,17 +19107,33 @@ def orders():
                 sku = item.find('ebay:SKU', ns)
                 price = item.find('.//ebay:CurrentPrice', ns)
                 quantity = item.find('ebay:Quantity', ns)
+                quantity_available = item.find('ebay:QuantityAvailable', ns)
+                quantity_sold = item.find('.//ebay:SellingStatus/ebay:QuantitySold', ns)
                 list_date = item.find('ebay:ListingDetails/ebay:StartTime', ns)
                 sold_date = item.find('ebay:ListingDetails/ebay:EndTime', ns)
                 URL = f"https://www.ebay.com/itm/{item_id_text}"
                 picture_url = item.find('.//ebay:PictureDetails/ebay:GalleryURL', ns)
                 high_res_url = get_high_res_image_url(picture_url.text) if picture_url is not None else "No image"
 
+                qty_total = _parse_int_text(quantity)
+                qty_available = _parse_int_text(quantity_available)
+                qty_sold = _parse_int_text(quantity_sold)
+                qty_to_store = None
+
+                if qty_available is not None:
+                    qty_to_store = max(0, qty_available)
+                elif list_state == "Active" and qty_total is not None and qty_sold is not None:
+                    qty_to_store = max(0, qty_total - qty_sold)
+                elif qty_total is not None:
+                    qty_to_store = max(0, qty_total)
+
+                qty_text = str(qty_to_store) if qty_to_store is not None else "N/A"
+
                 ebayStoreDB(title=title.text if title is not None else "N/A",
                            item_id=item_id_text,
                            sku=sku.text if sku is not None else "None",
                            price=price.text if price is not None else "N/A",
-                           quantity=quantity.text if quantity is not None else "N/A",
+                           quantity=qty_text,
                            image=high_res_url,
                            List_State=list_state,
                            Sold_Date=sold_date.text if sold_date is not None else "None",
@@ -17952,7 +19148,7 @@ def orders():
                 print("🆔 ItemID:", item_id.text if item_id is not None else "N/A")
                 print("🔖 SKU:", sku.text if sku is not None else "None")
                 print("💲 Price:", price.text if price is not None else "N/A")
-                print("🔢 Quantity:", quantity.text if quantity is not None else "N/A")
+                print("🔢 Quantity:", qty_text)
                 print("🖼️ Image:", high_res_url)
                 print("🛣️ URL:", f"https://www.ebay.com/itm/{item_id.text}")
                 print("—" * 40)

@@ -154,6 +154,9 @@
             {% if bol.listed_amazon_date %}
               <span style="color:#7f8c8d;font-size:0.9rem">({{ bol.listed_amazon_date }})</span>
             {% endif %}
+            {% if bol.listed_amazon_source_label %}
+              <span style="color:#7f8c8d;font-size:0.9rem">set by {{ bol.listed_amazon_source_label }}</span>
+            {% endif %}
           {% else %}
             <span style="color:#95a5a6">Not listed</span>
           {% endif %}
@@ -166,6 +169,9 @@
             {% if bol.listed_ebay_date %}
               <span style="color:#7f8c8d;font-size:0.9rem">({{ bol.listed_ebay_date }})</span>
             {% endif %}
+            {% if bol.listed_ebay_source_label %}
+              <span style="color:#7f8c8d;font-size:0.9rem">set by {{ bol.listed_ebay_source_label }}</span>
+            {% endif %}
           {% else %}
             <span style="color:#95a5a6">Not listed</span>
           {% endif %}
@@ -177,6 +183,9 @@
             <span style="color:#2ecc71;font-weight:600">✓ Listed</span>
             {% if bol.listed_facebook_date %}
               <span style="color:#7f8c8d;font-size:0.9rem">({{ bol.listed_facebook_date }})</span>
+            {% endif %}
+            {% if bol.listed_facebook_source_label %}
+              <span style="color:#7f8c8d;font-size:0.9rem">set by {{ bol.listed_facebook_source_label }}</span>
             {% endif %}
           {% else %}
             <span style="color:#95a5a6">Not listed</span>
