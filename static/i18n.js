@@ -517,6 +517,15 @@ function t(key) {
 
 let _readyLabelEl = null;
 let _readyLabelResizeBound = false;
+function isIpadDevice(){
+  try{
+    const ua = navigator.userAgent || '';
+    if(/\biPad\b/i.test(ua)) return true;
+    return navigator.platform === 'MacIntel' && Number(navigator.maxTouchPoints || 0) > 1;
+  }catch(e){
+    return false;
+  }
+}
 function updateReadyLabel(){
   if(!_readyLabelEl) return;
   const isMobile = window.innerWidth <= 640;
@@ -1294,6 +1303,7 @@ function createTopBanner(){
   alertsBtn.title = 'Alerts';
   alertsBtn.setAttribute('aria-label', 'Alerts');
   alertsBtn.style.display = 'none';
+  const hideAlertsBadgeOnDevice = isIpadDevice();
   alertsBtn.innerHTML = `
     <span class="ss-alerts-label" data-i18n="alerts">Alerts</span>
     <span class="ss-count" id="ss-alerts-count">0</span>
@@ -1442,13 +1452,14 @@ function createTopBanner(){
 
     const setCount = (val) => {
       const count = Number.isFinite(val) ? Math.max(0, Math.round(val)) : 0;
+      const showBadge = !hideAlertsBadgeOnDevice && count > 0;
       state.count = count;
       if(countEl){
         countEl.textContent = String(count);
-        countEl.style.display = count > 0 ? 'inline-flex' : 'none';
+        countEl.style.display = showBadge ? 'inline-flex' : 'none';
       }
-      alertsBtn.classList.toggle('has-alerts', count > 0);
-      alertsBtn.style.display = count > 0 ? 'inline-flex' : 'none';
+      alertsBtn.classList.toggle('has-alerts', showBadge);
+      alertsBtn.style.display = showBadge ? 'inline-flex' : 'none';
       alertsBtn.setAttribute('aria-label', `Alerts (${count})`);
       try{
         localStorage.setItem('ss_store_alert_count', String(count));
