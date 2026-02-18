@@ -430,6 +430,9 @@
           </label>
         </div>
       </div>
+      <div class="dropdown-section" id="gear-reset-wrap" style="display:none">
+        <button class="btn btn-sm" id="reset-gear-filters" type="button" style="background:#fff3f3;color:#b42318;border:1px solid #f3b4b4;width:100%">Reset to Default</button>
+      </div>
     </div>
     <div style="margin-left:auto; display:flex; align-items:center; gap:10px">
       <button class="btn" id="select-btn">Select</button>
@@ -483,14 +486,134 @@
 function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function missingThumb(width=48,height=48,text='No Img'){ return 'data:image/svg+xml;utf8,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="'+width+'" height="'+height+'"><rect width="100%" height="100%" fill="#f8f8f8"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#b0b0b0" font-size="10">'+text+'</text></svg>'); }
 
+const GEAR_SETTINGS_KEY = 'items_to_list_gear_settings_v1';
+const GEAR_DEFAULTS = Object.freeze({
+  lot: '',
+  sort: 'last_edited',
+  defect: '',
+  listed: '',
+  listed_amazon: true,
+  listed_ebay: true,
+  listed_facebook: true
+});
+let pendingLotSelection = '';
+
+function normalizeGearSettings(raw){
+  const src = (raw && typeof raw === 'object') ? raw : {};
+  const parseBool = (v, fallback) => {
+    if (typeof v === 'boolean') return v;
+    if (v === 1 || v === '1' || v === 'true') return true;
+    if (v === 0 || v === '0' || v === 'false') return false;
+    return fallback;
+  };
+  const allowedSorts = new Set(['last_edited', 'last_edited_asc', 'date_desc', 'date_asc', 'name']);
+  const sortRaw = String(src.sort || GEAR_DEFAULTS.sort);
+  const listedRaw = String(src.listed || '');
+  return {
+    lot: String(src.lot || ''),
+    sort: allowedSorts.has(sortRaw) ? sortRaw : GEAR_DEFAULTS.sort,
+    defect: String(src.defect || ''),
+    listed: (listedRaw === 'listed' || listedRaw === 'not_listed') ? listedRaw : '',
+    listed_amazon: parseBool(src.listed_amazon, GEAR_DEFAULTS.listed_amazon),
+    listed_ebay: parseBool(src.listed_ebay, GEAR_DEFAULTS.listed_ebay),
+    listed_facebook: parseBool(src.listed_facebook, GEAR_DEFAULTS.listed_facebook)
+  };
+}
+
+function getCurrentGearSettings(){
+  const lotEl = document.getElementById('filter-lot');
+  const sortEl = document.getElementById('sort-select');
+  const defectEl = document.getElementById('filter-defect');
+  const listedEl = document.getElementById('filter-listed-select');
+  const amazonCb = document.getElementById('filter-listed-amazon');
+  const ebayCb = document.getElementById('filter-listed-ebay');
+  const fbCb = document.getElementById('filter-listed-fb');
+  return normalizeGearSettings({
+    lot: lotEl ? lotEl.value : '',
+    sort: sortEl ? sortEl.value : GEAR_DEFAULTS.sort,
+    defect: defectEl ? defectEl.value : '',
+    listed: listedEl ? listedEl.value : '',
+    listed_amazon: !!(amazonCb && amazonCb.checked),
+    listed_ebay: !!(ebayCb && ebayCb.checked),
+    listed_facebook: !!(fbCb && fbCb.checked)
+  });
+}
+
+function applyGearSettings(raw){
+  const settings = normalizeGearSettings(raw);
+  const lotEl = document.getElementById('filter-lot');
+  const sortEl = document.getElementById('sort-select');
+  const defectEl = document.getElementById('filter-defect');
+  const listedEl = document.getElementById('filter-listed-select');
+  const amazonCb = document.getElementById('filter-listed-amazon');
+  const ebayCb = document.getElementById('filter-listed-ebay');
+  const fbCb = document.getElementById('filter-listed-fb');
+
+  if (lotEl) {
+    pendingLotSelection = settings.lot || '';
+    lotEl.value = settings.lot || '';
+  }
+  if (sortEl) sortEl.value = settings.sort;
+  if (defectEl) defectEl.value = settings.defect;
+  if (listedEl) listedEl.value = settings.listed;
+  if (amazonCb) amazonCb.checked = settings.listed_amazon;
+  if (ebayCb) ebayCb.checked = settings.listed_ebay;
+  if (fbCb) fbCb.checked = settings.listed_facebook;
+  updateMarketplaceFilterHighlight();
+}
+
+function saveGearSettings(){
+  try{
+    localStorage.setItem(GEAR_SETTINGS_KEY, JSON.stringify(getCurrentGearSettings()));
+  }catch(e){}
+}
+
+function restoreGearSettings(){
+  try{
+    const raw = localStorage.getItem(GEAR_SETTINGS_KEY);
+    if(!raw) return;
+    const parsed = JSON.parse(raw);
+    applyGearSettings(parsed);
+  }catch(e){}
+}
+
+function gearSettingsDifferFromDefaults(raw){
+  const settings = normalizeGearSettings(raw);
+  return (
+    settings.lot !== GEAR_DEFAULTS.lot ||
+    settings.sort !== GEAR_DEFAULTS.sort ||
+    settings.defect !== GEAR_DEFAULTS.defect ||
+    settings.listed !== GEAR_DEFAULTS.listed ||
+    settings.listed_amazon !== GEAR_DEFAULTS.listed_amazon ||
+    settings.listed_ebay !== GEAR_DEFAULTS.listed_ebay ||
+    settings.listed_facebook !== GEAR_DEFAULTS.listed_facebook
+  );
+}
+
+function updateGearResetButton(){
+  const wrap = document.getElementById('gear-reset-wrap');
+  if(!wrap) return;
+  wrap.style.display = gearSettingsDifferFromDefaults(getCurrentGearSettings()) ? 'block' : 'none';
+}
+
+function onGearSettingChanged(){
+  const lotEl = document.getElementById('filter-lot');
+  if(lotEl) pendingLotSelection = lotEl.value || '';
+  saveGearSettings();
+  updateGearResetButton();
+}
+
 function setFiltersFromURL(){
   const p = new URLSearchParams(window.location.search);
   const lot = p.get('lot')||''; const q = p.get('q')||''; const sort = p.get('sort')||''; const status = p.get('status')||''; const defect = p.get('defect')||'';
-  if(q) document.getElementById('filter-q').value = q;
-  if(lot) document.getElementById('filter-lot').value = lot;
-  if(sort) document.getElementById('sort-select').value = sort;
+  if(p.has('q')) document.getElementById('filter-q').value = q;
+  if(p.has('lot')){
+    pendingLotSelection = lot;
+    document.getElementById('filter-lot').value = lot;
+  }
+  if(p.has('sort') && sort) document.getElementById('sort-select').value = sort;
   // If status is explicitly set in URL, use it; otherwise default to good and bad
-  if(status) {
+  if(status && status !== 'listed' && status !== 'not_listed') {
     // Uncheck all first
     document.querySelectorAll('.status-checkbox').forEach(cb => cb.checked = false);
     // Check the ones in the URL (comma-separated)
@@ -502,28 +625,34 @@ function setFiltersFromURL(){
   }
   // Update status filter label
   updateStatusFilterLabel();
-  if(defect) document.getElementById('filter-defect').value = defect;
+  if(p.has('defect')) document.getElementById('filter-defect').value = defect;
   const listedFlag = (p.get('listed') === 'true') || (p.get('status') === 'listed');
   const notListedFlag = (p.get('not_listed') === 'true') || (p.get('status') === 'not_listed');
-  if(listedFlag){ document.getElementById('filter-listed-select').value = 'listed'; }
-  else if(notListedFlag){ document.getElementById('filter-listed-select').value = 'not_listed'; }
-  else { document.getElementById('filter-listed-select').value = ''; }
+  const hasListedFilterParam = p.has('listed') || p.has('not_listed') || (p.get('status') === 'listed') || (p.get('status') === 'not_listed');
+  if(hasListedFilterParam){
+    if(listedFlag){ document.getElementById('filter-listed-select').value = 'listed'; }
+    else if(notListedFlag){ document.getElementById('filter-listed-select').value = 'not_listed'; }
+    else { document.getElementById('filter-listed-select').value = ''; }
+  }
 
   // Marketplace filter (amazon, ebay, facebook)
-  const stores = (p.get('listed_stores') || '').split(',').map(s => s.trim()).filter(Boolean);
-  const amazonCb = document.getElementById('filter-listed-amazon');
-  const ebayCb = document.getElementById('filter-listed-ebay');
-  const fbCb = document.getElementById('filter-listed-fb');
-  if (stores.length === 0) {
-    if (amazonCb) amazonCb.checked = true;
-    if (ebayCb) ebayCb.checked = true;
-    if (fbCb) fbCb.checked = true;
-  } else {
-    if (amazonCb) amazonCb.checked = stores.includes('amazon');
-    if (ebayCb) ebayCb.checked = stores.includes('ebay');
-    if (fbCb) fbCb.checked = stores.includes('facebook');
+  if (p.has('listed_stores')) {
+    const stores = (p.get('listed_stores') || '').split(',').map(s => s.trim()).filter(Boolean);
+    const amazonCb = document.getElementById('filter-listed-amazon');
+    const ebayCb = document.getElementById('filter-listed-ebay');
+    const fbCb = document.getElementById('filter-listed-fb');
+    if (stores.length === 0) {
+      if (amazonCb) amazonCb.checked = true;
+      if (ebayCb) ebayCb.checked = true;
+      if (fbCb) fbCb.checked = true;
+    } else {
+      if (amazonCb) amazonCb.checked = stores.includes('amazon');
+      if (ebayCb) ebayCb.checked = stores.includes('ebay');
+      if (fbCb) fbCb.checked = stores.includes('facebook');
+    }
   }
   updateMarketplaceFilterHighlight();
+  updateGearResetButton();
 }
 
 // Format a timestamp into Eastern Time like: 2025-10-18 9:20am
@@ -636,8 +765,13 @@ function render(results){
     
     // Diagnostic link moved into its own Info column (first column)
     const diagLink = `<button class="btn btn-sm diag-link" style="background:transparent;border:1px solid #0066cc;color:#0066cc;border-radius:6px;padding:6px 10px;cursor:pointer" data-upc="${apiUpc}" data-lot="${esc(r.lot_number||'')}">Open</button>`;
-    // Pics count — will be updated after fetching actual count. Start with "..." as loading indicator
-    const picsBtn = `<span class="pics-count" data-upc="${apiUpc}" data-lot="${esc(r.lot_number||'')}" style="color:#2196F3;font-weight:600;cursor:pointer;font-size:0.9rem">...</span>`;
+    const photoCount = Number(r.photo_count || 0);
+    const hasPhotos = photoCount > 0;
+    const picsTitle = hasPhotos ? `${photoCount} photo${photoCount===1?'':'s'}` : '';
+    const picsStyle = hasPhotos
+      ? 'color:#2196F3;font-weight:600;cursor:pointer;font-size:0.9rem'
+      : 'display:none;color:#2196F3;font-weight:600;cursor:pointer;font-size:0.9rem';
+    const picsBtn = `<span class="pics-count" data-upc="${apiUpc}" data-lot="${esc(r.lot_number||'')}" title="${esc(picsTitle)}" style="${picsStyle}">${hasPhotos ? '📷' : ''}</span>`;
     // QTY display - make red if > 1 AND status is NOT "unchecked"
     const qty = r.quantity || 1;
     const qtyStyle = (qty > 1 && status !== 'unchecked') ? 'color:#e74c3c;font-weight:700;font-size:1.1rem' : '';
@@ -688,28 +822,6 @@ function render(results){
   document.querySelectorAll('.pics-count').forEach(el=> el.addEventListener('click', onOpenPics));
   // Wire note icon handlers
   document.querySelectorAll('.note-icon').forEach(el=> el.addEventListener('click', onOpenNotes));
-  // After rendering, for each displayed UPC, fetch the actual images count in the background and update the number
-  document.querySelectorAll('.pics-count').forEach(async (el)=>{
-    const upc = el.dataset.upc;
-    const lot = el.dataset.lot || '';
-    if(!upc) return;
-    try{
-      const lotQ = lot ? ('?lot=' + encodeURIComponent(lot)) : '';
-      const res = await fetch('/api/items_prep/diagnostic/'+encodeURIComponent(upc)+lotQ);
-      if(!res.ok) return;
-      const j = await res.json();
-      const n = (j.images || []).length;
-      if(n > 0){
-        // Show camera icon instead of number
-        el.innerHTML = '📷';
-        el.style.display = 'inline-block';
-        el.style.visibility = 'visible';
-      } else {
-        // Keep hidden when no photos
-        el.style.display = 'none';
-      }
-    }catch(e){ }
-  });
 }
 
 function onOpenImg(e){
@@ -729,8 +841,8 @@ document.getElementById('closePics').addEventListener('click', ()=>{ document.ge
 document.getElementById('closeNotes').addEventListener('click', ()=>{ document.getElementById('notesModal').style.display='none'; });
 // Apply button removed; filters auto-refresh on change and Enter in search
 // Auto-refresh on dropdown changes
-document.getElementById('filter-lot').addEventListener('change', loadItems);
-document.getElementById('sort-select').addEventListener('change', loadItems);
+document.getElementById('filter-lot').addEventListener('change', (e)=>{ onGearSettingChanged(); loadItems(e); });
+document.getElementById('sort-select').addEventListener('change', (e)=>{ onGearSettingChanged(); loadItems(e); });
 document.getElementById('refresh-btn').addEventListener('click', loadItems);
 
 // Status checkbox dropdown toggle
@@ -785,16 +897,26 @@ document.querySelectorAll('.status-checkbox').forEach(cb => {
 });
 
 // defect filter should behave like other filters
-const defectEl = document.getElementById('filter-defect'); if(defectEl) defectEl.addEventListener('change', loadItems);
+const defectEl = document.getElementById('filter-defect'); if(defectEl) defectEl.addEventListener('change', (e)=>{ onGearSettingChanged(); loadItems(e); });
 // radio buttons for listed filter
 const listedEl = document.getElementById('filter-listed-select');
-if(listedEl) listedEl.addEventListener('change', loadItems);
+if(listedEl) listedEl.addEventListener('change', (e)=>{ onGearSettingChanged(); loadItems(e); });
 const listedAmazonEl = document.getElementById('filter-listed-amazon');
-if(listedAmazonEl) listedAmazonEl.addEventListener('change', loadItems);
+if(listedAmazonEl) listedAmazonEl.addEventListener('change', (e)=>{ onGearSettingChanged(); loadItems(e); });
 const listedEbayEl = document.getElementById('filter-listed-ebay');
-if(listedEbayEl) listedEbayEl.addEventListener('change', loadItems);
+if(listedEbayEl) listedEbayEl.addEventListener('change', (e)=>{ onGearSettingChanged(); loadItems(e); });
 const listedFbEl = document.getElementById('filter-listed-fb');
-if(listedFbEl) listedFbEl.addEventListener('change', loadItems);
+if(listedFbEl) listedFbEl.addEventListener('change', (e)=>{ onGearSettingChanged(); loadItems(e); });
+const resetGearBtn = document.getElementById('reset-gear-filters');
+if(resetGearBtn){
+  resetGearBtn.addEventListener('click', (e)=>{
+    e.preventDefault();
+    applyGearSettings(GEAR_DEFAULTS);
+    saveGearSettings();
+    updateGearResetButton();
+    loadItems();
+  });
+}
 
 function updateMarketplaceFilterHighlight(){
   const map = {
@@ -1073,7 +1195,7 @@ async function onAddToListingAgentQueue(e){
     const resp = await fetch('/api/listingagent/queue/add', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({upc, title, source: 'list_manager', item_status})
+      body: JSON.stringify({upc, title, source: 'list_manager', item_status, added_mode: 'auto'})
     });
     const j = await resp.json().catch(()=> ({}));
     if(resp.ok && j && j.success){
@@ -1105,13 +1227,20 @@ async function loadLots(){
       opt.value = x.lot_number; opt.textContent = `${x.lot_number} — ${x.import_date||''}`;
       sel.appendChild(opt);
     });
-    if(cur) sel.value = cur;
+    const preferredLot = pendingLotSelection || cur;
+    if(preferredLot) sel.value = preferredLot;
+    pendingLotSelection = sel.value || '';
+    updateGearResetButton();
   }catch{}
 }
 
-// initial load: restore filters, populate lots, then load
+// Initial load: restore filters and fetch items immediately.
+// Lots are populated in the background so first paint is not blocked.
+restoreGearSettings();
 setFiltersFromURL();
-loadLots().then(loadItems);
+loadItems();
+loadLots();
+updateGearResetButton();
 // Focus the search input on load
 document.getElementById('filter-q').focus();
 // Back button navigates home; using button confines clickable area to the button
@@ -1243,20 +1372,8 @@ async function loadItems(e){
   const overlay = document.getElementById('loading-overlay');
   if(overlay) overlay.style.display = 'flex';
 
-  // Check if this is a forced refresh (from refresh button)
-  const isRefresh = (e && e.currentTarget && e.currentTarget.id === 'refresh-btn');
-
-  // Fetch current data version to ensure cache validity
-  let dataVersion = 0;
-  try {
-    const vr = await fetch('/api/data_version');
-    if(vr.ok) {
-        const vj = await vr.json();
-        dataVersion = vj.version;
-    }
-  } catch(e) { console.error('Failed to fetch data version', e); }
-
-  const lot = document.getElementById('filter-lot').value.trim();
+  let lot = document.getElementById('filter-lot').value.trim();
+  if(!lot && pendingLotSelection) lot = pendingLotSelection;
   const q = document.getElementById('filter-q').value.trim();
   const sort = document.getElementById('sort-select').value;
   // Get checked statuses as comma-separated string
@@ -1284,34 +1401,6 @@ async function loadItems(e){
     params.set('listed_stores', listedStores.join(','));
   } else if (listedStores.length === 0) {
     // If none selected, treat as "all" to avoid empty results
-  }
-  
-  // Use data version for cache busting (unless manual refresh which forces new)
-  if(isRefresh) {
-      params.set('_t', Date.now());
-  } else if(dataVersion) {
-      params.set('_v', dataVersion);
-  } else {
-      // Fallback: if version fetch failed, use timestamp to ensure we don't get stale data
-      params.set('_t', Date.now());
-  }
-
-  // First, fetch ALL results for stats calculation (without pagination)
-  let allResults = [];
-  try {
-    const allParams = new URLSearchParams(params);
-    allParams.set('page', '1');
-    allParams.set('limit', '10000'); // Get all items
-    allParams.set('_t', Date.now()); // Cache-busting timestamp
-    const allResp = await fetch('/api/bol_items?'+allParams.toString(), {
-      cache: 'no-store' // Disable browser cache
-    });
-    if(allResp.ok) {
-      const allJson = await allResp.json();
-      allResults = allJson.results || [];
-    }
-  } catch(err) {
-    console.error('Error fetching all items for stats:', err);
   }
   
   // Now fetch paginated results for display
@@ -1342,7 +1431,6 @@ async function loadItems(e){
     }
   }catch(err){ console.error('Error fetching /api/bol_items:', err); }
   let results = j.results||[];
-  const total = j.total || 0;
   const page = j.page || 1;
   currentPage = page;
   const limit = j.limit || 25;
@@ -1352,10 +1440,10 @@ async function loadItems(e){
   const perPageEl = document.getElementById('per-page-select');
   if (perPageEl) perPageEl.value = String(currentLimit);
   
-  // Calculate stats for ALL filtered results (already fetched earlier)
-  const filtered_count = allResults.length;
-  const filtered_unique_upcs = new Set(allResults.map(r => r.upc)).size;
-  const filtered_total_quantity = allResults.reduce((sum, r) => sum + (r.quantity || 1), 0);
+  // Use server-side totals for current filters.
+  const filtered_count = Number(j.total || 0);
+  const filtered_unique_upcs = Number(j.unique_items || 0);
+  const filtered_total_quantity = Number(j.total_quantity || 0);
   
   // Update results summary with filtered stats
   const summaryEl = document.getElementById('results-summary');
@@ -1367,7 +1455,7 @@ async function loadItems(e){
   lastRenderedResults = results;
   
   render(results);
-  // Use filtered_count for pagination instead of server total (which doesn't account for client-side filters)
+  // Pagination uses the filtered total returned by the API.
   renderPagination(filtered_count, page, limit);
   
   if(overlay) overlay.style.display = 'none';

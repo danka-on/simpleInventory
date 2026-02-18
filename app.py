@@ -1034,6 +1034,17 @@ def _listingagent_parse_int(val, default=None):
     except Exception:
         return default
 
+def _listagent_normalize_added_mode(val, default='my'):
+    raw = (val or '').strip().lower().replace(' ', '_')
+    if raw in ('auto', 'auto_added', 'autofill', 'automatic'):
+        return 'auto'
+    if raw in ('my', 'mine', 'my_added', 'manual', 'user'):
+        return 'my'
+    fallback = '' if default is None else str(default).strip().lower()
+    if fallback not in ('my', 'auto', ''):
+        fallback = 'my'
+    return fallback
+
 # -----------------------------
 # Listing Agent - Listing Queue (listagent.db)
 # -----------------------------
@@ -1051,6 +1062,7 @@ def _listagent_init_tables(cur):
             upc TEXT NOT NULL,
             title TEXT,
             source TEXT,
+            added_mode TEXT NOT NULL DEFAULT 'my',
             item_status TEXT,
             status TEXT NOT NULL DEFAULT 'queued',
             added_at TEXT NOT NULL,
@@ -1099,6 +1111,8 @@ def _listagent_init_tables(cur):
             cur.execute('ALTER TABLE listing_queue ADD COLUMN listed_amazon_at TEXT')
         if 'removed_at' not in cols:
             cur.execute('ALTER TABLE listing_queue ADD COLUMN removed_at TEXT')
+        if 'added_mode' not in cols:
+            cur.execute("ALTER TABLE listing_queue ADD COLUMN added_mode TEXT NOT NULL DEFAULT 'my'")
     except Exception:
         pass
 
@@ -1515,7 +1529,7 @@ def _listagent_upc_variants(value):
 
     return out
 
-def _listagent_add_to_queue(upc, *, title=None, source=None, item_status=None):
+def _listagent_add_to_queue(upc, *, title=None, source=None, item_status=None, added_mode=None):
     upc = _listagent_format_upc12(upc)
     if not upc:
         raise ValueError('upc is required')
@@ -1526,6 +1540,7 @@ def _listagent_add_to_queue(upc, *, title=None, source=None, item_status=None):
     title = (title or '').strip() or None
     source = (source or '').strip() or None
     item_status = (item_status or '').strip().lower() or None
+    added_mode = _listagent_normalize_added_mode(added_mode, default='my')
 
     with db_connection('listagent.db') as conn:
         cur = conn.cursor()
@@ -1573,6 +1588,7 @@ def _listagent_add_to_queue(upc, *, title=None, source=None, item_status=None):
                     removed_at = NULL,
                     title = COALESCE(?, title),
                     source = COALESCE(?, source),
+                    added_mode = COALESCE(?, COALESCE(NULLIF(TRIM(added_mode), ''), 'my')),
                     item_status = COALESCE(?, item_status),
                     listed_at = NULL,
                     listed_platform = NULL,
@@ -1584,32 +1600,43 @@ def _listagent_add_to_queue(upc, *, title=None, source=None, item_status=None):
                     listed_ebay_at = NULL,
                     listed_amazon_at = NULL
                 WHERE id = ?
-            ''', (now, title, source, item_status, qid))
+            ''', (now, title, source, added_mode, item_status, qid))
             cur.execute('SELECT * FROM listing_queue WHERE id = ? LIMIT 1', (qid,))
             return _listagent_row_to_dict(cur.fetchone()), True
 
         # Fresh insert
         cur.execute('''
-            INSERT INTO listing_queue (upc, title, source, item_status, status, added_at)
-            VALUES (?, ?, ?, ?, 'queued', ?)
-        ''', (upc, title, source, item_status, now))
+            INSERT INTO listing_queue (upc, title, source, added_mode, item_status, status, added_at)
+            VALUES (?, ?, ?, ?, ?, 'queued', ?)
+        ''', (upc, title, source, added_mode, item_status, now))
         qid = cur.lastrowid
         cur.execute('SELECT * FROM listing_queue WHERE id = ? LIMIT 1', (qid,))
         return _listagent_row_to_dict(cur.fetchone()), True
 
-def _listagent_get_queue(*, limit=50):
+def _listagent_get_queue(*, limit=50, added_mode=''):
     limit = int(limit or 50)
     limit = max(1, min(limit, 200))
+    mode = _listagent_normalize_added_mode(added_mode, default='')
+    if mode not in ('my', 'auto'):
+        mode = ''
     with db_connection('listagent.db') as conn:
         cur = conn.cursor()
         _listagent_init_tables(cur)
-        cur.execute('''
+        sql = '''
             SELECT *
             FROM listing_queue
             WHERE status IN ('queued', 'done')
+        '''
+        params = []
+        if mode:
+            sql += " AND COALESCE(NULLIF(TRIM(added_mode), ''), 'my') = ?"
+            params.append(mode)
+        sql += '''
             ORDER BY CASE WHEN status = 'done' THEN 1 ELSE 0 END, added_at DESC, id DESC
             LIMIT ?
-        ''', (limit,))
+        '''
+        params.append(limit)
+        cur.execute(sql, tuple(params))
         return [_listagent_row_to_dict(r) for r in cur.fetchall()]
 
 def _listagent_mark_listed(upc, *, platform=None, listing_id=None, offer_id=None, sku=None, asin=None, url=None,
@@ -1873,7 +1900,13 @@ def api_listingagent_queue():
     """Get the Listing Agent queue (queued + done; excludes removed)."""
     try:
         limit = _listingagent_parse_int(request.args.get('limit'), 60) or 60
-        items = _listagent_get_queue(limit=limit)
+        added_mode = _listagent_normalize_added_mode(
+            request.args.get('added_mode') or request.args.get('queue_mode') or request.args.get('mode'),
+            default=''
+        )
+        if added_mode not in ('my', 'auto'):
+            added_mode = ''
+        items = _listagent_get_queue(limit=limit, added_mode=added_mode)
         return jsonify({'success': True, 'items': items})
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e, 'listingagent:queue_get')}), 500
@@ -1889,8 +1922,18 @@ def api_listingagent_queue_add():
         title = (data.get('title') or '').strip()
         source = (data.get('source') or '').strip()
         item_status = (data.get('item_status') or data.get('itemStatus') or '').strip()
+        added_mode = _listagent_normalize_added_mode(
+            data.get('added_mode') or data.get('queue_mode') or data.get('mode'),
+            default='my'
+        )
 
-        item, added = _listagent_add_to_queue(upc, title=title, source=source, item_status=item_status)
+        item, added = _listagent_add_to_queue(
+            upc,
+            title=title,
+            source=source,
+            item_status=item_status,
+            added_mode=added_mode
+        )
         return jsonify({'success': True, 'added': added, 'item': item})
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e, 'listingagent:queue_add')}), 500
@@ -8696,6 +8739,11 @@ def _ensure_items_prep_tables():
             except Exception:
                 # some older sqlite versions may behave differently; ignore errors
                 pass
+
+        # Speed up per-UPC image/note lookups used by list views.
+        cur.execute('CREATE INDEX IF NOT EXISTS idx_items_prep_images_upc ON items_prep_images(upc)')
+        cur.execute('CREATE INDEX IF NOT EXISTS idx_items_prep_images_upc_deleted ON items_prep_images(upc, deleted_at)')
+        cur.execute('CREATE INDEX IF NOT EXISTS idx_items_prep_notes_upc ON items_prep_notes(upc)')
         
         # Create print queue table for cross-device synchronization
         cur.execute('''CREATE TABLE IF NOT EXISTS print_queue (
@@ -17649,6 +17697,7 @@ def api_bol_items():
         # Build a status map keyed by (upc, lot_number) with fallback to lotless legacy rows.
         status_map = {}
         note_map = {}
+        photo_count_map = {}
         page_upcs = set()
         for r in rows:
             u = r.get('upc')
@@ -17691,9 +17740,23 @@ def api_bol_items():
                         raw_upc = rr['upc']
                         if raw_upc:
                             note_map[_normalize_upc(raw_upc)] = rr['note_count']
+
+                    # Active (not deleted) photo counts for each UPC on the current page.
+                    k2.execute(f'''
+                        SELECT upc, COUNT(*) as photo_count
+                        FROM items_prep_images
+                        WHERE upc IN ({placeholders})
+                          AND (deleted_at IS NULL OR TRIM(COALESCE(deleted_at, '')) = '')
+                        GROUP BY upc
+                    ''', tuple(page_upcs))
+                    for rr in k2.fetchall():
+                        raw_upc = rr['upc']
+                        if raw_upc:
+                            photo_count_map[_normalize_upc(raw_upc)] = int(rr['photo_count'] or 0)
         except Exception:
             status_map = {}
             note_map = {}
+            photo_count_map = {}
 
         # Enrich rows with status map for any missing joins
         def status_of(row):
@@ -17712,6 +17775,8 @@ def api_bol_items():
 
             if 'prep_note_count' not in row:
                 row['prep_note_count'] = note_map.get(row_upc, 0)
+            if 'prep_photo_count' not in row:
+                row['prep_photo_count'] = photo_count_map.get(row_upc, 0)
 
             return st if st in ('good', 'bad', 'unchecked') else 'unchecked'
         
@@ -17735,6 +17800,7 @@ def api_bol_items():
             
             # Check if item has notes in items_prep_notes table
             has_notes = r.get('prep_note_count', 0) > 0
+            photo_count = int(r.get('prep_photo_count') or 0)
             
             results.append({
                 'id': r.get('id'),
@@ -17751,6 +17817,7 @@ def api_bol_items():
                 'temporary': r.get('temporary'),
                 'quantity': display_qty,
                 'note': 'yes' if has_notes else '',
+                'photo_count': photo_count,
                 # Marketplace listing columns
                 'listed_amazon': r.get('listed_amazon'),
                 'listed_amazon_date': r.get('listed_amazon_date'),

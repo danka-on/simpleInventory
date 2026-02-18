@@ -1029,6 +1029,47 @@
       flex-direction: column;
       gap: 8px;
     }
+    .queueTools{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      flex-wrap:wrap;
+    }
+    .queueModeSelect{
+      min-width: 150px;
+      height: 34px;
+      padding: 6px 10px;
+      border-radius: 9px;
+      border: 1px solid var(--border);
+      font-size: 0.82rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      transition: all .15s ease;
+    }
+    .queueModeSelect.mode-my{
+      border-color: rgba(59, 130, 246, 0.55);
+      background: rgba(37, 99, 235, 0.18);
+      color: #bfdbfe;
+    }
+    .queueModeSelect.mode-auto{
+      border-color: rgba(245, 158, 11, 0.65);
+      background: rgba(245, 158, 11, 0.18);
+      color: #fde68a;
+    }
+    .queueModeSelect:focus{
+      outline: none;
+      box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.22);
+    }
+    html.ss-theme-day .queueModeSelect.mode-my{
+      background: rgba(37, 99, 235, 0.12);
+      color: #1d4ed8;
+      border-color: rgba(37, 99, 235, 0.45);
+    }
+    html.ss-theme-day .queueModeSelect.mode-auto{
+      background: rgba(245, 158, 11, 0.16);
+      color: #92400e;
+      border-color: rgba(245, 158, 11, 0.45);
+    }
     .queueItem{
       display: flex;
       align-items: center;
@@ -1489,7 +1530,13 @@
             <div class="field" style="margin-top:12px;">
               <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
                 <label style="margin:0;">Queue</label>
-                <button class="btn btnGhost btnMini" id="btnQueueReload" type="button"><i class="fas fa-rotate"></i>Refresh</button>
+                <div class="queueTools">
+                  <select id="queueModeSelect" class="queueModeSelect mode-my" title="Queue source filter">
+                    <option value="my">My Added</option>
+                    <option value="auto">Auto Added</option>
+                  </select>
+                  <button class="btn btnGhost btnMini" id="btnQueueReload" type="button"><i class="fas fa-rotate"></i>Refresh</button>
+                </div>
               </div>
               <div id="queueList" class="queueList" style="margin-top:10px;"></div>
               <div id="queueEmpty" class="hint" style="display:none;margin-top:10px;">Queue is empty. Use "+ Listing Agent" in List Manager or scan a UPC.</div>
@@ -1959,6 +2006,7 @@
       images: [],
       removedImages: new Set(),
       queue: [],
+      queueMode: 'my',
       activeUpc: '',
       mobileUploadUrl: '',
       mobileUploadPoll: null,
@@ -2288,9 +2336,46 @@
       }
     }
 
+    function normalizeQueueMode(raw, fallback='my'){
+      const mode = (raw || '').toString().trim().toLowerCase();
+      if(mode === 'auto') return 'auto';
+      if(mode === 'my') return 'my';
+      return (fallback === 'auto') ? 'auto' : 'my';
+    }
+
+    function queueModeLabel(mode){
+      return normalizeQueueMode(mode, 'my') === 'auto' ? 'Auto Added' : 'My Added';
+    }
+
+    function queueItemMode(item){
+      return normalizeQueueMode(item?.added_mode || 'my', 'my');
+    }
+
+    function queueMatchesCurrentMode(item){
+      return queueItemMode(item) === normalizeQueueMode(state.queueMode, 'my');
+    }
+
+    function applyQueueModeUi(){
+      const sel = $('queueModeSelect');
+      const mode = normalizeQueueMode(state.queueMode, 'my');
+      state.queueMode = mode;
+      if(sel){
+        sel.value = mode;
+        sel.classList.remove('mode-my', 'mode-auto');
+        sel.classList.add(mode === 'auto' ? 'mode-auto' : 'mode-my');
+      }
+      const empty = $('queueEmpty');
+      if(empty){
+        empty.textContent = mode === 'auto'
+          ? 'Auto queue is empty. New auto-added items from List Manager will appear here.'
+          : 'Queue is empty. Use "+ Listing Agent" in List Manager or scan a UPC.';
+      }
+    }
+
     async function loadQueue(){
       try{
-        const data = await apiGet('/api/listingagent/queue?limit=120');
+        const mode = normalizeQueueMode(state.queueMode, 'my');
+        const data = await apiGet(`/api/listingagent/queue?limit=120&added_mode=${encodeURIComponent(mode)}`);
         state.queue = (data.items || []).map(it => {
           const upc = formatUpc12((it.upc || '').toString().trim());
           const ebayAt = (it.listed_ebay_at || '').toString().trim();
@@ -2315,7 +2400,8 @@
         const res = await apiPost('/api/listingagent/queue/add', {
           upc: clean,
           title: (meta.title || state.item?.title || state.item?.bol?.description || '').toString(),
-          source: (meta.source || 'listingagent').toString()
+          source: (meta.source || 'listingagent').toString(),
+          added_mode: (meta.added_mode || 'my').toString()
         });
         const item = res.item || null;
         if(item){
@@ -2328,10 +2414,15 @@
             obj.upc = formatUpc12(obj.upc || clean);
             return obj;
           };
-          if(idx >= 0){
-            state.queue[idx] = mergeDone({...state.queue[idx], ...item});
-          } else {
-            state.queue.unshift(mergeDone({...item}));
+          const merged = mergeDone(idx >= 0 ? {...state.queue[idx], ...item} : {...item});
+          if(queueMatchesCurrentMode(merged)){
+            if(idx >= 0){
+              state.queue[idx] = merged;
+            } else {
+              state.queue.unshift(merged);
+            }
+          } else if(idx >= 0){
+            state.queue.splice(idx, 1);
           }
           // Keep completed items at the bottom.
           state.queue = [...state.queue.filter(x => !x._done), ...state.queue.filter(x => x._done)];
@@ -5867,6 +5958,13 @@
       log('Refreshing queue...');
       loadQueue();
     };
+    if($('queueModeSelect')) $('queueModeSelect').addEventListener('change', async (e) => {
+      state.queueMode = normalizeQueueMode(e.target?.value || 'my', 'my');
+      applyQueueModeUi();
+      try{ localStorage.setItem('listingagent_queue_mode', state.queueMode); } catch(err){}
+      log(`Queue view: ${queueModeLabel(state.queueMode)}.`);
+      await loadQueue();
+    });
     if($('btnToggleEditListings')) $('btnToggleEditListings').onclick = () => {
       const body = $('editListingsBody');
       const open = !body || body.style.display === 'none';
@@ -6124,6 +6222,11 @@
     let editOpen = false;
     try{ editOpen = (localStorage.getItem('listingagent_edit_open') || '') === '1'; } catch(e){}
     setEditListingsOpen(editOpen);
+
+    let initialQueueMode = 'my';
+    try{ initialQueueMode = (localStorage.getItem('listingagent_queue_mode') || 'my').toString(); } catch(e){}
+    state.queueMode = normalizeQueueMode(initialQueueMode, 'my');
+    applyQueueModeUi();
  
     renderPreview();
     resetTemplatesUI();

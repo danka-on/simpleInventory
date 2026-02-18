@@ -12,7 +12,9 @@
         h2{color:#333;margin:0}
         .form-group{margin-bottom:15px}
         label{display:inline-block;width:120px;font-weight:600}
-        input[type="file"],input[type="text"],input[type="date"]{padding:8px;border:1px solid #ccc;border-radius:4px;width:300px}
+        input[type="file"],input[type="text"],input[type="date"],input[type="number"]{padding:8px;border:1px solid #ccc;border-radius:4px;width:300px}
+        input[type="file"]::file-selector-button{margin-right:10px;padding:6px 10px;border:1px solid #cbd5e1;border-radius:4px;background:#f1f5f9;cursor:pointer}
+        input[type="file"]::file-selector-button:hover{background:#e2e8f0}
         button{padding:10px 20px;background:#007bff;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:14px}
         button:hover{background:#0056b3}
         .message{margin-top:15px;padding:10px;border-radius:4px}
@@ -35,6 +37,35 @@
         .modal-content button{flex:1}
         .btn-cancel{background:#6c757d}
         .btn-cancel:hover{background:#5a6268}
+        .row-needs-items{background:#fff3cd}
+        .summary-row{background:#e8f4f8;font-weight:bold;border-top:2px solid #007bff}
+        .summary-label{text-align:right}
+
+        html.ss-theme-night body{background:#0f172a;color:#e2e8f0}
+        html.ss-theme-night h2{color:#f8fafc}
+        html.ss-theme-night label{color:#e2e8f0}
+        html.ss-theme-night input[type="file"],html.ss-theme-night input[type="text"],html.ss-theme-night input[type="date"],html.ss-theme-night input[type="number"]{background:#0f172a;color:#e2e8f0;border-color:rgba(255,255,255,0.12)}
+        html.ss-theme-night input[type="file"]::file-selector-button{background:#1f2937;color:#e2e8f0;border-color:rgba(255,255,255,0.15)}
+        html.ss-theme-night input[type="file"]::file-selector-button:hover{background:#334155}
+        html.ss-theme-night input::placeholder{color:#94a3b8}
+        html.ss-theme-night .section{background:#1e293b;border-color:rgba(255,255,255,0.1)}
+        html.ss-theme-night .section h3{color:#e2e8f0}
+        html.ss-theme-night .message{background:#1e293b;color:#e2e8f0;border:1px solid rgba(255,255,255,0.12)}
+        html.ss-theme-night .message.success{background:rgba(16,185,129,0.15);color:#6ee7b7;border-color:rgba(16,185,129,0.35)}
+        html.ss-theme-night .message.error{background:rgba(239,68,68,0.15);color:#fca5a5;border-color:rgba(239,68,68,0.35)}
+        html.ss-theme-night table{color:#e2e8f0}
+        html.ss-theme-night th{background:#1f2937;color:#e2e8f0;border-bottom-color:rgba(255,255,255,0.08)}
+        html.ss-theme-night td{border-bottom-color:rgba(255,255,255,0.08)}
+        html.ss-theme-night .edit-icon{color:#93c5fd}
+        html.ss-theme-night .edit-icon:hover{color:#bfdbfe}
+        html.ss-theme-night .modal{background:rgba(2,6,23,0.75)}
+        html.ss-theme-night .modal-content{background:#1e293b;color:#e2e8f0;border:1px solid rgba(255,255,255,0.12)}
+        html.ss-theme-night .modal-content label{color:#e2e8f0}
+        html.ss-theme-night .modal-content input{background:#0f172a;color:#e2e8f0;border-color:rgba(255,255,255,0.12)}
+        html.ss-theme-night .btn-cancel{background:#475569}
+        html.ss-theme-night .btn-cancel:hover{background:#64748b}
+        html.ss-theme-night .row-needs-items{background:rgba(245,158,11,0.2)}
+        html.ss-theme-night .summary-row{background:rgba(56,189,248,0.12);border-top-color:#38bdf8}
     </style>
 </head>
 <body>
@@ -204,10 +235,10 @@
                         const lotNumber = log.lot_number || '—';
                         const bolLocation = log.bol_location || '—';
                         const shippingForEdit = log.shipping_cost || '';
-                        const rowStyle = hasItems ? '' : ' style="background:#fff3cd"';
+                        const rowClass = hasItems ? '' : ' class="row-needs-items"';
                         const itemsDisplay = hasItems ? totalQty : `${totalQty} ⚠`;
                         console.log('Log data:', log, 'totalQty:', totalQty); // Debug logging
-                        html += `<tr${rowStyle}>
+                        html += `<tr${rowClass}>
                             <td>${bolLocation}</td>
                             <td>${log.filename}</td>
                             <td>${lotNumber}</td>
@@ -223,8 +254,8 @@
                     // Add summary row
                     const formattedTotal = '$' + totalCostSum.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
                     const formattedShippingTotal = '$' + totalShippingSum.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
-                    html += `<tr style="background:#e8f4f8;font-weight:bold;border-top:2px solid #007bff">
-                        <td colspan="3" style="text-align:right">TOTAL:</td>
+                    html += `<tr class="summary-row">
+                        <td colspan="3" class="summary-label">TOTAL:</td>
                         <td>${totalItemsSum.toLocaleString()}</td>
                         <td>${formattedTotal}</td>
                         <td>${formattedShippingTotal}</td>

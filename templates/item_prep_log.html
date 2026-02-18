@@ -16,6 +16,9 @@
     .row{display:flex;gap:10px;flex-wrap:wrap}
     .muted{color:#666;font-size:0.95rem}
     .pill{display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border-radius:999px;background:#f0f0f0;font-size:0.9rem}
+    .pill-link{border:none;cursor:pointer;transition:all 0.15s ease}
+    .pill-link:hover{background:#e8eef7}
+    .pill-link:focus{outline:2px solid #9ec5fe;outline-offset:1px}
     .badge{display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border-radius:999px;font-weight:700;font-size:0.9rem}
     .badge-good{background:rgba(0,184,148,0.12);color:#00b894;border:1px solid rgba(0,184,148,0.25)}
     .badge-bad{background:rgba(231,76,60,0.12);color:#e74c3c;border:1px solid rgba(231,76,60,0.25)}
@@ -30,6 +33,13 @@
     .ok{color:#00b894}
     .lotSel{min-width:140px;padding:8px 10px;border:1px solid #ddd;border-radius:8px;background:#fff}
     input[type="checkbox"]{width:18px;height:18px}
+    .modalOverlay{position:fixed;inset:0;background:rgba(0,0,0,0.55);display:none;align-items:center;justify-content:center;z-index:9999;padding:18px}
+    .modalCard{background:#fff;border-radius:14px;width:min(900px,96vw);max-height:90vh;overflow:auto;border:1px solid #ddd;padding:12px}
+    .thumbGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:10px}
+    .thumbBtn{border:1px solid #ddd;border-radius:10px;background:#fff;padding:4px;cursor:pointer}
+    .thumbBtn img{width:100%;height:110px;object-fit:cover;border-radius:8px;display:block}
+    .previewBox{background:#fafafa;border:1px solid #eee;border-radius:10px;padding:10px;min-height:220px;display:flex;align-items:center;justify-content:center}
+    .previewBox img{max-width:100%;max-height:56vh;border-radius:8px}
   </style>
 </head>
 <body>
@@ -67,6 +77,21 @@
     <div class="muted" id="err" style="margin-top:12px;"></div>
   </div>
 
+  <div id="photoModal" class="modalOverlay" aria-hidden="true">
+    <div class="modalCard">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+        <div>
+          <strong>Item Photos</strong>
+          <div class="muted" id="photoModalMeta"></div>
+        </div>
+        <button class="btn btn-small btn-gray" id="closePhotoModal" type="button">Close</button>
+      </div>
+      <div id="photoModalStatus" class="muted" style="margin-top:10px"></div>
+      <div id="photoModalPreview" class="previewBox" style="margin-top:10px"></div>
+      <div id="photoModalGrid" class="thumbGrid" style="margin-top:12px"></div>
+    </div>
+  </div>
+
   <script>
     function esc(s){
       return String(s ?? '').replace(/[&<>"']/g, c => ({
@@ -98,6 +123,86 @@
       const j = await r.json().catch(()=> ({}));
       if(!r.ok || j.success === false) throw new Error(j.error || ('HTTP '+r.status));
       return j;
+    }
+
+    function normalizeImageSrc(path){
+      const s = String(path ?? '').trim();
+      if(!s) return '';
+      if(/^https?:\/\//i.test(s) || s.startsWith('/')) return s;
+      if(s.startsWith('static/')) return '/' + s;
+      return '/static/' + s.replace(/^\/+/, '');
+    }
+
+    function setPhotoPreview(src, altText){
+      const box = document.getElementById('photoModalPreview');
+      if(!box) return;
+      if(!src){
+        box.innerHTML = '<div class="muted">No preview</div>';
+        return;
+      }
+      box.innerHTML = `<img src="${esc(src)}" alt="${esc(altText || 'Photo')}">`;
+    }
+
+    function closePhotoModal(){
+      const modal = document.getElementById('photoModal');
+      if(modal){
+        modal.style.display = 'none';
+        modal.setAttribute('aria-hidden', 'true');
+      }
+      const status = document.getElementById('photoModalStatus');
+      const grid = document.getElementById('photoModalGrid');
+      if(status) status.textContent = '';
+      if(grid) grid.innerHTML = '';
+      setPhotoPreview('', '');
+    }
+
+    async function openLogPhotos(upcRaw, lotRaw){
+      const upc = String(upcRaw ?? '').trim();
+      const lot = String(lotRaw ?? '').trim();
+      if(!upc){
+        alert('No UPC available for this entry.');
+        return;
+      }
+
+      const modal = document.getElementById('photoModal');
+      const meta = document.getElementById('photoModalMeta');
+      const status = document.getElementById('photoModalStatus');
+      const grid = document.getElementById('photoModalGrid');
+      if(!modal || !meta || !status || !grid) return;
+
+      modal.style.display = 'flex';
+      modal.setAttribute('aria-hidden', 'false');
+      meta.textContent = `UPC ${upc}` + (lot ? ` — LOT ${lot}` : '');
+      status.textContent = 'Loading photos...';
+      grid.innerHTML = '';
+      setPhotoPreview('', '');
+
+      try{
+        const lotQ = lot ? ('?lot=' + encodeURIComponent(lot)) : '';
+        const data = await apiGet('/api/items_prep/diagnostic/' + encodeURIComponent(upc) + lotQ);
+        const imgs = Array.isArray(data.images) ? data.images : [];
+        if(imgs.length === 0){
+          status.textContent = 'No photos found for this item.';
+          return;
+        }
+
+        status.textContent = `${imgs.length} photo` + (imgs.length === 1 ? '' : 's');
+        imgs.forEach((im, idx)=>{
+          const src = normalizeImageSrc(im && im.image_path);
+          if(!src) return;
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'thumbBtn';
+          btn.innerHTML = `<img src="${esc(src)}" alt="Thumbnail ${idx + 1}">`;
+          btn.onclick = ()=> setPhotoPreview(src, `Photo ${idx + 1}`);
+          grid.appendChild(btn);
+          if(idx === 0){
+            setPhotoPreview(src, 'Photo 1');
+          }
+        });
+      }catch(e){
+        status.textContent = 'Failed to load photos: ' + e.message;
+      }
     }
 
     function statusLabel(st){
@@ -244,6 +349,9 @@
         const requestedLot = String(it.requested_lot ?? '').trim();
         const autoAssigned = !!it.auto_assigned;
         const canReassign = !undone && (st === 'good' || st === 'bad' || st === 'return');
+        const upcPill = upc
+          ? `<button type="button" class="pill pill-link" data-photo-upc="${esc(upc)}" data-photo-lot="${esc(lot)}" title="Open item photos">UPC ${esc(upc)} 📷</button>`
+          : '<span class="pill">UPC —</span>';
 
         const row = document.createElement('div');
         row.className = 'logRow' + (undone ? ' undone' : '');
@@ -254,7 +362,7 @@
               <span class="pill">${esc(fmtTime(it.created_at))}</span>
               <span class="badge ${esc(statusClass(st))}">${esc(statusLabel(st))}</span>
               <span class="pill">Qty ${esc(qty)}</span>
-              <span class="pill">UPC ${esc(upc)}</span>
+              ${upcPill}
               <span class="pill">LOT ${esc(lot || '—')}</span>
               ${autoAssigned ? `<span class="badge badge-auto">AUTO-ASSIGNED${requestedLot ? ` (${esc(requestedLot)}→${esc(lot || '?')})` : ''}</span>` : ''}
               ${reason ? `<span class="pill">${esc(reason)}</span>` : ''}
@@ -282,6 +390,10 @@
         const reassignBtn = row.querySelector('button[data-reassign-id]');
         if(reassignBtn){
           reassignBtn.onclick = () => reassignLot(id);
+        }
+        const photoBtn = row.querySelector('button[data-photo-upc]');
+        if(photoBtn){
+          photoBtn.onclick = () => openLogPhotos(photoBtn.dataset.photoUpc, photoBtn.dataset.photoLot);
         }
 
         list.appendChild(row);
@@ -326,12 +438,26 @@
     }
 
     document.getElementById('refreshBtn').onclick = loadLog;
+    document.getElementById('closePhotoModal').onclick = closePhotoModal;
     document.getElementById('hideUndone').onchange = loadLog;
     document.getElementById('showAll').onchange = () => renderLog(allItems);
     document.getElementById('autoOnly').onchange = loadLog;
     document.getElementById('filterLot').addEventListener('input', () => renderLog(allItems));
     document.getElementById('filterLot').addEventListener('change', loadLog);
     document.getElementById('searchUpc').addEventListener('input', () => renderLog(allItems));
+    document.getElementById('photoModal').addEventListener('click', (e)=>{
+      if(e.target === e.currentTarget){
+        closePhotoModal();
+      }
+    });
+    document.addEventListener('keydown', (e)=>{
+      if(e.key === 'Escape'){
+        const modal = document.getElementById('photoModal');
+        if(modal && modal.style.display === 'flex'){
+          closePhotoModal();
+        }
+      }
+    });
 
     (async ()=>{
       applyQueryDefaults();
