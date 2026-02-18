@@ -5,90 +5,324 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Prep Log</title>
   <style>
-    body{font-family:Segoe UI,Arial,sans-serif;background:#f7fafc;margin:0;padding:18px}
-    .top{display:flex;align-items:center;gap:10px;justify-content:space-between}
-    .btn{padding:12px 16px;border-radius:12px;border:none;cursor:pointer;font-size:1.05rem}
-    .btn-danger{background:#e74c3c;color:#fff}
-    .btn-gray{background:#95a5a6;color:#fff}
-    .btn-small{padding:10px 14px;font-size:0.95rem;border-radius:10px}
-    .btn:disabled{opacity:0.55;cursor:not-allowed}
-    .card{background:#fff;border:1px solid #e8e8e8;border-radius:14px;padding:16px;margin-top:14px}
-    .row{display:flex;gap:10px;flex-wrap:wrap}
-    .muted{color:#666;font-size:0.95rem}
-    .pill{display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border-radius:999px;background:#f0f0f0;font-size:0.9rem}
-    .pill-link{border:none;cursor:pointer;transition:all 0.15s ease}
-    .pill-link:hover{background:#e8eef7}
-    .pill-link:focus{outline:2px solid #9ec5fe;outline-offset:1px}
-    .badge{display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border-radius:999px;font-weight:700;font-size:0.9rem}
-    .badge-good{background:rgba(0,184,148,0.12);color:#00b894;border:1px solid rgba(0,184,148,0.25)}
-    .badge-bad{background:rgba(231,76,60,0.12);color:#e74c3c;border:1px solid rgba(231,76,60,0.25)}
-    .badge-return{background:rgba(52,152,219,0.12);color:#2980b9;border:1px solid rgba(52,152,219,0.25)}
-    .badge-auto{background:rgba(243,156,18,0.14);color:#b46d00;border:1px solid rgba(243,156,18,0.32)}
-    .logRow{border:1px solid #eee;border-radius:14px;padding:12px 12px;margin-top:12px;background:#fff}
-    .logRow.undone{opacity:0.55}
-    .logTop{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}
-    .logLeft{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
-    .noteBox{margin-top:10px;padding:10px 12px;border-radius:12px;border:1px dashed #ddd;background:#fcfcfc;white-space:pre-wrap;line-height:1.35}
-    .bad{color:#e74c3c}
-    .ok{color:#00b894}
-    .lotSel{min-width:140px;padding:8px 10px;border:1px solid #ddd;border-radius:8px;background:#fff}
-    input[type="checkbox"]{width:18px;height:18px}
-    .modalOverlay{position:fixed;inset:0;background:rgba(0,0,0,0.55);display:none;align-items:center;justify-content:center;z-index:9999;padding:18px}
-    .modalCard{background:#fff;border-radius:14px;width:min(900px,96vw);max-height:90vh;overflow:auto;border:1px solid #ddd;padding:12px}
-    .thumbGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:10px}
-    .thumbBtn{border:1px solid #ddd;border-radius:10px;background:#fff;padding:4px;cursor:pointer}
-    .thumbBtn img{width:100%;height:110px;object-fit:cover;border-radius:8px;display:block}
-    .previewBox{background:#fafafa;border:1px solid #eee;border-radius:10px;padding:10px;min-height:220px;display:flex;align-items:center;justify-content:center}
-    .previewBox img{max-width:100%;max-height:56vh;border-radius:8px}
+    * { box-sizing: border-box; margin: 0; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #f1f5f9;
+      margin: 0;
+      padding: 24px;
+      color: #1e293b;
+    }
+
+    /* ── Header ── */
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 20px;
+      max-width: 900px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    .header h1 {
+      flex: 1;
+      text-align: center;
+      font-size: 1.3rem;
+      font-weight: 700;
+      color: #0f172a;
+    }
+    .btn {
+      padding: 10px 20px;
+      border-radius: 10px;
+      border: none;
+      cursor: pointer;
+      font-size: 0.95rem;
+      font-weight: 600;
+      transition: opacity 0.15s;
+    }
+    .btn:hover { opacity: 0.85; }
+    .btn:disabled { opacity: 0.35; cursor: not-allowed; }
+    .btn-back { background: #e2e8f0; color: #475569; text-decoration: none; display: inline-block; }
+    .btn-undo { background: #ef4444; color: #fff; padding: 8px 16px; font-size: 0.85rem; }
+    .btn-gray { background: #64748b; color: #fff; }
+
+    /* ── Toolbar ── */
+    .toolbar {
+      max-width: 900px;
+      margin: 0 auto 16px;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .toolbar input[type="text"] {
+      flex: 1;
+      min-width: 180px;
+      padding: 11px 14px;
+      font-size: 1rem;
+      border: 1.5px solid #e2e8f0;
+      border-radius: 10px;
+      background: #fff;
+      color: #1e293b;
+      outline: none;
+    }
+    .toolbar input:focus { border-color: #94a3b8; }
+    .toolbar input::placeholder { color: #94a3b8; }
+    .toolbar-filters {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .toolbar-filters label {
+      display: flex;
+      gap: 5px;
+      align-items: center;
+      font-size: 0.85rem;
+      color: #64748b;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .toolbar-filters input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+      accent-color: #3b82f6;
+    }
+    .count { font-size: 0.85rem; color: #94a3b8; font-weight: 500; }
+
+    /* ── Log list ── */
+    .log-list {
+      max-width: 900px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    /* ── Single log row ── */
+    .entry {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 12px 16px;
+    }
+    .entry.undone { opacity: 0.4; }
+
+    .entry-num {
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: #94a3b8;
+      min-width: 32px;
+      text-align: center;
+      flex-shrink: 0;
+    }
+
+    .entry-thumb {
+      width: 56px;
+      height: 56px;
+      border-radius: 8px;
+      object-fit: cover;
+      background: #f1f5f9;
+      flex-shrink: 0;
+      cursor: pointer;
+      border: 1px solid #e2e8f0;
+    }
+    .entry-thumb:hover { border-color: #3b82f6; }
+    .entry-thumb-placeholder {
+      width: 56px;
+      height: 56px;
+      border-radius: 8px;
+      background: #f1f5f9;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #cbd5e1;
+      font-size: 1.2rem;
+      border: 1px solid #e2e8f0;
+    }
+
+    .entry-info {
+      flex: 1;
+      min-width: 0;
+    }
+    .entry-title {
+      font-weight: 600;
+      font-size: 0.95rem;
+      color: #1e293b;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .entry-meta {
+      font-size: 0.82rem;
+      color: #94a3b8;
+      margin-top: 3px;
+    }
+
+    .status {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+    }
+    .status-good { background: #dcfce7; color: #16a34a; }
+    .status-bad { background: #fee2e2; color: #dc2626; }
+    .status-return { background: #dbeafe; color: #2563eb; }
+
+    .entry-actions {
+      flex-shrink: 0;
+    }
+
+    .note-line {
+      font-size: 0.82rem;
+      color: #64748b;
+      margin-top: 2px;
+      font-style: italic;
+    }
+
+    .empty {
+      text-align: center;
+      padding: 48px 16px;
+      color: #94a3b8;
+    }
+    .bad { color: #dc2626; }
+
+    /* ── Photo modal ── */
+    .modal-bg {
+      position: fixed;
+      inset: 0;
+      background: rgba(15,23,42,0.6);
+      backdrop-filter: blur(4px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+      padding: 20px;
+    }
+    .modal {
+      background: #fff;
+      border-radius: 14px;
+      width: min(800px, 95vw);
+      max-height: 88vh;
+      overflow: auto;
+      padding: 20px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.15);
+    }
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .modal-header strong { font-size: 1.05rem; }
+    .modal-close {
+      background: #e2e8f0;
+      border: none;
+      border-radius: 8px;
+      padding: 8px 16px;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 0.9rem;
+    }
+    .preview-box {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      padding: 10px;
+      min-height: 200px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 12px;
+    }
+    .preview-box img { max-width: 100%; max-height: 50vh; border-radius: 8px; }
+    .thumb-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+      gap: 6px;
+    }
+    .thumb-btn {
+      border: 2px solid transparent;
+      border-radius: 8px;
+      background: #f1f5f9;
+      padding: 2px;
+      cursor: pointer;
+    }
+    .thumb-btn:hover { border-color: #3b82f6; }
+    .thumb-btn img {
+      width: 100%;
+      height: 80px;
+      object-fit: cover;
+      border-radius: 6px;
+      display: block;
+    }
+    .muted { color: #94a3b8; font-size: 0.85rem; }
+
+    /* ── iPad (primary target) ── */
+    @media (min-width: 768px) and (max-width: 1024px) {
+      body { padding: 28px 36px; }
+      .entry { padding: 14px 18px; gap: 16px; }
+      .entry-thumb, .entry-thumb-placeholder { width: 64px; height: 64px; }
+      .entry-title { font-size: 1rem; }
+      .entry-meta { font-size: 0.88rem; }
+      .btn-undo { padding: 10px 18px; font-size: 0.9rem; }
+    }
+
+    /* ── Mobile ── */
+    @media (max-width: 767px) {
+      body { padding: 14px; }
+      .entry { padding: 10px 12px; gap: 10px; }
+      .entry-num { font-size: 0.95rem; min-width: 24px; }
+      .entry-thumb, .entry-thumb-placeholder { width: 44px; height: 44px; }
+      .entry-title { font-size: 0.88rem; }
+      .entry-meta { font-size: 0.78rem; }
+      .toolbar { gap: 8px; }
+    }
   </style>
 </head>
 <body>
-  <div class="top">
-    <a href="/item-prep" style="text-decoration:none"><button class="btn btn-danger">Back</button></a>
-    <h2 style="margin:0 auto;text-align:center;flex:1">Prep Log</h2>
-    <div style="display:flex;gap:10px;align-items:center;">
-      <button class="btn btn-gray" id="refreshBtn">Refresh</button>
-    </div>
+  <div class="header">
+    <a href="/item-prep" class="btn btn-back">&#8592; Back</a>
+    <h1>Prep Log</h1>
+    <button class="btn btn-gray" id="refreshBtn">Refresh</button>
   </div>
 
-  <div class="card">
-    <div style="margin-bottom:12px;">
-      <input type="text" id="searchUpc" placeholder="Search by barcode / UPC..." autocomplete="off" style="width:100%;padding:10px 14px;font-size:1.05rem;border:1px solid #ddd;border-radius:10px;box-sizing:border-box;">
+  <div class="toolbar">
+    <input type="text" id="searchUpc" placeholder="Search UPC..." autocomplete="off">
+    <div class="toolbar-filters">
+      <label><input type="checkbox" id="showAll"> All dates</label>
+      <label><input type="checkbox" id="hideUndone" checked> Hide undone</label>
+      <label><input type="checkbox" id="autoOnly"> Auto only</label>
     </div>
-    <div class="row" style="align-items:center;justify-content:space-between;">
-      <div class="muted" id="summary">Loading...</div>
-      <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;">
-        <label class="muted" style="display:flex;gap:6px;align-items:center;">
-          <input type="checkbox" id="showAll">
-          Show all
-        </label>
-        <label class="muted" style="display:flex;gap:6px;align-items:center;">
-          <input type="checkbox" id="hideUndone" checked>
-          Hide undone
-        </label>
-        <label class="muted" style="display:flex;gap:6px;align-items:center;">
-          <input type="checkbox" id="autoOnly">
-          Auto-assigned only
-        </label>
-        <input type="text" id="filterLot" placeholder="LOT filter..." autocomplete="off" style="padding:8px 10px;border:1px solid #ddd;border-radius:8px;min-width:140px;">
-      </div>
-    </div>
-    <div id="list"></div>
-    <div class="muted" id="err" style="margin-top:12px;"></div>
+    <span class="count" id="summary">Loading...</span>
   </div>
+  <!-- hidden LOT filter for query-string compat -->
+  <input type="hidden" id="filterLot" value="">
 
-  <div id="photoModal" class="modalOverlay" aria-hidden="true">
-    <div class="modalCard">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+  <div class="log-list" id="list"></div>
+  <div class="muted" id="err" style="max-width:900px;margin:12px auto 0;"></div>
+
+  <div id="photoModal" class="modal-bg" aria-hidden="true">
+    <div class="modal">
+      <div class="modal-header">
         <div>
           <strong>Item Photos</strong>
           <div class="muted" id="photoModalMeta"></div>
         </div>
-        <button class="btn btn-small btn-gray" id="closePhotoModal" type="button">Close</button>
+        <button class="modal-close" id="closePhotoModal" type="button">Close</button>
       </div>
-      <div id="photoModalStatus" class="muted" style="margin-top:10px"></div>
-      <div id="photoModalPreview" class="previewBox" style="margin-top:10px"></div>
-      <div id="photoModalGrid" class="thumbGrid" style="margin-top:12px"></div>
+      <div id="photoModalStatus" class="muted"></div>
+      <div id="photoModalPreview" class="preview-box"></div>
+      <div id="photoModalGrid" class="thumb-grid"></div>
     </div>
   </div>
 
@@ -105,22 +339,20 @@
       try{
         const d = new Date(s);
         if(Number.isNaN(d.getTime())) return s;
-        return d.toLocaleString([], {year:'numeric', month:'short', day:'2-digit', hour:'2-digit', minute:'2-digit'});
-      }catch(e){
-        return s;
-      }
+        return d.toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
+      }catch(e){ return s; }
     }
 
     async function apiGet(url){
       const r = await fetch(url, {headers:{'Accept':'application/json'}});
-      const j = await r.json().catch(()=> ({}));
+      const j = await r.json().catch(()=>({}));
       if(!r.ok || j.success === false) throw new Error(j.error || ('HTTP '+r.status));
       return j;
     }
 
     async function apiPost(url, payload){
-      const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json','Accept':'application/json'}, body: JSON.stringify(payload ?? {})});
-      const j = await r.json().catch(()=> ({}));
+      const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json','Accept':'application/json'}, body:JSON.stringify(payload ?? {})});
+      const j = await r.json().catch(()=>({}));
       if(!r.ok || j.success === false) throw new Error(j.error || ('HTTP '+r.status));
       return j;
     }
@@ -133,95 +365,80 @@
       return '/static/' + s.replace(/^\/+/, '');
     }
 
-    function setPhotoPreview(src, altText){
+    function setPhotoPreview(src, alt){
       const box = document.getElementById('photoModalPreview');
       if(!box) return;
-      if(!src){
-        box.innerHTML = '<div class="muted">No preview</div>';
-        return;
-      }
-      box.innerHTML = `<img src="${esc(src)}" alt="${esc(altText || 'Photo')}">`;
+      box.innerHTML = src
+        ? `<img src="${esc(src)}" alt="${esc(alt || 'Photo')}">`
+        : '<div class="muted">No preview</div>';
     }
 
     function closePhotoModal(){
-      const modal = document.getElementById('photoModal');
-      if(modal){
-        modal.style.display = 'none';
-        modal.setAttribute('aria-hidden', 'true');
-      }
-      const status = document.getElementById('photoModalStatus');
-      const grid = document.getElementById('photoModalGrid');
-      if(status) status.textContent = '';
-      if(grid) grid.innerHTML = '';
-      setPhotoPreview('', '');
+      const m = document.getElementById('photoModal');
+      if(m){ m.style.display = 'none'; m.setAttribute('aria-hidden','true'); }
+      document.getElementById('photoModalStatus').textContent = '';
+      document.getElementById('photoModalGrid').innerHTML = '';
+      setPhotoPreview('','');
     }
 
     async function openLogPhotos(upcRaw, lotRaw){
       const upc = String(upcRaw ?? '').trim();
       const lot = String(lotRaw ?? '').trim();
-      if(!upc){
-        alert('No UPC available for this entry.');
-        return;
-      }
+      if(!upc){ alert('No UPC available.'); return; }
 
       const modal = document.getElementById('photoModal');
       const meta = document.getElementById('photoModalMeta');
       const status = document.getElementById('photoModalStatus');
       const grid = document.getElementById('photoModalGrid');
-      if(!modal || !meta || !status || !grid) return;
 
       modal.style.display = 'flex';
-      modal.setAttribute('aria-hidden', 'false');
+      modal.setAttribute('aria-hidden','false');
       meta.textContent = `UPC ${upc}` + (lot ? ` — LOT ${lot}` : '');
-      status.textContent = 'Loading photos...';
+      status.textContent = 'Loading...';
       grid.innerHTML = '';
-      setPhotoPreview('', '');
+      setPhotoPreview('','');
 
       try{
-        const lotQ = lot ? ('?lot=' + encodeURIComponent(lot)) : '';
-        const data = await apiGet('/api/items_prep/diagnostic/' + encodeURIComponent(upc) + lotQ);
+        const params = new URLSearchParams();
+        params.set('include_related','1');
+        params.set('include_bol_image','1');
+        params.set('prefer_bol_image','1');
+        if(lot) params.set('lot', lot);
+        const data = await apiGet('/api/items_prep/diagnostic/' + encodeURIComponent(upc) + '?' + params.toString());
         const imgs = Array.isArray(data.images) ? data.images : [];
-        if(imgs.length === 0){
-          status.textContent = 'No photos found for this item.';
-          return;
-        }
+        if(!imgs.length){ status.textContent = 'No photos found.'; return; }
 
-        status.textContent = `${imgs.length} photo` + (imgs.length === 1 ? '' : 's');
-        imgs.forEach((im, idx)=>{
+        status.textContent = imgs.length + ' photo' + (imgs.length === 1 ? '' : 's');
+        imgs.forEach((im, i) => {
           const src = normalizeImageSrc(im && im.image_path);
           if(!src) return;
           const btn = document.createElement('button');
           btn.type = 'button';
-          btn.className = 'thumbBtn';
-          btn.innerHTML = `<img src="${esc(src)}" alt="Thumbnail ${idx + 1}">`;
-          btn.onclick = ()=> setPhotoPreview(src, `Photo ${idx + 1}`);
+          btn.className = 'thumb-btn';
+          btn.innerHTML = `<img src="${esc(src)}" alt="Photo ${i+1}">`;
+          btn.onclick = () => setPhotoPreview(src, 'Photo '+(i+1));
           grid.appendChild(btn);
-          if(idx === 0){
-            setPhotoPreview(src, 'Photo 1');
-          }
+          if(i === 0) setPhotoPreview(src, 'Photo 1');
         });
-      }catch(e){
-        status.textContent = 'Failed to load photos: ' + e.message;
-      }
+      }catch(e){ status.textContent = 'Error: ' + e.message; }
     }
 
-    function statusLabel(st){
-      const s = String(st ?? '').toLowerCase().trim();
+    function statusCls(st){
+      const s = String(st ?? '').toLowerCase();
+      if(s === 'return') return 'status-return';
+      if(s === 'bad') return 'status-bad';
+      return 'status-good';
+    }
+    function statusTxt(st){
+      const s = String(st ?? '').toLowerCase();
       if(s === 'return') return 'RETURN';
       if(s === 'bad') return 'BAD';
       return 'GOOD';
     }
 
-    function statusClass(st){
-      const s = String(st ?? '').toLowerCase().trim();
-      if(s === 'return') return 'badge-return';
-      if(s === 'bad') return 'badge-bad';
-      return 'badge-good';
-    }
-
     async function undoEntry(id){
       if(!confirm('Undo this prep entry?')) return;
-      const btn = document.querySelector(`[data-undo-id=\"${id}\"]`);
+      const btn = document.querySelector(`[data-undo="${id}"]`);
       if(btn) btn.disabled = true;
       try{
         await apiPost('/api/preplog/undo', {id});
@@ -233,50 +450,51 @@
     }
 
     let allItems = [];
-    let allLots = [];
+    const thumbCache = Object.create(null);
+    const thumbPending = new Set();
+    let thumbRenderQueued = false;
 
-    async function loadLots(){
+    function thumbCacheKey(upcRaw, lotRaw){
+      const upc = String(upcRaw ?? '').trim();
+      const lot = String(lotRaw ?? '').trim();
+      if(!upc) return '';
+      return encodeURIComponent(upc) + '|' + encodeURIComponent(lot);
+    }
+
+    function queueLogRender(){
+      if(thumbRenderQueued) return;
+      thumbRenderQueued = true;
+      setTimeout(() => {
+        thumbRenderQueued = false;
+        renderLog(allItems);
+      }, 0);
+    }
+
+    async function preloadEntryThumb(upcRaw, lotRaw){
+      const upc = String(upcRaw ?? '').trim();
+      const lot = String(lotRaw ?? '').trim();
+      const key = thumbCacheKey(upc, lot);
+      if(!upc || !key) return;
+      if(Object.prototype.hasOwnProperty.call(thumbCache, key)) return;
+      if(thumbPending.has(key)) return;
+
+      thumbPending.add(key);
       try{
-        const data = await apiGet('/api/lots');
-        const rows = Array.isArray(data.lots) ? data.lots : [];
-        allLots = rows.map(r => String(r.lot_number || '').trim()).filter(Boolean);
+        const params = new URLSearchParams();
+        params.set('include_related','1');
+        params.set('include_bol_image','1');
+        params.set('prefer_bol_image','1');
+        params.set('max_images','1');
+        if(lot) params.set('lot', lot);
+        const data = await apiGet('/api/items_prep/diagnostic/' + encodeURIComponent(upc) + '?' + params.toString());
+        const imgs = Array.isArray(data && data.images) ? data.images : [];
+        const src = imgs.length ? normalizeImageSrc(imgs[0] && imgs[0].image_path) : '';
+        thumbCache[key] = src || '';
       }catch(_){
-        allLots = [];
-      }
-    }
-
-    function lotOptionsHtml(currentLot){
-      const current = String(currentLot || '').trim();
-      const values = [...allLots];
-      if(current && !values.some(v => v.toLowerCase() === current.toLowerCase())){
-        values.unshift(current);
-      }
-      if(values.length === 0){
-        return '<option value="">(no lots)</option>';
-      }
-      return values.map(v => {
-        const selected = current && v.toLowerCase() === current.toLowerCase() ? ' selected' : '';
-        return `<option value="${esc(v)}"${selected}>${esc(v)}</option>`;
-      }).join('');
-    }
-
-    async function reassignLot(id){
-      const sel = document.querySelector(`[data-lot-select=\"${id}\"]`);
-      if(!sel) return;
-      const lot = String(sel.value || '').trim();
-      if(!lot){
-        alert('Pick a LOT first.');
-        return;
-      }
-      if(!confirm(`Reassign log #${id} to LOT ${lot}?`)) return;
-      const btn = document.querySelector(`[data-reassign-id=\"${id}\"]`);
-      if(btn) btn.disabled = true;
-      try{
-        await apiPost('/api/preplog/reassign_lot', {id, lot_number: lot});
-        await loadLog();
-      }catch(e){
-        alert('Reassign failed: ' + e.message);
-        if(btn) btn.disabled = false;
+        thumbCache[key] = '';
+      }finally{
+        thumbPending.delete(key);
+        queueLogRender();
       }
     }
 
@@ -284,12 +502,7 @@
       const d = new Date();
       return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
     }
-
-    function isToday(iso){
-      const s = String(iso ?? '').trim();
-      if(!s) return false;
-      return s.startsWith(todayStr());
-    }
+    function isToday(iso){ return String(iso ?? '').startsWith(todayStr()); }
 
     function renderLog(items){
       const list = document.getElementById('list');
@@ -300,119 +513,96 @@
       const lotFilter = document.getElementById('filterLot').value.trim().toLowerCase();
 
       let filtered = items;
+      if(!showAll) filtered = filtered.filter(it => isToday(it.created_at));
+      if(search) filtered = filtered.filter(it => {
+        const u = String(it.upc ?? '').toLowerCase();
+        const b = String(it.base_upc ?? '').toLowerCase();
+        return u.includes(search) || b.includes(search);
+      });
+      if(autoOnly) filtered = filtered.filter(it => !!it.auto_assigned);
+      if(lotFilter) filtered = filtered.filter(it => String(it.lot_number ?? '').toLowerCase().includes(lotFilter));
 
-      // Filter to today only (unless "Show all" is checked)
-      if(!showAll){
-        filtered = filtered.filter(it => isToday(it.created_at));
-      }
-
-      // Filter by UPC search
-      if(search){
-        filtered = filtered.filter(it => {
-          const upc = String(it.upc ?? '').toLowerCase();
-          const base = String(it.base_upc ?? '').toLowerCase();
-          return upc.includes(search) || base.includes(search);
-        });
-      }
-
-      if(autoOnly){
-        filtered = filtered.filter(it => !!it.auto_assigned);
-      }
-
-      if(lotFilter){
-        filtered = filtered.filter(it => {
-          const lot = String(it.lot_number ?? '').toLowerCase();
-          return lot.includes(lotFilter);
-        });
-      }
-
-      const label = showAll ? 'all time' : 'today';
-      summary.textContent = (search || !showAll) ? `${filtered.length} of ${items.length} entries (${label})` : `${items.length} entries`;
+      const label = showAll ? 'all' : 'today';
+      summary.textContent = `${filtered.length} entries` + (search || !showAll ? ` (${label})` : '');
 
       list.innerHTML = '';
-      if(filtered.length === 0){
-        list.innerHTML = '<div class="muted" style="margin-top:10px;">' + (search ? 'No entries matching that barcode.' : 'No prep log entries yet.') + '</div>';
+      if(!filtered.length){
+        list.innerHTML = '<div class="empty">' + (search ? 'No matches.' : 'No entries yet.') + '</div>';
         return;
       }
 
-      for(const it of filtered){
+      filtered.forEach((it, idx) => {
         const id = it.id;
-        const st = String(it.status ?? '').toLowerCase().trim();
-        const qty = (it.quantity ?? it.qty ?? 1);
+        const st = String(it.status ?? '').toLowerCase();
+        const qty = it.quantity ?? it.qty ?? 1;
         const upc = String(it.upc ?? '').trim();
-        const note = String(it.note ?? '').trim();
-        const reason = String(it.reason ?? '').trim();
-        const undone = !!it.undone;
-        const undoneAt = String(it.undone_at ?? '').trim();
-        const undoErr = String(it.undo_error ?? '').trim();
         const lot = String(it.lot_number ?? '').trim();
-        const requestedLot = String(it.requested_lot ?? '').trim();
-        const autoAssigned = !!it.auto_assigned;
-        const canReassign = !undone && (st === 'good' || st === 'bad' || st === 'return');
-        const upcPill = upc
-          ? `<button type="button" class="pill pill-link" data-photo-upc="${esc(upc)}" data-photo-lot="${esc(lot)}" title="Open item photos">UPC ${esc(upc)} 📷</button>`
-          : '<span class="pill">UPC —</span>';
+        const note = String(it.note ?? '').trim();
+        const undone = !!it.undone;
+        const photoUpc = String(((it.meta && it.meta.photo_upc) || upc) ?? '').trim();
+        const thumbKey = thumbCacheKey(photoUpc, lot);
+        const cachedThumb = thumbKey && Object.prototype.hasOwnProperty.call(thumbCache, thumbKey)
+          ? String(thumbCache[thumbKey] || '')
+          : '';
+
+        // Build first image src if available (cache first, then server-provided field)
+        const firstImg = cachedThumb || (it.first_image ? normalizeImageSrc(it.first_image) : '');
+
+        // Load thumbnails only for first 5 visible entries.
+        if(idx < 5 && photoUpc && thumbKey && !Object.prototype.hasOwnProperty.call(thumbCache, thumbKey)){
+          preloadEntryThumb(photoUpc, lot);
+        }
 
         const row = document.createElement('div');
-        row.className = 'logRow' + (undone ? ' undone' : '');
+        row.className = 'entry' + (undone ? ' undone' : '');
+
+        const num = filtered.length - idx;
+
         row.innerHTML = `
-          <div class="logTop">
-            <div class="logLeft">
-              <span class="pill">#${esc(id)}</span>
-              <span class="pill">${esc(fmtTime(it.created_at))}</span>
-              <span class="badge ${esc(statusClass(st))}">${esc(statusLabel(st))}</span>
-              <span class="pill">Qty ${esc(qty)}</span>
-              ${upcPill}
-              <span class="pill">LOT ${esc(lot || '—')}</span>
-              ${autoAssigned ? `<span class="badge badge-auto">AUTO-ASSIGNED${requestedLot ? ` (${esc(requestedLot)}→${esc(lot || '?')})` : ''}</span>` : ''}
-              ${reason ? `<span class="pill">${esc(reason)}</span>` : ''}
-              ${undone && undoneAt ? `<span class="pill">Undone ${esc(fmtTime(undoneAt))}</span>` : ''}
+          <div class="entry-num">${num}</div>
+          ${firstImg
+            ? `<img class="entry-thumb" src="${esc(firstImg)}" alt="Photo" data-photo-upc="${esc(photoUpc)}" data-photo-lot="${esc(lot)}">`
+            : `<div class="entry-thumb-placeholder" ${photoUpc ? `data-photo-upc="${esc(photoUpc)}" data-photo-lot="${esc(lot)}" style="cursor:pointer"` : ''}>&#128247;</div>`
+          }
+          <div class="entry-info">
+            <div class="entry-title">
+              <span>${esc(upc || '—')}</span>
+              <span class="status ${statusCls(st)}">${statusTxt(st)}</span>
+              ${qty > 1 ? `<span style="color:#64748b;font-weight:400;font-size:0.85rem">x${esc(qty)}</span>` : ''}
             </div>
-            <div style="display:flex;gap:10px;align-items:center;">
-              <button class="btn btn-danger btn-small" data-undo-id="${esc(id)}" ${undone ? 'disabled' : ''}>Undo</button>
-            </div>
+            <div class="entry-meta">${esc(fmtTime(it.created_at))}${lot ? ' &middot; LOT ' + esc(lot) : ''}${it.auto_assigned ? ' &middot; auto' : ''}</div>
+            ${note ? `<div class="note-line">${esc(note)}</div>` : ''}
           </div>
-          ${canReassign ? `
-          <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-            <span class="muted">Reassign LOT:</span>
-            <select class="lotSel" data-lot-select="${esc(id)}">${lotOptionsHtml(lot)}</select>
-            <button class="btn btn-gray btn-small" data-reassign-id="${esc(id)}">Save LOT</button>
+          <div class="entry-actions">
+            <button class="btn btn-undo" data-undo="${esc(id)}" ${undone ? 'disabled' : ''}>Undo</button>
           </div>
-          ` : ''}
-          ${note ? `<div class="noteBox"><strong>NOTE:</strong> ${esc(note)}</div>` : ''}
-          ${undoErr ? `<div class="muted" style="margin-top:10px;"><span class="bad">Undo error:</span> ${esc(undoErr)}</div>` : ''}
         `;
 
-        const undoBtn = row.querySelector('button[data-undo-id]');
-        if(undoBtn){
-          undoBtn.onclick = () => undoEntry(id);
-        }
-        const reassignBtn = row.querySelector('button[data-reassign-id]');
-        if(reassignBtn){
-          reassignBtn.onclick = () => reassignLot(id);
-        }
-        const photoBtn = row.querySelector('button[data-photo-upc]');
-        if(photoBtn){
-          photoBtn.onclick = () => openLogPhotos(photoBtn.dataset.photoUpc, photoBtn.dataset.photoLot);
-        }
+        // Event: undo
+        const undoBtn = row.querySelector('[data-undo]');
+        if(undoBtn) undoBtn.onclick = () => undoEntry(id);
+
+        // Event: photo click (thumb or placeholder)
+        const photoEl = row.querySelector('[data-photo-upc]');
+        if(photoEl) photoEl.onclick = () => openLogPhotos(photoEl.dataset.photoUpc, photoEl.dataset.photoLot);
 
         list.appendChild(row);
-      }
+      });
     }
 
     async function loadLog(){
       const list = document.getElementById('list');
       const err = document.getElementById('err');
       err.textContent = '';
-      list.innerHTML = '<div class="muted" style="margin-top:10px;">Loading...</div>';
+      list.innerHTML = '<div class="empty">Loading...</div>';
 
       const hideUndone = document.getElementById('hideUndone').checked;
       const autoOnly = document.getElementById('autoOnly').checked;
       const lotFilter = document.getElementById('filterLot').value.trim();
       const qs = new URLSearchParams();
-      qs.set('limit', '500');
+      qs.set('limit','500');
       qs.set('include_undone', hideUndone ? '0' : '1');
-      if(autoOnly) qs.set('auto_assigned_only', '1');
+      if(autoOnly) qs.set('auto_assigned_only','1');
       if(lotFilter) qs.set('lot_number', lotFilter);
 
       try{
@@ -421,20 +611,16 @@
         renderLog(allItems);
       }catch(e){
         list.innerHTML = '';
-        document.getElementById('summary').textContent = '—';
-        err.innerHTML = `<span class="bad">Failed to load log:</span> ${esc(e.message)}`;
+        summary.textContent = '—';
+        err.innerHTML = `<span class="bad">Failed to load:</span> ${esc(e.message)}`;
       }
     }
 
     function applyQueryDefaults(){
-      const params = new URLSearchParams(window.location.search || '');
-      if((params.get('auto_assigned') || '').trim() === '1'){
-        document.getElementById('autoOnly').checked = true;
-      }
-      const lotParam = (params.get('lot') || params.get('lot_number') || '').trim();
-      if(lotParam){
-        document.getElementById('filterLot').value = lotParam;
-      }
+      const p = new URLSearchParams(window.location.search || '');
+      if((p.get('auto_assigned') || '') === '1') document.getElementById('autoOnly').checked = true;
+      const lot = (p.get('lot') || p.get('lot_number') || '').trim();
+      if(lot) document.getElementById('filterLot').value = lot;
     }
 
     document.getElementById('refreshBtn').onclick = loadLog;
@@ -442,26 +628,16 @@
     document.getElementById('hideUndone').onchange = loadLog;
     document.getElementById('showAll').onchange = () => renderLog(allItems);
     document.getElementById('autoOnly').onchange = loadLog;
-    document.getElementById('filterLot').addEventListener('input', () => renderLog(allItems));
-    document.getElementById('filterLot').addEventListener('change', loadLog);
     document.getElementById('searchUpc').addEventListener('input', () => renderLog(allItems));
-    document.getElementById('photoModal').addEventListener('click', (e)=>{
-      if(e.target === e.currentTarget){
-        closePhotoModal();
-      }
+    document.getElementById('photoModal').addEventListener('click', e => {
+      if(e.target === e.currentTarget) closePhotoModal();
     });
-    document.addEventListener('keydown', (e)=>{
-      if(e.key === 'Escape'){
-        const modal = document.getElementById('photoModal');
-        if(modal && modal.style.display === 'flex'){
-          closePhotoModal();
-        }
-      }
+    document.addEventListener('keydown', e => {
+      if(e.key === 'Escape') closePhotoModal();
     });
 
     (async ()=>{
       applyQueryDefaults();
-      await loadLots();
       await loadLog();
     })();
   </script>

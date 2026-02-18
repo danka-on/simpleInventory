@@ -220,7 +220,7 @@
     
     <!-- Status bubbles and Set Position button in one row -->
     <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 12px;">
-      <div class="status-bubbles" style="margin: 0;">
+      <div id="statusBubbleWrap" class="status-bubbles" style="margin: 0;">
         <button type="button" class="status-bubble good" data-status="good">Good</button>
         <button type="button" class="status-bubble bad" data-status="bad">Bad</button>
       </div>
@@ -329,6 +329,8 @@
   }
   
   console.log('=== Diagnostic Edit Script Starting ===');
+  const pageParams = new URLSearchParams(window.location.search);
+  const isBadFlow = pageParams.get('from') === 'bad';
   // const photos = document.getElementById('photos'); // Not using file input anymore
     const preview = document.getElementById('preview');
     const qualityGroup = document.getElementById('qualityGroup');
@@ -560,7 +562,7 @@
         if(res.ok && j && j.success){
           // Also POST status (status, reason) - only if status is set (good or bad)
           try{
-            const statusVal = statusInput.value || '';
+            const statusVal = isBadFlow ? 'bad' : (statusInput.value || '');
             let continuedWithoutLot = false;
             console.log('[SAVE] Status value:', statusVal);
             if(statusVal && (statusVal === 'good' || statusVal === 'bad')){
@@ -570,6 +572,7 @@
               const qtyParam = urlParams.get('qty');
               const lotParam = (urlParams.get('lot') || '').trim();
               const requestedLotParam = (urlParams.get('requested_lot') || '').trim();
+              const exceptionOverage = urlParams.get('exception_overage') === '1';
               const qty = qtyParam ? parseInt(qtyParam, 10) : 1;
               console.log('[SAVE] Posting status:', statusVal, 'reason:', reasonVal, 'qty:', qty);
               let statusPayload = {
@@ -581,6 +584,10 @@
                 lot_number: lotParam,
                 requested_lot: requestedLotParam
               };
+              if(exceptionOverage){
+                statusPayload.allow_overage_exception = true;
+                statusPayload.exception_note = 'manual_overage_override';
+              }
               let statusRes = await fetch('/api/items_prep/status', {
                 method: 'POST',
                 headers: {'Content-Type':'application/json'},
@@ -588,30 +595,20 @@
               });
               let statusData = await statusRes.json();
               if(statusData && statusData.lot_match_error && !statusPayload.allow_no_lot){
-                const reqLot = (statusData.requested_lot || lotParam || requestedLotParam || '').trim();
-                const sugLot = (statusData.suggested_lot || '').trim();
-                const proceed = confirm([
-                  'LOT matching error.',
-                  reqLot ? ('Requested LOT: ' + reqLot) : '',
-                  sugLot ? ('Most recent available LOT: ' + sugLot) : '',
-                  '',
-                  'Continue without LOT?'
-                ].filter(Boolean).join('\n'));
-                if(!proceed){
-                  msg.textContent = 'Status save cancelled.';
-                  return;
-                }
-                statusPayload.allow_no_lot = true;
-                statusPayload.lot_number = '';
-                statusPayload.requested_lot = '';
+                // Auto-override to requested/current lot without prompting.
+                const overrideLot = (statusPayload.lot_number || statusPayload.requested_lot || '').trim();
+                statusPayload.allow_no_lot = false;
+                statusPayload.force_requested_lot = true;
+                statusPayload.lot_number = overrideLot;
+                statusPayload.requested_lot = overrideLot;
                 statusRes = await fetch('/api/items_prep/status', {
                   method: 'POST',
                   headers: {'Content-Type':'application/json'},
                   body: JSON.stringify(statusPayload)
                 });
                 statusData = await statusRes.json();
-              if(statusData && typeof statusData === 'object'){
-                  statusData.continued_without_lot = true;
+                if(statusData && typeof statusData === 'object'){
+                  statusData.forced_lot_override = true;
                 }
               }
               console.log('[SAVE] Status API response:', statusData);
@@ -698,6 +695,7 @@
     });
     // Status bubbles functionality
     const statusBubbles = document.querySelectorAll('.status-bubble');
+    const statusBubbleWrap = document.getElementById('statusBubbleWrap');
     const statusInput = document.getElementById('statusInput');
     
     function updateStatusBubbles(selectedStatus){
@@ -715,6 +713,17 @@
         updateDoneButtonState(); // Update button state when status changes
       });
     });
+    if(isBadFlow){
+      updateStatusBubbles('bad');
+      if(statusBubbleWrap){
+        statusBubbleWrap.style.display = 'none';
+      }
+      statusBubbles.forEach(bubble => {
+        bubble.disabled = true;
+        bubble.style.pointerEvents = 'none';
+        bubble.tabIndex = -1;
+      });
+    }
     window.addEventListener('beforeunload', stopCam);
 
     // Function to update Done button state
@@ -785,7 +794,11 @@
       await loadNotes();
       
       try{
-        const r = await fetch(`/api/items_prep/diagnostic/${encodeURIComponent(upc)}`);
+        const diagParams = new URLSearchParams();
+        diagParams.set('include_related', '1');
+        const lotParam = (params.get('lot') || '').trim();
+        if(lotParam) diagParams.set('lot', lotParam);
+        const r = await fetch(`/api/items_prep/diagnostic/${encodeURIComponent(upc)}?${diagParams.toString()}`);
         const j = await r.json();
   const st = j && j.status ? j.status : null;
         const imgs = Array.isArray(j && j.images) ? j.images : [];
@@ -1119,7 +1132,7 @@
       // Check if coming from "bad" flow - if so, set to bad and don't load existing
       const params = new URLSearchParams(window.location.search);
       const from = params.get('from');
-      if(from === 'bad'){
+      if(isBadFlow || from === 'bad'){
         updateStatusBubbles('bad');
         return;
       }

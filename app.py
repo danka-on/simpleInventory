@@ -722,6 +722,12 @@ _listing_helper_scan_cache_state = {
     'ts': 0.0,
     'payload': None
 }
+_items_prep_ensure_lock = threading.Lock()
+_items_prep_ensure_state = {
+    'running': False,
+    'last_success': 0.0
+}
+_ITEMS_PREP_ENSURE_MIN_INTERVAL_SECONDS = 300
 
 def _listing_helper_scan_cache_get(max_age_seconds=15):
     now_ts = time.time()
@@ -2066,6 +2072,25 @@ def api_preplog_undo():
 
         ok, err, code = _items_prep_undo_core(upc=upc, status=status, qty=qty, base_upc=base_upc, lot_number=lot_number)
         if not ok:
+            err_text = (err or '').strip()
+            err_l = err_text.lower()
+            # Allow stale GOOD rows to be cleared from prep log even when backing inventory
+            # was already zeroed/removed by previous corrections or migrations.
+            stale_good_noop = (
+                status == 'good' and (
+                    'only 0 marked as good' in err_l
+                    or 'cannot undo 0' in err_l
+                    or ('not found' in err_l and 'upc' in err_l)
+                )
+            )
+            if stale_good_noop:
+                updated = _preplog_mark_undone(log_id, undone_at=_listagent_now_iso(), undo_error=None)
+                return jsonify({
+                    'success': True,
+                    'item': _preplog_enrich_row(updated),
+                    'noop_undo': True,
+                    'warning': 'Inventory was already at zero; log entry marked undone.'
+                })
             try:
                 _preplog_set_undo_error(log_id, err)
             except Exception:
@@ -6476,7 +6501,8 @@ def get_emailer_settings():
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
 
 @app.route('/api/emailer/settings', methods=['POST'])
 def save_emailer_settings():
@@ -6520,7 +6546,8 @@ def save_emailer_settings():
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
 
 @app.route('/api/emailer/send-test', methods=['POST'])
 def send_test_email():
@@ -8423,7 +8450,20 @@ def _coerce_bool(value):
     s = str(value).strip().lower()
     return s in ('1', 'true', 'yes', 'y', 'on')
 
+def _request_lot_scope_is_all(data=None):
+    scope = ''
+    if isinstance(data, dict):
+        scope = str(data.get('lot_scope') or data.get('scope') or '').strip().lower()
+    if not scope:
+        try:
+            scope = str(request.args.get('lot_scope') or request.form.get('lot_scope') or '').strip().lower()
+        except Exception:
+            scope = ''
+    return scope == 'all'
+
 def _preferred_lot_from_request(data=None):
+    if _request_lot_scope_is_all(data):
+        return ''
     lot = ''
     if isinstance(data, dict):
         lot = _normalize_lot_number(data.get('lot_number') or data.get('lot'))
@@ -8587,10 +8627,126 @@ def _lot_mismatch_payload(*, upc, requested_lot, suggested_lot=''):
         'lot_match_error': True,
         'requested_lot': requested,
         'suggested_lot': suggested,
-        'can_continue_without_lot': True
+        'can_continue_without_lot': True,
+        'can_override_this_lot': True,
+        'can_auto_assign': True
     }
 
-def _ensure_items_prep_tables():
+def _items_prep_items_to_list_url(upc, lot_number=''):
+    try:
+        from urllib.parse import quote
+        upc_n = _normalize_upc_preserve_suffix_for_match(upc)
+        lot_n = _normalize_lot_number(lot_number)
+        url = f"/items-to-list?q={quote(upc_n)}&status=good,bad,unchecked"
+        if lot_n:
+            url += f"&lot={quote(lot_n)}"
+        return url
+    except Exception:
+        return '/items-to-list'
+
+def _items_prep_overage_payload(*, upc, lot_number='', unchecked_remaining=0, requested_qty=1, action='add'):
+    upc_n = _normalize_upc_preserve_suffix_for_match(upc)
+    lot_n = _normalize_lot_number(lot_number)
+    try:
+        unchecked_n = int(unchecked_remaining or 0)
+    except Exception:
+        unchecked_n = 0
+    try:
+        req_qty_n = int(requested_qty or 1)
+    except Exception:
+        req_qty_n = 1
+    return {
+        'success': False,
+        'overage_blocked': True,
+        'requires_exception_override': True,
+        'error': (
+            f'Item {upc_n} appears fully added already '
+            f'(unchecked remaining: {unchecked_n}).'
+        ),
+        'message': (
+            'This item already appears fully added for the current BOL quantity. '
+            'Use Add Anyway to save as an exception, or skip.'
+        ),
+        'upc': upc_n,
+        'lot_number': lot_n,
+        'unchecked_remaining': unchecked_n,
+        'requested_qty': req_qty_n,
+        'action': (action or 'add'),
+        'items_to_list_url': _items_prep_items_to_list_url(upc_n, lot_n)
+    }
+
+def _items_prep_record_exception(cur, *, upc, base_upc=None, lot_number='', action='overage_override',
+                                 quantity=1, unchecked_remaining=None, source='item-prep',
+                                 note=None, meta=None):
+    if cur is None:
+        return
+    upc_n = _normalize_upc_preserve_suffix_for_match(upc)
+    base_upc_n = _normalize_upc_preserve_suffix_for_match(base_upc or upc_n)
+    lot_n = _normalize_lot_number(lot_number)
+    action_n = (action or 'overage_override').strip().lower()
+    source_n = (source or 'item-prep').strip() or 'item-prep'
+    note_n = (note or '').strip() or None
+    try:
+        qty_n = int(quantity or 1)
+    except Exception:
+        qty_n = 1
+    try:
+        unchecked_n = int(unchecked_remaining) if unchecked_remaining is not None else None
+    except Exception:
+        unchecked_n = None
+
+    meta_json = None
+    try:
+        if meta is not None:
+            meta_json = json.dumps(meta, ensure_ascii=False)
+    except Exception:
+        meta_json = None
+
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS items_prep_exceptions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            upc TEXT NOT NULL,
+            base_upc TEXT NOT NULL,
+            lot_number TEXT,
+            action TEXT NOT NULL,
+            quantity INTEGER,
+            unchecked_remaining INTEGER,
+            source TEXT,
+            note TEXT,
+            meta_json TEXT
+        )
+    ''')
+    cur.execute('''
+        INSERT INTO items_prep_exceptions (
+            created_at, upc, base_upc, lot_number, action,
+            quantity, unchecked_remaining, source, note, meta_json
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (
+        _listagent_now_iso(), upc_n, base_upc_n, lot_n, action_n,
+        qty_n, unchecked_n, source_n, note_n, meta_json
+    ))
+
+def _ensure_items_prep_tables(force=False):
+    while True:
+        now_ts = time.time()
+        with _items_prep_ensure_lock:
+            last_success = float(_items_prep_ensure_state.get('last_success') or 0.0)
+            running = bool(_items_prep_ensure_state.get('running'))
+            if (
+                (not force)
+                and last_success > 0
+                and (now_ts - last_success) < _ITEMS_PREP_ENSURE_MIN_INTERVAL_SECONDS
+            ):
+                return
+            if not running:
+                _items_prep_ensure_state['running'] = True
+                break
+        time.sleep(0.01)
+
+    conn = None
+    success = False
     try:
         conn = sqlite3.connect('bol.db')
         cur = conn.cursor()
@@ -8677,32 +8833,42 @@ def _ensure_items_prep_tables():
         cur.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_items_prep_status_upc_lot ON items_prep_status(upc, lot_number)')
         cur.execute('CREATE INDEX IF NOT EXISTS idx_items_prep_status_upc ON items_prep_status(upc)')
         cur.execute('CREATE INDEX IF NOT EXISTS idx_items_prep_status_lot ON items_prep_status(lot_number)')
+
         # One-time compatibility backfill:
         # if a UPC maps to exactly one lot in bol_items, assign that lot to legacy lotless prep rows.
-        cur.execute('''
-            SELECT upc, MIN(COALESCE(lot_number, '')) AS lot_number
-            FROM bol_items
-            WHERE lot_number IS NOT NULL
-              AND TRIM(COALESCE(lot_number, '')) != ''
-            GROUP BY upc
-            HAVING COUNT(DISTINCT COALESCE(lot_number, '')) = 1
-        ''')
-        for upc, only_lot in cur.fetchall():
+        cur.execute('CREATE TABLE IF NOT EXISTS app_metadata (key TEXT PRIMARY KEY, value TEXT)')
+        cur.execute('SELECT value FROM app_metadata WHERE key = ? LIMIT 1', ('items_prep_lot_backfill_v1',))
+        lot_backfill_marker_row = cur.fetchone()
+        lot_backfill_marker = (lot_backfill_marker_row[0] if lot_backfill_marker_row else '')
+        if str(lot_backfill_marker) != '1':
             cur.execute('''
-                SELECT 1
-                FROM items_prep_status
-                WHERE upc = ? COLLATE NOCASE
-                  AND COALESCE(lot_number, '') = ? COLLATE NOCASE
-                LIMIT 1
-            ''', (upc, only_lot))
-            if cur.fetchone():
-                continue
-            cur.execute('''
-                UPDATE items_prep_status
-                SET lot_number = ?
-                WHERE upc = ? COLLATE NOCASE
-                  AND COALESCE(lot_number, '') = ''
-            ''', (only_lot, upc))
+                SELECT upc, MIN(COALESCE(lot_number, '')) AS lot_number
+                FROM bol_items
+                WHERE lot_number IS NOT NULL
+                  AND TRIM(COALESCE(lot_number, '')) != ''
+                GROUP BY upc
+                HAVING COUNT(DISTINCT COALESCE(lot_number, '')) = 1
+            ''')
+            for upc, only_lot in cur.fetchall():
+                cur.execute('''
+                    SELECT 1
+                    FROM items_prep_status
+                    WHERE upc = ? COLLATE NOCASE
+                      AND COALESCE(lot_number, '') = ? COLLATE NOCASE
+                    LIMIT 1
+                ''', (upc, only_lot))
+                if cur.fetchone():
+                    continue
+                cur.execute('''
+                    UPDATE items_prep_status
+                    SET lot_number = ?
+                    WHERE upc = ? COLLATE NOCASE
+                      AND COALESCE(lot_number, '') = ''
+                ''', (only_lot, upc))
+            cur.execute(
+                'INSERT OR REPLACE INTO app_metadata (key, value) VALUES (?, ?)',
+                ('items_prep_lot_backfill_v1', '1')
+            )
 
         cur.execute('''
             CREATE TABLE IF NOT EXISTS items_prep_images (
@@ -8744,6 +8910,26 @@ def _ensure_items_prep_tables():
         cur.execute('CREATE INDEX IF NOT EXISTS idx_items_prep_images_upc ON items_prep_images(upc)')
         cur.execute('CREATE INDEX IF NOT EXISTS idx_items_prep_images_upc_deleted ON items_prep_images(upc, deleted_at)')
         cur.execute('CREATE INDEX IF NOT EXISTS idx_items_prep_notes_upc ON items_prep_notes(upc)')
+
+        # Exception audit trail for intentional overage adds.
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS items_prep_exceptions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TEXT NOT NULL,
+                upc TEXT NOT NULL,
+                base_upc TEXT NOT NULL,
+                lot_number TEXT,
+                action TEXT NOT NULL,
+                quantity INTEGER,
+                unchecked_remaining INTEGER,
+                source TEXT,
+                note TEXT,
+                meta_json TEXT
+            )
+        ''')
+        cur.execute('CREATE INDEX IF NOT EXISTS idx_items_prep_exceptions_created_at ON items_prep_exceptions(created_at, id)')
+        cur.execute('CREATE INDEX IF NOT EXISTS idx_items_prep_exceptions_upc ON items_prep_exceptions(upc)')
+        cur.execute('CREATE INDEX IF NOT EXISTS idx_items_prep_exceptions_base_upc ON items_prep_exceptions(base_upc)')
         
         # Create print queue table for cross-device synchronization
         cur.execute('''CREATE TABLE IF NOT EXISTS print_queue (
@@ -8755,10 +8941,19 @@ def _ensure_items_prep_tables():
         )''')
         
         conn.commit()
+        success = True
     except Exception as e:
         print('Failed ensuring items_prep tables:', e)
     finally:
-        conn.close()
+        try:
+            if conn is not None:
+                conn.close()
+        except Exception:
+            pass
+        with _items_prep_ensure_lock:
+            _items_prep_ensure_state['running'] = False
+            if success:
+                _items_prep_ensure_state['last_success'] = time.time()
 
 def _now_iso():
     import datetime as _dt
@@ -10109,6 +10304,7 @@ def api_bol_lookup():
     First checks temp_items for custom items, then bol_items.
     If duplicate UPC is encountered, create a temporary suffixed entry (e.g., barcode-1).
     """
+    conn = None
     try:
         upc = _normalize_upc(request.args.get('upc'))
         if not upc:
@@ -10155,20 +10351,25 @@ def api_bol_lookup():
         
         selected_lot = _preferred_lot_from_request()
         rows = []
+        rows_in_selected = []
+        scope_all = _request_lot_scope_is_all()
         if selected_lot:
             cur.execute("""
-                SELECT id, upc, item_description, image_url, lot_number, bol_number, import_date, temporary
+                SELECT id, upc, item_description, image_url, lot_number, bol_number, import_date, temporary,
+                       unchecked_qty, original_qty, good_qty, bad_qty
                 FROM bol_items
                 WHERE upc = ? COLLATE NOCASE
                   AND lot_number = ? COLLATE NOCASE
                 ORDER BY import_date DESC, id DESC
             """, (upc, selected_lot))
-            rows = cur.fetchall()
+            rows_in_selected = cur.fetchall()
+            rows = rows_in_selected
 
         if not rows:
             # Fallback to newest row across lots
             cur.execute("""
-                SELECT id, upc, item_description, image_url, lot_number, bol_number, import_date, temporary 
+                SELECT id, upc, item_description, image_url, lot_number, bol_number, import_date, temporary,
+                       unchecked_qty, original_qty, good_qty, bad_qty
                 FROM bol_items 
                 WHERE upc = ? COLLATE NOCASE 
                 ORDER BY import_date DESC, id DESC
@@ -10176,7 +10377,24 @@ def api_bol_lookup():
             rows = cur.fetchall()
         
         if not rows:
-            return jsonify({'found': False})
+            return jsonify({
+                'found': False,
+                'requested_lot': selected_lot,
+                'scope': ('all' if scope_all else 'current')
+            })
+        
+        lot_mismatch = bool(selected_lot and not rows_in_selected)
+        available_lots = []
+        seen_lots = set()
+        for rr in rows:
+            lot_val = _normalize_lot_number(rr['lot_number'])
+            if not lot_val:
+                continue
+            lot_key = lot_val.lower()
+            if lot_key in seen_lots:
+                continue
+            seen_lots.add(lot_key)
+            available_lots.append(lot_val)
         
         # Find the newest permanent entry (temporary = 0 or NULL)
         # Since rows are sorted by import_date DESC, the first permanent row is the newest LOT
@@ -10210,8 +10428,6 @@ def api_bol_lookup():
                 cur.execute('SELECT status FROM items_prep_status WHERE upc = ? OR upc LIKE ? COLLATE NOCASE LIMIT 1', (upc, f'{upc}-%'))
             status_row = cur.fetchone()
             has_prep_record = status_row is not None
-            print(f'[DEBUG] BOL lookup for {upc}: has_prep_record={has_prep_record}, status={status_row["status"] if status_row else None}')
-            print(f'[DEBUG] Using LOT: lot_number={permanent_row["lot_number"]}, import_date={permanent_row["import_date"]}, selected_lot={selected_lot}')
         
         # Only create a suffixed entry if the item already has a prep record
         # BUT: Skip if this UPC itself is already a suffixed entry in items_prep_status (to prevent double suffixes like 35886326470-3-1)
@@ -10219,8 +10435,6 @@ def api_bol_lookup():
         if '-' in str(upc):
             # Check if this specific suffixed UPC exists in relevant lot status rows.
             is_suffixed_prep_entry = _select_prep_status_row(cur, upc, status_lot, columns='upc') is not None
-            if is_suffixed_prep_entry:
-                print(f'[DEBUG] Skipping suffix creation - {upc} is already a suffixed prep entry')
         
         if permanent_row and has_prep_record and not is_suffixed_prep_entry:
             # Find the next available suffix - check both bol_items and prep tables to avoid reusing deleted suffixes
@@ -10257,7 +10471,6 @@ def api_bol_lookup():
                 break
             
             # Create temporary duplicate entry using the resolved lot row data.
-            print(f'[DEBUG] Creating suffixed entry: {suffixed_upc} from LOT {permanent_row["lot_number"]}')
             cur.execute("""
                 INSERT INTO bol_items (upc, item_description, image_url, lot_number, bol_number, import_date, temporary)
                 VALUES (?, ?, ?, ?, ?, ?, 1)
@@ -10275,17 +10488,42 @@ def api_bol_lookup():
                 'bol_number': permanent_row['bol_number'],
                 'import_date': permanent_row['import_date'],
                 'temporary': 1,
+                'unchecked_qty': permanent_row['unchecked_qty'],
+                'original_qty': permanent_row['original_qty'],
+                'good_qty': permanent_row['good_qty'],
+                'bad_qty': permanent_row['bad_qty'],
                 'is_duplicate': True
             }
         else:
             # Return the existing NEWEST LOT row (no suffix needed)
             item = dict(permanent_row)
             item['is_duplicate'] = False
+
+        # Expose remaining unchecked quantity so the UI can warn before forced exception adds.
+        try:
+            unchecked_raw = item.get('unchecked_qty')
+            if unchecked_raw is None:
+                original_raw = int(item.get('original_qty') or 0)
+                good_raw = int(item.get('good_qty') or 0)
+                bad_raw = int(item.get('bad_qty') or 0)
+                unchecked_remaining = max(0, original_raw - good_raw - bad_raw)
+            else:
+                unchecked_remaining = int(unchecked_raw or 0)
+        except Exception:
+            unchecked_remaining = 0
+        base_lookup_upc = (upc.split('-')[0] if '-' in str(upc) else upc)
+        item['unchecked_remaining'] = unchecked_remaining
+        item['is_overage_candidate'] = bool(unchecked_remaining <= 0)
+        item['items_to_list_url'] = _items_prep_items_to_list_url(base_lookup_upc, item.get('lot_number') or selected_lot)
+        item['requested_lot'] = selected_lot
+        item['lot_mismatch'] = bool(lot_mismatch)
+        item['resolved_lot'] = _normalize_lot_number(item.get('lot_number'))
+        item['available_lots'] = available_lots
         
         
         # Also include current prep status if exists
+        conn2 = None
         try:
-            _ensure_items_prep_tables()
             conn2 = sqlite3.connect('bol.db')
             conn2.row_factory = sqlite3.Row
             cur2 = conn2.cursor()
@@ -10296,13 +10534,161 @@ def api_bol_lookup():
         except Exception:
             item['prep_status'] = None
         finally:
-            conn2.close()
+            if conn2 is not None:
+                conn2.close()
 
-        return jsonify({'found': True, 'item': item})
+        return jsonify({
+            'found': True,
+            'item': item,
+            'requested_lot': selected_lot,
+            'lot_mismatch': bool(lot_mismatch),
+            'resolved_lot': _normalize_lot_number(item.get('lot_number')),
+            'available_lots': available_lots
+        })
     except Exception as e:
         return jsonify({'found': False, 'error': _safe_error(e)}), 500
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
+
+@app.route('/api/items_prep/auto_assign_lot', methods=['POST'])
+def api_items_prep_auto_assign_lot():
+    """Resolve a lot for item-prep actions.
+    - If UPC exists in bol_items: use newest available lot.
+    - Else if UPC exists in raw_bol_items with lot: seed bol_items using that lot.
+    - Else create a new uncategorized lot entry (UNCATEGORIZED-<UPC>).
+    """
+    conn = None
+    raw_conn = None
+    try:
+        data = request.get_json() or {}
+        upc_raw = _normalize_upc(data.get('upc'))
+        upc = _normalize_upc_preserve_suffix_for_match(upc_raw)
+        if not upc:
+            return jsonify({'success': False, 'error': 'Missing upc'}), 400
+        base_upc = upc.split('-', 1)[0] if '-' in upc else upc
+
+        conn = sqlite3.connect('bol.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        _ensure_items_prep_tables()
+
+        # 1) Existing lot in bol_items.
+        cur.execute('''
+            SELECT id, lot_number
+            FROM bol_items
+            WHERE upc = ? COLLATE NOCASE
+            ORDER BY import_date DESC, id DESC
+            LIMIT 1
+        ''', (base_upc,))
+        row = cur.fetchone()
+        if row:
+            lot_number = _normalize_lot_number(row['lot_number'])
+            if lot_number:
+                return jsonify({
+                    'success': True,
+                    'upc': base_upc,
+                    'assigned_lot': lot_number,
+                    'created_entry': False,
+                    'source': 'bol_items_existing'
+                })
+
+        # 2) Try rawbol metadata.
+        raw_desc = ''
+        raw_image = ''
+        raw_lot = ''
+        try:
+            raw_conn = sqlite3.connect('rawbol.db')
+            raw_conn.row_factory = sqlite3.Row
+            raw_cur = raw_conn.cursor()
+            raw_cur.execute('''
+                SELECT upc, item_description, image_url, lot_number
+                FROM raw_bol_items
+                WHERE upc = ? COLLATE NOCASE
+                ORDER BY import_date DESC, id DESC
+                LIMIT 1
+            ''', (base_upc,))
+            raw_row = raw_cur.fetchone()
+            if raw_row:
+                raw_desc = (raw_row['item_description'] or '').strip()
+                raw_image = (raw_row['image_url'] or '').strip()
+                raw_lot = _normalize_lot_number(raw_row['lot_number'])
+        except Exception:
+            raw_desc = raw_desc or ''
+            raw_image = raw_image or ''
+            raw_lot = raw_lot or ''
+        finally:
+            if raw_conn is not None:
+                raw_conn.close()
+                raw_conn = None
+
+        assigned_lot = raw_lot or f'UNCATEGORIZED-{base_upc}'
+
+        # 3) If already seeded for that lot, reuse it.
+        cur.execute('''
+            SELECT id
+            FROM bol_items
+            WHERE upc = ? COLLATE NOCASE
+              AND COALESCE(lot_number, '') = ? COLLATE NOCASE
+            ORDER BY import_date DESC, id DESC
+            LIMIT 1
+        ''', (base_upc, assigned_lot))
+        seeded = cur.fetchone()
+        if seeded:
+            return jsonify({
+                'success': True,
+                'upc': base_upc,
+                'assigned_lot': assigned_lot,
+                'created_entry': False,
+                'source': 'bol_items_seeded'
+            })
+
+        # 4) Seed a new bol_items row.
+        cur.execute('PRAGMA table_info(bol_items)')
+        cols = {r[1] for r in cur.fetchall()}
+        now_iso = _listagent_now_iso()
+        payload = {
+            'upc': base_upc,
+            'item_description': raw_desc or f'Uncategorized Item {base_upc}',
+            'image_url': raw_image or '',
+            'lot_number': assigned_lot,
+            'bol_number': assigned_lot,
+            'import_date': now_iso,
+            'temporary': 0,
+            'original_qty': 1,
+            'unchecked_qty': 1,
+            'good_qty': 0,
+            'bad_qty': 0,
+            'quantity': 1
+        }
+        insert_cols = [k for k in payload.keys() if k in cols]
+        if 'upc' not in insert_cols:
+            return jsonify({'success': False, 'error': 'bol_items schema is missing upc'}), 500
+        placeholders = ','.join(['?'] * len(insert_cols))
+        cur.execute(
+            f"INSERT INTO bol_items ({','.join(insert_cols)}) VALUES ({placeholders})",
+            tuple(payload[k] for k in insert_cols)
+        )
+        conn.commit()
+        try:
+            update_data_version()
+        except Exception:
+            pass
+
+        return jsonify({
+            'success': True,
+            'upc': base_upc,
+            'assigned_lot': assigned_lot,
+            'created_entry': True,
+            'source': ('rawbol_seed' if raw_lot else 'uncategorized_created')
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'items_prep:auto_assign_lot')}), 500
+    finally:
+        if raw_conn is not None:
+            raw_conn.close()
+        if conn is not None:
+            conn.close()
 
 @app.route('/api/items_prep/status/<upc>', methods=['GET'])
 def api_items_prep_status_get(upc):
@@ -10342,13 +10728,21 @@ def api_items_prep_status():
     - BAD flow: UPC should already be suffixed (created by Bad button), just update status
     - Base qty is only decremented when status is finalized (Good immediately, Bad on Complete)
     """
+    conn = None
     try:
         data = request.get_json() or {}
         upc = _normalize_upc(data.get('upc'))
         status = (data.get('status') or '').strip().lower()
         reason = (data.get('reason') or '').strip()
         note = (data.get('note') or '').strip()
-        qty = int(data.get('qty', 1))
+        exception_note = (data.get('exception_note') or '').strip()
+        raw_qty = data.get('qty', 1)
+        try:
+            qty = int(raw_qty if raw_qty is not None else 1)
+        except Exception:
+            return jsonify({'success': False, 'error': 'Invalid qty'}), 400
+        if qty < 1:
+            return jsonify({'success': False, 'error': 'qty must be at least 1'}), 400
         
         if not upc or status not in ('good', 'bad', 'unchecked'):
             return jsonify({'success': False, 'error': 'Missing upc or invalid status'}), 400
@@ -10359,8 +10753,16 @@ def api_items_prep_status():
         base_upc = upc.split('-')[0] if '-' in upc else upc
         requested_lot = _preferred_lot_from_request(data)
         allow_no_lot = _coerce_bool(data.get('allow_no_lot'))
+        force_requested_lot = _coerce_bool(
+            data.get('force_requested_lot') if data.get('force_requested_lot') is not None else data.get('override_lot')
+        )
+        allow_overage_exception = _coerce_bool(
+            data.get('allow_overage_exception') if data.get('allow_overage_exception') is not None else data.get('force_exception')
+        )
+        exception_overage_applied = False
         if allow_no_lot:
             requested_lot = ''
+            force_requested_lot = False
         requested_lot_norm = _normalize_lot_number(requested_lot)
         
         print(f'[STATUS API] Received UPC: {data.get("upc")}, Normalized: {upc}, Base: {base_upc}, Status: {status}')
@@ -10372,7 +10774,7 @@ def api_items_prep_status():
         cur = conn.cursor()
         _ensure_items_prep_tables()
         lot_mismatch, suggested_lot = _check_requested_lot_mismatch(cur, base_upc, requested_lot_norm)
-        if lot_mismatch and not allow_no_lot:
+        if lot_mismatch and not allow_no_lot and not force_requested_lot:
             return jsonify(_lot_mismatch_payload(
                 upc=base_upc,
                 requested_lot=requested_lot_norm,
@@ -10389,7 +10791,13 @@ def api_items_prep_status():
                 return jsonify({'success': False, 'error': 'GOOD items cannot have defect reasons. Please clear the defect field or select BAD status.'}), 400
             
             # Resolve lot context first so status/quantity updates are scoped to one manifest lot.
-            selected_lot = '' if allow_no_lot else _resolve_bol_lot_for_upc(cur, base_upc, requested_lot)
+            if allow_no_lot:
+                selected_lot = ''
+            elif force_requested_lot and requested_lot_norm:
+                selected_lot = requested_lot_norm
+            else:
+                selected_lot = _resolve_bol_lot_for_upc(cur, base_upc, requested_lot)
+            forced_lot_override = bool(force_requested_lot and selected_lot)
             print(f'[STATUS API] Resolved LOT for GOOD flow: {selected_lot or "(none)"}')
             
             # Check if the incoming UPC itself is a suffixed BAD entry
@@ -10515,7 +10923,8 @@ def api_items_prep_status():
                     'success': True, 
                     'action': 'converted_bad_to_good_kept_suffix',
                     'upc': suffixed_upc_found,
-                    'lot_number': selected_lot
+                    'lot_number': selected_lot,
+                    'forced_lot_override': bool(forced_lot_override)
                 })
             
             # Not a BAD→GOOD conversion - proceed with normal GOOD flow for base UPC
@@ -10596,11 +11005,17 @@ def api_items_prep_status():
                     current_unchecked = max(0, original_qty - current_good - current_bad)
 
                 if qty > current_unchecked:
-                    conn.rollback()
-                    return jsonify({
-                        'success': False,
-                        'error': f'Cannot mark {qty} as good: only {current_unchecked} unchecked remaining for {base_upc}'
-                    }), 400
+                    exception_overage_applied = True
+                    if allow_overage_exception:
+                        print(
+                            f'[GOOD][EXCEPTION] Allowing overage add for {base_upc}: '
+                            f'requested={qty}, unchecked={current_unchecked}'
+                        )
+                    else:
+                        print(
+                            f'[GOOD][EXCEPTION][AUTO] Unchecked gate bypassed for {base_upc}: '
+                            f'requested={qty}, unchecked={current_unchecked}'
+                        )
 
                 new_good = current_good + qty
                 new_unchecked = max(0, current_unchecked - qty)
@@ -10619,6 +11034,28 @@ def api_items_prep_status():
                         WHERE id = ?
                     ''', (new_good, new_unchecked, bol_id))
                     print(f'[GOOD] Updated bol_items {base_upc} (id={bol_id}): good_qty {current_good}→{new_good}, unchecked_qty {current_unchecked}→{new_unchecked}')
+
+                if exception_overage_applied:
+                    _items_prep_record_exception(
+                        cur,
+                        upc=base_upc,
+                        base_upc=base_upc,
+                        lot_number=selected_lot,
+                        action='good_overage_override',
+                        quantity=qty,
+                        unchecked_remaining=current_unchecked,
+                        source='item-prep',
+                        note=exception_note or 'Added as exception after unchecked quantity was exhausted.',
+                        meta={
+                            'status': 'good',
+                            'requested_qty': qty,
+                            'unchecked_before': current_unchecked,
+                            'allow_overage_exception': True,
+                            'requested_lot': requested_lot_norm,
+                            'assigned_lot': selected_lot,
+                            'forced_lot_override': bool(forced_lot_override)
+                        }
+                    )
             else:
                 print(f'[GOOD] WARNING: Could not find bol_items entry for {base_upc} to update quantities')
 
@@ -10629,35 +11066,47 @@ def api_items_prep_status():
             # Update data version for cache invalidation
             update_data_version()
 
-        # Prep log (preplog.db)
-        try:
-            good_meta = {
-                'action': 'converted_to_good' if suffixed_upc_found else 'saved_good',
-                'requested_lot': requested_lot_norm,
-                'lot_number': selected_lot,
-                'assigned_lot': selected_lot
-            }
-            if selected_lot and (not requested_lot_norm or selected_lot.lower() != requested_lot_norm.lower()):
-                good_meta['auto_assigned'] = True
-            _preplog_add_entry(
-                upc=base_upc,
-                base_upc=base_upc,
-                status='good',
-                quantity=qty,
-                note=note or None,
-                reason=None,
-                source='item-prep',
-                meta=good_meta,
-                dedupe=False
-            )
-        except Exception:
-            pass
+            # Prep log (preplog.db)
+            try:
+                good_meta = {
+                    'action': 'converted_to_good' if suffixed_upc_found else 'saved_good',
+                    'requested_lot': requested_lot_norm,
+                    'lot_number': selected_lot,
+                    'assigned_lot': selected_lot
+                }
+                if suffixed_upc_found:
+                    # Keep original diagnostic UPC so log photo viewer can open exact-image rows.
+                    good_meta['photo_upc'] = suffixed_upc_found
+                if selected_lot and (not requested_lot_norm or selected_lot.lower() != requested_lot_norm.lower()):
+                    good_meta['auto_assigned'] = True
+                if forced_lot_override:
+                    good_meta['forced_lot_override'] = True
+                    good_meta['needs_review'] = True
+                if exception_overage_applied:
+                    good_meta['exception_overage'] = True
+                    good_meta['unchecked_before'] = current_unchecked
+                    good_meta['requested_qty'] = qty
+                _preplog_add_entry(
+                    upc=base_upc,
+                    base_upc=base_upc,
+                    status='good',
+                    quantity=qty,
+                    note=note or None,
+                    reason=None,
+                    source='item-prep',
+                    meta=good_meta,
+                    dedupe=False
+                )
+            except Exception:
+                pass
 
             return jsonify({
                 'success': True, 
                 'action': 'converted_to_good' if suffixed_upc_found else 'saved_good',
                 'upc': base_upc,
-                'lot_number': selected_lot
+                'lot_number': selected_lot,
+                'exception_overage': bool(exception_overage_applied),
+                'forced_lot_override': bool(forced_lot_override)
             })
         
         # BAD/UNCHECKED flow - upc should already be suffixed if coming from Bad button
@@ -10670,7 +11119,12 @@ def api_items_prep_status():
             print(f'[BAD] Converting GOOD item {base_upc} to BAD')
             
             # Resolve lot for this UPC (explicit/session lot first), unless user opted to continue without lot.
-            selected_lot = '' if allow_no_lot else _resolve_bol_lot_for_upc(cur, base_upc, requested_lot)
+            if allow_no_lot:
+                selected_lot = ''
+            elif force_requested_lot and requested_lot_norm:
+                selected_lot = requested_lot_norm
+            else:
+                selected_lot = _resolve_bol_lot_for_upc(cur, base_upc, requested_lot)
             if selected_lot:
                 # Get the bol_items entry to decrement its quantity
                 cur.execute('''
@@ -10833,7 +11287,12 @@ def api_items_prep_status():
         
         # Normal BAD/UNCHECKED flow - UPC already has suffix or is being updated
         # Just update the existing entry directly
-        status_lot = '' if allow_no_lot else _resolve_bol_lot_for_upc(cur, upc, requested_lot)
+        if allow_no_lot:
+            status_lot = ''
+        elif force_requested_lot and requested_lot_norm:
+            status_lot = requested_lot_norm
+        else:
+            status_lot = _resolve_bol_lot_for_upc(cur, upc, requested_lot)
         status_update_lot = _resolve_prep_status_lot(cur, upc, status_lot)
         existing_row = _select_prep_status_row(cur, upc, status_lot, columns='upc')
         if existing_row:
@@ -10902,7 +11361,8 @@ def api_items_prep_status():
         traceback.print_exc()
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
 
 @app.route('/api/items_prep/allocate_lots', methods=['POST'])
 def api_items_prep_allocate_lots():
@@ -11074,6 +11534,7 @@ def api_items_prep_create_bad_entry():
     try:
         data = request.get_json() or {}
         upc = _strip_leading_zeros_numeric(_normalize_upc(data.get('upc')))
+        exception_note = (data.get('exception_note') or '').strip()
         try:
             qty = int(data.get('qty', 1))
         except Exception:
@@ -11090,15 +11551,23 @@ def api_items_prep_create_bad_entry():
         base_upc = upc.split('-')[0] if '-' in upc else upc
         requested_lot = _preferred_lot_from_request(data)
         allow_no_lot = _coerce_bool(data.get('allow_no_lot'))
+        force_requested_lot = _coerce_bool(
+            data.get('force_requested_lot') if data.get('force_requested_lot') is not None else data.get('override_lot')
+        )
+        allow_overage_exception = _coerce_bool(
+            data.get('allow_overage_exception') if data.get('allow_overage_exception') is not None else data.get('force_exception')
+        )
+        exception_overage_applied = False
         if allow_no_lot:
             requested_lot = ''
+            force_requested_lot = False
         
         conn = sqlite3.connect('bol.db')
         cur = conn.cursor()
         _ensure_items_prep_tables()
         requested_lot_norm = _normalize_lot_number(requested_lot)
         lot_mismatch, suggested_lot = _check_requested_lot_mismatch(cur, base_upc, requested_lot_norm)
-        if lot_mismatch and not allow_no_lot:
+        if lot_mismatch and not allow_no_lot and not force_requested_lot:
             return jsonify(_lot_mismatch_payload(
                 upc=base_upc,
                 requested_lot=requested_lot_norm,
@@ -11112,6 +11581,14 @@ def api_items_prep_create_bad_entry():
                 'auto_assign_reason': ''
             }
             selected_lot = ''
+        elif force_requested_lot and requested_lot_norm:
+            lot_info = {
+                'requested_lot': requested_lot_norm,
+                'assigned_lot': requested_lot_norm,
+                'auto_assigned': False,
+                'auto_assign_reason': 'forced_requested_lot'
+            }
+            selected_lot = requested_lot_norm
         else:
             lot_info = _resolve_action_lot_assignment(cur, base_upc, requested_lot)
             selected_lot = _normalize_lot_number(lot_info.get('assigned_lot'))
@@ -11177,9 +11654,15 @@ def api_items_prep_create_bad_entry():
             return jsonify({'success': False, 'error': f'Base UPC {base_upc} not found in bol_items'}), 404
 
         resolved_base_lot = _normalize_lot_number(base_item[3])
-        selected_lot = '' if allow_no_lot else resolved_base_lot
+        if allow_no_lot:
+            selected_lot = ''
+        elif force_requested_lot and requested_lot_norm:
+            selected_lot = requested_lot_norm
+        else:
+            selected_lot = resolved_base_lot
         requested_lot_norm = _normalize_lot_number(lot_info.get('requested_lot'))
         auto_assigned = bool(selected_lot and (not requested_lot_norm or selected_lot.lower() != requested_lot_norm.lower()))
+        forced_lot_override = bool(force_requested_lot and selected_lot)
         auto_assign_reason = lot_info.get('auto_assign_reason') or (
             'requested_lot_unavailable_used_latest' if requested_lot_norm and auto_assigned else (
                 'no_lot_requested_used_latest' if auto_assigned else ''
@@ -11195,10 +11678,17 @@ def api_items_prep_create_bad_entry():
         if unchecked is None:
             unchecked = max(0, original_qty - current_good - current_bad)
         if qty > unchecked:
-            return jsonify({
-                'success': False,
-                'error': f'Cannot mark {qty} as bad: only {unchecked} unchecked remaining for {base_upc}'
-            }), 400
+            exception_overage_applied = True
+            if allow_overage_exception:
+                print(
+                    f'[BAD][EXCEPTION] Allowing overage bad-entry for {base_upc}: '
+                    f'requested={qty}, unchecked={unchecked}'
+                )
+            else:
+                print(
+                    f'[BAD][EXCEPTION][AUTO] Unchecked gate bypassed for {base_upc}: '
+                    f'requested={qty}, unchecked={unchecked}'
+                )
         
         # Create temporary suffixed entry with new quantity columns
         import datetime
@@ -11214,14 +11704,43 @@ def api_items_prep_create_bad_entry():
               qty, qty, qty))  # original_qty=qty, bad_qty=qty, quantity=qty for this suffixed entry
         
         # Update base item: move qty from unchecked to bad
-        new_unchecked = unchecked - qty
+        new_unchecked = max(0, unchecked - qty)
         new_bad = current_bad + qty
         
-        cur.execute('''
-            UPDATE bol_items 
-            SET unchecked_qty = ?, bad_qty = ?
-            WHERE id = ?
-        ''', (new_unchecked, new_bad, base_row_id))
+        if force_requested_lot and selected_lot:
+            cur.execute('''
+                UPDATE bol_items 
+                SET unchecked_qty = ?, bad_qty = ?, lot_number = ?
+                WHERE id = ?
+            ''', (new_unchecked, new_bad, selected_lot, base_row_id))
+        else:
+            cur.execute('''
+                UPDATE bol_items 
+                SET unchecked_qty = ?, bad_qty = ?
+                WHERE id = ?
+            ''', (new_unchecked, new_bad, base_row_id))
+
+        if exception_overage_applied:
+            _items_prep_record_exception(
+                cur,
+                upc=suffixed_upc,
+                base_upc=base_upc,
+                lot_number=selected_lot,
+                action='bad_overage_override',
+                quantity=qty,
+                unchecked_remaining=unchecked,
+                source='item-prep',
+                note=exception_note or 'BAD entry created as exception after unchecked quantity was exhausted.',
+                meta={
+                    'status': 'bad',
+                    'requested_qty': qty,
+                    'unchecked_before': unchecked,
+                    'allow_overage_exception': True,
+                    'requested_lot': requested_lot_norm,
+                    'assigned_lot': selected_lot,
+                    'forced_lot_override': bool(forced_lot_override)
+                }
+            )
         
         conn.commit()
         
@@ -11251,7 +11770,10 @@ def api_items_prep_create_bad_entry():
                     'auto_assign_reason': auto_assign_reason,
                     'continued_without_lot': bool(allow_no_lot),
                     'source_lot': resolved_base_lot,
-                    'needs_review': bool(auto_assigned)
+                    'forced_lot_override': bool(forced_lot_override),
+                    'needs_review': bool(auto_assigned or forced_lot_override),
+                    'exception_overage': bool(exception_overage_applied),
+                    'unchecked_before': unchecked if exception_overage_applied else None
                 },
                 dedupe=True
             )
@@ -11266,9 +11788,12 @@ def api_items_prep_create_bad_entry():
             'requested_lot': requested_lot_norm,
             'auto_assigned': bool(auto_assigned),
             'auto_assign_reason': auto_assign_reason,
+            'forced_lot_override': bool(forced_lot_override),
             'continued_without_lot': bool(allow_no_lot),
             'unchecked_qty': new_unchecked,
-            'bad_qty': new_bad
+            'bad_qty': new_bad,
+            'exception_overage': bool(exception_overage_applied),
+            'items_to_list_url': _items_prep_items_to_list_url(base_upc, selected_lot)
         })
         
     except Exception as e:
@@ -11309,15 +11834,19 @@ def api_items_prep_create_return_entry():
         base_upc = upc.split('-')[0] if '-' in upc else upc
         requested_lot = _preferred_lot_from_request(data)
         allow_no_lot = _coerce_bool(data.get('allow_no_lot'))
+        force_requested_lot = _coerce_bool(
+            data.get('force_requested_lot') if data.get('force_requested_lot') is not None else data.get('override_lot')
+        )
         if allow_no_lot:
             requested_lot = ''
+            force_requested_lot = False
         
         conn = sqlite3.connect('bol.db')
         cur = conn.cursor()
         _ensure_items_prep_tables()
         requested_lot_norm = _normalize_lot_number(requested_lot)
         lot_mismatch, suggested_lot = _check_requested_lot_mismatch(cur, base_upc, requested_lot_norm)
-        if lot_mismatch and not allow_no_lot:
+        if lot_mismatch and not allow_no_lot and not force_requested_lot:
             return jsonify(_lot_mismatch_payload(
                 upc=base_upc,
                 requested_lot=requested_lot_norm,
@@ -11331,6 +11860,14 @@ def api_items_prep_create_return_entry():
                 'auto_assign_reason': ''
             }
             selected_lot = ''
+        elif force_requested_lot and requested_lot_norm:
+            lot_info = {
+                'requested_lot': requested_lot_norm,
+                'assigned_lot': requested_lot_norm,
+                'auto_assigned': False,
+                'auto_assign_reason': 'forced_requested_lot'
+            }
+            selected_lot = requested_lot_norm
         else:
             lot_info = _resolve_action_lot_assignment(cur, base_upc, requested_lot)
             selected_lot = _normalize_lot_number(lot_info.get('assigned_lot'))
@@ -11387,9 +11924,15 @@ def api_items_prep_create_return_entry():
             return jsonify({'success': False, 'error': f'Base UPC {base_upc} not found in bol_items'}), 404
 
         resolved_base_lot = _normalize_lot_number(base_item[2])
-        selected_lot = '' if allow_no_lot else resolved_base_lot
+        if allow_no_lot:
+            selected_lot = ''
+        elif force_requested_lot and requested_lot_norm:
+            selected_lot = requested_lot_norm
+        else:
+            selected_lot = resolved_base_lot
         requested_lot_norm = _normalize_lot_number(lot_info.get('requested_lot'))
         auto_assigned = bool(selected_lot and (not requested_lot_norm or selected_lot.lower() != requested_lot_norm.lower()))
+        forced_lot_override = bool(force_requested_lot and selected_lot)
         auto_assign_reason = lot_info.get('auto_assign_reason') or (
             'requested_lot_unavailable_used_latest' if requested_lot_norm and auto_assigned else (
                 'no_lot_requested_used_latest' if auto_assigned else ''
@@ -11443,7 +11986,8 @@ def api_items_prep_create_return_entry():
                     'auto_assign_reason': auto_assign_reason,
                     'continued_without_lot': bool(allow_no_lot),
                     'source_lot': resolved_base_lot,
-                    'needs_review': bool(auto_assigned)
+                    'forced_lot_override': bool(forced_lot_override),
+                    'needs_review': bool(auto_assigned or forced_lot_override)
                 },
                 dedupe=True
             )
@@ -11458,6 +12002,7 @@ def api_items_prep_create_return_entry():
             'requested_lot': requested_lot_norm,
             'auto_assigned': bool(auto_assigned),
             'auto_assign_reason': auto_assign_reason,
+            'forced_lot_override': bool(forced_lot_override),
             'continued_without_lot': bool(allow_no_lot)
         })
         
@@ -11841,6 +12386,7 @@ def api_items_prep_undo():
 @app.route('/api/items_prep/diagnostic', methods=['POST'])
 def api_items_prep_diagnostic():
     """Save diagnostic info and photos for a UPC. form-data: upc, reason, note, files: photos[]"""
+    conn_temp = None
     try:
         _ensure_items_prep_tables()
         upc_raw = _normalize_upc(request.form.get('upc'))
@@ -11937,7 +12483,8 @@ def api_items_prep_diagnostic():
             pass
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
     finally:
-        conn_temp.close()
+        if conn_temp is not None:
+            conn_temp.close()
 
 @app.errorhandler(RequestEntityTooLarge)
 def handle_file_too_large(e):
@@ -11945,25 +12492,219 @@ def handle_file_too_large(e):
 
 @app.route('/api/items_prep/diagnostic/<upc>', methods=['GET'])
 def api_items_prep_diagnostic_get(upc):
+    conn = None
     try:
-        upc_norm = _normalize_upc(upc)
-        # Strip leading zeros ONLY if it's all digits (preserve suffix like -24)
-        upc_n = _normalize_upc_preserve_suffix_for_match(upc_norm)
+        upc_raw = _normalize_upc(upc)
+        # Strip leading zeros from numeric base while preserving suffix (e.g. 071..-4 -> 71..-4)
+        upc_n = _normalize_upc_preserve_suffix_for_match(upc_raw)
         lot_number = _preferred_lot_from_request()
-        print(f'[DEBUG] Getting diagnostic for UPC: {upc} -> {upc_norm} -> {upc_n}')
+        include_related_arg = request.args.get('include_related')
+        include_related = True if include_related_arg is None else _coerce_bool(include_related_arg)
+        include_bol_image = _coerce_bool(request.args.get('include_bol_image'))
+        try:
+            max_images = int(request.args.get('max_images') or 0)
+        except Exception:
+            max_images = 0
+        max_images = max(0, min(max_images, 50))
+        print(f'[DEBUG] Getting diagnostic for UPC: {upc} -> {upc_raw} -> {upc_n}')
         _ensure_items_prep_tables()
         conn = sqlite3.connect('bol.db')
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         srow = _select_prep_status_row(cur, upc_n, lot_number, columns='status, reason, note, updated_at, lot_number, quantity')
-        cur.execute("SELECT id, image_path, created_at, rotation FROM items_prep_images WHERE upc = ? COLLATE NOCASE AND (deleted_at IS NULL OR TRIM(COALESCE(deleted_at,'')) = '') ORDER BY created_at DESC, id DESC", (upc_n,))
-        images = [dict(r) for r in cur.fetchall()]
-        print(f'[DEBUG] Found {len(images)} images for UPC {upc_n}')
-        return jsonify({'upc': upc_n, 'status': dict(srow) if srow else None, 'images': images})
+        image_lookup = 'exact'
+        prefer_bol_image = _coerce_bool(request.args.get('prefer_bol_image'))
+
+        # Try exact UPC first, then compatible normalizations used by older codepaths.
+        candidate_upcs = []
+        for cand in (upc_n, upc_raw, _strip_leading_zeros_numeric(upc_raw), str(upc or '').strip()):
+            cand_n = _normalize_upc(cand)
+            if cand_n and cand_n not in candidate_upcs:
+                candidate_upcs.append(cand_n)
+
+        related_bases = []
+        for source in (upc_n, upc_raw, str(upc or '').strip()):
+            source = _normalize_upc(source)
+            if not source:
+                continue
+            base = source.split('-', 1)[0] if '-' in source else source
+            base = _strip_leading_zeros_numeric(base)
+            if base and base not in related_bases:
+                related_bases.append(base)
+
+        def _collect_manifest_rows(table_name):
+            rows = []
+            seen_ids = set()
+            try:
+                cur.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name = ? LIMIT 1", (table_name,))
+                if not cur.fetchone():
+                    return rows
+            except Exception:
+                return rows
+
+            def _append(sql, params):
+                try:
+                    cur.execute(sql, params)
+                    for rr in cur.fetchall():
+                        rid = rr['id']
+                        if rid in seen_ids:
+                            continue
+                        seen_ids.add(rid)
+                        rows.append(dict(rr))
+                except Exception:
+                    return
+
+            for cand in candidate_upcs:
+                if lot_number:
+                    _append(f'''
+                        SELECT id, upc, image_url, import_date
+                        FROM {table_name}
+                        WHERE upc = ? COLLATE NOCASE
+                          AND lot_number = ? COLLATE NOCASE
+                          AND TRIM(COALESCE(image_url, '')) <> ''
+                        ORDER BY import_date DESC, id DESC
+                        LIMIT 5
+                    ''', (cand, lot_number))
+                _append(f'''
+                    SELECT id, upc, image_url, import_date
+                    FROM {table_name}
+                    WHERE upc = ? COLLATE NOCASE
+                      AND TRIM(COALESCE(image_url, '')) <> ''
+                    ORDER BY import_date DESC, id DESC
+                    LIMIT 5
+                ''', (cand,))
+
+            if include_related:
+                for base in related_bases:
+                    safe_base = base.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+                    like_base = f"{safe_base}-%"
+                    if lot_number:
+                        _append(f'''
+                            SELECT id, upc, image_url, import_date
+                            FROM {table_name}
+                            WHERE (upc = ? COLLATE NOCASE OR upc LIKE ? ESCAPE '\\')
+                              AND lot_number = ? COLLATE NOCASE
+                              AND TRIM(COALESCE(image_url, '')) <> ''
+                            ORDER BY import_date DESC, id DESC
+                            LIMIT 10
+                        ''', (base, like_base, lot_number))
+                    _append(f'''
+                        SELECT id, upc, image_url, import_date
+                        FROM {table_name}
+                        WHERE (upc = ? COLLATE NOCASE OR upc LIKE ? ESCAPE '\\')
+                          AND TRIM(COALESCE(image_url, '')) <> ''
+                        ORDER BY import_date DESC, id DESC
+                        LIMIT 10
+                    ''', (base, like_base))
+
+            return rows
+
+        def _rows_to_images(rows, source_label):
+            seen_urls = set()
+            out = []
+            for rr in rows:
+                raw_url = str(rr.get('image_url') or '').strip()
+                if not raw_url:
+                    continue
+                key = raw_url.lower()
+                if key in seen_urls:
+                    continue
+                seen_urls.add(key)
+                out.append({
+                    'id': f"{source_label}-{rr.get('id')}",
+                    'image_path': raw_url,
+                    'created_at': rr.get('import_date') or '',
+                    'rotation': 0,
+                    'source': source_label
+                })
+            return out
+
+        def _collect_manifest_images():
+            raw_rows = _collect_manifest_rows('raw_bol_items')
+            raw_images = _rows_to_images(raw_rows, 'raw_bol_items')
+            if raw_images:
+                return raw_images, 'rawbol_image'
+
+            bol_rows = _collect_manifest_rows('bol_items')
+            bol_images = _rows_to_images(bol_rows, 'bol_items')
+            if bol_images:
+                return bol_images, 'bol_image'
+            return [], ''
+
+        images = []
+        if include_bol_image and prefer_bol_image:
+            manifest_images, manifest_lookup = _collect_manifest_images()
+            if manifest_images:
+                images = manifest_images
+                image_lookup = manifest_lookup
+
+        if not images:
+            for cand in candidate_upcs:
+                cur.execute(
+                    "SELECT id, image_path, created_at, rotation FROM items_prep_images "
+                    "WHERE upc = ? COLLATE NOCASE "
+                    "AND (deleted_at IS NULL OR TRIM(COALESCE(deleted_at,'')) = '') "
+                    "ORDER BY created_at DESC, id DESC",
+                    (cand,)
+                )
+                rows = [dict(r) for r in cur.fetchall()]
+                if rows:
+                    images = rows
+                    if cand != upc_n:
+                        image_lookup = 'variant'
+                    break
+
+        # Optional log-mode fallback: if exact/variant not found, include base and suffixed UPC rows.
+        if include_related and not images:
+            related_rows = []
+            for base in related_bases:
+                safe_base = base.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+                like_base = f"{safe_base}-%"
+                cur.execute(
+                    "SELECT id, image_path, created_at, rotation FROM items_prep_images "
+                    "WHERE (upc = ? COLLATE NOCASE OR upc LIKE ? ESCAPE '\\') "
+                    "AND (deleted_at IS NULL OR TRIM(COALESCE(deleted_at,'')) = '') "
+                    "ORDER BY created_at DESC, id DESC",
+                    (base, like_base)
+                )
+                related_rows.extend([dict(r) for r in cur.fetchall()])
+
+            if related_rows:
+                # Preserve newest-first ordering and avoid duplicates across multiple base candidates.
+                seen = set()
+                deduped = []
+                for row in related_rows:
+                    rid = row.get('id')
+                    if rid in seen:
+                        continue
+                    seen.add(rid)
+                    deduped.append(row)
+                images = deduped
+                image_lookup = 'related'
+
+        # Optional fallback for log/modal usage: if no diagnostic photos exist,
+        # surface manifest image_url (raw_bol_items first, then bol_items).
+        if include_bol_image and not images:
+            manifest_images, manifest_lookup = _collect_manifest_images()
+            if manifest_images:
+                images = manifest_images
+                image_lookup = manifest_lookup
+
+        if max_images > 0 and len(images) > max_images:
+            images = images[:max_images]
+
+        print(f'[DEBUG] Found {len(images)} images for UPC {upc_n} (lookup={image_lookup}, include_related={include_related})')
+        return jsonify({
+            'upc': upc_n,
+            'status': dict(srow) if srow else None,
+            'images': images,
+            'image_lookup': image_lookup
+        })
     except Exception as e:
         return jsonify({'error': _safe_error(e)}), 500
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
 
 @app.route('/api/items_prep/diagnostic/<upc>/photos', methods=['DELETE'])
 def api_items_prep_diagnostic_delete_photos(upc):
@@ -18770,6 +19511,7 @@ def movelocation_page():
 @app.route('/position/diagnostic', methods=['POST'])
 def position_diagnostic():
     """Handle position submission from diagnostic pages."""
+    conn = None
     try:
         upc = request.form.get('upc', '').strip()
         location = request.form.get('scanned_result', '').strip()
@@ -18941,7 +19683,8 @@ def position_diagnostic():
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
 
 
 #inventory flow #2
@@ -23590,7 +24333,8 @@ def api_set_rack_location():
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
 
 
 def _get_table_and_pk(db_path, table_hint=None):

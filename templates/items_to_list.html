@@ -33,8 +33,25 @@
     .marketplace-filter label{display:flex;align-items:center;gap:6px;cursor:pointer;padding:4px 8px;border-radius:999px;border:1px solid transparent;transition:all .15s ease}
     .marketplace-filter label.active{background:rgba(37,99,235,0.12);border-color:rgba(37,99,235,0.35);color:#1d4ed8;font-weight:600}
     html.ss-theme-night .marketplace-filter label.active{background:rgba(59,130,246,0.18);border-color:rgba(59,130,246,0.45);color:#93c5fd}
+    .status-filter-group{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    .status-filter-group label{display:flex;align-items:center;gap:6px;cursor:pointer;padding:4px 10px;border-radius:999px;border:1px solid transparent;transition:all .15s ease}
+    .status-filter-group label[data-status-filter="good"]{color:#15803d}
+    .status-filter-group label[data-status-filter="bad"]{color:#b91c1c}
+    .status-filter-group label[data-status-filter="unchecked"]{color:#6b7280}
+    .status-filter-group label.active[data-status-filter="good"]{background:rgba(22,163,74,0.12);border-color:rgba(22,163,74,0.35);color:#15803d;font-weight:600}
+    .status-filter-group label.active[data-status-filter="bad"]{background:rgba(220,38,38,0.12);border-color:rgba(220,38,38,0.35);color:#b91c1c;font-weight:600}
+    .status-filter-group label.active[data-status-filter="unchecked"]{background:rgba(107,114,128,0.12);border-color:rgba(107,114,128,0.35);color:#374151;font-weight:600}
+    html.ss-theme-night .status-filter-group label[data-status-filter="good"]{color:#86efac}
+    html.ss-theme-night .status-filter-group label[data-status-filter="bad"]{color:#fca5a5}
+    html.ss-theme-night .status-filter-group label[data-status-filter="unchecked"]{color:#cbd5e1}
+    html.ss-theme-night .status-filter-group label.active[data-status-filter="good"]{background:rgba(34,197,94,0.18);border-color:rgba(34,197,94,0.4);color:#86efac}
+    html.ss-theme-night .status-filter-group label.active[data-status-filter="bad"]{background:rgba(239,68,68,0.18);border-color:rgba(239,68,68,0.4);color:#fca5a5}
+    html.ss-theme-night .status-filter-group label.active[data-status-filter="unchecked"]{background:rgba(148,163,184,0.18);border-color:rgba(148,163,184,0.35);color:#e2e8f0}
     .dropdown-section:last-child{margin-bottom:0}
-    .gear-btn{background:#f0f0f0}
+    .gear-btn{background:linear-gradient(135deg,#3b82f6,#2563eb);color:#fff;font-size:1rem;padding:8px 14px;border-radius:8px;box-shadow:0 2px 8px rgba(37,99,235,0.3);transition:all 0.15s}
+    .gear-btn:hover{box-shadow:0 4px 14px rgba(37,99,235,0.4);transform:translateY(-1px)}
+    .gear-btn:active{transform:translateY(0)}
+    #filter-gear{display:inline-flex;align-items:center;justify-content:center;line-height:1.2;min-height:38px}
     /* Night mode overrides */
     html.ss-theme-night body { background: var(--bg0, #0f172a); color: var(--ink, #e2e8f0); }
     html.ss-theme-night .top h2 { color: var(--ink-bright, #f8fafc); }
@@ -48,7 +65,7 @@
     html.ss-theme-night .modal .card { background: var(--card, #1e293b); color: var(--ink, #e2e8f0); border: 1px solid rgba(255,255,255,0.1); }
     html.ss-theme-night .dropdown-panel { background: var(--card, #1e293b); border-color: rgba(255,255,255,0.1); color: var(--ink, #e2e8f0); box-shadow: 0 8px 24px rgba(0,0,0,0.4); }
     html.ss-theme-night .dropdown-panel label { color: var(--ink, #e2e8f0); }
-    html.ss-theme-night .gear-btn { background: #0064d2; color: #fff; }
+    html.ss-theme-night .gear-btn { background: linear-gradient(135deg,#3b82f6,#1d4ed8); color: #fff; box-shadow: 0 2px 10px rgba(59,130,246,0.35); }
     html.ss-theme-night .btn { color: var(--ink, #e2e8f0); }
     html.ss-theme-night #loading-overlay { background: rgba(15,23,42,0.7); }
     html.ss-theme-night .spinner { border-color: #334155; border-top-color: #3498db; }
@@ -83,75 +100,46 @@
 
     /* iPad/Tablet responsive styles */
     @media (max-width: 1024px) and (min-width: 769px) {
-      /* Top header - back left, title center, buttons right */
       .top {
         display: flex !important;
         flex-wrap: wrap;
         align-items: center;
         gap: 10px;
       }
-      .top h2 {
-        order: 1;
-        flex: 1;
-        text-align: center;
-        margin: 0;
-      }
-      .top > div:last-child {
-        order: 2;
-        margin-right: 70px !important;
-      }
+      .top h2 { order: 1; flex: 1; text-align: center; margin: 0; }
+      .top > div:last-child { order: 2; }
 
-      /* Filters reorganization */
+      /* Filters: search row as flex, gear inline */
       .filters {
-        display: grid !important;
-        grid-template-columns: 1fr auto auto;
-        grid-template-rows: auto auto auto;
+        display: flex !important;
+        flex-wrap: wrap;
         gap: 10px;
         align-items: center;
       }
-
-      /* Row 1: Search + button */
       .filters > label:first-of-type {
-        grid-column: 1 / 2;
-        grid-row: 1;
         display: flex;
+        flex: 1;
+        min-width: 0;
         gap: 0;
       }
       .filters > label:first-of-type input {
         flex: 1;
         border-radius: 8px 0 0 8px;
+        padding: 10px 12px;
       }
       #search-btn {
-        grid-column: 2 / 3;
-        grid-row: 1;
-        border-radius: 0 8px 8px 0;
+        border-radius: 0;
         margin-left: -1px !important;
-      }
-      #refresh-btn { display: none; }
-
-      /* Row 2: Pagination (moved from bottom) */
-      .filters::before {
-        content: '';
-        grid-column: 1 / -1;
-        grid-row: 2;
-      }
-
-      /* Row 3: Status + Gear on same line */
-      .filters > div[style*="position:relative"] {
-        grid-column: 1 / 2;
-        grid-row: 3;
+        padding: 10px 16px;
       }
       #filter-gear {
-        grid-column: 2 / 3;
-        grid-row: 3;
+        border-radius: 0 8px 8px 0;
+        margin-left: -1px;
+        padding: 10px 14px;
       }
 
-      /* Row 4: Select controls */
       .filters > div[style*="margin-left:auto"] {
-        grid-column: 1 / -1;
-        grid-row: 4;
-        margin-left: 0 !important;
-        justify-content: flex-start;
+        margin-left: auto !important;
       }
     }
 
@@ -159,7 +147,6 @@
     @media (max-width: 768px) {
       body { padding: 10px; }
 
-      /* Top header - back top left, buttons same row */
       .top {
         display: flex !important;
         flex-wrap: wrap;
@@ -181,56 +168,48 @@
         margin-right: 0 !important;
       }
       .top > div:last-child .btn {
-        justify-content: center;
         padding: 8px 12px;
         font-size: 0.9rem;
       }
 
-      /* Filters - organized rows */
+      /* Filters: search + search btn + gear all in one row */
       .filters {
         display: flex;
-        flex-direction: column;
+        flex-wrap: wrap;
         gap: 10px;
         padding: 0;
       }
-
-      /* Search row: full width input with button */
       .filters > label:first-of-type {
         display: flex;
-        width: 100%;
+        flex: 1;
+        min-width: 0;
         gap: 0;
         order: 1;
       }
       .filters > label:first-of-type input {
         flex: 1;
+        min-width: 0;
         border-radius: 8px 0 0 8px;
-        padding: 12px;
-        font-size: 1rem;
+        padding: 10px;
+        font-size: 0.95rem;
       }
       #search-btn {
-        order: 1;
-        padding: 12px 16px;
-        font-size: 1rem;
-        border-radius: 0 8px 8px 0;
+        order: 2;
+        padding: 10px 14px;
+        font-size: 0.95rem;
+        border-radius: 0;
         margin-left: -1px;
         white-space: nowrap;
       }
-      #refresh-btn { display: none; }
-
-      /* Status and Gear on same row */
-      .filters > div[style*="position:relative"],
       #filter-gear {
         order: 3;
+        padding: 10px 14px;
+        font-size: 0.95rem;
+        border-radius: 0 8px 8px 0;
+        margin-left: -1px;
       }
 
-      /* Create a button row container effect */
-      .filters::after {
-        content: '';
-        display: block;
-        clear: both;
-      }
-
-      /* Select controls - full width row at bottom */
+      /* Select controls */
       .filters > div[style*="margin-left:auto"] {
         order: 4;
         margin-left: 0 !important;
@@ -243,8 +222,8 @@
       #select-btn {
         flex: 1;
         min-width: 100px;
-        padding: 12px 16px;
-        font-size: 1rem;
+        padding: 10px 14px;
+        font-size: 0.95rem;
         text-align: center;
       }
       #select-all-label { display: none !important; }
@@ -252,8 +231,8 @@
         flex: 1;
         min-width: 120px;
         margin-left: 0;
-        padding: 12px 16px;
-        font-size: 1rem;
+        padding: 10px 14px;
+        font-size: 0.95rem;
         text-align: center;
       }
 
@@ -263,27 +242,18 @@
       .thumb { width: 40px; height: 40px; margin-right: 6px; }
       .title-cell { flex-direction: column; align-items: flex-start; gap: 4px; }
 
-      /* Buttons */
-      .btn { padding: 12px 16px; font-size: 1rem; border-radius: 8px; }
-      .btn-sm { padding: 10px 14px; font-size: 0.9rem; }
+      .btn { padding: 10px 14px; font-size: 0.95rem; border-radius: 8px; }
+      .btn-sm { padding: 8px 12px; font-size: 0.85rem; }
 
-      /* Bottom pagination */
       #bottom-pagination {
         display: flex;
         gap: 8px;
         flex-wrap: wrap;
         justify-content: center;
       }
-      #bottom-pagination .btn {
-        padding: 10px 14px;
-        min-width: 44px;
-      }
+      #bottom-pagination .btn { padding: 10px 14px; min-width: 44px; }
 
-      /* Results summary */
-      #results-summary {
-        font-size: 0.9rem;
-        text-align: center;
-      }
+      #results-summary { font-size: 0.9rem; text-align: center; }
     }
 
     @media (max-width: 480px) {
@@ -295,32 +265,15 @@
         padding: 10px 12px;
       }
 
-      .filters > label:first-of-type input {
-        padding: 10px;
-        font-size: 0.95rem;
-      }
-      #search-btn {
-        padding: 10px 12px;
-        font-size: 0.95rem;
-      }
+      .filters > label:first-of-type input { padding: 9px; font-size: 0.9rem; }
+      #search-btn { padding: 9px 10px; font-size: 0.9rem; }
+      #filter-gear { padding: 9px 10px; font-size: 0.9rem; }
 
       table { font-size: 0.8rem; }
       th, td { padding: 6px 4px; }
       .thumb { width: 36px; height: 36px; }
 
-      .btn { padding: 10px 14px; font-size: 0.95rem; }
-      .btn-sm { padding: 8px 12px; font-size: 0.85rem; }
-
-      #select-btn, #delete-selected {
-        padding: 10px 14px;
-        font-size: 0.95rem;
-      }
-
-      #bottom-pagination .btn {
-        padding: 8px 10px;
-        min-width: 38px;
-        font-size: 0.85rem;
-      }
+      #bottom-pagination .btn { padding: 8px 10px; min-width: 38px; font-size: 0.85rem; }
     }
 
     @media (max-width: 380px) {
@@ -358,28 +311,22 @@
       <input type="text" id="filter-q" placeholder="UPC or Title">
     </label>
     <button class="btn btn-primary" id="search-btn" style="margin-left:4px">Search</button>
-    <button class="btn" id="refresh-btn" style="margin-left:4px; background:#f0f0f0" title="Refresh List">🔄</button>
-    <div style="position:relative">
-      <button class="btn" id="status-filter-btn" style="background:#f0f0f0;min-width:120px;text-align:left;display:flex;justify-content:space-between;align-items:center">
-        <span id="status-filter-label">Status</span>
-        <span style="font-size:0.8rem">▼</span>
-      </button>
-      <div id="status-dropdown" class="dropdown-panel" style="display:none;min-width:200px">
-        <div style="display:flex;flex-direction:column;gap:8px">
-          <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+    <button class="btn gear-btn" id="filter-gear" title="More filters" aria-haspopup="true" aria-expanded="false">⚙️</button>
+    <div id="filter-dropdown" class="dropdown-panel" role="menu" aria-labelledby="filter-gear">
+      <div class="dropdown-section">
+        <div style="font-weight:600;margin-bottom:6px;">Status:</div>
+        <div class="status-filter-group">
+          <label data-status-filter="good">
             <input type="checkbox" class="status-checkbox" value="good" checked> Good
           </label>
-          <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+          <label data-status-filter="bad">
             <input type="checkbox" class="status-checkbox" value="bad" checked> Bad
           </label>
-          <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+          <label data-status-filter="unchecked">
             <input type="checkbox" class="status-checkbox" value="unchecked"> Unchecked
           </label>
         </div>
       </div>
-    </div>
-    <button class="btn gear-btn" id="filter-gear" title="More filters" aria-haspopup="true" aria-expanded="false">⚙️</button>
-    <div id="filter-dropdown" class="dropdown-panel" role="menu" aria-labelledby="filter-gear">
       <div class="dropdown-section">
         <label>Lot:
           <select id="filter-lot"><option value="">All lots</option></select>
@@ -429,6 +376,9 @@
             <input type="checkbox" id="filter-listed-fb" checked> Facebook
           </label>
         </div>
+      </div>
+      <div class="dropdown-section" style="border-top:1px solid rgba(0,0,0,0.08);padding-top:10px;margin-top:4px">
+        <button class="btn btn-sm" id="refresh-btn" type="button" style="background:#f0f7ff;color:#2563eb;border:1px solid #bfdbfe;width:100%">🔄 Refresh List</button>
       </div>
       <div class="dropdown-section" id="gear-reset-wrap" style="display:none">
         <button class="btn btn-sm" id="reset-gear-filters" type="button" style="background:#fff3f3;color:#b42318;border:1px solid #f3b4b4;width:100%">Reset to Default</button>
@@ -487,7 +437,11 @@ function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;')
 function missingThumb(width=48,height=48,text='No Img'){ return 'data:image/svg+xml;utf8,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="'+width+'" height="'+height+'"><rect width="100%" height="100%" fill="#f8f8f8"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#b0b0b0" font-size="10">'+text+'</text></svg>'); }
 
 const GEAR_SETTINGS_KEY = 'items_to_list_gear_settings_v1';
+const FILTER_UI_SETTINGS_KEY = 'items_to_list_filter_ui_v1';
 const GEAR_DEFAULTS = Object.freeze({
+  status_good: true,
+  status_bad: true,
+  status_unchecked: false,
   lot: '',
   sort: 'last_edited',
   defect: '',
@@ -497,6 +451,45 @@ const GEAR_DEFAULTS = Object.freeze({
   listed_facebook: true
 });
 let pendingLotSelection = '';
+let selectMode = false;
+let currentPage = 1;
+let currentLimit = 25;
+let lastRenderedResults = []; // Cache last results for re-rendering
+
+function getCurrentFilterUiSettings(){
+  const qEl = document.getElementById('filter-q');
+  const perPageEl = document.getElementById('per-page-select');
+  const perPageVal = perPageEl ? parseInt(perPageEl.value, 10) : currentLimit;
+  const validPerPage = [25, 50, 100].includes(perPageVal) ? perPageVal : currentLimit;
+  return {
+    q: qEl ? (qEl.value || '') : '',
+    per_page: validPerPage
+  };
+}
+
+function saveFilterUiSettings(){
+  try{
+    localStorage.setItem(FILTER_UI_SETTINGS_KEY, JSON.stringify(getCurrentFilterUiSettings()));
+  }catch(e){}
+}
+
+function restoreFilterUiSettings(){
+  try{
+    const raw = localStorage.getItem(FILTER_UI_SETTINGS_KEY);
+    if(!raw) return;
+    const parsed = JSON.parse(raw) || {};
+    const qEl = document.getElementById('filter-q');
+    if(qEl && typeof parsed.q === 'string'){
+      qEl.value = parsed.q;
+    }
+    const parsedPerPage = parseInt(parsed.per_page, 10);
+    if([25, 50, 100].includes(parsedPerPage)){
+      currentLimit = parsedPerPage;
+      const perPageEl = document.getElementById('per-page-select');
+      if(perPageEl) perPageEl.value = String(parsedPerPage);
+    }
+  }catch(e){}
+}
 
 function normalizeGearSettings(raw){
   const src = (raw && typeof raw === 'object') ? raw : {};
@@ -510,6 +503,9 @@ function normalizeGearSettings(raw){
   const sortRaw = String(src.sort || GEAR_DEFAULTS.sort);
   const listedRaw = String(src.listed || '');
   return {
+    status_good: parseBool(src.status_good, GEAR_DEFAULTS.status_good),
+    status_bad: parseBool(src.status_bad, GEAR_DEFAULTS.status_bad),
+    status_unchecked: parseBool(src.status_unchecked, GEAR_DEFAULTS.status_unchecked),
     lot: String(src.lot || ''),
     sort: allowedSorts.has(sortRaw) ? sortRaw : GEAR_DEFAULTS.sort,
     defect: String(src.defect || ''),
@@ -521,6 +517,9 @@ function normalizeGearSettings(raw){
 }
 
 function getCurrentGearSettings(){
+  const statusGoodCb = document.querySelector('.status-checkbox[value="good"]');
+  const statusBadCb = document.querySelector('.status-checkbox[value="bad"]');
+  const statusUncheckedCb = document.querySelector('.status-checkbox[value="unchecked"]');
   const lotEl = document.getElementById('filter-lot');
   const sortEl = document.getElementById('sort-select');
   const defectEl = document.getElementById('filter-defect');
@@ -529,6 +528,9 @@ function getCurrentGearSettings(){
   const ebayCb = document.getElementById('filter-listed-ebay');
   const fbCb = document.getElementById('filter-listed-fb');
   return normalizeGearSettings({
+    status_good: !!(statusGoodCb && statusGoodCb.checked),
+    status_bad: !!(statusBadCb && statusBadCb.checked),
+    status_unchecked: !!(statusUncheckedCb && statusUncheckedCb.checked),
     lot: lotEl ? lotEl.value : '',
     sort: sortEl ? sortEl.value : GEAR_DEFAULTS.sort,
     defect: defectEl ? defectEl.value : '',
@@ -541,6 +543,9 @@ function getCurrentGearSettings(){
 
 function applyGearSettings(raw){
   const settings = normalizeGearSettings(raw);
+  const statusGoodCb = document.querySelector('.status-checkbox[value="good"]');
+  const statusBadCb = document.querySelector('.status-checkbox[value="bad"]');
+  const statusUncheckedCb = document.querySelector('.status-checkbox[value="unchecked"]');
   const lotEl = document.getElementById('filter-lot');
   const sortEl = document.getElementById('sort-select');
   const defectEl = document.getElementById('filter-defect');
@@ -549,6 +554,9 @@ function applyGearSettings(raw){
   const ebayCb = document.getElementById('filter-listed-ebay');
   const fbCb = document.getElementById('filter-listed-fb');
 
+  if (statusGoodCb) statusGoodCb.checked = settings.status_good;
+  if (statusBadCb) statusBadCb.checked = settings.status_bad;
+  if (statusUncheckedCb) statusUncheckedCb.checked = settings.status_unchecked;
   if (lotEl) {
     pendingLotSelection = settings.lot || '';
     lotEl.value = settings.lot || '';
@@ -559,6 +567,7 @@ function applyGearSettings(raw){
   if (amazonCb) amazonCb.checked = settings.listed_amazon;
   if (ebayCb) ebayCb.checked = settings.listed_ebay;
   if (fbCb) fbCb.checked = settings.listed_facebook;
+  updateStatusFilterHighlight();
   updateMarketplaceFilterHighlight();
 }
 
@@ -580,6 +589,9 @@ function restoreGearSettings(){
 function gearSettingsDifferFromDefaults(raw){
   const settings = normalizeGearSettings(raw);
   return (
+    settings.status_good !== GEAR_DEFAULTS.status_good ||
+    settings.status_bad !== GEAR_DEFAULTS.status_bad ||
+    settings.status_unchecked !== GEAR_DEFAULTS.status_unchecked ||
     settings.lot !== GEAR_DEFAULTS.lot ||
     settings.sort !== GEAR_DEFAULTS.sort ||
     settings.defect !== GEAR_DEFAULTS.defect ||
@@ -623,8 +635,7 @@ function setFiltersFromURL(){
       if(cb) cb.checked = true;
     });
   }
-  // Update status filter label
-  updateStatusFilterLabel();
+  updateStatusFilterHighlight();
   if(p.has('defect')) document.getElementById('filter-defect').value = defect;
   const listedFlag = (p.get('listed') === 'true') || (p.get('status') === 'listed');
   const notListedFlag = (p.get('not_listed') === 'true') || (p.get('status') === 'not_listed');
@@ -845,53 +856,27 @@ document.getElementById('filter-lot').addEventListener('change', (e)=>{ onGearSe
 document.getElementById('sort-select').addEventListener('change', (e)=>{ onGearSettingChanged(); loadItems(e); });
 document.getElementById('refresh-btn').addEventListener('click', loadItems);
 
-// Status checkbox dropdown toggle
-const statusBtn = document.getElementById('status-filter-btn');
-const statusDropdown = document.getElementById('status-dropdown');
-if (statusBtn && statusDropdown){
-  function positionStatusDropdown(){
-    const rect = statusBtn.getBoundingClientRect();
-    statusDropdown.style.left = rect.left + 'px';
-    statusDropdown.style.top = (rect.bottom + 6) + 'px';
-  }
-  statusBtn.addEventListener('click', (e)=>{
-    e.preventDefault();
-    const open = statusDropdown.style.display === 'block';
-    if(open){
-      statusDropdown.style.display = 'none';
-    } else {
-      positionStatusDropdown();
-      statusDropdown.style.display = 'block';
-    }
-  });
-  window.addEventListener('resize', ()=>{ if(statusDropdown.style.display==='block') positionStatusDropdown(); });
-  window.addEventListener('scroll', ()=>{ if(statusDropdown.style.display==='block') positionStatusDropdown(); }, true);
-  document.addEventListener('click', (e)=>{
-    if (statusDropdown.style.display==='block'){
-      if(!statusDropdown.contains(e.target) && e.target!==statusBtn && !statusBtn.contains(e.target)){
-        statusDropdown.style.display='none';
-      }
+function updateStatusFilterHighlight(){
+  const map = {
+    good: document.querySelector('.status-checkbox[value="good"]'),
+    bad: document.querySelector('.status-checkbox[value="bad"]'),
+    unchecked: document.querySelector('.status-checkbox[value="unchecked"]')
+  };
+  Object.entries(map).forEach(([key, el]) => {
+    if(!el) return;
+    const label = el.closest(`label[data-status-filter="${key}"]`);
+    if(label){
+      label.classList.toggle('active', !!el.checked);
     }
   });
 }
-
-// Update label based on checked statuses
-function updateStatusFilterLabel(){
-  const checked = Array.from(document.querySelectorAll('.status-checkbox:checked')).map(cb => cb.value);
-  const label = document.getElementById('status-filter-label');
-  if(checked.length === 0){
-    label.textContent = 'Status: None';
-  } else if(checked.length === 3){
-    label.textContent = 'Status: All';
-  } else {
-    label.textContent = `Status: ${checked.join(', ')}`;
-  }
-}
+updateStatusFilterHighlight();
 
 // Status checkboxes auto-refresh
 document.querySelectorAll('.status-checkbox').forEach(cb => {
   cb.addEventListener('change', ()=>{
-    updateStatusFilterLabel();
+    updateStatusFilterHighlight();
+    onGearSettingChanged();
     loadItems();
   });
 });
@@ -942,9 +927,46 @@ const gearBtn = document.getElementById('filter-gear');
 const dropdown = document.getElementById('filter-dropdown');
 if (gearBtn && dropdown){
   function positionDropdown(){
+    const wasOpen = dropdown.style.display === 'block';
+    if(!wasOpen){
+      dropdown.style.visibility = 'hidden';
+      dropdown.style.display = 'block';
+    }
     const rect = gearBtn.getBoundingClientRect();
-    dropdown.style.left = rect.left + 'px';
-    dropdown.style.top = (rect.bottom + 6) + 'px';
+    const vw = window.innerWidth || document.documentElement.clientWidth || 1024;
+    const vh = window.innerHeight || document.documentElement.clientHeight || 768;
+    const gap = 6;
+    const margin = 8;
+
+    dropdown.style.maxHeight = '';
+    dropdown.style.overflowY = 'auto';
+
+    const panelW = dropdown.offsetWidth || 320;
+    const panelH = dropdown.offsetHeight || 320;
+
+    let left = rect.right - panelW; // keep panel aligned to gear button's right edge
+    if(!Number.isFinite(left)) left = rect.left;
+    left = Math.max(margin, Math.min(left, vw - panelW - margin));
+
+    let top = rect.bottom + gap;
+    const fitsBelow = (top + panelH) <= (vh - margin);
+    const topAbove = rect.top - panelH - gap;
+
+    if(!fitsBelow && topAbove >= margin){
+      top = topAbove; // flip above button when bottom space is tight
+    } else if(!fitsBelow){
+      top = margin; // clamp to viewport and allow internal scrolling
+      const maxH = Math.max(180, vh - (margin * 2));
+      dropdown.style.maxHeight = maxH + 'px';
+    }
+
+    dropdown.style.left = Math.round(left) + 'px';
+    dropdown.style.top = Math.round(top) + 'px';
+
+    if(!wasOpen){
+      dropdown.style.display = 'none';
+      dropdown.style.visibility = '';
+    }
   }
   gearBtn.addEventListener('click', (e)=>{
     e.preventDefault();
@@ -1005,8 +1027,10 @@ async function onOpenPics(e){
   editLink.href = diagUrl;
   dlAll.href = '/api/items_prep/diagnostic/'+encodeURIComponent(upc)+'/photos.zip';
   try{
-    const lotQ = lot ? ('?lot=' + encodeURIComponent(lot)) : '';
-    const res = await fetch('/api/items_prep/diagnostic/'+encodeURIComponent(upc)+lotQ);
+    const photoParams = new URLSearchParams();
+    photoParams.set('include_related', '1');
+    if(lot) photoParams.set('lot', lot);
+    const res = await fetch('/api/items_prep/diagnostic/'+encodeURIComponent(upc)+'?'+photoParams.toString());
     if(!res.ok){ area.innerHTML = '<div class="small-muted">Failed to load</div>'; modal.style.display='flex'; return; }
     const j = await res.json();
     const imgs = j.images || [];
@@ -1234,15 +1258,20 @@ async function loadLots(){
   }catch{}
 }
 
-// Initial load: restore filters and fetch items immediately.
-// Lots are populated in the background so first paint is not blocked.
-restoreGearSettings();
-setFiltersFromURL();
-loadItems();
-loadLots();
-updateGearResetButton();
-// Focus the search input on load
-document.getElementById('filter-q').focus();
+// Initial load: restore persisted/URL filters and auto-fetch page 1.
+// Load lots first so any persisted lot filter is resolved before the first query.
+async function initializeItemsToList(){
+  restoreGearSettings();
+  restoreFilterUiSettings();
+  setFiltersFromURL();
+  updateGearResetButton();
+  await loadLots();
+  currentPage = 1;
+  await loadItems();
+  const qInput = document.getElementById('filter-q');
+  if(qInput) qInput.focus();
+}
+initializeItemsToList();
 // Back button navigates home; using button confines clickable area to the button
 const backBtn = document.getElementById('back-btn');
 if (backBtn) {
@@ -1256,10 +1285,6 @@ document.getElementById('filter-q').addEventListener('keydown', (e)=>{ if(e.key=
 document.getElementById('search-btn').addEventListener('click', ()=>{ loadItems(); });
 
 // Select mode and delete handlers
-let selectMode = false;
-let currentPage = 1;
-let currentLimit = 25;
-let lastRenderedResults = []; // Cache last results for re-rendering
 
 document.getElementById('select-btn').addEventListener('click', () => {
   selectMode = !selectMode;
@@ -1371,6 +1396,7 @@ function changePage(p) {
 async function loadItems(e){
   const overlay = document.getElementById('loading-overlay');
   if(overlay) overlay.style.display = 'flex';
+  saveFilterUiSettings();
 
   let lot = document.getElementById('filter-lot').value.trim();
   if(!lot && pendingLotSelection) lot = pendingLotSelection;

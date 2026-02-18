@@ -40,6 +40,20 @@
   .page-loading-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:99999;align-items:center;justify-content:center}
   .page-loading-overlay.active{display:flex}
   .loading-spinner-large{border:4px solid #f3f3f3;border-top:4px solid #00b894;border-radius:50%;width:50px;height:50px;animation:spin 1s linear infinite}
+  .exception-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:100000;align-items:center;justify-content:center;padding:16px}
+  .exception-overlay.active{display:flex}
+  .exception-card{background:#fff;border:1px solid #e3e3e3;border-radius:14px;max-width:560px;width:100%;padding:16px;box-shadow:0 12px 36px rgba(0,0,0,0.22)}
+  .exception-title{font-size:1.1rem;font-weight:700;color:#b91c1c;margin:0 0 8px 0}
+  .exception-msg{color:#333;line-height:1.35;margin:0 0 12px 0}
+  .exception-actions{display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end}
+  .exception-link{display:inline-flex;align-items:center;gap:6px;color:#1d4ed8;text-decoration:none;font-weight:600}
+  .lot-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:100001;align-items:center;justify-content:center;padding:16px}
+  .lot-overlay.active{display:flex}
+  .lot-card{background:#fff;border:1px solid #e3e3e3;border-radius:14px;max-width:620px;width:100%;padding:16px;box-shadow:0 12px 36px rgba(0,0,0,0.22)}
+  .lot-title{font-size:1.1rem;font-weight:700;color:#1f2937;margin:0 0 8px 0}
+  .lot-msg{color:#333;line-height:1.35;margin:0 0 12px 0;white-space:pre-line}
+  .lot-actions{display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end}
+  .lot-actions .btn{min-width:150px}
   .qty-controls{display:flex;gap:12px;width:100%;align-items:center;justify-content:space-between}
   .qty-btn{font-size:2rem;font-weight:700;padding:12px 0;border:3px solid;border-radius:12px;cursor:pointer;background:#fff;transition:all 0.2s;flex:1;max-width:33vw}
     .qty-btn.plus{color:#00b894;border-color:#00b894}
@@ -101,6 +115,13 @@
     html.ss-theme-night .btn-gray { background: #475569; }
     html.ss-theme-night .loading-overlay { background: rgba(15,23,42,0.9); }
     html.ss-theme-night .page-loading-overlay { background: rgba(15,23,42,0.7); }
+    html.ss-theme-night .exception-card { background: var(--card, #1e293b); border-color: rgba(255,255,255,0.1); }
+    html.ss-theme-night .exception-title { color: #fca5a5; }
+    html.ss-theme-night .exception-msg { color: var(--ink, #e2e8f0); }
+    html.ss-theme-night .exception-link { color: #93c5fd; }
+    html.ss-theme-night .lot-card { background: var(--card, #1e293b); border-color: rgba(255,255,255,0.1); }
+    html.ss-theme-night .lot-title { color: var(--ink-bright, #f8fafc); }
+    html.ss-theme-night .lot-msg { color: var(--ink, #e2e8f0); }
     html.ss-theme-night .spinner { border-color: #334155; border-top-color: #10b981; }
     html.ss-theme-night .loading-spinner-large { border-color: #334155; border-top-color: #10b981; }
     html.ss-theme-night .top h2 { color: var(--ink-bright, #f8fafc); }
@@ -115,14 +136,15 @@
   </div>
   </div>
   
-  <!-- Working LOT selector (kept for session/default behavior, hidden to reduce UI clutter) -->
-  <div class="card" style="margin-top:12px;padding:12px;display:none;">
+  <!-- Working LOT mode -->
+  <div class="card" style="margin-top:12px;padding:12px;">
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
       <label style="font-weight:600;color:#2c3e50;white-space:nowrap;" data-i18n="working_lot">Working LOT:</label>
-      <select id="lotSelector" style="flex:1;min-width:200px;padding:8px 12px;border:2px solid #00b894;border-radius:8px;font-size:1rem;background:#fff;cursor:pointer;">
-        <option value="" data-i18n="loading_lots">Loading lots...</option>
+      <select id="lotScopeSelector" style="min-width:180px;padding:8px 12px;border:2px solid #00b894;border-radius:8px;font-size:1rem;background:#fff;cursor:pointer;">
+        <option value="current">Current</option>
+        <option value="all">ALL</option>
       </select>
-      <div id="lotDate" style="color:#666;font-size:0.9rem;white-space:nowrap;"></div>
+      <div id="lotDate" style="color:#666;font-size:0.9rem;white-space:nowrap;flex:1;min-width:220px;"></div>
     </div>
   </div>
 
@@ -191,6 +213,28 @@
   <div id="pageLoadingOverlay" class="page-loading-overlay">
     <div class="loading-spinner-large"></div>
   </div>
+  <div id="overageExceptionOverlay" class="exception-overlay" aria-hidden="true">
+    <div class="exception-card" role="dialog" aria-modal="true" aria-labelledby="overageExceptionTitle">
+      <h3 id="overageExceptionTitle" class="exception-title">Already Fully Added</h3>
+      <p id="overageExceptionMsg" class="exception-msg"></p>
+      <a id="overageExceptionLink" class="exception-link" href="/items-to-list" target="_blank" rel="noopener">Open in Items-to-List</a>
+      <div class="exception-actions" style="margin-top:14px">
+        <button class="btn btn-gray" id="overageExceptionSkipBtn" type="button">Skip</button>
+        <button class="btn btn-primary" id="overageExceptionAddBtn" type="button">Add Anyway (Exception)</button>
+      </div>
+    </div>
+  </div>
+  <div id="lotMismatchOverlay" class="lot-overlay" aria-hidden="true">
+    <div class="lot-card" role="dialog" aria-modal="true" aria-labelledby="lotMismatchTitle">
+      <h3 id="lotMismatchTitle" class="lot-title">Item Not In Current LOT</h3>
+      <p id="lotMismatchMsg" class="lot-msg"></p>
+      <div class="lot-actions" style="margin-top:14px">
+        <button class="btn btn-gray" id="lotMismatchCancelBtn" type="button">Cancel</button>
+        <button class="btn" id="lotMismatchAutoBtn" type="button" style="background:#3498db;color:#fff">Auto Assign</button>
+        <button class="btn btn-primary" id="lotMismatchOverrideBtn" type="button">Override THIS LOT</button>
+      </div>
+    </div>
+  </div>
 
   <script>
     // Loading overlay helpers
@@ -204,9 +248,69 @@
     
     function missingThumb(width=56,height=56,text='No Img'){return 'data:image/svg+xml;utf8,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="'+width+'" height="'+height+'"><rect width="100%" height="100%" fill="#f8f8f8"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#b0b0b0" font-size="10">'+text+'</text></svg>');}
 
+    const LOT_SCOPE_STORAGE_KEY = 'itemPrepLotScope';
     let selectedLot = null;
     let availableLots = [];
+    let lotScope = 'current';
+    let lotsReadyPromise = null;
+    try {
+      const savedScope = String(localStorage.getItem(LOT_SCOPE_STORAGE_KEY) || '').toLowerCase();
+      lotScope = savedScope === 'all' ? 'all' : 'current';
+    } catch (e) {
+      lotScope = 'current';
+    }
     let lotsLoaded = false;
+
+    function getActiveLotNumber() {
+      return lotScope === 'all' ? '' : (selectedLot || '');
+    }
+
+    function getActionLotNumber() {
+      if (lotScope === 'all') return '';
+      const actionLot = (currentLookupInfo && currentLookupInfo.action_lot)
+        ? String(currentLookupInfo.action_lot).trim()
+        : '';
+      return actionLot || getActiveLotNumber();
+    }
+
+    function getLotQueryString() {
+      const parts = [];
+      const activeLot = getActiveLotNumber();
+      if (activeLot) {
+        parts.push('lot_number=' + encodeURIComponent(activeLot));
+      }
+      if (lotScope === 'all') {
+        parts.push('lot_scope=all');
+      }
+      return parts.length ? ('&' + parts.join('&')) : '';
+    }
+
+    function withLotScope(payload) {
+      const body = Object.assign({}, payload || {});
+      body.lot_number = getActionLotNumber();
+      body.lot_scope = lotScope;
+      if (lotScope === 'current' && currentLookupInfo && currentLookupInfo.force_lot_override) {
+        body.force_requested_lot = true;
+      }
+      return body;
+    }
+
+    function renderWorkingLotInfo() {
+      const lotDate = document.getElementById('lotDate');
+      if (!lotDate) return;
+      if (lotScope === 'all') {
+        lotDate.textContent = 'Mode: ALL LOTs';
+        return;
+      }
+      const latestLot = availableLots.length > 0 ? availableLots[0] : null;
+      if (!latestLot) {
+        lotDate.textContent = 'Current LOT: none available';
+        return;
+      }
+      lotDate.textContent = latestLot.import_date
+        ? `Current LOT: ${latestLot.lot_number} (${latestLot.import_date})`
+        : `Current LOT: ${latestLot.lot_number}`;
+    }
     
     async function loadLots() {
       try {
@@ -219,60 +323,53 @@
         }
         
         availableLots = j.lots || [];
-        selectedLot = j.selected_lot || (availableLots.length > 0 ? availableLots[0].lot_number : null);
-        
-        const selector = document.getElementById('lotSelector');
-        const lotDate = document.getElementById('lotDate');
-        
-        if (!selector) {
-          console.error('lotSelector element not found');
-          return;
-        }
-        
-        selector.innerHTML = '';
-        if (availableLots.length === 0) {
-          selector.innerHTML = '<option value="">No LOTs available</option>';
-          if (lotDate) lotDate.textContent = '';
-          return;
-        }
-        
-        availableLots.forEach(lot => {
-          const opt = document.createElement('option');
-          opt.value = lot.lot_number;
-          opt.textContent = lot.import_date ? `${lot.lot_number} (${lot.import_date})` : lot.lot_number;
-          if (lot.lot_number === selectedLot) {
-            opt.selected = true;
-            if (lotDate) lotDate.textContent = lot.import_date ? `Imported: ${lot.import_date}` : '';
+        // "Current" always means latest LOT from BOL extractor.
+        selectedLot = availableLots.length > 0 ? availableLots[0].lot_number : null;
+
+        const scopeSelector = document.getElementById('lotScopeSelector');
+        if (scopeSelector) {
+          if (!lotsLoaded) {
+            scopeSelector.value = lotScope;
+
+            scopeSelector.addEventListener('change', async (e) => {
+              lotScope = (e.target.value || 'current').toLowerCase() === 'all' ? 'all' : 'current';
+              try { localStorage.setItem(LOT_SCOPE_STORAGE_KEY, lotScope); } catch (err) {}
+              if (lotScope === 'current' && selectedLot) {
+                try {
+                  await fetch('/api/lots/select', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({lot_number: selectedLot})
+                  });
+                } catch(err) {
+                  console.error('Failed to save lot selection:', err);
+                }
+              }
+              renderWorkingLotInfo();
+            });
+            lotsLoaded = true;
+          } else {
+            scopeSelector.value = lotScope;
           }
-          selector.appendChild(opt);
-        });
-        
-        // Only add listener once
-        if (!lotsLoaded) {
-          selector.addEventListener('change', async (e) => {
-            selectedLot = e.target.value;
-            const lot = availableLots.find(l => l.lot_number === selectedLot);
-            if (lotDate) lotDate.textContent = lot && lot.import_date ? `Imported: ${lot.import_date}` : '';
-            
-            // Save to session
-            try {
-              await fetch('/api/lots/select', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({lot_number: selectedLot})
-              });
-            } catch(err) {
-              console.error('Failed to save lot selection:', err);
-            }
-          });
-          lotsLoaded = true;
         }
+
+        if (selectedLot) {
+          try {
+            await fetch('/api/lots/select', {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({lot_number: selectedLot})
+            });
+          } catch(err) {
+            console.error('Failed to sync latest lot:', err);
+          }
+        }
+
+        renderWorkingLotInfo();
       } catch(e) {
         console.error('Failed to load lots:', e);
-        const selector = document.getElementById('lotSelector');
-        if (selector) {
-          selector.innerHTML = '<option value="">Error loading LOTs</option>';
-        }
+        const lotDate = document.getElementById('lotDate');
+        if (lotDate) lotDate.textContent = 'Error loading LOTs';
       }
     }
     
@@ -283,6 +380,43 @@
     let currentUpc = null; // Store the actual UPC returned from server (may be suffixed)
     let currentQty = 1; // Track quantity for visual display, start at 1
     let lastEntry = null; // Store last entry for undo: {upc, status, qty}
+    let lookupInFlight = false;
+    let queuedLookupUpc = null;
+    let lookupDebounceTimer = null;
+    let lastLookupFingerprint = {upc: '', ts: 0};
+    let currentLookupInfo = null;
+    const LOOKUP_DEDUPE_WINDOW_MS = 1200;
+
+    function triggerLookupFromInput(rawUpc){
+      const normalized = (rawUpc || '').trim();
+      if(!normalized) return;
+      const now = Date.now();
+
+      if(lookupInFlight){
+        queuedLookupUpc = normalized;
+        return;
+      }
+
+      if(
+        normalized === lastLookupFingerprint.upc &&
+        (now - lastLookupFingerprint.ts) < LOOKUP_DEDUPE_WINDOW_MS
+      ){
+        return;
+      }
+
+      lastLookupFingerprint = {upc: normalized, ts: now};
+      lookupInFlight = true;
+      lookup(normalized)
+        .catch((e)=>{ console.error('Lookup failed:', e); })
+        .finally(()=>{
+          lookupInFlight = false;
+          const queued = (queuedLookupUpc || '').trim();
+          queuedLookupUpc = null;
+          if(queued && queued !== normalized){
+            triggerLookupFromInput(queued);
+          }
+        });
+    }
 
     function updateQtyDisplay(change) {
       let newQty = currentQty + change;
@@ -317,6 +451,102 @@
       undoBtn.classList.add('hidden');
     }
 
+    function currentBaseUpc(){
+      const raw = (currentUpc || '').toString().trim();
+      if(!raw) return '';
+      return raw.includes('-') ? raw.split('-')[0] : raw;
+    }
+
+    function getItemsToListLinkFallback(){
+      const base = currentBaseUpc();
+      if(!base) return '/items-to-list';
+      const p = new URLSearchParams();
+      p.set('q', base);
+      p.set('status', 'good,bad,unchecked');
+      const lot = getActiveLotNumber();
+      if(lot) p.set('lot', lot);
+      return '/items-to-list?' + p.toString();
+    }
+
+    function clearCurrentResultCard(){
+      const prepSummary = document.getElementById('prepSummary');
+      if(prepSummary) prepSummary.textContent = '';
+      document.getElementById('manualUpc').value = '';
+      document.getElementById('result').classList.add('hidden');
+      document.getElementById('actions').classList.add('hidden');
+      document.getElementById('noBarcodeBtn').classList.remove('hidden');
+      currentUpc = null;
+      currentLookupInfo = null;
+      resetQtyDisplay();
+      setupDeviceMode();
+    }
+
+    function promptLotMismatchResolution(opts){
+      return new Promise((resolve)=>{
+        const info = opts || {};
+        const overlay = document.getElementById('lotMismatchOverlay');
+        const msg = document.getElementById('lotMismatchMsg');
+        const cancelBtn = document.getElementById('lotMismatchCancelBtn');
+        const autoBtn = document.getElementById('lotMismatchAutoBtn');
+        const overrideBtn = document.getElementById('lotMismatchOverrideBtn');
+        if(!overlay || !msg || !cancelBtn || !autoBtn || !overrideBtn){
+          resolve('cancel');
+          return;
+        }
+
+        const requestedLot = String(info.requested_lot || getActiveLotNumber() || '').trim();
+        const resolvedLot = String(info.resolved_lot || '').trim();
+        const upcLabel = String(info.upc || currentBaseUpc() || '').trim();
+        const allowOverride = info.allow_override !== false;
+        const mode = String(info.mode || 'mismatch').toLowerCase();
+        overrideBtn.style.display = allowOverride ? '' : 'none';
+
+        if(mode === 'missing'){
+          msg.textContent = [
+            `UPC ${upcLabel || '(unknown)'} is not found in LOT ${requestedLot || '(current)'} or any known LOT.`,
+            'Auto Assign will find a matching LOT if available, or create an uncategorized LOT entry for this UPC.'
+          ].join('\n');
+        } else {
+          msg.textContent = [
+            `UPC ${upcLabel || '(unknown)'} is not from current LOT ${requestedLot || '(current)'}.`,
+            resolvedLot ? `Detected LOT: ${resolvedLot}.` : 'Detected LOT is unavailable.',
+            'Choose Override THIS LOT to force current LOT, or Auto Assign to use its matching lot.'
+          ].join('\n');
+        }
+
+        const closeWith = (choice)=>{
+          overlay.classList.remove('active');
+          overlay.setAttribute('aria-hidden', 'true');
+          cancelBtn.onclick = null;
+          autoBtn.onclick = null;
+          overrideBtn.onclick = null;
+          resolve(choice);
+        };
+
+        cancelBtn.onclick = ()=> closeWith('cancel');
+        autoBtn.onclick = ()=> closeWith('auto');
+        overrideBtn.onclick = ()=> closeWith('override');
+        overlay.classList.add('active');
+        overlay.setAttribute('aria-hidden', 'false');
+      });
+    }
+
+    async function autoAssignLotForUpc(upcRaw){
+      const upc = String(upcRaw || '').trim();
+      if(!upc) return {success:false, error:'Missing upc'};
+      const payload = {
+        upc: upc,
+        lot_number: getActiveLotNumber(),
+        lot_scope: lotScope
+      };
+      const r = await fetch('/api/items_prep/auto_assign_lot', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(payload)
+      });
+      return r.json().catch(()=>({success:false, error:'Auto-assign failed'}));
+    }
+
     async function updateQuantity(upc, qty) {
       try {
         const r = await fetch('/api/bol_items/quantity', {
@@ -333,24 +563,53 @@
     }
 
     async function lookup(upc){
-      const lotQ = selectedLot ? ('&lot_number=' + encodeURIComponent(selectedLot)) : '';
+      const lotQ = getLotQueryString();
       const r = await fetch('/api/bol_lookup?upc='+encodeURIComponent(upc)+lotQ);
-      const j = await r.json();
+      let j = await r.json();
       const resEl = document.getElementById('result');
       const actions = document.getElementById('actions');
       const statusMsg = document.getElementById('statusMsg');
+      let forcedActionLot = '';
+      let forcedLotOverride = false;
+      let lotDecisionNote = '';
       if(!j.found){
         resEl.classList.add('hidden'); actions.classList.add('hidden');
         document.getElementById('noBarcodeBtn').classList.remove('hidden');
         statusMsg.innerHTML = '<span class="bad">Not found in BOL</span>';
         setTimeout(()=>{ statusMsg.textContent=''; }, 1000);
         currentUpc = null;
+        currentLookupInfo = null;
+        const prepSummary = document.getElementById('prepSummary');
+        if(prepSummary) prepSummary.textContent = '';
         // Auto-clear the input after lookup completes
         document.getElementById('manualUpc').value = '';
         return;
       }
       const it = j.item||{};
       currentUpc = it.upc || upc; // Store the actual UPC (may be suffixed if duplicate)
+      currentLookupInfo = {
+        unchecked_remaining: Number(it.unchecked_remaining || 0),
+        items_to_list_url: it.items_to_list_url || '',
+        overage_candidate: !!it.is_overage_candidate,
+        action_lot: forcedActionLot || '',
+        force_lot_override: !!forcedLotOverride,
+        lot_decision_note: lotDecisionNote || ''
+      };
+      if(lotScope === 'current' && !forcedActionLot && (j.lot_mismatch || (it && it.lot_mismatch))){
+        const requestedLot = String(j.requested_lot || it.requested_lot || getActiveLotNumber() || '').trim();
+        const resolvedLot = String(j.resolved_lot || it.resolved_lot || it.lot_number || '').trim();
+        const activeLot = requestedLot || getActiveLotNumber();
+        currentLookupInfo.action_lot = activeLot;
+        currentLookupInfo.force_lot_override = true;
+        currentLookupInfo.lot_mismatch_flagged = true;
+        if(activeLot){
+          currentLookupInfo.lot_decision_note = resolvedLot
+            ? `Flagged lot mismatch: found in ${resolvedLot}, processing under current lot ${activeLot}.`
+            : `Flagged lot mismatch: processing under current lot ${activeLot}.`;
+        } else {
+          currentLookupInfo.lot_decision_note = 'Flagged lot mismatch: processing under current lot override.';
+        }
+      }
       const thumbImg = document.getElementById('thumb');
       const addThumbBtn = document.getElementById('addThumbBtn');
       const hasImage = it.image_url && it.image_url.trim() && it.image_url !== 'nan' && it.image_url !== 'None';
@@ -369,7 +628,17 @@
       const hero = document.getElementById('hero'); hero.style.display=''; hero.src = it.image_url || '';
       document.getElementById('title').textContent = it.item_description || '';
       document.getElementById('upcTxt').textContent = it.upc || '';
-      // No longer showing prep status summary - not applicable with new suffix architecture
+      const prepSummary = document.getElementById('prepSummary');
+      if(prepSummary){
+        const lotNote = (currentLookupInfo && currentLookupInfo.lot_decision_note)
+          ? ('<span class="bad">' + esc(currentLookupInfo.lot_decision_note) + '</span>')
+          : '';
+        if(currentLookupInfo.overage_candidate){
+          prepSummary.innerHTML = '<span class="bad">BOL unchecked quantity is already exhausted. Processing will continue and be flagged automatically.</span>' + (lotNote ? '<br>' + lotNote : '');
+        } else {
+          prepSummary.innerHTML = lotNote || '';
+        }
+      }
       resEl.classList.remove('hidden'); actions.classList.remove('hidden');
       statusMsg.textContent='';
       // Hide No Barcode button when item is displayed
@@ -385,41 +654,32 @@
       }, 100);
     }
 
-    async function setStatus(upc, status, qty){
-      return postWithLotFallback('/api/items_prep/status', {upc,status,qty,lot_number:selectedLot||''});
+    async function setStatus(upc, status, qty, extraPayload){
+      const payload = Object.assign({upc, status, qty}, extraPayload || {});
+      return postWithLotFallback('/api/items_prep/status', payload);
     }
 
     async function postWithLotFallback(url, payload){
-      let body = Object.assign({}, payload || {});
+      let body = withLotScope(payload);
       let r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
       let j = await r.json().catch(() => ({}));
       if(j && j.lot_match_error && !body.allow_no_lot){
-        const reqLot = (j.requested_lot || body.lot_number || '').toString().trim();
-        const sugLot = (j.suggested_lot || '').toString().trim();
-        const msg = [
-          'LOT matching error.',
-          reqLot ? ('Requested LOT: ' + reqLot) : 'Requested LOT could not be matched.',
-          sugLot ? ('Most recent available LOT: ' + sugLot) : '',
-          '',
-          'Continue without LOT?'
-        ].filter(Boolean).join('\n');
-        const proceed = confirm(msg);
-        if(!proceed){
-          return {success:false, cancelled:true, error:'Cancelled by user'};
-        }
-        body.allow_no_lot = true;
-        body.lot_number = '';
+        // Auto-override to current lot without prompting.
+        const overrideLot = (body.lot_number || getActionLotNumber() || getActiveLotNumber() || '').toString().trim();
+        body.allow_no_lot = false;
+        body.force_requested_lot = true;
+        body.lot_number = overrideLot;
         r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
         j = await r.json().catch(() => ({}));
         if(j && typeof j === 'object'){
-          j.continued_without_lot = true;
+          j.forced_lot_override = true;
         }
       }
       return j;
     }
     
 
-    document.getElementById('lookupBtn').onclick = ()=>{ const v=document.getElementById('manualUpc').value.trim(); if(v) lookup(v); };
+    document.getElementById('lookupBtn').onclick = ()=>{ triggerLookupFromInput(document.getElementById('manualUpc').value); };
     
     // Temporary thumbnail upload
     const addThumbBtn = document.getElementById('addThumbBtn');
@@ -506,7 +766,8 @@
             previousQty: lastEntry.previousQty,
             base_upc: lastEntry.base_upc,
             qty: lastEntry.qty,
-            lot_number: lastEntry.lot_number || selectedLot || ''
+            lot_number: lastEntry.lot_number || getActiveLotNumber(),
+            lot_scope: lotScope
           })
         });
         
@@ -533,7 +794,7 @@
       // Show loading overlay
       showPageLoading();
       
-      const result = await setStatus(currentUpc, 'good', currentQty);
+      let result = await setStatus(currentUpc, 'good', currentQty);
       const statusMsg = document.getElementById('statusMsg');
       
       if(result && result.success){ 
@@ -544,16 +805,18 @@
           qty: currentQty,
           action: result.action, // 'incremented' or 'created'
           previousQty: result.action === 'incremented' ? (result.quantity - currentQty) : 0,
-          lot_number: result.lot_number || selectedLot || ''
+          lot_number: result.lot_number || getActionLotNumber()
         };
         showUndoButton();
-        statusMsg.innerHTML='<span class="ok">Marked GOOD (Qty: '+currentQty+')</span>'; 
+        const exceptionTag = result.exception_overage ? ' <span class="bad">(saved as exception)</span>' : '';
+        const forcedTag = result.forced_lot_override ? (' <span class="bad">(forced current LOT ' + esc(result.lot_number || '') + ', flagged)</span>') : '';
+        statusMsg.innerHTML='<span class="ok">Marked GOOD (Qty: '+currentQty+')</span>' + exceptionTag + forcedTag;
       } else { 
         const errorMsg = result && result.error ? result.error : 'Unknown error';
         console.error('Failed to mark good:', result);
         statusMsg.innerHTML='<span class="bad">Failed: ' + errorMsg + '</span>'; 
       }
-      setTimeout(()=>{ hidePageLoading(); statusMsg.textContent=''; document.getElementById('result').classList.add('hidden'); document.getElementById('actions').classList.add('hidden'); document.getElementById('noBarcodeBtn').classList.remove('hidden'); document.getElementById('manualUpc').value=''; currentUpc = null; resetQtyDisplay(); setupDeviceMode(); }, 3000);
+      setTimeout(()=>{ hidePageLoading(); statusMsg.textContent=''; clearCurrentResultCard(); }, 3000);
     };
 
     document.getElementById('returnBtn').onclick = async ()=>{
@@ -566,15 +829,15 @@
       try {
         const data = await postWithLotFallback('/api/items_prep/create_return_entry', {
           upc: currentUpc,
-          qty: currentQty,
-          lot_number: selectedLot || ''
+          qty: currentQty
         });
         
         if (data.success) {
           const statusMsg = document.getElementById('statusMsg');
           const autoHint = data.auto_assigned ? (` <span class="bad">(auto-assigned LOT ${esc(data.lot_number || '')})</span>`) : '';
+          const forcedHint = data.forced_lot_override ? (` <span class="bad">(forced current LOT ${esc(data.lot_number || '')}, flagged)</span>`) : '';
           const noLotHint = data.continued_without_lot ? ' <span class="bad">(continued with no LOT)</span>' : '';
-          statusMsg.innerHTML='<span class="ok">Return entry created: ' + data.suffixed_upc + ' (Qty: '+currentQty+')</span>' + autoHint + noLotHint;
+          statusMsg.innerHTML='<span class="ok">Return entry created: ' + data.suffixed_upc + ' (Qty: '+currentQty+')</span>' + autoHint + forcedHint + noLotHint;
           
           // Store for undo
           lastEntry = {
@@ -582,7 +845,7 @@
             status: 'return', 
             qty: currentQty,
             action: 'return',
-            lot_number: data.lot_number || selectedLot || ''
+            lot_number: data.lot_number || getActionLotNumber()
           };
           showUndoButton();
         } else {
@@ -601,13 +864,7 @@
         hidePageLoading();
         const statusMsg = document.getElementById('statusMsg');
         statusMsg.textContent=''; 
-        document.getElementById('result').classList.add('hidden'); 
-        document.getElementById('actions').classList.add('hidden'); 
-        document.getElementById('noBarcodeBtn').classList.remove('hidden'); 
-        document.getElementById('manualUpc').value=''; 
-        currentUpc = null; 
-        resetQtyDisplay(); 
-        setupDeviceMode(); 
+        clearCurrentResultCard();
       }, 3000);
     };
 
@@ -619,26 +876,26 @@
       
       // Call API to create temporary suffixed entry for Bad flow
       try {
-        const data = await postWithLotFallback('/api/items_prep/create_bad_entry', {
+        let data = await postWithLotFallback('/api/items_prep/create_bad_entry', {
           upc: currentUpc,
-          qty: currentQty,
-          lot_number: selectedLot || ''
+          qty: currentQty
         });
         
         if (data.success && data.suffixed_upc) {
           // Store for undo
-          lastEntry = {upc: data.suffixed_upc, status: 'bad', qty: currentQty, base_upc: currentUpc, lot_number: data.lot_number || selectedLot || ''};
+          lastEntry = {upc: data.suffixed_upc, status: 'bad', qty: currentQty, base_upc: currentUpc, lot_number: data.lot_number || getActionLotNumber() || ''};
           sessionStorage.setItem('lastEntry', JSON.stringify(lastEntry));
           
           updateQtyDisplay(-1); // Show -1 animation
           
           setTimeout(() => {
-            const lotParam = data.lot_number || selectedLot || '';
+            const lotParam = data.lot_number || getActionLotNumber() || '';
             const lotQuery = lotParam ? ('&lot=' + encodeURIComponent(lotParam)) : '';
-            const requestedLotParam = data.requested_lot || selectedLot || '';
+            const requestedLotParam = data.requested_lot || getActionLotNumber() || '';
             const requestedLotQuery = requestedLotParam ? ('&requested_lot=' + encodeURIComponent(requestedLotParam)) : '';
             const noLotQuery = data.continued_without_lot ? '&continued_without_lot=1' : '';
-            window.location.href = '/item-prep/diagnostic?upc='+encodeURIComponent(data.suffixed_upc)+'&from=bad&qty='+currentQty+lotQuery+requestedLotQuery+noLotQuery+'&return='+encodeURIComponent('/item-prep?forceFocus=1&showUndo=1');
+            const exceptionOverageQuery = data.exception_overage ? '&exception_overage=1' : '';
+            window.location.href = '/item-prep/diagnostic?upc='+encodeURIComponent(data.suffixed_upc)+'&from=bad&qty='+currentQty+lotQuery+requestedLotQuery+noLotQuery+exceptionOverageQuery+'&return='+encodeURIComponent('/item-prep?forceFocus=1&showUndo=1');
           }, 300);
         } else {
           hidePageLoading();
@@ -666,13 +923,7 @@
           console.error('Cleanup error:', e);
         }
       }
-      document.getElementById('manualUpc').value=''; 
-      document.getElementById('result').classList.add('hidden'); 
-      document.getElementById('actions').classList.add('hidden'); 
-      document.getElementById('noBarcodeBtn').classList.remove('hidden');
-      currentUpc = null;
-      resetQtyDisplay();
-      setupDeviceMode(); 
+      clearCurrentResultCard();
     };
 
     // Device detection similar to barcode.html
@@ -691,10 +942,29 @@
         try{ input.focus({preventScroll:true}); if(input.select) input.select(); }catch{}
       }
     }
-    // Treat Enter key or change as a trigger for lookup (works well with USB scanners on desktop)
+    // Treat Enter, input idle, or change as a trigger for lookup (works well with USB scanners on desktop)
     const manual = document.getElementById('manualUpc');
-    manual.addEventListener('keydown', (e)=>{ if (e.key === 'Enter'){ e.preventDefault(); const v = manual.value.trim(); if(v) lookup(v); }});
-    manual.addEventListener('change', ()=>{ const v = manual.value.trim(); if(v) lookup(v); });
+    manual.addEventListener('keydown', (e)=>{
+      if (e.key === 'Enter'){
+        e.preventDefault();
+        if(lookupDebounceTimer){ clearTimeout(lookupDebounceTimer); lookupDebounceTimer = null; }
+        triggerLookupFromInput(manual.value);
+      }
+    });
+    manual.addEventListener('input', ()=>{
+      if(lookupDebounceTimer){ clearTimeout(lookupDebounceTimer); }
+      const v = manual.value.trim();
+      if(!v) return;
+      const delayMs = v.length >= 8 ? 140 : 240;
+      lookupDebounceTimer = setTimeout(()=>{
+        lookupDebounceTimer = null;
+        triggerLookupFromInput(manual.value);
+      }, delayMs);
+    });
+    manual.addEventListener('change', ()=>{
+      if(lookupDebounceTimer){ clearTimeout(lookupDebounceTimer); lookupDebounceTimer = null; }
+      triggerLookupFromInput(manual.value);
+    });
 
     function ensureUpcFocus(){
       const input = document.getElementById('manualUpc');
@@ -712,7 +982,8 @@
     }
 
     window.addEventListener('DOMContentLoaded', async ()=>{
-      await loadLots(); // Load LOT selector first
+      lotsReadyPromise = loadLots(); // Load LOT selector first
+      await lotsReadyPromise;
       setupDeviceMode();
       // If no UPC param, focus the manual input for quick scanning/typing
       try{
@@ -750,6 +1021,9 @@
     // Auto-trigger lookup if ?upc= is provided OR if coming from no-barcode page
     window.addEventListener('DOMContentLoaded', async ()=>{
       try{
+        if (lotsReadyPromise) {
+          try { await lotsReadyPromise; } catch (e) {}
+        }
         const params = new URLSearchParams(window.location.search);
         let upc = (params.get('upc')||'').trim();
         
@@ -765,13 +1039,15 @@
         if(upc){
           document.getElementById('manualUpc').value = upc;
           await lookup(upc);
-          // stop scanner while viewing result
-          stopScanner();
-          // Ensure result is visible and actions are big
-          document.getElementById('result').classList.remove('hidden');
-          document.getElementById('actions').classList.remove('hidden');
-          // Hide No Barcode button when item is displayed
-          document.getElementById('noBarcodeBtn').classList.add('hidden');
+          if (currentUpc) {
+            // stop scanner while viewing result
+            stopScanner();
+            // Ensure result is visible and actions are big
+            document.getElementById('result').classList.remove('hidden');
+            document.getElementById('actions').classList.remove('hidden');
+            // Hide No Barcode button when item is displayed
+            document.getElementById('noBarcodeBtn').classList.add('hidden');
+          }
         }
       }catch(e){}
     });
