@@ -1493,6 +1493,98 @@ def _preplog_auto_assigned_entries(*, include_undone=False, lot_number='', limit
         filtered.append(row)
     return filtered
 
+def _preplog_attach_titles(items):
+    """Attach `item_title` to prep-log rows, preferring bol.db then rawbol.db."""
+    rows = [dict(it or {}) for it in (items or [])]
+    if not rows:
+        return rows
+
+    def _norm_upc(value):
+        try:
+            return _normalize_upc_preserve_suffix_for_match(_normalize_upc(value))
+        except Exception:
+            return str(value or '').strip()
+
+    upcs = []
+    seen = set()
+
+    def _add_upc(v):
+        u = _norm_upc(v)
+        if u and u not in seen:
+            seen.add(u)
+            upcs.append(u)
+
+    for row in rows:
+        upc = _norm_upc(row.get('upc'))
+        if not upc:
+            continue
+        _add_upc(upc)
+        base_upc = (str(row.get('base_upc') or '').strip() or (upc.split('-', 1)[0] if '-' in upc else upc))
+        _add_upc(base_upc)
+
+    if not upcs:
+        return rows
+
+    def _chunked(seq, size=350):
+        for i in range(0, len(seq), size):
+            yield seq[i:i+size]
+
+    bol_title_map = {}
+    try:
+        with db_connection('bol.db') as conn:
+            cur = conn.cursor()
+            for chunk in _chunked(upcs):
+                placeholders = ','.join('?' for _ in chunk)
+                cur.execute(f'''
+                    SELECT upc, item_description
+                    FROM bol_items
+                    WHERE upc IN ({placeholders})
+                    ORDER BY import_date DESC, id DESC
+                ''', tuple(chunk))
+                for rr in cur.fetchall():
+                    key = _norm_upc(rr['upc'] if isinstance(rr, sqlite3.Row) else rr[0])
+                    title = ((rr['item_description'] if isinstance(rr, sqlite3.Row) else rr[1]) or '').strip()
+                    if key and title and key not in bol_title_map:
+                        bol_title_map[key] = title
+    except Exception:
+        bol_title_map = {}
+
+    raw_title_map = {}
+    try:
+        with db_connection('rawbol.db') as conn:
+            cur = conn.cursor()
+            for chunk in _chunked(upcs):
+                placeholders = ','.join('?' for _ in chunk)
+                cur.execute(f'''
+                    SELECT upc, item_description
+                    FROM raw_bol_items
+                    WHERE upc IN ({placeholders})
+                ''', tuple(chunk))
+                for rr in cur.fetchall():
+                    key = _norm_upc(rr['upc'] if isinstance(rr, sqlite3.Row) else rr[0])
+                    title = ((rr['item_description'] if isinstance(rr, sqlite3.Row) else rr[1]) or '').strip()
+                    if key and title and key not in raw_title_map:
+                        raw_title_map[key] = title
+    except Exception:
+        raw_title_map = {}
+
+    for row in rows:
+        upc = _norm_upc(row.get('upc'))
+        base_upc = (str(row.get('base_upc') or '').strip() or (upc.split('-', 1)[0] if '-' in upc else upc))
+        meta = row.get('meta') if isinstance(row.get('meta'), dict) else {}
+        meta_title = str(meta.get('title') or meta.get('item_description') or '').strip()
+        item_title = (
+            bol_title_map.get(upc) or
+            bol_title_map.get(base_upc) or
+            raw_title_map.get(upc) or
+            raw_title_map.get(base_upc) or
+            meta_title or
+            upc
+        )
+        row['item_title'] = item_title
+
+    return rows
+
 def _listagent_format_upc12(value):
     s = (value or '').strip()
     if not s:
@@ -2032,10 +2124,127 @@ def api_preplog_recent():
             items = [it for it in items if it.get('auto_assigned')]
         if lot_filter:
             items = [it for it in items if _normalize_lot_number(it.get('lot_number')).lower() == lot_filter.lower()]
+        items = _preplog_attach_titles(items)
 
         return jsonify({'success': True, 'items': items})
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e, 'preplog:recent')}), 500
+
+@app.route('/api/preplog/update', methods=['POST'])
+def api_preplog_update():
+    """Update prep-log note/quantity by id. JSON: { id, note?, quantity? }"""
+    try:
+        data = request.get_json() or {}
+        log_id = data.get('id')
+        if log_id is None:
+            return jsonify({'success': False, 'error': 'Missing id'}), 400
+        try:
+            log_id = int(log_id)
+        except Exception:
+            return jsonify({'success': False, 'error': 'Invalid id'}), 400
+
+        has_note = ('note' in data)
+        has_qty = ('quantity' in data or 'qty' in data)
+        if not has_note and not has_qty:
+            return jsonify({'success': False, 'error': 'Nothing to update'}), 400
+
+        with db_connection('preplog.db') as conn:
+            cur = conn.cursor()
+            _preplog_init_tables(cur)
+            cur.execute('SELECT * FROM prep_log WHERE id = ? LIMIT 1', (log_id,))
+            row = cur.fetchone()
+            entry = _listagent_row_to_dict(row)
+            if not entry:
+                return jsonify({'success': False, 'error': 'Log entry not found'}), 404
+            if entry.get('undone'):
+                return jsonify({'success': False, 'error': 'Cannot edit a deleted log entry'}), 400
+
+            updates = []
+            params = []
+            cleaned_note = (entry.get('note') or '').strip()
+            new_qty = entry.get('quantity')
+
+            if has_note:
+                cleaned_note = (data.get('note') or '').strip()
+                updates.append('note = ?')
+                params.append(cleaned_note or None)
+
+            if has_qty:
+                raw_qty = data.get('quantity', data.get('qty'))
+                try:
+                    new_qty = int(raw_qty)
+                except Exception:
+                    return jsonify({'success': False, 'error': 'Invalid quantity'}), 400
+                if new_qty < 1:
+                    return jsonify({'success': False, 'error': 'Quantity must be at least 1'}), 400
+                updates.append('quantity = ?')
+                params.append(new_qty)
+
+            if not updates:
+                return jsonify({'success': False, 'error': 'Nothing to update'}), 400
+
+            params.append(log_id)
+            cur.execute(f'''
+                UPDATE prep_log
+                SET {', '.join(updates)},
+                    undo_error = NULL
+                WHERE id = ?
+            ''', tuple(params))
+            cur.execute('SELECT * FROM prep_log WHERE id = ? LIMIT 1', (log_id,))
+            updated = _preplog_enrich_row(_listagent_row_to_dict(cur.fetchone()))
+
+        # Keep live prep status note in sync for convenience.
+        if has_note:
+            try:
+                upc = _normalize_upc_preserve_suffix_for_match(_normalize_upc(updated.get('upc')))
+                lot_number = _normalize_lot_number(updated.get('lot_number'))
+                base_upc = (updated.get('base_upc') or '').strip() or (upc.split('-', 1)[0] if '-' in upc else upc)
+                ts = _listagent_now_iso()
+                conn_b = sqlite3.connect('bol.db')
+                cur_b = conn_b.cursor()
+                _ensure_items_prep_tables()
+                updated_any = False
+                for target_upc in (upc, base_upc):
+                    if not target_upc:
+                        continue
+                    status_lot = _resolve_prep_status_lot(cur_b, target_upc, lot_number)
+                    cur_b.execute('''
+                        UPDATE items_prep_status
+                        SET note = ?, updated_at = ?
+                        WHERE upc = ? COLLATE NOCASE
+                          AND COALESCE(lot_number, '') = ? COLLATE NOCASE
+                    ''', (cleaned_note, ts, target_upc, status_lot))
+                    updated_any = updated_any or bool(cur_b.rowcount)
+                if cleaned_note and upc:
+                    try:
+                        cur_b.execute('''
+                            SELECT note
+                            FROM items_prep_notes
+                            WHERE upc = ? COLLATE NOCASE
+                            ORDER BY created_at DESC, id DESC
+                            LIMIT 1
+                        ''', (upc,))
+                        latest = cur_b.fetchone()
+                        latest_note = (latest[0] or '').strip() if latest else ''
+                        if latest_note != cleaned_note:
+                            cur_b.execute('INSERT INTO items_prep_notes (upc, note, created_at) VALUES (?,?,?)', (upc, cleaned_note, ts))
+                            updated_any = True
+                    except Exception:
+                        pass
+                conn_b.commit()
+                conn_b.close()
+                if updated_any:
+                    try:
+                        update_data_version()
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        updated_with_titles = _preplog_attach_titles([updated])
+        return jsonify({'success': True, 'item': (updated_with_titles[0] if updated_with_titles else updated)})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'preplog:update')}), 500
 
 @app.route('/api/preplog/undo', methods=['POST'])
 def api_preplog_undo():
@@ -2069,8 +2278,20 @@ def api_preplog_undo():
         base_upc = (entry.get('base_upc') or '').strip() or None
         enriched_entry = _preplog_enrich_row(entry)
         lot_number = _normalize_lot_number(enriched_entry.get('lot_number'))
+        meta_action = ''
+        try:
+            meta_action = str((enriched_entry.get('meta') or {}).get('action') or '').strip().lower()
+        except Exception:
+            meta_action = ''
 
-        ok, err, code = _items_prep_undo_core(upc=upc, status=status, qty=qty, base_upc=base_upc, lot_number=lot_number)
+        ok, err, code = _items_prep_undo_core(
+            upc=upc,
+            status=status,
+            qty=qty,
+            base_upc=base_upc,
+            lot_number=lot_number,
+            action=meta_action
+        )
         if not ok:
             err_text = (err or '').strip()
             err_l = err_text.lower()
@@ -2139,6 +2360,7 @@ def api_preplog_reassign_lot():
 
         upc = _normalize_upc_preserve_suffix_for_match(_normalize_upc(upc_raw))
         base_upc = (entry.get('base_upc') or '').strip() or upc.split('-', 1)[0]
+        entry_meta = dict(entry.get('meta') or {})
         old_lot = _normalize_lot_number(entry.get('lot_number'))
         if old_lot and old_lot.lower() == target_lot.lower():
             return jsonify({'success': True, 'item': entry, 'moved': False})
@@ -2303,6 +2525,34 @@ def api_preplog_reassign_lot():
                     SET bad_qty = ?, unchecked_qty = ?
                     WHERE id = ?
                 ''', (new_bad + move_qty, max(0, new_unchecked - move_qty), int(new_base[0])))
+            elif status == 'good' and _coerce_bool(entry_meta.get('affects_base_good')):
+                old_base = _pick_bol_row(base_upc, assigned_from_lot)
+                if not old_base:
+                    return jsonify({'success': False, 'error': f'Base UPC {base_upc} not found in source lot'}), 404
+                new_base = _pick_bol_row(base_upc, target_lot)
+                if not new_base or _normalize_lot_number(new_base[2]).lower() != target_lot.lower():
+                    return jsonify({'success': False, 'error': f'Base UPC {base_upc} not found in target lot {target_lot}'}), 404
+
+                old_good = int(old_base[5] or 0)
+                old_unchecked = _effective_unchecked(old_base)
+                move_qty = min(item_qty, old_good if old_good > 0 else item_qty)
+
+                new_good = int(new_base[5] or 0)
+                new_unchecked = _effective_unchecked(new_base)
+                if move_qty > new_unchecked:
+                    return jsonify({'success': False, 'error': f'Cannot move {move_qty} GOOD items to lot {target_lot}: only {new_unchecked} unchecked available'}), 400
+
+                cur.execute('''
+                    UPDATE bol_items
+                    SET good_qty = ?, unchecked_qty = ?
+                    WHERE id = ?
+                ''', (max(0, old_good - move_qty), old_unchecked + move_qty, int(old_base[0])))
+
+                cur.execute('''
+                    UPDATE bol_items
+                    SET good_qty = ?, unchecked_qty = ?
+                    WHERE id = ?
+                ''', (new_good + move_qty, max(0, new_unchecked - move_qty), int(new_base[0])))
 
             target_base = _pick_bol_row(base_upc, target_lot)
             target_bol_number = target_base[3] if target_base else item_row[3]
@@ -8400,34 +8650,15 @@ def _fetch_live_marketplace_upc_keys(upcs, *, max_lookup_keys=4000):
 def _apply_marketplace_status_overlay(rows):
     """
     Normalize marketplace status + source payload for UI rows.
-    - eBay/Amazon listed flags prefer currently-live marketplace DB state when available.
-    - Source labels are always included for listed rows.
+    Manual list-status in bol.db is the source of truth for /items-to-list.
+    Live marketplace DBs are intentionally not used here.
     """
     if not rows:
         return
 
-    upcs = [str(r.get('upc') or '').strip() for r in rows if str(r.get('upc') or '').strip()]
-    live = _fetch_live_marketplace_upc_keys(upcs)
-    ebay_keys = live.get('ebay') or set()
-    amazon_keys = live.get('amazon') or set()
-    ebay_checked = bool(live.get('ebay_checked'))
-    amazon_checked = bool(live.get('amazon_checked'))
-
     for row in rows:
-        upc = str(row.get('upc') or '').strip()
-        if ebay_checked:
-            is_live = _is_marketplace_live_for_upc(upc, ebay_keys)
-            row['listed_ebay'] = 1 if is_live else 0
-            row['listed_ebay_live'] = 1 if is_live else 0
-        else:
-            row['listed_ebay_live'] = None
-
-        if amazon_checked:
-            is_live = _is_marketplace_live_for_upc(upc, amazon_keys)
-            row['listed_amazon'] = 1 if is_live else 0
-            row['listed_amazon_live'] = 1 if is_live else 0
-        else:
-            row['listed_amazon_live'] = None
+        row['listed_ebay_live'] = None
+        row['listed_amazon_live'] = None
 
         for mp in ('amazon', 'ebay', 'facebook'):
             listed_key = f'listed_{mp}'
@@ -9664,29 +9895,18 @@ def _ensure_bol_list_status_column():
         except Exception as src_backfill_err:
             print(f"Warning: Could not backfill listing source columns: {src_backfill_err}")
 
-        # One-time migration: convert existing list_status='listed' to listed_amazon=1
-        # This runs even if columns already exist, but only for items that haven't been migrated
-        print("[_ensure_bol_list_status_column] Running migration for list_status='listed' items...")
+        # Legacy migration disabled in normal request path.
+        # Reason: list_status is still maintained as "listed if any marketplace is listed".
+        # Auto-converting list_status='listed' -> listed_amazon=1 can incorrectly re-enable
+        # Amazon for eBay/Facebook-only rows.
         try:
-            # Use case-insensitive check for 'listed'
-            cur.execute("""
-                UPDATE bol_items 
-                SET listed_amazon = 1, 
-                    listed_amazon_date = datetime('now'),
-                    listed_amazon_source = COALESCE(NULLIF(TRIM(listed_amazon_source), ''), 'system')
-                WHERE (list_status = 'listed' OR list_status = 'Listed')
-                AND (listed_amazon IS NULL OR listed_amazon = 0)
-            """)
-            migrated = cur.rowcount
-            if migrated > 0:
-                print(f"📦 Migrated {migrated} items from list_status='listed' to listed_amazon=1")
-                # Force update data version if we migrated items
-                try:
-                    cur.execute('CREATE TABLE IF NOT EXISTS app_metadata (key TEXT PRIMARY KEY, value TEXT)')
-                    cur.execute('INSERT OR REPLACE INTO app_metadata (key, value) VALUES (?, ?)', ('data_version', str(int(time.time()))))
-                except Exception: pass
+            cur.execute('CREATE TABLE IF NOT EXISTS app_metadata (key TEXT PRIMARY KEY, value TEXT)')
+            cur.execute(
+                'INSERT OR REPLACE INTO app_metadata (key, value) VALUES (?, ?)',
+                ('legacy_list_status_auto_migration_disabled_v1', '1')
+            )
         except Exception as e:
-            print(f"Warning: Could not run marketplace migration: {e}")
+            print(f"Warning: Could not write legacy migration disable marker: {e}")
         
         conn.commit()
         # print("✅ Quantity tracking columns migrated successfully") # Reduce noise
@@ -9696,6 +9916,24 @@ def _ensure_bol_list_status_column():
         traceback.print_exc()
     finally:
         conn.close()
+
+def _legacy_migrate_list_status_to_amazon(cur):
+    """
+    Legacy backfill helper:
+    map old generic list_status='listed' rows to listed_amazon=1.
+
+    IMPORTANT: This should be invoked explicitly (debug/maintenance only),
+    not on the normal request path.
+    """
+    cur.execute("""
+        UPDATE bol_items
+        SET listed_amazon = 1,
+            listed_amazon_date = datetime('now'),
+            listed_amazon_source = COALESCE(NULLIF(TRIM(listed_amazon_source), ''), 'system')
+        WHERE LOWER(TRIM(COALESCE(list_status, ''))) = 'listed'
+          AND COALESCE(listed_amazon, 0) = 0
+    """)
+    return cur.rowcount or 0
 
 @app.route('/item-prep')
 def item_prep_page():
@@ -10724,7 +10962,7 @@ def api_items_prep_status():
     """Upsert preparation status for a UPC.
     
     NEW LOGIC:
-    - GOOD flow: Always uses base UPC, increments qty in items_prep_status, decrements base qty in bol_items
+    - GOOD flow: Base UPC is default; if a note is provided, create a suffixed GOOD special-case entry
     - BAD flow: UPC should already be suffixed (created by Bad button), just update status
     - Base qty is only decremented when status is finalized (Good immediately, Bad on Complete)
     """
@@ -10783,8 +11021,36 @@ def api_items_prep_status():
         
         import datetime
         ts = datetime.datetime.now(datetime.UTC).isoformat()
+
+        def _next_clean_suffix(base_upc_value):
+            """Find next suffix not used by bol_items or prep artifacts."""
+            suffix_num = 1
+            max_suffix_attempts = 500
+            while suffix_num <= max_suffix_attempts:
+                candidate = f"{base_upc_value}-{suffix_num}"
+                cur.execute('SELECT 1 FROM bol_items WHERE upc = ? COLLATE NOCASE LIMIT 1', (candidate,))
+                if cur.fetchone():
+                    suffix_num += 1
+                    continue
+                cur.execute('SELECT 1 FROM items_prep_status WHERE upc = ? COLLATE NOCASE LIMIT 1', (candidate,))
+                if cur.fetchone():
+                    suffix_num += 1
+                    continue
+                cur.execute('SELECT 1 FROM items_prep_images WHERE upc = ? COLLATE NOCASE LIMIT 1', (candidate,))
+                if cur.fetchone():
+                    suffix_num += 1
+                    continue
+                try:
+                    cur.execute('SELECT 1 FROM items_prep_notes WHERE upc = ? COLLATE NOCASE LIMIT 1', (candidate,))
+                    if cur.fetchone():
+                        suffix_num += 1
+                        continue
+                except Exception:
+                    pass
+                return candidate
+            raise RuntimeError(f'Unable to allocate suffix for {base_upc_value} after {max_suffix_attempts} attempts')
         
-        # GOOD flow - always uses base UPC, tracks quantities explicitly
+        # GOOD flow - base UPC by default; note-driven special cases are suffixed
         if status == 'good':
             # GOOD items cannot have defect reasons
             if reason:
@@ -10799,6 +11065,173 @@ def api_items_prep_status():
                 selected_lot = _resolve_bol_lot_for_upc(cur, base_upc, requested_lot)
             forced_lot_override = bool(force_requested_lot and selected_lot)
             print(f'[STATUS API] Resolved LOT for GOOD flow: {selected_lot or "(none)"}')
+
+            # Special-case GOOD with note: create a dedicated suffixed GOOD entry.
+            # This preserves per-unit notes/photos without collapsing into base UPC state.
+            if note and upc == base_upc:
+                suffixed_upc = _next_clean_suffix(base_upc)
+                print(f'[GOOD] Creating noted special-case suffix {suffixed_upc} for base {base_upc}')
+
+                # Use lot-specific base row when possible; fallback to latest base row.
+                if selected_lot:
+                    cur.execute('''
+                        SELECT id, item_description, image_url, lot_number, bol_number, good_qty, bad_qty, unchecked_qty, original_qty
+                        FROM bol_items
+                        WHERE upc = ? COLLATE NOCASE
+                          AND lot_number = ? COLLATE NOCASE
+                        ORDER BY import_date DESC, id DESC
+                        LIMIT 1
+                    ''', (base_upc, selected_lot))
+                    base_item = cur.fetchone()
+                else:
+                    base_item = None
+                if not base_item:
+                    cur.execute('''
+                        SELECT id, item_description, image_url, lot_number, bol_number, good_qty, bad_qty, unchecked_qty, original_qty
+                        FROM bol_items
+                        WHERE upc = ? COLLATE NOCASE
+                        ORDER BY import_date DESC, id DESC
+                        LIMIT 1
+                    ''', (base_upc,))
+                    base_item = cur.fetchone()
+                if not base_item:
+                    return jsonify({'success': False, 'error': f'Base UPC {base_upc} not found in bol_items'}), 404
+
+                base_row_id = int(base_item[0])
+                base_desc = base_item[1] or ''
+                base_img = base_item[2] or ''
+                resolved_base_lot = _normalize_lot_number(base_item[3])
+                base_bol = base_item[4] or ''
+                current_good = int(base_item[5] or 0)
+                current_bad = int(base_item[6] or 0)
+                current_unchecked = base_item[7]
+                original_qty = int(base_item[8] or 0)
+                if current_unchecked is None:
+                    current_unchecked = max(0, original_qty - current_good - current_bad)
+                else:
+                    current_unchecked = int(current_unchecked or 0)
+
+                if allow_no_lot:
+                    selected_lot = ''
+                elif force_requested_lot and requested_lot_norm:
+                    selected_lot = requested_lot_norm
+                else:
+                    selected_lot = resolved_base_lot
+
+                if qty > current_unchecked:
+                    exception_overage_applied = True
+                    if allow_overage_exception:
+                        print(
+                            f'[GOOD][EXCEPTION] Allowing noted suffix overage for {base_upc}: '
+                            f'requested={qty}, unchecked={current_unchecked}'
+                        )
+                    else:
+                        print(
+                            f'[GOOD][EXCEPTION][AUTO] Unchecked gate bypassed for noted suffix {base_upc}: '
+                            f'requested={qty}, unchecked={current_unchecked}'
+                        )
+
+                new_base_good = current_good + qty
+                new_base_unchecked = max(0, current_unchecked - qty)
+                if force_requested_lot and selected_lot:
+                    cur.execute('''
+                        UPDATE bol_items
+                        SET good_qty = ?, unchecked_qty = ?, lot_number = ?
+                        WHERE id = ?
+                    ''', (new_base_good, new_base_unchecked, selected_lot, base_row_id))
+                else:
+                    cur.execute('''
+                        UPDATE bol_items
+                        SET good_qty = ?, unchecked_qty = ?
+                        WHERE id = ?
+                    ''', (new_base_good, new_base_unchecked, base_row_id))
+                print(
+                    f'[GOOD] Updated base {base_upc}: good_qty {current_good}->{new_base_good}, '
+                    f'unchecked_qty {current_unchecked}->{new_base_unchecked}'
+                )
+
+                cur.execute('''
+                    INSERT INTO bol_items (
+                        upc, item_description, image_url, lot_number, bol_number, import_date,
+                        temporary, original_qty, unchecked_qty, good_qty, bad_qty, quantity
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, 0, ?, 0, ?, 0, ?)
+                ''', (suffixed_upc, base_desc, base_img, selected_lot, base_bol, ts, qty, qty, qty))
+
+                cur.execute('''
+                    INSERT INTO items_prep_status (upc, lot_number, status, reason, note, quantity, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                ''', (suffixed_upc, _normalize_lot_number(selected_lot), 'good', '', note, qty, ts))
+
+                if exception_overage_applied:
+                    _items_prep_record_exception(
+                        cur,
+                        upc=suffixed_upc,
+                        base_upc=base_upc,
+                        lot_number=selected_lot,
+                        action='good_overage_override',
+                        quantity=qty,
+                        unchecked_remaining=current_unchecked,
+                        source='item-prep',
+                        note=exception_note or 'Noted GOOD suffix added as exception after unchecked quantity was exhausted.',
+                        meta={
+                            'status': 'good',
+                            'requested_qty': qty,
+                            'unchecked_before': current_unchecked,
+                            'allow_overage_exception': True,
+                            'requested_lot': requested_lot_norm,
+                            'assigned_lot': selected_lot,
+                            'forced_lot_override': bool(forced_lot_override),
+                            'special_case_note': True
+                        }
+                    )
+
+                conn.commit()
+                update_data_version()
+
+                try:
+                    good_meta = {
+                        'action': 'saved_good_suffixed',
+                        'requested_lot': requested_lot_norm,
+                        'lot_number': selected_lot,
+                        'assigned_lot': selected_lot,
+                        'photo_upc': suffixed_upc,
+                        'special_case_note': True,
+                        'affects_base_good': True
+                    }
+                    if selected_lot and (not requested_lot_norm or selected_lot.lower() != requested_lot_norm.lower()):
+                        good_meta['auto_assigned'] = True
+                    if forced_lot_override:
+                        good_meta['forced_lot_override'] = True
+                        good_meta['needs_review'] = True
+                    if exception_overage_applied:
+                        good_meta['exception_overage'] = True
+                        good_meta['unchecked_before'] = current_unchecked
+                        good_meta['requested_qty'] = qty
+                    _preplog_add_entry(
+                        upc=suffixed_upc,
+                        base_upc=base_upc,
+                        status='good',
+                        quantity=qty,
+                        note=note or None,
+                        reason=None,
+                        source='item-prep',
+                        meta=good_meta,
+                        dedupe=False
+                    )
+                except Exception:
+                    pass
+
+                return jsonify({
+                    'success': True,
+                    'action': 'saved_good_suffixed',
+                    'upc': suffixed_upc,
+                    'base_upc': base_upc,
+                    'lot_number': selected_lot,
+                    'exception_overage': bool(exception_overage_applied),
+                    'forced_lot_override': bool(forced_lot_override),
+                    'special_case_note': True
+                })
             
             # Check if the incoming UPC itself is a suffixed BAD entry
             suffixed_upc_found = None
@@ -10806,18 +11239,49 @@ def api_items_prep_status():
             
             if upc != base_upc:
                 # UPC is already suffixed, check if it's a BAD entry
-                row = _select_prep_status_row(cur, upc, selected_lot, columns='status, reason')
+                row = _select_prep_status_row(cur, upc, selected_lot, columns='status, reason, quantity')
                 print(f'[GOOD] Checking suffixed UPC {upc} in items_prep_status: {row}')
                 if row and row[0] == 'bad':
                     suffixed_upc_found = upc
                     suffixed_reason = (row[1] or '').strip()
                     print(f'[GOOD] Found suffixed BAD entry directly: {suffixed_upc_found}')
                 elif row:
-                    # Entry exists but is not BAD - this could be from the initial item-prep flow
-                    # where we clicked Bad button and are now changing to Good in diagnostic
-                    print(f'[GOOD] Found suffixed entry {upc} with status={row[0]} (not bad, treating as BAD→GOOD conversion)')
-                    suffixed_upc_found = upc
-                    suffixed_reason = (row[1] or '').strip()
+                    # Suffix exists and is not BAD: keep this suffixed row as GOOD without touching base UPC aggregates.
+                    existing_qty = int(row[2] or 0)
+                    next_qty = max(existing_qty, qty)
+                    status_update_lot = _resolve_prep_status_lot(cur, upc, selected_lot)
+                    cur.execute('''
+                        UPDATE items_prep_status
+                        SET status = 'good',
+                            reason = '',
+                            note = ?,
+                            quantity = ?,
+                            updated_at = ?
+                        WHERE upc = ? COLLATE NOCASE
+                          AND COALESCE(lot_number, '') = ? COLLATE NOCASE
+                    ''', (note, next_qty, ts, upc, status_update_lot))
+
+                    cur.execute('SELECT good_qty, quantity FROM bol_items WHERE upc = ? COLLATE NOCASE', (upc,))
+                    bol_row = cur.fetchone()
+                    bol_good = int((bol_row[0] if bol_row else 0) or 0)
+                    bol_qty = int((bol_row[1] if bol_row else 0) or 0)
+                    merged_qty = max(bol_good, bol_qty, next_qty)
+                    cur.execute('''
+                        UPDATE bol_items
+                        SET good_qty = ?, bad_qty = 0, unchecked_qty = 0, quantity = ?, temporary = 0
+                        WHERE upc = ? COLLATE NOCASE
+                    ''', (merged_qty, merged_qty, upc))
+
+                    conn.commit()
+                    update_data_version()
+                    return jsonify({
+                        'success': True,
+                        'action': 'updated_suffixed_good',
+                        'upc': upc,
+                        'base_upc': base_upc,
+                        'lot_number': selected_lot,
+                        'forced_lot_override': bool(forced_lot_override)
+                    })
                 else:
                     # No items_prep_status entry yet - check if this is a bad entry in bol_items
                     # (created by Bad button but diagnostic not completed yet)
@@ -10923,6 +11387,7 @@ def api_items_prep_status():
                     'success': True, 
                     'action': 'converted_bad_to_good_kept_suffix',
                     'upc': suffixed_upc_found,
+                    'base_upc': base_upc,
                     'lot_number': selected_lot,
                     'forced_lot_override': bool(forced_lot_override)
                 })
@@ -11104,6 +11569,7 @@ def api_items_prep_status():
                 'success': True, 
                 'action': 'converted_to_good' if suffixed_upc_found else 'saved_good',
                 'upc': base_upc,
+                'base_upc': base_upc,
                 'lot_number': selected_lot,
                 'exception_overage': bool(exception_overage_applied),
                 'forced_lot_override': bool(forced_lot_override)
@@ -12137,7 +12603,7 @@ def api_items_prep_status_delete(upc):
         
         # If this is a suffixed UPC (e.g., 110101-1), delete it from bol_items too
         if '-' in upc and upc.split('-')[-1].isdigit():
-            print(f'Deleting suffixed bad entry {upc} from bol_items')
+            print(f'Deleting suffixed entry {upc} from bol_items')
             if lot_number:
                 cur.execute('DELETE FROM bol_items WHERE upc = ? COLLATE NOCASE AND lot_number = ? COLLATE NOCASE', (upc, lot_number))
                 if cur.rowcount == 0:
@@ -12152,7 +12618,7 @@ def api_items_prep_status_delete(upc):
     finally:
         conn.close()
 
-def _items_prep_undo_core(*, upc, status, qty=1, base_upc=None, lot_number=None):
+def _items_prep_undo_core(*, upc, status, qty=1, base_upc=None, lot_number=None, action=None):
     """Shared undo logic for Item Prep actions.
 
     Returns: (ok: bool, error: str|None, http_status: int)
@@ -12160,6 +12626,7 @@ def _items_prep_undo_core(*, upc, status, qty=1, base_upc=None, lot_number=None)
     try:
         upc = (upc or '').strip()
         status = (status or '').strip().lower()
+        action = (action or '').strip().lower()
         base_upc = (base_upc or '').strip() or None
         lot_number = _normalize_lot_number(lot_number)
 
@@ -12204,42 +12671,25 @@ def _items_prep_undo_core(*, upc, status, qty=1, base_upc=None, lot_number=None)
                 return cur.fetchone()
 
             if status == 'good':
-                row = _pick_bol_row(upc, 'id, lot_number, good_qty, unchecked_qty')
-                if not row:
-                    return False, f'UPC {upc} not found', 404
+                is_suffixed = ('-' in upc and upc.rsplit('-', 1)[-1].isdigit())
+                if is_suffixed and action in ('saved_good_suffixed', 'special_good_suffixed', 'good_suffixed'):
+                    row = _pick_bol_row(upc, 'id, lot_number, good_qty, unchecked_qty, quantity')
+                    if not row:
+                        return False, f'UPC {upc} not found', 404
 
-                bol_id = row[0]
-                row_lot = _normalize_lot_number(row[1])
-                current_good = row[2] or 0
-                current_unchecked = row[3] or 0
+                    bol_id = row[0]
+                    row_lot = _normalize_lot_number(row[1])
+                    current_good = int(row[2] or 0)
+                    current_unchecked = int(row[3] or 0)
+                    row_qty = int(row[4] or 0)
+                    if current_good <= 0:
+                        current_good = row_qty
 
-                if qty > current_good:
-                    return False, f'Cannot undo {qty} - only {current_good} marked as good', 400
+                    if qty > current_good:
+                        return False, f'Cannot undo {qty} - only {current_good} marked as good', 400
 
-                new_good = current_good - qty
-                new_unchecked = current_unchecked + qty
-
-                cur.execute('''
-                    UPDATE bol_items
-                    SET good_qty = ?, unchecked_qty = ?, quantity = ?
-                    WHERE id = ?
-                ''', (new_good, new_unchecked, new_good, bol_id))
-
-                if new_good > 0:
-                    cur.execute('''
-                        UPDATE items_prep_status
-                        SET quantity = ?
-                        WHERE upc = ? COLLATE NOCASE
-                          AND COALESCE(lot_number, '') = ? COLLATE NOCASE
-                    ''', (new_good, upc, row_lot))
-                    if cur.rowcount == 0 and row_lot:
-                        cur.execute('''
-                            UPDATE items_prep_status
-                            SET quantity = ?
-                            WHERE upc = ? COLLATE NOCASE
-                              AND COALESCE(lot_number, '') = ''
-                        ''', (new_good, upc))
-                else:
+                    undo_qty = qty
+                    cur.execute('DELETE FROM bol_items WHERE id = ?', (bol_id,))
                     cur.execute('''
                         DELETE FROM items_prep_status
                         WHERE upc = ? COLLATE NOCASE
@@ -12248,8 +12698,98 @@ def _items_prep_undo_core(*, upc, status, qty=1, base_upc=None, lot_number=None)
                             OR (? <> '' AND COALESCE(lot_number, '') = '')
                           )
                     ''', (upc, row_lot, row_lot))
+                    cur.execute('DELETE FROM items_prep_images WHERE upc = ? COLLATE NOCASE', (upc,))
+                    try:
+                        cur.execute('DELETE FROM items_prep_notes WHERE upc = ? COLLATE NOCASE', (upc,))
+                    except Exception:
+                        pass
 
-                print(f'[UNDO GOOD] {upc} (lot={row_lot}): moved {qty} from good to unchecked (good: {current_good}→{new_good}, unchecked: {current_unchecked}→{new_unchecked})')
+                    base_key = (base_upc or '').strip() or upc.split('-', 1)[0]
+                    if row_lot:
+                        cur.execute('''
+                            SELECT id, good_qty, unchecked_qty
+                            FROM bol_items
+                            WHERE upc = ? COLLATE NOCASE
+                              AND lot_number = ? COLLATE NOCASE
+                            ORDER BY import_date DESC, id DESC
+                            LIMIT 1
+                        ''', (base_key, row_lot))
+                        base_row = cur.fetchone()
+                    else:
+                        cur.execute('''
+                            SELECT id, good_qty, unchecked_qty
+                            FROM bol_items
+                            WHERE upc = ? COLLATE NOCASE
+                            ORDER BY import_date DESC, id DESC
+                            LIMIT 1
+                        ''', (base_key,))
+                        base_row = cur.fetchone()
+
+                    if base_row:
+                        base_id = int(base_row[0])
+                        base_good = int(base_row[1] or 0)
+                        base_unchecked = int(base_row[2] or 0)
+                        new_base_good = max(0, base_good - undo_qty)
+                        new_base_unchecked = base_unchecked + undo_qty
+                        cur.execute('''
+                            UPDATE bol_items
+                            SET good_qty = ?, unchecked_qty = ?
+                            WHERE id = ?
+                        ''', (new_base_good, new_base_unchecked, base_id))
+                        print(
+                            f'[UNDO GOOD SUFFIX] Deleted {upc} (lot={row_lot}); '
+                            f'base {base_key}: good {base_good}->{new_base_good}, '
+                            f'unchecked {base_unchecked}->{new_base_unchecked}'
+                        )
+                    else:
+                        print(f'[UNDO GOOD SUFFIX] Warning: base UPC {base_key} not found to restore quantity')
+                else:
+                    row = _pick_bol_row(upc, 'id, lot_number, good_qty, unchecked_qty')
+                    if not row:
+                        return False, f'UPC {upc} not found', 404
+
+                    bol_id = row[0]
+                    row_lot = _normalize_lot_number(row[1])
+                    current_good = row[2] or 0
+                    current_unchecked = row[3] or 0
+
+                    if qty > current_good:
+                        return False, f'Cannot undo {qty} - only {current_good} marked as good', 400
+
+                    new_good = current_good - qty
+                    new_unchecked = current_unchecked + qty
+
+                    cur.execute('''
+                        UPDATE bol_items
+                        SET good_qty = ?, unchecked_qty = ?, quantity = ?
+                        WHERE id = ?
+                    ''', (new_good, new_unchecked, new_good, bol_id))
+
+                    if new_good > 0:
+                        cur.execute('''
+                            UPDATE items_prep_status
+                            SET quantity = ?
+                            WHERE upc = ? COLLATE NOCASE
+                              AND COALESCE(lot_number, '') = ? COLLATE NOCASE
+                        ''', (new_good, upc, row_lot))
+                        if cur.rowcount == 0 and row_lot:
+                            cur.execute('''
+                                UPDATE items_prep_status
+                                SET quantity = ?
+                                WHERE upc = ? COLLATE NOCASE
+                                  AND COALESCE(lot_number, '') = ''
+                            ''', (new_good, upc))
+                    else:
+                        cur.execute('''
+                            DELETE FROM items_prep_status
+                            WHERE upc = ? COLLATE NOCASE
+                              AND (
+                                COALESCE(lot_number, '') = ? COLLATE NOCASE
+                                OR (? <> '' AND COALESCE(lot_number, '') = '')
+                              )
+                        ''', (upc, row_lot, row_lot))
+
+                    print(f'[UNDO GOOD] {upc} (lot={row_lot}): moved {qty} from good to unchecked (good: {current_good}→{new_good}, unchecked: {current_unchecked}→{new_unchecked})')
 
             elif status == 'bad':
                 row = _pick_bol_row(upc, 'id, lot_number, quantity, temporary')
@@ -12369,11 +12909,19 @@ def api_items_prep_undo():
         data = request.get_json() or {}
         upc = data.get('upc')
         status = data.get('status')
+        action = data.get('action')
         base_upc = data.get('base_upc')
         qty = data.get('qty', 1)
         lot_number = _preferred_lot_from_request(data)
 
-        ok, err, code = _items_prep_undo_core(upc=upc, status=status, qty=qty, base_upc=base_upc, lot_number=lot_number)
+        ok, err, code = _items_prep_undo_core(
+            upc=upc,
+            status=status,
+            qty=qty,
+            base_upc=base_upc,
+            lot_number=lot_number,
+            action=action
+        )
         if not ok:
             return jsonify({'success': False, 'error': err or 'Undo failed'}), (code or 400)
         return jsonify({'success': True})
@@ -18833,24 +19381,46 @@ def api_bol_lots():
 
 @app.route('/api/bol_items/list_status', methods=['POST'])
 def api_bol_items_set_list_status():
-    """Set marketplace listing status for a BOL item by UPC.
-    JSON: { upc, marketplace, listed, quantity (for facebook) } where marketplace in ['amazon', 'ebay', 'facebook'] and listed is boolean"""
+    """Set marketplace listing status for a BOL item.
+    JSON: { id?, upc?, lot_number?, marketplace, listed, quantity (for facebook) }
+    marketplace in ['amazon', 'ebay', 'facebook'] and listed is boolean.
+    """
     conn = None
     try:
         data = request.get_json() or {}
         upc = _strip_leading_zeros_numeric(_normalize_upc(data.get('upc')))
-        lot_number = _normalize_lot_number(data.get('lot_number') or data.get('lot'))
-        if not lot_number:
+        item_id = data.get('id')
+        if item_id is not None and str(item_id).strip() != '':
+            try:
+                item_id = int(item_id)
+            except Exception:
+                return jsonify({'success': False, 'error': 'Invalid id'}), 400
+            if item_id <= 0:
+                return jsonify({'success': False, 'error': 'Invalid id'}), 400
+        else:
+            item_id = None
+
+        lot_explicit = False
+        lot_raw = ''
+        if isinstance(data, dict):
+            if 'lot_number' in data:
+                lot_explicit = True
+                lot_raw = data.get('lot_number')
+            elif 'lot' in data:
+                lot_explicit = True
+                lot_raw = data.get('lot')
+        lot_number = _normalize_lot_number(lot_raw)
+        if not lot_number and not lot_explicit:
             lot_number = _preferred_lot_from_request(data)
         marketplace = (data.get('marketplace') or '').strip().lower()
         listed = bool(data.get('listed', True))
         quantity = int(data.get('quantity', 1)) if data.get('quantity') else 1
         source = _normalize_listing_source(data.get('source'), default='user')
 
-        print(f"[list_status] UPC: {upc}, LOT: {lot_number}, Marketplace: {marketplace}, Listed: {listed}, Qty: {quantity}, Source: {source}")
+        print(f"[list_status] id={item_id} UPC: {upc}, LOT: {lot_number}, Marketplace: {marketplace}, Listed: {listed}, Qty: {quantity}, Source: {source}")
 
-        if not upc:
-            return jsonify({'success': False, 'error': 'Missing upc'}), 400
+        if not upc and item_id is None:
+            return jsonify({'success': False, 'error': 'Missing upc or id'}), 400
         if marketplace not in ('amazon', 'ebay', 'facebook'):
             return jsonify({'success': False, 'error': 'Invalid marketplace. Must be amazon, ebay, or facebook'}), 400
 
@@ -18859,32 +19429,43 @@ def api_bol_items_set_list_status():
 
         conn = sqlite3.connect('bol.db')
         cur = conn.cursor()
-        if lot_number:
+        if item_id is not None:
             cur.execute('''
-                SELECT id, lot_number, COALESCE(listed_facebook,0), COALESCE(listed_facebook_qty,1), listed_facebook_date
+                SELECT id, upc, lot_number, COALESCE(listed_facebook,0), COALESCE(listed_facebook_qty,1), listed_facebook_date
                 FROM bol_items
-                WHERE upc = ? COLLATE NOCASE
-                  AND lot_number = ? COLLATE NOCASE
-                ORDER BY import_date DESC, id DESC
+                WHERE id = ?
                 LIMIT 1
-            ''', (upc, lot_number))
+            ''', (item_id,))
         else:
-            cur.execute('''
-                SELECT id, lot_number, COALESCE(listed_facebook,0), COALESCE(listed_facebook_qty,1), listed_facebook_date
-                FROM bol_items
-                WHERE upc = ? COLLATE NOCASE
-                ORDER BY import_date DESC, id DESC
-                LIMIT 1
-            ''', (upc,))
+            if lot_number:
+                cur.execute('''
+                    SELECT id, upc, lot_number, COALESCE(listed_facebook,0), COALESCE(listed_facebook_qty,1), listed_facebook_date
+                    FROM bol_items
+                    WHERE upc = ? COLLATE NOCASE
+                      AND lot_number = ? COLLATE NOCASE
+                    ORDER BY import_date DESC, id DESC
+                    LIMIT 1
+                ''', (upc, lot_number))
+            else:
+                cur.execute('''
+                    SELECT id, upc, lot_number, COALESCE(listed_facebook,0), COALESCE(listed_facebook_qty,1), listed_facebook_date
+                    FROM bol_items
+                    WHERE upc = ? COLLATE NOCASE
+                    ORDER BY import_date DESC, id DESC
+                    LIMIT 1
+                ''', (upc,))
         target_row = cur.fetchone()
         if not target_row:
+            if item_id is not None:
+                return jsonify({'success': False, 'error': f'Item id {item_id} not found'}), 404
             if lot_number:
                 return jsonify({'success': False, 'error': f'Item {upc} not found in lot {lot_number}'}), 404
             return jsonify({'success': False, 'error': f'Item {upc} not found'}), 404
 
         target_id = target_row[0]
-        target_lot = _normalize_lot_number(target_row[1])
-        prev_fb = target_row[2:]
+        target_upc = _strip_leading_zeros_numeric(_normalize_upc(target_row[1])) or upc
+        target_lot = _normalize_lot_number(target_row[2])
+        prev_fb = target_row[3:]
         prev_fb_listed = int(prev_fb[0] or 0) if prev_fb else 0
         prev_fb_qty = int(prev_fb[1] or 1) if prev_fb else 1
         prev_fb_date = prev_fb[2] if prev_fb else None
@@ -18893,10 +19474,10 @@ def api_bol_items_set_list_status():
         if marketplace == 'amazon':
             if listed:
                 cur.execute('UPDATE bol_items SET listed_amazon=1, listed_amazon_date=datetime("now"), listed_amazon_source=? WHERE id = ?', (source, target_id))
-                print(f"[list_status] Set listed_amazon=1 for {upc}")
+                print(f"[list_status] Set listed_amazon=1 for {target_upc}")
             else:
                 cur.execute('UPDATE bol_items SET listed_amazon=0, listed_amazon_date=NULL, listed_amazon_source=NULL WHERE id = ?', (target_id,))
-                print(f"[list_status] Set listed_amazon=0 for {upc}")
+                print(f"[list_status] Set listed_amazon=0 for {target_upc}")
         elif marketplace == 'ebay':
             if listed:
                 cur.execute('UPDATE bol_items SET listed_ebay=1, listed_ebay_date=datetime("now"), listed_ebay_source=? WHERE id = ?', (source, target_id))
@@ -18906,11 +19487,11 @@ def api_bol_items_set_list_status():
             if listed:
                 cur.execute('UPDATE bol_items SET listed_facebook=1, listed_facebook_date=datetime("now"), listed_facebook_qty=?, listed_facebook_source=? WHERE id = ?', (quantity, source, target_id))
                 # Track in fbstore.db
-                _track_fb_listing(upc, quantity, listed=True)
+                _track_fb_listing(target_upc, quantity, listed=True)
                 action = 'manual_add' if prev_fb_listed == 0 else ('manual_qty_change' if prev_fb_qty != quantity else 'manual_add')
                 _log_fb_listing_action(
                     action=action,
-                    upc=upc,
+                    upc=target_upc,
                     delta_qty=(quantity - prev_fb_qty),
                     prev_qty=prev_fb_qty,
                     new_qty=quantity,
@@ -18921,10 +19502,10 @@ def api_bol_items_set_list_status():
             else:
                 cur.execute('UPDATE bol_items SET listed_facebook=0, listed_facebook_date=NULL, listed_facebook_qty=NULL, listed_facebook_source=NULL WHERE id = ?', (target_id,))
                 # Mark as unlisted in fbstore.db
-                _track_fb_listing(upc, quantity, listed=False)
+                _track_fb_listing(target_upc, quantity, listed=False)
                 _log_fb_listing_action(
                     action='manual_unlist',
-                    upc=upc,
+                    upc=target_upc,
                     delta_qty=(0 - prev_fb_qty),
                     prev_qty=prev_fb_qty,
                     new_qty=0,
@@ -18951,7 +19532,7 @@ def api_bol_items_set_list_status():
         # Best-effort listing audit trail for manual/system status toggles.
         try:
             _listinglog_add_entry(
-                upc=upc,
+                upc=target_upc,
                 platform=marketplace,
                 action='listed' if listed else 'unlisted',
                 source=source,
@@ -18995,14 +19576,24 @@ def api_bol_items_set_list_status():
 @app.route('/api/debug/migrate_listings', methods=['GET'])
 @require_debug_mode
 def api_debug_migrate_listings():
-    """Force run the listing migration and return results."""
+    """
+    Legacy migration endpoint.
+    By default this is read-only and does not run migration.
+    Add `?force=1` to run the old list_status -> listed_amazon backfill once.
+    """
+    conn = None
     try:
         _ensure_bol_list_status_column()
-        update_data_version()
-        
-        # Check results
+        force = str(request.args.get('force') or '').strip().lower() in ('1', 'true', 'yes', 'on')
+
         conn = sqlite3.connect('bol.db')
         cur = conn.cursor()
+        migrated = 0
+        if force:
+            migrated = _legacy_migrate_list_status_to_amazon(cur)
+            conn.commit()
+            update_data_version()
+
         cur.execute("SELECT COUNT(*) FROM bol_items WHERE listed_amazon = 1")
         amazon_count = cur.fetchone()[0]
         cur.execute("SELECT COUNT(*) FROM bol_items WHERE list_status = 'listed'")
@@ -19010,7 +19601,13 @@ def api_debug_migrate_listings():
         
         return jsonify({
             'success': True, 
-            'message': 'Migration ran. Check server logs for details.',
+            'message': (
+                f'Legacy migration ran: migrated={migrated}.'
+                if force else
+                'Legacy migration is disabled by default. Use ?force=1 to run it explicitly.'
+            ),
+            'forced': force,
+            'migrated': migrated,
             'amazon_listed_count': amazon_count,
             'legacy_listed_count': legacy_count
         })
@@ -19019,7 +19616,8 @@ def api_debug_migrate_listings():
         traceback.print_exc()
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
 
 @app.route('/api/debug/check_item/<upc>', methods=['GET'])
 @require_debug_mode

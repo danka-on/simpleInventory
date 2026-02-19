@@ -180,13 +180,55 @@
 
     .entry-actions {
       flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 6px;
     }
 
-    .note-line {
+    .edit-grid {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-top: 7px;
+    }
+    .edit-note {
+      flex: 1;
+      min-width: 180px;
+      padding: 7px 9px;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      font-size: 0.86rem;
+      color: #334155;
+      background: #fff;
+      outline: none;
+    }
+    .edit-note:focus {
+      border-color: #94a3b8;
+    }
+    .edit-qty {
+      width: 78px;
+      padding: 7px 9px;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      font-size: 0.86rem;
+      color: #334155;
+      background: #fff;
+      outline: none;
+      text-align: center;
+    }
+    .edit-qty:focus {
+      border-color: #94a3b8;
+    }
+    .btn-save {
+      background: #0ea5a4;
+      color: #fff;
+      padding: 8px 14px;
       font-size: 0.82rem;
-      color: #64748b;
-      margin-top: 2px;
-      font-style: italic;
+    }
+    .btn-save:hover {
+      opacity: 0.92;
     }
 
     .empty {
@@ -275,6 +317,9 @@
       .entry-title { font-size: 1rem; }
       .entry-meta { font-size: 0.88rem; }
       .btn-undo { padding: 10px 18px; font-size: 0.9rem; }
+      .edit-note { font-size: 0.9rem; }
+      .edit-qty { width: 84px; font-size: 0.9rem; }
+      .btn-save { font-size: 0.86rem; }
     }
 
     /* ── Mobile ── */
@@ -286,6 +331,10 @@
       .entry-title { font-size: 0.88rem; }
       .entry-meta { font-size: 0.78rem; }
       .toolbar { gap: 8px; }
+      .edit-grid { gap: 6px; }
+      .edit-note { min-width: 120px; font-size: 0.8rem; }
+      .edit-qty { width: 66px; font-size: 0.8rem; }
+      .btn-save { font-size: 0.78rem; padding: 7px 10px; }
     }
   </style>
 </head>
@@ -297,11 +346,15 @@
   </div>
 
   <div class="toolbar">
-    <input type="text" id="searchUpc" placeholder="Search UPC..." autocomplete="off">
+    <input type="text" id="searchUpc" placeholder="Search UPC or title..." autocomplete="off">
     <div class="toolbar-filters">
       <label><input type="checkbox" id="showAll"> All dates</label>
-      <label><input type="checkbox" id="hideUndone" checked> Hide undone</label>
+      <label><input type="checkbox" id="hideUndone" checked> Hide deleted</label>
       <label><input type="checkbox" id="autoOnly"> Auto only</label>
+      <label><input type="checkbox" id="statusGood" checked> Good</label>
+      <label><input type="checkbox" id="statusBad" checked> Bad</label>
+      <label><input type="checkbox" id="statusReturn" checked> Return</label>
+      <label><input type="checkbox" id="withNoteOnly"> With note</label>
     </div>
     <span class="count" id="summary">Loading...</span>
   </div>
@@ -437,15 +490,48 @@
     }
 
     async function undoEntry(id){
-      if(!confirm('Undo this prep entry?')) return;
+      if(!confirm('Delete this prep entry?')) return;
       const btn = document.querySelector(`[data-undo="${id}"]`);
       if(btn) btn.disabled = true;
       try{
         await apiPost('/api/preplog/undo', {id});
         await loadLog();
       }catch(e){
-        alert('Undo failed: ' + e.message);
+        alert('Delete failed: ' + e.message);
         if(btn) btn.disabled = false;
+      }
+    }
+
+    async function saveEntryEdits(id, rowEl){
+      if(!rowEl) return;
+      const noteEl = rowEl.querySelector('[data-note]');
+      const qtyEl = rowEl.querySelector('[data-qty]');
+      const saveBtn = rowEl.querySelector('[data-save]');
+      const note = noteEl ? String(noteEl.value || '').trim() : '';
+      const qtyRaw = qtyEl ? String(qtyEl.value || '').trim() : '';
+      const qty = Number.parseInt(qtyRaw, 10);
+      if(!Number.isFinite(qty) || qty < 1){
+        alert('Quantity must be at least 1');
+        if(qtyEl) qtyEl.focus();
+        return;
+      }
+      if(saveBtn) saveBtn.disabled = true;
+      const oldTxt = saveBtn ? saveBtn.textContent : '';
+      if(saveBtn) saveBtn.textContent = 'Saving...';
+      try{
+        const data = await apiPost('/api/preplog/update', {id, note, quantity: qty});
+        if(data && data.item){
+          const idx = allItems.findIndex(it => Number(it.id) === Number(id));
+          if(idx >= 0) allItems[idx] = data.item;
+        }
+        if(saveBtn) saveBtn.textContent = 'Saved';
+        setTimeout(() => { loadLog(); }, 180);
+      }catch(e){
+        alert('Save failed: ' + e.message);
+        if(saveBtn){
+          saveBtn.disabled = false;
+          saveBtn.textContent = oldTxt || 'Save';
+        }
       }
     }
 
@@ -510,14 +596,31 @@
       const search = document.getElementById('searchUpc').value.trim().toLowerCase();
       const showAll = document.getElementById('showAll').checked;
       const autoOnly = document.getElementById('autoOnly').checked;
+      const statusGood = document.getElementById('statusGood').checked;
+      const statusBad = document.getElementById('statusBad').checked;
+      const statusReturn = document.getElementById('statusReturn').checked;
+      const withNoteOnly = document.getElementById('withNoteOnly').checked;
       const lotFilter = document.getElementById('filterLot').value.trim().toLowerCase();
 
       let filtered = items;
       if(!showAll) filtered = filtered.filter(it => isToday(it.created_at));
+      const allowedStatuses = [];
+      if(statusGood) allowedStatuses.push('good');
+      if(statusBad) allowedStatuses.push('bad');
+      if(statusReturn) allowedStatuses.push('return');
+      if(allowedStatuses.length > 0){
+        filtered = filtered.filter(it => allowedStatuses.includes(String(it.status ?? '').toLowerCase()));
+      }else{
+        filtered = [];
+      }
+      if(withNoteOnly){
+        filtered = filtered.filter(it => String(it.note ?? '').trim().length > 0);
+      }
       if(search) filtered = filtered.filter(it => {
         const u = String(it.upc ?? '').toLowerCase();
         const b = String(it.base_upc ?? '').toLowerCase();
-        return u.includes(search) || b.includes(search);
+        const t = String(it.item_title ?? it.title ?? '').toLowerCase();
+        return u.includes(search) || b.includes(search) || t.includes(search);
       });
       if(autoOnly) filtered = filtered.filter(it => !!it.auto_assigned);
       if(lotFilter) filtered = filtered.filter(it => String(it.lot_number ?? '').toLowerCase().includes(lotFilter));
@@ -534,8 +637,9 @@
       filtered.forEach((it, idx) => {
         const id = it.id;
         const st = String(it.status ?? '').toLowerCase();
-        const qty = it.quantity ?? it.qty ?? 1;
+        const qty = Number.parseInt(it.quantity ?? it.qty ?? 1, 10) || 1;
         const upc = String(it.upc ?? '').trim();
+        const displayTitle = String(it.item_title ?? it.title ?? '').trim() || upc || '—';
         const lot = String(it.lot_number ?? '').trim();
         const note = String(it.note ?? '').trim();
         const undone = !!it.undone;
@@ -555,6 +659,7 @@
 
         const row = document.createElement('div');
         row.className = 'entry' + (undone ? ' undone' : '');
+        row.dataset.entryId = String(id);
 
         const num = filtered.length - idx;
 
@@ -566,21 +671,28 @@
           }
           <div class="entry-info">
             <div class="entry-title">
-              <span>${esc(upc || '—')}</span>
+              <span>${esc(displayTitle)}</span>
               <span class="status ${statusCls(st)}">${statusTxt(st)}</span>
-              ${qty > 1 ? `<span style="color:#64748b;font-weight:400;font-size:0.85rem">x${esc(qty)}</span>` : ''}
+              <span style="color:#64748b;font-weight:400;font-size:0.85rem">x${esc(qty)}</span>
             </div>
-            <div class="entry-meta">${esc(fmtTime(it.created_at))}${lot ? ' &middot; LOT ' + esc(lot) : ''}${it.auto_assigned ? ' &middot; auto' : ''}</div>
-            ${note ? `<div class="note-line">${esc(note)}</div>` : ''}
+            <div class="entry-meta">${esc(fmtTime(it.created_at))}${lot ? ' &middot; LOT ' + esc(lot) : ''}${it.auto_assigned ? ' &middot; auto' : ''} &middot; UPC ${esc(upc || '—')}</div>
+            <div class="edit-grid">
+              <input class="edit-note" data-note="${esc(id)}" type="text" value="${esc(note)}" placeholder="Add/edit note" ${undone ? 'disabled' : ''}>
+              <input class="edit-qty" data-qty="${esc(id)}" type="number" min="1" step="1" value="${esc(qty)}" ${undone ? 'disabled' : ''}>
+              <button class="btn btn-save" data-save="${esc(id)}" ${undone ? 'disabled' : ''}>Save</button>
+            </div>
           </div>
           <div class="entry-actions">
-            <button class="btn btn-undo" data-undo="${esc(id)}" ${undone ? 'disabled' : ''}>Undo</button>
+            <button class="btn btn-undo" data-undo="${esc(id)}" ${undone ? 'disabled' : ''}>Delete</button>
           </div>
         `;
 
         // Event: undo
         const undoBtn = row.querySelector('[data-undo]');
         if(undoBtn) undoBtn.onclick = () => undoEntry(id);
+
+        const saveBtn = row.querySelector('[data-save]');
+        if(saveBtn) saveBtn.onclick = () => saveEntryEdits(id, row);
 
         // Event: photo click (thumb or placeholder)
         const photoEl = row.querySelector('[data-photo-upc]');
@@ -628,6 +740,10 @@
     document.getElementById('hideUndone').onchange = loadLog;
     document.getElementById('showAll').onchange = () => renderLog(allItems);
     document.getElementById('autoOnly').onchange = loadLog;
+    document.getElementById('statusGood').onchange = () => renderLog(allItems);
+    document.getElementById('statusBad').onchange = () => renderLog(allItems);
+    document.getElementById('statusReturn').onchange = () => renderLog(allItems);
+    document.getElementById('withNoteOnly').onchange = () => renderLog(allItems);
     document.getElementById('searchUpc').addEventListener('input', () => renderLog(allItems));
     document.getElementById('photoModal').addEventListener('click', e => {
       if(e.target === e.currentTarget) closePhotoModal();

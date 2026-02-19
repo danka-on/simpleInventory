@@ -455,6 +455,111 @@ let selectMode = false;
 let currentPage = 1;
 let currentLimit = 25;
 let lastRenderedResults = []; // Cache last results for re-rendering
+const PENDING_MARKETPLACE_OPS_KEY = 'items_to_list_pending_marketplace_ops_v1';
+const PENDING_MARKETPLACE_OP_MAX_AGE_MS = 3 * 24 * 60 * 60 * 1000;
+let marketplacePendingSaveCount = 0;
+let marketplaceFlushInFlight = false;
+
+function _safeJsonParse(raw, fallback){
+  try{ return JSON.parse(raw); }catch(e){ return fallback; }
+}
+
+function _readPendingMarketplaceOps(){
+  try{
+    const raw = localStorage.getItem(PENDING_MARKETPLACE_OPS_KEY);
+    const parsed = _safeJsonParse(raw, []);
+    return Array.isArray(parsed) ? parsed : [];
+  }catch(e){
+    return [];
+  }
+}
+
+function _writePendingMarketplaceOps(ops){
+  try{
+    localStorage.setItem(PENDING_MARKETPLACE_OPS_KEY, JSON.stringify(Array.isArray(ops) ? ops : []));
+  }catch(e){}
+}
+
+function _marketplaceOpKey(payload){
+  const id = payload && payload.id ? String(payload.id) : '';
+  const upc = payload && payload.upc ? String(payload.upc) : '';
+  const lot = payload && payload.lot_number ? String(payload.lot_number) : '';
+  const marketplace = payload && payload.marketplace ? String(payload.marketplace) : '';
+  return `${id}|${upc}|${lot}|${marketplace}`;
+}
+
+function _queuePendingMarketplaceOp(payload){
+  const key = _marketplaceOpKey(payload);
+  const now = Date.now();
+  const filtered = _readPendingMarketplaceOps().filter(op => {
+    if(!op || !op.key || !op.created_at) return false;
+    if((now - Number(op.created_at || 0)) > PENDING_MARKETPLACE_OP_MAX_AGE_MS) return false;
+    return op.key !== key;
+  });
+  filtered.push({ key, payload, created_at: now });
+  _writePendingMarketplaceOps(filtered);
+  return key;
+}
+
+function _clearPendingMarketplaceOp(key){
+  if(!key) return;
+  const filtered = _readPendingMarketplaceOps().filter(op => op && op.key !== key);
+  _writePendingMarketplaceOps(filtered);
+}
+
+function _markMarketplaceSaveStarted(){
+  marketplacePendingSaveCount += 1;
+}
+
+function _markMarketplaceSaveFinished(){
+  marketplacePendingSaveCount = Math.max(0, marketplacePendingSaveCount - 1);
+}
+
+window.addEventListener('beforeunload', (e)=>{
+  if(marketplacePendingSaveCount > 0){
+    e.preventDefault();
+    e.returnValue = '';
+  }
+});
+
+async function flushPendingMarketplaceOps(){
+  if(marketplaceFlushInFlight) return;
+  const now = Date.now();
+  let ops = _readPendingMarketplaceOps().filter(op => op && op.payload && op.key && ((now - Number(op.created_at || 0)) <= PENDING_MARKETPLACE_OP_MAX_AGE_MS));
+  if(!ops.length){
+    _writePendingMarketplaceOps([]);
+    return;
+  }
+
+  marketplaceFlushInFlight = true;
+  const remaining = [];
+  try{
+    for(const op of ops){
+      try{
+        const resp = await fetch('/api/bol_items/list_status', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify(op.payload),
+          cache: 'no-store',
+          keepalive: true
+        });
+        const result = await resp.json().catch(()=> ({}));
+        const ok = !!(resp.ok && result && result.success);
+        if(!ok){
+          // Permanent client-side validation/not-found errors should not loop forever.
+          if(!(resp.status >= 400 && resp.status < 500)){
+            remaining.push(op);
+          }
+        }
+      }catch(err){
+        remaining.push(op);
+      }
+    }
+  }finally{
+    _writePendingMarketplaceOps(remaining);
+    marketplaceFlushInFlight = false;
+  }
+}
 
 function getCurrentFilterUiSettings(){
   const qEl = document.getElementById('filter-q');
@@ -768,9 +873,10 @@ function render(results){
     
     rowIndex++;
     
-    const amazonCheckbox = `<label style="display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap" title="${esc(amazonTitle)}"><input type="checkbox" class="marketplace-checkbox" data-upc="${apiUpc}" data-lot="${lotNumber}" data-marketplace="amazon" ${listedAmazon ? 'checked' : ''}><span style="font-size:0.85rem">Amazon</span></label>`;
-    const ebayCheckbox = `<label style="display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap" title="${esc(ebayTitle)}"><input type="checkbox" class="marketplace-checkbox" data-upc="${apiUpc}" data-lot="${lotNumber}" data-marketplace="ebay" ${listedEbay ? 'checked' : ''}><span style="font-size:0.85rem">eBay</span></label>`;
-    const fbCheckbox = `<label style="display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap" title="${esc(facebookTitle)}"><input type="checkbox" class="marketplace-checkbox" data-upc="${apiUpc}" data-lot="${lotNumber}" data-marketplace="facebook" ${listedFacebook ? 'checked' : ''}><span style="font-size:0.85rem">Facebook</span></label>`;
+    const rowIdAttr = esc(String(r.id || ''));
+    const amazonCheckbox = `<label style="display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap" title="${esc(amazonTitle)}"><input type="checkbox" class="marketplace-checkbox" data-id="${rowIdAttr}" data-upc="${apiUpc}" data-lot="${lotNumber}" data-marketplace="amazon" ${listedAmazon ? 'checked' : ''}><span style="font-size:0.85rem">Amazon</span></label>`;
+    const ebayCheckbox = `<label style="display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap" title="${esc(ebayTitle)}"><input type="checkbox" class="marketplace-checkbox" data-id="${rowIdAttr}" data-upc="${apiUpc}" data-lot="${lotNumber}" data-marketplace="ebay" ${listedEbay ? 'checked' : ''}><span style="font-size:0.85rem">eBay</span></label>`;
+    const fbCheckbox = `<label style="display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap" title="${esc(facebookTitle)}"><input type="checkbox" class="marketplace-checkbox" data-id="${rowIdAttr}" data-upc="${apiUpc}" data-lot="${lotNumber}" data-marketplace="facebook" ${listedFacebook ? 'checked' : ''}><span style="font-size:0.85rem">Facebook</span></label>`;
     
     const actionBtn = `<div style="display:flex;flex-direction:column;gap:4px;align-items:flex-start">${amazonCheckbox}${ebayCheckbox}${fbCheckbox}</div>`;
     
@@ -826,7 +932,10 @@ function render(results){
   // Wire marketplace checkbox handlers
   const marketplaceCheckboxes = document.querySelectorAll('.marketplace-checkbox');
   console.log('[render] Found', marketplaceCheckboxes.length, 'marketplace checkboxes, attaching listeners');
-  marketplaceCheckboxes.forEach(el=> el.addEventListener('change', onMarketplaceToggle));
+  marketplaceCheckboxes.forEach(el=> {
+    el.dataset.prevChecked = el.checked ? '1' : '0';
+    el.addEventListener('change', onMarketplaceToggle);
+  });
   document.querySelectorAll('.btn-copy').forEach(el=> el.addEventListener('click', onCopyUpc));
   document.querySelectorAll('.btn-listagent-queue').forEach(el=> el.addEventListener('click', onAddToListingAgentQueue));
   // Wire pics-count handlers (now spans instead of buttons)
@@ -1084,12 +1193,21 @@ async function onOpenNotes(e){
 
 async function onMarketplaceToggle(e){
   const checkbox = e.currentTarget;
+  const row = checkbox.closest('tr');
+  const rowCheckboxes = row ? Array.from(row.querySelectorAll('.marketplace-checkbox')) : [checkbox];
+  const itemIdRaw = checkbox.dataset.id || '';
+  const itemId = parseInt(itemIdRaw, 10);
   const upc = checkbox.dataset.upc;
   const lot = checkbox.dataset.lot || '';
   const marketplace = checkbox.dataset.marketplace;
   const listed = checkbox.checked;
+  const previousChecked = checkbox.dataset.prevChecked === '1';
 
   if(!upc || !marketplace) return;
+  if(row && row.dataset.marketplaceSaving === '1') {
+    checkbox.checked = previousChecked;
+    return;
+  }
 
   console.log(`[onMarketplaceToggle] ${listed ? 'Listing' : 'Unlisting'} ${upc} lot=${lot} on ${marketplace}`);
 
@@ -1099,31 +1217,46 @@ async function onMarketplaceToggle(e){
     const input = prompt('Facebook Marketplace quantity:', '1');
     if(input === null) {
       // User cancelled - revert checkbox
-      checkbox.checked = false;
+      checkbox.checked = previousChecked;
       return;
     }
     quantity = parseInt(input, 10) || 1;
     if(quantity < 1) quantity = 1;
   }
 
+  let pendingOpKey = '';
+  let saveStarted = false;
   try{
+    if(row) row.dataset.marketplaceSaving = '1';
+    rowCheckboxes.forEach(cb => cb.disabled = true);
+
+    const payload = { upc, lot_number: lot, marketplace, listed, quantity, source: 'user' };
+    if(Number.isFinite(itemId) && itemId > 0) payload.id = itemId;
+    pendingOpKey = _queuePendingMarketplaceOp(payload);
+    _markMarketplaceSaveStarted();
+    saveStarted = true;
+
     const response = await fetch('/api/bol_items/list_status', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ upc, lot_number: lot, marketplace, listed, quantity, source: 'user' })
+      body: JSON.stringify(payload),
+      cache: 'no-store',
+      keepalive: true
     });
     const result = await response.json();
     console.log('[onMarketplaceToggle] API response:', result);
     if(!result.success) {
       console.error('[onMarketplaceToggle] API returned error:', result.error);
       // Revert checkbox on error
-      checkbox.checked = !listed;
+      checkbox.checked = previousChecked;
+      checkbox.dataset.prevChecked = checkbox.checked ? '1' : '0';
+      _clearPendingMarketplaceOp(pendingOpKey);
       return;
     }
+    _clearPendingMarketplaceOp(pendingOpKey);
     
     // CRITICAL: Update all checkboxes with the ACTUAL database state
     // Don't trust cached page data - use the freshly queried state from server
-    const row = checkbox.closest('tr');
     if(row && result.current_state) {
       const amazonCb = row.querySelector('.marketplace-checkbox[data-marketplace="amazon"]');
       const ebayCb = row.querySelector('.marketplace-checkbox[data-marketplace="ebay"]');
@@ -1135,6 +1268,12 @@ async function onMarketplaceToggle(e){
       if(amazonCb) amazonCb.checked = amazonOn;
       if(ebayCb) ebayCb.checked = ebayOn;
       if(facebookCb) facebookCb.checked = facebookOn;
+
+      rowCheckboxes.forEach(cb => {
+        cb.dataset.prevChecked = cb.checked ? '1' : '0';
+      });
+    } else {
+      checkbox.dataset.prevChecked = checkbox.checked ? '1' : '0';
     }
     
     // Update checkbox title with timestamp
@@ -1149,7 +1288,12 @@ async function onMarketplaceToggle(e){
   }catch(err){ 
     console.error('[onMarketplaceToggle] Fetch error:', err);
     // Revert checkbox on error
-    checkbox.checked = !listed;
+    checkbox.checked = previousChecked;
+    checkbox.dataset.prevChecked = checkbox.checked ? '1' : '0';
+  }finally{
+    if(saveStarted) _markMarketplaceSaveFinished();
+    rowCheckboxes.forEach(cb => cb.disabled = false);
+    if(row) delete row.dataset.marketplaceSaving;
   }
 }
 
@@ -1265,6 +1409,7 @@ async function initializeItemsToList(){
   restoreFilterUiSettings();
   setFiltersFromURL();
   updateGearResetButton();
+  await flushPendingMarketplaceOps();
   await loadLots();
   currentPage = 1;
   await loadItems();

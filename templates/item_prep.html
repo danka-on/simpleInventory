@@ -25,10 +25,31 @@
     .big-actions{display:flex;gap:12px;margin-top:12px}
     .big-actions .btn{flex:1;padding:18px 0;font-size:1.2rem}
     .pill{display:inline-block;padding:6px 10px;border-radius:999px;background:#eee}
-  .qty-display{display:flex;flex-direction:column;gap:12px;margin:12px 0;padding:12px;background:#f8f9fa;border-radius:12px}
-  .qty-number{font-size:2.2rem;font-weight:700;min-width:80px;text-align:center;color:#2c3e50}
-  .qty-label{font-size:0.72rem;color:#7f8c8d;text-transform:uppercase;letter-spacing:1px;text-align:center;margin-bottom:6px}
-  .loading-overlay{position:absolute;top:0;left:0;right:0;bottom:0;background:rgba(255,255,255,0.9);display:flex;align-items:center;justify-content:center;z-index:10;border-radius:12px}
+    .qty-display{display:flex;flex-direction:column;gap:12px;margin:12px 0;padding:12px;background:#f8f9fa;border-radius:12px}
+    .qty-number{font-size:2.2rem;font-weight:700;min-width:80px;text-align:center;color:#2c3e50}
+    .qty-label{font-size:0.72rem;color:#7f8c8d;text-transform:uppercase;letter-spacing:1px;text-align:center;margin-bottom:6px}
+    .note-wrap{display:block;margin-top:8px}
+    .note-input{
+      display:block;
+      width:100%;
+      min-width:0;
+      height:38px;
+      padding:8px 12px;
+      border:1px solid #e8d98a;
+      border-radius:10px;
+      font-family:inherit;
+      font-size:0.96rem;
+      color:#5c4a00;
+      background:#fff6bf;
+      box-shadow:inset 0 1px 0 rgba(255,255,255,0.55), 0 1px 2px rgba(0,0,0,0.06);
+    }
+    .note-input::placeholder{color:#8f7f42}
+    .note-input:focus{
+      outline:none;
+      border-color:#d3bc62;
+      box-shadow:0 0 0 2px rgba(234,206,92,0.35);
+    }
+    .loading-overlay{position:absolute;top:0;left:0;right:0;bottom:0;background:rgba(255,255,255,0.9);display:flex;align-items:center;justify-content:center;z-index:10;border-radius:12px}
   .spinner{border:3px solid #f3f3f3;border-top:3px solid #00b894;border-radius:50%;width:24px;height:24px;animation:spin 1s linear infinite}
   @keyframes spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
   .btn:disabled{opacity:0.5;cursor:not-allowed}
@@ -87,6 +108,30 @@
       .hero{max-height:28vh}
     }
 
+    /* iPad compact layout so note/image/actions fit without scrolling */
+    @media (min-width: 768px) and (max-width: 1100px) {
+      body{padding:10px}
+      .top{gap:8px}
+      .top h2{font-size:1.2rem}
+      .btn{padding:8px 12px;font-size:0.92rem}
+      .card{padding:10px;margin-top:8px}
+      .item{gap:10px}
+      .thumb{width:64px;height:64px}
+      #hero{max-height:18vh !important;margin-top:6px !important}
+      #prepSummary{margin-top:6px !important;font-size:0.88rem}
+      .note-wrap{margin-top:6px}
+      .note-input{height:34px;padding:6px 10px;font-size:0.9rem}
+      .qty-display{margin:6px 0;padding:8px;gap:6px}
+      .qty-label{margin-bottom:2px;font-size:0.66rem}
+      .qty-number{font-size:1.7rem}
+      .qty-btn{font-size:1.4rem;padding:8px 0;max-width:30vw}
+      .big-actions{gap:8px;margin-top:8px}
+      .big-actions .btn{padding:11px 0;font-size:1rem}
+      #noBarcodeBtn{margin-top:16px}
+      #manualUpc{padding:6px 8px !important;font-size:0.95rem}
+      #lotScopeSelector{padding:6px 10px !important;font-size:0.92rem !important}
+    }
+
     /* Night mode overrides */
     html.ss-theme-night body { background: var(--bg0, #0f172a); color: var(--ink, #e2e8f0); }
     html.ss-theme-night .card { background: var(--card, #1e293b); border-color: rgba(255,255,255,0.08); }
@@ -101,6 +146,8 @@
     html.ss-theme-night .qty-btn { background: #1e293b; border-color: currentColor; }
     html.ss-theme-night .qty-btn.plus:hover { background: #00b894; color: #fff; }
     html.ss-theme-night .qty-btn.minus:hover { background: #e74c3c; color: #fff; }
+    html.ss-theme-night .note-input { background:#f7e79f !important; color:#4d3f04 !important; border-color:#cfb95f !important; box-shadow:inset 0 1px 0 rgba(255,255,255,0.45), 0 1px 2px rgba(0,0,0,0.08) !important; }
+    html.ss-theme-night .note-input::placeholder { color:#7f7031 !important; }
     html.ss-theme-night input[type="text"] { background: var(--bg0, #0f172a); color: var(--ink, #e2e8f0); border-color: rgba(255,255,255,0.12); }
     html.ss-theme-night select { background: var(--bg0, #0f172a); color: var(--ink, #e2e8f0); border-color: rgba(255,255,255,0.12); }
     html.ss-theme-night label { color: var(--muted, #94a3b8); }
@@ -188,6 +235,9 @@
         </div>
       </div>
       <input type="file" id="tempThumbInput" accept="image/*" capture="environment" style="display:none">
+      <div class="note-wrap">
+        <input id="quickPrepNote" class="note-input" type="text" placeholder="Add note (optional)">
+      </div>
       <img id="hero" class="hero" src="" alt="item image" onerror="this.style.display='none'" style="margin-top:10px">
       <div id="prepSummary" class="muted" style="margin-top:8px"></div>
       <div id="qtyDisplay" class="qty-display hidden">
@@ -471,6 +521,8 @@
     function clearCurrentResultCard(){
       const prepSummary = document.getElementById('prepSummary');
       if(prepSummary) prepSummary.textContent = '';
+      const quickNoteEl = document.getElementById('quickPrepNote');
+      if(quickNoteEl) quickNoteEl.value = '';
       document.getElementById('manualUpc').value = '';
       document.getElementById('result').classList.add('hidden');
       document.getElementById('actions').classList.add('hidden');
@@ -639,6 +691,7 @@
           prepSummary.innerHTML = lotNote || '';
         }
       }
+      clearQuickPrepNote();
       resEl.classList.remove('hidden'); actions.classList.remove('hidden');
       statusMsg.textContent='';
       // Hide No Barcode button when item is displayed
@@ -657,6 +710,28 @@
     async function setStatus(upc, status, qty, extraPayload){
       const payload = Object.assign({upc, status, qty}, extraPayload || {});
       return postWithLotFallback('/api/items_prep/status', payload);
+    }
+
+    function getQuickPrepNoteText(){
+      const el = document.getElementById('quickPrepNote');
+      return el ? String(el.value || '').trim() : '';
+    }
+
+    function clearQuickPrepNote(){
+      const el = document.getElementById('quickPrepNote');
+      if(el) el.value = '';
+    }
+
+    async function savePrepNote(upc, note){
+      const upcN = String(upc || '').trim();
+      const noteN = String(note || '').trim();
+      if(!upcN || !noteN) return {success:false, error:'Missing upc or note'};
+      const r = await fetch('/api/items_prep/notes', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({upc: upcN, note: noteN})
+      });
+      return r.json().catch(() => ({success:false, error:'Failed to save note'}));
     }
 
     async function postWithLotFallback(url, payload){
@@ -790,17 +865,34 @@
     
     document.getElementById('goodBtn').onclick = async ()=>{
       if(!currentUpc) return;
+      const quickNote = getQuickPrepNoteText();
       
       // Show loading overlay
       showPageLoading();
       
-      let result = await setStatus(currentUpc, 'good', currentQty);
+      let result = await setStatus(currentUpc, 'good', currentQty, quickNote ? {note: quickNote} : undefined);
       const statusMsg = document.getElementById('statusMsg');
       
       if(result && result.success){ 
+        let noteSaveError = '';
+        const resultUpc = result.upc || currentUpc;
+        const resultBaseUpc = result.base_upc || (String(resultUpc || '').includes('-') ? String(resultUpc).split('-')[0] : String(resultUpc || currentUpc || ''));
+        if(quickNote){
+          try{
+            const noteResp = await savePrepNote(resultUpc, quickNote);
+            if(noteResp && noteResp.success){
+              clearQuickPrepNote();
+            }else{
+              noteSaveError = ' (note not saved)';
+            }
+          }catch(e){
+            noteSaveError = ' (note not saved)';
+          }
+        }
         // Store for undo with action type
         lastEntry = {
-          upc: result.upc || currentUpc, 
+          upc: resultUpc, 
+          base_upc: resultBaseUpc || null,
           status: 'good', 
           qty: currentQty,
           action: result.action, // 'incremented' or 'created'
@@ -810,7 +902,7 @@
         showUndoButton();
         const exceptionTag = result.exception_overage ? ' <span class="bad">(saved as exception)</span>' : '';
         const forcedTag = result.forced_lot_override ? (' <span class="bad">(forced current LOT ' + esc(result.lot_number || '') + ', flagged)</span>') : '';
-        statusMsg.innerHTML='<span class="ok">Marked GOOD (Qty: '+currentQty+')</span>' + exceptionTag + forcedTag;
+        statusMsg.innerHTML='<span class="ok">Marked GOOD (Qty: '+currentQty+')</span>' + exceptionTag + forcedTag + (noteSaveError ? (' <span class="bad">' + noteSaveError + '</span>') : '');
       } else { 
         const errorMsg = result && result.error ? result.error : 'Unknown error';
         console.error('Failed to mark good:', result);
@@ -870,6 +962,7 @@
 
     document.getElementById('badBtn').onclick = async ()=>{
       if(!currentUpc) return;
+      const quickNote = getQuickPrepNoteText();
       
       // Show loading overlay
       showPageLoading();
@@ -882,6 +975,14 @@
         });
         
         if (data.success && data.suffixed_upc) {
+          if(quickNote){
+            try{
+              const noteResp = await savePrepNote(data.suffixed_upc || currentUpc, quickNote);
+              if(noteResp && noteResp.success){
+                clearQuickPrepNote();
+              }
+            }catch(e){}
+          }
           // Store for undo
           lastEntry = {upc: data.suffixed_upc, status: 'bad', qty: currentQty, base_upc: currentUpc, lot_number: data.lot_number || getActionLotNumber() || ''};
           sessionStorage.setItem('lastEntry', JSON.stringify(lastEntry));
