@@ -2204,7 +2204,9 @@ def api_preplog_update():
                 cur_b = conn_b.cursor()
                 _ensure_items_prep_tables()
                 updated_any = False
-                for target_upc in (upc, base_upc):
+                # Keep note scoped to the exact log UPC. For suffixed entries we do NOT
+                # mirror to base UPC, otherwise distinct noted units can overwrite base notes.
+                for target_upc in (upc,):
                     if not target_upc:
                         continue
                     status_lot = _resolve_prep_status_lot(cur_b, target_upc, lot_number)
@@ -2304,13 +2306,21 @@ def api_preplog_undo():
                     or ('not found' in err_l and 'upc' in err_l)
                 )
             )
-            if stale_good_noop:
+            stale_non_good_noop = (
+                status in ('bad', 'return')
+                and ('not found' in err_l and 'upc' in err_l)
+            )
+            if stale_good_noop or stale_non_good_noop:
                 updated = _preplog_mark_undone(log_id, undone_at=_listagent_now_iso(), undo_error=None)
                 return jsonify({
                     'success': True,
                     'item': _preplog_enrich_row(updated),
                     'noop_undo': True,
-                    'warning': 'Inventory was already at zero; log entry marked undone.'
+                    'warning': (
+                        'Inventory was already at zero; log entry marked undone.'
+                        if stale_good_noop
+                        else 'Backing inventory row was already removed; log entry marked undone.'
+                    )
                 })
             try:
                 _preplog_set_undo_error(log_id, err)
@@ -11068,8 +11078,30 @@ def api_items_prep_status():
 
             # Special-case GOOD with note: create a dedicated suffixed GOOD entry.
             # This preserves per-unit notes/photos without collapsing into base UPC state.
-            if note and upc == base_upc:
-                suffixed_upc = _next_clean_suffix(base_upc)
+            temp_note_suffix_row = None
+            if note and upc != base_upc:
+                # Lookup can return a temporary suffixed duplicate for already-prepped UPCs.
+                # If user adds a note on that row, keep it as a distinct suffixed GOOD entry
+                # instead of collapsing back into the base UPC.
+                existing_suffixed_status = _select_prep_status_row(cur, upc, selected_lot, columns='status')
+                existing_suffixed_status_val = (
+                    str(existing_suffixed_status[0] or '').strip().lower()
+                    if existing_suffixed_status else ''
+                )
+                if existing_suffixed_status_val != 'bad':
+                    cur.execute('''
+                        SELECT id, temporary
+                        FROM bol_items
+                        WHERE upc = ? COLLATE NOCASE
+                        ORDER BY import_date DESC, id DESC
+                        LIMIT 1
+                    ''', (upc,))
+                    _tmp_row = cur.fetchone()
+                    if _tmp_row and int(_tmp_row[1] or 0) == 1:
+                        temp_note_suffix_row = _tmp_row
+
+            if note and (upc == base_upc or temp_note_suffix_row):
+                suffixed_upc = upc if temp_note_suffix_row else _next_clean_suffix(base_upc)
                 print(f'[GOOD] Creating noted special-case suffix {suffixed_upc} for base {base_upc}')
 
                 # Use lot-specific base row when possible; fallback to latest base row.
@@ -11150,18 +11182,51 @@ def api_items_prep_status():
                     f'unchecked_qty {current_unchecked}->{new_base_unchecked}'
                 )
 
-                cur.execute('''
-                    INSERT INTO bol_items (
-                        upc, item_description, image_url, lot_number, bol_number, import_date,
-                        temporary, original_qty, unchecked_qty, good_qty, bad_qty, quantity
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, 0, ?, 0, ?, 0, ?)
-                ''', (suffixed_upc, base_desc, base_img, selected_lot, base_bol, ts, qty, qty, qty))
+                if temp_note_suffix_row:
+                    temp_row_id = int(temp_note_suffix_row[0])
+                    cur.execute('''
+                        UPDATE bol_items
+                        SET upc = ?,
+                            item_description = ?,
+                            image_url = ?,
+                            lot_number = ?,
+                            bol_number = ?,
+                            import_date = ?,
+                            temporary = 0,
+                            original_qty = ?,
+                            unchecked_qty = 0,
+                            good_qty = ?,
+                            bad_qty = 0,
+                            quantity = ?
+                        WHERE id = ?
+                    ''', (suffixed_upc, base_desc, base_img, selected_lot, base_bol, ts, qty, qty, qty, temp_row_id))
+                else:
+                    cur.execute('''
+                        INSERT INTO bol_items (
+                            upc, item_description, image_url, lot_number, bol_number, import_date,
+                            temporary, original_qty, unchecked_qty, good_qty, bad_qty, quantity
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, 0, ?, 0, ?, 0, ?)
+                    ''', (suffixed_upc, base_desc, base_img, selected_lot, base_bol, ts, qty, qty, qty))
 
-                cur.execute('''
-                    INSERT INTO items_prep_status (upc, lot_number, status, reason, note, quantity, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                ''', (suffixed_upc, _normalize_lot_number(selected_lot), 'good', '', note, qty, ts))
+                existing_note_status = _select_prep_status_row(cur, suffixed_upc, selected_lot, columns='upc')
+                suffixed_status_lot = _resolve_prep_status_lot(cur, suffixed_upc, selected_lot)
+                if existing_note_status:
+                    cur.execute('''
+                        UPDATE items_prep_status
+                        SET status = 'good',
+                            reason = '',
+                            note = ?,
+                            quantity = ?,
+                            updated_at = ?
+                        WHERE upc = ? COLLATE NOCASE
+                          AND COALESCE(lot_number, '') = ? COLLATE NOCASE
+                    ''', (note, qty, ts, suffixed_upc, suffixed_status_lot))
+                else:
+                    cur.execute('''
+                        INSERT INTO items_prep_status (upc, lot_number, status, reason, note, quantity, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ''', (suffixed_upc, _normalize_lot_number(selected_lot), 'good', '', note, qty, ts))
 
                 if exception_overage_applied:
                     _items_prep_record_exception(
@@ -11764,16 +11829,16 @@ def api_items_prep_status():
         if existing_row:
             cur.execute('''
                 UPDATE items_prep_status
-                SET status=?, reason=?, note=?, updated_at=?
+                SET status=?, reason=?, note=?, quantity=?, updated_at=?
                 WHERE upc=? COLLATE NOCASE
                   AND COALESCE(lot_number, '') = ? COLLATE NOCASE
-            ''', (status, reason, note, ts, upc, status_update_lot))
+            ''', (status, reason, note, qty, ts, upc, status_update_lot))
             print(f'[{status.upper()}] Updated existing entry {upc}')
         else:
             cur.execute('''
-                INSERT INTO items_prep_status (upc, lot_number, status, reason, note, updated_at)
-                VALUES (?,?,?,?,?,?)
-            ''', (upc, _normalize_lot_number(status_lot), status, reason, note, ts))
+                INSERT INTO items_prep_status (upc, lot_number, status, reason, note, quantity, updated_at)
+                VALUES (?,?,?,?,?,?,?)
+            ''', (upc, _normalize_lot_number(status_lot), status, reason, note, qty, ts))
             print(f'[{status.upper()}] Created new entry {upc}')
         conn.commit()
         
@@ -12169,6 +12234,13 @@ def api_items_prep_create_bad_entry():
         ''', (suffixed_upc, base_item[1], base_item[2], selected_lot, base_item[4], import_date, 
               qty, qty, qty))  # original_qty=qty, bad_qty=qty, quantity=qty for this suffixed entry
         
+        # Seed prep status immediately so Items-to-List visibility stays in sync
+        # even before diagnostic completion posts the final reason/note payload.
+        cur.execute('''
+            INSERT INTO items_prep_status (upc, lot_number, status, reason, note, quantity, updated_at)
+            VALUES (?, ?, 'bad', '', '', ?, ?)
+        ''', (suffixed_upc, _normalize_lot_number(selected_lot), qty, import_date))
+        
         # Update base item: move qty from unchecked to bad
         new_unchecked = max(0, unchecked - qty)
         new_bad = current_bad + qty
@@ -12492,8 +12564,12 @@ def api_items_prep_cleanup_temp():
         cur = conn.cursor()
         # Delete temporary entries with this UPC
         cur.execute('DELETE FROM bol_items WHERE upc = ? COLLATE NOCASE AND temporary = 1', (upc,))
+        deleted = cur.rowcount
+        if deleted:
+            # Keep prep status in sync when a temporary BAD entry is abandoned.
+            cur.execute('DELETE FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (upc,))
         conn.commit()
-        return jsonify({'success': True})
+        return jsonify({'success': True, 'deleted': deleted})
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
     finally:
@@ -18841,6 +18917,8 @@ def api_bol_items():
         cols = [r[1] for r in cur.fetchall()]
         has_temporary = any(c.lower() == 'temporary' for c in cols)
         has_itemprepped = any(c.lower() == 'itemprepped' for c in cols)
+        status_filter_has_good_qty = any(c.lower() == 'good_qty' for c in cols)
+        status_filter_has_bad_qty = any(c.lower() == 'bad_qty' for c in cols)
         
         # DEBUG: Log columns to diagnose marketplace column issue
         marketplace_cols = [c for c in cols if 'listed' in c.lower()]
@@ -18850,6 +18928,12 @@ def api_bol_items():
         
         where = []
         params = []
+        prep_status_expr = "COALESCE(s_exact.status, s_fallback.status)"
+        prep_reason_expr = "COALESCE(s_exact.reason, s_fallback.reason)"
+        prep_note_expr = "COALESCE(s_exact.note, s_fallback.note)"
+        prep_updated_expr = "COALESCE(s_exact.updated_at, s_fallback.updated_at)"
+        prep_qty_expr = "COALESCE(s_exact.quantity, s_fallback.quantity)"
+        prep_lot_expr = "COALESCE(s_exact.lot_number, s_fallback.lot_number, '')"
         # Exclude itemprepped entries (internal prep tracking) from item manager
         if has_itemprepped:
             where.append('(b.itemprepped IS NULL OR b.itemprepped = 0)')
@@ -18872,10 +18956,21 @@ def api_bol_items():
                 sf = sf.replace(' ', '_')
                 if sf == 'unchecked':
                     # Unchecked: no prep_status OR explicit 'unchecked', AND exclude suffixed items (BAD flow temporaries)
-                    status_conditions.append("((s.status IS NULL OR s.status = 'unchecked') AND b.upc NOT LIKE '%-%')")
-                elif sf in ('good', 'bad'):
-                    # Good or Bad: explicit status match
-                    status_conditions.append(f"s.status = '{sf}'")
+                    unchecked_clause = f"({prep_status_expr} IS NULL OR {prep_status_expr} = 'unchecked')"
+                    if status_filter_has_good_qty and status_filter_has_bad_qty:
+                        unchecked_clause = f"({unchecked_clause} AND COALESCE(b.good_qty, 0) = 0 AND COALESCE(b.bad_qty, 0) = 0)"
+                    status_conditions.append(f"({unchecked_clause} AND b.upc NOT LIKE '%-%')")
+                elif sf == 'good':
+                    # Good rows can still exist with missing status metadata after complex undo/delete history.
+                    if status_filter_has_good_qty:
+                        status_conditions.append(f"({prep_status_expr} = 'good' OR ({prep_status_expr} IS NULL AND COALESCE(b.good_qty, 0) > 0 AND COALESCE(b.bad_qty, 0) = 0))")
+                    else:
+                        status_conditions.append(f"{prep_status_expr} = 'good'")
+                elif sf == 'bad':
+                    if status_filter_has_bad_qty:
+                        status_conditions.append(f"({prep_status_expr} = 'bad' OR ({prep_status_expr} IS NULL AND COALESCE(b.bad_qty, 0) > 0 AND COALESCE(b.good_qty, 0) = 0))")
+                    else:
+                        status_conditions.append(f"{prep_status_expr} = 'bad'")
             
             if status_conditions:
                 where.append(f"({' OR '.join(status_conditions)})")
@@ -18901,16 +18996,20 @@ def api_bol_items():
         
         # Apply defect filter (filter by prep_reason column)
         if defect_filter:
-            where.append('s.reason = ?')
+            where.append(f"{prep_reason_expr} = ?")
             params.append(defect_filter)
         
         # Build WHERE clause only when we actually have conditions
         where_sql = (' WHERE ' + ' AND '.join(where)) if where else ''
         prep_join = (
             " FROM bol_items b "
-            "LEFT JOIN items_prep_status s "
-            "ON s.upc = b.upc "
-            "AND COALESCE(s.lot_number, '') = COALESCE(b.lot_number, '') "
+            "LEFT JOIN items_prep_status s_exact "
+            "ON s_exact.upc = b.upc "
+            "AND COALESCE(s_exact.lot_number, '') = COALESCE(b.lot_number, '') "
+            "LEFT JOIN items_prep_status s_fallback "
+            "ON s_fallback.upc = b.upc "
+            "AND COALESCE(s_fallback.lot_number, '') = '' "
+            "AND s_exact.id IS NULL "
         )
         # Build sort
         order_sql = ' ORDER BY '
@@ -18921,9 +19020,9 @@ def api_bol_items():
             order_sql += "b.item_description COLLATE NOCASE ASC"
         elif sort == 'last_edited':
             # newest last_edited first
-            order_sql += "COALESCE(s.updated_at, b.import_date) DESC, b.id DESC"
+            order_sql += f"COALESCE({prep_updated_expr}, b.import_date) DESC, b.id DESC"
         elif sort == 'last_edited_asc':
-            order_sql += "COALESCE(s.updated_at, b.import_date) ASC, b.id ASC"
+            order_sql += f"COALESCE({prep_updated_expr}, b.import_date) ASC, b.id ASC"
         else:
             # date_desc default
             order_sql += "b.import_date DESC, b.id DESC"
@@ -18967,8 +19066,8 @@ def api_bol_items():
             ('b.listed_ebay_source, ' if has_listed_ebay_source else '') +
             ('b.listed_facebook, b.listed_facebook_date, ' if has_listed_facebook else '') +
             ('b.listed_facebook_source, ' if has_listed_facebook_source else '') +
-            "s.status as prep_status, s.reason as prep_reason, s.note as prep_note, s.updated_at as prep_updated_at, "
-            "s.quantity as prep_quantity, COALESCE(s.lot_number, '') as prep_lot_number "
+            f"{prep_status_expr} as prep_status, {prep_reason_expr} as prep_reason, {prep_note_expr} as prep_note, {prep_updated_expr} as prep_updated_at, "
+            f"{prep_qty_expr} as prep_quantity, {prep_lot_expr} as prep_lot_number "
             + prep_join
             + where_sql + order_sql
         )
@@ -19061,6 +19160,23 @@ def api_bol_items():
                     row['prep_note'] = sm.get('prep_note')
                     row['prep_updated_at'] = sm.get('prep_updated_at')
                     st = (row.get('prep_status') or '').strip().lower()
+            if not st:
+                # Final fallback: infer status from quantity buckets so edge-case rows
+                # still render under Good/Bad filters even if prep status metadata is missing.
+                try:
+                    good_bucket = int(row.get('good_qty') or 0)
+                except Exception:
+                    good_bucket = 0
+                try:
+                    bad_bucket = int(row.get('bad_qty') or 0)
+                except Exception:
+                    bad_bucket = 0
+                if bad_bucket > 0 and good_bucket <= 0:
+                    st = 'bad'
+                    row['prep_status'] = 'bad'
+                elif good_bucket > 0 and bad_bucket <= 0:
+                    st = 'good'
+                    row['prep_status'] = 'good'
 
             if 'prep_note_count' not in row:
                 row['prep_note_count'] = note_map.get(row_upc, 0)
@@ -19682,6 +19798,9 @@ def api_cleanup_temporary_entry():
         # Only delete if it's marked as temporary
         cur.execute('DELETE FROM bol_items WHERE upc = ? COLLATE NOCASE AND temporary = 1', (upc,))
         deleted = cur.rowcount
+        if deleted:
+            # Keep prep status in sync when a temporary BAD entry is abandoned.
+            cur.execute('DELETE FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (upc,))
         conn.commit()
         
         print(f'[CLEANUP] Deleted {deleted} temporary entries for UPC: {upc}')

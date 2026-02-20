@@ -29,6 +29,8 @@
     .qty-number{font-size:2.2rem;font-weight:700;min-width:80px;text-align:center;color:#2c3e50}
     .qty-label{font-size:0.72rem;color:#7f8c8d;text-transform:uppercase;letter-spacing:1px;text-align:center;margin-bottom:6px}
     .note-wrap{display:block;margin-top:8px}
+    .note-row{display:flex;align-items:center;gap:8px}
+    .note-row .note-input{flex:1}
     .note-input{
       display:block;
       width:100%;
@@ -49,6 +51,29 @@
       border-color:#d3bc62;
       box-shadow:0 0 0 2px rgba(234,206,92,0.35);
     }
+    .btn-set-note{
+      padding:8px 14px;
+      min-width:64px;
+      border-radius:10px;
+      border:1px solid #d9b445;
+      background:#f8d556;
+      color:#5c4a00;
+      font-weight:700;
+      font-size:0.92rem;
+      line-height:1;
+      box-shadow:0 1px 2px rgba(0,0,0,0.08);
+    }
+    .btn-set-note:hover{background:#f2c842}
+    .setqty-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:100002;align-items:center;justify-content:center;padding:16px}
+    .setqty-overlay.active{display:flex}
+    .setqty-card{background:#fff;border:1px solid #e3e3e3;border-radius:14px;max-width:420px;width:100%;padding:16px;box-shadow:0 12px 36px rgba(0,0,0,0.22)}
+    .setqty-title{font-size:1.1rem;font-weight:700;color:#1f2937;margin:0 0 8px 0}
+    .setqty-note-preview{font-size:0.95rem;color:#475569;margin-bottom:12px}
+    .setqty-controls{display:flex;align-items:center;justify-content:center;gap:10px;margin:8px 0 14px}
+    .setqty-btn{width:52px;height:52px;border-radius:12px;border:2px solid #d1d5db;background:#fff;font-size:1.9rem;line-height:1;cursor:pointer}
+    .setqty-btn:active{transform:scale(0.97)}
+    .setqty-value{min-width:74px;text-align:center;font-size:2rem;font-weight:700;color:#0f172a}
+    .setqty-actions{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap}
     .loading-overlay{position:absolute;top:0;left:0;right:0;bottom:0;background:rgba(255,255,255,0.9);display:flex;align-items:center;justify-content:center;z-index:10;border-radius:12px}
   .spinner{border:3px solid #f3f3f3;border-top:3px solid #00b894;border-radius:50%;width:24px;height:24px;animation:spin 1s linear infinite}
   @keyframes spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
@@ -120,7 +145,9 @@
       #hero{max-height:18vh !important;margin-top:6px !important}
       #prepSummary{margin-top:6px !important;font-size:0.88rem}
       .note-wrap{margin-top:6px}
+      .note-row{gap:6px}
       .note-input{height:34px;padding:6px 10px;font-size:0.9rem}
+      .btn-set-note{height:34px;padding:6px 10px;font-size:0.84rem;min-width:58px}
       .qty-display{margin:6px 0;padding:8px;gap:6px}
       .qty-label{margin-bottom:2px;font-size:0.66rem}
       .qty-number{font-size:1.7rem}
@@ -148,6 +175,13 @@
     html.ss-theme-night .qty-btn.minus:hover { background: #e74c3c; color: #fff; }
     html.ss-theme-night .note-input { background:#f7e79f !important; color:#4d3f04 !important; border-color:#cfb95f !important; box-shadow:inset 0 1px 0 rgba(255,255,255,0.45), 0 1px 2px rgba(0,0,0,0.08) !important; }
     html.ss-theme-night .note-input::placeholder { color:#7f7031 !important; }
+    html.ss-theme-night .btn-set-note { background:#eab308; color:#3b2f00; border-color:#ca8a04; }
+    html.ss-theme-night .btn-set-note:hover { background:#dca307; }
+    html.ss-theme-night .setqty-card { background: var(--card, #1e293b); border-color: rgba(255,255,255,0.1); }
+    html.ss-theme-night .setqty-title { color: var(--ink-bright, #f8fafc); }
+    html.ss-theme-night .setqty-note-preview { color: var(--muted, #94a3b8); }
+    html.ss-theme-night .setqty-btn { background: var(--bg0, #0f172a); color: var(--ink, #e2e8f0); border-color: rgba(255,255,255,0.15); }
+    html.ss-theme-night .setqty-value { color: var(--ink, #e2e8f0); }
     html.ss-theme-night input[type="text"] { background: var(--bg0, #0f172a); color: var(--ink, #e2e8f0); border-color: rgba(255,255,255,0.12); }
     html.ss-theme-night select { background: var(--bg0, #0f172a); color: var(--ink, #e2e8f0); border-color: rgba(255,255,255,0.12); }
     html.ss-theme-night label { color: var(--muted, #94a3b8); }
@@ -178,7 +212,7 @@
 <div class="top">
   <h2 style="margin:0 auto;text-align:center;flex:1" data-i18n="preparation">Preparation</h2>
   <div style="display:flex;gap:10px;align-items:center;">
-    <a href="/barcode-print-que" style="text-decoration:none"><button class="btn btn-primary">🖨️ <span data-i18n="print_que">Print Que</span></button></a>
+    <!-- Print Que button intentionally hidden for now; keep this spot for possible reactivation later. -->
     <a href="/item-prep/log" style="text-decoration:none"><button class="btn btn-gray">LOG</button></a>
   </div>
   </div>
@@ -236,7 +270,10 @@
       </div>
       <input type="file" id="tempThumbInput" accept="image/*" capture="environment" style="display:none">
       <div class="note-wrap">
-        <input id="quickPrepNote" class="note-input" type="text" placeholder="Add note (optional)">
+        <div class="note-row">
+          <input id="quickPrepNote" class="note-input" type="text" placeholder="Add note (optional)">
+          <button type="button" class="btn btn-set-note" id="setNoteBtn">Set</button>
+        </div>
       </div>
       <img id="hero" class="hero" src="" alt="item image" onerror="this.style.display='none'" style="margin-top:10px">
       <div id="prepSummary" class="muted" style="margin-top:8px"></div>
@@ -282,6 +319,21 @@
         <button class="btn btn-gray" id="lotMismatchCancelBtn" type="button">Cancel</button>
         <button class="btn" id="lotMismatchAutoBtn" type="button" style="background:#3498db;color:#fff">Auto Assign</button>
         <button class="btn btn-primary" id="lotMismatchOverrideBtn" type="button">Override THIS LOT</button>
+      </div>
+    </div>
+  </div>
+  <div id="setQtyOverlay" class="setqty-overlay" aria-hidden="true">
+    <div class="setqty-card" role="dialog" aria-modal="true" aria-labelledby="setQtyTitle">
+      <h3 id="setQtyTitle" class="setqty-title">Quick Set Note</h3>
+      <div id="setQtyPreview" class="setqty-note-preview">Set of 2</div>
+      <div class="setqty-controls">
+        <button class="setqty-btn" id="setQtyMinusBtn" type="button">-</button>
+        <span id="setQtyValue" class="setqty-value">2</span>
+        <button class="setqty-btn" id="setQtyPlusBtn" type="button">+</button>
+      </div>
+      <div class="setqty-actions">
+        <button class="btn btn-gray" id="setQtyCancelBtn" type="button">Cancel</button>
+        <button class="btn btn-primary" id="setQtyApplyBtn" type="button">Set</button>
       </div>
     </div>
   </div>
@@ -523,6 +575,7 @@
       if(prepSummary) prepSummary.textContent = '';
       const quickNoteEl = document.getElementById('quickPrepNote');
       if(quickNoteEl) quickNoteEl.value = '';
+      closeSetQtyModal();
       document.getElementById('manualUpc').value = '';
       document.getElementById('result').classList.add('hidden');
       document.getElementById('actions').classList.add('hidden');
@@ -722,6 +775,113 @@
       if(el) el.value = '';
     }
 
+    let setQtyModalValue = 2;
+    let setQtyModalMode = 'manual';
+    let setQtyModalResolver = null;
+
+    function getSetQtyDismissChoice(){
+      return 'cancel';
+    }
+
+    function updateSetQtyModalUi(){
+      setQtyModalValue = Math.max(1, Math.min(99, parseInt(setQtyModalValue, 10) || 1));
+      const qtyEl = document.getElementById('setQtyValue');
+      const previewEl = document.getElementById('setQtyPreview');
+      if(qtyEl) qtyEl.textContent = String(setQtyModalValue);
+      if(previewEl) previewEl.textContent = `Set of ${setQtyModalValue}`;
+    }
+
+    function appendSetQtyNote(qty, showMessage=true){
+      const safeQty = Math.max(1, parseInt(qty, 10) || 1);
+      const noteText = `Set of ${safeQty}`;
+      const noteEl = document.getElementById('quickPrepNote');
+      if(noteEl){
+        const existing = String(noteEl.value || '').trim();
+        noteEl.value = existing ? `${existing} | ${noteText}` : noteText;
+        noteEl.focus();
+        try {
+          noteEl.setSelectionRange(noteEl.value.length, noteEl.value.length);
+        } catch(e) {}
+      }
+      if(showMessage){
+        const statusMsg = document.getElementById('statusMsg');
+        if(statusMsg){
+          statusMsg.innerHTML = `<span class="ok">Note added: ${noteText}</span>`;
+          setTimeout(()=>{ statusMsg.textContent=''; }, 1200);
+        }
+      }
+    }
+
+    function closeSetQtyModal(choice='cancel'){
+      const overlay = document.getElementById('setQtyOverlay');
+      if(!overlay) return;
+      overlay.classList.remove('active');
+      overlay.setAttribute('aria-hidden', 'true');
+      if(setQtyModalResolver){
+        try{ setQtyModalResolver({choice, qty: setQtyModalValue}); }catch(e){}
+        setQtyModalResolver = null;
+      }
+    }
+
+    function openSetQtyModal(mode='manual'){
+      if(!currentUpc){
+        const statusMsg = document.getElementById('statusMsg');
+        if(statusMsg){
+          statusMsg.innerHTML = '<span class="bad">Lookup an item first</span>';
+          setTimeout(()=>{ statusMsg.textContent=''; }, 1200);
+        }
+        return Promise.resolve({choice:'blocked', qty:setQtyModalValue});
+      }
+      setQtyModalMode = mode || 'manual';
+      setQtyModalValue = setQtyModalMode === 'plate_check' ? 1 : Math.max(2, currentQty || 2);
+      updateSetQtyModalUi();
+      const overlay = document.getElementById('setQtyOverlay');
+      const titleEl = document.getElementById('setQtyTitle');
+      const cancelBtn = document.getElementById('setQtyCancelBtn');
+      const applyBtn = document.getElementById('setQtyApplyBtn');
+      if(titleEl && cancelBtn && applyBtn){
+        if(setQtyModalMode === 'plate_check'){
+          titleEl.textContent = 'Is this a set?';
+          cancelBtn.textContent = 'Cancel';
+          applyBtn.textContent = 'Continue';
+        } else {
+          titleEl.textContent = 'Quick Set Note';
+          cancelBtn.textContent = 'Cancel';
+          applyBtn.textContent = 'Set';
+        }
+      }
+      if(overlay){
+        overlay.classList.add('active');
+        overlay.setAttribute('aria-hidden', 'false');
+      }
+      return new Promise((resolve)=>{
+        setQtyModalResolver = resolve;
+      });
+    }
+
+    function applySetQtyNote(){
+      if(setQtyModalMode === 'plate_check'){
+        if(setQtyModalValue > 1){
+          appendSetQtyNote(setQtyModalValue, false);
+        }
+        closeSetQtyModal('continue');
+        return;
+      }
+      appendSetQtyNote(setQtyModalValue, true);
+      closeSetQtyModal('set');
+    }
+
+    function shouldPromptPlateSet(){
+      const titleText = String((document.getElementById('title') || {}).textContent || '').trim();
+      return /\b(plate|napkin)s?\b/i.test(titleText);
+    }
+
+    async function maybeRunPlateSetPrompt(){
+      if(!shouldPromptPlateSet()) return true;
+      const res = await openSetQtyModal('plate_check');
+      return !!res && res.choice === 'continue';
+    }
+
     async function savePrepNote(upc, note){
       const upcN = String(upc || '').trim();
       const noteN = String(note || '').trim();
@@ -824,6 +984,28 @@
     
     document.getElementById('qtyPlusBtn').onclick = ()=>{ updateQtyDisplay(1); };
     document.getElementById('qtyMinusBtn').onclick = ()=>{ updateQtyDisplay(-1); };
+    const setNoteBtn = document.getElementById('setNoteBtn');
+    const setQtyMinusBtn = document.getElementById('setQtyMinusBtn');
+    const setQtyPlusBtn = document.getElementById('setQtyPlusBtn');
+    const setQtyCancelBtn = document.getElementById('setQtyCancelBtn');
+    const setQtyApplyBtn = document.getElementById('setQtyApplyBtn');
+    const setQtyOverlay = document.getElementById('setQtyOverlay');
+
+    if(setNoteBtn) setNoteBtn.onclick = ()=>{ openSetQtyModal('manual'); };
+    if(setQtyMinusBtn) setQtyMinusBtn.onclick = ()=>{ setQtyModalValue -= 1; updateSetQtyModalUi(); };
+    if(setQtyPlusBtn) setQtyPlusBtn.onclick = ()=>{ setQtyModalValue += 1; updateSetQtyModalUi(); };
+    if(setQtyCancelBtn) setQtyCancelBtn.onclick = ()=>{ closeSetQtyModal(getSetQtyDismissChoice()); };
+    if(setQtyApplyBtn) setQtyApplyBtn.onclick = applySetQtyNote;
+    if(setQtyOverlay){
+      setQtyOverlay.addEventListener('click', (e)=>{
+        if(e.target === setQtyOverlay) closeSetQtyModal(getSetQtyDismissChoice());
+      });
+    }
+    document.addEventListener('keydown', (e)=>{
+      if(e.key === 'Escape' && setQtyOverlay && setQtyOverlay.classList.contains('active')){
+        closeSetQtyModal(getSetQtyDismissChoice());
+      }
+    });
     
     document.getElementById('undoBtn').onclick = async ()=>{
       if(!lastEntry) return;
@@ -865,6 +1047,8 @@
     
     document.getElementById('goodBtn').onclick = async ()=>{
       if(!currentUpc) return;
+      const continueAction = await maybeRunPlateSetPrompt();
+      if(!continueAction) return;
       const quickNote = getQuickPrepNoteText();
       
       // Show loading overlay
@@ -962,6 +1146,8 @@
 
     document.getElementById('badBtn').onclick = async ()=>{
       if(!currentUpc) return;
+      const continueAction = await maybeRunPlateSetPrompt();
+      if(!continueAction) return;
       const quickNote = getQuickPrepNoteText();
       
       // Show loading overlay

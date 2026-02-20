@@ -450,9 +450,9 @@
                 return false;
             }
             
-            // Valid lengths for this workflow: UPC-family only (8, 11, 12)
+            // Valid lengths for this workflow: UPC-family only (8, 11, 12, 13)
             const len = code.length;
-            if (len < 8 || len > 12) {
+            if (len < 8 || len > 13) {
                 return false;
             }
 
@@ -462,9 +462,9 @@
         function normalizeScannedBarcode(code) {
             const s0 = String(code || '').trim();
             if (!/^\d+$/.test(s0)) return s0;
-            if (s0.length > 12 && s0.startsWith('0')) {
+            if (s0.length > 13 && s0.startsWith('0')) {
                 const stripped = s0.replace(/^0+/, '');
-                if (stripped && stripped.length <= 12) return stripped;
+                if (stripped && stripped.length <= 13) return stripped;
             }
             return s0;
         }

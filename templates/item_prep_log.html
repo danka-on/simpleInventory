@@ -182,8 +182,15 @@
       flex-shrink: 0;
       display: flex;
       flex-direction: column;
-      align-items: flex-end;
-      gap: 6px;
+      align-items: stretch;
+      gap: 8px;
+      min-width: 102px;
+    }
+    .entry-actions .btn {
+      width: 100%;
+      text-align: center;
+      padding: 8px 12px;
+      font-size: 0.84rem;
     }
 
     .edit-grid {
@@ -203,6 +210,14 @@
       color: #334155;
       background: #fff;
       outline: none;
+    }
+    .edit-note.note-active {
+      background: #fff7c7;
+      border-color: #e4cf71;
+      color: #5b4a00;
+    }
+    .edit-note.note-active::placeholder {
+      color: #8f7a28;
     }
     .edit-note:focus {
       border-color: #94a3b8;
@@ -226,7 +241,9 @@
       color: #fff;
       padding: 8px 14px;
       font-size: 0.82rem;
+      display: none;
     }
+    .btn-save.is-visible { display: inline-block; }
     .btn-save:hover {
       opacity: 0.92;
     }
@@ -316,25 +333,38 @@
       .entry-thumb, .entry-thumb-placeholder { width: 64px; height: 64px; }
       .entry-title { font-size: 1rem; }
       .entry-meta { font-size: 0.88rem; }
-      .btn-undo { padding: 10px 18px; font-size: 0.9rem; }
+      .entry-actions { min-width: 116px; }
+      .entry-actions .btn { font-size: 0.9rem; padding: 10px 14px; }
       .edit-note { font-size: 0.9rem; }
       .edit-qty { width: 84px; font-size: 0.9rem; }
-      .btn-save { font-size: 0.86rem; }
     }
 
     /* ── Mobile ── */
     @media (max-width: 767px) {
       body { padding: 14px; }
-      .entry { padding: 10px 12px; gap: 10px; }
+      .entry { padding: 10px 12px; gap: 10px; flex-wrap: wrap; }
       .entry-num { font-size: 0.95rem; min-width: 24px; }
       .entry-thumb, .entry-thumb-placeholder { width: 44px; height: 44px; }
+      .entry-info { min-width: 0; width: calc(100% - 88px); }
       .entry-title { font-size: 0.88rem; }
       .entry-meta { font-size: 0.78rem; }
       .toolbar { gap: 8px; }
       .edit-grid { gap: 6px; }
       .edit-note { min-width: 120px; font-size: 0.8rem; }
       .edit-qty { width: 66px; font-size: 0.8rem; }
-      .btn-save { font-size: 0.78rem; padding: 7px 10px; }
+      .entry-actions {
+        width: 100%;
+        min-width: 0;
+        flex-direction: row;
+        justify-content: flex-end;
+        margin-top: 6px;
+      }
+      .entry-actions .btn {
+        width: auto;
+        min-width: 84px;
+        font-size: 0.78rem;
+        padding: 7px 10px;
+      }
     }
   </style>
 </head>
@@ -517,7 +547,10 @@
       }
       if(saveBtn) saveBtn.disabled = true;
       const oldTxt = saveBtn ? saveBtn.textContent : '';
-      if(saveBtn) saveBtn.textContent = 'Saving...';
+      if(saveBtn){
+        saveBtn.classList.add('is-visible');
+        saveBtn.textContent = 'Saving...';
+      }
       try{
         const data = await apiPost('/api/preplog/update', {id, note, quantity: qty});
         if(data && data.item){
@@ -533,6 +566,26 @@
           saveBtn.textContent = oldTxt || 'Save';
         }
       }
+    }
+
+    function syncRowSaveState(rowEl){
+      if(!rowEl) return;
+      const noteEl = rowEl.querySelector('[data-note]');
+      const qtyEl = rowEl.querySelector('[data-qty]');
+      const saveBtn = rowEl.querySelector('[data-save]');
+      if(!noteEl || !qtyEl || !saveBtn) return;
+      if(noteEl.disabled || qtyEl.disabled){
+        saveBtn.classList.remove('is-visible');
+        return;
+      }
+      const initialNote = String(noteEl.dataset.initialNote ?? '');
+      const initialQty = String(qtyEl.dataset.initialQty ?? '');
+      const currentNote = String(noteEl.value ?? '').trim();
+      const currentQty = String(Number.parseInt(String(qtyEl.value ?? '').trim(), 10) || '');
+      const noteChanged = currentNote !== initialNote;
+      const qtyChanged = currentQty !== initialQty;
+      saveBtn.classList.toggle('is-visible', noteChanged || qtyChanged);
+      noteEl.classList.toggle('note-active', currentNote.length > 0);
     }
 
     let allItems = [];
@@ -677,12 +730,12 @@
             </div>
             <div class="entry-meta">${esc(fmtTime(it.created_at))}${lot ? ' &middot; LOT ' + esc(lot) : ''}${it.auto_assigned ? ' &middot; auto' : ''} &middot; UPC ${esc(upc || '—')}</div>
             <div class="edit-grid">
-              <input class="edit-note" data-note="${esc(id)}" type="text" value="${esc(note)}" placeholder="Add/edit note" ${undone ? 'disabled' : ''}>
+              <input class="edit-note${note ? ' note-active' : ''}" data-note="${esc(id)}" type="text" value="${esc(note)}" placeholder="Add/edit note" ${undone ? 'disabled' : ''}>
               <input class="edit-qty" data-qty="${esc(id)}" type="number" min="1" step="1" value="${esc(qty)}" ${undone ? 'disabled' : ''}>
-              <button class="btn btn-save" data-save="${esc(id)}" ${undone ? 'disabled' : ''}>Save</button>
             </div>
           </div>
           <div class="entry-actions">
+            <button class="btn btn-save" data-save="${esc(id)}" ${undone ? 'disabled' : ''}>Save</button>
             <button class="btn btn-undo" data-undo="${esc(id)}" ${undone ? 'disabled' : ''}>Delete</button>
           </div>
         `;
@@ -693,6 +746,18 @@
 
         const saveBtn = row.querySelector('[data-save]');
         if(saveBtn) saveBtn.onclick = () => saveEntryEdits(id, row);
+
+        const noteEl = row.querySelector('[data-note]');
+        const qtyEl = row.querySelector('[data-qty]');
+        if(noteEl && qtyEl){
+          noteEl.dataset.initialNote = note;
+          qtyEl.dataset.initialQty = String(qty);
+          const onEdit = () => syncRowSaveState(row);
+          noteEl.addEventListener('input', onEdit);
+          qtyEl.addEventListener('input', onEdit);
+          qtyEl.addEventListener('change', onEdit);
+          syncRowSaveState(row);
+        }
 
         // Event: photo click (thumb or placeholder)
         const photoEl = row.querySelector('[data-photo-upc]');
