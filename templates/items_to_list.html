@@ -897,6 +897,8 @@ function render(results){
     const qty = r.quantity || 1;
     const qtyStyle = (qty > 1 && status !== 'unchecked') ? 'color:#e74c3c;font-weight:700;font-size:1.1rem' : '';
     const qtyCell = `<td style="text-align:center"><span style="${qtyStyle}">${qty}</span></td>`;
+    const defectTextRaw = String(r.defect || '').trim();
+    const defectDisplay = defectTextRaw || (Number(r.set_note_flag) === 1 ? 'SET' : '');
     // Notes icon - show 📝 if note exists and make it clickable
     const hasNote = r.note && String(r.note).trim().length > 0;
     const noteCell = hasNote ? `<td style="text-align:center;font-size:1.2rem"><span class="note-icon" data-upc="${apiUpc}" style="cursor:pointer" title="Click to view notes">📝</span></td>` : `<td style="text-align:center"></td>`;
@@ -911,7 +913,7 @@ function render(results){
           `</div></td>`+
             noteCell+
             `<td style="text-align:center">${picsBtn}</td>`+
-            `<td>${esc(r.defect||'')}</td>`+
+            `<td>${esc(defectDisplay)}</td>`+
              qtyCell+
              `<td><div class="title-cell"><img class="thumb" src="${thumb}" onerror="this.src='${missingThumb(48,48,'No Img')}'"><a href="#" class="img-link" data-img="${img}" data-title="${title}">${title}</a></div></td>`+
              `<td><div style=\"display:flex;gap:6px;align-items:center\"><span>${upc}</span><button type=\"button\" class=\"btn btn-sm btn-copy\" data-upc=\"${baseUpc}\" title=\"Copy UPC\">Copy</button></div></td>`+

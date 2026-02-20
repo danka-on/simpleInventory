@@ -2162,6 +2162,7 @@ def api_preplog_update():
             updates = []
             params = []
             cleaned_note = (entry.get('note') or '').strip()
+            previous_note = cleaned_note
             new_qty = entry.get('quantity')
 
             if has_note:
@@ -2198,12 +2199,13 @@ def api_preplog_update():
             try:
                 upc = _normalize_upc_preserve_suffix_for_match(_normalize_upc(updated.get('upc')))
                 lot_number = _normalize_lot_number(updated.get('lot_number'))
-                base_upc = (updated.get('base_upc') or '').strip() or (upc.split('-', 1)[0] if '-' in upc else upc)
-                ts = _listagent_now_iso()
+                # Keep prep status timestamps in UTC format for stable last_edited sorting.
+                ts = datetime.datetime.now(datetime.UTC).isoformat()
                 conn_b = sqlite3.connect('bol.db')
                 cur_b = conn_b.cursor()
                 _ensure_items_prep_tables()
                 updated_any = False
+                previous_note_n = (previous_note or '').strip()
                 # Keep note scoped to the exact log UPC. For suffixed entries we do NOT
                 # mirror to base UPC, otherwise distinct noted units can overwrite base notes.
                 for target_upc in (upc,):
@@ -2217,20 +2219,47 @@ def api_preplog_update():
                           AND COALESCE(lot_number, '') = ? COLLATE NOCASE
                     ''', (cleaned_note, ts, target_upc, status_lot))
                     updated_any = updated_any or bool(cur_b.rowcount)
-                if cleaned_note and upc:
+                if upc:
                     try:
-                        cur_b.execute('''
-                            SELECT note
-                            FROM items_prep_notes
-                            WHERE upc = ? COLLATE NOCASE
-                            ORDER BY created_at DESC, id DESC
-                            LIMIT 1
-                        ''', (upc,))
-                        latest = cur_b.fetchone()
-                        latest_note = (latest[0] or '').strip() if latest else ''
-                        if latest_note != cleaned_note:
-                            cur_b.execute('INSERT INTO items_prep_notes (upc, note, created_at) VALUES (?,?,?)', (upc, cleaned_note, ts))
-                            updated_any = True
+                        target_note_row = None
+                        if previous_note_n:
+                            cur_b.execute('''
+                                SELECT id, note
+                                FROM items_prep_notes
+                                WHERE upc = ? COLLATE NOCASE
+                                  AND TRIM(COALESCE(note, '')) = ?
+                                ORDER BY created_at DESC, id DESC
+                                LIMIT 1
+                            ''', (upc, previous_note_n))
+                            target_note_row = cur_b.fetchone()
+                        if not target_note_row:
+                            cur_b.execute('''
+                                SELECT id, note
+                                FROM items_prep_notes
+                                WHERE upc = ? COLLATE NOCASE
+                                ORDER BY created_at DESC, id DESC
+                                LIMIT 1
+                            ''', (upc,))
+                            target_note_row = cur_b.fetchone()
+
+                        if cleaned_note:
+                            if target_note_row:
+                                target_note_id = int(target_note_row[0])
+                                target_note_text = (target_note_row[1] or '').strip()
+                                if target_note_text != cleaned_note:
+                                    cur_b.execute('''
+                                        UPDATE items_prep_notes
+                                        SET note = ?, created_at = ?
+                                        WHERE id = ?
+                                    ''', (cleaned_note, ts, target_note_id))
+                                    updated_any = updated_any or bool(cur_b.rowcount)
+                            else:
+                                cur_b.execute('INSERT INTO items_prep_notes (upc, note, created_at) VALUES (?,?,?)', (upc, cleaned_note, ts))
+                                updated_any = True
+                        elif target_note_row:
+                            target_note_id = int(target_note_row[0])
+                            cur_b.execute('DELETE FROM items_prep_notes WHERE id = ?', (target_note_id,))
+                            updated_any = updated_any or bool(cur_b.rowcount)
                     except Exception:
                         pass
                 conn_b.commit()
@@ -19085,6 +19114,7 @@ def api_bol_items():
         # Build a status map keyed by (upc, lot_number) with fallback to lotless legacy rows.
         status_map = {}
         note_map = {}
+        set_note_map = {}
         photo_count_map = {}
         page_upcs = set()
         for r in rows:
@@ -19119,7 +19149,10 @@ def api_bol_items():
 
                     # Notes are still stored per UPC; apply as a shared note flag.
                     k2.execute(f'''
-                        SELECT upc, COUNT(*) as note_count
+                        SELECT
+                            upc,
+                            COUNT(*) as note_count,
+                            MAX(CASE WHEN INSTR(COALESCE(note, ''), 'Set of ') > 0 THEN 1 ELSE 0 END) as set_note_flag
                         FROM items_prep_notes
                         WHERE upc IN ({placeholders})
                         GROUP BY upc
@@ -19128,6 +19161,7 @@ def api_bol_items():
                         raw_upc = rr['upc']
                         if raw_upc:
                             note_map[_normalize_upc(raw_upc)] = rr['note_count']
+                            set_note_map[_normalize_upc(raw_upc)] = int(rr['set_note_flag'] or 0)
 
                     # Active (not deleted) photo counts for each UPC on the current page.
                     k2.execute(f'''
@@ -19144,6 +19178,7 @@ def api_bol_items():
         except Exception:
             status_map = {}
             note_map = {}
+            set_note_map = {}
             photo_count_map = {}
 
         # Enrich rows with status map for any missing joins
@@ -19180,6 +19215,8 @@ def api_bol_items():
 
             if 'prep_note_count' not in row:
                 row['prep_note_count'] = note_map.get(row_upc, 0)
+            if 'prep_set_note' not in row:
+                row['prep_set_note'] = set_note_map.get(row_upc, 0)
             if 'prep_photo_count' not in row:
                 row['prep_photo_count'] = photo_count_map.get(row_upc, 0)
 
@@ -19222,6 +19259,7 @@ def api_bol_items():
                 'temporary': r.get('temporary'),
                 'quantity': display_qty,
                 'note': 'yes' if has_notes else '',
+                'set_note_flag': bool(r.get('prep_set_note') or 0),
                 'photo_count': photo_count,
                 # Marketplace listing columns
                 'listed_amazon': r.get('listed_amazon'),
