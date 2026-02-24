@@ -155,10 +155,19 @@
                         });
                     return;
                 } else if(forDiagnostic){
+                    let lotNumber = (params.get('lot') || '').trim();
+                    if(!lotNumber && returnUrl){
+                        try{
+                            const retUrl = new URL(returnUrl, window.location.origin);
+                            lotNumber = (retUrl.searchParams.get('lot') || '').trim();
+                        }catch(e){}
+                    }
+                    const locationPayload = {upc: forDiagnostic, pictureposition: result.path, location: ''};
+                    if(lotNumber) locationPayload.lot_number = lotNumber;
                     fetch('/api/items_prep/location', {
                         method:'POST', 
                         headers:{'Content-Type':'application/json'}, 
-                        body: JSON.stringify({upc: forDiagnostic, pictureposition: result.path, location: ''})
+                        body: JSON.stringify(locationPayload)
                     })
                     .then(r=>r.json())
                     .then(j=>{

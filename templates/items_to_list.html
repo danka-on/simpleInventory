@@ -459,10 +459,9 @@ let selectMode = false;
 let currentPage = 1;
 let currentLimit = 25;
 let lastRenderedResults = []; // Cache last results for re-rendering
+let pendingMarketplaceSaves = 0;
 const PENDING_MARKETPLACE_OPS_KEY = 'items_to_list_pending_marketplace_ops_v1';
-const PENDING_MARKETPLACE_OP_MAX_AGE_MS = 3 * 24 * 60 * 60 * 1000;
-let marketplacePendingSaveCount = 0;
-let marketplaceFlushInFlight = false;
+const PENDING_MARKETPLACE_OP_MAX_AGE_MS = 10 * 60 * 1000;
 
 function _safeJsonParse(raw, fallback){
   try{ return JSON.parse(raw); }catch(e){ return fallback; }
@@ -472,7 +471,18 @@ function _readPendingMarketplaceOps(){
   try{
     const raw = localStorage.getItem(PENDING_MARKETPLACE_OPS_KEY);
     const parsed = _safeJsonParse(raw, []);
-    return Array.isArray(parsed) ? parsed : [];
+    const list = Array.isArray(parsed) ? parsed : [];
+    const now = Date.now();
+    const cleaned = list.filter(op => {
+      if(!op || typeof op !== 'object') return false;
+      if(!op.key || !op.payload) return false;
+      if((now - Number(op.created_at || 0)) > PENDING_MARKETPLACE_OP_MAX_AGE_MS) return false;
+      return _isValidPendingMarketplacePayload(op.payload);
+    });
+    if(cleaned.length !== list.length){
+      _writePendingMarketplaceOps(cleaned);
+    }
+    return cleaned;
   }catch(e){
     return [];
   }
@@ -492,77 +502,41 @@ function _marketplaceOpKey(payload){
   return `${id}|${upc}|${lot}|${marketplace}`;
 }
 
+function _isValidPendingMarketplacePayload(payload){
+  if(!payload || typeof payload !== 'object') return false;
+  const id = Number.parseInt(payload.id, 10);
+  if(!Number.isFinite(id) || id <= 0) return false;
+  const upc = String(payload.upc || '').trim();
+  const marketplace = String(payload.marketplace || '').trim().toLowerCase();
+  if(!upc) return false;
+  if(!['amazon', 'ebay', 'facebook'].includes(marketplace)) return false;
+  if(typeof payload.listed !== 'boolean') return false;
+  return true;
+}
+
 function _queuePendingMarketplaceOp(payload){
-  const key = _marketplaceOpKey(payload);
-  const now = Date.now();
-  const filtered = _readPendingMarketplaceOps().filter(op => {
-    if(!op || !op.key || !op.created_at) return false;
-    if((now - Number(op.created_at || 0)) > PENDING_MARKETPLACE_OP_MAX_AGE_MS) return false;
-    return op.key !== key;
-  });
-  filtered.push({ key, payload, created_at: now });
-  _writePendingMarketplaceOps(filtered);
-  return key;
+  // Manual-only mode: do not enqueue deferred marketplace operations.
+  return '';
 }
 
 function _clearPendingMarketplaceOp(key){
-  if(!key) return;
-  const filtered = _readPendingMarketplaceOps().filter(op => op && op.key !== key);
-  _writePendingMarketplaceOps(filtered);
+  // Manual-only mode: no-op.
+  return;
 }
 
 function _markMarketplaceSaveStarted(){
-  marketplacePendingSaveCount += 1;
+  // Manual-only mode: no-op.
+  return;
 }
 
 function _markMarketplaceSaveFinished(){
-  marketplacePendingSaveCount = Math.max(0, marketplacePendingSaveCount - 1);
+  // Manual-only mode: no-op.
+  return;
 }
 
-window.addEventListener('beforeunload', (e)=>{
-  if(marketplacePendingSaveCount > 0){
-    e.preventDefault();
-    e.returnValue = '';
-  }
-});
-
 async function flushPendingMarketplaceOps(){
-  if(marketplaceFlushInFlight) return;
-  const now = Date.now();
-  let ops = _readPendingMarketplaceOps().filter(op => op && op.payload && op.key && ((now - Number(op.created_at || 0)) <= PENDING_MARKETPLACE_OP_MAX_AGE_MS));
-  if(!ops.length){
-    _writePendingMarketplaceOps([]);
-    return;
-  }
-
-  marketplaceFlushInFlight = true;
-  const remaining = [];
-  try{
-    for(const op of ops){
-      try{
-        const resp = await fetch('/api/bol_items/list_status', {
-          method:'POST',
-          headers:{'Content-Type':'application/json'},
-          body: JSON.stringify(op.payload),
-          cache: 'no-store',
-          keepalive: true
-        });
-        const result = await resp.json().catch(()=> ({}));
-        const ok = !!(resp.ok && result && result.success);
-        if(!ok){
-          // Permanent client-side validation/not-found errors should not loop forever.
-          if(!(resp.status >= 400 && resp.status < 500)){
-            remaining.push(op);
-          }
-        }
-      }catch(err){
-        remaining.push(op);
-      }
-    }
-  }finally{
-    _writePendingMarketplaceOps(remaining);
-    marketplaceFlushInFlight = false;
-  }
+  // Manual-only mode: clear any stale deferred operations from older builds.
+  _writePendingMarketplaceOps([]);
 }
 
 function getCurrentFilterUiSettings(){
@@ -1210,6 +1184,11 @@ async function onMarketplaceToggle(e){
   const previousChecked = checkbox.dataset.prevChecked === '1';
 
   if(!upc || !marketplace) return;
+  if(!Number.isFinite(itemId) || itemId <= 0){
+    checkbox.checked = previousChecked;
+    alert('Row id missing. Refresh the page and try again.');
+    return;
+  }
   if(row && row.dataset.marketplaceSaving === '1') {
     checkbox.checked = previousChecked;
     return;
@@ -1230,17 +1209,13 @@ async function onMarketplaceToggle(e){
     if(quantity < 1) quantity = 1;
   }
 
-  let pendingOpKey = '';
-  let saveStarted = false;
   try{
     if(row) row.dataset.marketplaceSaving = '1';
+    pendingMarketplaceSaves += 1;
     rowCheckboxes.forEach(cb => cb.disabled = true);
 
     const payload = { upc, lot_number: lot, marketplace, listed, quantity, source: 'user' };
     if(Number.isFinite(itemId) && itemId > 0) payload.id = itemId;
-    pendingOpKey = _queuePendingMarketplaceOp(payload);
-    _markMarketplaceSaveStarted();
-    saveStarted = true;
 
     const response = await fetch('/api/bol_items/list_status', {
       method:'POST',
@@ -1256,10 +1231,8 @@ async function onMarketplaceToggle(e){
       // Revert checkbox on error
       checkbox.checked = previousChecked;
       checkbox.dataset.prevChecked = checkbox.checked ? '1' : '0';
-      _clearPendingMarketplaceOp(pendingOpKey);
       return;
     }
-    _clearPendingMarketplaceOp(pendingOpKey);
     
     // CRITICAL: Update all checkboxes with the ACTUAL database state
     // Don't trust cached page data - use the freshly queried state from server
@@ -1297,11 +1270,18 @@ async function onMarketplaceToggle(e){
     checkbox.checked = previousChecked;
     checkbox.dataset.prevChecked = checkbox.checked ? '1' : '0';
   }finally{
-    if(saveStarted) _markMarketplaceSaveFinished();
     rowCheckboxes.forEach(cb => cb.disabled = false);
     if(row) delete row.dataset.marketplaceSaving;
+    pendingMarketplaceSaves = Math.max(0, pendingMarketplaceSaves - 1);
   }
 }
+
+window.addEventListener('beforeunload', (e)=>{
+  if(pendingMarketplaceSaves > 0){
+    e.preventDefault();
+    e.returnValue = '';
+  }
+});
 
 // Copy UPC to clipboard
 async function onCopyUpc(e){

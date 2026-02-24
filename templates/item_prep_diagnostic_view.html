@@ -242,6 +242,9 @@
   </div>
 
   <script>
+    const DIAG_VIEW_ITEM_ID = {{ (bol.id if bol and bol.id is not none else none)|tojson }};
+    const DIAG_VIEW_SELECTED_LOT = {{ (selected_lot if selected_lot else (bol.lot_number if bol and bol.lot_number else ''))|tojson }};
+
     // Format Updated time to Eastern in a friendly way (YYYY-MM-DD h:mmam)
     (function(){
       const el = document.getElementById('updatedAt');
@@ -369,7 +372,13 @@
             const res = await fetch('/api/items_prep/set_display_image', {
               method: 'POST',
               headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify({ upc: '{{ upc }}', photo_id: currentPhotoId, image_path: currentPhotoPath })
+              body: JSON.stringify({
+                upc: '{{ upc }}',
+                photo_id: currentPhotoId,
+                image_path: currentPhotoPath,
+                id: (Number.isFinite(DIAG_VIEW_ITEM_ID) && DIAG_VIEW_ITEM_ID > 0) ? DIAG_VIEW_ITEM_ID : undefined,
+                lot_number: String(DIAG_VIEW_SELECTED_LOT || '').trim()
+              })
             });
             const j = await res.json();
             if(j.success){
@@ -464,7 +473,12 @@
           const setRes = await fetch('/api/items_prep/set_display_image', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ upc: '{{ upc }}', image_path: img.image_path })
+            body: JSON.stringify({
+              upc: '{{ upc }}',
+              image_path: img.image_path,
+              id: (Number.isFinite(DIAG_VIEW_ITEM_ID) && DIAG_VIEW_ITEM_ID > 0) ? DIAG_VIEW_ITEM_ID : undefined,
+              lot_number: String(DIAG_VIEW_SELECTED_LOT || '').trim()
+            })
           });
           const setJ = await setRes.json();
           if(setJ.success){
@@ -811,7 +825,9 @@
       const upc = '{{ upc }}'.trim();
       if(!upc) return;
       try{
-        const res = await fetch(`/api/items_prep/location/${encodeURIComponent(upc)}`);
+        const lot = String(DIAG_VIEW_SELECTED_LOT || '').trim();
+        const query = lot ? (`?lot=${encodeURIComponent(lot)}`) : '';
+        const res = await fetch(`/api/items_prep/location/${encodeURIComponent(upc)}${query}`);
         const j = await res.json();
         if(j.success && (j.location || j.pictureposition)){
           const row = document.getElementById('locationRow');
@@ -888,6 +904,10 @@
       const qtyValue = document.getElementById('qtyValue');
       const editPanel = document.getElementById('qtyEditPanel');
       const qtyInput = document.getElementById('qtyInput');
+      const DIAG_UPC = {{ upc|tojson }};
+      const DIAG_ITEM_ID = {{ (bol.id if bol and bol.id is not none else none)|tojson }};
+      const DIAG_BOL_LOT = {{ (bol.lot_number if bol and bol.lot_number else '')|tojson }};
+      const DIAG_SELECTED_LOT = {{ (selected_lot if selected_lot else '')|tojson }};
 
       if(!btnEdit || !btnSave || !btnCancel || !editPanel || !qtyInput) return;
 
@@ -916,10 +936,15 @@
         try{
           btnSave.disabled = true;
           btnSave.textContent = 'Saving...';
+          const payload = { upc: DIAG_UPC, quantity: newQty };
+          const lotFromUrl = new URLSearchParams(window.location.search || '').get('lot') || '';
+          const targetLot = String(DIAG_BOL_LOT || DIAG_SELECTED_LOT || lotFromUrl || '').trim();
+          if(targetLot) payload.lot_number = targetLot;
+          if(Number.isFinite(DIAG_ITEM_ID) && DIAG_ITEM_ID > 0) payload.id = DIAG_ITEM_ID;
           const res = await fetch('/api/bol_items/quantity', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ upc: '{{ upc }}', quantity: newQty })
+            body: JSON.stringify(payload)
           });
           const j = await res.json();
           if(j.success){

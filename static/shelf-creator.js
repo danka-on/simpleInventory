@@ -32,7 +32,15 @@ const state = {
     rectW: 0,
     rectH: 0,
     rectRotation: 0,
-    handleSize: 40 // Size of corner handles for touch
+    handleSize: 40, // Size of corner handles for touch
+    imageLoadToken: 0,
+    pendingContinueTimer: null,
+    cameraStarting: false,
+    isSaving: false,
+    saveRequestToken: 0,
+    saveAbortController: null,
+    saveTimeoutId: null,
+    defaultSaveBtnHtml: ''
 };
 
 // ============================================================================
@@ -45,10 +53,82 @@ const state = {
 function init() {
     console.log('Initializing Shelf Creator...');
     console.log('Device type:', state.isMobile ? 'Mobile' : 'Desktop');
+
+    const saveBtn = document.getElementById('save-btn');
+    if (saveBtn) {
+        state.defaultSaveBtnHtml = saveBtn.innerHTML;
+    }
     
     loadData();
     setupEventListeners();
     setupCanvas();
+}
+
+function invalidatePendingImageWork() {
+    state.imageLoadToken += 1;
+    if (state.pendingContinueTimer) {
+        clearTimeout(state.pendingContinueTimer);
+        state.pendingContinueTimer = null;
+    }
+}
+
+function invalidateSaveFlow() {
+    state.saveRequestToken += 1;
+    if (state.saveTimeoutId) {
+        clearTimeout(state.saveTimeoutId);
+        state.saveTimeoutId = null;
+    }
+    if (state.saveAbortController) {
+        try {
+            state.saveAbortController.abort();
+        } catch (err) {
+            console.warn('Abort save failed:', err);
+        }
+        state.saveAbortController = null;
+    }
+    state.isSaving = false;
+}
+
+function resetCameraPreviewUI() {
+    const video = document.getElementById('camera-video');
+    const preview = document.getElementById('camera-preview');
+    const cameraContainer = document.getElementById('camera-container');
+    const cameraControls = document.getElementById('camera-controls');
+    const captureBtn = document.getElementById('capture-btn');
+
+    if (video) {
+        video.style.display = 'block';
+        video.srcObject = null;
+    }
+    if (preview) {
+        const pctx = preview.getContext('2d');
+        if (pctx) pctx.clearRect(0, 0, preview.width, preview.height);
+        preview.classList.remove('active');
+        preview.width = 0;
+        preview.height = 0;
+    }
+    if (cameraContainer) cameraContainer.classList.remove('active');
+    if (cameraControls) cameraControls.style.display = 'none';
+    if (captureBtn) captureBtn.style.display = 'none';
+}
+
+function resetSaveButtonUI() {
+    const saveBtn = document.getElementById('save-btn');
+    if (!saveBtn) return;
+
+    const defaultText = state.defaultSaveBtnHtml || '<i class="fas fa-save"></i> Save Shelf';
+    saveBtn.innerHTML = defaultText;
+    saveBtn.disabled = true;
+}
+
+async function parseJsonResponse(response) {
+    const text = await response.text();
+    if (!text) return {};
+    try {
+        return JSON.parse(text);
+    } catch (err) {
+        throw new Error(`Server returned non-JSON response (${response.status})`);
+    }
 }
 
 /**
@@ -599,10 +679,21 @@ function editShelf() {
         return;
     }
 
+    invalidatePendingImageWork();
+    stopCamera();
+    resetCameraPreviewUI();
+
     // Prepare editor
     state.isEditing = true;
     document.getElementById('form-title').textContent = `Edit Shelf: ${code}`;
     document.getElementById('shelf-code').value = code;
+    state.currentImage = null;
+    state.rectX = 0;
+    state.rectY = 0;
+    state.rectW = 0;
+    state.rectH = 0;
+    state.rectRotation = 0;
+    updateSaveButton();
     
     // Mark code as valid immediately since we are editing
     const input = document.getElementById('shelf-code');
@@ -611,10 +702,16 @@ function editShelf() {
     document.getElementById('code-validation').textContent = '';
 
     // Load image into canvas
+    const imageToken = state.imageLoadToken;
     const img = new Image();
     img.crossOrigin = 'anonymous';
     
     img.onload = () => {
+        if (imageToken !== state.imageLoadToken) {
+            console.log('Ignoring stale edit image load for:', code);
+            return;
+        }
+
         const canvas = document.getElementById('editor-canvas');
         const ctx = canvas.getContext('2d');
         canvas.width = img.width;
@@ -643,6 +740,7 @@ function editShelf() {
     };
     
     img.onerror = () => {
+        if (imageToken !== state.imageLoadToken) return;
         showError('Failed to load shelf image into editor');
     };
     
@@ -661,6 +759,17 @@ function editShelf() {
  */
 function replaceImage() {
     console.log('Replacing image...');
+
+    invalidatePendingImageWork();
+    stopCamera();
+    resetCameraPreviewUI();
+    state.currentImage = null;
+    state.rectX = 0;
+    state.rectY = 0;
+    state.rectW = 0;
+    state.rectH = 0;
+    state.rectRotation = 0;
+    updateSaveButton();
     
     // Hide editor
     const editorContainer = document.getElementById('editor-container');
@@ -758,6 +867,12 @@ function showAddView() {
  */
 function cancelAdd() {
     console.log('Canceling add/edit');
+    if (state.isSaving) {
+        console.warn('Cancel requested while save in progress, aborting save');
+        invalidateSaveFlow();
+        resetSaveButtonUI();
+    }
+
     stopCamera();
     document.getElementById('add-view').classList.remove('active');
     document.getElementById('list-view').classList.add('active');
@@ -768,10 +883,12 @@ function cancelAdd() {
  * Reset form to initial state
  */
 function resetForm() {
+    invalidatePendingImageWork();
+    invalidateSaveFlow();
     document.getElementById('shelf-code').value = '';
     document.getElementById('code-validation').textContent = '';
     document.getElementById('shelf-code').classList.remove('valid', 'invalid');
-    document.getElementById('save-btn').disabled = true;
+    resetSaveButtonUI();
     
     const replaceBtn = document.getElementById('replace-image-btn');
     if (replaceBtn) replaceBtn.style.display = 'none';
@@ -780,8 +897,10 @@ function resetForm() {
     editorContainer.classList.remove('active');
     editorContainer.style.display = 'none';
     
+    resetCameraPreviewUI();
     state.currentImage = null;
     state.rectX = state.rectY = state.rectW = state.rectH = 0;
+    state.rectRotation = 0;
     state.isEditing = false;
 }
 
@@ -870,7 +989,7 @@ function updateSaveButton() {
     const canSave = code && hasImage; 
     
     const saveBtn = document.getElementById('save-btn');
-    saveBtn.disabled = !canSave;
+    saveBtn.disabled = state.isSaving || !canSave;
     
     console.log('Save button update:', {
         code: code,
@@ -921,6 +1040,11 @@ function handleFileSelect(event) {
  */
 function startCapture() {
     console.log('Starting camera...');
+
+    if (state.cameraStarting) {
+        console.log('Camera start already in progress');
+        return;
+    }
     
     // Check if code is entered and valid first
     const codeInput = document.getElementById('shelf-code');
@@ -941,6 +1065,15 @@ function startCapture() {
     const cameraContainer = document.getElementById('camera-container');
     const captureBtn = document.getElementById('capture-btn');
     const startCameraBtn = document.getElementById('start-camera-btn');
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        showError('Camera not supported on this device/browser');
+        return;
+    }
+
+    stopCamera();
+    resetCameraPreviewUI();
+    state.cameraStarting = true;
     
     navigator.mediaDevices.getUserMedia({
         // Use 'user' (front) camera for desktop testing, 'environment' (back) for mobile
@@ -963,6 +1096,9 @@ function startCapture() {
     .catch(err => {
         console.error('Camera error:', err);
         showError('Camera access denied: ' + err.message);
+    })
+    .finally(() => {
+        state.cameraStarting = false;
     });
 }
 
@@ -1003,6 +1139,10 @@ function retakePhoto() {
     // Hide preview, show video
     video.style.display = 'block';
     preview.classList.remove('active');
+    const pctx = preview.getContext('2d');
+    if (pctx) pctx.clearRect(0, 0, preview.width, preview.height);
+    preview.width = 0;
+    preview.height = 0;
     document.getElementById('capture-btn').style.display = 'block';
     document.getElementById('camera-controls').style.display = 'none';
     
@@ -1016,11 +1156,18 @@ function retakePhoto() {
 function continueToEditor() {
     console.log('Continuing to editor with photo...');
     const preview = document.getElementById('camera-preview');
+
+    if (!preview.width || !preview.height) {
+        showError('Please capture a photo first');
+        return;
+    }
     
     try {
         // Use toDataURL directly - it's synchronous and simpler
         const dataUrl = preview.toDataURL('image/png');
         console.log('Photo converted to data URL (length: ' + dataUrl.length + '), loading to editor...');
+
+        const imageToken = ++state.imageLoadToken;
         
         // Hide camera UI explicitly
         document.getElementById('camera-container').classList.remove('active');
@@ -1032,8 +1179,12 @@ function continueToEditor() {
         
         // Load to editor
         // Small timeout to allow UI to update
-        setTimeout(() => {
-            loadImageToEditor(dataUrl);
+        if (state.pendingContinueTimer) {
+            clearTimeout(state.pendingContinueTimer);
+        }
+        state.pendingContinueTimer = setTimeout(() => {
+            state.pendingContinueTimer = null;
+            loadImageToEditor(dataUrl, imageToken);
         }, 100);
         
     } catch (e) {
@@ -1046,11 +1197,15 @@ function continueToEditor() {
  * Stop camera stream and release resources
  */
 function stopCamera() {
+    state.cameraStarting = false;
     if (state.cameraStream) {
         console.log('Stopping camera stream');
         state.cameraStream.getTracks().forEach(track => track.stop());
         state.cameraStream = null;
     }
+
+    const video = document.getElementById('camera-video');
+    if (video) video.srcObject = null;
 }
 
 // ============================================================================
@@ -1070,17 +1225,20 @@ function resetRect() {
 
     // If we are editing, try to load the original clean image
     if (state.isEditing && state.currentShelfCode) {
+        const imageToken = state.imageLoadToken;
         const originalUrl = `/static/shelves/originals/${state.currentShelfCode}.png`;
         const img = new Image();
         img.crossOrigin = 'anonymous';
         
         img.onload = () => {
+            if (imageToken !== state.imageLoadToken) return;
             console.log('Loaded original clean image for redraw');
             state.currentImage = img;
             redrawCanvas();
         };
         
         img.onerror = () => {
+            if (imageToken !== state.imageLoadToken) return;
             console.log('No original image found, sticking with current image');
             redrawCanvas();
         };
@@ -1414,13 +1572,23 @@ function handleTouchEnd(e) {
 /**
  * Load image to canvas editor
  */
-function loadImageToEditor(dataUrl) {
+function loadImageToEditor(dataUrl, imageToken = state.imageLoadToken) {
     console.log('Loading image to editor...');
     const img = new Image();
     
     img.onload = () => {
+        if (imageToken !== state.imageLoadToken) {
+            console.log('Ignoring stale image load');
+            return;
+        }
+
         console.log('Image loaded successfully, dimensions:', img.width, 'x', img.height);
         state.currentImage = img;
+        state.rectX = 0;
+        state.rectY = 0;
+        state.rectW = 0;
+        state.rectH = 0;
+        state.rectRotation = 0;
         
         // Ensure canvas context exists
         if (!state.canvas) {
@@ -1469,6 +1637,7 @@ function loadImageToEditor(dataUrl) {
     };
     
     img.onerror = (e) => {
+        if (imageToken !== state.imageLoadToken) return;
         console.error('Failed to load image:', e);
         showError('Failed to load image into editor');
     };
@@ -1487,6 +1656,11 @@ function loadImageToEditor(dataUrl) {
  */
 function saveShelf() {
     console.log('=== SAVE SHELF CLICKED ===');
+
+    if (state.isSaving) {
+        console.log('Save ignored: save already in progress');
+        return;
+    }
     
     const code = document.getElementById('shelf-code').value.trim();
     const hasImage = state.currentImage !== null;
@@ -1501,6 +1675,11 @@ function saveShelf() {
         const msg = !code ? 'Please provide a shelf code' : 'Please provide an image';
         console.error('Save blocked:', msg);
         showError(msg);
+        return;
+    }
+
+    if (!state.canvas || !state.ctx) {
+        showError('Image editor is not ready. Please retake the image.');
         return;
     }
     
@@ -1519,18 +1698,34 @@ function saveShelf() {
     console.log('Converting canvas to blob...');
     
     const saveBtn = document.getElementById('save-btn');
-    const originalBtnText = saveBtn.innerHTML;
+    const saveToken = ++state.saveRequestToken;
+    state.isSaving = true;
     saveBtn.disabled = true;
     saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
-    
-    // Safety timeout in case toBlob or fetch hangs indefinitely
-    const safetyTimeout = setTimeout(() => {
-        if (saveBtn.disabled) {
-            console.error('Save operation timed out');
-            showError('Save operation timed out. Please try again.');
-            saveBtn.disabled = false;
-            saveBtn.innerHTML = originalBtnText;
+
+    const finishSave = (restoreButton = true) => {
+        if (saveToken !== state.saveRequestToken) return;
+
+        if (state.saveTimeoutId) {
+            clearTimeout(state.saveTimeoutId);
+            state.saveTimeoutId = null;
         }
+        state.saveAbortController = null;
+        state.isSaving = false;
+
+        if (restoreButton) {
+            const defaultText = state.defaultSaveBtnHtml || '<i class="fas fa-save"></i> Save Shelf';
+            saveBtn.innerHTML = defaultText;
+            updateSaveButton();
+        }
+    };
+
+    // Safety timeout in case toBlob or fetch hangs indefinitely
+    state.saveTimeoutId = setTimeout(() => {
+        if (saveToken !== state.saveRequestToken) return;
+        console.error('Save operation timed out');
+        showError('Save operation timed out. Please try again.');
+        finishSave(true);
     }, 30000); // 30 seconds
 
     // Helper to get blob from original image (clean)
@@ -1551,107 +1746,92 @@ function saveShelf() {
         });
     };
 
+    const controller = new AbortController();
+    state.saveAbortController = controller;
+
+    const applySaveSuccess = (message) => {
+        finishSave(false);
+        showSuccess(message);
+        state.isEditing = false;
+        state.currentShelfCode = '';
+        cancelAdd();
+        loadData();
+    };
+
     try {
         // Convert canvas to blob
         state.canvas.toBlob(async blob => {
-            if (!blob) {
-                clearTimeout(safetyTimeout);
-                console.error('Failed to create blob from canvas');
-                showError('Failed to process image');
-                saveBtn.disabled = false;
-                saveBtn.innerHTML = originalBtnText;
-                return;
-            }
-            
-            console.log('Blob created, size:', blob.size);
-            const formData = new FormData();
-            formData.append('image', blob, `${code}.png`);
-            
-            // Also save original image (clean)
-            const origBlob = await getOriginalBlob();
-            if (origBlob) {
-                console.log('Original blob created, size:', origBlob.size);
-                formData.append('original_image', origBlob, `${code}.png`);
-            }
+            try {
+                if (saveToken !== state.saveRequestToken) return;
 
-            if (state.isEditing) {
-                const oldCode = state.currentShelfCode;
-                formData.append('old_code', oldCode);
-                if (oldCode !== code) formData.append('new_code', code);
-
-                console.log('Updating shelf via /api/update_shelf');
-                fetch('/api/update_shelf', {
-                    method: 'POST',
-                    body: formData
-                })
-                .then(r => r.json())
-                .then(data => {
-                    clearTimeout(safetyTimeout);
-                    console.log('Update response:', data);
-                    if (data.success) {
-                        showSuccess('Shelf updated successfully!');
-                        state.isEditing = false;
-                        state.currentShelfCode = '';
-                        cancelAdd();
-                        loadData();
-                    } else {
-                        showError(data.error || 'Failed to update shelf');
-                        saveBtn.disabled = false;
-                        saveBtn.innerHTML = originalBtnText;
-                    }
-                })
-                .catch(err => {
-                    clearTimeout(safetyTimeout);
-                    console.error('Update error:', err);
-                    showError('Error updating shelf: ' + err.message);
-                    saveBtn.disabled = false;
-                    saveBtn.innerHTML = originalBtnText;
-                });
-            } else {
-                formData.append('code', code);
-                // Add group_id if we are inside a group
-                if (state.currentGroupId) {
-                    formData.append('group_id', state.currentGroupId);
-                    console.log('Adding to group:', state.currentGroupId);
+                if (!blob) {
+                    console.error('Failed to create blob from canvas');
+                    showError('Failed to process image');
+                    finishSave(true);
+                    return;
                 }
                 
-                console.log('Creating new shelf via /api/upload_shelf');
-                fetch('/api/upload_shelf', {
-                    method: 'POST',
-                    body: formData
-                })
-                .then(r => {
-                    console.log('Upload response status:', r.status);
-                    return r.json();
-                })
-                .then(data => {
-                    clearTimeout(safetyTimeout);
-                    console.log('Upload response data:', data);
-                    if (data.success) {
-                        showSuccess('Shelf saved successfully!');
-                        cancelAdd();
-                        loadData();
-                    } else {
-                        showError(data.error || 'Failed to save shelf');
-                        saveBtn.disabled = false;
-                        saveBtn.innerHTML = originalBtnText;
+                console.log('Blob created, size:', blob.size);
+                const formData = new FormData();
+                formData.append('image', blob, `${code}.png`);
+                
+                // Also save original image (clean)
+                const origBlob = await getOriginalBlob();
+                if (origBlob) {
+                    console.log('Original blob created, size:', origBlob.size);
+                    formData.append('original_image', origBlob, `${code}.png`);
+                }
+
+                let endpoint = '/api/upload_shelf';
+                let successMessage = 'Shelf saved successfully!';
+
+                if (state.isEditing) {
+                    const oldCode = state.currentShelfCode;
+                    formData.append('old_code', oldCode);
+                    if (oldCode !== code) formData.append('new_code', code);
+                    endpoint = '/api/update_shelf';
+                    successMessage = 'Shelf updated successfully!';
+                    console.log('Updating shelf via /api/update_shelf');
+                } else {
+                    formData.append('code', code);
+                    if (state.currentGroupId) {
+                        formData.append('group_id', state.currentGroupId);
+                        console.log('Adding to group:', state.currentGroupId);
                     }
-                })
-                .catch(err => {
-                    clearTimeout(safetyTimeout);
-                    console.error('Save error:', err);
-                    showError('Error saving shelf: ' + err.message);
-                    saveBtn.disabled = false;
-                    saveBtn.innerHTML = originalBtnText;
+                    console.log('Creating new shelf via /api/upload_shelf');
+                }
+
+                const response = await fetch(endpoint, {
+                    method: 'POST',
+                    body: formData,
+                    signal: controller.signal
                 });
+                const data = await parseJsonResponse(response);
+                if (saveToken !== state.saveRequestToken) return;
+
+                console.log('Save response:', data);
+                if (data.success) {
+                    applySaveSuccess(successMessage);
+                } else {
+                    showError(data.error || 'Failed to save shelf');
+                    finishSave(true);
+                }
+            } catch (err) {
+                if (saveToken !== state.saveRequestToken) return;
+                if (err.name === 'AbortError') {
+                    console.warn('Save request aborted');
+                    finishSave(true);
+                    return;
+                }
+                console.error('Save error:', err);
+                showError('Error saving shelf: ' + err.message);
+                finishSave(true);
             }
         }, 'image/png');
     } catch (e) {
-        clearTimeout(safetyTimeout);
         console.error('Error in save process:', e);
         showError('Error preparing save: ' + e.message);
-        saveBtn.disabled = false;
-        saveBtn.innerHTML = originalBtnText;
+        finishSave(true);
     }
 }
 

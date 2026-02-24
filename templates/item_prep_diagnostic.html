@@ -1085,7 +1085,10 @@
       const upc = '{{ upc }}'.trim();
       if(!upc) return;
       try{
-        const res = await fetch(`/api/items_prep/location/${encodeURIComponent(upc)}`);
+        const params = new URLSearchParams(window.location.search || '');
+        const lot = (params.get('lot') || '').trim();
+        const query = lot ? (`?lot=${encodeURIComponent(lot)}`) : '';
+        const res = await fetch(`/api/items_prep/location/${encodeURIComponent(upc)}${query}`);
         const j = await res.json();
         if(j.success && (j.location || j.pictureposition)){
           const row = document.getElementById('locationRow');
@@ -1144,7 +1147,10 @@
       }
       
       try{
-        const res = await fetch(`/api/items_prep/status/${encodeURIComponent(upc)}`);
+        const params = new URLSearchParams(window.location.search || '');
+        const lot = (params.get('lot') || '').trim();
+        const query = lot ? (`?lot=${encodeURIComponent(lot)}`) : '';
+        const res = await fetch(`/api/items_prep/status/${encodeURIComponent(upc)}${query}`);
         const j = await res.json();
         if(j.success && j.status){
           statusInput.value = j.status;
@@ -1174,9 +1180,12 @@
       btn.innerHTML = '<span>Resetting...</span>';
       
       try{
+        const params = new URLSearchParams(window.location.search || '');
+        const lot = (params.get('lot') || '').trim();
         const res = await fetch(`/api/items_prep/diagnostic/${encodeURIComponent(upc)}/reset`, {
           method: 'POST',
-          headers: {'Content-Type': 'application/json'}
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(lot ? { lot_number: lot } : {})
         });
         const j = await res.json();
         

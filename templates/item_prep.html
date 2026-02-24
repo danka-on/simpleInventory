@@ -487,7 +487,27 @@
     let lookupDebounceTimer = null;
     let lastLookupFingerprint = {upc: '', ts: 0};
     let currentLookupInfo = null;
+    let prepActionInFlight = false;
     const LOOKUP_DEDUPE_WINDOW_MS = 1200;
+
+    function setPrepActionButtonsDisabled(disabled){
+      ['goodBtn', 'badBtn', 'returnBtn', 'skipBtn', 'lookupBtn'].forEach((id)=>{
+        const el = document.getElementById(id);
+        if(el) el.disabled = !!disabled;
+      });
+    }
+
+    function tryBeginPrepAction(){
+      if(prepActionInFlight) return false;
+      prepActionInFlight = true;
+      setPrepActionButtonsDisabled(true);
+      return true;
+    }
+
+    function endPrepAction(){
+      prepActionInFlight = false;
+      setPrepActionButtonsDisabled(false);
+    }
 
     function triggerLookupFromInput(rawUpc){
       const normalized = (rawUpc || '').trim();
@@ -953,7 +973,11 @@
           const setRes = await fetch('/api/items_prep/set_display_image', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ upc: currentUpc, image_path: img.image_path })
+            body: JSON.stringify({
+              upc: currentUpc,
+              image_path: img.image_path,
+              lot_number: getActionLotNumber()
+            })
           });
           const setJ = await setRes.json();
           if(setJ.success){
@@ -1047,56 +1071,77 @@
     
     document.getElementById('goodBtn').onclick = async ()=>{
       if(!currentUpc) return;
-      const continueAction = await maybeRunPlateSetPrompt();
-      if(!continueAction) return;
-      const quickNote = getQuickPrepNoteText();
-      
-      // Show loading overlay
-      showPageLoading();
-      
-      let result = await setStatus(currentUpc, 'good', currentQty, quickNote ? {note: quickNote} : undefined);
-      const statusMsg = document.getElementById('statusMsg');
-      
-      if(result && result.success){ 
-        let noteSaveError = '';
-        const resultUpc = result.upc || currentUpc;
-        const resultBaseUpc = result.base_upc || (String(resultUpc || '').includes('-') ? String(resultUpc).split('-')[0] : String(resultUpc || currentUpc || ''));
-        if(quickNote){
-          try{
-            const noteResp = await savePrepNote(resultUpc, quickNote);
-            if(noteResp && noteResp.success){
-              clearQuickPrepNote();
-            }else{
+      if(!tryBeginPrepAction()) return;
+      let releaseDeferred = false;
+      try{
+        const continueAction = await maybeRunPlateSetPrompt();
+        if(!continueAction){
+          return;
+        }
+        const quickNote = getQuickPrepNoteText();
+        // Show loading overlay
+        showPageLoading();
+        let result = await setStatus(currentUpc, 'good', currentQty, quickNote ? {note: quickNote} : undefined);
+        const statusMsg = document.getElementById('statusMsg');
+        
+        if(result && result.success){ 
+          let noteSaveError = '';
+          const resultUpc = result.upc || currentUpc;
+          const resultBaseUpc = result.base_upc || (String(resultUpc || '').includes('-') ? String(resultUpc).split('-')[0] : String(resultUpc || currentUpc || ''));
+          if(quickNote){
+            try{
+              const noteResp = await savePrepNote(resultUpc, quickNote);
+              if(noteResp && noteResp.success){
+                clearQuickPrepNote();
+              }else{
+                noteSaveError = ' (note not saved)';
+              }
+            }catch(e){
               noteSaveError = ' (note not saved)';
             }
-          }catch(e){
-            noteSaveError = ' (note not saved)';
           }
+          // Store for undo with action type
+          lastEntry = {
+            upc: resultUpc, 
+            base_upc: resultBaseUpc || null,
+            status: 'good', 
+            qty: currentQty,
+            action: result.action, // 'incremented' or 'created'
+            previousQty: result.action === 'incremented' ? (result.quantity - currentQty) : 0,
+            lot_number: result.lot_number || getActionLotNumber()
+          };
+          showUndoButton();
+          const exceptionTag = result.exception_overage ? ' <span class="bad">(saved as exception)</span>' : '';
+          const forcedTag = result.forced_lot_override ? (' <span class="bad">(forced current LOT ' + esc(result.lot_number || '') + ', flagged)</span>') : '';
+          statusMsg.innerHTML='<span class="ok">Marked GOOD (Qty: '+currentQty+')</span>' + exceptionTag + forcedTag + (noteSaveError ? (' <span class="bad">' + noteSaveError + '</span>') : '');
+        } else { 
+          const errorMsg = result && result.error ? result.error : 'Unknown error';
+          console.error('Failed to mark good:', result);
+          statusMsg.innerHTML='<span class="bad">Failed: ' + errorMsg + '</span>'; 
         }
-        // Store for undo with action type
-        lastEntry = {
-          upc: resultUpc, 
-          base_upc: resultBaseUpc || null,
-          status: 'good', 
-          qty: currentQty,
-          action: result.action, // 'incremented' or 'created'
-          previousQty: result.action === 'incremented' ? (result.quantity - currentQty) : 0,
-          lot_number: result.lot_number || getActionLotNumber()
-        };
-        showUndoButton();
-        const exceptionTag = result.exception_overage ? ' <span class="bad">(saved as exception)</span>' : '';
-        const forcedTag = result.forced_lot_override ? (' <span class="bad">(forced current LOT ' + esc(result.lot_number || '') + ', flagged)</span>') : '';
-        statusMsg.innerHTML='<span class="ok">Marked GOOD (Qty: '+currentQty+')</span>' + exceptionTag + forcedTag + (noteSaveError ? (' <span class="bad">' + noteSaveError + '</span>') : '');
-      } else { 
-        const errorMsg = result && result.error ? result.error : 'Unknown error';
-        console.error('Failed to mark good:', result);
-        statusMsg.innerHTML='<span class="bad">Failed: ' + errorMsg + '</span>'; 
+        releaseDeferred = true;
+        setTimeout(()=>{
+          hidePageLoading();
+          statusMsg.textContent='';
+          clearCurrentResultCard();
+          endPrepAction();
+        }, 3000);
+      }catch(e){
+        console.error('Good button error:', e);
+        const statusMsg = document.getElementById('statusMsg');
+        statusMsg.innerHTML='<span class="bad">Failed: ' + e + '</span>';
+      }finally{
+        if(!releaseDeferred){
+          hidePageLoading();
+          endPrepAction();
+        }
       }
-      setTimeout(()=>{ hidePageLoading(); statusMsg.textContent=''; clearCurrentResultCard(); }, 3000);
     };
 
     document.getElementById('returnBtn').onclick = async ()=>{
       if(!currentUpc) return;
+      if(!tryBeginPrepAction()) return;
+      let releaseDeferred = false;
       
       // Show loading overlay
       showPageLoading();
@@ -1118,43 +1163,49 @@
           // Store for undo
           lastEntry = {
             upc: data.suffixed_upc,
+            base_upc: data.base_upc || currentBaseUpc() || (String(currentUpc || '').split('-')[0] || ''),
             status: 'return', 
             qty: currentQty,
             action: 'return',
             lot_number: data.lot_number || getActionLotNumber()
           };
           showUndoButton();
+          releaseDeferred = true;
+          setTimeout(()=>{ 
+            hidePageLoading();
+            statusMsg.textContent=''; 
+            clearCurrentResultCard();
+            endPrepAction();
+          }, 3000);
         } else {
-          hidePageLoading();
           if(!data.cancelled){
             alert('Error creating return entry: ' + (data.error || 'Unknown error'));
           }
         }
       } catch(e) {
-        hidePageLoading();
         console.error('Return button error:', e);
         alert('Error creating return entry');
+      } finally {
+        if(!releaseDeferred){
+          hidePageLoading();
+          endPrepAction();
+        }
       }
-      
-      setTimeout(()=>{ 
-        hidePageLoading();
-        const statusMsg = document.getElementById('statusMsg');
-        statusMsg.textContent=''; 
-        clearCurrentResultCard();
-      }, 3000);
     };
 
     document.getElementById('badBtn').onclick = async ()=>{
       if(!currentUpc) return;
-      const continueAction = await maybeRunPlateSetPrompt();
-      if(!continueAction) return;
-      const quickNote = getQuickPrepNoteText();
-      
-      // Show loading overlay
-      showPageLoading();
-      
+      if(!tryBeginPrepAction()) return;
+      let releaseDeferred = false;
       // Call API to create temporary suffixed entry for Bad flow
       try {
+        const continueAction = await maybeRunPlateSetPrompt();
+        if(!continueAction){
+          return;
+        }
+        const quickNote = getQuickPrepNoteText();
+        // Show loading overlay
+        showPageLoading();
         let data = await postWithLotFallback('/api/items_prep/create_bad_entry', {
           upc: currentUpc,
           qty: currentQty
@@ -1184,20 +1235,25 @@
             const exceptionOverageQuery = data.exception_overage ? '&exception_overage=1' : '';
             window.location.href = '/item-prep/diagnostic?upc='+encodeURIComponent(data.suffixed_upc)+'&from=bad&qty='+currentQty+lotQuery+requestedLotQuery+noLotQuery+exceptionOverageQuery+'&return='+encodeURIComponent('/item-prep?forceFocus=1&showUndo=1');
           }, 300);
+          releaseDeferred = true;
         } else {
-          hidePageLoading();
           if(!data.cancelled){
             alert('Error creating bad entry: ' + (data.error || 'Unknown error'));
           }
         }
       } catch(e) {
-        hidePageLoading();
         console.error('Bad button error:', e);
         alert('Error creating bad entry');
+      } finally {
+        if(!releaseDeferred){
+          hidePageLoading();
+          endPrepAction();
+        }
       }
     };
 
     document.getElementById('skipBtn').onclick = async ()=>{ 
+      if(prepActionInFlight) return;
       if (currentUpc) {
         // Cleanup temporary entry if it exists
         try {
