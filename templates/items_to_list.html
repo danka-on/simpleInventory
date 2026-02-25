@@ -16,8 +16,113 @@
     table{width:100%;border-collapse:collapse;margin-top:12px}
     th,td{padding:8px;border:1px solid #e6e6e6;text-align:left}
     th{background:#f0f0f0}
-    tr.row-note-highlight td{background:rgba(255, 243, 199, 0.55)}
-    tr.row-note-highlight:hover td{background:rgba(255, 236, 170, 0.68)}
+    th.th-sortable{cursor:pointer;user-select:none;white-space:nowrap}
+    th.th-sortable .sort-ind{font-size:0.8em;opacity:0.85;margin-left:4px}
+    .warehouse-info-btn{
+      background:transparent;
+      border:none;
+      padding:0;
+      margin:0;
+      cursor:pointer;
+      font:inherit;
+      text-decoration:underline;
+      text-underline-offset:2px;
+    }
+    .warehouse-info-btn:hover{opacity:0.85}
+    .auto-listings-btn{
+      background:#eef2ff;
+      color:#3730a3;
+      border:1px solid #c7d2fe;
+      border-radius:999px;
+      padding:5px 10px;
+      font-size:0.83rem;
+      font-weight:600;
+      cursor:pointer;
+      font-family:inherit;
+      white-space:nowrap;
+    }
+    .auto-listings-btn:hover{background:#e0e7ff}
+    .auto-listings-meta-badge{
+      display:inline-block;
+      padding:2px 8px;
+      border-radius:999px;
+      font-size:0.8rem;
+      font-weight:700;
+      margin-right:8px;
+    }
+    .auto-badge-ebay{background:#e8f5ff;color:#0a66c2;border:1px solid #bfdbfe}
+    .auto-badge-amazon{background:#fff6e8;color:#b45309;border:1px solid #fcd34d}
+    .auto-listings-row{
+      display:flex;
+      gap:8px;
+      align-items:flex-start;
+      justify-content:space-between;
+      padding:8px 0;
+      border-bottom:1px solid rgba(0,0,0,0.08);
+    }
+    .auto-listings-row:last-child{border-bottom:none}
+    .auto-listings-link{font-weight:600;word-break:break-word}
+    .auto-listings-platform{font-size:0.8rem;font-weight:700;color:#475569;min-width:70px}
+    .warehouse-loc-list{display:flex;flex-wrap:wrap;gap:8px}
+    .warehouse-loc-btn{
+      background:#eef6ff;
+      color:#1d4ed8;
+      border:1px solid #bfdbfe;
+      border-radius:999px;
+      padding:6px 10px;
+      cursor:pointer;
+      font-size:0.9rem;
+      font-family:inherit;
+    }
+    .warehouse-loc-btn:hover{background:#dbeafe}
+    .warehouse-loc-btn.active{background:#1d4ed8;color:#fff;border-color:#1d4ed8}
+    .warehouse-loc-qty{
+      display:inline-block;
+      margin-left:6px;
+      padding:1px 8px;
+      border-radius:999px;
+      font-size:0.78rem;
+      font-weight:700;
+      background:rgba(29,78,216,0.15);
+      color:#1e40af;
+    }
+    .warehouse-loc-btn.active .warehouse-loc-qty{
+      background:rgba(255,255,255,0.2);
+      color:#dbeafe;
+    }
+    .warehouse-preview-wrap{margin-top:12px;border-top:1px solid #e5e7eb;padding-top:10px}
+    .warehouse-preview-meta{margin-bottom:8px}
+    .warehouse-preview-pane{
+      min-height:120px;
+      border:1px solid #dbe3ef;
+      border-radius:10px;
+      background:#f8fbff;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:10px;
+      overflow:auto;
+      transition:min-height 0.18s ease, background 0.18s ease;
+      cursor:default;
+    }
+    .warehouse-preview-pane img{
+      max-width:100%;
+      max-height:260px;
+      border-radius:8px;
+      cursor:zoom-in;
+      display:block;
+      margin:0 auto;
+    }
+    .warehouse-preview-pane.expanded{
+      min-height:380px;
+      background:#0f172a;
+      border-color:#334155;
+    }
+    .warehouse-preview-pane.expanded img{
+      max-height:none;
+      width:100%;
+      cursor:zoom-out;
+    }
     .thumb{width:48px;height:48px;object-fit:cover;border-radius:6px;margin-right:8px}
     .title-cell{display:flex;align-items:center}
     .status-box{display:inline-block;padding:4px 8px;border-radius:6px;background:#bbb;color:#fff;font-size:0.85rem}
@@ -62,11 +167,22 @@
     html.ss-theme-night th { background: #1e293b; color: var(--ink, #e2e8f0); border-color: rgba(255,255,255,0.08); }
     html.ss-theme-night td { border-color: rgba(255,255,255,0.08); }
     html.ss-theme-night tr:hover td { background: rgba(255,255,255,0.04); }
-    html.ss-theme-night tr.row-note-highlight td { background: rgba(250, 204, 21, 0.24) !important; }
-    html.ss-theme-night tr.row-note-highlight:hover td { background: rgba(250, 204, 21, 0.32) !important; }
     html.ss-theme-night .status-box { background: #475569; }
     html.ss-theme-night .small-muted { color: var(--muted, #94a3b8); }
     html.ss-theme-night .modal .card { background: var(--card, #1e293b); color: var(--ink, #e2e8f0); border: 1px solid rgba(255,255,255,0.1); }
+    html.ss-theme-night .warehouse-loc-btn{background:rgba(30,64,175,0.25);border-color:#3b82f6;color:#bfdbfe}
+    html.ss-theme-night .warehouse-loc-btn:hover{background:rgba(37,99,235,0.35)}
+    html.ss-theme-night .warehouse-loc-btn.active{background:#3b82f6;border-color:#60a5fa;color:#0f172a}
+    html.ss-theme-night .warehouse-loc-btn.active .warehouse-loc-qty{color:#e0f2fe;background:rgba(15,23,42,0.2)}
+    html.ss-theme-night .auto-listings-btn{background:rgba(79,70,229,0.2);border-color:rgba(129,140,248,0.45);color:#c7d2fe}
+    html.ss-theme-night .auto-listings-btn:hover{background:rgba(99,102,241,0.28)}
+    html.ss-theme-night .auto-badge-ebay{background:rgba(14,116,144,0.22);color:#bae6fd;border-color:rgba(125,211,252,0.35)}
+    html.ss-theme-night .auto-badge-amazon{background:rgba(180,83,9,0.22);color:#fde68a;border-color:rgba(245,158,11,0.4)}
+    html.ss-theme-night .auto-listings-row{border-bottom-color:rgba(255,255,255,0.12)}
+    html.ss-theme-night .auto-listings-platform{color:#cbd5e1}
+    html.ss-theme-night .warehouse-preview-wrap{border-top-color:rgba(255,255,255,0.12)}
+    html.ss-theme-night .warehouse-preview-pane{background:rgba(15,23,42,0.45);border-color:rgba(148,163,184,0.35)}
+    html.ss-theme-night .warehouse-preview-pane.expanded{background:#020617;border-color:#475569}
     html.ss-theme-night .dropdown-panel { background: var(--card, #1e293b); border-color: rgba(255,255,255,0.1); color: var(--ink, #e2e8f0); box-shadow: 0 8px 24px rgba(0,0,0,0.4); }
     html.ss-theme-night .dropdown-panel label { color: var(--ink, #e2e8f0); }
     html.ss-theme-night .gear-btn { background: linear-gradient(135deg,#3b82f6,#1d4ed8); color: #fff; box-shadow: 0 2px 10px rgba(59,130,246,0.35); }
@@ -381,6 +497,34 @@
           </label>
         </div>
       </div>
+      <div class="dropdown-section listed-row">
+        <label>Auto Listed:
+          <select id="filter-auto-listed-select">
+            <option value="">All</option>
+            <option value="listed">Listed</option>
+            <option value="not_listed">Not Listed</option>
+          </select>
+        </label>
+        <div class="marketplace-filter" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <span style="font-weight:600;">Marketplace:</span>
+          <label data-auto-marketplace-filter="amazon">
+            <input type="checkbox" id="filter-auto-listed-amazon" checked> Amazon
+          </label>
+          <label data-auto-marketplace-filter="ebay">
+            <input type="checkbox" id="filter-auto-listed-ebay" checked> eBay
+          </label>
+        </div>
+      </div>
+      <div class="dropdown-section listed-row">
+        <label>Warehouse:
+          <select id="filter-warehouse-select">
+            <option value="">All</option>
+            <option value="with_quantity">With Quantity</option>
+            <option value="without_quantity">Without Quantity</option>
+            <option value="multiple_locations">Multiple Locations</option>
+          </select>
+        </label>
+      </div>
       <div class="dropdown-section" style="border-top:1px solid rgba(0,0,0,0.08);padding-top:10px;margin-top:4px">
         <button class="btn btn-sm" id="refresh-btn" type="button" style="background:#f0f7ff;color:#2563eb;border:1px solid #bfdbfe;width:100%">🔄 Refresh List</button>
       </div>
@@ -419,6 +563,24 @@
     <div id="notesModalContent" style="max-height:400px;overflow-y:auto"></div>
   </div></div>
 
+  <div id="warehouseModal" class="modal"><div class="card" style="max-width:680px; width:95%;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <h3 style="margin:0">Warehouse Locations</h3>
+      <button id="closeWarehouse" class="btn-sm">Close</button>
+    </div>
+    <div id="warehouseModalMeta" class="small-muted" style="margin-bottom:10px"></div>
+    <div id="warehouseModalContent" style="max-height:420px;overflow-y:auto"></div>
+  </div></div>
+
+  <div id="autoListingsModal" class="modal"><div class="card" style="max-width:760px; width:95%;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <h3 style="margin:0">Auto Listings</h3>
+      <button id="closeAutoListings" class="btn-sm">Close</button>
+    </div>
+    <div id="autoListingsMeta" class="small-muted" style="margin-bottom:10px"></div>
+    <div id="autoListingsContent" style="max-height:420px;overflow-y:auto"></div>
+  </div></div>
+
   <!-- Pics preview modal: shows thumbnails and an edit button linking to diagnostic edit -->
   <div id="picsModal" class="modal"><div class="card" style="max-width:800px; width:95%;">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
@@ -450,9 +612,13 @@ const GEAR_DEFAULTS = Object.freeze({
   sort: 'last_edited',
   defect: '',
   listed: '',
+  auto_listed: '',
+  warehouse: '',
   listed_amazon: true,
   listed_ebay: true,
-  listed_facebook: true
+  listed_facebook: true,
+  auto_listed_amazon: true,
+  auto_listed_ebay: true
 });
 let pendingLotSelection = '';
 let selectMode = false;
@@ -460,8 +626,93 @@ let currentPage = 1;
 let currentLimit = 25;
 let lastRenderedResults = []; // Cache last results for re-rendering
 let pendingMarketplaceSaves = 0;
+let columnSort = { key: '', dir: 'desc' };
+let fullColumnSortLoaded = false;
+let fullColumnSortCacheKey = '';
+let fullColumnSortResults = [];
+let fullColumnSortStats = null;
+const FULL_COLUMN_SORT_LIMIT = 50000;
 const PENDING_MARKETPLACE_OPS_KEY = 'items_to_list_pending_marketplace_ops_v1';
 const PENDING_MARKETPLACE_OP_MAX_AGE_MS = 10 * 60 * 1000;
+
+function _isGlobalColumnSortActive(){
+  return columnSort && ['quantity', 'warehouse_available'].includes(String(columnSort.key || '').trim());
+}
+
+function _clearGlobalColumnSortCache(){
+  fullColumnSortLoaded = false;
+  fullColumnSortCacheKey = '';
+  fullColumnSortResults = [];
+  fullColumnSortStats = null;
+}
+
+function _buildBolItemsQueryContext(){
+  let lot = document.getElementById('filter-lot').value.trim();
+  if(!lot && pendingLotSelection) lot = pendingLotSelection;
+  const q = document.getElementById('filter-q').value.trim();
+  const sort = document.getElementById('sort-select').value;
+  const checkedStatuses = Array.from(document.querySelectorAll('.status-checkbox:checked')).map(cb => cb.value);
+  const status = checkedStatuses.length > 0 ? checkedStatuses.join(',') : '';
+  const defectFilter = (document.getElementById('filter-defect') && document.getElementById('filter-defect').value) || '';
+  const listedVal = document.getElementById('filter-listed-select').value;
+  const autoListedVal = (document.getElementById('filter-auto-listed-select') && document.getElementById('filter-auto-listed-select').value) || '';
+  const warehouseFilterVal = (document.getElementById('filter-warehouse-select') && document.getElementById('filter-warehouse-select').value) || '';
+
+  const listedStores = [];
+  const amazonCb = document.getElementById('filter-listed-amazon');
+  const ebayCb = document.getElementById('filter-listed-ebay');
+  const fbCb = document.getElementById('filter-listed-fb');
+  if (amazonCb && amazonCb.checked) listedStores.push('amazon');
+  if (ebayCb && ebayCb.checked) listedStores.push('ebay');
+  if (fbCb && fbCb.checked) listedStores.push('facebook');
+  const autoListedStores = [];
+  const autoAmazonCb = document.getElementById('filter-auto-listed-amazon');
+  const autoEbayCb = document.getElementById('filter-auto-listed-ebay');
+  if (autoAmazonCb && autoAmazonCb.checked) autoListedStores.push('amazon');
+  if (autoEbayCb && autoEbayCb.checked) autoListedStores.push('ebay');
+
+  const params = new URLSearchParams();
+  if(lot) params.set('lot', lot);
+  if(q) params.set('q', q);
+  if(sort) params.set('sort', sort); else params.set('sort', 'last_edited');
+  if(status) params.set('status', status);
+  if(listedVal === 'listed') params.set('listed', 'true');
+  else if(listedVal === 'not_listed') params.set('not_listed', 'true');
+  if(autoListedVal === 'listed') params.set('auto_listed', 'true');
+  else if(autoListedVal === 'not_listed') params.set('auto_not_listed', 'true');
+  if(['with_quantity', 'without_quantity', 'multiple_locations'].includes(warehouseFilterVal)){
+    params.set('warehouse_filter', warehouseFilterVal);
+  }
+  let listedStoresKey = 'all';
+  if (listedStores.length > 0 && listedStores.length < 3) {
+    params.set('listed_stores', listedStores.join(','));
+    listedStoresKey = listedStores.slice().sort().join(',');
+  }
+  let autoListedStoresKey = 'all';
+  if (autoListedStores.length > 0 && autoListedStores.length < 2) {
+    params.set('auto_listed_stores', autoListedStores.join(','));
+    autoListedStoresKey = autoListedStores.slice().sort().join(',');
+  }
+  if(defectFilter) params.set('defect', defectFilter);
+
+  const cacheKey = JSON.stringify({
+    lot,
+    q,
+    sort: sort || 'last_edited',
+    status,
+    defect: defectFilter,
+    listed: listedVal || '',
+    auto_listed: autoListedVal || '',
+    warehouse_filter: warehouseFilterVal || '',
+    listed_stores: listedStoresKey,
+    auto_listed_stores: autoListedStoresKey
+  });
+
+  return {
+    params,
+    cacheKey
+  };
+}
 
 function _safeJsonParse(raw, fallback){
   try{ return JSON.parse(raw); }catch(e){ return fallback; }
@@ -585,6 +836,8 @@ function normalizeGearSettings(raw){
   const allowedSorts = new Set(['last_edited', 'last_edited_asc', 'date_desc', 'date_asc', 'name']);
   const sortRaw = String(src.sort || GEAR_DEFAULTS.sort);
   const listedRaw = String(src.listed || '');
+  const autoListedRaw = String(src.auto_listed || '');
+  const warehouseRaw = String(src.warehouse || '');
   return {
     status_good: parseBool(src.status_good, GEAR_DEFAULTS.status_good),
     status_bad: parseBool(src.status_bad, GEAR_DEFAULTS.status_bad),
@@ -593,9 +846,13 @@ function normalizeGearSettings(raw){
     sort: allowedSorts.has(sortRaw) ? sortRaw : GEAR_DEFAULTS.sort,
     defect: String(src.defect || ''),
     listed: (listedRaw === 'listed' || listedRaw === 'not_listed') ? listedRaw : '',
+    auto_listed: (autoListedRaw === 'listed' || autoListedRaw === 'not_listed') ? autoListedRaw : '',
+    warehouse: ['with_quantity', 'without_quantity', 'multiple_locations'].includes(warehouseRaw) ? warehouseRaw : '',
     listed_amazon: parseBool(src.listed_amazon, GEAR_DEFAULTS.listed_amazon),
     listed_ebay: parseBool(src.listed_ebay, GEAR_DEFAULTS.listed_ebay),
-    listed_facebook: parseBool(src.listed_facebook, GEAR_DEFAULTS.listed_facebook)
+    listed_facebook: parseBool(src.listed_facebook, GEAR_DEFAULTS.listed_facebook),
+    auto_listed_amazon: parseBool(src.auto_listed_amazon, GEAR_DEFAULTS.auto_listed_amazon),
+    auto_listed_ebay: parseBool(src.auto_listed_ebay, GEAR_DEFAULTS.auto_listed_ebay)
   };
 }
 
@@ -607,9 +864,13 @@ function getCurrentGearSettings(){
   const sortEl = document.getElementById('sort-select');
   const defectEl = document.getElementById('filter-defect');
   const listedEl = document.getElementById('filter-listed-select');
+  const autoListedEl = document.getElementById('filter-auto-listed-select');
+  const warehouseEl = document.getElementById('filter-warehouse-select');
   const amazonCb = document.getElementById('filter-listed-amazon');
   const ebayCb = document.getElementById('filter-listed-ebay');
   const fbCb = document.getElementById('filter-listed-fb');
+  const autoAmazonCb = document.getElementById('filter-auto-listed-amazon');
+  const autoEbayCb = document.getElementById('filter-auto-listed-ebay');
   return normalizeGearSettings({
     status_good: !!(statusGoodCb && statusGoodCb.checked),
     status_bad: !!(statusBadCb && statusBadCb.checked),
@@ -618,9 +879,13 @@ function getCurrentGearSettings(){
     sort: sortEl ? sortEl.value : GEAR_DEFAULTS.sort,
     defect: defectEl ? defectEl.value : '',
     listed: listedEl ? listedEl.value : '',
+    auto_listed: autoListedEl ? autoListedEl.value : '',
+    warehouse: warehouseEl ? warehouseEl.value : '',
     listed_amazon: !!(amazonCb && amazonCb.checked),
     listed_ebay: !!(ebayCb && ebayCb.checked),
-    listed_facebook: !!(fbCb && fbCb.checked)
+    listed_facebook: !!(fbCb && fbCb.checked),
+    auto_listed_amazon: !!(autoAmazonCb && autoAmazonCb.checked),
+    auto_listed_ebay: !!(autoEbayCb && autoEbayCb.checked)
   });
 }
 
@@ -633,9 +898,13 @@ function applyGearSettings(raw){
   const sortEl = document.getElementById('sort-select');
   const defectEl = document.getElementById('filter-defect');
   const listedEl = document.getElementById('filter-listed-select');
+  const autoListedEl = document.getElementById('filter-auto-listed-select');
+  const warehouseEl = document.getElementById('filter-warehouse-select');
   const amazonCb = document.getElementById('filter-listed-amazon');
   const ebayCb = document.getElementById('filter-listed-ebay');
   const fbCb = document.getElementById('filter-listed-fb');
+  const autoAmazonCb = document.getElementById('filter-auto-listed-amazon');
+  const autoEbayCb = document.getElementById('filter-auto-listed-ebay');
 
   if (statusGoodCb) statusGoodCb.checked = settings.status_good;
   if (statusBadCb) statusBadCb.checked = settings.status_bad;
@@ -647,11 +916,16 @@ function applyGearSettings(raw){
   if (sortEl) sortEl.value = settings.sort;
   if (defectEl) defectEl.value = settings.defect;
   if (listedEl) listedEl.value = settings.listed;
+  if (autoListedEl) autoListedEl.value = settings.auto_listed;
+  if (warehouseEl) warehouseEl.value = settings.warehouse;
   if (amazonCb) amazonCb.checked = settings.listed_amazon;
   if (ebayCb) ebayCb.checked = settings.listed_ebay;
   if (fbCb) fbCb.checked = settings.listed_facebook;
+  if (autoAmazonCb) autoAmazonCb.checked = settings.auto_listed_amazon;
+  if (autoEbayCb) autoEbayCb.checked = settings.auto_listed_ebay;
   updateStatusFilterHighlight();
   updateMarketplaceFilterHighlight();
+  updateAutoMarketplaceFilterHighlight();
 }
 
 function saveGearSettings(){
@@ -679,9 +953,13 @@ function gearSettingsDifferFromDefaults(raw){
     settings.sort !== GEAR_DEFAULTS.sort ||
     settings.defect !== GEAR_DEFAULTS.defect ||
     settings.listed !== GEAR_DEFAULTS.listed ||
+    settings.auto_listed !== GEAR_DEFAULTS.auto_listed ||
+    settings.warehouse !== GEAR_DEFAULTS.warehouse ||
     settings.listed_amazon !== GEAR_DEFAULTS.listed_amazon ||
     settings.listed_ebay !== GEAR_DEFAULTS.listed_ebay ||
-    settings.listed_facebook !== GEAR_DEFAULTS.listed_facebook
+    settings.listed_facebook !== GEAR_DEFAULTS.listed_facebook ||
+    settings.auto_listed_amazon !== GEAR_DEFAULTS.auto_listed_amazon ||
+    settings.auto_listed_ebay !== GEAR_DEFAULTS.auto_listed_ebay
   );
 }
 
@@ -728,6 +1006,37 @@ function setFiltersFromURL(){
     else if(notListedFlag){ document.getElementById('filter-listed-select').value = 'not_listed'; }
     else { document.getElementById('filter-listed-select').value = ''; }
   }
+  const autoListedFlag = p.get('auto_listed') === 'true';
+  const autoNotListedFlag = p.get('auto_not_listed') === 'true';
+  const hasAutoListedParam = p.has('auto_listed') || p.has('auto_not_listed');
+  if(hasAutoListedParam){
+    const autoListedEl = document.getElementById('filter-auto-listed-select');
+    if(autoListedEl){
+      if(autoListedFlag) autoListedEl.value = 'listed';
+      else if(autoNotListedFlag) autoListedEl.value = 'not_listed';
+      else autoListedEl.value = '';
+    }
+  }
+  if (p.has('auto_listed_stores')) {
+    const stores = (p.get('auto_listed_stores') || '').split(',').map(s => s.trim()).filter(Boolean);
+    const autoAmazonCb = document.getElementById('filter-auto-listed-amazon');
+    const autoEbayCb = document.getElementById('filter-auto-listed-ebay');
+    if (stores.length === 0) {
+      if (autoAmazonCb) autoAmazonCb.checked = true;
+      if (autoEbayCb) autoEbayCb.checked = true;
+    } else {
+      if (autoAmazonCb) autoAmazonCb.checked = stores.includes('amazon');
+      if (autoEbayCb) autoEbayCb.checked = stores.includes('ebay');
+    }
+  }
+  if(p.has('warehouse_filter')){
+    const rawWarehouseVal = (p.get('warehouse_filter') || '').trim();
+    const warehouseVal = rawWarehouseVal === 'multi_locations' ? 'multiple_locations' : rawWarehouseVal;
+    const warehouseEl = document.getElementById('filter-warehouse-select');
+    if(warehouseEl && ['with_quantity', 'without_quantity', 'multiple_locations'].includes(warehouseVal)){
+      warehouseEl.value = warehouseVal;
+    }
+  }
 
   // Marketplace filter (amazon, ebay, facebook)
   if (p.has('listed_stores')) {
@@ -746,6 +1055,7 @@ function setFiltersFromURL(){
     }
   }
   updateMarketplaceFilterHighlight();
+  updateAutoMarketplaceFilterHighlight();
   updateGearResetButton();
 }
 
@@ -789,12 +1099,354 @@ function formatLastEdited(raw){
   }
 }
 
+function _parseSortableNumber(value){
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function _sortIndicator(key){
+  if(columnSort.key !== key) return '';
+  return columnSort.dir === 'asc' ? '▲' : '▼';
+}
+
+function _sortedRenderResults(results){
+  const src = Array.isArray(results) ? [...results] : [];
+  if(!columnSort.key) return src;
+  const key = columnSort.key;
+  const dirMult = columnSort.dir === 'asc' ? 1 : -1;
+  src.sort((a, b) => {
+    const av = _parseSortableNumber(a && a[key]);
+    const bv = _parseSortableNumber(b && b[key]);
+    if(av !== bv) return (av - bv) * dirMult;
+    const at = String((a && a.title) || '').toLowerCase();
+    const bt = String((b && b.title) || '').toLowerCase();
+    return at.localeCompare(bt);
+  });
+  return src;
+}
+
+function toggleColumnSort(key){
+  const sortKey = String(key || '').trim();
+  if(!['quantity', 'warehouse_available'].includes(sortKey)) return;
+  if(columnSort.key === sortKey){
+    columnSort.dir = columnSort.dir === 'asc' ? 'desc' : 'asc';
+  } else {
+    columnSort.key = sortKey;
+    columnSort.dir = 'desc';
+  }
+  currentPage = 1;
+  loadItems();
+}
+
+function _locationImageCandidates(location){
+  const raw = String(location || '').trim();
+  if(!raw) return [];
+  const candidates = [];
+  const compact = raw.replace(/\s+/g, '');
+  const lower = raw.toLowerCase();
+  const compactLower = compact.toLowerCase();
+  const compactUpper = compact.toUpperCase();
+  const add = (src) => {
+    if(!src) return;
+    if(!candidates.includes(src)) candidates.push(src);
+  };
+
+  add('/static/shelves/' + encodeURIComponent(raw) + '.png');
+  add('/static/shelves/' + encodeURIComponent(compact) + '.png');
+  add('/static/shelves/' + encodeURIComponent(lower) + '.png');
+  add('/static/shelves/' + encodeURIComponent(compactLower) + '.png');
+  add('/static/shelves/' + encodeURIComponent(compactUpper) + '.png');
+
+  add('/static/pictureposition/' + encodeURIComponent(raw));
+  add('/static/pictureposition/' + encodeURIComponent(compact));
+  add('/static/pictureposition/' + encodeURIComponent(raw) + '.jpg');
+  add('/static/pictureposition/' + encodeURIComponent(raw) + '.png');
+  add('/static/pictureposition/' + encodeURIComponent(compact) + '.jpg');
+  add('/static/pictureposition/' + encodeURIComponent(compact) + '.png');
+
+  const bust = Date.now();
+  return candidates.map(src => `${src}${src.includes('?') ? '&' : '?'}t=${bust}`);
+}
+
+function _normalizeWarehouseLocationDetails(rawDetails){
+  const map = new Map();
+  const addRow = (rawLoc, rawQty) => {
+    const location = String(rawLoc || '').trim();
+    if(!location) return;
+    let quantity = Number(rawQty);
+    if(!Number.isFinite(quantity)) quantity = 0;
+    quantity = Math.max(0, Math.floor(quantity));
+    const current = map.get(location);
+    if(current){
+      current.quantity = Math.max(0, Number(current.quantity || 0) + quantity);
+      return;
+    }
+    map.set(location, { location, quantity });
+  };
+
+  if(Array.isArray(rawDetails)){
+    rawDetails.forEach(entry => {
+      if(entry && typeof entry === 'object' && !Array.isArray(entry)){
+        addRow(entry.location || entry.code, entry.quantity ?? entry.qty ?? 0);
+      } else {
+        addRow(entry, 0);
+      }
+    });
+  }
+
+  return Array.from(map.values()).sort((a, b) => {
+    if(a.quantity !== b.quantity) return b.quantity - a.quantity;
+    return String(a.location).localeCompare(String(b.location), undefined, { sensitivity: 'base' });
+  });
+}
+
+function _decodeWarehouseLocationDetails(encodedPayload){
+  if(!encodedPayload) return [];
+  try{
+    const raw = decodeURIComponent(encodedPayload);
+    const parsed = JSON.parse(raw || '[]');
+    return _normalizeWarehouseLocationDetails(parsed);
+  }catch(err){
+    return [];
+  }
+}
+
+function _warehouseRenderInlinePreview(location, quantity){
+  const loc = String(location || '').trim();
+  const meta = document.getElementById('warehousePreviewMeta');
+  const pane = document.getElementById('warehousePreviewPane');
+  if(!loc || !meta || !pane) return;
+
+  pane.classList.remove('expanded');
+  const qtyLabel = Number.isFinite(Number(quantity)) ? `Qty: ${Math.max(0, Math.floor(Number(quantity || 0)))}` : '';
+  meta.textContent = [ `Location: ${loc}`, qtyLabel, 'Click image to expand, click away to retract' ].filter(Boolean).join(' | ');
+
+  const candidates = _locationImageCandidates(loc);
+  if(!candidates.length){
+    pane.innerHTML = '<div class="small-muted">No location picture found.</div>';
+    return;
+  }
+
+  pane.innerHTML = '<div class="small-muted">Loading location image...</div>';
+
+  const img = document.createElement('img');
+  img.id = 'warehousePreviewImage';
+  img.alt = 'Location image';
+
+  let idx = 0;
+  const tryNext = () => {
+    if(idx >= candidates.length){
+      pane.innerHTML = '<div class="small-muted">No location picture found.</div>';
+      return;
+    }
+    img.src = candidates[idx++];
+  };
+
+  img.onerror = tryNext;
+  img.onload = () => {
+    pane.innerHTML = '';
+    pane.appendChild(img);
+  };
+  img.addEventListener('click', (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    pane.classList.toggle('expanded');
+  });
+
+  tryNext();
+}
+
+function onOpenWarehouseDetails(e){
+  e.preventDefault();
+  const btn = e.currentTarget;
+  if(!btn) return;
+
+  const baseUpc = String(btn.dataset.baseUpc || '').trim();
+  const locationDetails = _decodeWarehouseLocationDetails(btn.dataset.locations || '');
+
+  const modal = document.getElementById('warehouseModal');
+  const meta = document.getElementById('warehouseModalMeta');
+  const body = document.getElementById('warehouseModalContent');
+  if(!modal || !body || !meta) return;
+
+  meta.textContent = baseUpc ? `Base UPC: ${baseUpc}` : '';
+  if(!locationDetails.length){
+    body.innerHTML = '<div class="small-muted">No item locations found in warehouse rows.</div>';
+  } else {
+    body.innerHTML = `
+      <div class="warehouse-loc-list">
+        ${locationDetails.map(row => `
+          <button type="button" class="warehouse-loc-btn" data-location="${encodeURIComponent(row.location)}" data-qty="${row.quantity}">
+            ${esc(row.location)}
+            <span class="warehouse-loc-qty">${esc(row.quantity)}</span>
+          </button>
+        `).join('')}
+      </div>
+      <div class="warehouse-preview-wrap">
+        <div id="warehousePreviewMeta" class="small-muted warehouse-preview-meta">Select a location bubble to preview image.</div>
+        <div id="warehousePreviewPane" class="warehouse-preview-pane"><div class="small-muted">Select a location bubble above.</div></div>
+      </div>
+    `;
+
+    body.querySelectorAll('.warehouse-loc-btn').forEach(el => {
+      el.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        body.querySelectorAll('.warehouse-loc-btn.active').forEach(activeBtn => activeBtn.classList.remove('active'));
+        el.classList.add('active');
+
+        const encoded = el.dataset.location || '';
+        const qty = Number(el.dataset.qty || 0);
+        let loc = '';
+        try{ loc = decodeURIComponent(encoded); }catch(_){ loc = encoded; }
+        _warehouseRenderInlinePreview(loc, qty);
+      });
+    });
+
+    const firstBtn = body.querySelector('.warehouse-loc-btn');
+    if(firstBtn){
+      firstBtn.classList.add('active');
+      const encoded = firstBtn.dataset.location || '';
+      const qty = Number(firstBtn.dataset.qty || 0);
+      let loc = '';
+      try{ loc = decodeURIComponent(encoded); }catch(_){ loc = encoded; }
+      _warehouseRenderInlinePreview(loc, qty);
+    }
+  }
+
+  modal.style.display = 'flex';
+}
+
+function _decodeAutoListings(encodedPayload){
+  if(!encodedPayload) return [];
+  try{
+    const raw = decodeURIComponent(encodedPayload);
+    const parsed = JSON.parse(raw || '[]');
+    if(!Array.isArray(parsed)) return [];
+    return parsed
+      .filter(entry => entry && typeof entry === 'object')
+      .map(entry => ({
+        platform: String(entry.platform || '').trim().toLowerCase(),
+        listing_id: String(entry.listing_id || '').trim(),
+        title: String(entry.title || '').trim(),
+        url: String(entry.url || '').trim()
+      }))
+      .filter(entry => ['ebay', 'amazon'].includes(entry.platform) && (entry.url || entry.listing_id));
+  }catch(err){
+    return [];
+  }
+}
+
+function onOpenAutoListings(e){
+  e.preventDefault();
+  const btn = e.currentTarget;
+  if(!btn) return;
+
+  const upc = String(btn.dataset.upc || '').trim();
+  const ebayCount = Number(btn.dataset.ebayCount || 0);
+  const amazonCount = Number(btn.dataset.amazonCount || 0);
+  const listings = _decodeAutoListings(btn.dataset.listings || '');
+
+  const modal = document.getElementById('autoListingsModal');
+  const meta = document.getElementById('autoListingsMeta');
+  const body = document.getElementById('autoListingsContent');
+  if(!modal || !meta || !body) return;
+
+  const groups = { ebay: [], amazon: [] };
+  listings.forEach(entry => {
+    if(groups[entry.platform]) groups[entry.platform].push(entry);
+  });
+
+  const total = groups.ebay.length + groups.amazon.length;
+  meta.textContent = [upc ? `UPC: ${upc}` : '', `${total} listing${total === 1 ? '' : 's'} detected`].filter(Boolean).join(' | ');
+
+  body.innerHTML = '';
+  if(total <= 0){
+    body.innerHTML = '<div class="small-muted">No live listing links detected for this row.</div>';
+    modal.style.display = 'flex';
+    return;
+  }
+
+  const sectionTitle = (label, count, badgeClass) => {
+    const wrap = document.createElement('div');
+    wrap.style.marginBottom = '8px';
+    const badge = document.createElement('span');
+    badge.className = `auto-listings-meta-badge ${badgeClass}`;
+    badge.textContent = `${label}: ${count}`;
+    wrap.appendChild(badge);
+    return wrap;
+  };
+
+  const renderRows = (platform, rows) => {
+    if(!rows || rows.length === 0) return;
+    const label = platform === 'ebay' ? 'eBay' : 'Amazon';
+    const badgeClass = platform === 'ebay' ? 'auto-badge-ebay' : 'auto-badge-amazon';
+    body.appendChild(sectionTitle(label, rows.length, badgeClass));
+    rows.forEach((entry, idx) => {
+      const row = document.createElement('div');
+      row.className = 'auto-listings-row';
+
+      const platformEl = document.createElement('div');
+      platformEl.className = 'auto-listings-platform';
+      platformEl.textContent = label;
+      row.appendChild(platformEl);
+
+      const main = document.createElement('div');
+      main.style.flex = '1';
+      const titleText = entry.title || entry.listing_id || `${label} listing ${idx + 1}`;
+      const titleLine = document.createElement('div');
+      titleLine.style.marginBottom = '4px';
+      titleLine.textContent = titleText;
+      main.appendChild(titleLine);
+
+      if(entry.url){
+        const link = document.createElement('a');
+        link.className = 'auto-listings-link';
+        link.href = entry.url;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.textContent = entry.url;
+        main.appendChild(link);
+      } else {
+        const noLink = document.createElement('div');
+        noLink.className = 'small-muted';
+        noLink.textContent = 'No direct URL available';
+        main.appendChild(noLink);
+      }
+
+      if(entry.listing_id){
+        const idLine = document.createElement('div');
+        idLine.className = 'small-muted';
+        idLine.style.marginTop = '4px';
+        idLine.textContent = `ID: ${entry.listing_id}`;
+        main.appendChild(idLine);
+      }
+
+      row.appendChild(main);
+      body.appendChild(row);
+    });
+  };
+
+  renderRows('ebay', groups.ebay);
+  renderRows('amazon', groups.amazon);
+
+  if((ebayCount > 0 || amazonCount > 0) && (ebayCount !== groups.ebay.length || amazonCount !== groups.amazon.length)){
+    const note = document.createElement('div');
+    note.className = 'small-muted';
+    note.style.marginTop = '8px';
+    note.textContent = `Detected counts: eBay ${groups.ebay.length}, Amazon ${groups.amazon.length}.`;
+    body.appendChild(note);
+  }
+
+  modal.style.display = 'flex';
+}
+
 function render(results){
   let html = '<table><thead><tr>';
   if (selectMode) html += '<th>Select</th>';
-  html += '<th>Info</th><th>Status</th><th>Notes</th><th>Foto</th><th>Defect</th><th>QTY</th><th>Title</th><th>UPC</th><th>+ Listing Agent</th><th>Marketplaces</th><th>Last Edited</th></tr></thead><tbody>';
+  html += `<th>Info</th><th>Status</th><th>Notes</th><th>Foto</th><th>Defect</th><th class="th-sortable" data-sort-key="quantity" title="Sort by quantity" role="button" tabindex="0">PREP <span class="sort-ind">${_sortIndicator('quantity')}</span></th><th class="th-sortable" data-sort-key="warehouse_available" title="Sort by warehouse quantity" role="button" tabindex="0">Warehouse <span class="sort-ind">${_sortIndicator('warehouse_available')}</span></th><th>Title</th><th>UPC</th><th>Marketplaces</th><th>Auto Listings</th><th>Last Edited</th><th>+ Listing Agent</th></tr></thead><tbody>`;
   let rowIndex = 0;
-  for (const r of results) {
+  const viewResults = _sortedRenderResults(results);
+  for (const r of viewResults) {
     const title = esc(r.title||'');
     const img = esc(r.image||'');
     const thumb = img ? img.replace('s-l1600.jpg', 's-l140.jpg') : '';
@@ -857,6 +1509,18 @@ function render(results){
     const fbCheckbox = `<label style="display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap" title="${esc(facebookTitle)}"><input type="checkbox" class="marketplace-checkbox" data-id="${rowIdAttr}" data-upc="${apiUpc}" data-lot="${lotNumber}" data-marketplace="facebook" ${listedFacebook ? 'checked' : ''}><span style="font-size:0.85rem">Facebook</span></label>`;
     
     const actionBtn = `<div style="display:flex;flex-direction:column;gap:4px;align-items:flex-start">${amazonCheckbox}${ebayCheckbox}${fbCheckbox}</div>`;
+    const autoListings = Array.isArray(r.auto_marketplace_listings) ? r.auto_marketplace_listings : [];
+    const autoEbayCount = Number(r.auto_marketplace_ebay_count || 0);
+    const autoAmazonCount = Number(r.auto_marketplace_amazon_count || 0);
+    const autoTotalCount = Number(r.auto_marketplace_total_count || autoListings.length || 0);
+    const autoLabelBits = [];
+    if(autoEbayCount > 0) autoLabelBits.push(`eBay ${autoEbayCount}`);
+    if(autoAmazonCount > 0) autoLabelBits.push(`Amazon ${autoAmazonCount}`);
+    const autoListingsEncoded = encodeURIComponent(JSON.stringify(autoListings));
+    const autoListingsLabel = autoLabelBits.join(' | ') || `${autoTotalCount} listing${autoTotalCount === 1 ? '' : 's'}`;
+    const autoListingsCell = autoTotalCount > 0
+      ? `<td style="text-align:center"><button type="button" class="auto-listings-btn" data-upc="${apiUpc}" data-listings="${esc(autoListingsEncoded)}" data-ebay-count="${autoEbayCount}" data-amazon-count="${autoAmazonCount}" title="View detected live listing links">${esc(autoListingsLabel)}</button></td>`
+      : `<td style="text-align:center"><span class="small-muted">—</span></td>`;
     
     // Diagnostic link moved into its own Info column (first column)
     const diagLink = `<button class="btn btn-sm diag-link" style="background:transparent;border:1px solid #0066cc;color:#0066cc;border-radius:6px;padding:6px 10px;cursor:pointer" data-upc="${apiUpc}" data-lot="${esc(r.lot_number||'')}">Open</button>`;
@@ -867,16 +1531,45 @@ function render(results){
       ? 'color:#2196F3;font-weight:600;cursor:pointer;font-size:0.9rem'
       : 'display:none;color:#2196F3;font-weight:600;cursor:pointer;font-size:0.9rem';
     const picsBtn = `<span class="pics-count" data-upc="${apiUpc}" data-lot="${esc(r.lot_number||'')}" title="${esc(picsTitle)}" style="${picsStyle}">${hasPhotos ? '📷' : ''}</span>`;
-    // QTY display - make red if > 1 AND status is NOT "unchecked"
-    const qty = r.quantity || 1;
+    const whAvail = Number(r.warehouse_available || 0);
+    const qtyRaw = Number(r.quantity);
+    const qty = Number.isFinite(qtyRaw) ? qtyRaw : 0;
+    const prepQtyWithoutWarehouse = qty > 0 && whAvail <= 0;
     const qtyStyle = (qty > 1 && status !== 'unchecked') ? 'color:#e74c3c;font-weight:700;font-size:1.1rem' : '';
     const qtyCell = `<td style="text-align:center"><span style="${qtyStyle}">${qty}</span></td>`;
+    const whBase = String(r.warehouse_base_upc || '').trim();
+    const whLocations = Array.isArray(r.warehouse_locations)
+      ? r.warehouse_locations.map(v => String(v || '').trim()).filter(Boolean)
+      : [];
+    let whLocationDetails = Array.isArray(r.warehouse_location_details)
+      ? r.warehouse_location_details
+          .map(v => ({
+            location: String((v && (v.location || v.code)) || '').trim(),
+            quantity: Number(v && (v.quantity ?? v.qty) || 0)
+          }))
+          .filter(v => v.location)
+      : [];
+    if(!whLocationDetails.length && whLocations.length){
+      whLocationDetails = whLocations.map(loc => ({ location: loc, quantity: 0 }));
+    }
+    const whStyle = prepQtyWithoutWarehouse
+      ? 'color:#b91c1c;font-weight:800'
+      : (whAvail > 0 ? 'color:#15803d;font-weight:700' : 'color:#b91c1c;font-weight:600');
+    const whTitleBase = whBase ? `Base UPC: ${whBase}` : '';
+    const whLocCountLabel = `${whLocationDetails.length} location${whLocationDetails.length === 1 ? '' : 's'}`;
+    const whTitle = whAvail > 0
+      ? [whTitleBase, whLocCountLabel, 'Click to view locations'].filter(Boolean).join(' | ')
+      : whTitleBase;
+    const whLocationsEncoded = encodeURIComponent(JSON.stringify(whLocationDetails));
+    const whCell = whAvail > 0
+      ? `<td style="text-align:center" title="${esc(whTitle)}"><button type="button" class="warehouse-info-btn" data-base-upc="${esc(whBase)}" data-locations="${esc(whLocationsEncoded)}"><span style="${whStyle}">${whAvail}</span></button></td>`
+      : `<td style="text-align:center" title="${esc(whTitle)}"><span style="${whStyle}">${whAvail}</span></td>`;
     const defectTextRaw = String(r.defect || '').trim();
     const defectDisplay = defectTextRaw || (Number(r.set_note_flag) === 1 ? 'SET' : '');
     // Notes icon - show 📝 if note exists and make it clickable
     const hasNote = r.note && String(r.note).trim().length > 0;
     const noteCell = hasNote ? `<td style="text-align:center;font-size:1.2rem"><span class="note-icon" data-upc="${apiUpc}" style="cursor:pointer" title="Click to view notes">📝</span></td>` : `<td style="text-align:center"></td>`;
-    html += `<tr${hasNote ? ' class="row-note-highlight"' : ''}>`;
+    html += `<tr>`;
     if (selectMode) {
       // Allow selection of all items (base barcodes will be reset instead of deleted)
       html += `<td><input type="checkbox" class="item-checkbox" data-id="${r.id}" data-upc="${apiUpc}"></td>`;
@@ -889,16 +1582,28 @@ function render(results){
             `<td style="text-align:center">${picsBtn}</td>`+
             `<td>${esc(defectDisplay)}</td>`+
              qtyCell+
+             whCell+
              `<td><div class="title-cell"><img class="thumb" src="${thumb}" onerror="this.src='${missingThumb(48,48,'No Img')}'"><a href="#" class="img-link" data-img="${img}" data-title="${title}">${title}</a></div></td>`+
              `<td><div style=\"display:flex;gap:6px;align-items:center\"><span>${upc}</span><button type=\"button\" class=\"btn btn-sm btn-copy\" data-upc=\"${baseUpc}\" title=\"Copy UPC\">Copy</button></div></td>`+
-             `<td style="text-align:center;white-space:nowrap">${queueBtn}</td>`+
              `<td>${actionBtn}</td>`+
+             autoListingsCell+
              `<td class="last-edited-cell" data-raw="${last_edited}">${formatLastEdited(last_edited)}</td>`+
+             `<td style="text-align:center;white-space:nowrap">${queueBtn}</td>`+
              `</tr>`;
   }
   html += '</tbody></table>';
   const container = document.getElementById('results');
   container.innerHTML = html;
+  document.querySelectorAll('th.th-sortable[data-sort-key]').forEach(el => {
+    const triggerSort = () => toggleColumnSort(el.dataset.sortKey);
+    el.addEventListener('click', triggerSort);
+    el.addEventListener('keydown', (e) => {
+      if(e.key === 'Enter' || e.key === ' '){
+        e.preventDefault();
+        triggerSort();
+      }
+    });
+  });
   // Add select all listener
   const selectAllEl = document.getElementById('select-all');
   if (selectAllEl) {
@@ -908,6 +1613,8 @@ function render(results){
     });
   }
   document.querySelectorAll('.img-link').forEach(el=> el.addEventListener('click', onOpenImg));
+  document.querySelectorAll('.warehouse-info-btn').forEach(el=> el.addEventListener('click', onOpenWarehouseDetails));
+  document.querySelectorAll('.auto-listings-btn').forEach(el=> el.addEventListener('click', onOpenAutoListings));
   document.querySelectorAll('.diag-link, button.diag-link').forEach(el=> el.addEventListener('click', onOpenDiag));
   // Wire marketplace checkbox handlers
   const marketplaceCheckboxes = document.querySelectorAll('.marketplace-checkbox');
@@ -939,11 +1646,28 @@ function onOpenImg(e){
 document.getElementById('closeImg').addEventListener('click', ()=>{ document.getElementById('imgModal').style.display='none'; });
 document.getElementById('closePics').addEventListener('click', ()=>{ document.getElementById('picsModal').style.display='none'; });
 document.getElementById('closeNotes').addEventListener('click', ()=>{ document.getElementById('notesModal').style.display='none'; });
+document.getElementById('closeWarehouse').addEventListener('click', ()=>{ document.getElementById('warehouseModal').style.display='none'; });
+document.getElementById('closeAutoListings').addEventListener('click', ()=>{ document.getElementById('autoListingsModal').style.display='none'; });
+document.getElementById('warehouseModal').addEventListener('click', (e)=>{
+  const pane = document.getElementById('warehousePreviewPane');
+  const clickedImage = !!(e.target && (e.target.id === 'warehousePreviewImage' || (e.target.closest && e.target.closest('#warehousePreviewImage'))));
+  if(pane && pane.classList.contains('expanded') && !clickedImage){
+    pane.classList.remove('expanded');
+  }
+  if(e.target && e.target.id === 'warehouseModal'){
+    e.currentTarget.style.display = 'none';
+  }
+});
+document.getElementById('autoListingsModal').addEventListener('click', (e)=>{
+  if(e.target && e.target.id === 'autoListingsModal'){
+    e.currentTarget.style.display = 'none';
+  }
+});
 // Apply button removed; filters auto-refresh on change and Enter in search
 // Auto-refresh on dropdown changes
 document.getElementById('filter-lot').addEventListener('change', (e)=>{ onGearSettingChanged(); loadItems(e); });
 document.getElementById('sort-select').addEventListener('change', (e)=>{ onGearSettingChanged(); loadItems(e); });
-document.getElementById('refresh-btn').addEventListener('click', loadItems);
+document.getElementById('refresh-btn').addEventListener('click', (e)=> loadItems(e, { forceRefetch: true }));
 
 function updateStatusFilterHighlight(){
   const map = {
@@ -975,6 +1699,14 @@ const defectEl = document.getElementById('filter-defect'); if(defectEl) defectEl
 // radio buttons for listed filter
 const listedEl = document.getElementById('filter-listed-select');
 if(listedEl) listedEl.addEventListener('change', (e)=>{ onGearSettingChanged(); loadItems(e); });
+const autoListedEl = document.getElementById('filter-auto-listed-select');
+if(autoListedEl) autoListedEl.addEventListener('change', (e)=>{ onGearSettingChanged(); loadItems(e); });
+const autoListedAmazonEl = document.getElementById('filter-auto-listed-amazon');
+if(autoListedAmazonEl) autoListedAmazonEl.addEventListener('change', (e)=>{ onGearSettingChanged(); loadItems(e); });
+const autoListedEbayEl = document.getElementById('filter-auto-listed-ebay');
+if(autoListedEbayEl) autoListedEbayEl.addEventListener('change', (e)=>{ onGearSettingChanged(); loadItems(e); });
+const warehouseFilterEl = document.getElementById('filter-warehouse-select');
+if(warehouseFilterEl) warehouseFilterEl.addEventListener('change', (e)=>{ onGearSettingChanged(); loadItems(e); });
 const listedAmazonEl = document.getElementById('filter-listed-amazon');
 if(listedAmazonEl) listedAmazonEl.addEventListener('change', (e)=>{ onGearSettingChanged(); loadItems(e); });
 const listedEbayEl = document.getElementById('filter-listed-ebay');
@@ -1010,6 +1742,23 @@ updateMarketplaceFilterHighlight();
 if(listedAmazonEl) listedAmazonEl.addEventListener('change', updateMarketplaceFilterHighlight);
 if(listedEbayEl) listedEbayEl.addEventListener('change', updateMarketplaceFilterHighlight);
 if(listedFbEl) listedFbEl.addEventListener('change', updateMarketplaceFilterHighlight);
+
+function updateAutoMarketplaceFilterHighlight(){
+  const map = {
+    amazon: document.getElementById('filter-auto-listed-amazon'),
+    ebay: document.getElementById('filter-auto-listed-ebay')
+  };
+  Object.entries(map).forEach(([key, el]) => {
+    if(!el) return;
+    const label = el.closest('label[data-auto-marketplace-filter]');
+    if(label){
+      label.classList.toggle('active', !!el.checked);
+    }
+  });
+}
+updateAutoMarketplaceFilterHighlight();
+if(autoListedAmazonEl) autoListedAmazonEl.addEventListener('change', updateAutoMarketplaceFilterHighlight);
+if(autoListedEbayEl) autoListedEbayEl.addEventListener('change', updateAutoMarketplaceFilterHighlight);
 
 // Gear dropdown toggle and positioning
 const gearBtn = document.getElementById('filter-gear');
@@ -1087,7 +1836,8 @@ function onOpenDiag(e){
   // Build a compact return URL consisting of the active filter params so we can return to the same list state
   const params = new URLSearchParams(window.location.search);
   const returnParams = [];
-  ['lot','q','sort','status','defect'].forEach(k=>{ const v = params.get(k); if(v) returnParams.push(`${k}=${encodeURIComponent(v)}`); });
+  ['lot','q','sort','status','defect','listed','not_listed','listed_stores','auto_listed','auto_not_listed','auto_listed_stores','warehouse_filter']
+    .forEach(k=>{ const v = params.get(k); if(v) returnParams.push(`${k}=${encodeURIComponent(v)}`); });
   const ret = '/items-to-list' + (returnParams.length? ('?'+returnParams.join('&')) : '');
   let url = '/item-prep/diagnostic/view?upc='+encodeURIComponent(upc)+'&from=items&return='+encodeURIComponent(ret);
   if(lot) url += '&lot='+encodeURIComponent(lot);
@@ -1109,7 +1859,8 @@ async function onOpenPics(e){
   // Preserve return params so that Edit Diagnostic -> Back returns to Items-to-List
   const params = new URLSearchParams(window.location.search);
   const returnParams = [];
-  ['lot','q','sort','status','defect'].forEach(k=>{ const v = params.get(k); if(v) returnParams.push(`${k}=${encodeURIComponent(v)}`); });
+  ['lot','q','sort','status','defect','listed','not_listed','listed_stores','auto_listed','auto_not_listed','auto_listed_stores','warehouse_filter']
+    .forEach(k=>{ const v = params.get(k); if(v) returnParams.push(`${k}=${encodeURIComponent(v)}`); });
   const ret = '/items-to-list' + (returnParams.length? ('?'+returnParams.join('&')) : '');
   let diagUrl = '/item-prep/diagnostic?upc='+encodeURIComponent(upc)+'&from=items&return='+encodeURIComponent(ret);
   if(lot) diagUrl += '&lot='+encodeURIComponent(lot);
@@ -1524,58 +2275,111 @@ function changePage(p) {
 }
 
 // Update loadItems to include page and limit
-async function loadItems(e){
+async function loadItems(e, opts = {}){
   const overlay = document.getElementById('loading-overlay');
   if(overlay) overlay.style.display = 'flex';
   saveFilterUiSettings();
 
-  let lot = document.getElementById('filter-lot').value.trim();
-  if(!lot && pendingLotSelection) lot = pendingLotSelection;
-  const q = document.getElementById('filter-q').value.trim();
-  const sort = document.getElementById('sort-select').value;
-  // Get checked statuses as comma-separated string
-  const checkedStatuses = Array.from(document.querySelectorAll('.status-checkbox:checked')).map(cb => cb.value);
-  const status = checkedStatuses.length > 0 ? checkedStatuses.join(',') : '';
-  const defectFilter = (document.getElementById('filter-defect') && document.getElementById('filter-defect').value) || '';
-  // Determine listed/not_listed filter from the select
-  const listedVal = document.getElementById('filter-listed-select').value;
-  const listedStores = [];
-  const amazonCb = document.getElementById('filter-listed-amazon');
-  const ebayCb = document.getElementById('filter-listed-ebay');
-  const fbCb = document.getElementById('filter-listed-fb');
-  if (amazonCb && amazonCb.checked) listedStores.push('amazon');
-  if (ebayCb && ebayCb.checked) listedStores.push('ebay');
-  if (fbCb && fbCb.checked) listedStores.push('facebook');
-  const params = new URLSearchParams();
-  if(lot) params.set('lot', lot);
-  if(q) params.set('q', q);
-  if(sort) params.set('sort', sort); else params.set('sort', 'last_edited');
-  if(status) params.set('status', status);
-  // Use 'listed' and 'not_listed' as separate params to avoid overwriting status
-  if(listedVal === 'listed') params.set('listed', 'true');
-  else if(listedVal === 'not_listed') params.set('not_listed', 'true');
-  if (listedStores.length > 0 && listedStores.length < 3) {
-    params.set('listed_stores', listedStores.join(','));
-  } else if (listedStores.length === 0) {
-    // If none selected, treat as "all" to avoid empty results
+  const forceRefetch = !!(opts && opts.forceRefetch);
+  const context = _buildBolItemsQueryContext();
+  const baseParams = context.params;
+  const cacheKey = context.cacheKey;
+  const globalSortMode = _isGlobalColumnSortActive();
+
+  const syncPerPageDropdown = () => {
+    const perPageEl = document.getElementById('per-page-select');
+    if (perPageEl) perPageEl.value = String(currentLimit);
+  };
+  const updateSummary = (count, unique, qty) => {
+    const summaryEl = document.getElementById('results-summary');
+    if (summaryEl) {
+      summaryEl.textContent = `Results: ${count} items — ${unique} unique items — ${qty} total quantity`;
+    }
+  };
+
+  if(globalSortMode){
+    const hasMatchingCache = fullColumnSortLoaded && fullColumnSortCacheKey === cacheKey;
+    const shouldFetchFull = forceRefetch || !hasMatchingCache;
+    if(shouldFetchFull){
+      const fullParams = new URLSearchParams(baseParams.toString());
+      fullParams.set('page', '1');
+      fullParams.set('limit', String(FULL_COLUMN_SORT_LIMIT));
+      fullParams.set('_t', Date.now());
+      try{
+        const resp = await fetch('/api/bol_items?' + fullParams.toString(), { cache: 'no-store' });
+        if(!resp.ok){
+          console.error('Failed to load full sorted items', resp.status);
+          if(!hasMatchingCache){
+            fullColumnSortLoaded = true;
+            fullColumnSortCacheKey = cacheKey;
+            fullColumnSortResults = [];
+            fullColumnSortStats = { total: 0, unique_items: 0, total_quantity: 0 };
+          }
+        } else {
+          const j = await resp.json();
+          fullColumnSortLoaded = true;
+          fullColumnSortCacheKey = cacheKey;
+          fullColumnSortResults = Array.isArray(j.results) ? j.results : [];
+          fullColumnSortStats = {
+            total: Number(j.total || fullColumnSortResults.length || 0),
+            unique_items: Number(j.unique_items || 0),
+            total_quantity: Number(j.total_quantity || 0)
+          };
+          console.log('[LOAD_ITEMS] Full sort fetched', fullColumnSortResults.length, 'rows');
+        }
+      }catch(err){
+        console.error('Error fetching full sorted /api/bol_items:', err);
+        if(!hasMatchingCache){
+          fullColumnSortLoaded = true;
+          fullColumnSortCacheKey = cacheKey;
+          fullColumnSortResults = [];
+          fullColumnSortStats = { total: 0, unique_items: 0, total_quantity: 0 };
+        }
+      }
+    }
+
+    const allResults = Array.isArray(fullColumnSortResults) ? fullColumnSortResults : [];
+    const sortedAll = _sortedRenderResults(allResults);
+    const totalCount = sortedAll.length;
+    const limit = Math.max(1, Number(currentLimit || 25));
+    const totalPages = Math.max(1, Math.ceil(Math.max(totalCount, 1) / limit));
+    if(currentPage > totalPages) currentPage = totalPages;
+    if(currentPage < 1) currentPage = 1;
+    const page = currentPage;
+    const start = (page - 1) * limit;
+    const pageResults = sortedAll.slice(start, start + limit);
+
+    const uniqueCount = Number((fullColumnSortStats && fullColumnSortStats.unique_items) || 0);
+    const totalQty = Number((fullColumnSortStats && fullColumnSortStats.total_quantity) || 0);
+
+    currentLimit = limit;
+    syncPerPageDropdown();
+    updateSummary(totalCount, uniqueCount, totalQty);
+    lastRenderedResults = pageResults;
+    render(pageResults);
+    renderPagination(totalCount, page, limit);
+    if(overlay) overlay.style.display = 'none';
+    return;
   }
-  
-  // Now fetch paginated results for display
+
+  // Normal mode (fast page fetch): clear full-sort cache so first click re-fetches full list.
+  _clearGlobalColumnSortCache();
+
+  const params = new URLSearchParams(baseParams.toString());
   params.set('page', currentPage);
   params.set('limit', currentLimit);
   params.set('_t', Date.now()); // Cache-busting timestamp
-  // Add defect filter to server request
-  if(defectFilter) params.set('defect', defectFilter);
-  let j = {results:[], total:0, page:1, limit:currentLimit};
+
+  let j = {results:[], total:0, unique_items:0, total_quantity:0, page:1, limit:currentLimit};
   try{
     const resp = await fetch('/api/bol_items?'+params.toString(), {
       cache: 'no-store' // Disable browser cache
     });
-    if(!resp.ok){ console.error('Failed to load items', resp.status); }
-    else { 
+    if(!resp.ok){
+      console.error('Failed to load items', resp.status);
+    } else {
       j = await resp.json();
       console.log('[LOAD_ITEMS] Fetched', j.results?.length, 'items from API');
-      // Log marketplace columns for UPC 777000000013 if present
       const testItem = j.results?.find(r => r.upc === '777000000013');
       if (testItem) {
         console.log('[LOAD_ITEMS] UPC 777000000013 data:', {
@@ -1586,35 +2390,26 @@ async function loadItems(e){
         });
       }
     }
-  }catch(err){ console.error('Error fetching /api/bol_items:', err); }
-  let results = j.results||[];
-  const page = j.page || 1;
+  }catch(err){
+    console.error('Error fetching /api/bol_items:', err);
+  }
+
+  const results = Array.isArray(j.results) ? j.results : [];
+  const page = Number(j.page || 1);
   currentPage = page;
-  const limit = j.limit || 25;
+  const limit = Number(j.limit || 25);
   currentLimit = limit;
-  
-  // Sync per-page dropdown with the actual limit
-  const perPageEl = document.getElementById('per-page-select');
-  if (perPageEl) perPageEl.value = String(currentLimit);
-  
-  // Use server-side totals for current filters.
+  syncPerPageDropdown();
+
   const filtered_count = Number(j.total || 0);
   const filtered_unique_upcs = Number(j.unique_items || 0);
   const filtered_total_quantity = Number(j.total_quantity || 0);
-  
-  // Update results summary with filtered stats
-  const summaryEl = document.getElementById('results-summary');
-  if (summaryEl) {
-    summaryEl.textContent = `Results: ${filtered_count} items — ${filtered_unique_upcs} unique items — ${filtered_total_quantity} total quantity`;
-  }
-  
-  // Cache results for select mode re-rendering
+
+  updateSummary(filtered_count, filtered_unique_upcs, filtered_total_quantity);
   lastRenderedResults = results;
-  
   render(results);
-  // Pagination uses the filtered total returned by the API.
   renderPagination(filtered_count, page, limit);
-  
+
   if(overlay) overlay.style.display = 'none';
 }
 

@@ -5,251 +5,1270 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Unified Search</title>
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; background: #f5f7fa; padding: 20px; }
-    .container { max-width: 1000px; margin: 0 auto; }
-    h1 { color: #2c3e50; margin-bottom: 24px; }
-    .search-box { background: white; padding: 24px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); margin-bottom: 24px; }
-    .search-input-wrapper { display: flex; gap: 12px; }
-    .search-input { flex: 1; padding: 14px; font-size: 16px; border: 2px solid #e0e0e0; border-radius: 8px; transition: border-color 0.2s; }
-    .search-input:focus { outline: none; border-color: #3498db; }
-    .search-btn { padding: 14px 28px; background: #3498db; color: white; border: none; border-radius: 8px; font-size: 16px; cursor: pointer; transition: background 0.2s; }
-    .search-btn:hover { background: #2980b9; }
-    .search-btn:disabled { background: #95a5a6; cursor: not-allowed; }
-    .results-summary { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); margin-bottom: 16px; }
-    .db-result { background: white; padding: 16px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.08); margin-bottom: 12px; cursor: pointer; transition: transform 0.2s, box-shadow 0.2s; }
-    .db-result:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
-    .db-result.not-found { opacity: 0.5; cursor: default; }
-    .db-result.not-found:hover { transform: none; box-shadow: 0 2px 4px rgba(0,0,0,0.08); }
-    .db-header { display: flex; align-items: center; justify-content: space-between; }
-    .db-info { display: flex; align-items: center; gap: 12px; }
-    .db-icon { font-size: 24px; }
-    .db-name { font-weight: 600; font-size: 16px; color: #2c3e50; }
-    .db-count { display: inline-block; padding: 4px 12px; border-radius: 12px; font-size: 14px; font-weight: 600; color: white; }
-    .db-samples { margin-top: 12px; padding-top: 12px; border-top: 1px solid #f0f0f0; display: none; }
-    .db-result.expanded .db-samples { display: block; }
-    .sample-item { padding: 8px; background: #f8f9fa; border-radius: 6px; margin-bottom: 8px; font-size: 14px; }
-    .sample-item:last-child { margin-bottom: 0; }
-    .loading { text-align: center; padding: 40px; color: #95a5a6; }
-    .spinner { border: 3px solid #f3f3f3; border-top: 3px solid #3498db; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto 16px; }
-    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-    .no-results { text-align: center; padding: 40px; color: #95a5a6; }
-    .from-cache { display: inline-block; padding: 4px 8px; background: #e8f8f5; color: #00b894; border-radius: 4px; font-size: 12px; margin-left: 8px; }
-    .view-all-btn { padding: 6px 16px; background: #3498db; color: white; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; margin-left: 12px; }
-    .view-all-btn:hover { background: #2980b9; }
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
-    /* Night mode */
-    html.ss-theme-night body { background:#0f172a; color:#e2e8f0; }
-    html.ss-theme-night h1 { color:#e2e8f0; }
-    html.ss-theme-night .search-box,
-    html.ss-theme-night .results-summary,
-    html.ss-theme-night .db-result { background:#1e293b; border:1px solid rgba(255,255,255,0.08); box-shadow:0 10px 28px rgba(0,0,0,0.45); }
-    html.ss-theme-night .search-input { background:#0f172a; border-color:rgba(255,255,255,0.12); color:#e2e8f0; }
-    html.ss-theme-night .search-input::placeholder { color:#94a3b8; }
-    html.ss-theme-night .search-btn { background:#2563eb; }
-    html.ss-theme-night .search-btn:hover { background:#1d4ed8; }
-    html.ss-theme-night .search-btn:disabled { background:#334155; }
-    html.ss-theme-night .db-name { color:#e2e8f0; }
-    html.ss-theme-night .db-result:hover { box-shadow:0 12px 30px rgba(0,0,0,0.5); }
-    html.ss-theme-night .db-result.not-found { opacity:0.55; }
-    html.ss-theme-night .db-samples { border-top-color:rgba(255,255,255,0.08); }
-    html.ss-theme-night .sample-item { background:#111827; color:#e2e8f0; }
-    html.ss-theme-night .loading,
-    html.ss-theme-night .no-results { color:#94a3b8; }
-    html.ss-theme-night .spinner { border-color:#334155; border-top-color:#60a5fa; }
-    html.ss-theme-night .from-cache { background:rgba(16,185,129,0.15); color:#10b981; }
-    html.ss-theme-night .view-all-btn { background:#2563eb; }
-    html.ss-theme-night .view-all-btn:hover { background:#1d4ed8; }
-    html.ss-theme-night .back-btn { background:#ef4444; }
-    html.ss-theme-night .back-btn:hover { background:#dc2626; }
+    :root {
+      --bg: #f0f2f5;
+      --surface: #ffffff;
+      --surface2: #f8f9fa;
+      --border: #e4e7eb;
+      --text-primary: #1a1f36;
+      --text-secondary: #6b7280;
+      --text-muted: #9ca3af;
+      --blue: #3b82f6;
+      --blue-hover: #2563eb;
+      --red: #ef4444;
+      --red-hover: #dc2626;
+      --green: #10b981;
+      --amber: #d97706;
+      --shadow-sm: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
+      --shadow-md: 0 4px 12px rgba(0,0,0,0.10), 0 2px 4px rgba(0,0,0,0.06);
+      --radius: 12px;
+      --radius-sm: 8px;
+      --radius-xs: 6px;
+    }
+
+    html.ss-theme-night {
+      --bg: #0f172a;
+      --surface: #1e293b;
+      --surface2: #0f172a;
+      --border: rgba(255,255,255,0.08);
+      --text-primary: #f1f5f9;
+      --text-secondary: #94a3b8;
+      --text-muted: #64748b;
+      --blue: #60a5fa;
+      --blue-hover: #93c5fd;
+      --red: #ef4444;
+      --red-hover: #f87171;
+      --green: #34d399;
+      --amber: #fbbf24;
+      --shadow-sm: 0 1px 3px rgba(0,0,0,0.3);
+      --shadow-md: 0 4px 16px rgba(0,0,0,0.4);
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text-primary);
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── Nav bar ── */
+    .nav-bar {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0 24px;
+      height: 56px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      box-shadow: var(--shadow-sm);
+    }
+    .back-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      background: var(--red);
+      color: white;
+      border: none;
+      border-radius: var(--radius-xs);
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s, transform 0.1s;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .back-btn:hover { background: var(--red-hover); }
+    .back-btn:active { transform: scale(0.97); }
+    .back-btn svg { width: 14px; height: 14px; }
+    .nav-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .nav-title svg { width: 18px; height: 18px; color: var(--blue); flex-shrink: 0; }
+
+    /* ── Content ── */
+    .content {
+      max-width: 820px;
+      margin: 0 auto;
+      padding: 24px 16px 48px;
+    }
+
+    /* ── Search card ── */
+    .search-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      box-shadow: var(--shadow-sm);
+      margin-bottom: 20px;
+    }
+    .search-row { display: flex; gap: 10px; }
+    .search-input {
+      flex: 1;
+      height: 46px;
+      padding: 0 16px;
+      font-size: 15px;
+      border: 2px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--surface2);
+      color: var(--text-primary);
+      transition: border-color 0.15s, box-shadow 0.15s;
+      outline: none;
+    }
+    .search-input::placeholder { color: var(--text-muted); }
+    .search-input:focus {
+      border-color: var(--blue);
+      box-shadow: 0 0 0 3px rgba(59,130,246,0.15);
+      background: var(--surface);
+    }
+    .search-btn {
+      height: 46px;
+      padding: 0 22px;
+      background: var(--blue);
+      color: white;
+      border: none;
+      border-radius: var(--radius-sm);
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s, transform 0.1s;
+      white-space: nowrap;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      flex-shrink: 0;
+    }
+    .search-btn:hover { background: var(--blue-hover); }
+    .search-btn:active { transform: scale(0.97); }
+    .search-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+    .search-btn svg { width: 15px; height: 15px; flex-shrink: 0; }
+
+    /* ── Summary bar ── */
+    .summary-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 14px;
+      flex-wrap: wrap;
+    }
+    .summary-query {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+    .summary-query em { color: var(--text-secondary); font-style: normal; font-weight: 400; }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .badge-blue   { background: rgba(59,130,246,0.12); color: var(--blue); }
+    .badge-green  { background: rgba(16,185,129,0.12); color: var(--green); }
+    .badge-gray   { background: rgba(107,114,128,0.12); color: var(--text-secondary); }
+    .badge-amber  { background: rgba(245,158,11,0.12); color: var(--amber); }
+
+    html.ss-theme-night .badge-blue  { background: rgba(96,165,250,0.15); }
+    html.ss-theme-night .badge-green { background: rgba(52,211,153,0.15); }
+    html.ss-theme-night .badge-gray  { background: rgba(107,114,128,0.2); }
+    html.ss-theme-night .badge-amber { background: rgba(251,191,36,0.15); }
+    .warehouse-total-box {
+      margin: 0 0 14px;
+      display: inline-flex;
+      align-items: baseline;
+      gap: 10px;
+      padding: 10px 14px;
+      border-radius: 12px;
+      border: 1px solid rgba(16,185,129,0.35);
+      background: linear-gradient(135deg, #10b981, #059669);
+      color: #ffffff;
+      box-shadow: var(--shadow-sm);
+      max-width: 100%;
+      flex-wrap: wrap;
+    }
+    .warehouse-total-box.warehouse-total-in-card {
+      margin: 0 14px 12px;
+      display: flex;
+      width: calc(100% - 28px);
+    }
+    .warehouse-total-label {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      opacity: 0.92;
+    }
+    .warehouse-total-value {
+      font-size: 30px;
+      line-height: 1;
+      font-weight: 800;
+      letter-spacing: 0.01em;
+    }
+    .warehouse-total-unit {
+      font-size: 12px;
+      font-weight: 700;
+      opacity: 0.9;
+    }
+    html.ss-theme-night .warehouse-total-box {
+      border-color: rgba(52,211,153,0.4);
+      background: linear-gradient(135deg, #10b981, #047857);
+    }
+    @media (max-width: 560px) {
+      .warehouse-total-box { padding: 10px 12px; gap: 8px; }
+      .warehouse-total-value { font-size: 24px; }
+      .warehouse-total-box.warehouse-total-in-card { width: calc(100% - 24px); margin: 0 12px 10px; }
+    }
+
+    /* ── Result cards ── */
+    .results-list { display: flex; flex-direction: column; gap: 10px; }
+
+    .db-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-left: 4px solid var(--db-color, #aaa);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow-sm);
+      overflow: hidden;
+      transition: box-shadow 0.15s;
+    }
+    .db-card:hover { box-shadow: var(--shadow-md); }
+
+    /* ── Card header (clickable) ── */
+    .db-card-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 13px 14px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .db-icon-wrap {
+      width: 36px;
+      height: 36px;
+      border-radius: var(--radius-sm);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 17px;
+      background: color-mix(in srgb, var(--db-color, #aaa) 14%, transparent);
+      flex-shrink: 0;
+    }
+    html.ss-theme-night .db-icon-wrap {
+      background: color-mix(in srgb, var(--db-color, #aaa) 22%, transparent);
+    }
+    .db-card-meta { flex: 1; min-width: 0; }
+    .db-card-name {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text-primary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .db-card-sub { font-size: 12px; color: var(--text-secondary); margin-top: 1px; }
+    .db-card-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+    .view-btn {
+      padding: 6px 13px;
+      background: var(--db-color, #aaa);
+      color: white;
+      border: none;
+      border-radius: var(--radius-xs);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s, transform 0.1s;
+      white-space: nowrap;
+    }
+    .view-btn:hover { opacity: 0.85; }
+    .view-btn:active { transform: scale(0.97); }
+
+    /* Chevron collapse button */
+    .collapse-btn {
+      width: 28px;
+      height: 28px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-xs);
+      background: var(--surface2);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      transition: background 0.15s;
+    }
+    .collapse-btn:hover { background: var(--border); }
+    .collapse-chevron {
+      width: 13px;
+      height: 13px;
+      transition: transform 0.2s ease;
+      color: var(--text-secondary);
+    }
+    .db-card.collapsed .collapse-chevron { transform: rotate(-90deg); }
+
+    /* ── Samples section (collapsible) ── */
+    .db-samples {
+      max-height: 3000px;
+      overflow: hidden;
+      transition: max-height 0.25s ease;
+    }
+    .db-card.collapsed .db-samples { max-height: 0; }
+
+    .samples-inner {
+      border-top: 1px solid var(--border);
+      padding: 0 14px 12px;
+    }
+
+    .sample-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .sample-row:last-child { border-bottom: none; }
+
+    .sample-index {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: color-mix(in srgb, var(--db-color, #aaa) 14%, transparent);
+      color: var(--db-color, #aaa);
+      font-size: 10px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+    html.ss-theme-night .sample-index {
+      background: color-mix(in srgb, var(--db-color, #aaa) 24%, transparent);
+    }
+
+    .sample-body { flex: 1; min-width: 0; }
+    .sample-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-primary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-bottom: 5px;
+    }
+
+    /* Tags row */
+    .sample-tags { display: flex; flex-wrap: wrap; gap: 5px; }
+    .sample-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 11px;
+      color: var(--text-secondary);
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 2px 8px;
+      white-space: nowrap;
+      max-width: 220px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    html.ss-theme-night .sample-tag { background: rgba(255,255,255,0.04); }
+    .tag-label {
+      color: var(--text-muted);
+      font-weight: 700;
+      flex-shrink: 0;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+
+    /* Highlighted tags */
+    .tag-location {
+      background: rgba(59,130,246,0.08);
+      border-color: rgba(59,130,246,0.25);
+      color: var(--blue);
+      font-weight: 600;
+    }
+    .tag-location .tag-label { color: rgba(59,130,246,0.7); }
+    html.ss-theme-night .tag-location {
+      background: rgba(96,165,250,0.12);
+      border-color: rgba(96,165,250,0.3);
+    }
+    .location-tag {
+      max-width: 100%;
+      align-items: flex-start;
+      gap: 6px;
+      white-space: normal;
+      padding-right: 6px;
+      overflow: visible;
+      text-overflow: initial;
+    }
+    .location-chip-list {
+      display: inline-flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      min-width: 0;
+    }
+    .location-chip-link {
+      border: 1px solid rgba(59,130,246,0.3);
+      background: rgba(59,130,246,0.12);
+      color: var(--blue);
+      border-radius: 999px;
+      font-size: 11px;
+      line-height: 1.2;
+      font-weight: 700;
+      padding: 2px 8px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.12s ease, border-color 0.12s ease, transform 0.08s ease;
+    }
+    .location-chip-link:hover {
+      background: rgba(59,130,246,0.18);
+      border-color: rgba(59,130,246,0.45);
+    }
+    .location-chip-link:active { transform: scale(0.97); }
+    html.ss-theme-night .location-chip-link {
+      background: rgba(96,165,250,0.18);
+      border-color: rgba(96,165,250,0.42);
+      color: #bfdbfe;
+    }
+
+    /* Location preview modal */
+    .loc-preview-modal {
+      position: fixed;
+      inset: 0;
+      z-index: 2200;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 18px;
+      background: rgba(0, 0, 0, 0.6);
+      backdrop-filter: blur(2px);
+    }
+    .loc-preview-modal.open { display: flex; }
+    .loc-preview-dialog {
+      width: min(700px, 100%);
+      max-height: min(86vh, 760px);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      box-shadow: var(--shadow-md);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .loc-preview-head {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .loc-preview-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text-primary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .loc-preview-close {
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      color: var(--text-secondary);
+      border-radius: 7px;
+      height: 30px;
+      min-width: 30px;
+      padding: 0 10px;
+      cursor: pointer;
+      font-weight: 700;
+      font-size: 15px;
+    }
+    .loc-preview-close:hover { background: var(--border); }
+    .loc-preview-body {
+      padding: 12px;
+      overflow: auto;
+      min-height: 160px;
+    }
+    .loc-preview-note {
+      font-size: 13px;
+      color: var(--text-secondary);
+      margin-bottom: 10px;
+    }
+    .loc-preview-image-wrap {
+      width: 100%;
+      min-height: 120px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .loc-preview-image {
+      max-width: 100%;
+      max-height: 65vh;
+      display: none;
+      object-fit: contain;
+    }
+    .loc-preview-empty {
+      color: var(--text-secondary);
+      font-size: 13px;
+      padding: 22px 10px;
+      text-align: center;
+    }
+    .tag-qty {
+      background: rgba(16,185,129,0.08);
+      border-color: rgba(16,185,129,0.25);
+      color: var(--green);
+      font-weight: 600;
+    }
+    .tag-qty .tag-label { color: rgba(16,185,129,0.7); }
+    html.ss-theme-night .tag-qty {
+      background: rgba(52,211,153,0.12);
+      border-color: rgba(52,211,153,0.3);
+    }
+    .tag-price {
+      background: rgba(245,158,11,0.08);
+      border-color: rgba(245,158,11,0.25);
+      color: var(--amber);
+      font-weight: 600;
+    }
+    .tag-price .tag-label { color: rgba(245,158,11,0.7); }
+    html.ss-theme-night .tag-price {
+      background: rgba(251,191,36,0.12);
+      border-color: rgba(251,191,36,0.3);
+    }
+
+    /* Listing link */
+    .listing-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      margin-top: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--blue);
+      text-decoration: none;
+      border: 1px solid rgba(59,130,246,0.3);
+      border-radius: 4px;
+      padding: 2px 8px;
+      transition: background 0.12s;
+    }
+    .listing-link:hover {
+      background: rgba(59,130,246,0.08);
+      text-decoration: none;
+    }
+    .listing-link svg { width: 11px; height: 11px; flex-shrink: 0; }
+
+    /* "N more" footer */
+    .more-label {
+      font-size: 12px;
+      color: var(--text-muted);
+      padding: 8px 0 2px;
+      font-style: italic;
+    }
+
+    /* ── Not-found section ── */
+    .not-found-section { margin-top: 20px; }
+    .not-found-label {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      margin-bottom: 8px;
+    }
+    .not-found-pills { display: flex; flex-wrap: wrap; gap: 7px; }
+    .not-found-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 11px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      font-size: 12px;
+      color: var(--text-muted);
+      background: var(--surface);
+    }
+    .pill-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      opacity: 0.5;
+    }
+
+    /* ── Skeleton ── */
+    .skeleton-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-left: 4px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+      box-shadow: var(--shadow-sm);
+      margin-bottom: 10px;
+    }
+    .skeleton-row { display: flex; align-items: center; gap: 12px; }
+    .skel {
+      background: var(--border);
+      border-radius: 4px;
+      animation: shimmer 1.4s ease-in-out infinite;
+    }
+    html.ss-theme-night .skel { background: rgba(255,255,255,0.07); }
+    @keyframes shimmer { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
+    .skel-circle { border-radius: 50%; width: 36px; height: 36px; flex-shrink: 0; }
+    .skel-line { height: 13px; border-radius: 4px; }
+    .skel-sub  { height: 10px; border-radius: 4px; margin-top: 6px; }
+
+    /* ── State boxes ── */
+    .state-box {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 48px 24px;
+      text-align: center;
+      box-shadow: var(--shadow-sm);
+    }
+    .state-box svg { width: 38px; height: 38px; color: var(--text-muted); margin: 0 auto 12px; display: block; }
+    .state-box-title { font-size: 16px; font-weight: 700; color: var(--text-primary); margin-bottom: 6px; }
+    .state-box-sub   { font-size: 14px; color: var(--text-secondary); }
   </style>
 </head>
 <body>
-  <div class="container">
-    <div style="margin-bottom: 15px;">
-        <button id="backBtn" class="back-btn" style="padding: 8px 16px; background: #e74c3c; color: white; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; font-weight: 600;">Back</button>
+
+  <nav class="nav-bar">
+    <button id="backBtn" class="back-btn">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 4L6 10l6 6"/>
+      </svg>
+      Back
+    </button>
+    <div class="nav-title">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="8.5" cy="8.5" r="5.5"/><path d="M17 17l-4-4"/>
+      </svg>
+      Unified Search
     </div>
-    <h1>🔍 Unified Search</h1>
-    
-    <div class="search-box">
-      <div class="search-input-wrapper">
-        <input type="text" class="search-input" id="searchInput" placeholder="Search by UPC, barcode, or item name..." autofocus>
-        <button class="search-btn" id="searchBtn">Search</button>
+  </nav>
+
+  <div class="content">
+    <div class="search-card">
+      <div class="search-row">
+        <input type="text" class="search-input" id="searchInput"
+          placeholder="Search by UPC, barcode, SKU, or item name…"
+          autocomplete="off" autofocus>
+        <button class="search-btn" id="searchBtn">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="8.5" cy="8.5" r="5.5"/><path d="M17 17l-4-4"/>
+          </svg>
+          Search
+        </button>
       </div>
     </div>
 
-    <div id="results">
-      <!-- Results will be inserted here -->
+    <div id="results"></div>
+  </div>
+
+  <div id="locationPreviewModal" class="loc-preview-modal" aria-hidden="true">
+    <div class="loc-preview-dialog" role="dialog" aria-modal="true" aria-labelledby="locationPreviewTitle">
+      <div class="loc-preview-head">
+        <div class="loc-preview-title" id="locationPreviewTitle">Location Preview</div>
+        <button type="button" class="loc-preview-close" id="locationPreviewClose" aria-label="Close preview">&times;</button>
+      </div>
+      <div class="loc-preview-body">
+        <div id="locationPreviewNote" class="loc-preview-note"></div>
+        <div class="loc-preview-image-wrap">
+          <img id="locationPreviewImage" class="loc-preview-image" alt="Location preview image">
+          <div id="locationPreviewEmpty" class="loc-preview-empty">Loading location image...</div>
+        </div>
+      </div>
     </div>
   </div>
 
   <script>
     const searchInput = document.getElementById('searchInput');
-    const searchBtn = document.getElementById('searchBtn');
-    const resultsDiv = document.getElementById('results');
-    const backBtn = document.getElementById('backBtn');
-    
-    let currentQuery = '';
+    const searchBtn   = document.getElementById('searchBtn');
+    const resultsDiv  = document.getElementById('results');
+    const backBtn     = document.getElementById('backBtn');
+    const locationPreviewModal = document.getElementById('locationPreviewModal');
+    const locationPreviewTitle = document.getElementById('locationPreviewTitle');
+    const locationPreviewNote  = document.getElementById('locationPreviewNote');
+    const locationPreviewImage = document.getElementById('locationPreviewImage');
+    const locationPreviewEmpty = document.getElementById('locationPreviewEmpty');
+    const locationPreviewClose = document.getElementById('locationPreviewClose');
 
-    function showLoading() {
-      resultsDiv.innerHTML = '<div class="loading"><div class="spinner"></div>Searching all databases...</div>';
-    }
-
-    function showNoResults() {
-      resultsDiv.innerHTML = '<div class="no-results">No results found in any database.</div>';
-    }
-
-    async function performSearch(query) {
-      if (!query.trim()) return;
-      
-      currentQuery = query;
-      showLoading();
-      searchBtn.disabled = true;
-      
+    // ── Theme ─────────────────────────────────────────────────
+    (function() {
       try {
-        const response = await fetch('/api/search-all', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ q: query })
-        });
-        
-        const data = await response.json();
-        
-        if (data.error) {
-          resultsDiv.innerHTML = `<div class="no-results">Error: ${data.error}</div>`;
+        if ((localStorage.getItem('ss_theme') || 'day') === 'night')
+          document.documentElement.classList.add('ss-theme-night');
+      } catch (_) {}
+    })();
+
+    // ── Back button ───────────────────────────────────────────
+    const urlParams     = new URLSearchParams(window.location.search);
+    const returnToParam = urlParams.get('return_to');
+    backBtn.addEventListener('click', () => {
+      try {
+        if (returnToParam) { window.location.href = decodeURIComponent(returnToParam); return; }
+      } catch (_) {}
+      window.history.length > 1 ? window.history.back() : (window.location.href = '/');
+    });
+
+    // ── Skeleton ──────────────────────────────────────────────
+    function showLoading() {
+      let h = '';
+      for (let i = 0; i < 4; i++) {
+        h += `<div class="skeleton-card">
+          <div class="skeleton-row">
+            <div class="skel skel-circle"></div>
+            <div style="flex:1">
+              <div class="skel skel-line" style="width:${130+i*25}px"></div>
+              <div class="skel skel-sub"  style="width:${70+i*10}px"></div>
+            </div>
+            <div class="skel skel-line" style="width:68px;height:26px;border-radius:999px"></div>
+          </div>
+        </div>`;
+      }
+      resultsDiv.innerHTML = h;
+    }
+
+    // ── Helpers ───────────────────────────────────────────────
+    function esc(v) {
+      const d = document.createElement('div');
+      d.textContent = String(v == null ? '' : v);
+      return d.innerHTML;
+    }
+
+    function escAttr(v) {
+      return String(v == null ? '' : v)
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+    }
+
+    function formatPrice(v) {
+      const n = parseFloat(v);
+      return isNaN(n) ? String(v) : '$' + n.toFixed(2);
+    }
+
+    function formatDate(v) {
+      if (!v || v === 'None') return null;
+      const m = String(v).match(/^(\d{4})-(\d{2})-(\d{2})/);
+      return m ? `${m[2]}/${m[3]}/${m[1].slice(2)}` : String(v).slice(0, 10);
+    }
+
+    const TITLE_KEYS = ['TITLE', 'title', 'Title', 'item_description', 'name', 'Name', 'description', 'Description'];
+    function getTitle(s) {
+      for (const k of TITLE_KEYS) if (s[k] && String(s[k]).trim()) return String(s[k]).trim();
+      for (const [, v] of Object.entries(s)) if (typeof v === 'string' && v.trim().length > 4) return v.trim();
+      return '(no title)';
+    }
+
+    function tag(cls, label, value) {
+      if (value == null || String(value).trim() === '' || value === 'None') return '';
+      return `<span class="sample-tag ${esc(cls)}"><span class="tag-label">${esc(label)}</span>${esc(String(value))}</span>`;
+    }
+
+    function normalizeLocationCodes(value) {
+      const raw = String(value || '').trim();
+      if (!raw) return [];
+      const pieces = raw.split(/[\n,;|]+/).map(v => v.trim()).filter(Boolean);
+      const source = pieces.length ? pieces : [raw];
+      const seen = new Set();
+      const out = [];
+      for (const item of source) {
+        const key = item.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(item);
+      }
+      return out;
+    }
+
+    function buildLocationTag(locationCodes, picturePath) {
+      if (!Array.isArray(locationCodes) || !locationCodes.length) return '';
+      const picture = String(picturePath || '').trim();
+      const chips = locationCodes.map(code => {
+        return `<button type="button" class="location-chip-link" data-location-code="${escAttr(code)}" data-location-picture="${escAttr(picture)}" title="View location picture">${esc(code)}</button>`;
+      }).join('');
+      return `<span class="sample-tag tag-location location-tag"><span class="tag-label">Location</span><span class="location-chip-list">${chips}</span></span>`;
+    }
+
+    function locationImageCandidates(locationCode, picturePath) {
+      const code = String(locationCode || '').trim();
+      const picture = String(picturePath || '').trim();
+      const candidates = [];
+      const add = (src) => {
+        const val = String(src || '').trim();
+        if (!val || candidates.includes(val)) return;
+        candidates.push(val);
+      };
+
+      if (picture) {
+        const picLower = picture.toLowerCase();
+        if (picLower.startsWith('http://') || picLower.startsWith('https://') || picLower.startsWith('/')) {
+          add(picture);
+        } else {
+          add('/static/pictureposition/' + encodeURIComponent(picture));
+          add('/static/pictureposition/' + encodeURIComponent(picture.replace(/\s+/g, '')));
+          add('/static/pictureposition/' + encodeURIComponent(picture) + '.jpg');
+          add('/static/pictureposition/' + encodeURIComponent(picture) + '.png');
+        }
+      }
+
+      if (code) {
+        const compact = code.replace(/\s+/g, '');
+        add('/static/shelves/' + encodeURIComponent(code.toLowerCase()) + '.png');
+        add('/static/shelves/' + encodeURIComponent(compact.toLowerCase()) + '.png');
+        add('/static/shelves/' + encodeURIComponent(code) + '.png');
+        add('/static/shelves/' + encodeURIComponent(compact) + '.png');
+        add('/static/pictureposition/' + encodeURIComponent(code));
+        add('/static/pictureposition/' + encodeURIComponent(compact));
+        add('/static/pictureposition/' + encodeURIComponent(code) + '.jpg');
+        add('/static/pictureposition/' + encodeURIComponent(code) + '.png');
+      }
+
+      const stamp = Date.now();
+      return candidates.map(src => `${src}${src.includes('?') ? '&' : '?'}t=${stamp}`);
+    }
+
+    function loadFirstAvailableImage(candidates) {
+      return new Promise((resolve, reject) => {
+        if (!Array.isArray(candidates) || !candidates.length) {
+          reject(new Error('No candidates'));
           return;
         }
-        
-        displayResults(data);
-        
-      } catch (error) {
-        resultsDiv.innerHTML = `<div class="no-results">Error: ${error.message}</div>`;
-      } finally {
-        searchBtn.disabled = false;
-      }
+        let idx = 0;
+        const tryNext = () => {
+          if (idx >= candidates.length) {
+            reject(new Error('Image not found'));
+            return;
+          }
+          const src = candidates[idx++];
+          const img = new Image();
+          img.onload = () => resolve(src);
+          img.onerror = () => tryNext();
+          img.src = src;
+        };
+        tryNext();
+      });
     }
 
-    function displayResults(data) {
-      const databases = data.databases;
-      const foundAny = Object.values(databases).some(db => db.found);
-      
-      if (!foundAny) {
-        showNoResults();
+    async function openLocationPreview(locationCode, picturePath) {
+      const code = String(locationCode || '').trim();
+      const picture = String(picturePath || '').trim();
+      const label = code || picture || 'Location';
+
+      locationPreviewTitle.textContent = `Location: ${label}`;
+      locationPreviewNote.textContent = 'Trying location image paths...';
+      locationPreviewImage.style.display = 'none';
+      locationPreviewImage.removeAttribute('src');
+      locationPreviewEmpty.textContent = 'Loading location image...';
+      locationPreviewModal.classList.add('open');
+      locationPreviewModal.setAttribute('aria-hidden', 'false');
+
+      const candidates = locationImageCandidates(code, picture);
+      if (!candidates.length) {
+        locationPreviewEmpty.textContent = `No location picture found for ${label}.`;
+        locationPreviewNote.textContent = '';
         return;
       }
 
-      let html = '<div class="results-summary">';
-      html += `<strong>Searching for:</strong> "${data.query}"`;
-      html += ` <span style="color:#7f8c8d;font-size:14px;">(${data.search_type === 'upc' ? 'UPC/Barcode' : 'Text'} search)</span>`;
-      if (data.from_cache) {
-        html += '<span class="from-cache">⚡ Cached</span>';
+      try {
+        const src = await loadFirstAvailableImage(candidates);
+        locationPreviewImage.src = src;
+        locationPreviewImage.style.display = 'block';
+        locationPreviewEmpty.textContent = '';
+        locationPreviewNote.textContent = '';
+      } catch (_) {
+        locationPreviewImage.style.display = 'none';
+        locationPreviewEmpty.textContent = `No location picture found for ${label}.`;
+        locationPreviewNote.textContent = '';
       }
-      html += '</div>';
-
-      // Sort: found databases first, then by count
-      const sortedDbs = Object.entries(databases).sort((a, b) => {
-        if (a[1].found && !b[1].found) return -1;
-        if (!a[1].found && b[1].found) return 1;
-        return (b[1].count || 0) - (a[1].count || 0);
-      });
-
-      for (const [dbKey, dbData] of sortedDbs) {
-        const notFoundClass = !dbData.found ? 'not-found' : '';
-        html += `<div class="db-result ${notFoundClass}" data-db="${dbKey}" data-found="${dbData.found}">`;
-        html += '<div class="db-header">';
-        html += '<div class="db-info">';
-        html += `<span class="db-icon">${dbData.icon}</span>`;
-        html += `<span class="db-name">${dbData.name}</span>`;
-        html += '</div>';
-        
-        if (dbData.found) {
-          html += `<div><span class="db-count" style="background:${dbData.color};">${dbData.count} result${dbData.count !== 1 ? 's' : ''}</span>`;
-          html += `<button class="view-all-btn" onclick="viewFullResults('${dbKey}', '${data.query}')">View All</button>`;
-          html += '</div>';
-        } else {
-          html += '<span style="color:#95a5a6;font-size:14px;">Not found</span>';
-        }
-        
-        html += '</div>';
-        
-        // Show sample results if available
-        if (dbData.samples && dbData.samples.length > 0) {
-          html += '<div class="db-samples">';
-          dbData.samples.forEach(sample => {
-            html += '<div class="sample-item">';
-            const title = sample.title || sample.Title || sample.item_description || sample.name || sample.Name || '';
-            const barcode = sample.barcode || sample.Barcode || sample.UPC || sample.upc || '';
-            html += `<strong>${escapeHtml(title)}</strong><br>`;
-            if (barcode) html += `<span style="color:#7f8c8d;font-size:13px;">UPC: ${escapeHtml(barcode)}</span>`;
-            html += '</div>';
-          });
-          html += '</div>';
-        }
-        
-        html += '</div>';
-      }
-
-      resultsDiv.innerHTML = html;
-
-      // Add click handlers to expand/collapse
-      document.querySelectorAll('.db-result[data-found="true"]').forEach(el => {
-        el.addEventListener('click', (e) => {
-          if (e.target.classList.contains('view-all-btn')) return;
-          el.classList.toggle('expanded');
-        });
-      });
     }
 
-    function viewFullResults(dbKey, query) {
-      // Store search query and redirect to the specific database search page
+    function closeLocationPreview() {
+      locationPreviewModal.classList.remove('open');
+      locationPreviewModal.setAttribute('aria-hidden', 'true');
+      locationPreviewImage.removeAttribute('src');
+      locationPreviewImage.style.display = 'none';
+      locationPreviewEmpty.textContent = '';
+      locationPreviewNote.textContent = '';
+    }
+
+    function extLink(href, text) {
+      if (!href || href === 'None' || !href.startsWith('http')) return '';
+      return `<a class="listing-link" href="${esc(href)}" target="_blank" rel="noopener noreferrer">
+        <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 2H2a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1V7M7 1h4m0 0v4m0-4L5 7"/>
+        </svg>
+        ${esc(text)}
+      </a>`;
+    }
+
+    function getQtyValue(sample) {
+      const keys = ['quantity', 'Quantity', 'qty', 'Qty', 'QUANTITY'];
+      for (const k of keys) {
+        if (sample[k] != null && String(sample[k]).trim() !== '') {
+          const n = parseFloat(sample[k]);
+          if (!Number.isNaN(n)) return n;
+        }
+      }
+      return 0;
+    }
+
+    function getPerItemPrice(sample) {
+      const directKeys = [
+        'avg_cost', 'AVG_COST',
+        'client_cost', 'CLIENT_COST',
+        'unit_price', 'UNIT_PRICE',
+        'price', 'Price', 'PRICE',
+        'cost', 'Cost', 'COST'
+      ];
+      for (const k of directKeys) {
+        if (sample[k] == null || String(sample[k]).trim() === '') continue;
+        const n = parseFloat(sample[k]);
+        if (!Number.isNaN(n) && n > 0) return n;
+      }
+
+      const totalKeys = ['total_client_cost', 'TOTAL_CLIENT_COST', 'total_cost', 'TOTAL_COST'];
+      const qty = getQtyValue(sample);
+      if (qty > 0) {
+        for (const k of totalKeys) {
+          if (sample[k] == null || String(sample[k]).trim() === '') continue;
+          const total = parseFloat(sample[k]);
+          if (!Number.isNaN(total) && total > 0) return total / qty;
+        }
+      }
+      return null;
+    }
+
+    // ── Per-database sample row builders ─────────────────────
+    const sampleBuilders = {
+
+      shelves(s) {
+        const pos  = s.ITEM_POSITION || s.item_position;
+        const picture = s.PICTUREPOSITION || s.pictureposition;
+        const locationCodes = normalizeLocationCodes(pos || picture);
+        const qty  = s.QUANTITY      ?? s.quantity;
+        const bc   = s.BARCODE       || s.barcode;
+        const date = formatDate(s.CREATED_AT || s.created_at);
+        return [
+          buildLocationTag(locationCodes, picture),
+          tag('tag-qty',      'Qty',      qty),
+          tag('',             'UPC',      bc),
+          date ? tag('', 'Added', date) : '',
+        ].filter(Boolean).join('');
+      },
+
+      ebay(s) {
+        const price = s.Price || s.price;
+        const qty   = s.Quantity || s.quantity;
+        const state = s.List_State || s.list_state;
+        const upc   = s.UPC || s.upc;
+        const url   = s.URL || s.url;
+        return [
+          price && price !== '0' ? tag('tag-price', 'Price',  formatPrice(price)) : '',
+          tag('tag-qty', 'Qty',    qty),
+          tag('',        'Status', state),
+          tag('',        'UPC',    upc),
+          extLink(url, 'View eBay listing'),
+        ].filter(Boolean).join('');
+      },
+
+      amazon(s) {
+        const asin   = s.ASIN   || s.asin;
+        const price  = s.PRICE  || s.price;
+        const qty    = s.QUANTITY ?? s.quantity;
+        const status = s.STATUS || s.status;
+        const upc    = s.UPC    || s.upc;
+        const url    = asin ? `https://www.amazon.com/dp/${encodeURIComponent(asin)}` : null;
+        return [
+          asin   ? tag('',        'ASIN',   asin)               : '',
+          price && price !== '0' ? tag('tag-price', 'Price', formatPrice(price)) : '',
+          tag('tag-qty', 'Qty',    qty),
+          tag('',        'Status', status),
+          tag('',        'UPC',    upc),
+          extLink(url, 'View Amazon listing'),
+        ].filter(Boolean).join('');
+      },
+
+      sold(s) {
+        const price  = s.sale_price || s.price || s.Price;
+        const date   = formatDate(s.sale_date || s.sold_date || s.Sold_Date);
+        const bc     = s.barcode || s.Barcode || s.UPC || s.upc;
+        const market = s.marketplace || s.source || s.channel;
+        return [
+          price && price !== '0' ? tag('tag-price', 'Sold For', formatPrice(price)) : '',
+          date   ? tag('', 'Date',        date)   : '',
+          tag('',  'UPC',        bc),
+          tag('',  'Marketplace', market),
+        ].filter(Boolean).join('');
+      },
+
+      bol(s) {
+        const perItem = getPerItemPrice(s);
+        const qty = s.quantity ?? s.Quantity ?? s.qty;
+        const lot = s.lot_number || s.LOT_NUMBER || s.lot || s.LOT;
+        const upc = s.upc || s.UPC || s.barcode || s.Barcode;
+        const imported = formatDate(s.import_date || s.IMPORT_DATE || s.created_at || s.CREATED_AT);
+        return [
+          perItem != null ? tag('tag-price', 'Unit', formatPrice(perItem)) : '',
+          tag('tag-qty', 'Qty', qty),
+          tag('', 'LOT', lot),
+          imported ? tag('', 'Imported', imported) : '',
+          tag('', 'UPC', upc),
+        ].filter(Boolean).join('');
+      },
+
+      _generic(s) {
+        const PRICE_KEYS = [
+          'avg_cost', 'AVG_COST',
+          'client_cost', 'CLIENT_COST',
+          'price', 'Price', 'retail_price', 'cost', 'sale_price'
+        ];
+        const LOC_KEYS   = ['location', 'Location', 'position', 'Position', 'rack'];
+        const QTY_KEYS   = ['quantity', 'Quantity', 'qty'];
+        const UPC_KEYS   = ['barcode', 'Barcode', 'UPC', 'upc', 'sku', 'SKU', 'asin', 'ASIN'];
+        const DATE_KEYS  = ['sale_date', 'import_date', 'created_at', 'sold_date'];
+        const parts = [];
+        for (const k of UPC_KEYS)   if (s[k] && s[k] !== 'None') { parts.push(tag('', 'UPC', s[k]));              break; }
+        for (const k of LOC_KEYS)   if (s[k] && s[k] !== 'None') { parts.push(tag('tag-location', 'Location', s[k])); break; }
+        for (const k of PRICE_KEYS) if (s[k] && s[k] !== '0')    { parts.push(tag('tag-price', 'Price', formatPrice(s[k]))); break; }
+        for (const k of QTY_KEYS)   if (s[k] != null)             { parts.push(tag('tag-qty', 'Qty', s[k]));     break; }
+        for (const k of DATE_KEYS)  if (s[k] && s[k] !== 'None') { const d = formatDate(s[k]); if (d) parts.push(tag('', 'Date', d)); break; }
+        return parts.join('');
+      },
+    };
+
+    function buildSampleRow(dbKey, sample, idx) {
+      const title   = getTitle(sample);
+      const builder = sampleBuilders[dbKey] || sampleBuilders._generic;
+      const tagsHtml = builder(sample);
+
+      return `<div class="sample-row">
+        <div class="sample-index">${idx + 1}</div>
+        <div class="sample-body">
+          <div class="sample-title" title="${esc(title)}">${esc(title)}</div>
+          ${tagsHtml ? `<div class="sample-tags">${tagsHtml}</div>` : ''}
+        </div>
+      </div>`;
+    }
+
+    // ── Card builder ──────────────────────────────────────────
+    function buildCard(dbKey, dbData, query) {
+      const color  = esc(dbData.color || '#888');
+      const cardId = `card-${dbKey}`;
+      const hasSamples = dbData.samples && dbData.samples.length > 0;
+      const countLabel = `${dbData.count} result${dbData.count !== 1 ? 's' : ''} found`;
+      const warehouseTotalRaw = dbKey === 'shelves' ? (dbData.total_quantity ?? dbData.totalQuantity) : null;
+      const warehouseTotalNum = Number(warehouseTotalRaw);
+      const hasWarehouseTotal = dbKey === 'shelves' && Number.isFinite(warehouseTotalNum);
+      const warehouseTotal = hasWarehouseTotal ? Math.max(0, Math.floor(warehouseTotalNum)) : 0;
+      const subLabel = countLabel;
+
+      let h = `<div class="db-card" id="${cardId}" style="--db-color:${color};">`;
+
+      // Header
+      h += `<div class="db-card-header" onclick="toggleCard('${cardId}', event)">`;
+      h += `<div class="db-icon-wrap">${esc(dbData.icon || '')}</div>`;
+      h += `<div class="db-card-meta">
+        <div class="db-card-name">${esc(dbData.name)}</div>
+        <div class="db-card-sub">${esc(subLabel)}</div>
+      </div>`;
+      h += `<div class="db-card-actions">`;
+      h += `<button class="view-btn" onclick="event.stopPropagation(); viewAll('${esc(dbKey)}', '${esc(query).replace(/'/g,"\\'")}')">View All</button>`;
+      if (hasSamples) {
+        h += `<button class="collapse-btn" tabindex="-1" aria-label="Collapse">
+          <svg class="collapse-chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 6l4 4 4-4"/>
+          </svg>
+        </button>`;
+      }
+      h += `</div></div>`;
+      if (hasWarehouseTotal) {
+        h += `<div class="warehouse-total-box warehouse-total-in-card" title="Total matched warehouse quantity">
+          <span class="warehouse-total-label">Warehouse Total Qty</span>
+          <span class="warehouse-total-value">${warehouseTotal.toLocaleString()}</span>
+          <span class="warehouse-total-unit">units</span>
+        </div>`;
+      }
+
+      // Samples (collapsible)
+      if (hasSamples) {
+        h += `<div class="db-samples"><div class="samples-inner">`;
+        dbData.samples.forEach((s, i) => { h += buildSampleRow(dbKey, s, i); });
+        if (dbData.count > dbData.samples.length) {
+          const rem = dbData.count - dbData.samples.length;
+          h += `<div class="more-label">+ ${rem} more result${rem !== 1 ? 's' : ''} — click View All to see everything</div>`;
+        }
+        h += `</div></div>`;
+      }
+
+      h += `</div>`;
+      return h;
+    }
+
+    // ── Display results ───────────────────────────────────────
+    function displayResults(data) {
+      const dbs     = data.databases;
+      const found   = Object.entries(dbs).filter(([, d]) => d.found);
+      const missing = Object.entries(dbs).filter(([, d]) => !d.found);
+      const total   = found.reduce((s, [, d]) => s + (d.count || 0), 0);
+
+      if (found.length === 0) {
+        resultsDiv.innerHTML = `<div class="state-box">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/><path d="M8 11h6" opacity=".4"/>
+          </svg>
+          <div class="state-box-title">No results found</div>
+          <div class="state-box-sub">Try a different UPC, barcode, or item name.</div>
+        </div>`;
+        return;
+      }
+
+      found.sort((a, b) => (b[1].count || 0) - (a[1].count || 0));
+
+      let h = '';
+
+      // Summary
+      h += `<div class="summary-bar">
+        <span class="summary-query">Results for <em>"${esc(data.query)}"</em></span>
+        <span class="badge badge-blue">${found.length}/${Object.keys(dbs).length} databases</span>
+        <span class="badge badge-gray">${total.toLocaleString()} match${total !== 1 ? 'es' : ''}</span>
+        ${data.search_type === 'upc'  ? '<span class="badge badge-amber">UPC / Barcode</span>' : ''}
+        ${data.from_cache             ? '<span class="badge badge-green">&#9889; Cached</span>' : ''}
+      </div>`;
+
+      // Cards
+      h += `<div class="results-list">`;
+      for (const [key, dbData] of found) h += buildCard(key, dbData, data.query);
+      h += `</div>`;
+
+      // Not found
+      if (missing.length > 0) {
+        h += `<div class="not-found-section">
+          <div class="not-found-label">Not found in</div>
+          <div class="not-found-pills">`;
+        for (const [, d] of missing) {
+          const errNote = d.error ? ` <span style="font-size:10px;opacity:.65;">(${esc(d.error)})</span>` : '';
+          h += `<span class="not-found-pill">
+            <span class="pill-dot" style="background:${esc(d.color||'#aaa')}"></span>
+            ${esc(d.icon||'')} ${esc(d.name)}${errNote}
+          </span>`;
+        }
+        h += `</div></div>`;
+      }
+
+      resultsDiv.innerHTML = h;
+    }
+
+    // ── Toggle collapse ───────────────────────────────────────
+    function toggleCard(cardId, event) {
+      if (event.target.closest('.view-btn')) return;
+      const card = document.getElementById(cardId);
+      if (card) card.classList.toggle('collapsed');
+    }
+
+    // Location preview click handling
+    resultsDiv.addEventListener('click', (event) => {
+      const chip = event.target.closest('.location-chip-link');
+      if (!chip) return;
+      event.preventDefault();
+      event.stopPropagation();
+      openLocationPreview(chip.dataset.locationCode || '', chip.dataset.locationPicture || '');
+    });
+
+    locationPreviewClose.addEventListener('click', closeLocationPreview);
+    locationPreviewModal.addEventListener('click', (event) => {
+      if (event.target === locationPreviewModal) closeLocationPreview();
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && locationPreviewModal.classList.contains('open')) closeLocationPreview();
+    });
+
+    // ── View all ──────────────────────────────────────────────
+    function viewAll(dbKey, query) {
       sessionStorage.setItem('searchQuery', query);
       sessionStorage.setItem('unifiedSearchQuery', query);
-      
-      // Map db keys to their search pages
-      const pageMap = {
-        'shelves': '/searchrack?db=searchRack&q=' + encodeURIComponent(query),
-        'processed': '/items-to-list?q=' + encodeURIComponent(query) + '&status=good,bad',
-        'bol': '/searchrack?db=bol&q=' + encodeURIComponent(query),
-        'sold': '/searchrack?db=sold&q=' + encodeURIComponent(query),
-        'amazon': '/searchrack?db=amazonStore&q=' + encodeURIComponent(query),
-        'ebay': '/searchrack?db=ebayStore&q=' + encodeURIComponent(query)
+      const map = {
+        shelves:   '/searchrack?db=searchRack&q=' + encodeURIComponent(query),
+        processed: '/items-to-list?q=' + encodeURIComponent(query) + '&status=good,bad',
+        bol:       '/searchrack?db=bol&q=' + encodeURIComponent(query),
+        sold:      '/searchrack?db=sold&q=' + encodeURIComponent(query),
+        amazon:    '/searchrack?db=amazonStore&q=' + encodeURIComponent(query),
+        ebay:      '/searchrack?db=ebayStore&q=' + encodeURIComponent(query),
       };
-      
-      const url = pageMap[dbKey] || '/tools';
-      window.location.href = url;
+      window.location.href = map[dbKey] || '/tools';
     }
 
-    function escapeHtml(text) {
-      const div = document.createElement('div');
-      div.textContent = text;
-      return div.innerHTML;
-    }
+    // ── Search ────────────────────────────────────────────────
+    async function performSearch(query) {
+      const q = String(query || '').trim();
+      if (!q) return;
+      showLoading();
+      searchBtn.disabled = true;
 
-    // Event listeners
-    searchBtn.addEventListener('click', () => performSearch(searchInput.value));
-    searchInput.addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') performSearch(searchInput.value);
-    });
-
-    const urlParams = new URLSearchParams(window.location.search);
-    const returnToParam = urlParams.get('return_to');
-
-    // Back button: prefer explicit return_to (searchrack), otherwise browser history.
-    backBtn.addEventListener('click', () => {
       try {
-        if (returnToParam) {
-          window.location.href = decodeURIComponent(returnToParam);
+        const res  = await fetch('/api/search-all', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ q }),
+        });
+        const data = await res.json();
+        if (data.error) {
+          resultsDiv.innerHTML = `<div class="state-box">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/>
+            </svg>
+            <div class="state-box-title">Search error</div>
+            <div class="state-box-sub">${esc(data.error)}</div>
+          </div>`;
           return;
         }
-      } catch (_) {}
-      if (window.history.length > 1) {
-        window.history.back();
-      } else {
-        window.location.href = '/';
+        displayResults(data);
+      } catch (err) {
+        resultsDiv.innerHTML = `<div class="state-box">
+          <div class="state-box-title">Connection error</div>
+          <div class="state-box-sub">${esc(err.message)}</div>
+        </div>`;
+      } finally {
+        searchBtn.disabled = false;
+        searchInput.value = '';
+        try { searchInput.focus({ preventScroll: true }); } catch (_) {}
       }
-    });
+    }
 
-    // Auto-search if there's a query parameter
+    searchBtn.addEventListener('click', () => performSearch(searchInput.value));
+    searchInput.addEventListener('keypress', e => { if (e.key === 'Enter') performSearch(searchInput.value); });
+
     const initialQuery = urlParams.get('q');
     if (initialQuery) {
       searchInput.value = initialQuery;

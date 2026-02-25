@@ -75,9 +75,10 @@
     .setqty-value{min-width:74px;text-align:center;font-size:2rem;font-weight:700;color:#0f172a}
     .setqty-actions{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap}
     .loading-overlay{position:absolute;top:0;left:0;right:0;bottom:0;background:rgba(255,255,255,0.9);display:flex;align-items:center;justify-content:center;z-index:10;border-radius:12px}
-  .spinner{border:3px solid #f3f3f3;border-top:3px solid #00b894;border-radius:50%;width:24px;height:24px;animation:spin 1s linear infinite}
-  @keyframes spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
-  .btn:disabled{opacity:0.5;cursor:not-allowed}
+    .spinner{border:3px solid #f3f3f3;border-top:3px solid #00b894;border-radius:50%;width:24px;height:24px;animation:spin 1s linear infinite}
+    @keyframes spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
+    .btn:disabled{opacity:0.5;cursor:not-allowed}
+    .scan-validation-msg{margin-top:8px;font-size:0.95rem;color:#b91c1c;font-weight:700}
   .loading-overlay{position:absolute;top:0;left:0;right:0;bottom:0;background:rgba(255,255,255,0.9);display:flex;align-items:center;justify-content:center;z-index:10;border-radius:12px}
   .spinner{border:3px solid #f3f3f3;border-top:3px solid #00b894;border-radius:50%;width:24px;height:24px;animation:spin 1s linear infinite}
   @keyframes spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
@@ -203,6 +204,7 @@
     html.ss-theme-night .lot-card { background: var(--card, #1e293b); border-color: rgba(255,255,255,0.1); }
     html.ss-theme-night .lot-title { color: var(--ink-bright, #f8fafc); }
     html.ss-theme-night .lot-msg { color: var(--ink, #e2e8f0); }
+    html.ss-theme-night .scan-validation-msg { color:#fca5a5; }
     html.ss-theme-night .spinner { border-color: #334155; border-top-color: #10b981; }
     html.ss-theme-night .loading-spinner-large { border-color: #334155; border-top-color: #10b981; }
     html.ss-theme-night .top h2 { color: var(--ink-bright, #f8fafc); }
@@ -236,6 +238,7 @@
   <input type="text" id="manualUpc" placeholder="Enter/scan UPC" data-i18n="enter_scan_upc" autofocus style="padding:8px;border:1px solid #ddd;border-radius:6px;flex:1;min-width:200px">
       <button class="btn" id="lookupBtn" data-i18n="lookup">Lookup</button>
     </div>
+    <div id="scanValidationMsg" class="scan-validation-msg hidden">not a upc code</div>
     
     <div id="noBarcodeBtn" style="margin-top:48px">
       <a href="/item-prep-no-barcode" style="text-decoration:none;display:block">
@@ -489,6 +492,59 @@
     let currentLookupInfo = null;
     let prepActionInFlight = false;
     const LOOKUP_DEDUPE_WINDOW_MS = 1200;
+    let scanErrorAudioCtx = null;
+
+    function normalizeScannedUpc(raw){
+      return String(raw || '').replace(/\s+/g, '').trim();
+    }
+
+    function isAcceptedUpcForPrep(upc){
+      return /^\d{12,13}$/.test(String(upc || ''));
+    }
+
+    function clearScanValidationMsg(){
+      const el = document.getElementById('scanValidationMsg');
+      if(!el) return;
+      el.textContent = '';
+      el.classList.add('hidden');
+    }
+
+    function showScanValidationMsg(msg){
+      const el = document.getElementById('scanValidationMsg');
+      if(!el) return;
+      el.textContent = String(msg || 'not a upc code');
+      el.classList.remove('hidden');
+    }
+
+    function ensureScanErrorAudioReady(){
+      if(!scanErrorAudioCtx){
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if(!Ctx) return null;
+        scanErrorAudioCtx = new Ctx();
+      }
+      if(scanErrorAudioCtx && scanErrorAudioCtx.state === 'suspended'){
+        scanErrorAudioCtx.resume().catch(()=>{});
+      }
+      return scanErrorAudioCtx;
+    }
+
+    function playScanErrorBeep(){
+      try{
+        const ctx = ensureScanErrorAudioReady();
+        if(!ctx) return;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(200, ctx.currentTime);
+        gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.22, ctx.currentTime + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.18);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.2);
+      } catch(_) {}
+    }
 
     function setPrepActionButtonsDisabled(disabled){
       ['goodBtn', 'badBtn', 'returnBtn', 'skipBtn', 'lookupBtn'].forEach((id)=>{
@@ -510,8 +566,21 @@
     }
 
     function triggerLookupFromInput(rawUpc){
-      const normalized = (rawUpc || '').trim();
+      const normalized = normalizeScannedUpc(rawUpc);
       if(!normalized) return;
+      clearScanValidationMsg();
+
+      if(!isAcceptedUpcForPrep(normalized)){
+        showScanValidationMsg('not a upc code');
+        playScanErrorBeep();
+        const manualInput = document.getElementById('manualUpc');
+        if(manualInput){
+          manualInput.value = '';
+          try{ manualInput.focus({preventScroll:true}); if(manualInput.select) manualInput.select(); }catch{}
+        }
+        lastLookupFingerprint = {upc: normalized, ts: Date.now()};
+        return;
+      }
       const now = Date.now();
 
       if(lookupInFlight){
@@ -595,6 +664,7 @@
       if(prepSummary) prepSummary.textContent = '';
       const quickNoteEl = document.getElementById('quickPrepNote');
       if(quickNoteEl) quickNoteEl.value = '';
+      clearScanValidationMsg();
       closeSetQtyModal();
       document.getElementById('manualUpc').value = '';
       document.getElementById('result').classList.add('hidden');
@@ -1308,6 +1378,8 @@
       if(lookupDebounceTimer){ clearTimeout(lookupDebounceTimer); lookupDebounceTimer = null; }
       triggerLookupFromInput(manual.value);
     });
+    document.addEventListener('pointerdown', ensureScanErrorAudioReady, {once:true});
+    document.addEventListener('keydown', ensureScanErrorAudioReady, {once:true});
 
     function ensureUpcFocus(){
       const input = document.getElementById('manualUpc');

@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bulk Manifest</title>
+  <style>
+    :root {
+      --bg: #f3f4f6;
+      --card: #ffffff;
+      --ink: #0f172a;
+      --muted: #64748b;
+      --border: #d1d5db;
+      --accent: #1d4ed8;
+      --accent-2: #0f766e;
+      --danger: #b91c1c;
+      --warn: #b45309;
+      --ok: #166534;
+    }
+    html.ss-theme-night {
+      --bg: #0f172a;
+      --card: #111827;
+      --ink: #e5e7eb;
+      --muted: #94a3b8;
+      --border: #334155;
+      --accent: #60a5fa;
+      --accent-2: #14b8a6;
+      --danger: #f87171;
+      --warn: #fbbf24;
+      --ok: #4ade80;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Tahoma, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+    }
+    .page {
+      max-width: 1150px;
+      margin: 0 auto;
+      padding: 14px;
+    }
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .topbar-title {
+      font-size: 1.25rem;
+      font-weight: 700;
+    }
+    .btn {
+      border: 1px solid var(--border);
+      background: var(--card);
+      color: var(--ink);
+      border-radius: 10px;
+      padding: 10px 14px;
+      cursor: pointer;
+      font-weight: 600;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      white-space: nowrap;
+    }
+    .btn-primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    .btn-danger {
+      background: #ef4444;
+      border-color: #ef4444;
+      color: #fff;
+    }
+    .sheet {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 14px;
+      box-shadow: 0 10px 24px rgba(2, 6, 23, 0.08);
+    }
+    .sheet-head h1 {
+      margin: 0 0 10px 0;
+      font-size: 1.35rem;
+    }
+    .meta-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(180px, 1fr));
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+    .meta-field {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .meta-field label {
+      color: var(--muted);
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+    }
+    .meta-field input {
+      height: 36px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--ink);
+      padding: 6px 10px;
+      font-size: 0.95rem;
+    }
+    .stamp {
+      color: var(--muted);
+      font-size: 0.84rem;
+      margin-bottom: 10px;
+    }
+    .scan-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    .scan-input {
+      flex: 1;
+      min-width: 220px;
+      height: 42px;
+      border-radius: 10px;
+      border: 2px solid var(--accent);
+      background: transparent;
+      color: var(--ink);
+      padding: 8px 12px;
+      font-size: 1rem;
+      font-weight: 600;
+    }
+    .scan-input:focus {
+      outline: none;
+      box-shadow: 0 0 0 3px rgba(29, 78, 216, 0.18);
+    }
+    .status {
+      min-height: 22px;
+      font-size: 0.92rem;
+      margin-bottom: 8px;
+      color: var(--muted);
+    }
+    .status.ok { color: var(--ok); }
+    .status.warn { color: var(--warn); }
+    .status.error { color: var(--danger); }
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 780px;
+    }
+    th, td {
+      border-bottom: 1px solid var(--border);
+      padding: 8px 10px;
+      text-align: left;
+      vertical-align: middle;
+    }
+    th {
+      background: rgba(148, 163, 184, 0.14);
+      font-size: 0.85rem;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    tfoot th {
+      background: rgba(20, 184, 166, 0.12);
+      color: var(--ink);
+      font-weight: 800;
+    }
+    .idx-col {
+      width: 46px;
+      text-align: center;
+      font-weight: 700;
+      color: var(--muted);
+    }
+    .qty-col, .money-col {
+      width: 115px;
+      text-align: center;
+    }
+    .line-total {
+      font-weight: 700;
+      color: var(--accent-2);
+      text-align: right;
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+    }
+    .cell-input {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: transparent;
+      color: var(--ink);
+      padding: 6px 8px;
+      font-size: 0.95rem;
+    }
+    .cell-input.qty,
+    .cell-input.price {
+      text-align: center;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+    .remove-btn {
+      border: 1px solid #ef4444;
+      background: #ef4444;
+      color: #fff;
+      border-radius: 8px;
+      padding: 6px 10px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+    .empty-row td {
+      color: var(--muted);
+      text-align: center;
+      padding: 20px 10px;
+      font-style: italic;
+    }
+    .totals-qty, .totals-amount {
+      font-variant-numeric: tabular-nums;
+      text-align: center;
+      font-weight: 800;
+    }
+    .totals-amount {
+      color: var(--accent-2);
+      text-align: right;
+      padding-right: 14px;
+    }
+
+    @media (max-width: 860px) {
+      .meta-grid { grid-template-columns: 1fr; }
+      .topbar { flex-wrap: wrap; }
+      .topbar-title { width: 100%; }
+    }
+
+    @media print {
+      body {
+        background: #fff;
+        color: #000;
+      }
+      .page {
+        max-width: none;
+        padding: 0;
+      }
+      .sheet {
+        border: none;
+        border-radius: 0;
+        box-shadow: none;
+        padding: 10mm;
+      }
+      .no-print { display: none !important; }
+      .table-wrap {
+        border: 1px solid #000;
+      }
+      th, td {
+        border-color: #000;
+      }
+      th {
+        background: #f3f4f6 !important;
+        color: #111;
+      }
+      tfoot th {
+        background: #e5e7eb !important;
+        color: #111;
+      }
+      .cell-input {
+        border: none;
+        padding: 0;
+        color: #000;
+      }
+      .line-total,
+      .totals-amount {
+        color: #000;
+      }
+      .meta-field input {
+        border: none;
+        padding: 0;
+        height: auto;
+        color: #000;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="topbar no-print">
+      <a href="/tools" class="btn">Back to Tools</a>
+      <div class="topbar-title">Bulk Manifest</div>
+      <button id="printBtnTop" class="btn btn-primary" type="button">Print Sheet</button>
+    </div>
+
+    <div class="sheet">
+      <div class="sheet-head">
+        <h1>Bulk Manifest</h1>
+        <div class="meta-grid">
+          <div class="meta-field">
+            <label for="manifestTitle">Manifest Title</label>
+            <input id="manifestTitle" type="text" value="Bulk Sale Manifest">
+          </div>
+          <div class="meta-field">
+            <label for="manifestBuyer">Buyer / Account</label>
+            <input id="manifestBuyer" type="text" placeholder="Customer or account name">
+          </div>
+          <div class="meta-field">
+            <label for="manifestDate">Date</label>
+            <input id="manifestDate" type="date">
+          </div>
+        </div>
+        <div id="generatedStamp" class="stamp"></div>
+      </div>
+
+      <div class="scan-row no-print">
+        <input id="scanInput" class="scan-input" type="text" placeholder="Scan barcode and press Enter" autofocus autocomplete="off">
+        <button id="addScanBtn" class="btn btn-primary" type="button">Add Scan</button>
+        <button id="addBlankBtn" class="btn" type="button">Add Blank Row</button>
+        <button id="clearBtn" class="btn btn-danger" type="button">Clear List</button>
+      </div>
+
+      <div id="statusMsg" class="status no-print"></div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th class="idx-col">#</th>
+              <th>Barcode</th>
+              <th>Item Name</th>
+              <th class="qty-col">Qty</th>
+              <th class="money-col">Unit Price</th>
+              <th class="money-col" style="text-align:right;padding-right:14px;">Line Total</th>
+              <th class="no-print" style="width:98px;"></th>
+            </tr>
+          </thead>
+          <tbody id="itemsBody">
+            <tr class="empty-row">
+              <td colspan="7">Scan a barcode to start your manifest.</td>
+            </tr>
+          </tbody>
+          <tfoot>
+            <tr>
+              <th colspan="3" style="text-align:right;">Totals</th>
+              <th id="totalQty" class="totals-qty">0</th>
+              <th></th>
+              <th id="totalAmount" class="totals-amount">$0.00</th>
+              <th class="no-print"></th>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const scanInput = document.getElementById('scanInput');
+    const addScanBtn = document.getElementById('addScanBtn');
+    const addBlankBtn = document.getElementById('addBlankBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const printBtnTop = document.getElementById('printBtnTop');
+    const itemsBody = document.getElementById('itemsBody');
+    const totalQtyEl = document.getElementById('totalQty');
+    const totalAmountEl = document.getElementById('totalAmount');
+    const statusMsgEl = document.getElementById('statusMsg');
+    const generatedStampEl = document.getElementById('generatedStamp');
+    const manifestDateEl = document.getElementById('manifestDate');
+
+    const state = {
+      nextId: 1,
+      items: []
+    };
+
+    function esc(value) {
+      return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function toQty(value) {
+      const parsed = Number.parseInt(value, 10);
+      if (!Number.isFinite(parsed) || parsed < 0) return 0;
+      return parsed;
+    }
+
+    function toPrice(value) {
+      const parsed = Number.parseFloat(value);
+      if (!Number.isFinite(parsed) || parsed < 0) return 0;
+      return Number(parsed.toFixed(2));
+    }
+
+    function money(value) {
+      const n = Number(value || 0);
+      return '$' + n.toFixed(2);
+    }
+
+    function updateStamp() {
+      const now = new Date();
+      generatedStampEl.textContent = 'Generated: ' + now.toLocaleString();
+    }
+
+    function setStatus(message, tone) {
+      const t = String(tone || 'muted').trim();
+      statusMsgEl.className = 'status no-print';
+      if (t) statusMsgEl.classList.add(t);
+      statusMsgEl.textContent = String(message || '');
+    }
+
+    function findItemById(id) {
+      const n = Number.parseInt(id, 10);
+      if (!Number.isFinite(n)) return null;
+      return state.items.find(item => item.id === n) || null;
+    }
+
+    function recalcTotals() {
+      let totalQty = 0;
+      let totalAmount = 0;
+      for (const item of state.items) {
+        item.qty = toQty(item.qty);
+        item.unit_price = toPrice(item.unit_price);
+        totalQty += item.qty;
+        totalAmount += item.qty * item.unit_price;
+      }
+      totalQtyEl.textContent = String(totalQty);
+      totalAmountEl.textContent = money(totalAmount);
+    }
+
+    function renderRows() {
+      if (!state.items.length) {
+        itemsBody.innerHTML = '<tr class="empty-row"><td colspan="7">Scan a barcode to start your manifest.</td></tr>';
+        recalcTotals();
+        return;
+      }
+
+      let html = '';
+      state.items.forEach((item, idx) => {
+        const qty = toQty(item.qty);
+        const unitPrice = toPrice(item.unit_price);
+        const line = qty * unitPrice;
+        html += '<tr>';
+        html += '<td class="idx-col">' + (idx + 1) + '</td>';
+        html += '<td><input class="cell-input" data-id="' + item.id + '" data-field="barcode" type="text" value="' + esc(item.barcode) + '" /></td>';
+        html += '<td><input class="cell-input" data-id="' + item.id + '" data-field="name" type="text" value="' + esc(item.name) + '" /></td>';
+        html += '<td class="qty-col"><input class="cell-input qty" data-id="' + item.id + '" data-field="qty" type="number" min="0" step="1" value="' + qty + '" /></td>';
+        html += '<td class="money-col"><input class="cell-input price" data-id="' + item.id + '" data-field="unit_price" type="number" min="0" step="0.01" value="' + unitPrice.toFixed(2) + '" /></td>';
+        html += '<td class="line-total">' + money(line) + '</td>';
+        html += '<td class="no-print"><button class="remove-btn" data-action="remove" data-id="' + item.id + '" type="button">Remove</button></td>';
+        html += '</tr>';
+      });
+      itemsBody.innerHTML = html;
+      recalcTotals();
+    }
+
+    async function lookupBarcode(barcode) {
+      const resp = await fetch('/api/bulk-manifest/lookup?barcode=' + encodeURIComponent(barcode));
+      return resp.json();
+    }
+
+    function addBlankRow(prefillBarcode) {
+      state.items.push({
+        id: state.nextId++,
+        barcode: String(prefillBarcode || '').trim(),
+        name: '',
+        qty: 1,
+        unit_price: 0
+      });
+      renderRows();
+    }
+
+    async function addScannedBarcode() {
+      const raw = String(scanInput.value || '').trim();
+      if (!raw) {
+        try { scanInput.focus({ preventScroll: true }); } catch (_) {}
+        return;
+      }
+
+      scanInput.value = '';
+      try { scanInput.focus({ preventScroll: true }); } catch (_) {}
+      setStatus('Looking up ' + raw + ' ...', 'muted');
+
+      let lookup = null;
+      try {
+        lookup = await lookupBarcode(raw);
+      } catch (err) {
+        lookup = { success: false, error: err && err.message ? err.message : 'Lookup failed' };
+      }
+
+      const resolvedBarcode = String((lookup && (lookup.upc || lookup.barcode)) || raw).trim() || raw;
+      const existing = state.items.find(item => {
+        return String(item.barcode || '').trim().toLowerCase() === resolvedBarcode.toLowerCase();
+      });
+
+      if (existing) {
+        existing.qty = toQty(existing.qty) + 1;
+        if ((!existing.name || !String(existing.name).trim()) && lookup && lookup.title) {
+          existing.name = String(lookup.title || '').trim();
+        }
+        renderRows();
+        setStatus('Incremented quantity for ' + resolvedBarcode, 'ok');
+        return;
+      }
+
+      state.items.push({
+        id: state.nextId++,
+        barcode: resolvedBarcode,
+        name: String((lookup && lookup.title) || '').trim(),
+        qty: 1,
+        unit_price: 0
+      });
+      renderRows();
+
+      if (lookup && lookup.success && lookup.found) {
+        setStatus('Added ' + resolvedBarcode, 'ok');
+      } else if (lookup && lookup.success && !lookup.found) {
+        setStatus('Not found in raw BOL. Added blank line for manual item details.', 'warn');
+      } else {
+        const msg = (lookup && lookup.error) ? lookup.error : 'Lookup failed';
+        setStatus('Lookup failed (' + msg + '). Added blank line item.', 'error');
+      }
+    }
+
+    itemsBody.addEventListener('change', (event) => {
+      const target = event.target;
+      if (!target || !target.dataset) return;
+
+      const item = findItemById(target.dataset.id);
+      if (!item) return;
+
+      const field = String(target.dataset.field || '').trim();
+      if (field === 'name' || field === 'barcode') {
+        item[field] = String(target.value || '').trim();
+      } else if (field === 'qty') {
+        item.qty = toQty(target.value);
+      } else if (field === 'unit_price') {
+        item.unit_price = toPrice(target.value);
+      }
+      renderRows();
+    });
+
+    itemsBody.addEventListener('click', (event) => {
+      const btn = event.target.closest('button[data-action="remove"]');
+      if (!btn) return;
+      const item = findItemById(btn.dataset.id);
+      if (!item) return;
+      state.items = state.items.filter(row => row.id !== item.id);
+      renderRows();
+      setStatus('Removed line item', 'muted');
+      try { scanInput.focus({ preventScroll: true }); } catch (_) {}
+    });
+
+    addScanBtn.addEventListener('click', addScannedBarcode);
+    scanInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        addScannedBarcode();
+      }
+    });
+    addBlankBtn.addEventListener('click', () => {
+      addBlankRow('');
+      setStatus('Added blank line item', 'muted');
+      try { scanInput.focus({ preventScroll: true }); } catch (_) {}
+    });
+    clearBtn.addEventListener('click', () => {
+      if (!state.items.length) return;
+      if (!confirm('Clear all manifest line items?')) return;
+      state.items = [];
+      renderRows();
+      setStatus('Manifest cleared', 'muted');
+      try { scanInput.focus({ preventScroll: true }); } catch (_) {}
+    });
+
+    function printSheet() {
+      updateStamp();
+      window.print();
+    }
+
+    printBtnTop.addEventListener('click', printSheet);
+    window.addEventListener('beforeprint', updateStamp);
+
+    (function init() {
+      try {
+        const theme = localStorage.getItem('ss_theme') || 'day';
+        if (theme === 'night') document.documentElement.classList.add('ss-theme-night');
+      } catch (_) {}
+      const today = new Date();
+      manifestDateEl.value = today.toISOString().slice(0, 10);
+      updateStamp();
+      renderRows();
+      try { scanInput.focus({ preventScroll: true }); } catch (_) {}
+    })();
+  </script>
+  <script src="/static/i18n.js"></script>
+</body>
+</html>

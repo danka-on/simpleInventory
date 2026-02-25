@@ -404,6 +404,204 @@
       box-shadow: 0 6px 20px rgba(59,130,246,0.4) !important;
     }
 
+    /* Required allocation popup for multi-location sold items */
+    .loc-alloc-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(2, 6, 23, 0.72);
+      backdrop-filter: blur(3px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 10050;
+      padding: 16px;
+    }
+    .loc-alloc-card {
+      width: min(700px, 96vw);
+      max-height: 90vh;
+      overflow-y: auto;
+      background: #0f172a;
+      border: 1px solid rgba(148, 163, 184, 0.25);
+      border-radius: 16px;
+      padding: 18px 18px 16px;
+      box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
+    }
+    .loc-alloc-title {
+      margin: 0 0 8px;
+      font-size: 1rem;
+      font-weight: 700;
+      color: #f8fafc;
+    }
+    .loc-alloc-subtitle {
+      margin: 0 0 12px;
+      font-size: 0.86rem;
+      color: #94a3b8;
+      line-height: 1.45;
+    }
+    .loc-alloc-summary {
+      margin: 0 0 14px;
+      font-size: 0.86rem;
+      font-weight: 600;
+      color: #f8fafc;
+      background: rgba(59, 130, 246, 0.12);
+      border: 1px solid rgba(59, 130, 246, 0.3);
+      border-radius: 10px;
+      padding: 9px 11px;
+    }
+    .loc-alloc-summary.ok {
+      color: #bbf7d0;
+      background: rgba(16, 185, 129, 0.12);
+      border-color: rgba(16, 185, 129, 0.36);
+    }
+    .loc-alloc-summary.bad {
+      color: #fecaca;
+      background: rgba(239, 68, 68, 0.13);
+      border-color: rgba(239, 68, 68, 0.3);
+    }
+    .loc-alloc-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .loc-alloc-item {
+      border: 1px solid rgba(148, 163, 184, 0.24);
+      border-radius: 12px;
+      padding: 10px;
+      background: rgba(15, 23, 42, 0.66);
+      transition: border-color 0.15s ease, background 0.15s ease;
+    }
+    .loc-alloc-item.is-selected {
+      border-color: rgba(16, 185, 129, 0.6);
+      background: rgba(16, 185, 129, 0.14);
+    }
+    .loc-alloc-top {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .loc-alloc-bubble {
+      width: auto;
+      flex: 1;
+      border: 1px solid rgba(148, 163, 184, 0.3);
+      border-radius: 999px;
+      background: rgba(30, 41, 59, 0.85);
+      color: #e2e8f0;
+      padding: 8px 12px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      font-size: 0.82rem;
+      font-weight: 600;
+    }
+    .loc-alloc-item.is-selected .loc-alloc-bubble {
+      background: rgba(16, 185, 129, 0.22);
+      border-color: rgba(16, 185, 129, 0.65);
+      color: #ecfdf5;
+    }
+    .loc-alloc-bubble small {
+      color: #93c5fd;
+      font-weight: 600;
+      font-size: 0.75rem;
+    }
+    .loc-alloc-item.is-selected .loc-alloc-bubble small {
+      color: #bbf7d0;
+    }
+    .loc-alloc-view {
+      border: 1px solid rgba(148, 163, 184, 0.35);
+      border-radius: 999px;
+      background: rgba(30, 41, 59, 0.9);
+      color: #cbd5e1;
+      padding: 7px 11px;
+      cursor: pointer;
+      font-size: 0.74rem;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .loc-alloc-view:hover {
+      color: #f8fafc;
+      border-color: rgba(147, 197, 253, 0.7);
+    }
+    .loc-alloc-view:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+    .loc-alloc-preview {
+      margin-top: 8px;
+      border-radius: 10px;
+      border: 1px solid rgba(148, 163, 184, 0.3);
+      background: rgba(2, 6, 23, 0.7);
+      padding: 8px;
+      text-align: center;
+    }
+    .loc-alloc-preview img {
+      width: 100%;
+      max-height: 190px;
+      object-fit: contain;
+      border-radius: 8px;
+      border: 1px solid rgba(148, 163, 184, 0.3);
+      background: #0f172a;
+    }
+    .loc-alloc-controls {
+      margin-top: 8px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .loc-alloc-controls button {
+      width: 30px;
+      height: 30px;
+      border-radius: 8px;
+      border: 1px solid rgba(148, 163, 184, 0.35);
+      background: rgba(30, 41, 59, 0.9);
+      color: #e2e8f0;
+      cursor: pointer;
+      font-size: 0.9rem;
+      font-weight: 700;
+      line-height: 1;
+    }
+    .loc-alloc-controls input {
+      width: 64px;
+      text-align: center;
+      border-radius: 8px;
+      border: 1px solid rgba(148, 163, 184, 0.35);
+      background: rgba(15, 23, 42, 0.85);
+      color: #f8fafc;
+      padding: 6px 4px;
+      font-size: 0.84rem;
+      font-weight: 700;
+    }
+    .loc-alloc-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .loc-alloc-actions button {
+      border: 0;
+      border-radius: 9px;
+      padding: 8px 14px;
+      cursor: pointer;
+      font-weight: 700;
+      font-size: 0.82rem;
+    }
+    .loc-alloc-cancel {
+      background: rgba(148, 163, 184, 0.2);
+      color: #e2e8f0;
+    }
+    .loc-alloc-confirm {
+      background: linear-gradient(135deg, #10b981, #059669);
+      color: #fff;
+      box-shadow: 0 8px 20px rgba(16, 185, 129, 0.28);
+    }
+    .loc-alloc-confirm:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+      box-shadow: none;
+    }
+
     /* Sold popup (legacy) */
     .sold-popup {
       display: none;
@@ -531,6 +729,61 @@
     html.ss-theme-day .order-popup-card .popup-close-btn {
       background: linear-gradient(135deg, #3b82f6, #2563eb) !important;
     }
+    html.ss-theme-day .loc-alloc-card {
+      background: #e4ebf4;
+      border-color: #64748b;
+      box-shadow: 0 20px 60px rgba(15,23,42,0.24);
+    }
+    html.ss-theme-day .loc-alloc-title { color: #0f172a; }
+    html.ss-theme-day .loc-alloc-subtitle { color: #1f2937; }
+    html.ss-theme-day .loc-alloc-summary {
+      color: #0f172a;
+      background: #dbeafe;
+      border-color: #93c5fd;
+    }
+    html.ss-theme-day .loc-alloc-summary.ok {
+      color: #14532d;
+      background: #dcfce7;
+      border-color: #86efac;
+    }
+    html.ss-theme-day .loc-alloc-summary.bad {
+      color: #7f1d1d;
+      background: #fee2e2;
+      border-color: #fca5a5;
+    }
+    html.ss-theme-day .loc-alloc-item { background: #f1f5f9; border-color: #94a3b8; }
+    html.ss-theme-day .loc-alloc-item.is-selected { background: #dcfce7; border-color: #22c55e; }
+    html.ss-theme-day .loc-alloc-bubble {
+      background: #ffffff;
+      color: #0f172a;
+      border-color: #64748b;
+    }
+    html.ss-theme-day .loc-alloc-bubble small { color: #1e3a8a; }
+    html.ss-theme-day .loc-alloc-item.is-selected .loc-alloc-bubble small { color: #14532d; }
+    html.ss-theme-day .loc-alloc-view {
+      background: #ffffff;
+      color: #1e3a8a;
+      border-color: #64748b;
+    }
+    html.ss-theme-day .loc-alloc-view:hover {
+      color: #172554;
+      border-color: #1e3a8a;
+    }
+    html.ss-theme-day .loc-alloc-preview {
+      background: #ffffff;
+      border-color: #94a3b8;
+    }
+    html.ss-theme-day .loc-alloc-preview img {
+      background: #f8fafc;
+      border-color: #94a3b8;
+    }
+    html.ss-theme-day .loc-alloc-controls button,
+    html.ss-theme-day .loc-alloc-controls input {
+      background: #ffffff;
+      color: #0f172a;
+      border-color: #64748b;
+    }
+    html.ss-theme-day .loc-alloc-cancel { color: #0f172a; background: #cbd5e1; }
     html.ss-theme-day .sold-popup {
       background: #fff;
       color: #111827;
@@ -825,6 +1078,35 @@ function updatePendingCount() {
     }
 }
 
+function dedupeOrdersForRender(orders) {
+    const list = Array.isArray(orders) ? orders : [];
+    const seen = new Set();
+    const out = [];
+
+    for (const order of list) {
+        if (!order || typeof order !== 'object') continue;
+        const quantity = parseInt(order.quantity, 10);
+        const price = Number(order.price);
+        const signature = JSON.stringify({
+            store: String(order.store || '').trim().toLowerCase(),
+            order_id: String(order.order_id || '').trim(),
+            item_id: String(order.item_id || '').trim(),
+            barcode: String(order.barcode || '').trim(),
+            title: String(order.title || '').trim().toLowerCase(),
+            quantity: Number.isFinite(quantity) ? quantity : 0,
+            price: Number.isFinite(price) ? Number(price.toFixed(4)) : 0,
+            paid_time: String(order.paid_time || '').trim(),
+            shipped_time: String(order.shipped_time || '').trim(),
+            shipping_name: String(order.shipping_name || '').trim().toLowerCase()
+        });
+        if (seen.has(signature)) continue;
+        seen.add(signature);
+        out.push(order);
+    }
+
+    return out;
+}
+
 // Render orders to tables with performance optimization
 function renderSoldOrders(orders, fromCache = false) {
     const pendingTbody = document.querySelector('#sold-orders-table tbody');
@@ -839,7 +1121,8 @@ function renderSoldOrders(orders, fromCache = false) {
     let hasPending = false;
     let hasCompleted = false;
 
-    orders.forEach(order => {
+    const dedupedOrders = dedupeOrdersForRender(orders);
+    dedupedOrders.forEach(order => {
         OrderManager.setOrder(order);
         const row = createOrderRow(order, order.isHandled);
 
@@ -885,6 +1168,263 @@ function renderSoldOrders(orders, fromCache = false) {
     }
 }
 
+function parsePosInt(value, fallback = 0) {
+    const n = parseInt(value, 10);
+    if (Number.isNaN(n) || n < 0) return fallback;
+    return n;
+}
+
+function normalizeLocationKey(value) {
+    const s = String(value || '').trim().toLowerCase();
+    return s || '__no_code__';
+}
+
+function locationPreviewUrl(rawKey) {
+    const key = String(rawKey || '').trim();
+    if (!key) return '';
+    if (/\.(jpe?g|png|gif|webp)$/i.test(key)) {
+        return `/static/pictureposition/${encodeURIComponent(key)}`;
+    }
+    return `/static/shelves/${encodeURIComponent(key.toLowerCase())}.png`;
+}
+
+async function fetchOrderLocationOptions(orderId) {
+    const response = await fetch(`/api/ready-to-ship/location-options/${encodeURIComponent(orderId)}?_t=${Date.now()}`, {
+        cache: 'no-store'
+    });
+    const data = await response.json();
+    if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Failed to load location options');
+    }
+    return data;
+}
+
+function promptLocationAllocation(order, options) {
+    return new Promise((resolve) => {
+        const existing = document.getElementById('location-allocation-popup');
+        if (existing) existing.remove();
+
+        const requiredQty = Math.max(1, parsePosInt(options.quantity ?? order.quantity, 1));
+        const locations = Array.isArray(options.locations) ? options.locations : [];
+        if (!locations.length) {
+            resolve([]);
+            return;
+        }
+
+        const existingMap = new Map();
+        const existingAllocs = Array.isArray(options.existing_allocations) ? options.existing_allocations : [];
+        existingAllocs.forEach(a => {
+            const key = normalizeLocationKey(a.location_key || a.location_code);
+            const qty = parsePosInt(a.quantity, 0);
+            if (qty > 0) existingMap.set(key, qty);
+        });
+
+        const state = locations.map((loc) => {
+            const key = normalizeLocationKey(loc.location_key || loc.location_code);
+            const available = Math.max(0, parsePosInt(loc.available_qty, 0));
+            const prefill = Math.min(available, parsePosInt(existingMap.get(key), 0));
+            return {
+                location_key: key,
+                location_code: String(loc.location_code || '(No Code)'),
+                available_qty: available,
+                selected_qty: prefill,
+                preview_key: String(loc.preview_key || loc.location_code || '').trim(),
+                preview_open: false
+            };
+        });
+        const missingPreviewDataUrl = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="340" height="180"><rect width="100%" height="100%" fill="#0f172a"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#64748b" font-size="16">Preview missing</text></svg>');
+
+        const overlay = document.createElement('div');
+        overlay.id = 'location-allocation-popup';
+        overlay.className = 'loc-alloc-overlay';
+
+        const card = document.createElement('div');
+        card.className = 'loc-alloc-card';
+        card.onclick = (e) => e.stopPropagation();
+
+        const title = document.createElement('h3');
+        title.className = 'loc-alloc-title';
+        title.textContent = 'Select Removal Location(s)';
+
+        const subtitle = document.createElement('p');
+        subtitle.className = 'loc-alloc-subtitle';
+        subtitle.innerHTML = `Order <strong>${esc(order.order_id || order.id || '')}</strong> needs <strong>${requiredQty}</strong> unit(s) removed.`;
+
+        const summary = document.createElement('div');
+        summary.className = 'loc-alloc-summary';
+
+        const list = document.createElement('div');
+        list.className = 'loc-alloc-list';
+
+        const actions = document.createElement('div');
+        actions.className = 'loc-alloc-actions';
+        actions.innerHTML = `
+            <button type="button" class="loc-alloc-cancel">Cancel</button>
+            <button type="button" class="loc-alloc-confirm">Use Selection</button>
+        `;
+
+        card.appendChild(title);
+        card.appendChild(subtitle);
+        card.appendChild(summary);
+        card.appendChild(list);
+        card.appendChild(actions);
+        overlay.appendChild(card);
+        document.body.appendChild(overlay);
+
+        const cancelBtn = actions.querySelector('.loc-alloc-cancel');
+        const confirmBtn = actions.querySelector('.loc-alloc-confirm');
+
+        const totalSelected = () => state.reduce((acc, loc) => acc + parsePosInt(loc.selected_qty, 0), 0);
+
+        function clampQty(index, rawQty) {
+            const loc = state[index];
+            if (!loc) return;
+            const maxQty = Math.max(0, parsePosInt(loc.available_qty, 0));
+            let qty = parsePosInt(rawQty, 0);
+            if (qty > maxQty) qty = maxQty;
+            if (qty < 0) qty = 0;
+            loc.selected_qty = qty;
+        }
+
+        function renderState() {
+            const selected = totalSelected();
+            const remaining = requiredQty - selected;
+            const canFulfill = (options.can_fulfill !== false);
+
+            if (!canFulfill) {
+                summary.className = 'loc-alloc-summary bad';
+                summary.textContent = `Not enough inventory available (have ${options.total_available || 0}, need ${requiredQty}).`;
+            } else if (remaining === 0) {
+                summary.className = 'loc-alloc-summary ok';
+                summary.textContent = `Ready: selected ${selected} / ${requiredQty}.`;
+            } else if (remaining > 0) {
+                summary.className = 'loc-alloc-summary';
+                summary.textContent = `Select ${remaining} more unit(s). Selected ${selected} / ${requiredQty}.`;
+            } else {
+                summary.className = 'loc-alloc-summary bad';
+                summary.textContent = `Selected ${selected} / ${requiredQty} (remove ${Math.abs(remaining)} unit(s) from selection).`;
+            }
+
+            confirmBtn.disabled = !canFulfill || remaining !== 0;
+
+            list.innerHTML = state.map((loc, idx) => {
+                const isSelected = parsePosInt(loc.selected_qty, 0) > 0;
+                const safeCode = esc(loc.location_code);
+                const hasPreview = !!String(loc.preview_key || '').trim();
+                const previewLabel = loc.preview_open ? 'Hide' : 'View';
+                const previewSrc = hasPreview ? locationPreviewUrl(loc.preview_key) : '';
+                return `
+                    <div class="loc-alloc-item ${isSelected ? 'is-selected' : ''}" data-index="${idx}">
+                        <div class="loc-alloc-top">
+                            <button type="button" class="loc-alloc-bubble" data-role="toggle" data-index="${idx}">
+                                <span>${safeCode}</span>
+                                <small>Avail ${loc.available_qty}</small>
+                            </button>
+                            <button type="button" class="loc-alloc-view" data-role="view" data-index="${idx}" ${hasPreview ? '' : 'disabled'}>
+                                ${previewLabel}
+                            </button>
+                        </div>
+                        ${loc.preview_open && hasPreview ? `
+                            <div class="loc-alloc-preview">
+                                <img src="${esc(previewSrc)}" alt="${safeCode}" loading="lazy" onerror="this.src='${missingPreviewDataUrl}'">
+                            </div>
+                        ` : ''}
+                        ${isSelected ? `
+                            <div class="loc-alloc-controls">
+                                <button type="button" data-role="dec" data-index="${idx}">-</button>
+                                <input type="number" min="0" max="${loc.available_qty}" value="${loc.selected_qty}" data-role="qty" data-index="${idx}">
+                                <button type="button" data-role="inc" data-index="${idx}">+</button>
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function closeWith(value) {
+            document.removeEventListener('keydown', onKeyDown);
+            overlay.remove();
+            resolve(value);
+        }
+
+        function onKeyDown(e) {
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                closeWith(null);
+            }
+        }
+        document.addEventListener('keydown', onKeyDown);
+
+        overlay.onclick = (e) => {
+            if (e.target === overlay) {
+                closeWith(null);
+            }
+        };
+
+        cancelBtn.onclick = () => closeWith(null);
+        confirmBtn.onclick = () => {
+            const allocations = state
+                .filter(loc => parsePosInt(loc.selected_qty, 0) > 0)
+                .map(loc => ({
+                    location_key: loc.location_key,
+                    location_code: loc.location_code,
+                    quantity: parsePosInt(loc.selected_qty, 0)
+                }));
+            closeWith(allocations);
+        };
+
+        list.addEventListener('click', (e) => {
+            const target = e.target.closest('[data-role]');
+            if (!target) return;
+            const idx = parsePosInt(target.getAttribute('data-index'), -1);
+            if (idx < 0 || !state[idx]) return;
+            const role = target.getAttribute('data-role');
+            const loc = state[idx];
+
+            if (role === 'toggle') {
+                if (parsePosInt(loc.selected_qty, 0) > 0) {
+                    loc.selected_qty = 0;
+                } else {
+                    const remaining = requiredQty - totalSelected();
+                    const seed = remaining > 0 ? remaining : 1;
+                    clampQty(idx, Math.min(loc.available_qty, seed));
+                }
+                renderState();
+                return;
+            }
+
+            if (role === 'dec') {
+                clampQty(idx, parsePosInt(loc.selected_qty, 0) - 1);
+                renderState();
+                return;
+            }
+
+            if (role === 'inc') {
+                clampQty(idx, parsePosInt(loc.selected_qty, 0) + 1);
+                renderState();
+                return;
+            }
+
+            if (role === 'view') {
+                if (!String(loc.preview_key || '').trim()) return;
+                loc.preview_open = !loc.preview_open;
+                renderState();
+            }
+        });
+
+        list.addEventListener('input', (e) => {
+            const input = e.target.closest('input[data-role="qty"]');
+            if (!input) return;
+            const idx = parsePosInt(input.getAttribute('data-index'), -1);
+            if (idx < 0 || !state[idx]) return;
+            clampQty(idx, input.value);
+            renderState();
+        });
+
+        renderState();
+    });
+}
+
 // ============================================================================
 // ORDER STATUS CHANGE HANDLER - With optimistic updates and rollback
 // ============================================================================
@@ -916,31 +1456,50 @@ async function handleOrderStatusChange(orderId, isUndo) {
     const btn = tr.querySelector('.handle-btn');
     if (!btn) return;
 
+    const restoreBtn = () => {
+        btn.disabled = false;
+        btn.style.opacity = '1';
+        btn.style.cursor = 'pointer';
+    };
+
     // Disable button during operation
     btn.disabled = true;
     btn.style.opacity = '0.5';
     btn.style.cursor = 'not-allowed';
 
-    // Store original state for rollback
     const originalState = order.isHandled;
-
-    // Optimistic update
-    OrderManager.updateOrderStatus(orderId, !originalState);
-
-    // Animate out
-    tr.style.transform = 'translateX(100%)';
-    tr.style.opacity = '0';
+    let optimisticApplied = false;
+    let locationAllocations = [];
 
     try {
+        if (!isUndo) {
+            const options = await fetchOrderLocationOptions(orderId);
+            if (options.needs_choice) {
+                const chosen = await promptLocationAllocation(order, options);
+                if (!chosen || !chosen.length) {
+                    restoreBtn();
+                    return;
+                }
+                locationAllocations = chosen;
+            }
+        }
+
+        // Optimistic update only after mandatory location selection is complete
+        OrderManager.updateOrderStatus(orderId, !originalState);
+        optimisticApplied = true;
+        tr.style.transform = 'translateX(100%)';
+        tr.style.opacity = '0';
+
         // Update server
         const endpoint = isUndo ? '/mark-order-unhandled' : '/mark-order-handled';
+        const payload = isUndo ? { id: orderId } : { id: orderId, allocations: locationAllocations };
         const response = await fetch(endpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id: orderId })
+            body: JSON.stringify(payload)
         });
 
-        const data = await response.json();
+        const data = await response.json().catch(() => ({ success: false, error: 'Invalid server response' }));
 
         if (!data.success) {
             throw new Error(data.error || 'Failed to update order');
@@ -994,15 +1553,14 @@ async function handleOrderStatusChange(orderId, isUndo) {
     } catch (error) {
         console.error('Error updating order status:', error);
 
-        // Rollback on error
-        OrderManager.updateOrderStatus(orderId, originalState);
+        if (optimisticApplied) {
+            OrderManager.updateOrderStatus(orderId, originalState);
+        }
 
         // Restore button and row
         tr.style.transform = '';
         tr.style.opacity = '1';
-        btn.disabled = false;
-        btn.style.opacity = '1';
-        btn.style.cursor = 'pointer';
+        restoreBtn();
 
         // Show error toast
         showToast('Failed to update order: ' + error.message, 'error');

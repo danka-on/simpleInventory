@@ -261,6 +261,204 @@ def _ensure_removed_items_table(cur):
         )
     ''')
 
+def _ensure_order_removal_allocations_table(cur):
+    """Persist explicit ready-to-ship location choices for sold-order removals."""
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS order_removal_allocations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_row_id INTEGER NOT NULL,
+            location_key TEXT NOT NULL,
+            location_code TEXT NOT NULL,
+            quantity INTEGER NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_order_removal_allocations_order ON order_removal_allocations(order_row_id)')
+
+def _sold_location_key(value):
+    s = str(value or '').strip()
+    if not s:
+        return '__no_code__'
+    return s.lower()
+
+def _sold_location_label(value):
+    s = str(value or '').strip()
+    return s if s else '(No Code)'
+
+def _sold_removal_barcode_key(value):
+    return _normalize_upc_preserve_suffix_for_match(_normalize_upc(value))
+
+def _sold_removal_barcode_variants(value):
+    raw = _normalize_upc(value)
+    key = _sold_removal_barcode_key(raw)
+    variants = set()
+
+    for candidate in (raw, key):
+        s = str(candidate or '').strip()
+        if s:
+            variants.add(s)
+
+    if key and '-' in key:
+        base, suffix = key.split('-', 1)
+        if base.isdigit():
+            for width in (8, 11, 12, 13, 14):
+                if len(base) < width:
+                    variants.add(f"{base.zfill(width)}-{suffix}")
+    elif key and key.isdigit():
+        for width in (8, 11, 12, 13, 14):
+            if len(key) < width:
+                variants.add(key.zfill(width))
+
+    if raw and raw.isdigit():
+        stripped = raw.lstrip('0') or '0'
+        variants.add(stripped)
+        for width in (8, 11, 12, 13, 14):
+            if len(stripped) < width:
+                variants.add(stripped.zfill(width))
+
+    return {str(v).strip() for v in variants if str(v).strip()}
+
+def _searchrack_removal_schema(cur):
+    cur.execute("PRAGMA table_info('SEARCHRACK')")
+    cols = [r[1] for r in cur.fetchall()]
+    cols_lower = {c.lower(): c for c in cols}
+    return {
+        'id_col': cols_lower.get('id'),
+        'barcode_col': cols_lower.get('barcode') or cols_lower.get('upc'),
+        'qty_col': cols_lower.get('quantity') or cols_lower.get('qty'),
+        'title_col': cols_lower.get('title'),
+        'pos_col': cols_lower.get('item_position') or cols_lower.get('itemposition') or cols_lower.get('position'),
+        'pic_col': cols_lower.get('pictureposition')
+    }
+
+def _searchrack_matches_for_barcode(cur, barcode, schema=None, include_zero=False):
+    schema = schema or _searchrack_removal_schema(cur)
+    barcode_col = schema.get('barcode_col')
+    qty_col = schema.get('qty_col')
+    id_col = schema.get('id_col')
+    title_col = schema.get('title_col')
+    pos_col = schema.get('pos_col')
+    pic_col = schema.get('pic_col')
+
+    target_key = _sold_removal_barcode_key(barcode)
+    if not target_key or not barcode_col:
+        return []
+
+    base_sql = f'''
+        SELECT rowid AS _rowid_, *
+        FROM SEARCHRACK
+        WHERE {barcode_col} IS NOT NULL
+          AND TRIM({barcode_col}) != ''
+    '''
+
+    variants = sorted(v.lower() for v in _sold_removal_barcode_variants(barcode))
+    rows = []
+    if variants:
+        placeholders = ','.join('?' for _ in variants)
+        cur.execute(base_sql + f" AND LOWER(TRIM({barcode_col})) IN ({placeholders})", tuple(variants))
+        rows = [dict(r) for r in cur.fetchall()]
+    else:
+        cur.execute(base_sql)
+        rows = [dict(r) for r in cur.fetchall()]
+
+    matches = []
+    for row in rows:
+        raw_barcode = str(row.get(barcode_col) or '').strip()
+        if _sold_removal_barcode_key(raw_barcode) != target_key:
+            continue
+
+        qty = max(0, _coerce_int(row.get(qty_col) if qty_col else None, 0))
+        if not include_zero and qty <= 0:
+            continue
+
+        raw_id = row.get(id_col) if id_col else row.get('_rowid_')
+        try:
+            row_id = int(raw_id)
+        except Exception:
+            continue
+
+        item_position = str(row.get(pos_col) or '').strip() if pos_col else ''
+        pictureposition = str(row.get(pic_col) or '').strip() if pic_col else ''
+        location_code = item_position or pictureposition
+        location_label = _sold_location_label(location_code)
+
+        matches.append({
+            'id': row_id,
+            'barcode': raw_barcode,
+            'title': str(row.get(title_col) or '').strip() if title_col else '',
+            'quantity': qty,
+            'item_position': item_position,
+            'pictureposition': pictureposition,
+            'location_code': location_label,
+            'location_key': _sold_location_key(location_label),
+            'location_preview': pictureposition or item_position or location_label
+        })
+
+    matches.sort(key=lambda m: (m.get('location_key') or '', int(m.get('id') or 0)))
+    return matches
+
+def _group_searchrack_matches_by_location(matches):
+    groups = {}
+    for row in (matches or []):
+        loc_key = _sold_location_key(row.get('location_key') or row.get('location_code'))
+        bucket = groups.get(loc_key)
+        if bucket is None:
+            bucket = {
+                'location_key': loc_key,
+                'location_code': _sold_location_label(row.get('location_code')),
+                'preview_key': str(row.get('location_preview') or row.get('location_code') or '').strip(),
+                'available_qty': 0,
+                'rows': []
+            }
+            groups[loc_key] = bucket
+        bucket['available_qty'] += max(0, _coerce_int(row.get('quantity'), 0))
+        bucket['rows'].append(row)
+
+    out = []
+    for bucket in groups.values():
+        bucket['rows'].sort(key=lambda r: int(r.get('id') or 0))
+        out.append(bucket)
+    out.sort(key=lambda g: str(g.get('location_code') or '').lower())
+    return out
+
+def _load_order_removal_allocations(cur, order_row_id):
+    _ensure_order_removal_allocations_table(cur)
+    cur.execute('''
+        SELECT location_key, location_code, quantity
+        FROM order_removal_allocations
+        WHERE order_row_id = ?
+        ORDER BY id ASC
+    ''', (order_row_id,))
+    rows = cur.fetchall()
+    out = []
+    for r in rows:
+        location_code = _sold_location_label(r['location_code'] if isinstance(r, sqlite3.Row) else r[1])
+        location_key_raw = (r['location_key'] if isinstance(r, sqlite3.Row) else r[0]) or location_code
+        qty_raw = (r['quantity'] if isinstance(r, sqlite3.Row) else r[2])
+        qty = max(0, _coerce_int(qty_raw, 0))
+        if qty <= 0:
+            continue
+        out.append({
+            'location_key': _sold_location_key(location_key_raw),
+            'location_code': location_code,
+            'quantity': qty
+        })
+    return out
+
+def _save_order_removal_allocations(cur, order_row_id, allocations):
+    _ensure_order_removal_allocations_table(cur)
+    cur.execute('DELETE FROM order_removal_allocations WHERE order_row_id = ?', (order_row_id,))
+    for alloc in (allocations or []):
+        qty = max(0, _coerce_int(alloc.get('quantity'), 0))
+        if qty <= 0:
+            continue
+        location_code = _sold_location_label(alloc.get('location_code'))
+        location_key = _sold_location_key(alloc.get('location_key') or location_code)
+        cur.execute('''
+            INSERT INTO order_removal_allocations (order_row_id, location_key, location_code, quantity)
+            VALUES (?, ?, ?, ?)
+        ''', (order_row_id, location_key, location_code, qty))
+
 def _ensure_listing_alerts_tables():
     """Create listing_alerts.db tables if they don't exist."""
     try:
@@ -963,6 +1161,141 @@ def send_email_smtp(to_emails, subject, body, html_body=None):
 def tools():
     return render_template('tools.html')
 
+@app.route('/bulk-manifest')
+def bulk_manifest_page():
+    """Bulk manifest builder for scanned barcode sale sheets."""
+    return render_template('bulk_manifest.html')
+
+def _bulk_manifest_candidate_barcodes(raw_barcode):
+    """Build a prioritized set of barcode candidates for raw_bol_items lookup."""
+    normalized = _normalize_upc_preserve_suffix_for_match(_normalize_scanned_upc(raw_barcode))
+    if not normalized:
+        return []
+
+    candidates = []
+    seen = set()
+
+    def _add(value):
+        v = _normalize_upc_preserve_suffix_for_match(_normalize_upc(value))
+        v = str(v or '').strip()
+        if not v:
+            return
+        key = v.lower()
+        if key in seen:
+            return
+        seen.add(key)
+        candidates.append(v)
+
+    _add(normalized)
+    base = normalized.split('-', 1)[0].strip()
+    stripped_base = _strip_leading_zeros_numeric(base)
+    _add(base)
+    _add(stripped_base)
+
+    if base.isdigit():
+        for width in (12, 13):
+            if len(base) <= width:
+                _add(base.zfill(width))
+            if stripped_base and stripped_base.isdigit() and len(stripped_base) <= width:
+                _add(stripped_base.zfill(width))
+
+    return candidates
+
+def _bulk_manifest_lookup_rawbol(raw_barcode):
+    """Return best raw_bol_items match for barcode, or None."""
+    candidates = _bulk_manifest_candidate_barcodes(raw_barcode)
+    if not candidates:
+        return None
+
+    conn = None
+    try:
+        conn = sqlite3.connect('rawbol.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+
+        for candidate in candidates:
+            cur.execute('''
+                SELECT upc, item_description, image_url, lot_number, quantity, import_date
+                FROM raw_bol_items
+                WHERE upc = ? COLLATE NOCASE
+                ORDER BY COALESCE(import_date, '') DESC, rowid DESC
+                LIMIT 1
+            ''', (candidate,))
+            row = cur.fetchone()
+            if row:
+                return dict(row)
+
+        stripped = _strip_leading_zeros_numeric(candidates[0])
+        if stripped and len(stripped) >= 8:
+            cur.execute('''
+                SELECT upc, item_description, image_url, lot_number, quantity, import_date
+                FROM raw_bol_items
+                WHERE REPLACE(COALESCE(upc, ''), '.0', '') LIKE ? COLLATE NOCASE
+                ORDER BY COALESCE(import_date, '') DESC, rowid DESC
+                LIMIT 1
+            ''', (f'%{stripped}',))
+            row = cur.fetchone()
+            if row:
+                return dict(row)
+
+        if stripped and stripped.isdigit():
+            cur.execute('''
+                SELECT upc, item_description, image_url, lot_number, quantity, import_date
+                FROM raw_bol_items
+                WHERE CAST(CAST(REPLACE(COALESCE(upc, ''), '.0', '') AS INTEGER) AS TEXT) = ?
+                ORDER BY COALESCE(import_date, '') DESC, rowid DESC
+                LIMIT 1
+            ''', (stripped,))
+            row = cur.fetchone()
+            if row:
+                return dict(row)
+    finally:
+        if conn is not None:
+            conn.close()
+
+    return None
+
+@app.route('/api/bulk-manifest/lookup', methods=['GET'])
+def api_bulk_manifest_lookup():
+    """Lookup title metadata in rawbol.db for bulk manifest scanned barcodes."""
+    try:
+        barcode_raw = (request.args.get('barcode') or '').strip()
+        if not barcode_raw:
+            return jsonify({'success': False, 'error': 'Missing barcode'}), 400
+
+        normalized_barcode = _normalize_upc_preserve_suffix_for_match(_normalize_scanned_upc(barcode_raw))
+        row = _bulk_manifest_lookup_rawbol(barcode_raw)
+        if not row:
+            return jsonify({
+                'success': True,
+                'found': False,
+                'barcode': normalized_barcode,
+                'upc': normalized_barcode,
+                'title': '',
+                'image_url': '',
+                'lot_number': '',
+                'quantity': 0
+            })
+
+        upc = _normalize_upc_preserve_suffix_for_match(row.get('upc') or normalized_barcode)
+        title = str(row.get('item_description') or '').strip()
+        image_url = str(row.get('image_url') or '').strip()
+        lot_number = _normalize_lot_number(row.get('lot_number'))
+        quantity = max(0, _coerce_int(row.get('quantity'), 0))
+
+        return jsonify({
+            'success': True,
+            'found': True,
+            'barcode': upc,
+            'upc': upc,
+            'title': title,
+            'image_url': image_url,
+            'lot_number': lot_number,
+            'quantity': quantity
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e)}), 500
+
 @app.route('/listingagent')
 def listingagent():
     """Experimental: assisted listing page (start with eBay)."""
@@ -1408,6 +1741,20 @@ def _preplog_set_undo_error(log_id: int, error: str):
         return _listagent_row_to_dict(cur.fetchone())
 
 def _preplog_meta_dict(entry):
+    if not isinstance(entry, dict):
+        return {}
+    raw = entry.get('meta_json')
+    if raw is None:
+        return {}
+    if isinstance(raw, dict):
+        return raw
+    try:
+        parsed = json.loads(str(raw))
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+
+def _listinglog_meta_dict(entry):
     if not isinstance(entry, dict):
         return {}
     raw = entry.get('meta_json')
@@ -8912,9 +9259,9 @@ def _fetch_live_marketplace_upc_keys(upcs, *, max_lookup_keys=4000):
                     FROM INVENTORY
                     WHERE UPC IS NOT NULL
                       AND TRIM(UPC) != ''
-                      AND LOWER(TRIM(COALESCE(List_State, ''))) = 'active'
+                      AND LOWER(TRIM(COALESCE(List_State, ''))) IN ('active', 'live', 'listed')
                       AND TRIM(COALESCE(ItemID, '')) != ''
-                      AND (Quantity > 0 OR Quantity IS NULL)
+                      AND COALESCE(CAST(Quantity AS INTEGER), 0) > 0
                       AND LOWER(TRIM(UPC)) IN ({placeholders})
                 ''', tuple(part))
                 for row in cur.fetchall():
@@ -8935,9 +9282,9 @@ def _fetch_live_marketplace_upc_keys(upcs, *, max_lookup_keys=4000):
                     FROM ITEMS
                     WHERE UPC IS NOT NULL
                       AND TRIM(UPC) != ''
-                      AND TRIM(COALESCE(STATUS, '')) = 'Active'
+                      AND LOWER(TRIM(COALESCE(STATUS, ''))) IN ('active', 'live', 'listed')
                       AND TRIM(COALESCE(ASIN, '')) != ''
-                      AND (QUANTITY > 0 OR QUANTITY IS NULL)
+                      AND COALESCE(CAST(QUANTITY AS INTEGER), 0) > 0
                       AND LOWER(TRIM(UPC)) IN ({placeholders})
                 ''', tuple(part))
                 for row in cur.fetchall():
@@ -8948,6 +9295,191 @@ def _fetch_live_marketplace_upc_keys(upcs, *, max_lookup_keys=4000):
         print(f"[_fetch_live_marketplace_upc_keys] Amazon lookup failed: {e}")
 
     return payload
+
+def _fetch_auto_marketplace_listing_links(upcs, *, max_lookup_keys=4000, max_links_per_platform=40):
+    """
+    Return live marketplace listing links keyed by normalized UPC-variant key.
+    This is display-only enrichment for /items-to-list auto listing preview.
+    """
+    key_pool = set()
+    for upc in upcs or []:
+        for key in _marketplace_upc_lookup_variants(upc):
+            key_pool.add(key)
+
+    if not key_pool:
+        return {}
+    if len(key_pool) > max_lookup_keys:
+        return {}
+
+    listing_map = {}
+    dedupe_map = {}
+    keys_sorted = sorted(key_pool)
+    chunk_size = 700
+    amazon_live_max_age_days = _coerce_int(os.getenv('ITEMS_TO_LIST_AMAZON_LIVE_MAX_AGE_DAYS', 45), 45)
+    if amazon_live_max_age_days < 0:
+        amazon_live_max_age_days = 0
+    now_utc = datetime.datetime.utcnow()
+
+    def _is_recent_amazon_listing(last_updated_raw):
+        if amazon_live_max_age_days <= 0:
+            return True
+        dt = _parse_iso_utc_naive(last_updated_raw)
+        if dt is None:
+            return False
+        age_seconds = (now_utc - dt).total_seconds()
+        return age_seconds <= (amazon_live_max_age_days * 86400)
+
+    def _add_listing(raw_upc, platform, listing_id='', title='', url=''):
+        upc_variants = _marketplace_upc_lookup_variants(raw_upc)
+        if not upc_variants:
+            return
+        listing_id = str(listing_id or '').strip()
+        title = str(title or '').strip()
+        url = str(url or '').strip()
+        if not url and platform == 'ebay' and listing_id:
+            url = f'https://www.ebay.com/itm/{listing_id}'
+        if not url and platform == 'amazon' and listing_id and listing_id.upper().startswith('B'):
+            url = f'https://www.amazon.com/dp/{listing_id}'
+        if not listing_id and not url:
+            return
+
+        token = f"{listing_id.lower()}|{url.lower()}"
+        for key in upc_variants:
+            if key not in key_pool:
+                continue
+            bucket = listing_map.get(key)
+            if bucket is None:
+                bucket = {'ebay': [], 'amazon': []}
+                listing_map[key] = bucket
+            dedupe_bucket = dedupe_map.get(key)
+            if dedupe_bucket is None:
+                dedupe_bucket = {'ebay': set(), 'amazon': set()}
+                dedupe_map[key] = dedupe_bucket
+            if token in dedupe_bucket[platform]:
+                continue
+            if len(bucket[platform]) >= max_links_per_platform:
+                continue
+            dedupe_bucket[platform].add(token)
+            bucket[platform].append({
+                'platform': platform,
+                'listing_id': listing_id,
+                'title': title,
+                'url': url
+            })
+
+    try:
+        with sqlite3.connect('ebayStore.db') as conn:
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            cur.execute("PRAGMA table_info('INVENTORY')")
+            cols = [r[1] for r in cur.fetchall()]
+            cols_lower = {c.lower(): c for c in cols}
+            upc_col = cols_lower.get('upc') or cols_lower.get('barcode')
+            state_col = cols_lower.get('list_state') or cols_lower.get('status')
+            item_id_col = cols_lower.get('itemid') or cols_lower.get('item_id')
+            url_col = cols_lower.get('url') or cols_lower.get('viewitemurl')
+            title_col = cols_lower.get('title')
+            qty_col = cols_lower.get('quantity')
+            order_col = cols_lower.get('list_date') or cols_lower.get('created_at')
+
+            if upc_col:
+                upc_where = f"{upc_col} IS NOT NULL AND TRIM({upc_col}) != ''"
+                state_where = f"LOWER(TRIM(COALESCE({state_col}, ''))) IN ('active', 'live', 'listed')" if state_col else "1=1"
+                item_where = f"TRIM(COALESCE({item_id_col}, '')) != ''" if item_id_col else "1=1"
+                qty_where = f"COALESCE(CAST({qty_col} AS INTEGER), 0) > 0" if qty_col else "1=1"
+                item_expr = f"{item_id_col} AS ITEM_ID" if item_id_col else "'' AS ITEM_ID"
+                url_expr = f"{url_col} AS URL" if url_col else "'' AS URL"
+                title_expr = f"{title_col} AS TITLE" if title_col else "'' AS TITLE"
+                order_sql = f" ORDER BY {order_col} DESC" if order_col else ""
+
+                for part in _chunk_list(keys_sorted, chunk_size):
+                    placeholders = ','.join('?' for _ in part)
+                    cur.execute(f'''
+                        SELECT {upc_col} AS UPC_RAW, {item_expr}, {url_expr}, {title_expr}
+                        FROM INVENTORY
+                        WHERE {upc_where}
+                          AND {state_where}
+                          AND {item_where}
+                          AND {qty_where}
+                          AND LOWER(TRIM({upc_col})) IN ({placeholders})
+                        {order_sql}
+                    ''', tuple(part))
+                    for row in cur.fetchall():
+                        _add_listing(
+                            row['UPC_RAW'],
+                            'ebay',
+                            listing_id=row['ITEM_ID'],
+                            title=row['TITLE'],
+                            url=row['URL']
+                        )
+    except Exception as e:
+        print(f"[_fetch_auto_marketplace_listing_links] eBay lookup failed: {e}")
+
+    try:
+        with sqlite3.connect('amazonStore.db') as conn:
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            cur.execute("PRAGMA table_info('ITEMS')")
+            cols = [r[1] for r in cur.fetchall()]
+            cols_lower = {c.lower(): c for c in cols}
+            upc_col = cols_lower.get('upc') or cols_lower.get('barcode')
+            status_col = cols_lower.get('status')
+            asin_col = cols_lower.get('asin')
+            sku_col = cols_lower.get('sku')
+            url_col = cols_lower.get('product_url') or cols_lower.get('url')
+            title_col = cols_lower.get('title')
+            qty_col = cols_lower.get('quantity')
+            order_col = cols_lower.get('last_updated') or cols_lower.get('created_at')
+
+            if upc_col:
+                upc_where = f"{upc_col} IS NOT NULL AND TRIM({upc_col}) != ''"
+                status_where = f"LOWER(TRIM(COALESCE({status_col}, ''))) IN ('active', 'live', 'listed')" if status_col else "1=1"
+                qty_where = f"COALESCE(CAST({qty_col} AS INTEGER), 0) > 0" if qty_col else "1=1"
+                if asin_col:
+                    live_id_where = f"TRIM(COALESCE({asin_col}, '')) != ''"
+                elif sku_col:
+                    live_id_where = f"TRIM(COALESCE({sku_col}, '')) != ''"
+                else:
+                    live_id_where = "1=1"
+                asin_expr = f"{asin_col} AS ASIN" if asin_col else "'' AS ASIN"
+                sku_expr = f"{sku_col} AS SKU" if sku_col else "'' AS SKU"
+                url_expr = f"{url_col} AS URL" if url_col else "'' AS URL"
+                title_expr = f"{title_col} AS TITLE" if title_col else "'' AS TITLE"
+                updated_expr = f"{order_col} AS LAST_UPDATED_RAW" if order_col else "NULL AS LAST_UPDATED_RAW"
+                order_sql = f" ORDER BY {order_col} DESC" if order_col else ""
+
+                for part in _chunk_list(keys_sorted, chunk_size):
+                    placeholders = ','.join('?' for _ in part)
+                    cur.execute(f'''
+                        SELECT {upc_col} AS UPC_RAW, {asin_expr}, {sku_expr}, {url_expr}, {title_expr}, {updated_expr}
+                        FROM ITEMS
+                        WHERE {upc_where}
+                          AND {status_where}
+                          AND {qty_where}
+                          AND {live_id_where}
+                          AND LOWER(TRIM({upc_col})) IN ({placeholders})
+                        {order_sql}
+                    ''', tuple(part))
+                    for row in cur.fetchall():
+                        if not _is_recent_amazon_listing(row['LAST_UPDATED_RAW']):
+                            continue
+                        asin = str(row['ASIN'] or '').strip()
+                        sku = str(row['SKU'] or '').strip()
+                        listing_id = asin or sku
+                        listing_url = str(row['URL'] or '').strip()
+                        if not listing_url and asin:
+                            listing_url = f"https://www.amazon.com/dp/{asin}"
+                        _add_listing(
+                            row['UPC_RAW'],
+                            'amazon',
+                            listing_id=listing_id,
+                            title=row['TITLE'],
+                            url=listing_url
+                        )
+    except Exception as e:
+        print(f"[_fetch_auto_marketplace_listing_links] Amazon lookup failed: {e}")
+
+    return listing_map
 
 def _apply_marketplace_status_overlay(rows):
     """
@@ -9975,12 +10507,15 @@ def _start_zero_qty_deleter_thread():
 def _process_automatic_inventory_removals():
     """Process sold orders that are past grace period and reduce inventory automatically"""
     from datetime import datetime, timedelta
-    
+    sold_conn = None
+    searchrack_conn = None
+
     try:
         print("🔄 Checking for automatic inventory removals...")
         sold_conn = sqlite3.connect('sold.db')
         sold_conn.row_factory = sqlite3.Row
         sold_cur = sold_conn.cursor()
+        _ensure_order_removal_allocations_table(sold_cur)
         
         # Get grace period setting
         sold_cur.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)")
@@ -10009,7 +10544,43 @@ def _process_automatic_inventory_removals():
         now = datetime.now()
         
         searchrack_conn = sqlite3.connect('searchRack.db')
+        searchrack_conn.row_factory = sqlite3.Row
         searchrack_cur = searchrack_conn.cursor()
+        searchrack_schema = _searchrack_removal_schema(searchrack_cur)
+        barcode_col = searchrack_schema.get('barcode_col')
+        qty_col = searchrack_schema.get('qty_col')
+        id_lookup_col = searchrack_schema.get('id_col') or 'rowid'
+
+        if not barcode_col or not qty_col:
+            print("❌ Automatic removal skipped: SEARCHRACK is missing BARCODE/UPC or QUANTITY/QTY columns")
+            return
+
+        def _mark_zero_qty_for_deletion(item_id):
+            try:
+                searchrack_cur.execute("SELECT value FROM zero_qty_settings WHERE key = 'interval_minutes'")
+                settings = searchrack_cur.fetchone()
+                interval = int(settings[0]) if settings else 60
+                delete_at = datetime.now() + timedelta(minutes=interval)
+                searchrack_cur.execute(
+                    'SELECT id, deletion_cancelled FROM zero_qty_pending_deletion WHERE searchrack_id = ?',
+                    (item_id,)
+                )
+                existing = searchrack_cur.fetchone()
+                if not existing:
+                    searchrack_cur.execute('''
+                        INSERT INTO zero_qty_pending_deletion (searchrack_id, marked_at, delete_at, deletion_cancelled)
+                        VALUES (?, ?, ?, 0)
+                    ''', (item_id, datetime.now().isoformat(), delete_at.isoformat()))
+                elif existing[1] == 1:
+                    searchrack_cur.execute('''
+                        UPDATE zero_qty_pending_deletion
+                        SET deletion_cancelled = 0, marked_at = ?, delete_at = ?
+                        WHERE searchrack_id = ?
+                    ''', (datetime.now().isoformat(), delete_at.isoformat(), item_id))
+            except Exception as mark_error:
+                print(f"  ❌ Error marking item {item_id} for zero-qty deletion: {mark_error}")
+                import traceback
+                traceback.print_exc()
         
         processed_count = 0
         
@@ -10035,124 +10606,219 @@ def _process_automatic_inventory_removals():
                 if hours_since_shipped < grace_period_hours:
                     continue
                 
-                # Get barcode and try to find in searchRack with flexible matching
                 barcode = order['barcode']
-                item_row = None
+                sold_qty = max(1, _coerce_int(order['quantity'], 1))
 
-                # Helper to clean barcode for comparisons
-                barcode_stripped = _strip_leading_zeros_numeric(barcode)
-
-                # 1. Try exact match first
-                searchrack_cur.execute('SELECT ID, QUANTITY FROM SEARCHRACK WHERE BARCODE = ?', (barcode,))
-                item_row = searchrack_cur.fetchone()
-
-                # 2. Try with zero-padding to 12 digits (UPC-A)
-                if not item_row and barcode and barcode.isdigit():
-                    barcode_padded = barcode.zfill(12)
-                    if barcode_padded != barcode:
-                        searchrack_cur.execute('SELECT ID, QUANTITY FROM SEARCHRACK WHERE BARCODE = ?', (barcode_padded,))
-                        item_row = searchrack_cur.fetchone()
-
-                # 3. Try with zero-padding to 13 digits (EAN)
-                if not item_row and barcode and barcode.isdigit():
-                    barcode_padded13 = barcode.zfill(13)
-                    if barcode_padded13 != barcode:
-                        searchrack_cur.execute('SELECT ID, QUANTITY FROM SEARCHRACK WHERE BARCODE = ?', (barcode_padded13,))
-                        item_row = searchrack_cur.fetchone()
-
-                # 4. Try stripped leading zeros
-                if not item_row and barcode_stripped and barcode_stripped != barcode:
-                    searchrack_cur.execute('SELECT ID, QUANTITY FROM SEARCHRACK WHERE BARCODE = ?', (barcode_stripped,))
-                    item_row = searchrack_cur.fetchone()
-
-                # 5. Try matching by stripping zeros from searchRack barcode (handles both directions)
-                if not item_row and barcode_stripped and len(barcode_stripped) >= 8:
-                    searchrack_cur.execute('''
-                        SELECT ID, QUANTITY FROM SEARCHRACK
-                        WHERE CAST(CAST(BARCODE AS INTEGER) AS TEXT) = ?
-                        LIMIT 1
-                    ''', (barcode_stripped,))
-                    item_row = searchrack_cur.fetchone()
-
-                if not item_row:
-                    # Item not found in searchRack - DO NOT mark as processed
-                    # This allows retry when barcode is enriched or item is added later
+                matches = _searchrack_matches_for_barcode(
+                    searchrack_cur,
+                    barcode,
+                    schema=searchrack_schema,
+                    include_zero=False
+                )
+                if not matches:
                     print(f"  ⏭️  Order {order['order_id']}: Item not in inventory yet (barcode: {barcode}) - will retry later")
                     continue
-                
-                item_id, current_qty = item_row
-                current_qty = current_qty or 0
-                sold_qty = order['quantity'] or 1
-                
-                # Calculate new quantity (don't go below 0)
-                new_qty = max(0, current_qty - sold_qty)
-                
-                # Update searchRack quantity
-                searchrack_cur.execute('UPDATE SEARCHRACK SET QUANTITY = ? WHERE ID = ?', (new_qty, item_id))
-                
-                # Mark order as processed
-                sold_cur.execute('UPDATE orders SET rackupdated = 1 WHERE id = ?', (order['id'],))
-                
-                # Log to rackhistory.db
+
+                location_groups = _group_searchrack_matches_by_location(matches)
+                saved_allocations = _load_order_removal_allocations(sold_cur, order['id'])
+
+                planned_steps = []
+                using_saved_allocations = False
+
+                if len(location_groups) > 1:
+                    if not saved_allocations:
+                        print(f"  ⏭️  Order {order['order_id']}: multiple locations found; awaiting explicit location selection")
+                        continue
+
+                    using_saved_allocations = True
+                    group_by_key = {g['location_key']: g for g in location_groups}
+
+                    for alloc in saved_allocations:
+                        alloc_qty = max(0, _coerce_int(alloc.get('quantity'), 0))
+                        if alloc_qty <= 0:
+                            continue
+                        alloc_key = _sold_location_key(alloc.get('location_key') or alloc.get('location_code'))
+                        group = group_by_key.get(alloc_key)
+                        if not group:
+                            planned_steps = []
+                            print(
+                                f"  ⏭️  Order {order['order_id']}: saved location {alloc.get('location_code')} not found in current inventory; waiting"
+                            )
+                            break
+                        if alloc_qty > max(0, _coerce_int(group.get('available_qty'), 0)):
+                            planned_steps = []
+                            print(
+                                f"  ⏭️  Order {order['order_id']}: saved qty for {group['location_code']} exceeds available inventory; waiting"
+                            )
+                            break
+
+                        remaining = alloc_qty
+                        for row_match in group['rows']:
+                            if remaining <= 0:
+                                break
+                            available = max(0, _coerce_int(row_match.get('quantity'), 0))
+                            if available <= 0:
+                                continue
+                            take = min(available, remaining)
+                            if take > 0:
+                                planned_steps.append({
+                                    'searchrack_id': int(row_match['id']),
+                                    'location_code': group['location_code'],
+                                    'quantity': int(take)
+                                })
+                                remaining -= take
+                        if remaining > 0:
+                            planned_steps = []
+                            print(
+                                f"  ⏭️  Order {order['order_id']}: insufficient inventory in selected location {group['location_code']}; waiting"
+                            )
+                            break
+
+                    if not planned_steps:
+                        continue
+
+                    # Respect sold quantity exactly even if stale allocations sum higher.
+                    keep = sold_qty
+                    trimmed = []
+                    for step in planned_steps:
+                        if keep <= 0:
+                            break
+                        take = min(int(step['quantity']), keep)
+                        if take > 0:
+                            trimmed.append({
+                                'searchrack_id': step['searchrack_id'],
+                                'location_code': step['location_code'],
+                                'quantity': take
+                            })
+                            keep -= take
+                    if keep > 0:
+                        print(f"  ⏭️  Order {order['order_id']}: selected location quantities do not cover sold qty ({sold_qty})")
+                        continue
+                    planned_steps = trimmed
+                else:
+                    if not location_groups:
+                        print(f"  ⏭️  Order {order['order_id']}: no matching location rows with quantity > 0; will retry later")
+                        continue
+                    remaining = sold_qty
+                    for row_match in location_groups[0]['rows']:
+                        if remaining <= 0:
+                            break
+                        available = max(0, _coerce_int(row_match.get('quantity'), 0))
+                        if available <= 0:
+                            continue
+                        take = min(available, remaining)
+                        if take > 0:
+                            planned_steps.append({
+                                'searchrack_id': int(row_match['id']),
+                                'location_code': location_groups[0]['location_code'],
+                                'quantity': int(take)
+                            })
+                            remaining -= take
+                    if remaining > 0:
+                        print(f"  ⏭️  Order {order['order_id']}: insufficient inventory to remove {sold_qty}; will retry later")
+                        continue
+
+                # Merge by SEARCHRACK row id in case stale data contains duplicates.
+                merged_steps = []
+                merged_index = {}
+                for step in planned_steps:
+                    sid = int(step['searchrack_id'])
+                    if sid in merged_index:
+                        idx = merged_index[sid]
+                        merged_steps[idx]['quantity'] += int(step['quantity'])
+                    else:
+                        merged_index[sid] = len(merged_steps)
+                        merged_steps.append({
+                            'searchrack_id': sid,
+                            'location_code': step['location_code'],
+                            'quantity': int(step['quantity'])
+                        })
+
+                # Re-read row quantities to ensure nothing changed before applying updates.
+                recheck = {}
+                recheck_ok = True
+                for step in merged_steps:
+                    sid = int(step['searchrack_id'])
+                    searchrack_cur.execute(
+                        f'''
+                            SELECT {qty_col} AS qty,
+                                   COALESCE({searchrack_schema.get('pos_col') or "''"}, '') AS item_position,
+                                   COALESCE({searchrack_schema.get('pic_col') or "''"}, '') AS pictureposition
+                            FROM SEARCHRACK
+                            WHERE {id_lookup_col} = ?
+                        ''',
+                        (sid,)
+                    )
+                    row_now = searchrack_cur.fetchone()
+                    if not row_now:
+                        recheck_ok = False
+                        print(f"  ⏭️  Order {order['order_id']}: selected inventory row {sid} no longer exists; waiting")
+                        break
+                    current_qty = max(0, _coerce_int(row_now['qty'], 0))
+                    remove_qty = max(0, _coerce_int(step['quantity'], 0))
+                    if remove_qty <= 0 or current_qty < remove_qty:
+                        recheck_ok = False
+                        print(
+                            f"  ⏭️  Order {order['order_id']}: selected row {sid} has qty {current_qty}, cannot remove {remove_qty}; waiting"
+                        )
+                        break
+                    recheck[sid] = {
+                        'current_qty': current_qty,
+                        'item_position': str(row_now['item_position'] or row_now['pictureposition'] or step['location_code'] or '').strip()
+                    }
+
+                if not recheck_ok:
+                    continue
+
                 removed_conn = sqlite3.connect('rackhistory.db')
                 try:
                     removed_cur = removed_conn.cursor()
                     _ensure_removed_items_table(removed_cur)
-                
-                    # Get location before removal
-                    searchrack_cur.execute('SELECT ITEM_POSITION FROM SEARCHRACK WHERE ID = ?', (item_id,))
-                    loc_row = searchrack_cur.fetchone()
-                    item_location = loc_row[0] if loc_row else ''
-                
-                    removed_cur.execute('''
-                    INSERT INTO removed_items 
-                    (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (order['order_id'], barcode, order['title'], sold_qty, now.isoformat(), item_id, current_qty, new_qty, 'automatic', item_location))
+
+                    for step in merged_steps:
+                        sid = int(step['searchrack_id'])
+                        remove_qty = max(0, _coerce_int(step['quantity'], 0))
+                        if remove_qty <= 0:
+                            continue
+                        old_qty = recheck[sid]['current_qty']
+                        new_qty = max(0, old_qty - remove_qty)
+
+                        searchrack_cur.execute(
+                            f'UPDATE SEARCHRACK SET {qty_col} = ? WHERE {id_lookup_col} = ?',
+                            (new_qty, sid)
+                        )
+
+                        removed_cur.execute('''
+                            INSERT INTO removed_items
+                            (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (
+                            order['order_id'],
+                            barcode,
+                            order['title'],
+                            remove_qty,
+                            now.isoformat(),
+                            sid,
+                            old_qty,
+                            new_qty,
+                            'automatic_allocated' if using_saved_allocations else 'automatic',
+                            recheck[sid]['item_position']
+                        ))
+
+                        if new_qty == 0:
+                            _mark_zero_qty_for_deletion(sid)
+
                     removed_conn.commit()
                 finally:
                     removed_conn.close()
-                
+
+                sold_cur.execute('UPDATE orders SET rackupdated = 1 WHERE id = ?', (order['id'],))
+                sold_cur.execute('DELETE FROM order_removal_allocations WHERE order_row_id = ?', (order['id'],))
                 processed_count += 1
-                
-                # If item is now at 0 quantity, mark for deletion
-                if new_qty == 0:
-                    try:
-                        # Get interval from settings
-                        searchrack_cur.execute("SELECT value FROM zero_qty_settings WHERE key = 'interval_minutes'")
-                        settings = searchrack_cur.fetchone()
-                        interval = int(settings[0]) if settings else 60
-                        
-                        # Calculate deletion time
-                        delete_at = datetime.now() + timedelta(minutes=interval)
-                        
-                        # Check if already marked (and not cancelled)
-                        searchrack_cur.execute('SELECT id, deletion_cancelled FROM zero_qty_pending_deletion WHERE searchrack_id = ?', (item_id,))
-                        existing = searchrack_cur.fetchone()
-                        
-                        if not existing:
-                            # Mark for deletion
-                            searchrack_cur.execute('''
-                                INSERT INTO zero_qty_pending_deletion (searchrack_id, marked_at, delete_at, deletion_cancelled)
-                                VALUES (?, ?, ?, 0)
-                            ''', (item_id, datetime.now().isoformat(), delete_at.isoformat()))
-                            print(f"  ✓ Order {order['order_id']}: Reduced {barcode} from {current_qty} to 0 → Marked for deletion in {interval} min")
-                        elif existing[1] == 1:
-                            # Entry exists but was cancelled - update it to re-enable
-                            searchrack_cur.execute('''
-                                UPDATE zero_qty_pending_deletion 
-                                SET deletion_cancelled = 0, marked_at = ?, delete_at = ?
-                                WHERE searchrack_id = ?
-                            ''', (datetime.now().isoformat(), delete_at.isoformat(), item_id))
-                            print(f"  ✓ Order {order['order_id']}: Reduced {barcode} from {current_qty} to 0 → Re-enabled deletion (was cancelled)")
-                        else:
-                            print(f"  ✓ Order {order['order_id']}: Reduced {barcode} from {current_qty} to 0 (already marked for deletion)")
-                    except Exception as mark_error:
-                        print(f"  ❌ Error marking item {item_id} for zero-qty deletion: {mark_error}")
-                        import traceback
-                        traceback.print_exc()
-                else:
-                    print(f"  ✓ Order {order['order_id']}: Reduced {barcode} from {current_qty} to {new_qty}")
+                print(
+                    f"  ✓ Order {order['order_id']}: removed {sold_qty} from "
+                    f"{'selected locations' if using_saved_allocations else 'single location inventory'}"
+                )
                 
             except Exception as e:
                 print(f"  ❌ Error processing order {order['order_id']}: {e}")
@@ -10170,8 +10836,16 @@ def _process_automatic_inventory_removals():
         import traceback
         traceback.print_exc()
     finally:
-        sold_conn.close()
-        searchrack_conn.close()
+        try:
+            if sold_conn is not None:
+                sold_conn.close()
+        except Exception:
+            pass
+        try:
+            if searchrack_conn is not None:
+                searchrack_conn.close()
+        except Exception:
+            pass
 
 def _start_automatic_removal_thread():
     """Start background thread to automatically process inventory removals after grace period"""
@@ -13084,6 +13758,7 @@ def api_bol_items_update_quantity():
         quantity = data.get('quantity')
         lot_number = _normalize_lot_number(_preferred_lot_from_request(data))
         item_id = data.get('id')
+        source = _normalize_listing_source(data.get('source'), default='user')
         if quantity is None:
             return jsonify({'success': False, 'error': 'Missing quantity'}), 400
         if item_id is not None and str(item_id).strip() != '':
@@ -13194,11 +13869,55 @@ def api_bol_items_update_quantity():
 
         if target_id is None:
             return jsonify({'success': False, 'error': 'Missing target row id'}), 400
-        
+
         # Check if new quantity columns exist
         cur.execute('PRAGMA table_info(bol_items)')
         cols = [col[1].lower() for col in cur.fetchall()]
         has_new_cols = 'original_qty' in cols and 'unchecked_qty' in cols
+        has_good_bad_cols = 'good_qty' in cols and 'bad_qty' in cols
+
+        if has_new_cols and has_good_bad_cols:
+            cur.execute('''
+                SELECT
+                    COALESCE(quantity, 0),
+                    COALESCE(original_qty, 0),
+                    COALESCE(good_qty, 0),
+                    COALESCE(bad_qty, 0),
+                    COALESCE(unchecked_qty, 0)
+                FROM bol_items
+                WHERE id = ?
+                LIMIT 1
+            ''', (target_id,))
+        elif has_good_bad_cols:
+            cur.execute('''
+                SELECT
+                    COALESCE(quantity, 0),
+                    COALESCE(quantity, 0),
+                    COALESCE(good_qty, 0),
+                    COALESCE(bad_qty, 0),
+                    0
+                FROM bol_items
+                WHERE id = ?
+                LIMIT 1
+            ''', (target_id,))
+        else:
+            cur.execute('''
+                SELECT
+                    COALESCE(quantity, 0),
+                    COALESCE(quantity, 0),
+                    0,
+                    0,
+                    0
+                FROM bol_items
+                WHERE id = ?
+                LIMIT 1
+            ''', (target_id,))
+        qty_before_row = cur.fetchone() or (0, 0, 0, 0, 0)
+        old_qty = int(qty_before_row[0] or 0)
+        old_original_qty = int(qty_before_row[1] or 0)
+        old_good_qty = int(qty_before_row[2] or 0)
+        old_bad_qty = int(qty_before_row[3] or 0)
+        old_unchecked_qty = int(qty_before_row[4] or 0)
         
         if has_new_cols:
             # Update both quantity and unchecked_qty (manual edits adjust unchecked bucket).
@@ -13230,12 +13949,41 @@ def api_bol_items_update_quantity():
                 WHERE upc = ? COLLATE NOCASE
                   AND COALESCE(lot_number, '') = ? COLLATE NOCASE
             ''', (quantity, target_upc, status_update_lot))
+
+        new_original_qty = quantity if has_new_cols else old_original_qty
+        new_unchecked_qty = max(0, quantity - old_good_qty - old_bad_qty) if has_new_cols else old_unchecked_qty
+        quantity_changes = {}
+        if old_qty != quantity:
+            quantity_changes['quantity'] = {'from': old_qty, 'to': quantity}
+        if has_new_cols and old_original_qty != new_original_qty:
+            quantity_changes['original_qty'] = {'from': old_original_qty, 'to': new_original_qty}
+        if has_new_cols and old_unchecked_qty != new_unchecked_qty:
+            quantity_changes['unchecked_qty'] = {'from': old_unchecked_qty, 'to': new_unchecked_qty}
         
         conn.commit()
         try:
             update_data_version()
         except Exception:
             pass
+
+        if quantity_changes:
+            try:
+                _listinglog_add_entry(
+                    upc=target_upc,
+                    platform='item_manager',
+                    action='quantity_update',
+                    source=source,
+                    quantity=quantity,
+                    success=True,
+                    meta={
+                        'item_id': target_id,
+                        'lot_number': target_lot,
+                        'changes': quantity_changes,
+                        'via': 'api_bol_items_update_quantity'
+                    }
+                )
+            except Exception:
+                pass
         return jsonify({'success': True, 'upc': target_upc, 'lot_number': target_lot, 'id': target_id})
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
@@ -14018,6 +14766,295 @@ def api_items_prep_diagnostic_get(upc):
         if conn is not None:
             conn.close()
 
+@app.route('/api/items_prep/diagnostic/<upc>/history', methods=['GET'])
+def api_items_prep_diagnostic_history(upc):
+    """Unified per-item timeline for diagnostic view (item-prep + item-manager changes)."""
+    try:
+        upc_n = _normalize_upc_preserve_suffix_for_match(_normalize_upc(upc))
+        if not upc_n:
+            return jsonify({'success': False, 'error': 'Missing upc'}), 400
+
+        base_upc = upc_n.split('-', 1)[0] if '-' in upc_n else upc_n
+        requested_lot = _normalize_lot_number(_preferred_lot_from_request())
+        limit = _listingagent_parse_int(request.args.get('limit'), 200) or 200
+        limit = max(1, min(limit, 1000))
+        fetch_limit = max(100, min(limit * 4, 4000))
+
+        safe_base = base_upc.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+        like_base = f"{safe_base}-%"
+        events = []
+
+        def _parse_dt(raw_ts):
+            txt = str(raw_ts or '').strip()
+            if not txt:
+                return datetime.datetime.min
+            try:
+                txt = txt.replace(' ', 'T')
+                if txt.endswith('Z'):
+                    txt = txt[:-1] + '+00:00'
+                parsed = datetime.datetime.fromisoformat(txt)
+                if parsed.tzinfo is not None:
+                    parsed = parsed.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+                return parsed
+            except Exception:
+                return datetime.datetime.min
+
+        def _to_int(raw_value):
+            try:
+                return int(raw_value) if raw_value is not None else None
+            except Exception:
+                return None
+
+        target_upc_key = upc_n.lower()
+
+        def _matches_upc(candidate):
+            key = _normalize_upc_preserve_suffix_for_match(_normalize_upc(candidate))
+            if not key:
+                return False
+            return key.lower() == target_upc_key
+
+        def _matches_lot(event_lot):
+            if not requested_lot:
+                return True
+            lot_key = _normalize_lot_number(event_lot)
+            if not lot_key:
+                # Keep older/unscoped records visible even when lot context is active.
+                return True
+            return lot_key.lower() == requested_lot.lower()
+
+        def _append_event(payload):
+            if not isinstance(payload, dict):
+                return
+            if not str(payload.get('timestamp') or '').strip():
+                return
+            events.append(payload)
+
+        prep_rows = []
+        try:
+            with db_connection('preplog.db') as prep_conn:
+                prep_cur = prep_conn.cursor()
+                _preplog_init_tables(prep_cur)
+                prep_cur.execute('''
+                    SELECT *
+                    FROM prep_log
+                    WHERE (
+                        upc = ? COLLATE NOCASE
+                        OR upc = ? COLLATE NOCASE
+                        OR base_upc = ? COLLATE NOCASE
+                        OR upc LIKE ? ESCAPE '\\'
+                    )
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT ?
+                ''', (upc_n, base_upc, base_upc, like_base, fetch_limit))
+                prep_rows = [_preplog_enrich_row(_listagent_row_to_dict(r)) for r in prep_cur.fetchall()]
+        except Exception:
+            prep_rows = []
+
+        for row in prep_rows:
+            row_upc = row.get('upc')
+            if not _matches_upc(row_upc):
+                continue
+
+            meta = row.get('meta') if isinstance(row.get('meta'), dict) else _preplog_meta_dict(row)
+            event_lot = _normalize_lot_number(
+                row.get('lot_number')
+                or meta.get('lot_number')
+                or meta.get('assigned_lot')
+                or meta.get('requested_lot')
+            )
+            if not _matches_lot(event_lot):
+                continue
+
+            status = str(row.get('status') or '').strip().lower()
+            action = str(meta.get('action') or '').strip().lower()
+            qty = _to_int(row.get('quantity'))
+            note = str(row.get('note') or '').strip()
+            reason = str(row.get('reason') or '').strip()
+
+            if status == 'good' and action in (
+                'saved_good',
+                'saved_good_suffixed',
+                'converted_to_good',
+                'updated_suffixed_good',
+                'converted_bad_to_good_kept_suffix',
+                'allocate_lots'
+            ):
+                title = 'Added from item-prep'
+            elif status == 'good':
+                title = 'Item-prep marked good'
+            elif status == 'bad':
+                title = 'Item-prep marked bad'
+            elif status == 'return':
+                title = 'Item-prep marked return'
+            elif status == 'unchecked':
+                title = 'Item-prep marked unchecked'
+            else:
+                title = 'Item-prep update'
+
+            desc_bits = []
+            if qty is not None:
+                desc_bits.append(f'qty {qty}')
+            if reason:
+                desc_bits.append(f'reason: {reason}')
+            if action:
+                desc_bits.append(action.replace('_', ' '))
+
+            changes = []
+            if status:
+                changes.append({'field': 'status', 'to': status})
+            if qty is not None:
+                changes.append({'field': 'quantity', 'to': qty})
+            if reason:
+                changes.append({'field': 'reason', 'to': reason})
+            if note:
+                changes.append({'field': 'note', 'to': note})
+
+            _append_event({
+                'id': f"prep-{row.get('id')}",
+                '_sort_id': _to_int(row.get('id')) or 0,
+                'timestamp': row.get('created_at') or '',
+                'category': 'item_prep',
+                'title': title,
+                'description': '; '.join(desc_bits),
+                'upc': row_upc,
+                'base_upc': row.get('base_upc') or base_upc,
+                'lot_number': event_lot,
+                'source': row.get('source') or 'item-prep',
+                'changes': changes
+            })
+
+        listing_rows = []
+        try:
+            with db_connection('listinglog.db') as listing_conn:
+                listing_cur = listing_conn.cursor()
+                _listinglog_init_tables(listing_cur)
+                listing_cur.execute('''
+                    SELECT *
+                    FROM listing_log
+                    WHERE (
+                        upc = ? COLLATE NOCASE
+                        OR upc = ? COLLATE NOCASE
+                        OR upc LIKE ? ESCAPE '\\'
+                    )
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT ?
+                ''', (upc_n, base_upc, like_base, fetch_limit))
+                listing_rows = [_listagent_row_to_dict(r) for r in listing_cur.fetchall()]
+        except Exception:
+            listing_rows = []
+
+        for row in listing_rows:
+            row_upc = row.get('upc')
+            if not _matches_upc(row_upc):
+                continue
+
+            meta = _listinglog_meta_dict(row)
+            event_lot = _normalize_lot_number(
+                meta.get('lot_number')
+                or meta.get('target_lot')
+                or meta.get('lot')
+                or meta.get('assigned_lot')
+            )
+            if not _matches_lot(event_lot):
+                continue
+
+            platform = str(row.get('platform') or '').strip().lower()
+            action = str(row.get('action') or '').strip().lower()
+            source = str(row.get('source') or '').strip()
+            source_label = _listing_source_label(source) if source else ''
+            qty = _to_int(row.get('quantity'))
+
+            changes = []
+            meta_changes = meta.get('changes')
+            if isinstance(meta_changes, dict):
+                for field, change in meta_changes.items():
+                    if isinstance(change, dict):
+                        changes.append({
+                            'field': str(field),
+                            'from': change.get('from'),
+                            'to': change.get('to')
+                        })
+                    else:
+                        changes.append({'field': str(field), 'to': change})
+
+            category = 'item_manager'
+            if platform in ('amazon', 'ebay', 'facebook'):
+                category = 'marketplace'
+                platform_label = 'eBay' if platform == 'ebay' else platform.capitalize()
+                if action == 'listed':
+                    title = f'{platform_label} marked listed'
+                elif action == 'unlisted':
+                    title = f'{platform_label} marked unlisted'
+                else:
+                    title = f'{platform_label} listing update'
+                if qty is not None and not any(ch.get('field') == 'quantity' for ch in changes):
+                    changes.append({'field': 'quantity', 'to': qty})
+            elif platform == 'item_manager':
+                title_map = {
+                    'quantity_update': 'Quantity changed in item-manager',
+                    'location_update': 'Location updated in item-manager',
+                    'note_add': 'Note added in item-manager',
+                    'note_delete': 'Note removed in item-manager',
+                    'prep_reset': 'Prep quantities reset in item-manager',
+                    'diagnostic_reset': 'Diagnostic reset in item-manager'
+                }
+                title = title_map.get(action) or 'Item-manager update'
+                if action == 'note_add':
+                    note_text = str(meta.get('note') or '').strip()
+                    if note_text and not any(ch.get('field') == 'note' for ch in changes):
+                        changes.append({'field': 'note', 'to': note_text})
+                elif action == 'note_delete':
+                    note_text = str(meta.get('note') or '').strip()
+                    if note_text and not any(ch.get('field') == 'note' for ch in changes):
+                        changes.append({'field': 'note', 'from': note_text})
+            else:
+                category = platform or 'other'
+                title = 'Inventory update'
+
+            desc_bits = []
+            if action:
+                desc_bits.append(action.replace('_', ' '))
+            if source_label:
+                desc_bits.append(f'by {source_label}')
+            if event_lot:
+                desc_bits.append(f'LOT {event_lot}')
+
+            _append_event({
+                'id': f"log-{row.get('id')}",
+                '_sort_id': _to_int(row.get('id')) or 0,
+                'timestamp': row.get('created_at') or '',
+                'category': category,
+                'title': title,
+                'description': '; '.join(desc_bits),
+                'upc': row_upc,
+                'base_upc': base_upc,
+                'lot_number': event_lot,
+                'source': source or None,
+                'changes': changes
+            })
+
+        events.sort(
+            key=lambda ev: (_parse_dt(ev.get('timestamp')), int(ev.get('_sort_id') or 0)),
+            reverse=True
+        )
+
+        items = []
+        for ev in events[:limit]:
+            out = dict(ev)
+            out.pop('_sort_id', None)
+            items.append(out)
+
+        return jsonify({
+            'success': True,
+            'upc': upc_n,
+            'base_upc': base_upc,
+            'lot_number': requested_lot,
+            'items': items,
+            'count': len(items)
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'items_prep:diagnostic_history')}), 500
+
 @app.route('/api/items_prep/diagnostic/<upc>/photos', methods=['DELETE'])
 def api_items_prep_diagnostic_delete_photos(upc):
     """Soft-delete all diagnostic photos for a UPC by moving them to trash and setting retention expiry.
@@ -14373,6 +15410,7 @@ def api_items_prep_diagnostic_reset(upc):
 
         req_data = request.get_json(silent=True) or {}
         lot_number = _preferred_lot_from_request(req_data)
+        source = _normalize_listing_source(req_data.get('source'), default='user')
 
         conn = sqlite3.connect('bol.db', isolation_level='IMMEDIATE')
         cur = conn.cursor()
@@ -14380,7 +15418,7 @@ def api_items_prep_diagnostic_reset(upc):
 
         if lot_number:
             cur.execute('''
-                SELECT id, COALESCE(original_qty, 0), COALESCE(good_qty, 0), COALESCE(bad_qty, 0), unchecked_qty, COALESCE(lot_number, '')
+                SELECT id, COALESCE(original_qty, 0), COALESCE(good_qty, 0), COALESCE(bad_qty, 0), unchecked_qty, COALESCE(quantity, 0), COALESCE(lot_number, '')
                 FROM bol_items
                 WHERE upc = ? COLLATE NOCASE
                   AND lot_number = ? COLLATE NOCASE
@@ -14389,7 +15427,7 @@ def api_items_prep_diagnostic_reset(upc):
             ''', (upc_n, lot_number))
         else:
             cur.execute('''
-                SELECT id, COALESCE(original_qty, 0), COALESCE(good_qty, 0), COALESCE(bad_qty, 0), unchecked_qty, COALESCE(lot_number, '')
+                SELECT id, COALESCE(original_qty, 0), COALESCE(good_qty, 0), COALESCE(bad_qty, 0), unchecked_qty, COALESCE(quantity, 0), COALESCE(lot_number, '')
                 FROM bol_items
                 WHERE upc = ? COLLATE NOCASE
                 ORDER BY import_date DESC, id DESC
@@ -14405,7 +15443,9 @@ def api_items_prep_diagnostic_reset(upc):
         current_good = int(row[2] or 0)
         current_bad = int(row[3] or 0)
         current_unchecked = row[4]
-        target_lot = _normalize_lot_number(row[5])
+        current_qty = int(row[5] or 0)
+        target_lot = _normalize_lot_number(row[6])
+        current_unchecked_n = int(current_unchecked or 0) if current_unchecked is not None else 0
         if original_qty <= 0:
             if current_unchecked is not None:
                 original_qty = max(0, int(current_unchecked or 0) + current_good + current_bad)
@@ -14439,6 +15479,33 @@ def api_items_prep_diagnostic_reset(upc):
             update_data_version()
         except Exception:
             pass
+
+        reset_changes = {}
+        if current_qty != original_qty:
+            reset_changes['quantity'] = {'from': current_qty, 'to': original_qty}
+        if current_good != 0:
+            reset_changes['good_qty'] = {'from': current_good, 'to': 0}
+        if current_bad != 0:
+            reset_changes['bad_qty'] = {'from': current_bad, 'to': 0}
+        if current_unchecked_n != original_qty:
+            reset_changes['unchecked_qty'] = {'from': current_unchecked_n, 'to': original_qty}
+        if reset_changes:
+            try:
+                _listinglog_add_entry(
+                    upc=upc_n,
+                    platform='item_manager',
+                    action='prep_reset',
+                    source=source,
+                    quantity=original_qty,
+                    success=True,
+                    meta={
+                        'lot_number': target_lot or _normalize_lot_number(lot_number),
+                        'changes': reset_changes,
+                        'via': 'api_items_prep_diagnostic_reset'
+                    }
+                )
+            except Exception:
+                pass
         
         return jsonify({
             'success': True, 
@@ -14496,6 +15563,8 @@ def api_items_prep_notes_add():
         # Strip leading zeros to match item manager behavior
         upc = _strip_leading_zeros_numeric(upc_norm)
         note = (data.get('note') or '').strip()
+        lot_number = _normalize_lot_number(_preferred_lot_from_request(data))
+        source = _normalize_listing_source(data.get('source'), default='user')
         if not upc or not note:
             return jsonify({'success': False, 'error': 'Missing upc or note'}), 400
         _ensure_items_prep_tables()
@@ -14527,6 +15596,23 @@ def api_items_prep_notes_add():
             update_data_version()
         except Exception:
             pass
+        try:
+            _listinglog_add_entry(
+                upc=upc,
+                platform='item_manager',
+                action='note_add',
+                source=source,
+                success=True,
+                meta={
+                    'note_id': note_id,
+                    'note': note,
+                    'lot_number': lot_number,
+                    'changes': {'note': {'from': None, 'to': note}},
+                    'via': 'api_items_prep_notes_add'
+                }
+            )
+        except Exception:
+            pass
         return jsonify({'success': True, 'id': note_id, 'created_at': ts})
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
@@ -14540,8 +15626,14 @@ def api_items_prep_notes_delete(note_id):
     conn = None
     try:
         _ensure_items_prep_tables()
+        source = _normalize_listing_source(request.args.get('source'), default='user')
+        lot_number = _normalize_lot_number(_preferred_lot_from_request())
         conn = sqlite3.connect('bol.db')
         cur = conn.cursor()
+        cur.execute('SELECT upc, note FROM items_prep_notes WHERE id = ? LIMIT 1', (note_id,))
+        existing = cur.fetchone()
+        note_upc = _normalize_upc_preserve_suffix_for_match(_normalize_upc(existing[0])) if existing else ''
+        note_text = str(existing[1] or '').strip() if existing else ''
         cur.execute('DELETE FROM items_prep_notes WHERE id = ?', (note_id,))
         deleted = cur.rowcount
         conn.commit()
@@ -14550,6 +15642,24 @@ def api_items_prep_notes_delete(note_id):
                 update_data_version()
             except Exception:
                 pass
+            if note_upc:
+                try:
+                    _listinglog_add_entry(
+                        upc=note_upc,
+                        platform='item_manager',
+                        action='note_delete',
+                        source=source,
+                        success=True,
+                        meta={
+                            'note_id': note_id,
+                            'note': note_text,
+                            'lot_number': lot_number,
+                            'changes': {'note': {'from': note_text, 'to': None}},
+                            'via': 'api_items_prep_notes_delete'
+                        }
+                    )
+                except Exception:
+                    pass
         if deleted == 0:
             return jsonify({'success': False, 'error': 'Note not found'}), 404
         return jsonify({'success': True, 'deleted': deleted})
@@ -14598,6 +15708,7 @@ def api_items_prep_location_set():
         location = (data.get('location') or '').strip()
         pictureposition = (data.get('pictureposition') or '').strip()
         lot_number = _normalize_lot_number(_preferred_lot_from_request(data))
+        source = _normalize_listing_source(data.get('source'), default='user')
         if not upc:
             return jsonify({'success': False, 'error': 'Missing upc'}), 400
         _ensure_items_prep_tables()
@@ -14606,7 +15717,9 @@ def api_items_prep_location_set():
         conn = sqlite3.connect('bol.db')
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
-        existing = _select_prep_status_row(cur, upc, lot_number, columns='upc, lot_number')
+        existing = _select_prep_status_row(cur, upc, lot_number, columns='upc, lot_number, location, pictureposition')
+        old_location = (existing[2] or '').strip() if existing and len(existing) > 2 else ''
+        old_pictureposition = (existing[3] or '').strip() if existing and len(existing) > 3 else ''
         status_update_lot = _resolve_prep_status_lot(cur, upc, lot_number)
         if existing:
             cur.execute('''
@@ -14676,6 +15789,28 @@ def api_items_prep_location_set():
             finally:
                 if search_conn is not None:
                     search_conn.close()
+
+        location_changes = {}
+        if old_location != location:
+            location_changes['location'] = {'from': old_location or None, 'to': location or None}
+        if old_pictureposition != pictureposition:
+            location_changes['pictureposition'] = {'from': old_pictureposition or None, 'to': pictureposition or None}
+        if location_changes:
+            try:
+                _listinglog_add_entry(
+                    upc=upc,
+                    platform='item_manager',
+                    action='location_update',
+                    source=source,
+                    success=True,
+                    meta={
+                        'lot_number': status_update_lot or lot_number,
+                        'changes': location_changes,
+                        'via': 'api_items_prep_location_set'
+                    }
+                )
+            except Exception:
+                pass
         
         return jsonify({'success': True, 'lot_number': lot_number})
     except Exception as e:
@@ -14862,6 +15997,66 @@ def store_manager_page():
 def mail_center_page():
     """Centralized mailbox for store communications."""
     return render_template('mail_center.html')
+
+def _mail_center_env_int(name, default, min_value, max_value):
+    try:
+        raw = os.getenv(name, str(default))
+        value = int(str(raw).strip())
+    except Exception:
+        value = int(default)
+    if value < min_value:
+        return min_value
+    if value > max_value:
+        return max_value
+    return value
+
+def _mail_center_hourly_refresh_once():
+    """
+    Lightweight periodic refresh for mail-center data.
+    Runs small-window pulls so /alerts can show fresher unread counts
+    even if /mail-center has not been opened recently.
+    """
+    _ensure_storemail_tables()
+
+    ebay_hours = _mail_center_env_int('MAIL_CENTER_REFRESH_EBAY_HOURS', 24, 1, 168)
+    ebay_pages = _mail_center_env_int('MAIL_CENTER_REFRESH_EBAY_PAGES', 1, 1, 5)
+    amazon_days = _mail_center_env_int('MAIL_CENTER_REFRESH_AMAZON_DAYS', 2, 1, 14)
+    amazon_orders = _mail_center_env_int('MAIL_CENTER_REFRESH_AMAZON_ORDERS', 25, 1, 120)
+
+    summary = {'success': True, 'ebay': None, 'amazon': None, 'warnings': []}
+
+    ebay_token = (os.getenv('EBAY_OLDAUTH_TOKEN') or '').strip()
+    if ebay_token:
+        try:
+            summary['ebay'] = _mail_sync_ebay(hours_back=ebay_hours, max_pages=ebay_pages)
+        except Exception as e:
+            summary['ebay'] = {'error': _safe_error(e, 'mail_center:hourly_ebay')}
+            summary['warnings'].append('eBay refresh failed')
+    else:
+        summary['ebay'] = {'skipped': 'missing_ebay_token'}
+
+    has_amazon_creds = (BASE_DIR / 'amazon_credentials.json').exists()
+    if AMAZON_AVAILABLE and has_amazon_creds:
+        try:
+            summary['amazon'] = _mail_sync_amazon(days_back=amazon_days, max_orders=amazon_orders)
+            if isinstance(summary.get('amazon'), dict):
+                if summary['amazon'].get('error'):
+                    summary['warnings'].append('Amazon SP-API refresh had issues')
+                forwarded = summary['amazon'].get('forwarded_email') or {}
+                if isinstance(forwarded, dict) and forwarded.get('error'):
+                    summary['warnings'].append('Amazon forwarded-email refresh had issues')
+        except Exception as e:
+            summary['amazon'] = {'error': _safe_error(e, 'mail_center:hourly_amazon')}
+            summary['warnings'].append('Amazon refresh failed')
+    else:
+        summary['amazon'] = {'skipped': 'amazon_unavailable_or_missing_credentials'}
+
+    try:
+        update_sync_timestamp('mail_center_refresh')
+    except Exception:
+        pass
+
+    return summary
 
 def _mail_parse_payload(value):
     try:
@@ -19823,6 +21018,21 @@ def api_bol_items():
         # Get listed/not_listed filters
         listed_flag = request.args.get('listed', '').strip().lower() == 'true'
         not_listed_flag = request.args.get('not_listed', '').strip().lower() == 'true'
+        auto_listed_flag = request.args.get('auto_listed', '').strip().lower() == 'true'
+        auto_not_listed_flag = request.args.get('auto_not_listed', '').strip().lower() == 'true'
+        auto_listed_stores = [s.strip().lower() for s in (request.args.get('auto_listed_stores') or '').split(',') if s.strip()]
+        auto_listed_stores = [s for s in auto_listed_stores if s in ('amazon', 'ebay')]
+        if not auto_listed_stores:
+            auto_listed_stores = ['amazon', 'ebay']
+        if auto_listed_flag and auto_not_listed_flag:
+            auto_listed_flag = False
+            auto_not_listed_flag = False
+        warehouse_filter = (request.args.get('warehouse_filter') or '').strip().lower()
+        if warehouse_filter == 'multi_locations':
+            warehouse_filter = 'multiple_locations'
+        if warehouse_filter not in ('', 'with_quantity', 'without_quantity', 'multiple_locations'):
+            warehouse_filter = ''
+        needs_enriched_post_filter = auto_listed_flag or auto_not_listed_flag or bool(warehouse_filter)
         
         # Get defect filter
         defect_filter = (request.args.get('defect') or '').strip()
@@ -19834,7 +21044,12 @@ def api_bol_items():
         if q_stripped == '86279051523':
              print(f"[DEBUG] Searching for 86279051523. Status filters: {status_filters}")
 
-        print(f"[api_bol_items] Filters - lot: '{lot}', import_date: '{import_date}', q: '{q_stripped}', status_filters: {status_filters}, listed: {listed_flag}, not_listed: {not_listed_flag}")
+        print(
+            f"[api_bol_items] Filters - lot: '{lot}', import_date: '{import_date}', q: '{q_stripped}', "
+            f"status_filters: {status_filters}, listed: {listed_flag}, not_listed: {not_listed_flag}, "
+            f"auto_listed: {auto_listed_flag}, auto_not_listed: {auto_not_listed_flag}, auto_listed_stores: {auto_listed_stores}, "
+            f"warehouse_filter: '{warehouse_filter}'"
+        )
         conn = sqlite3.connect('bol.db')
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
@@ -19967,13 +21182,19 @@ def api_bol_items():
         else:
             # date_desc default
             order_sql += "b.import_date DESC, b.id DESC"
-        # Get total count, unique items count, and total quantity
+        # Get total count, unique items count, and total quantity (SQL-level filters only).
         count_sql = "SELECT COUNT(*), COUNT(DISTINCT (b.upc || '|' || COALESCE(b.lot_number, ''))), SUM(COALESCE(b.quantity, 1))" + prep_join + where_sql
-        cur.execute(count_sql, params)
-        count_row = cur.fetchone()
-        total = count_row[0]
-        unique_items = count_row[1] or 0
-        total_quantity = count_row[2] or 0
+        query_params = list(params)
+        if not needs_enriched_post_filter:
+            cur.execute(count_sql, tuple(query_params))
+            count_row = cur.fetchone()
+            total = count_row[0]
+            unique_items = count_row[1] or 0
+            total_quantity = count_row[2] or 0
+        else:
+            total = 0
+            unique_items = 0
+            total_quantity = 0
         
         # Check if new quantity columns exist
         has_original_qty = any(c.lower() == 'original_qty' for c in cols)
@@ -20012,9 +21233,13 @@ def api_bol_items():
             + prep_join
             + where_sql + order_sql
         )
-        sql += ' LIMIT ? OFFSET ?'
-        params.extend([limit, offset])
-        cur.execute(sql, params)
+        if needs_enriched_post_filter:
+            # Enriched filters (auto marketplace / warehouse) require full candidate set before pagination.
+            cur.execute(sql, tuple(query_params))
+        else:
+            paged_params = list(query_params)
+            paged_params.extend([limit, offset])
+            cur.execute(sql + ' LIMIT ? OFFSET ?', tuple(paged_params))
         rows = [dict(r) for r in cur.fetchall()]
         
         # DEBUG: Check if marketplace columns are in the first row
@@ -20022,6 +21247,111 @@ def api_bol_items():
             first_row = rows[0]
             print(f"[api_bol_items] First row keys: {list(first_row.keys())}")
             print(f"[api_bol_items] First row marketplace data: listed_amazon={first_row.get('listed_amazon')}, listed_ebay={first_row.get('listed_ebay')}, listed_facebook={first_row.get('listed_facebook')}")
+
+        # Auto-detected live listing links from marketplace store DBs.
+        auto_marketplace_map_by_key = {}
+        try:
+            row_upcs = []
+            for r in rows:
+                upc_val = r.get('upc')
+                if upc_val:
+                    row_upcs.append(upc_val)
+            if row_upcs:
+                auto_marketplace_map_by_key = _fetch_auto_marketplace_listing_links(
+                    row_upcs,
+                    max_lookup_keys=(250000 if needs_enriched_post_filter else 4000)
+                )
+        except Exception as e:
+            print(f"Error building auto marketplace listing map: {e}")
+            auto_marketplace_map_by_key = {}
+
+        # Warehouse availability map by normalized base UPC from searchRack.db.
+        warehouse_available_by_base = {}
+        warehouse_locations_by_base = {}
+        warehouse_location_qty_by_base = {}
+
+        def _warehouse_base_upc(value):
+            upc_norm = _normalize_upc(value)
+            if not upc_norm:
+                return ''
+            base = upc_norm.split('-', 1)[0].strip()
+            return _strip_leading_zeros_numeric(base)
+
+        try:
+            page_base_upcs = set()
+            for r in rows:
+                upc_base = _warehouse_base_upc(r.get('upc'))
+                if upc_base:
+                    page_base_upcs.add(upc_base)
+
+            if page_base_upcs:
+                with sqlite3.connect('searchRack.db') as sr_conn:
+                    sr_conn.row_factory = sqlite3.Row
+                    sr_cur = sr_conn.cursor()
+
+                    sr_cur.execute('PRAGMA table_info(SEARCHRACK)')
+                    sr_cols = [c[1] for c in sr_cur.fetchall()]
+                    sr_cols_lower = {c.lower(): c for c in sr_cols}
+                    barcode_col = sr_cols_lower.get('barcode') or sr_cols_lower.get('upc')
+                    qty_col = sr_cols_lower.get('quantity') or sr_cols_lower.get('qty')
+                    loc_col = sr_cols_lower.get('item_position') or sr_cols_lower.get('itemposition') or sr_cols_lower.get('position')
+                    pic_col = sr_cols_lower.get('pictureposition')
+
+                    if barcode_col and qty_col:
+                        loc_expr = f"{loc_col} AS LOC" if loc_col else "NULL AS LOC"
+                        pic_expr = f"{pic_col} AS PIC" if pic_col else "NULL AS PIC"
+                        sr_cur.execute(f'''
+                            SELECT {barcode_col} AS BARCODE, {qty_col} AS QTY, {loc_expr}, {pic_expr}
+                            FROM SEARCHRACK
+                            WHERE {barcode_col} IS NOT NULL
+                              AND TRIM({barcode_col}) != ''
+                        ''')
+                        for sr_row in sr_cur.fetchall():
+                            sr_base = _warehouse_base_upc(sr_row['BARCODE'])
+                            if not sr_base or sr_base not in page_base_upcs:
+                                continue
+                            try:
+                                qty_val = int(float(sr_row['QTY'])) if sr_row['QTY'] is not None else 0
+                            except Exception:
+                                qty_val = 0
+                            warehouse_available_by_base[sr_base] = warehouse_available_by_base.get(sr_base, 0) + qty_val
+
+                            location_label = ((sr_row['LOC'] or '').strip() or (sr_row['PIC'] or '').strip())
+                            if location_label:
+                                loc_list = warehouse_locations_by_base.get(sr_base)
+                                if loc_list is None:
+                                    loc_list = []
+                                    warehouse_locations_by_base[sr_base] = loc_list
+                                if location_label not in loc_list:
+                                    loc_list.append(location_label)
+                                loc_qty_map = warehouse_location_qty_by_base.get(sr_base)
+                                if loc_qty_map is None:
+                                    loc_qty_map = {}
+                                    warehouse_location_qty_by_base[sr_base] = loc_qty_map
+                                loc_qty_map[location_label] = loc_qty_map.get(location_label, 0) + qty_val
+                    else:
+                        print("Error reading searchRack warehouse availability: missing BARCODE/UPC or QUANTITY/QTY columns")
+
+            for upc_base, total_qty in list(warehouse_available_by_base.items()):
+                warehouse_available_by_base[upc_base] = max(0, int(total_qty or 0))
+            for upc_base, loc_qty_map in list(warehouse_location_qty_by_base.items()):
+                cleaned = {}
+                if isinstance(loc_qty_map, dict):
+                    for raw_loc, raw_qty in loc_qty_map.items():
+                        loc = str(raw_loc or '').strip()
+                        if not loc:
+                            continue
+                        try:
+                            qty = int(raw_qty)
+                        except Exception:
+                            qty = 0
+                        cleaned[loc] = max(0, cleaned.get(loc, 0) + qty)
+                warehouse_location_qty_by_base[upc_base] = cleaned
+        except Exception as e:
+            print(f"Error reading warehouse availability from searchRack: {e}")
+            warehouse_available_by_base = {}
+            warehouse_locations_by_base = {}
+            warehouse_location_qty_by_base = {}
         
         # Build a status map keyed by (upc, lot_number) with fallback to lotless legacy rows.
         status_map = {}
@@ -20167,6 +21497,45 @@ def api_bol_items():
             # Determine last_edited: prefer items_prep_status.updated_at, fall back to import_date
             last_edited = r.get('prep_updated_at') or r.get('import_date') or ''
             status = (r.get('prep_status') or 'unchecked').strip().lower()
+            upc_raw = r.get('upc') or ''
+            warehouse_base_upc = _warehouse_base_upc(r.get('upc'))
+            warehouse_available = max(0, int(warehouse_available_by_base.get(warehouse_base_upc, 0) or 0))
+            warehouse_locations = warehouse_locations_by_base.get(warehouse_base_upc, []) or []
+            warehouse_loc_qty_map = warehouse_location_qty_by_base.get(warehouse_base_upc, {}) or {}
+            warehouse_location_details = []
+            seen_warehouse_locations = set()
+            for raw_loc in warehouse_locations:
+                loc = str(raw_loc or '').strip()
+                if not loc or loc in seen_warehouse_locations:
+                    continue
+                seen_warehouse_locations.add(loc)
+                try:
+                    loc_qty = int(warehouse_loc_qty_map.get(loc, 0) or 0)
+                except Exception:
+                    loc_qty = 0
+                warehouse_location_details.append({
+                    'location': loc,
+                    'quantity': max(0, loc_qty)
+                })
+            extra_location_rows = []
+            for raw_loc, raw_qty in warehouse_loc_qty_map.items():
+                loc = str(raw_loc or '').strip()
+                if not loc:
+                    continue
+                try:
+                    loc_qty = int(raw_qty or 0)
+                except Exception:
+                    loc_qty = 0
+                extra_location_rows.append((loc, max(0, loc_qty)))
+            extra_location_rows.sort(key=lambda item: (-item[1], item[0].lower()))
+            for loc, loc_qty in extra_location_rows:
+                if loc in seen_warehouse_locations:
+                    continue
+                seen_warehouse_locations.add(loc)
+                warehouse_location_details.append({
+                    'location': loc,
+                    'quantity': loc_qty
+                })
 
             def _safe_int(value, fallback=0):
                 try:
@@ -20196,12 +21565,50 @@ def api_bol_items():
             # Check if item has notes in items_prep_notes table
             has_notes = r.get('prep_note_count', 0) > 0
             photo_count = int(r.get('prep_photo_count') or 0)
+
+            auto_marketplace_seen = set()
+            auto_marketplace_listings = []
+            auto_marketplace_ebay_count = 0
+            auto_marketplace_amazon_count = 0
+            if upc_raw:
+                for key in _marketplace_upc_lookup_variants(upc_raw):
+                    bucket = auto_marketplace_map_by_key.get(key)
+                    if not bucket:
+                        continue
+                    for platform in ('ebay', 'amazon'):
+                        for entry in (bucket.get(platform) or []):
+                            listing_id = str(entry.get('listing_id') or '').strip()
+                            listing_url = str(entry.get('url') or '').strip()
+                            dedupe_token = f"{platform}|{listing_id.lower()}|{listing_url.lower()}"
+                            if dedupe_token in auto_marketplace_seen:
+                                continue
+                            auto_marketplace_seen.add(dedupe_token)
+                            normalized_entry = {
+                                'platform': platform,
+                                'listing_id': listing_id,
+                                'title': str(entry.get('title') or '').strip(),
+                                'url': listing_url
+                            }
+                            auto_marketplace_listings.append(normalized_entry)
+                            if platform == 'ebay':
+                                auto_marketplace_ebay_count += 1
+                            elif platform == 'amazon':
+                                auto_marketplace_amazon_count += 1
+
+            auto_marketplace_listings.sort(
+                key=lambda x: (
+                    0 if (x.get('platform') or '') == 'ebay' else 1,
+                    (x.get('listing_id') or '').lower(),
+                    (x.get('url') or '').lower()
+                )
+            )
+            auto_marketplace_total_count = auto_marketplace_ebay_count + auto_marketplace_amazon_count
             
             results.append({
                 'id': r.get('id'),
                 'title': r.get('item_description') or '',
                 'image': r.get('image_url') or '',
-                'upc': r.get('upc') or '',
+                'upc': upc_raw,
                 'lot_number': r.get('lot_number') or '',
                 'bol_number': r.get('bol_number') or '',
                 'import_date': r.get('import_date') or '',
@@ -20211,6 +21618,10 @@ def api_bol_items():
                 'list_status': (r.get('list_status') or ''),
                 'temporary': r.get('temporary'),
                 'quantity': display_qty,
+                'warehouse_base_upc': warehouse_base_upc,
+                'warehouse_available': warehouse_available,
+                'warehouse_locations': warehouse_locations,
+                'warehouse_location_details': warehouse_location_details,
                 'note': 'yes' if has_notes else '',
                 'set_note_flag': bool(r.get('prep_set_note') or 0),
                 'photo_count': photo_count,
@@ -20223,9 +21634,89 @@ def api_bol_items():
                 'listed_ebay_source': r.get('listed_ebay_source'),
                 'listed_facebook': r.get('listed_facebook'),
                 'listed_facebook_date': r.get('listed_facebook_date'),
-                'listed_facebook_source': r.get('listed_facebook_source')
+                'listed_facebook_source': r.get('listed_facebook_source'),
+                # Auto marketplace listing preview payload (live store-db lookup).
+                'auto_marketplace_listings': auto_marketplace_listings,
+                'auto_marketplace_total_count': auto_marketplace_total_count,
+                'auto_marketplace_ebay_count': auto_marketplace_ebay_count,
+                'auto_marketplace_amazon_count': auto_marketplace_amazon_count
             })
         _apply_marketplace_status_overlay(results)
+        if needs_enriched_post_filter:
+            def _safe_nonnegative_int(value):
+                try:
+                    return max(0, int(value))
+                except Exception:
+                    return 0
+
+            def _warehouse_location_count(item):
+                locations = set()
+                raw_details = item.get('warehouse_location_details')
+                if isinstance(raw_details, list):
+                    for entry in raw_details:
+                        if isinstance(entry, dict):
+                            loc_val = entry.get('location') or entry.get('code')
+                        else:
+                            loc_val = entry
+                        loc = str(loc_val or '').strip()
+                        if loc:
+                            locations.add(loc)
+                if not locations:
+                    raw_locations = item.get('warehouse_locations')
+                    if isinstance(raw_locations, list):
+                        for loc_val in raw_locations:
+                            loc = str(loc_val or '').strip()
+                            if loc:
+                                locations.add(loc)
+                return len(locations)
+
+            filtered_results = []
+            for item in results:
+                auto_ebay_total = _safe_nonnegative_int(item.get('auto_marketplace_ebay_count'))
+                auto_amazon_total = _safe_nonnegative_int(item.get('auto_marketplace_amazon_count'))
+                auto_total = 0
+                if 'ebay' in auto_listed_stores:
+                    auto_total += auto_ebay_total
+                if 'amazon' in auto_listed_stores:
+                    auto_total += auto_amazon_total
+                warehouse_available = _safe_nonnegative_int(item.get('warehouse_available'))
+                location_count = _warehouse_location_count(item)
+
+                auto_match = True
+                if auto_listed_flag:
+                    auto_match = auto_total > 0
+                elif auto_not_listed_flag:
+                    auto_match = auto_total <= 0
+
+                warehouse_match = True
+                if warehouse_filter == 'with_quantity':
+                    warehouse_match = warehouse_available > 0
+                elif warehouse_filter == 'without_quantity':
+                    warehouse_match = warehouse_available <= 0
+                elif warehouse_filter == 'multiple_locations':
+                    warehouse_match = location_count > 1
+
+                if auto_match and warehouse_match:
+                    filtered_results.append(item)
+
+            total = len(filtered_results)
+            unique_key_pairs = set()
+            total_quantity = 0
+            for item in filtered_results:
+                unique_key_pairs.add((_normalize_upc(item.get('upc')), _normalize_lot_number(item.get('lot_number'))))
+                total_quantity += _safe_nonnegative_int(item.get('quantity'))
+            unique_items = len(unique_key_pairs)
+
+            paged_results = filtered_results[offset: offset + limit]
+            return jsonify({
+                'results': paged_results,
+                'total': total,
+                'unique_items': unique_items,
+                'total_quantity': total_quantity,
+                'page': page,
+                'limit': limit
+            })
+
         return jsonify({'results': results, 'total': total, 'unique_items': unique_items, 'total_quantity': total_quantity, 'page': page, 'limit': limit})
     except Exception as e:
         return jsonify({'error': _safe_error(e)}), 500
@@ -22534,9 +24025,50 @@ def sold_orders():
     try:
         sold_conn.row_factory = sqlite3.Row
         sold_cur = sold_conn.cursor()
-        # Only show orders from the last N days
-        sold_cur.execute('''SELECT * FROM orders WHERE paid_time >= date('now', '-' || ? || ' days') ORDER BY paid_time DESC''', (days,))
-        orders = sold_cur.fetchall()
+        # Only show orders from the last N days.
+        # Keep ordering deterministic for duplicate suppression and UI stability.
+        sold_cur.execute('''
+            SELECT *
+            FROM orders
+            WHERE paid_time >= date('now', '-' || ? || ' days')
+            ORDER BY paid_time DESC, id DESC
+        ''', (days,))
+        raw_orders = sold_cur.fetchall()
+
+        # Defensive dedupe: intermittent sync races can leave clone rows.
+        # Keep the newest row per strong content signature.
+        dedupe_seen = set()
+        orders = []
+        duplicate_count = 0
+        for order in raw_orders:
+            try:
+                qty_val = int(order['quantity']) if order['quantity'] is not None else 0
+            except Exception:
+                qty_val = 0
+            try:
+                price_val = float(order['price']) if order['price'] is not None else 0.0
+            except Exception:
+                price_val = 0.0
+            signature = (
+                str(order['store'] or '').strip().lower(),
+                str(order['order_id'] or '').strip(),
+                str(order['item_id'] or '').strip(),
+                _normalize_upc(order['barcode'] or ''),
+                str(order['title'] or '').strip().lower(),
+                qty_val,
+                round(price_val, 4),
+                str(order['paid_time'] or '').strip(),
+                str(order['shipped_time'] or '').strip(),
+                str(order['shipping_name'] or '').strip().lower()
+            )
+            if signature in dedupe_seen:
+                duplicate_count += 1
+                continue
+            dedupe_seen.add(signature)
+            orders.append(order)
+
+        if duplicate_count > 0:
+            print(f"[sold_orders] Deduped {duplicate_count} transient duplicate row(s) from sold.db query")
     finally:
         sold_conn.close()
     
@@ -22652,17 +24184,187 @@ def get_order():
     finally:
         conn.close()
 
+@app.route('/api/ready-to-ship/location-options/<int:order_id>', methods=['GET'])
+def ready_to_ship_location_options(order_id):
+    sold_conn = None
+    rack_conn = None
+    try:
+        sold_conn = sqlite3.connect('sold.db')
+        sold_conn.row_factory = sqlite3.Row
+        sold_cur = sold_conn.cursor()
+        _ensure_order_removal_allocations_table(sold_cur)
+
+        sold_cur.execute('SELECT id, order_id, barcode, quantity, title FROM orders WHERE id = ?', (order_id,))
+        order = sold_cur.fetchone()
+        if not order:
+            return jsonify({'success': False, 'error': 'Order not found'}), 404
+
+        barcode = str(order['barcode'] or '').strip()
+        sold_qty = max(1, _coerce_int(order['quantity'], 1))
+        existing_allocations = _load_order_removal_allocations(sold_cur, order_id)
+
+        if not barcode:
+            return jsonify({
+                'success': True,
+                'order_id': order_id,
+                'barcode': '',
+                'quantity': sold_qty,
+                'needs_choice': False,
+                'locations': [],
+                'existing_allocations': existing_allocations,
+                'total_available': 0,
+                'can_fulfill': False
+            })
+
+        rack_conn = sqlite3.connect('searchRack.db')
+        rack_conn.row_factory = sqlite3.Row
+        rack_cur = rack_conn.cursor()
+
+        matches = _searchrack_matches_for_barcode(rack_cur, barcode, include_zero=False)
+        location_groups = _group_searchrack_matches_by_location(matches)
+        locations = [
+            {
+                'location_key': g['location_key'],
+                'location_code': g['location_code'],
+                'available_qty': max(0, _coerce_int(g['available_qty'], 0)),
+                'preview_key': g['preview_key']
+            }
+            for g in location_groups
+        ]
+        total_available = sum(max(0, _coerce_int(x['available_qty'], 0)) for x in locations)
+
+        return jsonify({
+            'success': True,
+            'order_id': order_id,
+            'order_ref': order['order_id'],
+            'title': order['title'],
+            'barcode': barcode,
+            'quantity': sold_qty,
+            'needs_choice': len(locations) > 1,
+            'locations': locations,
+            'existing_allocations': existing_allocations,
+            'total_available': total_available,
+            'can_fulfill': total_available >= sold_qty
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e)}), 500
+    finally:
+        try:
+            if sold_conn is not None:
+                sold_conn.close()
+        except Exception:
+            pass
+        try:
+            if rack_conn is not None:
+                rack_conn.close()
+        except Exception:
+            pass
+
 @app.route('/mark-order-handled', methods=['POST'])
 def mark_order_handled():
-    data = request.get_json()
+    data = request.get_json() or {}
     order_id = data.get('id')
+    incoming_allocations = data.get('allocations')
     
     if not order_id:
         return jsonify({'success': False, 'error': 'Missing order id'}), 400
-        
+
+    conn = None
+    rack_conn = None
     try:
         conn = sqlite3.connect('sold.db')
+        conn.row_factory = sqlite3.Row
         cur = conn.cursor()
+        _ensure_order_removal_allocations_table(cur)
+
+        cur.execute('SELECT id, barcode, quantity FROM orders WHERE id = ?', (order_id,))
+        order = cur.fetchone()
+        if not order:
+            return jsonify({'success': False, 'error': 'Order not found'}), 404
+
+        barcode = str(order['barcode'] or '').strip()
+        sold_qty = max(1, _coerce_int(order['quantity'], 1))
+
+        normalized_allocations = []
+        if incoming_allocations is not None:
+            if not isinstance(incoming_allocations, list):
+                return jsonify({'success': False, 'error': 'allocations must be an array'}), 400
+            grouped = {}
+            for alloc in incoming_allocations:
+                if not isinstance(alloc, dict):
+                    continue
+                qty = max(0, _coerce_int(alloc.get('quantity', alloc.get('qty')), 0))
+                if qty <= 0:
+                    continue
+                location_code = _sold_location_label(alloc.get('location_code') or alloc.get('code'))
+                location_key = _sold_location_key(alloc.get('location_key') or location_code)
+                bucket = grouped.get(location_key)
+                if bucket is None:
+                    bucket = {
+                        'location_key': location_key,
+                        'location_code': location_code,
+                        'quantity': 0
+                    }
+                    grouped[location_key] = bucket
+                bucket['quantity'] += qty
+            normalized_allocations = list(grouped.values())
+
+        if barcode:
+            rack_conn = sqlite3.connect('searchRack.db')
+            rack_conn.row_factory = sqlite3.Row
+            rack_cur = rack_conn.cursor()
+            matches = _searchrack_matches_for_barcode(rack_cur, barcode, include_zero=False)
+            location_groups = _group_searchrack_matches_by_location(matches)
+            group_map = {g['location_key']: g for g in location_groups}
+            needs_choice = len(location_groups) > 1
+
+            if needs_choice and not normalized_allocations:
+                return jsonify({
+                    'success': False,
+                    'error': 'Location selection required for this order',
+                    'location_selection_required': True,
+                    'order_id': order_id,
+                    'quantity': sold_qty,
+                    'locations': [
+                        {
+                            'location_key': g['location_key'],
+                            'location_code': g['location_code'],
+                            'available_qty': max(0, _coerce_int(g['available_qty'], 0))
+                        }
+                        for g in location_groups
+                    ]
+                }), 400
+
+            if normalized_allocations:
+                alloc_total = 0
+                for alloc in normalized_allocations:
+                    loc_key = alloc['location_key']
+                    qty = max(0, _coerce_int(alloc['quantity'], 0))
+                    group = group_map.get(loc_key)
+                    if not group:
+                        return jsonify({
+                            'success': False,
+                            'error': f"Unknown location selected: {alloc['location_code']}"
+                        }), 400
+                    group_available = max(0, _coerce_int(group.get('available_qty'), 0))
+                    if qty > group_available:
+                        return jsonify({
+                            'success': False,
+                            'error': f"Selected quantity exceeds available for {alloc['location_code']}"
+                        }), 400
+                    alloc_total += qty
+                if alloc_total != sold_qty:
+                    return jsonify({
+                        'success': False,
+                        'error': f'Selected location quantities must total {sold_qty}'
+                    }), 400
+
+                _save_order_removal_allocations(cur, order_id, normalized_allocations)
+            else:
+                _save_order_removal_allocations(cur, order_id, [])
+        else:
+            _save_order_removal_allocations(cur, order_id, [])
+
         # Set shipped_time if not already set (for test orders to trigger automatic removal)
         cur.execute("""
             UPDATE orders 
@@ -22681,20 +24383,32 @@ def mark_order_handled():
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
     finally:
-        conn.close()
+        try:
+            if conn is not None:
+                conn.close()
+        except Exception:
+            pass
+        try:
+            if rack_conn is not None:
+                rack_conn.close()
+        except Exception:
+            pass
 
 @app.route('/mark-order-unhandled', methods=['POST'])
 def mark_order_unhandled():
-    data = request.get_json()
+    data = request.get_json() or {}
     order_id = data.get('id')
     
     if not order_id:
         return jsonify({'success': False, 'error': 'Missing order id'}), 400
-        
+
+    conn = None
     try:
         conn = sqlite3.connect('sold.db')
         cur = conn.cursor()
+        _ensure_order_removal_allocations_table(cur)
         cur.execute("UPDATE orders SET isHandled = '', isHandledDate = NULL WHERE id = ?", (order_id,))
+        cur.execute('DELETE FROM order_removal_allocations WHERE order_row_id = ?', (order_id,))
         conn.commit()
         
         # Clear the sold-orders cache since data changed
@@ -22705,7 +24419,8 @@ def mark_order_unhandled():
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
 
 @app.route('/api/sold/pending-removals', methods=['GET'])
 def get_pending_removals():
@@ -25599,7 +27314,7 @@ def api_search_all():
         is_upc_search = query.isdigit()
         
         # Check cache for UPC searches only
-        cache_key = f"search_all:{query_stripped}"
+        cache_key = f"search_all:v2:{query_stripped}"
         if is_upc_search and cache_key in _search_all_cache:
             cached_data, cached_time = _search_all_cache[cache_key]
             if time.time() - cached_time < _search_cache_timeout:
@@ -25693,21 +27408,35 @@ def api_search_all():
                 count_sql = f"SELECT COUNT(*) as count FROM {db_info['table']} WHERE {where_clause}"
                 cur.execute(count_sql, params)
                 count = cur.fetchone()['count']
+
+                # For warehouse results, also provide total matched quantity.
+                total_quantity = None
+                if db_key == 'shelves':
+                    qty_col = next((c for c in cols if c.lower() == 'quantity'), None)
+                    if qty_col:
+                        qty_sql = f"SELECT COALESCE(SUM(CAST({qty_col} AS REAL)), 0) AS total_quantity FROM {db_info['table']} WHERE {where_clause}"
+                        cur.execute(qty_sql, params)
+                        qty_row = cur.fetchone()
+                        try:
+                            total_quantity = max(0, int(round(float((qty_row['total_quantity'] if qty_row else 0) or 0))))
+                        except Exception:
+                            total_quantity = 0
                 
-                # Get sample results (up to 3)
+                # Get sample results (up to 20)
                 sample_results = []
                 if count > 0:
-                    sample_sql = f"SELECT * FROM {db_info['table']} WHERE {where_clause} LIMIT 3"
+                    sample_sql = f"SELECT * FROM {db_info['table']} WHERE {where_clause} LIMIT 20"
                     cur.execute(sample_sql, params)
                     sample_results = [dict(row) for row in cur.fetchall()]
-                
+
                 results['databases'][db_key] = {
                     'name': db_info['name'],
                     'color': db_info['color'],
                     'icon': db_info['icon'],
                     'found': count > 0,
                     'count': count,
-                    'samples': sample_results[:3] if count > 0 else []
+                    'total_quantity': total_quantity,
+                    'samples': sample_results if count > 0 else []
                 }
                 
             except Exception as e:
@@ -27235,6 +28964,539 @@ def api_location_hierarchy():
         conn.close()
 
 
+def _movelocation_barcode_key(value):
+    return _normalize_upc_preserve_suffix_for_match(_normalize_upc(value))
+
+
+def _movelocation_barcode_variants(value):
+    raw = _normalize_upc(value)
+    key = _movelocation_barcode_key(raw)
+    variants = set()
+    for candidate in (raw, key):
+        s = str(candidate or '').strip()
+        if s:
+            variants.add(s)
+
+    if key and '-' in key:
+        base, suffix = key.split('-', 1)
+        if base.isdigit():
+            for width in (8, 11, 12, 13, 14):
+                if len(base) < width:
+                    variants.add(f"{base.zfill(width)}-{suffix}")
+    elif key and key.isdigit():
+        for width in (8, 11, 12, 13, 14):
+            if len(key) < width:
+                variants.add(key.zfill(width))
+
+    if raw and raw.isdigit():
+        stripped = raw.lstrip('0') or '0'
+        variants.add(stripped)
+        for width in (8, 11, 12, 13, 14):
+            if len(stripped) < width:
+                variants.add(stripped.zfill(width))
+
+    return {str(v).strip() for v in variants if str(v).strip()}
+
+
+def _movelocation_parse_qty(value, default=1):
+    try:
+        if value is None:
+            return default
+        s = str(value).strip()
+        if not s:
+            return default
+        return int(float(s))
+    except Exception:
+        return default
+
+
+def _movelocation_pick_image(row_dict, image_col=None, images_col=None):
+    try:
+        image_val = ''
+        if image_col:
+            image_val = str(row_dict.get(image_col) or '').strip()
+        if image_val:
+            return image_val
+
+        images_raw = row_dict.get(images_col) if images_col else ''
+        if not images_raw:
+            return ''
+
+        if isinstance(images_raw, list):
+            for item in images_raw:
+                s = str(item or '').strip()
+                if s:
+                    return s
+            return ''
+
+        images_text = str(images_raw).strip()
+        if not images_text:
+            return ''
+        if images_text.startswith('['):
+            try:
+                parsed = json.loads(images_text)
+                if isinstance(parsed, list):
+                    for item in parsed:
+                        s = str(item or '').strip()
+                        if s:
+                            return s
+            except Exception:
+                pass
+        for sep in ('|', ',', ';'):
+            if sep in images_text:
+                for part in images_text.split(sep):
+                    s = part.strip()
+                    if s:
+                        return s
+        return images_text
+    except Exception:
+        return ''
+
+
+def _movelocation_row_location(row_dict, pos_col=None, pic_col=None):
+    pos_val = str(row_dict.get(pos_col) or '').strip() if pos_col else ''
+    pic_val = str(row_dict.get(pic_col) or '').strip() if pic_col else ''
+    code = pos_val or pic_val
+    preview = pic_val or pos_val
+    return code, pos_val, pic_val, preview
+
+
+@app.route('/api/movelocation_lookup', methods=['GET'])
+def api_movelocation_lookup():
+    """Lookup a scanned barcode and return all available source locations."""
+    conn = None
+    try:
+        barcode_raw = (request.args.get('barcode') or '').strip()
+        if not barcode_raw:
+            return jsonify({'success': False, 'error': 'Missing barcode'}), 400
+
+        barcode_key = _movelocation_barcode_key(barcode_raw)
+        if not barcode_key:
+            return jsonify({'success': False, 'error': 'Invalid barcode'}), 400
+
+        conn = sqlite3.connect('searchRack.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+
+        cur.execute("PRAGMA table_info('SEARCHRACK')")
+        cols = [r[1] for r in cur.fetchall()]
+        cols_lower = {c.lower(): c for c in cols}
+        id_col = cols_lower.get('id')
+        barcode_col = cols_lower.get('barcode') or cols_lower.get('upc')
+        title_col = cols_lower.get('title')
+        image_col = cols_lower.get('image')
+        images_col = cols_lower.get('images')
+        qty_col = cols_lower.get('quantity') or cols_lower.get('qty')
+        pos_col = cols_lower.get('item_position') or cols_lower.get('itemposition') or cols_lower.get('position')
+        pic_col = cols_lower.get('pictureposition')
+
+        if not barcode_col:
+            return jsonify({'success': False, 'error': 'SEARCHRACK barcode column not found'}), 500
+
+        base_sql = f'''
+            SELECT rowid AS _rowid_, *
+            FROM SEARCHRACK
+            WHERE {barcode_col} IS NOT NULL
+              AND TRIM({barcode_col}) != ''
+        '''
+
+        variants = sorted(v.lower() for v in _movelocation_barcode_variants(barcode_raw))
+        candidate_rows = []
+        if variants:
+            placeholders = ','.join('?' for _ in variants)
+            cur.execute(base_sql + f" AND LOWER(TRIM({barcode_col})) IN ({placeholders})", tuple(variants))
+            candidate_rows = [dict(r) for r in cur.fetchall()]
+
+        if not candidate_rows:
+            cur.execute(base_sql)
+            candidate_rows = [dict(r) for r in cur.fetchall()]
+
+        matched_rows = []
+        for row in candidate_rows:
+            row_barcode = row.get(barcode_col)
+            if _movelocation_barcode_key(row_barcode) == barcode_key:
+                matched_rows.append(row)
+
+        if not matched_rows:
+            return jsonify({
+                'success': True,
+                'found': False,
+                'error': f'No inventory found for barcode {barcode_raw}'
+            })
+
+        title_val = ''
+        image_val = ''
+        canonical_barcode = ''
+        locations_map = {}
+        total_available = 0
+
+        for row in matched_rows:
+            if not canonical_barcode:
+                canonical_barcode = str(row.get(barcode_col) or '').strip()
+            if not title_val and title_col:
+                title_val = str(row.get(title_col) or '').strip()
+            if not image_val:
+                image_val = _movelocation_pick_image(row, image_col=image_col, images_col=images_col)
+
+            code, pos_val, pic_val, preview_val = _movelocation_row_location(row, pos_col=pos_col, pic_col=pic_col)
+            if not code:
+                continue
+
+            qty_val = max(0, _movelocation_parse_qty(row.get(qty_col) if qty_col else None, default=1))
+            total_available += qty_val
+
+            loc_key = code.lower()
+            bucket = locations_map.get(loc_key)
+            if bucket is None:
+                bucket = {
+                    'location_key': loc_key,
+                    'code': code,
+                    'item_position': pos_val,
+                    'pictureposition': pic_val,
+                    'preview_key': preview_val or code,
+                    'quantity': 0,
+                    'row_ids': []
+                }
+                locations_map[loc_key] = bucket
+
+            bucket['quantity'] += qty_val
+            row_id = row.get(id_col) if id_col else row.get('_rowid_')
+            if row_id is None:
+                row_id = row.get('_rowid_')
+            if row_id is not None and row_id not in bucket['row_ids']:
+                bucket['row_ids'].append(row_id)
+
+        locations = sorted(
+            locations_map.values(),
+            key=lambda x: (-int(x.get('quantity') or 0), str(x.get('code') or '').lower())
+        )
+
+        if not locations:
+            return jsonify({
+                'success': True,
+                'found': False,
+                'error': f'No location code found for barcode {barcode_raw}'
+            })
+
+        canonical_barcode = canonical_barcode or _normalize_upc(barcode_raw)
+        if not title_val:
+            title_val = canonical_barcode or barcode_raw
+
+        return jsonify({
+            'success': True,
+            'found': True,
+            'item': {
+                'barcode': canonical_barcode,
+                'barcode_display': _format_upc_display(canonical_barcode),
+                'barcode_key': barcode_key,
+                'title': title_val,
+                'image': image_val,
+                'total_available': max(0, int(total_available or 0)),
+                'locations_count': len(locations),
+                'locations': locations
+            }
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e)}), 500
+    finally:
+        try:
+            if conn is not None:
+                conn.close()
+        except Exception:
+            pass
+
+
+@app.route('/api/movelocation_execute', methods=['POST'])
+def api_movelocation_execute():
+    """Move scanned barcode quantities from selected source locations to one destination shelf."""
+    conn = None
+    rem_conn = None
+    try:
+        data = request.get_json() or {}
+        to_location = (data.get('to_location') or '').strip()
+        items = data.get('items') or []
+
+        if not to_location:
+            return jsonify({'success': False, 'error': 'Missing destination shelf code'}), 400
+        if not isinstance(items, list) or not items:
+            return jsonify({'success': False, 'error': 'Missing items list'}), 400
+
+        conn = sqlite3.connect('searchRack.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+
+        cur.execute("PRAGMA table_info('SEARCHRACK')")
+        cols = [r[1] for r in cur.fetchall()]
+        cols_lower = {c.lower(): c for c in cols}
+        id_col = cols_lower.get('id')
+        barcode_col = cols_lower.get('barcode') or cols_lower.get('upc')
+        title_col = cols_lower.get('title')
+        qty_col = cols_lower.get('quantity') or cols_lower.get('qty')
+        pos_col = cols_lower.get('item_position') or cols_lower.get('itemposition') or cols_lower.get('position')
+        pic_col = cols_lower.get('pictureposition')
+
+        if not barcode_col:
+            return jsonify({'success': False, 'error': 'SEARCHRACK barcode column not found'}), 500
+        if not pos_col and not pic_col:
+            return jsonify({'success': False, 'error': 'SEARCHRACK location columns not found'}), 500
+
+        id_lookup_col = id_col or 'rowid'
+        skip_pk_cols = {'id', 'rowid'}
+        if id_col:
+            skip_pk_cols.add(id_col.lower())
+        insert_cols = [c for c in cols if c.lower() not in skip_pk_cols]
+
+        rem_conn = sqlite3.connect('rackhistory.db')
+        rem_cur = rem_conn.cursor()
+        _ensure_removed_items_table(rem_cur)
+        try:
+            rem_cur.execute("PRAGMA table_info(removed_items)")
+            rem_cols = [c[1] for c in rem_cur.fetchall()]
+            if 'item_position' not in rem_cols:
+                rem_cur.execute('ALTER TABLE removed_items ADD COLUMN item_position TEXT')
+                rem_conn.commit()
+        except Exception:
+            pass
+
+        from datetime import datetime
+        moved_items = 0
+        moved_units = 0
+        skipped_items = 0
+        item_results = []
+        to_location_norm = to_location.lower()
+
+        def _location_match_rows(source_location_norm):
+            if pos_col and pic_col:
+                cur.execute(f'''
+                    SELECT rowid AS _rowid_, *
+                    FROM SEARCHRACK
+                    WHERE LOWER(TRIM(COALESCE(NULLIF({pos_col}, ''), NULLIF({pic_col}, '')))) = ?
+                ''', (source_location_norm,))
+            elif pos_col:
+                cur.execute(f'''
+                    SELECT rowid AS _rowid_, *
+                    FROM SEARCHRACK
+                    WHERE LOWER(TRIM({pos_col})) = ?
+                ''', (source_location_norm,))
+            else:
+                cur.execute(f'''
+                    SELECT rowid AS _rowid_, *
+                    FROM SEARCHRACK
+                    WHERE LOWER(TRIM({pic_col})) = ?
+                ''', (source_location_norm,))
+            return [dict(r) for r in cur.fetchall()]
+
+        for idx, raw_item in enumerate(items):
+            row_result = {
+                'index': idx,
+                'barcode': str((raw_item or {}).get('barcode') or '').strip(),
+                'from_location': str((raw_item or {}).get('from_location') or '').strip(),
+                'requested_qty': 0,
+                'moved_qty': 0,
+                'success': False
+            }
+            try:
+                barcode_raw = row_result['barcode']
+                from_location = row_result['from_location']
+                try:
+                    requested_qty = int((raw_item or {}).get('quantity') or 1)
+                except Exception:
+                    requested_qty = 1
+                requested_qty = max(1, requested_qty)
+                row_result['requested_qty'] = requested_qty
+
+                barcode_key = _movelocation_barcode_key(barcode_raw)
+                from_location_norm = from_location.lower().strip()
+
+                if not barcode_key:
+                    row_result['error'] = 'Invalid barcode'
+                    skipped_items += 1
+                    item_results.append(row_result)
+                    continue
+                if not from_location_norm:
+                    row_result['error'] = 'Missing source location'
+                    skipped_items += 1
+                    item_results.append(row_result)
+                    continue
+                if from_location_norm == to_location_norm:
+                    row_result['error'] = 'Source and destination are the same'
+                    skipped_items += 1
+                    item_results.append(row_result)
+                    continue
+
+                source_rows = _location_match_rows(from_location_norm)
+                if not source_rows:
+                    row_result['error'] = f'No rows found at source location {from_location}'
+                    skipped_items += 1
+                    item_results.append(row_result)
+                    continue
+
+                matched_rows = []
+                for source_row in source_rows:
+                    if _movelocation_barcode_key(source_row.get(barcode_col)) == barcode_key:
+                        qty_here = max(0, _movelocation_parse_qty(source_row.get(qty_col) if qty_col else None, default=1))
+                        source_row['_qty_for_move'] = qty_here
+                        matched_rows.append(source_row)
+
+                if not matched_rows:
+                    row_result['error'] = f'Barcode not found at {from_location}'
+                    skipped_items += 1
+                    item_results.append(row_result)
+                    continue
+
+                matched_rows.sort(key=lambda r: int(r.get('_qty_for_move') or 0), reverse=True)
+                available_qty = sum(int(r.get('_qty_for_move') or 0) for r in matched_rows)
+                if available_qty <= 0:
+                    row_result['error'] = f'No available quantity at {from_location}'
+                    skipped_items += 1
+                    item_results.append(row_result)
+                    continue
+
+                move_target_qty = min(requested_qty, available_qty)
+                remaining = move_target_qty
+                moved_this_item = 0
+
+                for source_row in matched_rows:
+                    if remaining <= 0:
+                        break
+
+                    row_qty = int(source_row.get('_qty_for_move') or 0)
+                    if row_qty <= 0:
+                        continue
+                    take_qty = min(row_qty, remaining)
+                    if take_qty <= 0:
+                        continue
+
+                    row_id = source_row.get(id_col) if id_col else source_row.get('_rowid_')
+                    if row_id is None:
+                        row_id = source_row.get('_rowid_')
+                    if row_id is None:
+                        continue
+
+                    barcode_val = str(source_row.get(barcode_col) or barcode_raw or '').strip()
+                    title_val = str(source_row.get(title_col) or '').strip() if title_col else ''
+                    now = datetime.now().isoformat()
+
+                    if take_qty < row_qty and qty_col:
+                        new_qty = row_qty - take_qty
+                        cur.execute(
+                            f"UPDATE SEARCHRACK SET {qty_col} = ? WHERE {id_lookup_col} = ?",
+                            (new_qty, row_id)
+                        )
+
+                        placeholders = ','.join('?' for _ in insert_cols)
+                        insert_values = []
+                        for c in insert_cols:
+                            val = source_row.get(c)
+                            if qty_col and c.lower() == qty_col.lower():
+                                val = take_qty
+                            if pos_col and c.lower() == pos_col.lower():
+                                val = to_location
+                            if pic_col and c.lower() == pic_col.lower():
+                                val = ''
+                            insert_values.append(val)
+
+                        cur.execute(
+                            f"INSERT INTO SEARCHRACK ({', '.join(insert_cols)}) VALUES ({placeholders})",
+                            tuple(insert_values)
+                        )
+                        new_id = cur.lastrowid
+
+                        rem_cur.execute('''
+                            INSERT INTO removed_items
+                            (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (None, barcode_val, title_val, take_qty, now, row_id, row_qty, new_qty, 'locationmoved', from_location))
+                        rem_cur.execute('''
+                            INSERT INTO removed_items
+                            (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (None, barcode_val, title_val, take_qty, now, new_id, 0, take_qty, 'locationmoved', to_location))
+                    else:
+                        if pos_col and pic_col:
+                            cur.execute(
+                                f"UPDATE SEARCHRACK SET {pos_col} = ?, {pic_col} = ? WHERE {id_lookup_col} = ?",
+                                (to_location, '', row_id)
+                            )
+                        elif pos_col:
+                            cur.execute(
+                                f"UPDATE SEARCHRACK SET {pos_col} = ? WHERE {id_lookup_col} = ?",
+                                (to_location, row_id)
+                            )
+                        else:
+                            cur.execute(
+                                f"UPDATE SEARCHRACK SET {pic_col} = ? WHERE {id_lookup_col} = ?",
+                                (to_location, row_id)
+                            )
+
+                        rem_cur.execute('''
+                            INSERT INTO removed_items
+                            (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (None, barcode_val, title_val, take_qty, now, row_id, take_qty, 0, 'locationmoved', from_location))
+                        rem_cur.execute('''
+                            INSERT INTO removed_items
+                            (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (None, barcode_val, title_val, take_qty, now, row_id, 0, take_qty, 'locationmoved', to_location))
+
+                    remaining -= take_qty
+                    moved_this_item += take_qty
+
+                row_result['moved_qty'] = moved_this_item
+                if moved_this_item > 0:
+                    row_result['success'] = True
+                    moved_items += 1
+                    moved_units += moved_this_item
+                    if moved_this_item < requested_qty:
+                        row_result['error'] = f'Only moved {moved_this_item} of {requested_qty}'
+                else:
+                    row_result['error'] = 'Move failed'
+                    skipped_items += 1
+            except Exception as row_err:
+                row_result['error'] = _safe_error(row_err)
+                skipped_items += 1
+
+            item_results.append(row_result)
+
+        conn.commit()
+        rem_conn.commit()
+        if moved_units > 0:
+            update_data_version()
+            _invalidate_searchrack_cache()
+
+        if moved_units <= 0:
+            return jsonify({
+                'success': False,
+                'error': 'No items were moved',
+                'moved_items': moved_items,
+                'moved_units': moved_units,
+                'skipped_items': skipped_items,
+                'item_results': item_results
+            }), 400
+
+        return jsonify({
+            'success': True,
+            'moved_items': moved_items,
+            'moved_units': moved_units,
+            'skipped_items': skipped_items,
+            'item_results': item_results
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e)}), 500
+    finally:
+        try:
+            if conn is not None:
+                conn.close()
+        except Exception:
+            pass
+        try:
+            if rem_conn is not None:
+                rem_conn.close()
+        except Exception:
+            pass
+
+
 @app.route('/api/location_items', methods=['GET'])
 def api_location_items():
     """Get items for a specific shelf/location from searchRack.db"""
@@ -27963,6 +30225,7 @@ def get_sync_status():
             'amazon_orders': status.get('amazon_orders_last'),
             'amazon_listings': status.get('amazon_listings_last'),
             'amazon_upcs': status.get('amazon_upcs_last'),
+            'mail_center_refresh': status.get('mail_center_refresh_last'),
             'auto_sync_enabled': status.get('auto_sync_enabled') == 'true',
             'sync_interval': int(status.get('sync_interval', 60)),
             'orders_lookback': int(status.get('orders_lookback', 30)),
@@ -30491,6 +32754,38 @@ def _start_emailer_alert_thread():
     emailer_thread.start()
     print("🚀 Emailer alert thread started")
 
+def mail_center_refresh_worker():
+    """Background worker to refresh mail-center message data on a fixed interval."""
+    import time as _time
+    interval_seconds = _mail_center_env_int('MAIL_CENTER_REFRESH_INTERVAL_SECONDS', 3600, 300, 86400)
+    startup_delay = _mail_center_env_int('MAIL_CENTER_REFRESH_STARTUP_DELAY_SECONDS', 45, 0, 900)
+    print(f"📬 Mail-center refresh worker started (every {interval_seconds // 60} minutes)")
+
+    if startup_delay > 0:
+        _time.sleep(startup_delay)
+
+    while True:
+        loop_started = _time.time()
+        try:
+            summary = _mail_center_hourly_refresh_once()
+            warnings = summary.get('warnings') if isinstance(summary, dict) else []
+            if warnings:
+                print(f"📬 Mail-center refresh completed with warnings: {', '.join(warnings)}")
+            else:
+                print("📬 Mail-center refresh completed")
+        except Exception as e:
+            print(f"⚠️ Mail-center refresh worker error: {e}")
+
+        elapsed = _time.time() - loop_started
+        sleep_for = max(30, interval_seconds - int(elapsed))
+        _time.sleep(sleep_for)
+
+def _start_mail_center_refresh_thread():
+    """Start hourly lightweight refresh for centralized message data."""
+    refresh_thread = threading.Thread(target=mail_center_refresh_worker, daemon=True)
+    refresh_thread.start()
+    print("🚀 Mail-center refresh thread started")
+
 def start_background_services():
     """Start all background services with a lock to ensure single execution"""
     # Only run on non-Windows (Unix/Pi) to avoid locking issues during dev
@@ -30533,6 +32828,11 @@ def start_background_services():
         _start_emailer_alert_thread()
     except Exception as e:
         print(f"Failed to start emailer: {e}")
+
+    try:
+        _start_mail_center_refresh_thread()
+    except Exception as e:
+        print(f"Failed to start mail-center refresh: {e}")
 
 # Start background services when imported (for Gunicorn)
 # We use a small delay to allow the app to fully load

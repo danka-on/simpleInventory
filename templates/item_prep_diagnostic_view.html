@@ -50,6 +50,14 @@
     .set-position-btn{background:#3498db;color:#fff;border:none;padding:16px 24px;border-radius:12px;cursor:pointer;font-size:1.2rem;font-weight:600;display:flex;align-items:center;gap:10px;margin:12px 0}
     .set-position-btn:hover{background:#2980b9}
     .set-position-btn i{font-size:1.4rem}
+    .history-list{display:flex;flex-direction:column;gap:10px;margin-top:10px;max-height:340px;overflow-y:auto}
+    .history-item{border:1px solid #e2e8f0;background:#f8fbff;border-radius:10px;padding:10px 12px}
+    .history-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+    .history-title{font-weight:700;color:#1f3b57}
+    .history-time{font-size:0.82rem;color:#6c7f90;white-space:nowrap}
+    .history-sub{font-size:0.84rem;color:#5e7387;margin-top:4px}
+    .history-changes{display:flex;flex-direction:column;gap:4px;margin-top:8px}
+    .history-change{font-size:0.85rem;color:#2f475d;background:#fff;border:1px solid #dbe5ef;border-radius:7px;padding:5px 8px}
   </style>
 </head>
 <body>
@@ -194,6 +202,16 @@
       {% else %}
         <div style="color:#95a5a6">Item not found in inventory</div>
       {% endif %}
+    </div>
+  </div>
+
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+      <h3 style="margin:0">Item Change Log</h3>
+      <button type="button" id="refreshHistoryBtn" class="btn" style="background:#3498db;color:#fff;padding:6px 12px">Refresh</button>
+    </div>
+    <div id="historyContainer" class="history-list">
+      <div class="muted">Loading log...</div>
     </div>
   </div>
 
@@ -694,6 +712,7 @@
         if(j.success){
           input.value = '';
           await loadNotes();
+          await loadHistory();
         } else {
           alert('Failed to add note: ' + (j.error || 'unknown'));
         }
@@ -709,6 +728,7 @@
         const j = await res.json();
         if(j.success){
           await loadNotes();
+          await loadHistory();
         } else {
           alert('Failed to delete note: ' + (j.error || 'unknown'));
         }
@@ -723,6 +743,86 @@
       return div.innerHTML;
     }
 
+    function formatHistoryValue(value){
+      if(value === null || value === undefined || value === '') return 'empty';
+      if(typeof value === 'object'){
+        try{ return JSON.stringify(value); }
+        catch(e){ return String(value); }
+      }
+      return String(value);
+    }
+
+    function renderHistoryChange(change){
+      const c = (change && typeof change === 'object') ? change : {};
+      const field = escapeHtml(String(c.field || 'value'));
+      const hasFrom = Object.prototype.hasOwnProperty.call(c, 'from');
+      const hasTo = Object.prototype.hasOwnProperty.call(c, 'to');
+      const fromText = escapeHtml(formatHistoryValue(c.from));
+      const toText = escapeHtml(formatHistoryValue(c.to));
+      if(hasFrom && hasTo) return `${field}: ${fromText} -> ${toText}`;
+      if(hasTo) return `${field}: set to ${toText}`;
+      if(hasFrom) return `${field}: was ${fromText}`;
+      return `${field}: updated`;
+    }
+
+    async function loadHistory(){
+      const upc = '{{ upc }}'.trim();
+      const container = document.getElementById('historyContainer');
+      if(!upc || !container) return;
+      container.innerHTML = '<div class="muted">Loading log...</div>';
+      try{
+        const params = new URLSearchParams(window.location.search || '');
+        const lot = String(DIAG_VIEW_SELECTED_LOT || params.get('lot') || '').trim();
+        const q = new URLSearchParams();
+        q.set('limit', '250');
+        if(lot) q.set('lot', lot);
+        const res = await fetch(`/api/items_prep/diagnostic/${encodeURIComponent(upc)}/history?${q.toString()}`);
+        const j = await res.json();
+        if(!(j && j.success)){
+          container.innerHTML = `<div class="muted">Failed to load log: ${escapeHtml((j && j.error) || 'unknown')}</div>`;
+          return;
+        }
+        const items = Array.isArray(j.items) ? j.items : [];
+        if(items.length === 0){
+          container.innerHTML = '<div class="muted">No logged changes found for this item yet.</div>';
+          return;
+        }
+        container.innerHTML = '';
+        items.forEach(ev=>{
+          const title = escapeHtml(String(ev && ev.title || 'Update'));
+          const timestamp = formatNoteTimestamp(ev && ev.timestamp || '');
+          const description = escapeHtml(String(ev && ev.description || ''));
+          const category = String(ev && ev.category || '').replace(/_/g, ' ').trim();
+          const upcValue = String(ev && ev.upc || '').trim();
+          const lotValue = String(ev && ev.lot_number || '').trim();
+          const sourceValue = String(ev && ev.source || '').trim();
+          const subBits = [];
+          if(category) subBits.push(category);
+          if(upcValue) subBits.push(`UPC ${upcValue}`);
+          if(lotValue) subBits.push(`LOT ${lotValue}`);
+          if(sourceValue) subBits.push(`source ${sourceValue}`);
+          const changes = Array.isArray(ev && ev.changes) ? ev.changes : [];
+          const changesHtml = changes.length
+            ? `<div class="history-changes">${changes.map(ch=>`<div class="history-change">${renderHistoryChange(ch)}</div>`).join('')}</div>`
+            : '';
+          const item = document.createElement('div');
+          item.className = 'history-item';
+          item.innerHTML = `
+            <div class="history-head">
+              <div class="history-title">${title}</div>
+              <div class="history-time">${escapeHtml(timestamp)}</div>
+            </div>
+            ${subBits.length ? `<div class="history-sub">${escapeHtml(subBits.join(' | '))}</div>` : ''}
+            ${description ? `<div class="history-sub">${description}</div>` : ''}
+            ${changesHtml}
+          `;
+          container.appendChild(item);
+        });
+      }catch(e){
+        container.innerHTML = `<div class="muted">Failed to load log: ${escapeHtml(String(e))}</div>`;
+      }
+    }
+
     (function(){
       const addBtn = document.getElementById('addNoteBtn');
       const noteInput = document.getElementById('newNoteInput');
@@ -734,6 +834,13 @@
 
     // Load notes on page load
     window.addEventListener('DOMContentLoaded', loadNotes);
+    window.addEventListener('DOMContentLoaded', loadHistory);
+
+    (function(){
+      const refreshBtn = document.getElementById('refreshHistoryBtn');
+      if(!refreshBtn) return;
+      refreshBtn.addEventListener('click', loadHistory);
+    })();
 
     // Upload photos handling (auto-upload on file selection)
     (function(){
@@ -957,6 +1064,7 @@
             }
             editPanel.style.display = 'none';
             btnEdit.style.display = 'inline-block';
+            await loadHistory();
           } else {
             alert('Failed to update quantity: ' + (j.error || 'unknown'));
           }

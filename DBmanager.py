@@ -473,9 +473,41 @@ def store_ebay_order(order):
             except Exception:
                 pass
 
-        # Check for duplicate (order_id + item_id)
-        cur.execute('SELECT id FROM orders WHERE order_id = ? AND item_id = ?', (order.get('order_id'), order.get('item_id')))
-        existing = cur.fetchone()
+        # Check for duplicate row before insert.
+        # Some edge-case eBay payloads may omit item_id; use a stricter fallback key
+        # so repeat sync passes do not insert clones.
+        order_id_val = order.get('order_id')
+        item_id_val = order.get('item_id')
+        existing = None
+        if item_id_val is not None and str(item_id_val).strip() != '':
+            cur.execute(
+                '''
+                SELECT id
+                FROM orders
+                WHERE COALESCE(order_id, '') = COALESCE(?, '')
+                  AND COALESCE(item_id, '') = COALESCE(?, '')
+                ORDER BY id DESC
+                LIMIT 1
+                ''',
+                (order_id_val, item_id_val)
+            )
+            existing = cur.fetchone()
+        else:
+            cur.execute(
+                '''
+                SELECT id
+                FROM orders
+                WHERE COALESCE(order_id, '') = COALESCE(?, '')
+                  AND COALESCE(item_id, '') = ''
+                  AND COALESCE(barcode, '') = COALESCE(?, '')
+                  AND COALESCE(title, '') = COALESCE(?, '')
+                  AND COALESCE(quantity, 0) = COALESCE(?, 0)
+                ORDER BY id DESC
+                LIMIT 1
+                ''',
+                (order_id_val, barcode_val, title_val, order.get('quantity'))
+            )
+            existing = cur.fetchone()
         if existing:
             cur.execute('''UPDATE orders SET
                 title = COALESCE(?, title),
