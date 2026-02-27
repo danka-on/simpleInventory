@@ -13,6 +13,9 @@
         .form-group{margin-bottom:15px}
         label{display:inline-block;width:120px;font-weight:600}
         input[type="file"],input[type="text"],input[type="date"],input[type="number"]{padding:8px;border:1px solid #ccc;border-radius:4px;width:300px}
+        .inline-check{display:inline-flex;align-items:center;gap:8px;width:auto}
+        .hint{font-size:12px;color:#555;margin-left:124px;margin-top:4px}
+        .muted-note{font-size:12px;color:#6b7280}
         input[type="file"]::file-selector-button{margin-right:10px;padding:6px 10px;border:1px solid #cbd5e1;border-radius:4px;background:#f1f5f9;cursor:pointer}
         input[type="file"]::file-selector-button:hover{background:#e2e8f0}
         button{padding:10px 20px;background:#007bff;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:14px}
@@ -48,6 +51,8 @@
         html.ss-theme-night input[type="file"]::file-selector-button{background:#1f2937;color:#e2e8f0;border-color:rgba(255,255,255,0.15)}
         html.ss-theme-night input[type="file"]::file-selector-button:hover{background:#334155}
         html.ss-theme-night input::placeholder{color:#94a3b8}
+        html.ss-theme-night .hint{color:#94a3b8}
+        html.ss-theme-night .muted-note{color:#94a3b8}
         html.ss-theme-night .section{background:#1e293b;border-color:rgba(255,255,255,0.1)}
         html.ss-theme-night .section h3{color:#e2e8f0}
         html.ss-theme-night .message{background:#1e293b;color:#e2e8f0;border:1px solid rgba(255,255,255,0.12)}
@@ -76,7 +81,14 @@
     <form id="extractor-form" enctype="multipart/form-data">
         <div class="form-group">
             <label for="excel-file">Upload Excel File:</label>
-            <input type="file" id="excel-file" name="excel_file" accept=".xls,.xlsx" required>
+            <input type="file" id="excel-file" name="excel_file" accept=".xls,.xlsx,.csv" required>
+        </div>
+        <div class="form-group">
+            <label for="retail-only-mode">Retail-Only Mode:</label>
+            <span class="inline-check">
+                <input type="checkbox" id="retail-only-mode" name="retail_only_mode">
+                <span class="muted-note">Update only original retail (no qty/sync changes)</span>
+            </span>
         </div>
         <div class="form-group">
             <label for="import-date">Date of Purchase:</label>
@@ -86,7 +98,19 @@
             <label for="shipping-cost">Shipping Cost ($):</label>
             <input type="number" id="shipping-cost" name="shipping_cost" step="0.01" min="0" placeholder="0.00">
         </div>
-        <button type="submit">Upload & Sync to BOL</button>
+        <div class="form-group" id="lot-override-wrap" style="display:none;">
+            <label for="lot-override">LOT Override:</label>
+            <input type="text" id="lot-override" name="lot_override" placeholder="Optional if LOT cannot be extracted">
+            <div class="hint">Used only in retail-only mode.</div>
+        </div>
+        <div class="form-group" id="overwrite-retail-wrap" style="display:none;">
+            <label for="overwrite-retail">Overwrite Existing:</label>
+            <span class="inline-check">
+                <input type="checkbox" id="overwrite-retail" name="overwrite_existing">
+                <span class="muted-note">Also replace rows that already have a retail value</span>
+            </span>
+        </div>
+        <button id="submit-btn" type="submit">Upload & Sync to BOL</button>
     </form>
     <div id="message"></div>
 
@@ -102,7 +126,26 @@
 
     <script>
         // Set today's date as default
-        document.getElementById('import-date').valueAsDate = new Date();
+        const importDateEl = document.getElementById('import-date');
+        const shippingCostEl = document.getElementById('shipping-cost');
+        const retailOnlyModeEl = document.getElementById('retail-only-mode');
+        const lotOverrideWrapEl = document.getElementById('lot-override-wrap');
+        const overwriteRetailWrapEl = document.getElementById('overwrite-retail-wrap');
+        const submitBtnEl = document.getElementById('submit-btn');
+
+        importDateEl.valueAsDate = new Date();
+
+        function applyModeUI() {
+            const retailOnly = !!retailOnlyModeEl.checked;
+            lotOverrideWrapEl.style.display = retailOnly ? '' : 'none';
+            overwriteRetailWrapEl.style.display = retailOnly ? '' : 'none';
+            importDateEl.required = !retailOnly;
+            shippingCostEl.disabled = retailOnly;
+            submitBtnEl.textContent = retailOnly ? 'Backfill Original Retail Only' : 'Upload & Sync to BOL';
+        }
+
+        retailOnlyModeEl.addEventListener('change', applyModeUI);
+        applyModeUI();
 
         // Load upload logs and stats on page load
         loadUploadLogs();
@@ -115,64 +158,90 @@
         document.getElementById('extractor-form').addEventListener('submit', async function(e) {
             e.preventDefault();
             const formData = new FormData(this);
+            const retailOnly = !!retailOnlyModeEl.checked;
+            const endpoint = retailOnly ? '/api/rawbol/backfill-retail' : '/api/rawbol/upload';
             const msgEl = document.getElementById('message');
-            msgEl.innerHTML = '<div class="message">Uploading and syncing...</div>';
+            msgEl.innerHTML = retailOnly
+                ? '<div class="message">Backfilling original retail values...</div>'
+                : '<div class="message">Uploading and syncing...</div>';
+
+            if (retailOnly) {
+                formData.delete('import_date');
+                formData.delete('shipping_cost');
+            }
             
             try {
-                const response = await fetch('/api/rawbol/upload', {
+                const response = await fetch(endpoint, {
                     method: 'POST',
                     body: formData
                 });
                 const data = await response.json();
                 
                 if (data.success) {
-                    let msg = `Upload successful! ${data.inserted} rows imported.`;
-                    
-                    // Show extracted header data
-                    if (data.extracted_lot_number) {
-                        msg += `<br><strong>Extracted LOT #:</strong> ${data.extracted_lot_number}`;
-                    }
-                    if (data.bol_location) {
-                        msg += `<br><strong>Location:</strong> ${data.bol_location}`;
-                    }
-                    if (data.total_client_cost !== undefined && data.total_client_cost !== null) {
-                        const formattedCost = '$' + parseFloat(data.total_client_cost).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
-                        msg += `<br><strong>Total Client Cost:</strong> ${formattedCost}`;
-                    }
-                    if (data.shipping_cost !== undefined && data.shipping_cost !== null) {
-                        const formattedShipping = '$' + parseFloat(data.shipping_cost).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
-                        msg += `<br><strong>Shipping Cost:</strong> ${formattedShipping}`;
-                    }
-                    if (data.avg_cost !== undefined && data.avg_cost !== null) {
-                        const formattedAvgCost = '$' + parseFloat(data.avg_cost).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
-                        msg += `<br><strong>Average Cost per Item:</strong> ${formattedAvgCost}`;
-                    }
-                    
-                    if (data.synced) {
-                        msg += `<br>Auto-synced to BOL.DB: ${data.sync_updated} updated, ${data.sync_inserted} inserted.`;
-                    } else if (data.sync_error) {
-                        msg += `<br>WARNING: Sync failed - ${data.sync_error}`;
-                    }
-                    msgEl.innerHTML = `<div class="message success">${msg}</div>`;
-                    
-                    // Add undo button
-                    const undoBtn = document.createElement('button');
-                    undoBtn.textContent = 'Undo Last Upload';
-                    undoBtn.style.cssText = 'margin-left:10px;padding:8px 16px;background:#dc3545;color:#fff;border:none;border-radius:4px;cursor:pointer;';
-                    undoBtn.onclick = () => undoLastUpload(data.lot_number);
-                    
-                    const messageDiv = msgEl.querySelector('.message');
-                    messageDiv.appendChild(undoBtn);
-                    
-                    // Auto-hide undo button after 10 seconds
-                    setTimeout(() => {
-                        if (undoBtn.parentNode) {
-                            undoBtn.remove();
+                    if (retailOnly) {
+                        let msg = 'Retail backfill complete.';
+                        if (data.lot_number) {
+                            msg += `<br><strong>LOT #:</strong> ${data.lot_number}`;
                         }
-                    }, 10000);
-                    
+                        if (data.match_scope) {
+                            msg += `<br><strong>Match Scope:</strong> ${data.match_scope}`;
+                        }
+                        msg += `<br><strong>Source UPCs:</strong> ${Number(data.source_upcs || 0).toLocaleString()}`;
+                        msg += `<br><strong>Updated Rows:</strong> ${Number(data.updated_rows || 0).toLocaleString()}`;
+                        msg += `<br><strong>Missing UPC Matches:</strong> ${Number(data.missing_upcs || 0).toLocaleString()}`;
+                        msg += `<br><strong>Skipped Existing Retail:</strong> ${Number(data.skipped_existing_nonzero || 0).toLocaleString()}`;
+                        msgEl.innerHTML = `<div class="message success">${msg}</div>`;
+                    } else {
+                        let msg = `Upload successful! ${data.inserted} rows imported.`;
+                        
+                        // Show extracted header data
+                        if (data.extracted_lot_number) {
+                            msg += `<br><strong>Extracted LOT #:</strong> ${data.extracted_lot_number}`;
+                        }
+                        if (data.bol_location) {
+                            msg += `<br><strong>Location:</strong> ${data.bol_location}`;
+                        }
+                        if (data.total_client_cost !== undefined && data.total_client_cost !== null) {
+                            const formattedCost = '$' + parseFloat(data.total_client_cost).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                            msg += `<br><strong>Total Client Cost:</strong> ${formattedCost}`;
+                        }
+                        if (data.shipping_cost !== undefined && data.shipping_cost !== null) {
+                            const formattedShipping = '$' + parseFloat(data.shipping_cost).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                            msg += `<br><strong>Shipping Cost:</strong> ${formattedShipping}`;
+                        }
+                        if (data.avg_cost !== undefined && data.avg_cost !== null) {
+                            const formattedAvgCost = '$' + parseFloat(data.avg_cost).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                            msg += `<br><strong>Average Cost per Item:</strong> ${formattedAvgCost}`;
+                        }
+                        
+                        if (data.synced) {
+                            msg += `<br>Auto-synced to BOL.DB: ${data.sync_updated} updated, ${data.sync_inserted} inserted.`;
+                        } else if (data.sync_error) {
+                            msg += `<br>WARNING: Sync failed - ${data.sync_error}`;
+                        }
+                        msgEl.innerHTML = `<div class="message success">${msg}</div>`;
+                        
+                        // Add undo button
+                        const undoBtn = document.createElement('button');
+                        undoBtn.textContent = 'Undo Last Upload';
+                        undoBtn.style.cssText = 'margin-left:10px;padding:8px 16px;background:#dc3545;color:#fff;border:none;border-radius:4px;cursor:pointer;';
+                        undoBtn.onclick = () => undoLastUpload(data.lot_number);
+                        
+                        const messageDiv = msgEl.querySelector('.message');
+                        messageDiv.appendChild(undoBtn);
+                        
+                        // Auto-hide undo button after 10 seconds
+                        setTimeout(() => {
+                            if (undoBtn.parentNode) {
+                                undoBtn.remove();
+                            }
+                        }, 10000);
+                    }
+
                     document.getElementById('extractor-form').reset();
-                    document.getElementById('import-date').valueAsDate = new Date();
+                    importDateEl.valueAsDate = new Date();
+                    retailOnlyModeEl.checked = false;
+                    applyModeUI();
                     loadUploadLogs();
                     loadStats();
                 } else {

@@ -498,24 +498,6 @@
         </div>
       </div>
       <div class="dropdown-section listed-row">
-        <label>Auto Listed:
-          <select id="filter-auto-listed-select">
-            <option value="">All</option>
-            <option value="listed">Listed</option>
-            <option value="not_listed">Not Listed</option>
-          </select>
-        </label>
-        <div class="marketplace-filter" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-          <span style="font-weight:600;">Marketplace:</span>
-          <label data-auto-marketplace-filter="amazon">
-            <input type="checkbox" id="filter-auto-listed-amazon" checked> Amazon
-          </label>
-          <label data-auto-marketplace-filter="ebay">
-            <input type="checkbox" id="filter-auto-listed-ebay" checked> eBay
-          </label>
-        </div>
-      </div>
-      <div class="dropdown-section listed-row">
         <label>Warehouse:
           <select id="filter-warehouse-select">
             <option value="">All</option>
@@ -617,8 +599,8 @@ const GEAR_DEFAULTS = Object.freeze({
   listed_amazon: true,
   listed_ebay: true,
   listed_facebook: true,
-  auto_listed_amazon: true,
-  auto_listed_ebay: true
+  auto_listed_amazon: false,
+  auto_listed_ebay: false
 });
 let pendingLotSelection = '';
 let selectMode = false;
@@ -1443,7 +1425,7 @@ function onOpenAutoListings(e){
 function render(results){
   let html = '<table><thead><tr>';
   if (selectMode) html += '<th>Select</th>';
-  html += `<th>Info</th><th>Status</th><th>Notes</th><th>Foto</th><th>Defect</th><th class="th-sortable" data-sort-key="quantity" title="Sort by quantity" role="button" tabindex="0">PREP <span class="sort-ind">${_sortIndicator('quantity')}</span></th><th class="th-sortable" data-sort-key="warehouse_available" title="Sort by warehouse quantity" role="button" tabindex="0">Warehouse <span class="sort-ind">${_sortIndicator('warehouse_available')}</span></th><th>Title</th><th>UPC</th><th>Marketplaces</th><th>Auto Listings</th><th>Last Edited</th><th>+ Listing Agent</th></tr></thead><tbody>`;
+  html += `<th>Info</th><th>Status</th><th>Notes</th><th>Foto</th><th>Defect</th><th class="th-sortable" data-sort-key="quantity" title="Sort by quantity" role="button" tabindex="0">PREP <span class="sort-ind">${_sortIndicator('quantity')}</span></th><th class="th-sortable" data-sort-key="warehouse_available" title="Sort by warehouse quantity" role="button" tabindex="0">Warehouse <span class="sort-ind">${_sortIndicator('warehouse_available')}</span></th><th>Title</th><th>UPC</th><th>Marketplaces</th><th>Last Edited</th><th>+ Listing Agent</th></tr></thead><tbody>`;
   let rowIndex = 0;
   const viewResults = _sortedRenderResults(results);
   for (const r of viewResults) {
@@ -1509,18 +1491,6 @@ function render(results){
     const fbCheckbox = `<label style="display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap" title="${esc(facebookTitle)}"><input type="checkbox" class="marketplace-checkbox" data-id="${rowIdAttr}" data-upc="${apiUpc}" data-lot="${lotNumber}" data-marketplace="facebook" ${listedFacebook ? 'checked' : ''}><span style="font-size:0.85rem">Facebook</span></label>`;
     
     const actionBtn = `<div style="display:flex;flex-direction:column;gap:4px;align-items:flex-start">${amazonCheckbox}${ebayCheckbox}${fbCheckbox}</div>`;
-    const autoListings = Array.isArray(r.auto_marketplace_listings) ? r.auto_marketplace_listings : [];
-    const autoEbayCount = Number(r.auto_marketplace_ebay_count || 0);
-    const autoAmazonCount = Number(r.auto_marketplace_amazon_count || 0);
-    const autoTotalCount = Number(r.auto_marketplace_total_count || autoListings.length || 0);
-    const autoLabelBits = [];
-    if(autoEbayCount > 0) autoLabelBits.push(`eBay ${autoEbayCount}`);
-    if(autoAmazonCount > 0) autoLabelBits.push(`Amazon ${autoAmazonCount}`);
-    const autoListingsEncoded = encodeURIComponent(JSON.stringify(autoListings));
-    const autoListingsLabel = autoLabelBits.join(' | ') || `${autoTotalCount} listing${autoTotalCount === 1 ? '' : 's'}`;
-    const autoListingsCell = autoTotalCount > 0
-      ? `<td style="text-align:center"><button type="button" class="auto-listings-btn" data-upc="${apiUpc}" data-listings="${esc(autoListingsEncoded)}" data-ebay-count="${autoEbayCount}" data-amazon-count="${autoAmazonCount}" title="View detected live listing links">${esc(autoListingsLabel)}</button></td>`
-      : `<td style="text-align:center"><span class="small-muted">—</span></td>`;
     
     // Diagnostic link moved into its own Info column (first column)
     const diagLink = `<button class="btn btn-sm diag-link" style="background:transparent;border:1px solid #0066cc;color:#0066cc;border-radius:6px;padding:6px 10px;cursor:pointer" data-upc="${apiUpc}" data-lot="${esc(r.lot_number||'')}">Open</button>`;
@@ -1535,7 +1505,7 @@ function render(results){
     const qtyRaw = Number(r.quantity);
     const qty = Number.isFinite(qtyRaw) ? qtyRaw : 0;
     const prepQtyWithoutWarehouse = qty > 0 && whAvail <= 0;
-    const qtyStyle = (qty > 1 && status !== 'unchecked') ? 'color:#e74c3c;font-weight:700;font-size:1.1rem' : '';
+    const qtyStyle = (qty > 1) ? 'font-weight:700' : '';
     const qtyCell = `<td style="text-align:center"><span style="${qtyStyle}">${qty}</span></td>`;
     const whBase = String(r.warehouse_base_upc || '').trim();
     const whLocations = Array.isArray(r.warehouse_locations)
@@ -1586,7 +1556,6 @@ function render(results){
              `<td><div class="title-cell"><img class="thumb" src="${thumb}" onerror="this.src='${missingThumb(48,48,'No Img')}'"><a href="#" class="img-link" data-img="${img}" data-title="${title}">${title}</a></div></td>`+
              `<td><div style=\"display:flex;gap:6px;align-items:center\"><span>${upc}</span><button type=\"button\" class=\"btn btn-sm btn-copy\" data-upc=\"${baseUpc}\" title=\"Copy UPC\">Copy</button></div></td>`+
              `<td>${actionBtn}</td>`+
-             autoListingsCell+
              `<td class="last-edited-cell" data-raw="${last_edited}">${formatLastEdited(last_edited)}</td>`+
              `<td style="text-align:center;white-space:nowrap">${queueBtn}</td>`+
              `</tr>`;
@@ -1836,7 +1805,7 @@ function onOpenDiag(e){
   // Build a compact return URL consisting of the active filter params so we can return to the same list state
   const params = new URLSearchParams(window.location.search);
   const returnParams = [];
-  ['lot','q','sort','status','defect','listed','not_listed','listed_stores','auto_listed','auto_not_listed','auto_listed_stores','warehouse_filter']
+  ['lot','q','sort','status','defect','listed','not_listed','listed_stores','warehouse_filter']
     .forEach(k=>{ const v = params.get(k); if(v) returnParams.push(`${k}=${encodeURIComponent(v)}`); });
   const ret = '/items-to-list' + (returnParams.length? ('?'+returnParams.join('&')) : '');
   let url = '/item-prep/diagnostic/view?upc='+encodeURIComponent(upc)+'&from=items&return='+encodeURIComponent(ret);
@@ -1859,7 +1828,7 @@ async function onOpenPics(e){
   // Preserve return params so that Edit Diagnostic -> Back returns to Items-to-List
   const params = new URLSearchParams(window.location.search);
   const returnParams = [];
-  ['lot','q','sort','status','defect','listed','not_listed','listed_stores','auto_listed','auto_not_listed','auto_listed_stores','warehouse_filter']
+  ['lot','q','sort','status','defect','listed','not_listed','listed_stores','warehouse_filter']
     .forEach(k=>{ const v = params.get(k); if(v) returnParams.push(`${k}=${encodeURIComponent(v)}`); });
   const ret = '/items-to-list' + (returnParams.length? ('?'+returnParams.join('&')) : '');
   let diagUrl = '/item-prep/diagnostic?upc='+encodeURIComponent(upc)+'&from=items&return='+encodeURIComponent(ret);

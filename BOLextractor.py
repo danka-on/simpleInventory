@@ -2,6 +2,8 @@ import pandas as pd
 from rawbol_manager import insert_raw_bol_items, log_upload
 import io
 import os
+import re
+import sqlite3
 from io import StringIO
 
 def process_bol_excel(file, lot_number, import_date, shipping_cost=None):
@@ -497,5 +499,369 @@ def process_bol_excel(file, lot_number, import_date, shipping_cost=None):
             result['shipping_cost'] = shipping_cost
         
         return result
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
+
+
+def _retail_safe_text(value):
+    txt = str(value or '').strip()
+    if txt.lower() in ('nan', 'none', 'null'):
+        return ''
+    return txt
+
+
+def _retail_parse_money(value):
+    txt = _retail_safe_text(value)
+    if not txt:
+        return None
+    txt = txt.replace('$', '').replace(',', '').strip()
+    if txt.startswith('(') and txt.endswith(')'):
+        txt = '-' + txt[1:-1]
+    try:
+        n = float(txt)
+    except Exception:
+        return None
+    if n <= 0:
+        return None
+    return round(n, 2)
+
+
+def _retail_normalize_upc_key(value):
+    upc = _retail_safe_text(value)
+    if not upc:
+        return ''
+    if upc.endswith('.0') and upc[:-2].isdigit():
+        upc = upc[:-2]
+    if '-' in upc:
+        base, suffix = upc.split('-', 1)
+        base = base.strip()
+        suffix = suffix.strip()
+    else:
+        base, suffix = upc.strip(), ''
+    if base.isdigit():
+        base = base.lstrip('0') or '0'
+    return (f'{base}-{suffix}' if suffix else base).strip().lower()
+
+
+def _retail_find_upc_row(df_raw):
+    for idx, row in df_raw.iterrows():
+        for cell in row.values:
+            if _retail_safe_text(cell).upper() == 'UPC':
+                return int(idx)
+    return None
+
+
+def _retail_extract_lot(df_raw, upc_row_index):
+    location_row_index = None
+    for idx in range(upc_row_index):
+        first_cell = _retail_safe_text(df_raw.iloc[idx, 0]).upper() if df_raw.shape[1] > 0 else ''
+        if first_cell == 'LOCATION':
+            location_row_index = idx
+            break
+
+    if location_row_index is not None:
+        lot_col_idx = None
+        location_row = df_raw.iloc[location_row_index]
+        for col_idx, cell in enumerate(location_row.values):
+            cell_str = _retail_safe_text(cell).upper()
+            if 'LOT' in cell_str and ('#' in cell_str or 'NUMBER' in cell_str or cell_str.endswith('NO') or cell_str.endswith('NO.')):
+                lot_col_idx = col_idx
+                break
+        if lot_col_idx is not None and location_row_index + 1 < upc_row_index:
+            lot_value = _retail_safe_text(df_raw.iloc[location_row_index + 1, lot_col_idx])
+            if lot_value:
+                return lot_value
+
+    lot_pattern = re.compile(r'\bLOT\b\s*(?:#|NO\.?|NUMBER)?\s*[:\-]?\s*([A-Za-z0-9\-_./]+)', re.IGNORECASE)
+    for idx in range(upc_row_index):
+        row = df_raw.iloc[idx]
+        for cell in row.values:
+            txt = _retail_safe_text(cell)
+            if not txt:
+                continue
+            m = lot_pattern.search(txt)
+            if m:
+                candidate = _retail_safe_text(m.group(1))
+                if _retail_is_plausible_lot(candidate):
+                    return candidate
+    return ''
+
+
+def _retail_choose_col(columns):
+    normalized_cols = {str(col).strip().lower(): col for col in columns}
+    preferred_cols = (
+        'original retail',
+        'original_retail',
+        'original retail price',
+        'original_retail_price',
+        'original retail $',
+        'retail price',
+        'retail_price'
+    )
+    for key in preferred_cols:
+        if key in normalized_cols:
+            return normalized_cols[key]
+
+    for key, original_name in normalized_cols.items():
+        compact = ''.join(ch for ch in key if ch.isalnum())
+        if 'original' in compact and 'retail' in compact:
+            return original_name
+
+    for key, original_name in normalized_cols.items():
+        if 'retail' in key and 'qty' not in key and 'quantity' not in key:
+            return original_name
+    return None
+
+
+def _retail_extract_lot_from_text(raw_text):
+    if not raw_text:
+        return ''
+
+    lines = [line.strip() for line in str(raw_text).split('\n') if line.strip()]
+    for i, line in enumerate(lines):
+        line_upper = line.upper().strip()
+        if line_upper in ('LOT #', 'LOT#', 'LOT NUMBER', 'LOT NO', 'LOT NO.', 'LOT') or line_upper.startswith('LOT #:') or line_upper.startswith('LOT NUMBER:'):
+            lot_match = line.split(':')[-1].strip() if ':' in line else ''
+            if not lot_match or lot_match.upper().startswith('LOT'):
+                if i + 1 < len(lines):
+                    lot_match = lines[i + 1].strip()
+            if _retail_is_plausible_lot(lot_match):
+                return lot_match
+
+    pattern = re.compile(r'\bLOT\b\s*(?:#|NO\.?|NUMBER)?\s*[:\-]?\s*([A-Za-z0-9\-_./]+)', re.IGNORECASE)
+    for line in lines:
+        m = pattern.search(line)
+        if not m:
+            continue
+        candidate = _retail_safe_text(m.group(1))
+        if _retail_is_plausible_lot(candidate):
+            return candidate
+    return ''
+
+
+def _retail_is_plausible_lot(value):
+    candidate = _retail_safe_text(value)
+    if not candidate:
+        return False
+    upper = candidate.upper()
+    if upper in ('LOT', 'NUMBER', '#', 'NO', 'NO.', 'H', 'HTML', 'HEAD', 'BODY'):
+        return False
+    if len(candidate) < 3 or len(candidate) > 50:
+        return False
+    if re.search(r'[A-Za-z0-9]', candidate) is None:
+        return False
+    return True
+
+
+def process_bol_retail_backfill(file, overwrite_existing=False, forced_lot_number=None):
+    """
+    Parse one BOL file and backfill only raw_bol_items.original_retail for an existing LOT.
+    No quantity or sync state changes are made.
+    """
+    try:
+        file_bytes = file.read()
+        if not file_bytes or len(file_bytes) < 10:
+            return {'success': False, 'error': 'Uploaded file is empty or too small.'}
+
+        filename = getattr(file, 'filename', None) or getattr(file, 'name', None) or ''
+        ext = os.path.splitext(filename)[-1].lower()
+        if ext not in ('.xls', '.xlsx', '.csv'):
+            return {'success': False, 'error': 'Only .xls, .xlsx, and .csv files are supported.'}
+
+        lot_number = _retail_safe_text(forced_lot_number)
+        df = None
+
+        # Handle "xls" files that are actually HTML exports (common in browser downloads).
+        first_32 = file_bytes[:32].lower()
+        html_indicators = [b'<html>', b'<html ', b'<!doct', b'<head>', b'<body>']
+        is_html = any(indicator in first_32 for indicator in html_indicators)
+
+        if is_html:
+            try:
+                html_content = file_bytes.decode('utf-8', errors='replace')
+                tables = pd.read_html(StringIO(html_content))
+                if not tables:
+                    return {'success': False, 'error': 'No tables found in HTML file.'}
+
+                df_raw = None
+                for table in tables:
+                    if any('UPC' in str(col).upper() for col in table.columns):
+                        df_raw = table
+                        break
+                if df_raw is None:
+                    for table in tables:
+                        for col in table.columns:
+                            col_values = table[col].dropna().astype(str)
+                            normalized_values = [v.strip().replace('.0', '') for v in col_values]
+                            upc_candidates = [v for v in normalized_values if v.isdigit() and 10 <= len(v) <= 14]
+                            if len(col_values) > 0 and len(upc_candidates) > len(col_values) * 0.3:
+                                df_raw = table
+                                break
+                        if df_raw is not None:
+                            break
+                if df_raw is None:
+                    best_table = None
+                    best_score = 0
+                    for table in tables:
+                        score = len(table.columns) * len(table)
+                        if score > best_score and len(table.columns) > 2 and len(table) > 1:
+                            best_score = score
+                            best_table = table
+                    df_raw = best_table
+                if df_raw is None:
+                    return {'success': False, 'error': 'Could not find item table in HTML file.'}
+
+                if not any('UPC' in str(col).upper() for col in df_raw.columns):
+                    for idx, row in df_raw.iterrows():
+                        if any(str(cell).strip().upper() == 'UPC' for cell in row):
+                            df_raw = df_raw.iloc[idx:].reset_index(drop=True)
+                            df_raw.columns = df_raw.iloc[0]
+                            df_raw = df_raw.iloc[1:].reset_index(drop=True)
+                            break
+
+                df = df_raw.copy()
+                df.columns = [str(col).strip() for col in df.columns]
+
+                if not lot_number:
+                    lot_number = _retail_extract_lot_from_text(html_content)
+            except Exception as e:
+                return {'success': False, 'error': f'Failed to parse HTML-wrapped file: {e}'}
+        else:
+            in_memory_file = io.BytesIO(file_bytes)
+            try:
+                if ext == '.csv':
+                    df_raw = pd.read_csv(in_memory_file, header=None, dtype=str)
+                else:
+                    engine = 'xlrd' if ext == '.xls' else 'openpyxl'
+                    df_raw = pd.read_excel(in_memory_file, engine=engine, header=None, dtype=str)
+            except Exception as read_err:
+                msg = str(read_err)
+                if 'Expected BOF record' in msg:
+                    return {
+                        'success': False,
+                        'error': 'Unsupported format, or corrupt file. This looks like an HTML download renamed to .xls. Re-download as real Excel or use retail-only mode with a valid export.'
+                    }
+                return {'success': False, 'error': msg}
+
+            upc_row_index = _retail_find_upc_row(df_raw)
+            if upc_row_index is None:
+                return {'success': False, 'error': 'Could not find row with "UPC" header.'}
+
+            extracted_lot = _retail_extract_lot(df_raw, upc_row_index)
+            if not lot_number:
+                lot_number = extracted_lot
+
+            in_memory_file.seek(0)
+            if ext == '.csv':
+                df = pd.read_csv(in_memory_file, header=upc_row_index, dtype=str)
+            else:
+                engine = 'xlrd' if ext == '.xls' else 'openpyxl'
+                df = pd.read_excel(in_memory_file, engine=engine, header=upc_row_index, dtype=str)
+            df.columns = [str(col).strip() for col in df.columns]
+
+        if df is None:
+            return {'success': False, 'error': 'Could not parse uploaded file.'}
+
+        # LOT is optional for retail-only mode. If unavailable, fall back to UPC-only match.
+        use_lot_scope = bool(lot_number)
+
+        upc_col = None
+        for col in df.columns:
+            if str(col).strip().upper() == 'UPC':
+                upc_col = col
+                break
+        if not upc_col:
+            return {'success': False, 'error': 'Missing UPC column in item table.'}
+
+        retail_col = _retail_choose_col(df.columns)
+        if not retail_col:
+            return {'success': False, 'error': 'Could not find original retail column in uploaded file.'}
+
+        retail_map = {}
+        for _, row in df.iterrows():
+            upc_key = _retail_normalize_upc_key(row.get(upc_col))
+            if not upc_key:
+                continue
+            retail_value = _retail_parse_money(row.get(retail_col))
+            if retail_value is None:
+                continue
+            current = retail_map.get(upc_key)
+            if current is None or current <= 0:
+                retail_map[upc_key] = retail_value
+
+        if not retail_map:
+            return {'success': False, 'error': 'No valid UPC + retail rows found in uploaded file.', 'lot_number': lot_number}
+
+        db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'rawbol.db')
+        conn = sqlite3.connect(db_path)
+        try:
+            cur = conn.cursor()
+
+            cur.execute("PRAGMA table_info(raw_bol_items)")
+            cols = [str(r[1]).lower() for r in cur.fetchall()]
+            if 'original_retail' not in cols:
+                cur.execute("ALTER TABLE raw_bol_items ADD COLUMN original_retail REAL")
+                conn.commit()
+
+            if use_lot_scope:
+                cur.execute('''
+                    SELECT id, upc, COALESCE(original_retail, 0)
+                    FROM raw_bol_items
+                    WHERE lot_number = ?
+                ''', (lot_number,))
+            else:
+                cur.execute('''
+                    SELECT id, upc, COALESCE(original_retail, 0)
+                    FROM raw_bol_items
+                ''')
+            lot_rows = cur.fetchall()
+            if not lot_rows:
+                return {'success': False, 'error': 'No rows found in rawbol.db to update.'}
+
+            lot_map = {}
+            for row_id, upc, current_retail in lot_rows:
+                key = _retail_normalize_upc_key(upc)
+                if not key:
+                    continue
+                try:
+                    current_val = round(float(current_retail or 0), 2)
+                except Exception:
+                    current_val = 0.0
+                lot_map.setdefault(key, []).append((int(row_id), current_val))
+
+            updated_rows = 0
+            missing_upcs = 0
+            skipped_existing_nonzero = 0
+
+            for upc_key, retail_val in retail_map.items():
+                matches = lot_map.get(upc_key)
+                if not matches:
+                    missing_upcs += 1
+                    continue
+                for row_id, current_val in matches:
+                    if (not overwrite_existing) and current_val > 0:
+                        skipped_existing_nonzero += 1
+                        continue
+                    cur.execute(
+                        'UPDATE raw_bol_items SET original_retail = ? WHERE id = ?',
+                        (retail_val, row_id)
+                    )
+                    updated_rows += 1
+
+            conn.commit()
+            return {
+                'success': True,
+                'mode': 'retail_backfill_only',
+                'filename': filename,
+                'lot_number': lot_number,
+                'match_scope': ('lot+upc' if use_lot_scope else 'upc_only'),
+                'source_upcs': len(retail_map),
+                'updated_rows': updated_rows,
+                'missing_upcs': missing_upcs,
+                'skipped_existing_nonzero': skipped_existing_nonzero,
+                'overwrite_existing': bool(overwrite_existing)
+            }
+        finally:
+            conn.close()
     except Exception as e:
         return {'success': False, 'error': str(e)}

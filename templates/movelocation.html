@@ -32,7 +32,10 @@
     .thumb{width:56px;height:56px;border-radius:8px;border:1px solid #d1d5db;object-fit:cover;background:#f1f5f9}
     .title{font-weight:700;line-height:1.25;margin-bottom:3px}
     .code{font-family:Consolas,monospace;color:#64748b;font-size:.82rem}
-    .qty{display:inline-block;padding:4px 10px;border-radius:999px;background:#eef2ff;color:#3730a3;border:1px solid #c7d2fe;font-weight:700}
+    .qty-wrap{display:inline-flex;align-items:center;gap:6px}
+    .qty-btn{width:26px;height:26px;border-radius:999px;border:1px solid #93c5fd;background:#e0f2fe;color:#0c4a6e;font-weight:900;cursor:pointer;line-height:1;padding:0}
+    .qty-btn[disabled]{opacity:.5;cursor:not-allowed}
+    .qty{display:inline-block;min-width:34px;text-align:center;padding:4px 10px;border-radius:999px;background:#eef2ff;color:#3730a3;border:1px solid #c7d2fe;font-weight:700}
     .locs{display:flex;gap:7px;flex-wrap:wrap;min-width:240px}
     .loc{border:1px solid #7dd3fc;background:#e0f2fe;color:#0c4a6e;border-radius:999px;padding:6px 10px;cursor:pointer;font-size:.84rem}
     .loc.selected{background:#075985;color:#fff;border-color:#075985}
@@ -57,6 +60,8 @@
     html.ss-theme-night td,html.ss-theme-night .table-wrap{border-color:#334155}
     html.ss-theme-night .scan-row input,html.ss-theme-night .dest input{background:#0f172a;color:#e5e7eb;border-color:#334155}
     html.ss-theme-night .btn-lite{background:#1f2937;color:#e5e7eb;border-color:#475569}
+    html.ss-theme-night .qty-btn{background:#082f49;color:#bae6fd;border-color:#0ea5e9}
+    html.ss-theme-night .qty{background:#172554;color:#c7d2fe;border-color:#3730a3}
   </style>
 </head>
 <body>
@@ -71,7 +76,7 @@
       <input id="barcodeInput" type="text" placeholder="Scan barcode and press Enter" autocomplete="off" autocapitalize="off" spellcheck="false">
       <button id="scanBtn" class="btn btn-primary" type="button">Add Scan</button>
     </div>
-    <div class="hint">Single location auto-selects. Multiple locations: tap a bubble to select source, tap selected bubble again for location picture preview.</div>
+    <div class="hint">Single location auto-selects. Multiple locations: tap one or more bubbles to select sources; tap a selected bubble again for location picture preview.</div>
     <div id="status" class="status"></div>
   </div>
 
@@ -83,7 +88,7 @@
       </div>
       <div class="actions">
         <button id="moveBtn" class="btn btn-green" type="button">Move</button>
-        <button id="clearBtn" class="btn btn-gray" type="button">Clear List</button>
+        <button id="clearBtn" class="btn btn-gray" type="button">Remove All</button>
       </div>
     </div>
 
@@ -281,6 +286,64 @@
         return String(a.code||'').localeCompare(String(b.code||''), undefined, {sensitivity:'base'});
       });
     }
+    function maxMoveQty(row){
+      const parsed = Number.parseInt(row && row.total_available, 10);
+      if(Number.isFinite(parsed) && parsed > 0) return parsed;
+      return 1;
+    }
+    function clampRowQty(row){
+      const maxQty = maxMoveQty(row);
+      let qty = Number.parseInt(row && row.scan_qty, 10);
+      if(!Number.isFinite(qty) || qty < 1) qty = 1;
+      if(qty > maxQty) qty = maxQty;
+      row.scan_qty = qty;
+      return { qty, maxQty };
+    }
+    function syncRowSelection(row){
+      if(!row || !Array.isArray(row.locations)) return;
+      const qtyCap = Math.max(1, Number.parseInt(row.scan_qty || 1, 10) || 1);
+      const locByKey = new Map();
+      row.locations.forEach(loc => {
+        const key = String(loc.location_key || '').trim();
+        if(key) locByKey.set(key, loc);
+      });
+
+      const keys = [];
+      const codes = [];
+      const seen = new Set();
+      const pushKey = keyVal => {
+        const key = String(keyVal || '').trim();
+        if(!key || seen.has(key) || !locByKey.has(key)) return;
+        seen.add(key);
+        keys.push(key);
+        const loc = locByKey.get(key);
+        codes.push(String((loc && loc.code) || '').trim());
+      };
+
+      const legacyKeys = [];
+      if(Array.isArray(row.selected_location_keys)) legacyKeys.push(...row.selected_location_keys);
+      if(row.selected_location_key) legacyKeys.push(row.selected_location_key);
+      legacyKeys.forEach(pushKey);
+
+      if(!keys.length && row.locations.length === 1){
+        const only = row.locations[0];
+        if(only && only.location_key){
+          pushKey(only.location_key);
+          row.selected_preview_key = String(only.preview_key || only.code || '').trim();
+        }
+      }
+
+      const limitedKeys = keys.slice(0, qtyCap);
+      const limitedCodes = codes.slice(0, qtyCap);
+      row.selected_location_keys = limitedKeys;
+      row.selected_location_codes = limitedCodes;
+      row.selected_location_key = limitedKeys[0] || '';
+      row.selected_location_code = limitedCodes[0] || '';
+      if(!row.selected_preview_key && keys.length){
+        const first = locByKey.get(limitedKeys[0]);
+        row.selected_preview_key = String((first && (first.preview_key || first.code)) || '').trim();
+      }
+    }
     function queuedUnits(){return queue.reduce((sum,r)=>sum+Number(r.scan_qty||0),0);}
 
     function render(){
@@ -292,48 +355,96 @@
       }
       let html = '';
       queue.forEach(row => {
-        const selected = String(row.selected_location_key||'');
-        const need = !selected && row.locations.length > 1;
+        const { qty, maxQty } = clampRowQty(row);
+        syncRowSelection(row);
+        const selectedKeys = new Set((row.selected_location_keys || []).map(v => String(v || '').trim()).filter(Boolean));
+        const selectedCodes = (row.selected_location_codes || []).map(v => String(v || '').trim()).filter(Boolean);
+        const need = selectedKeys.size === 0 && row.locations.length > 1;
         const locs = row.locations.length
-          ? row.locations.map(l => `<button type="button" class="loc ${String(l.location_key||'')===selected?'selected':''}" data-row="${row.uid}" data-lockey="${esc(l.location_key)}" title="Click to select source. Click selected bubble again to preview image.">${esc(l.code)} <span class="q">${esc(l.quantity)}</span></button>`).join('')
+          ? row.locations.map(l => {
+              const key = String(l.location_key || '');
+              const selected = selectedKeys.has(key);
+              return `<button type="button" class="loc ${selected?'selected':''}" data-row="${row.uid}" data-lockey="${esc(key)}" title="Click to select multiple sources. Click selected bubble again to preview image.">${esc(l.code)} <span class="q">${esc(l.quantity)}</span></button>`;
+            }).join('')
           : '<span style="color:#b91c1c;font-weight:700">No location found</span>';
         const note = need
-          ? '<div class="loc-note">Select one location bubble.</div>'
-          : (row.selected_location_code ? `<div class="loc-note">Selected: ${esc(row.selected_location_code)}</div>` : '');
+          ? '<div class="loc-note">Select one or more location bubbles.</div>'
+          : (selectedCodes.length ? `<div class="loc-note">Selected: ${esc(selectedCodes.join(', '))} <button type="button" class="btn btn-lite" data-clear-select="${row.uid}" style="padding:2px 8px;font-size:.75rem;margin-left:6px">Clear</button></div>` : '');
         const img = row.image ? esc(row.image) : missingThumb();
+        const decDisabled = qty <= 1 ? 'disabled' : '';
+        const incDisabled = qty >= maxQty ? 'disabled' : '';
         html += `<tr class="${need?'warn':''}">
           <td><div class="item"><img class="thumb" src="${img}" onerror="this.src='${missingThumb()}'"><div><div class="title">${esc(row.title||row.barcode||'Item')}</div><div class="code">${esc(barcodeDisplay(row.barcode_display||row.barcode||''))}</div></div></div></td>
-          <td><span class="qty">${esc(row.scan_qty)}</span></td>
+          <td><div class="qty-wrap"><button type="button" class="qty-btn" data-row="${row.uid}" data-qtyadj="-1" ${decDisabled}>-</button><span class="qty">${esc(qty)}</span><button type="button" class="qty-btn" data-row="${row.uid}" data-qtyadj="1" ${incDisabled}>+</button></div><div class="loc-note">max ${esc(maxQty)}</div></td>
           <td><div class="locs">${locs}</div>${note}</td>
           <td style="font-weight:700;color:${Number(row.total_available||0)>0?'#15803d':'#b91c1c'}">${esc(row.total_available||0)}</td>
-          <td><button class="btn btn-lite" type="button" data-remove="${row.uid}" title="Remove one scan">Remove</button></td>
+          <td style="color:#64748b">-</td>
         </tr>`;
       });
       queueBody.innerHTML = html;
-      queueBody.querySelectorAll('[data-remove]').forEach(btn => btn.addEventListener('click', () => removeRow(Number(btn.dataset.remove))));
+      queueBody.querySelectorAll('[data-qtyadj]').forEach(btn => btn.addEventListener('click', () => adjustRowQty(Number(btn.dataset.row), Number(btn.dataset.qtyadj || 0))));
       queueBody.querySelectorAll('.loc').forEach(btn => btn.addEventListener('click', () => selectLocation(Number(btn.dataset.row), String(btn.dataset.lockey||''))));
+      queueBody.querySelectorAll('[data-clear-select]').forEach(btn => btn.addEventListener('click', () => clearLocationSelection(Number(btn.dataset.clearSelect))));
     }
 
-    function removeRow(uid){
-      const idx = queue.findIndex(r => Number(r.uid)===Number(uid));
-      if(idx < 0) return;
-      if(Number(queue[idx].scan_qty||0) > 1) queue[idx].scan_qty = Number(queue[idx].scan_qty||0) - 1;
-      else queue.splice(idx,1);
+    function adjustRowQty(uid, delta){
+      const row = queue.find(r => Number(r.uid)===Number(uid));
+      if(!row) return;
+      const maxQty = maxMoveQty(row);
+      const oldQty = Number.parseInt(row.scan_qty, 10) || 1;
+      let nextQty = oldQty + Number(delta || 0);
+      if(nextQty < 1) nextQty = 1;
+      if(nextQty > maxQty){
+        nextQty = maxQty;
+        setStatus(false, `Max available for this item is ${maxQty}`);
+      } else {
+        setStatus(null, '');
+      }
+      row.scan_qty = nextQty;
+      const beforeSelected = Array.isArray(row.selected_location_keys) ? row.selected_location_keys.length : 0;
+      syncRowSelection(row);
+      const afterSelected = Array.isArray(row.selected_location_keys) ? row.selected_location_keys.length : 0;
+      if(afterSelected < beforeSelected){
+        setStatus(false, `Selection limited to ${nextQty} source location${nextQty===1?'':'s'} for qty ${nextQty}`);
+      }
       render();
-      setStatus(null,'');
+    }
+
+    function clearLocationSelection(uid){
+      const row = queue.find(r => Number(r.uid)===Number(uid));
+      if(!row) return;
+      row.selected_location_keys = [];
+      row.selected_location_codes = [];
+      row.selected_location_key = '';
+      row.selected_location_code = '';
+      row.selected_preview_key = '';
+      syncRowSelection(row);
+      render();
     }
 
     function selectLocation(uid,key){
       const row = queue.find(r => Number(r.uid)===Number(uid));
       if(!row) return;
+      clampRowQty(row);
+      syncRowSelection(row);
       const loc = (row.locations||[]).find(l => String(l.location_key||'')===String(key||''));
       if(!loc) return;
-      if(String(row.selected_location_key||'') === String(key||'')){
+      const selectedSet = new Set((row.selected_location_keys || []).map(v => String(v || '').trim()).filter(Boolean));
+      if(selectedSet.has(String(key||''))){
         openPreview(loc.preview_key || loc.code || '');
         return;
       }
-      row.selected_location_key = loc.location_key;
-      row.selected_location_code = loc.code;
+      const qtyCap = Math.max(1, Number.parseInt(row.scan_qty || 1, 10) || 1);
+      if(selectedSet.size >= qtyCap){
+        setStatus(false, `Qty is ${qtyCap}. Cannot select more than ${qtyCap} source location${qtyCap===1?'':'s'}.`);
+        return;
+      }
+      const nextKeys = Array.isArray(row.selected_location_keys) ? row.selected_location_keys.slice() : [];
+      nextKeys.push(loc.location_key);
+      row.selected_location_keys = nextKeys;
+      row.selected_location_codes = Array.isArray(row.selected_location_codes) ? row.selected_location_codes.slice() : [];
+      row.selected_location_codes.push(loc.code);
+      syncRowSelection(row);
       row.selected_preview_key = loc.preview_key || loc.code || '';
       render();
     }
@@ -364,17 +475,21 @@
           return;
         }
 
+        let addOk = true;
+        let addMessage = `Added ${item.title || item.barcode || scanned}`;
         let row = queue.find(r => String(r.barcode_key||'') === key);
         if(row){
-          row.scan_qty = Number(row.scan_qty||0) + 1;
+          const priorQty = Number.parseInt(row.scan_qty || 0, 10) || 0;
+          row.scan_qty = priorQty + 1;
           row.title = row.title || item.title || row.barcode;
           row.image = row.image || item.image || '';
           row.locations = mergeLocations(row.locations, newLocs);
           row.total_available = Number(item.total_available != null ? item.total_available : row.total_available || 0);
-          if(!row.selected_location_key && row.locations.length === 1){
-            row.selected_location_key = row.locations[0].location_key;
-            row.selected_location_code = row.locations[0].code;
-            row.selected_preview_key = row.locations[0].preview_key || row.locations[0].code;
+          const clamped = clampRowQty(row);
+          syncRowSelection(row);
+          if(clamped.qty <= priorQty){
+            addOk = false;
+            addMessage = `Max available reached (${clamped.maxQty}) for ${item.title || item.barcode || scanned}`;
           }
         } else {
           row = {
@@ -387,19 +502,18 @@
             total_available: Number(item.total_available || 0),
             locations: newLocs,
             scan_qty: 1,
+            selected_location_keys: [],
+            selected_location_codes: [],
             selected_location_key: '',
             selected_location_code: '',
             selected_preview_key: ''
           };
-          if(row.locations.length === 1){
-            row.selected_location_key = row.locations[0].location_key;
-            row.selected_location_code = row.locations[0].code;
-            row.selected_preview_key = row.locations[0].preview_key || row.locations[0].code;
-          }
+          clampRowQty(row);
+          syncRowSelection(row);
           queue.unshift(row);
         }
         render();
-        setStatus(true, `Added ${item.title || item.barcode || scanned}`);
+        setStatus(addOk, addMessage);
       }catch(err){
         showMessage('Lookup Error', err.message || 'Lookup failed');
         setStatus(false, err.message || 'Lookup failed');
@@ -416,7 +530,10 @@
         showMessage('No Items', 'Scan at least one item before moving.');
         return;
       }
-      const missing = queue.filter(r => !String(r.selected_location_key||'').trim());
+      const missing = queue.filter(r => {
+        syncRowSelection(r);
+        return !((r.selected_location_keys || []).length);
+      });
       if(missing.length){
         const list = missing.map(r => barcodeDisplay(r.barcode_display || r.barcode || '')).join(', ');
         showMessage('Select Source Location', `Choose source location for each item.\n\nMissing: ${list}`);
@@ -441,7 +558,10 @@
 
       const payload = queue.map(r => ({
         barcode: r.barcode,
-        from_location: r.selected_location_code,
+        from_location: String(((r.selected_location_codes || [])[0] || r.selected_location_code || '')).trim(),
+        from_locations: (r.selected_location_codes || [])
+          .map(v => String(v || '').trim())
+          .filter(Boolean),
         quantity: Number(r.scan_qty||0) || 1
       }));
       if(!payload.length){ showMessage('No Items', 'No queued items to move.'); return; }
@@ -510,10 +630,10 @@
     moveBtn.addEventListener('click', openDestPanel);
     clearBtn.addEventListener('click', () => {
       if(!queue.length) return;
-      if(!confirm(`Clear ${queue.length} queued row(s)?`)) return;
+      if(!confirm(`Remove all ${queue.length} queued row(s)?`)) return;
       queue = [];
       render();
-      setStatus(null,'');
+      setStatus(true,'Removed all queued items');
       closeDestPanel();
       barcodeInput.focus();
     });

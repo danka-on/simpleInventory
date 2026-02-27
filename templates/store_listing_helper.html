@@ -628,6 +628,10 @@
         <i class="fas fa-warehouse" style="margin-right:6px"></i><span data-i18n="no_warehouse">No Warehouse</span>
         <span class="badge badge-red" id="badge-no-warehouse" style="display:none">0</span>
       </button>
+      <button class="tab" data-tab="no_listings">
+        <i class="fas fa-store-slash" style="margin-right:6px"></i><span data-i18n="no_listings">No Listings</span>
+        <span class="badge badge-yellow" id="badge-no-listings" style="display:none">0</span>
+      </button>
       <button class="tab" data-tab="quantity_alert">
         <i class="fas fa-balance-scale-right" style="margin-right:6px"></i><span data-i18n="quantity_alert">Quantity Alert</span>
         <span class="badge badge-yellow" id="badge-quantity-alert" style="display:none">0</span>
@@ -644,6 +648,7 @@
     </div>
 
     <div class="tab-content active" id="content-no_warehouse"></div>
+    <div class="tab-content" id="content-no_listings"></div>
     <div class="tab-content" id="content-quantity_alert"></div>
     <div class="tab-content" id="content-dismissed"></div>
   </div>
@@ -813,11 +818,13 @@ async function scanAlerts(forceRefresh = false) {
 
     // Update badges
     updateBadge('badge-no-warehouse', counts.no_warehouse);
+    updateBadge('badge-no-listings', counts.no_listings);
     updateBadge('badge-quantity-alert', counts.quantity_alert);
     syncGlobalAlertsBadge(counts);
 
     // Render alerts
     renderNoWarehouse(alertsData.no_warehouse || []);
+    renderNoListings(alertsData.no_listings || []);
     renderQuantityAlert(alertsData.quantity_alert || []);
 
   } catch (e) {
@@ -975,6 +982,46 @@ function renderNoWarehouse(alerts) {
       </div>
     </div>
   `}).join('');
+}
+
+function renderNoListings(alerts) {
+  const el = document.getElementById('content-no_listings');
+  if (!el) return;
+  if (!alerts.length) {
+    el.innerHTML = `<div class="empty-state"><span class="icon"><i class="fas fa-check-circle"></i></span><p>${esc(t('no_no_listings'))}</p></div>`;
+    return;
+  }
+  el.innerHTML = alerts.map(a => {
+    const warehouseQty = Number(a.warehouse_qty || 0);
+    const locationHtml = renderLocationLinks(a.warehouse_locations);
+    const title = a.title || t('untitled');
+    return `
+    <div class="alert-card yellow">
+      <div class="alert-hero">
+        <img class="alert-hero-img" src="${missingImgSvg()}" data-img="" data-title="${encodeURIComponent(title)}" onclick="openListingImg(this)">
+        <div class="alert-hero-info">
+          <div class="alert-hero-title">${esc(title)}</div>
+          <div class="alert-hero-meta">
+            <span class="alert-severity yellow"><i class="fas fa-store-slash"></i> ${esc(t('no_listings'))}</span>
+            <a class="alert-upc-link" href="${esc(allSearchHref(a.upc))}">${esc(a.upc)}</a>
+          </div>
+        </div>
+      </div>
+      <div class="alert-stats">
+        <div class="stat-cell"><div class="stat-value warning">${warehouseQty}</div><div class="stat-label">\u{1F3ED} ${esc(t('warehouse'))}</div></div>
+        <div class="stat-cell"><div class="stat-value danger">0</div><div class="stat-label">${esc(t('listed'))}</div></div>
+      </div>
+      <div class="alert-location-row">
+        <i class="fas fa-map-marker-alt"></i> ${locationHtml}
+      </div>
+      <div class="alert-footer">
+        <button class="btn-dismiss" onclick="dismissAlert('no_listings', '${a.hash}', '${esc(a.upc)}')">
+          <i class="fas fa-check"></i> ${esc(t('mark_fixed'))}
+        </button>
+      </div>
+    </div>
+  `;
+  }).join('');
 }
 
 function renderQuantityAlert(alerts) {

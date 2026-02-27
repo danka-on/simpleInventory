@@ -186,6 +186,12 @@
       font-weight: 700;
       color: var(--muted);
     }
+    .barcode-col {
+      width: 190px;
+    }
+    .name-col {
+      width: auto;
+    }
     .qty-col, .money-col {
       width: 115px;
       text-align: center;
@@ -205,6 +211,12 @@
       color: var(--ink);
       padding: 6px 8px;
       font-size: 0.95rem;
+    }
+    .print-name {
+      display: none;
+      white-space: normal;
+      word-break: break-word;
+      line-height: 1.25;
     }
     .cell-input.qty,
     .cell-input.price {
@@ -263,7 +275,9 @@
       .no-print { display: none !important; }
       .table-wrap {
         border: 1px solid #000;
+        overflow: visible;
       }
+      table { min-width: 0; }
       th, td {
         border-color: #000;
       }
@@ -289,6 +303,12 @@
         padding: 0;
         height: auto;
         color: #000;
+      }
+      td.name-col .cell-input {
+        display: none;
+      }
+      td.name-col .print-name {
+        display: block;
       }
     }
   </style>
@@ -335,11 +355,11 @@
           <thead>
             <tr>
               <th class="idx-col">#</th>
-              <th>Barcode</th>
-              <th>Item Name</th>
+              <th class="name-col">Item Name</th>
+              <th class="barcode-col">Barcode</th>
               <th class="qty-col">Qty</th>
-              <th class="money-col">Unit Price</th>
-              <th class="money-col" style="text-align:right;padding-right:14px;">Line Total</th>
+              <th class="money-col">Original Retail</th>
+              <th class="money-col" style="text-align:right;padding-right:14px;">Total (Qty &gt; 1)</th>
               <th class="no-print" style="width:98px;"></th>
             </tr>
           </thead>
@@ -449,13 +469,14 @@
         const qty = toQty(item.qty);
         const unitPrice = toPrice(item.unit_price);
         const line = qty * unitPrice;
+        const lineDisplay = qty > 1 ? money(line) : '';
         html += '<tr>';
         html += '<td class="idx-col">' + (idx + 1) + '</td>';
-        html += '<td><input class="cell-input" data-id="' + item.id + '" data-field="barcode" type="text" value="' + esc(item.barcode) + '" /></td>';
-        html += '<td><input class="cell-input" data-id="' + item.id + '" data-field="name" type="text" value="' + esc(item.name) + '" /></td>';
+        html += '<td class="name-col"><input class="cell-input" data-id="' + item.id + '" data-field="name" type="text" value="' + esc(item.name) + '" /><div class="print-name">' + esc(item.name) + '</div></td>';
+        html += '<td class="barcode-col"><input class="cell-input" data-id="' + item.id + '" data-field="barcode" type="text" value="' + esc(item.barcode) + '" /></td>';
         html += '<td class="qty-col"><input class="cell-input qty" data-id="' + item.id + '" data-field="qty" type="number" min="0" step="1" value="' + qty + '" /></td>';
         html += '<td class="money-col"><input class="cell-input price" data-id="' + item.id + '" data-field="unit_price" type="number" min="0" step="0.01" value="' + unitPrice.toFixed(2) + '" /></td>';
-        html += '<td class="line-total">' + money(line) + '</td>';
+        html += '<td class="line-total">' + lineDisplay + '</td>';
         html += '<td class="no-print"><button class="remove-btn" data-action="remove" data-id="' + item.id + '" type="button">Remove</button></td>';
         html += '</tr>';
       });
@@ -498,6 +519,7 @@
       }
 
       const resolvedBarcode = String((lookup && (lookup.upc || lookup.barcode)) || raw).trim() || raw;
+      const lookedUpUnitPrice = toPrice(lookup && lookup.unit_price);
       const existing = state.items.find(item => {
         return String(item.barcode || '').trim().toLowerCase() === resolvedBarcode.toLowerCase();
       });
@@ -506,6 +528,9 @@
         existing.qty = toQty(existing.qty) + 1;
         if ((!existing.name || !String(existing.name).trim()) && lookup && lookup.title) {
           existing.name = String(lookup.title || '').trim();
+        }
+        if (toPrice(existing.unit_price) <= 0 && lookedUpUnitPrice > 0) {
+          existing.unit_price = lookedUpUnitPrice;
         }
         renderRows();
         setStatus('Incremented quantity for ' + resolvedBarcode, 'ok');
@@ -517,7 +542,7 @@
         barcode: resolvedBarcode,
         name: String((lookup && lookup.title) || '').trim(),
         qty: 1,
-        unit_price: 0
+        unit_price: lookedUpUnitPrice
       });
       renderRows();
 

@@ -33,6 +33,35 @@ scp .\static\i18n.js manager@superinventory.local:/opt/sweetshelves/static/
 
 After deploying, restart the service on the Pi: `sudo systemctl restart sweetshelves.service`
 
+### Preferred one-liner deploy (known working)
+
+Use this when asked to "push to pi" with a specific file list and no DB transfer:
+
+```powershell
+$h='manager@superinventory.local'; $t="$env:TEMP\pi-deploy.tar"; tar -cf $t DBmanager.py app.py static/shelf-creator.js templates/bulk_manifest.html templates/item_prep.html templates/item_prep_diagnostic.html templates/item_prep_diagnostic_view.html templates/items_to_list.html templates/movelocation.html templates/pictureposition.html templates/ready_to_ship.html templates/shelfmanager.html templates/tools.html templates/unified_search.html; scp $t "${h}:/tmp/pi-deploy.tar"; ssh $h "tar -xf /tmp/pi-deploy.tar -C /opt/sweetshelves && rm -f /tmp/pi-deploy.tar && sudo systemctl restart sweetshelves"; Remove-Item $t -Force
+```
+
+This workflow:
+- uploads only the selected files via tar,
+- extracts into `/opt/sweetshelves`,
+- deletes the remote tar,
+- restarts `sweetshelves`,
+- deletes the local temp tar.
+
+### Push/commit intent rule
+
+When user says "push to pi" or "commit changes", treat it as:
+- deploy/commit only the most recent relevant changes,
+- use git diff from the last successful checkpoint forward,
+- exclude all `.db` files from transfer.
+
+### Last successful checkpoint
+
+- Status: success confirmed by user
+- Date: 2026-02-25
+- Branch: `pi-claude-refactor`
+- Git commit baseline for next incremental file discovery: `8a5938e` (`bigupdateprepush2`)
+
 ## Architecture
 
 - **`app.py`** (~14k lines) — monolithic Flask app with 227+ routes. All routing, API endpoints, and view logic lives here.

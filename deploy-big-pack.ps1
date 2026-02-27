@@ -7,40 +7,78 @@ param(
   [string]$RemotePath = "/opt/sweetshelves"
 )
 
+Set-Location $PSScriptRoot
+
 $baseCommit = "c510c00^"
 $range = "$baseCommit..HEAD"
-$changed = git diff --name-only $range | Where-Object { $_ -and ($_ -notmatch '\.db$') }
-$extra = @(".env", "tokens.json", "listagent.db", "pricemaster.db", "listing_alerts.db", "fbstore.db")
-$files = @($changed + $extra) | Select-Object -Unique | Where-Object { Test-Path $_ }
+$changedRange = git diff --name-only $range
+$changedLocal = git ls-files -m -o --exclude-standard
+$candidates = @($changedRange + $changedLocal) | Select-Object -Unique
 
-$root = @()
-$templates = @()
-$static = @()
+$excludedExact = @(
+  ".env",
+  "tokens.json",
+  "amazon_credentials.json"
+)
+$excludedRegex = @(
+  '\.db$',
+  '^__pycache__/',
+  '^debug_uploads/',
+  '^\.claude/',
+  '\.pyc$'
+)
 
-foreach ($f in $files) {
-  if ($f -like "templates/*") {
-    $templates += $f
-  } elseif ($f -like "static/*") {
-    $static += $f
-  } else {
-    $root += $f
+$files = @()
+foreach ($f in $candidates) {
+  if (-not $f) { continue }
+  if (-not (Test-Path $f)) { continue }
+  if ($excludedExact -contains $f) { continue }
+
+  $skip = $false
+  foreach ($rx in $excludedRegex) {
+    if ($f -match $rx) {
+      $skip = $true
+      break
+    }
   }
+  if ($skip) { continue }
+
+  $files += $f
+}
+$files = $files | Select-Object -Unique
+
+if ($files.Count -eq 0) {
+  Write-Host "No deployable changes found." -ForegroundColor Yellow
+  exit 0
 }
 
-Write-Host "🚀 Deploying big pack to $User@$HostName..." -ForegroundColor Cyan
+$tmpDir = [System.IO.Path]::GetTempPath()
+$stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+$listPath = Join-Path $tmpDir "sweetshelves-deploy-$stamp.txt"
+$tarPath = Join-Path $tmpDir "sweetshelves-deploy-$stamp.tar"
+$remoteTar = "/tmp/sweetshelves-deploy-$stamp.tar"
 
-if ($root.Count -gt 0) {
-  Write-Host "Transferring root files..." -ForegroundColor Yellow
-  scp @root "$User@$HostName`:$RemotePath/"
+$files | Out-File -FilePath $listPath -Encoding ascii
+
+Write-Host "📦 Building archive with $($files.Count) files..." -ForegroundColor Yellow
+tar -cf $tarPath -T $listPath
+if ($LASTEXITCODE -ne 0) {
+  throw "Failed to build deployment archive."
 }
-if ($templates.Count -gt 0) {
-  Write-Host "Transferring templates..." -ForegroundColor Yellow
-  scp @templates "$User@$HostName`:$RemotePath/templates/"
+
+Write-Host "🚀 Uploading archive to $User@$HostName..." -ForegroundColor Cyan
+scp $tarPath "$User@$HostName`:$remoteTar"
+if ($LASTEXITCODE -ne 0) {
+  throw "Failed to upload deployment archive."
 }
-if ($static.Count -gt 0) {
-  Write-Host "Transferring static assets..." -ForegroundColor Yellow
-  scp @static "$User@$HostName`:$RemotePath/static/"
+
+Write-Host "📂 Extracting on Pi..." -ForegroundColor Yellow
+ssh "$User@$HostName" "mkdir -p '$RemotePath' && tar -xf '$remoteTar' -C '$RemotePath' && rm -f '$remoteTar'"
+if ($LASTEXITCODE -ne 0) {
+  throw "Failed to extract deployment archive on Pi."
 }
+
+Remove-Item -Path $listPath, $tarPath -ErrorAction SilentlyContinue
 
 Write-Host "✅ Deployment complete!" -ForegroundColor Green
 

@@ -17,6 +17,7 @@ def ensure_rawbol_db():
             upc TEXT,
             item_description TEXT,
             avg_cost REAL,
+            original_retail REAL,
             image_url TEXT,
             quantity INTEGER DEFAULT 1,
             lot_number TEXT,
@@ -87,6 +88,7 @@ def ensure_rawbol_db():
         # Migration: Remove old cost columns and add avg_cost to raw_bol_items if needed
         cur.execute("PRAGMA table_info(raw_bol_items)")
         columns = [col[1] for col in cur.fetchall()]
+        has_original_retail = 'original_retail' in columns
 
         if 'client_cost' in columns or 'total_client_cost' in columns:
             print("Migrating raw_bol_items table structure...")
@@ -96,6 +98,7 @@ def ensure_rawbol_db():
                 upc TEXT,
                 item_description TEXT,
                 avg_cost REAL,
+                original_retail REAL,
                 image_url TEXT,
                 quantity INTEGER DEFAULT 1,
                 lot_number TEXT,
@@ -106,10 +109,12 @@ def ensure_rawbol_db():
             )''')
 
             # Copy data from old table (client_cost becomes avg_cost as fallback)
+            original_retail_expr = "original_retail" if has_original_retail else "NULL"
             cur.execute('''INSERT INTO raw_bol_items_new
-                (id, upc, item_description, avg_cost, image_url, quantity, lot_number, bol_number, bol_location, import_date, created_at)
+                (id, upc, item_description, avg_cost, original_retail, image_url, quantity, lot_number, bol_number, bol_location, import_date, created_at)
                 SELECT id, upc, item_description,
                        CASE WHEN client_cost IS NOT NULL THEN client_cost ELSE 0 END,
+                       ''' + original_retail_expr + ''',
                        image_url, quantity, lot_number, bol_number, NULL, import_date, created_at
                 FROM raw_bol_items''')
 
@@ -124,6 +129,15 @@ def ensure_rawbol_db():
             conn.commit()
             print("Column added successfully!")
 
+        # Migration: Add original_retail column if it doesn't exist
+        if 'original_retail' not in columns:
+            print("Adding original_retail column to raw_bol_items table...")
+            cur.execute("ALTER TABLE raw_bol_items ADD COLUMN original_retail REAL")
+            conn.commit()
+            print("Column added successfully!")
+            columns.append('original_retail')
+            has_original_retail = True
+
         # Migration: Remove bol_number column from raw_bol_items if it exists
         if 'bol_number' in columns:
             print("Removing bol_number column from raw_bol_items table...")
@@ -133,6 +147,7 @@ def ensure_rawbol_db():
                 upc TEXT,
                 item_description TEXT,
                 avg_cost REAL,
+                original_retail REAL,
                 image_url TEXT,
                 quantity INTEGER DEFAULT 1,
                 lot_number TEXT,
@@ -142,9 +157,10 @@ def ensure_rawbol_db():
             )''')
 
             # Copy data
+            original_retail_expr = "original_retail" if has_original_retail else "NULL"
             cur.execute('''INSERT INTO raw_bol_items_temp
-                (id, upc, item_description, avg_cost, image_url, quantity, lot_number, bol_location, import_date, created_at)
-                SELECT id, upc, item_description, avg_cost, image_url, quantity, lot_number, bol_location, import_date, created_at
+                (id, upc, item_description, avg_cost, original_retail, image_url, quantity, lot_number, bol_location, import_date, created_at)
+                SELECT id, upc, item_description, avg_cost, ''' + original_retail_expr + ''', image_url, quantity, lot_number, bol_location, import_date, created_at
                 FROM raw_bol_items''')
 
             # Drop old and rename
@@ -222,8 +238,51 @@ def insert_raw_bol_items(df, lot_number, import_date, avg_cost=None, bol_locatio
             cur = conn.cursor()
 
             # First pass: consolidate duplicates in DataFrame
-            from collections import defaultdict
             consolidated_items = {}  # {upc: {'qty': total, 'desc': desc, 'image': image}}
+
+            def _parse_money(raw):
+                if raw is None:
+                    return None
+                txt = str(raw).strip()
+                if not txt or txt.lower() in ('nan', 'none', 'null'):
+                    return None
+                txt = txt.replace('$', '').replace(',', '').strip()
+                if txt.startswith('(') and txt.endswith(')'):
+                    txt = '-' + txt[1:-1]
+                try:
+                    value = float(txt)
+                except Exception:
+                    return None
+                if value < 0:
+                    return 0.0
+                return round(value, 2)
+
+            normalized_cols = {str(col).strip().lower(): col for col in df.columns}
+            preferred_retail_cols = (
+                'original retail',
+                'original_retail',
+                'original retail price',
+                'original_retail_price',
+                'original retail $',
+                'retail price',
+                'retail_price'
+            )
+            retail_col = None
+            for key in preferred_retail_cols:
+                if key in normalized_cols:
+                    retail_col = normalized_cols[key]
+                    break
+            if retail_col is None:
+                for key, original_name in normalized_cols.items():
+                    compact = ''.join(ch for ch in key if ch.isalnum())
+                    if 'original' in compact and 'retail' in compact:
+                        retail_col = original_name
+                        break
+            if retail_col is None:
+                for key, original_name in normalized_cols.items():
+                    if 'retail' in key and 'qty' not in key and 'quantity' not in key:
+                        retail_col = original_name
+                        break
 
             for _, row in df.iterrows():
                 upc = str(row.get('UPC', '')).strip()
@@ -261,6 +320,7 @@ def insert_raw_bol_items(df, lot_number, import_date, avg_cost=None, bol_locatio
                         image_url = match.group(1).strip()
 
                 desc = str(row.get('ITEM DESCRIPTION', '')).strip()
+                retail_value = _parse_money(row.get(retail_col)) if retail_col is not None else None
 
                 # If this UPC already exists, sum the quantities
                 if upc in consolidated_items:
@@ -270,11 +330,14 @@ def insert_raw_bol_items(df, lot_number, import_date, avg_cost=None, bol_locatio
                         consolidated_items[upc]['desc'] = desc
                     if not consolidated_items[upc]['image'] and image_url:
                         consolidated_items[upc]['image'] = image_url
+                    if (consolidated_items[upc].get('original_retail') or 0) <= 0 and retail_value is not None and retail_value > 0:
+                        consolidated_items[upc]['original_retail'] = retail_value
                 else:
                     consolidated_items[upc] = {
                         'qty': qty,
                         'desc': desc,
-                        'image': image_url
+                        'image': image_url,
+                        'original_retail': retail_value if retail_value is not None else 0.0
                     }
 
             # Second pass: insert consolidated items
@@ -283,11 +346,12 @@ def insert_raw_bol_items(df, lot_number, import_date, avg_cost=None, bol_locatio
 
             for upc, item_data in consolidated_items.items():
                 cur.execute('''INSERT INTO raw_bol_items
-                    (upc, item_description, avg_cost, image_url, quantity, lot_number, bol_location, import_date, created_at, aftersale_quantity)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                    (upc, item_description, avg_cost, original_retail, image_url, quantity, lot_number, bol_location, import_date, created_at, aftersale_quantity)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                     (upc,
                      item_data['desc'],
                      avg_cost,
+                     item_data.get('original_retail', 0.0),
                      item_data['image'],
                      item_data['qty'],
                      lot_number,

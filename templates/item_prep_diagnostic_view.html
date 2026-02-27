@@ -58,6 +58,12 @@
     .history-sub{font-size:0.84rem;color:#5e7387;margin-top:4px}
     .history-changes{display:flex;flex-direction:column;gap:4px;margin-top:8px}
     .history-change{font-size:0.85rem;color:#2f475d;background:#fff;border:1px solid #dbe5ef;border-radius:7px;padding:5px 8px}
+    .live-listing-row{display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid #eceff3}
+    .live-listing-row:last-child{border-bottom:none}
+    .live-listing-platform{min-width:68px;font-weight:700;font-size:0.85rem;color:#334155;text-transform:uppercase}
+    .live-listing-main{flex:1;min-width:0}
+    .live-listing-main a{font-weight:600;word-break:break-word}
+    .live-listing-id{font-size:0.82rem;color:#64748b;margin-top:3px}
   </style>
 </head>
 <body>
@@ -203,6 +209,15 @@
         <div style="color:#95a5a6">Item not found in inventory</div>
       {% endif %}
     </div>
+  </div>
+
+  <div class="card" id="liveListingsCard">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+      <h3 style="margin:0">Live Marketplace Listings</h3>
+      <button type="button" id="refreshLiveListingsBtn" class="btn" style="background:#16a34a;color:#fff;padding:6px 12px">Refresh</button>
+    </div>
+    <div id="liveListingsSummary" class="muted">Loading live listings...</div>
+    <div id="liveListingsBody" style="margin-top:8px"></div>
   </div>
 
   <div class="card">
@@ -765,6 +780,82 @@
       return `${field}: updated`;
     }
 
+    async function loadLiveListings(){
+      const upc = '{{ upc }}'.trim();
+      const summary = document.getElementById('liveListingsSummary');
+      const body = document.getElementById('liveListingsBody');
+      if(!upc || !summary || !body) return;
+
+      summary.textContent = 'Loading live listings...';
+      body.innerHTML = '';
+      try{
+        const t = Date.now();
+        const res = await fetch(`/api/items_prep/diagnostic/${encodeURIComponent(upc)}/live_listings?_t=${t}`, { cache: 'no-store' });
+        const j = await res.json();
+        if(!(res.ok && j && j.success)){
+          summary.textContent = `Failed to load live listings${j && j.error ? ': ' + j.error : ''}`;
+          return;
+        }
+
+        const ebayCount = Number(j.ebay_count || 0);
+        const amazonCount = Number(j.amazon_count || 0);
+        const total = Number(j.total_count || 0);
+        const rows = Array.isArray(j.listings) ? j.listings : [];
+        summary.textContent = `Total: ${total} (eBay ${ebayCount}, Amazon ${amazonCount})`;
+
+        if(!rows.length){
+          body.innerHTML = '<div class="muted">No active live listings found.</div>';
+          return;
+        }
+
+        const frag = document.createDocumentFragment();
+        rows.forEach(entry => {
+          const platform = String(entry.platform || '').trim().toUpperCase() || 'LIVE';
+          const title = String(entry.title || '').trim();
+          const url = String(entry.url || '').trim();
+          const listingId = String(entry.listing_id || '').trim();
+
+          const row = document.createElement('div');
+          row.className = 'live-listing-row';
+
+          const plat = document.createElement('div');
+          plat.className = 'live-listing-platform';
+          plat.textContent = platform;
+          row.appendChild(plat);
+
+          const main = document.createElement('div');
+          main.className = 'live-listing-main';
+
+          const titleEl = document.createElement('div');
+          if(url){
+            const a = document.createElement('a');
+            a.href = url;
+            a.target = '_blank';
+            a.rel = 'noopener noreferrer';
+            a.textContent = title || url;
+            titleEl.appendChild(a);
+          } else {
+            titleEl.textContent = title || '(No link available)';
+          }
+          main.appendChild(titleEl);
+
+          if(listingId){
+            const idEl = document.createElement('div');
+            idEl.className = 'live-listing-id';
+            idEl.textContent = `ID: ${listingId}`;
+            main.appendChild(idEl);
+          }
+
+          row.appendChild(main);
+          frag.appendChild(row);
+        });
+        body.innerHTML = '';
+        body.appendChild(frag);
+      }catch(e){
+        summary.textContent = `Failed to load live listings: ${String(e)}`;
+      }
+    }
+
     async function loadHistory(){
       const upc = '{{ upc }}'.trim();
       const container = document.getElementById('historyContainer');
@@ -834,12 +925,19 @@
 
     // Load notes on page load
     window.addEventListener('DOMContentLoaded', loadNotes);
+    window.addEventListener('DOMContentLoaded', loadLiveListings);
     window.addEventListener('DOMContentLoaded', loadHistory);
 
     (function(){
       const refreshBtn = document.getElementById('refreshHistoryBtn');
       if(!refreshBtn) return;
       refreshBtn.addEventListener('click', loadHistory);
+    })();
+
+    (function(){
+      const refreshLiveBtn = document.getElementById('refreshLiveListingsBtn');
+      if(!refreshLiveBtn) return;
+      refreshLiveBtn.addEventListener('click', loadLiveListings);
     })();
 
     // Upload photos handling (auto-upload on file selection)
