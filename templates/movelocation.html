@@ -16,6 +16,7 @@
     .btn-lite{background:#f3f4f6;border:1px solid #d1d5db;color:#111827}
     .panel{background:#fff;border:1px solid #d8dee9;border-radius:12px;padding:12px;margin-bottom:12px}
     .scan-row{display:grid;grid-template-columns:1fr auto;gap:8px}
+    .shelf-row{margin-top:8px}
     .scan-row input,.dest input{width:100%;padding:11px;border:1px solid #cbd5e1;border-radius:8px;font-size:1rem}
     .hint{margin-top:6px;color:#64748b;font-size:.9rem}
     .status{margin-top:6px;min-height:20px;color:#64748b;font-size:.9rem}
@@ -76,7 +77,12 @@
       <input id="barcodeInput" type="text" placeholder="Scan barcode and press Enter" autocomplete="off" autocapitalize="off" spellcheck="false">
       <button id="scanBtn" class="btn btn-primary" type="button">Add Scan</button>
     </div>
+    <div class="scan-row shelf-row">
+      <input id="shelfInput" type="text" placeholder="Scan SHELF code and press Enter" autocomplete="off" autocapitalize="off" spellcheck="false">
+      <button id="loadShelfBtn" class="btn btn-lite" type="button">Load Shelf</button>
+    </div>
     <div class="hint">Single location auto-selects. Multiple locations: tap one or more bubbles to select sources; tap a selected bubble again for location picture preview.</div>
+    <div class="hint">SHELF input accepts shelf codes only and loads all items from that shelf.</div>
     <div id="status" class="status"></div>
   </div>
 
@@ -104,7 +110,7 @@
           </tr>
         </thead>
         <tbody id="queueBody">
-          <tr><td colspan="5" class="empty">Scan barcodes to build list.</td></tr>
+          <tr><td colspan="5" class="empty">Scan barcodes or load a shelf to build list.</td></tr>
         </tbody>
       </table>
     </div>
@@ -138,6 +144,8 @@
   <script>
     const barcodeInput = document.getElementById('barcodeInput');
     const scanBtn = document.getElementById('scanBtn');
+    const shelfInput = document.getElementById('shelfInput');
+    const loadShelfBtn = document.getElementById('loadShelfBtn');
     const statusEl = document.getElementById('status');
     const queueBody = document.getElementById('queueBody');
     const queueCount = document.getElementById('queueCount');
@@ -161,6 +169,7 @@
     let queue = [];
     let seq = 1;
     let scanBusy = false;
+    let shelfBusy = false;
     let moveBusy = false;
     let validShelves = [];
 
@@ -350,7 +359,7 @@
       const units = queuedUnits();
       queueCount.textContent = `${units} unit${units===1?'':'s'} queued across ${queue.length} item${queue.length===1?'':'s'}`;
       if(!queue.length){
-        queueBody.innerHTML = '<tr><td colspan="5" class="empty">Scan barcodes to build list.</td></tr>';
+        queueBody.innerHTML = '<tr><td colspan="5" class="empty">Scan barcodes or load a shelf to build list.</td></tr>';
         return;
       }
       let html = '';
@@ -525,6 +534,92 @@
       }
     }
 
+    async function loadShelfItems(rawShelf){
+      const shelf = String(rawShelf || '').trim();
+      if(!shelf || shelfBusy) return;
+      if(!validShelf(shelf)){
+        const msg = `Shelf "${shelf}" is not a known shelf code.`;
+        showMessage('Invalid Shelf Code', msg);
+        setStatus(false, msg);
+        shelfInput.focus();
+        return;
+      }
+      if(queue.length && !confirm(`Replace current queue with all items from ${shelf}?`)){
+        shelfInput.focus();
+        return;
+      }
+
+      shelfBusy = true;
+      loadShelfBtn.disabled = true;
+      setStatus(null, `Loading all items from shelf ${shelf}...`);
+      try{
+        const resp = await fetch('/api/movelocation_lookup_shelf?shelf=' + encodeURIComponent(shelf));
+        const data = await resp.json();
+        if(!data || !data.success) throw new Error((data && data.error) || 'Shelf lookup failed');
+
+        const items = Array.isArray(data.items) ? data.items : [];
+        if(!data.found || !items.length){
+          queue = [];
+          render();
+          const msg = data.error || `No items found on shelf ${shelf}`;
+          showMessage('Shelf Empty', msg);
+          setStatus(false, msg);
+          closeDestPanel();
+          return;
+        }
+
+        const nextQueue = [];
+        items.forEach(item => {
+          const newLocs = mergeLocations([], Array.isArray(item.locations) ? item.locations : []);
+          const totalAvailable = Math.max(0, Number.parseInt(item.total_available, 10) || 0);
+          if(!newLocs.length || totalAvailable <= 0) return;
+          const row = {
+            uid: seq++,
+            barcode: String(item.barcode || ''),
+            barcode_display: String(item.barcode_display || item.barcode || ''),
+            barcode_key: String(item.barcode_key || barcodeKey(item.barcode || '')),
+            title: String(item.title || item.barcode || 'Item'),
+            image: String(item.image || ''),
+            total_available: totalAvailable,
+            locations: newLocs,
+            scan_qty: totalAvailable,
+            selected_location_keys: [],
+            selected_location_codes: [],
+            selected_location_key: '',
+            selected_location_code: '',
+            selected_preview_key: ''
+          };
+          clampRowQty(row);
+          syncRowSelection(row);
+          nextQueue.push(row);
+        });
+
+        if(!nextQueue.length){
+          queue = [];
+          render();
+          const msg = `No movable inventory found on shelf ${shelf}`;
+          showMessage('Shelf Empty', msg);
+          setStatus(false, msg);
+          closeDestPanel();
+          return;
+        }
+
+        queue = nextQueue;
+        closeDestPanel();
+        render();
+        const units = queuedUnits();
+        setStatus(true, `Loaded ${queue.length} item(s), ${units} unit(s) from shelf ${shelf}.`);
+      }catch(err){
+        showMessage('Shelf Lookup Error', err.message || 'Shelf lookup failed');
+        setStatus(false, err.message || 'Shelf lookup failed');
+      }finally{
+        shelfBusy = false;
+        loadShelfBtn.disabled = false;
+        shelfInput.focus();
+        shelfInput.select();
+      }
+    }
+
     function openDestPanel(){
       if(!queue.length){
         showMessage('No Items', 'Scan at least one item before moving.');
@@ -621,11 +716,20 @@
       if(!code) return;
       lookupAndAdd(code);
     }
+    function processShelf(){
+      const shelf = String(shelfInput.value||'').trim();
+      if(!shelf) return;
+      loadShelfItems(shelf);
+    }
 
     barcodeInput.addEventListener('keydown', e => {
       if(e.key === 'Enter'){ e.preventDefault(); processScan(); }
     });
     scanBtn.addEventListener('click', processScan);
+    shelfInput.addEventListener('keydown', e => {
+      if(e.key === 'Enter'){ e.preventDefault(); processShelf(); }
+    });
+    loadShelfBtn.addEventListener('click', processShelf);
 
     moveBtn.addEventListener('click', openDestPanel);
     clearBtn.addEventListener('click', () => {

@@ -29482,6 +29482,171 @@ def api_movelocation_lookup():
             pass
 
 
+@app.route('/api/movelocation_lookup_shelf', methods=['GET'])
+def api_movelocation_lookup_shelf():
+    """Lookup all inventory rows for one shelf code and aggregate by barcode."""
+    conn = None
+    try:
+        shelf_raw = (request.args.get('shelf') or '').strip()
+        if not shelf_raw:
+            return jsonify({'success': False, 'error': 'Missing shelf code'}), 400
+
+        shelf_norm = shelf_raw.lower()
+
+        conn = sqlite3.connect('searchRack.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+
+        cur.execute("PRAGMA table_info('SEARCHRACK')")
+        cols = [r[1] for r in cur.fetchall()]
+        cols_lower = {c.lower(): c for c in cols}
+        id_col = cols_lower.get('id')
+        barcode_col = cols_lower.get('barcode') or cols_lower.get('upc')
+        title_col = cols_lower.get('title')
+        image_col = cols_lower.get('image')
+        images_col = cols_lower.get('images')
+        qty_col = cols_lower.get('quantity') or cols_lower.get('qty')
+        pos_col = cols_lower.get('item_position') or cols_lower.get('itemposition') or cols_lower.get('position')
+        pic_col = cols_lower.get('pictureposition')
+
+        if not barcode_col:
+            return jsonify({'success': False, 'error': 'SEARCHRACK barcode column not found'}), 500
+        if not pos_col and not pic_col:
+            return jsonify({'success': False, 'error': 'SEARCHRACK location columns not found'}), 500
+
+        if pos_col and pic_col:
+            cur.execute(f'''
+                SELECT rowid AS _rowid_, *
+                FROM SEARCHRACK
+                WHERE LOWER(TRIM(COALESCE(NULLIF({pos_col}, ''), NULLIF({pic_col}, '')))) = ?
+            ''', (shelf_norm,))
+        elif pos_col:
+            cur.execute(f'''
+                SELECT rowid AS _rowid_, *
+                FROM SEARCHRACK
+                WHERE LOWER(TRIM({pos_col})) = ?
+            ''', (shelf_norm,))
+        else:
+            cur.execute(f'''
+                SELECT rowid AS _rowid_, *
+                FROM SEARCHRACK
+                WHERE LOWER(TRIM({pic_col})) = ?
+            ''', (shelf_norm,))
+
+        matched_rows = [dict(r) for r in cur.fetchall()]
+        if not matched_rows:
+            return jsonify({
+                'success': True,
+                'found': False,
+                'shelf': shelf_raw,
+                'error': f'No inventory found for shelf {shelf_raw}',
+                'items': [],
+                'items_count': 0,
+                'total_units': 0
+            })
+
+        buckets = {}
+        total_units = 0
+
+        for row in matched_rows:
+            code, pos_val, pic_val, preview_val = _movelocation_row_location(row, pos_col=pos_col, pic_col=pic_col)
+            if not code:
+                continue
+
+            code_norm = str(code).strip().lower()
+            if code_norm != shelf_norm:
+                pos_norm = str(pos_val or '').strip().lower()
+                pic_norm = str(pic_val or '').strip().lower()
+                if pos_norm != shelf_norm and pic_norm != shelf_norm:
+                    continue
+
+            barcode_val = str(row.get(barcode_col) or '').strip()
+            barcode_key = _movelocation_barcode_key(barcode_val)
+            if not barcode_key:
+                continue
+
+            qty_val = max(0, _movelocation_parse_qty(row.get(qty_col) if qty_col else None, default=1))
+            if qty_val <= 0:
+                continue
+
+            bucket = buckets.get(barcode_key)
+            if bucket is None:
+                canonical_barcode = barcode_val or barcode_key
+                title_val = str(row.get(title_col) or '').strip() if title_col else ''
+                image_val = _movelocation_pick_image(row, image_col=image_col, images_col=images_col)
+                bucket = {
+                    'barcode': canonical_barcode,
+                    'barcode_display': _format_upc_display(canonical_barcode),
+                    'barcode_key': barcode_key,
+                    'title': title_val or canonical_barcode,
+                    'image': image_val,
+                    'total_available': 0,
+                    'locations': [{
+                        'location_key': code_norm,
+                        'code': str(code).strip(),
+                        'item_position': pos_val,
+                        'pictureposition': pic_val,
+                        'preview_key': preview_val or code,
+                        'quantity': 0,
+                        'row_ids': []
+                    }]
+                }
+                buckets[barcode_key] = bucket
+            else:
+                if not bucket.get('title') and title_col:
+                    bucket['title'] = str(row.get(title_col) or '').strip()
+                if not bucket.get('image'):
+                    bucket['image'] = _movelocation_pick_image(row, image_col=image_col, images_col=images_col)
+
+            loc_entry = bucket['locations'][0]
+            loc_entry['quantity'] += qty_val
+
+            row_id = row.get(id_col) if id_col else row.get('_rowid_')
+            if row_id is None:
+                row_id = row.get('_rowid_')
+            if row_id is not None and row_id not in loc_entry['row_ids']:
+                loc_entry['row_ids'].append(row_id)
+
+            bucket['total_available'] += qty_val
+            total_units += qty_val
+
+        items = sorted(
+            [v for v in buckets.values() if int(v.get('total_available') or 0) > 0 and v.get('locations')],
+            key=lambda x: (
+                str(x.get('title') or '').lower(),
+                str(x.get('barcode') or '').lower()
+            )
+        )
+
+        if not items:
+            return jsonify({
+                'success': True,
+                'found': False,
+                'shelf': shelf_raw,
+                'error': f'No movable inventory found for shelf {shelf_raw}',
+                'items': [],
+                'items_count': 0,
+                'total_units': 0
+            })
+
+        return jsonify({
+            'success': True,
+            'found': True,
+            'shelf': shelf_raw,
+            'items': items,
+            'items_count': len(items),
+            'total_units': int(total_units or 0)
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e)}), 500
+    finally:
+        try:
+            if conn is not None:
+                conn.close()
+        except Exception:
+            pass
+
+
 @app.route('/api/movelocation_execute', methods=['POST'])
 def api_movelocation_execute():
     """Move scanned barcode quantities from selected source locations to one destination shelf."""
