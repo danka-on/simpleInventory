@@ -19656,6 +19656,37 @@ def api_listing_helper_scan():
             except Exception:
                 return default
 
+        def _extract_image_url(raw_value):
+            raw = (str(raw_value or '').strip())
+            if not raw:
+                return ''
+
+            # Some rows store image lists (JSON or delimiter-separated).
+            if raw.startswith('[') and raw.endswith(']'):
+                try:
+                    parsed = json.loads(raw)
+                    if isinstance(parsed, list):
+                        for item in parsed:
+                            candidate = (str(item or '').strip().strip('"').strip("'"))
+                            if candidate:
+                                return candidate
+                    elif isinstance(parsed, str):
+                        candidate = parsed.strip().strip('"').strip("'")
+                        if candidate:
+                            return candidate
+                except Exception:
+                    pass
+
+            for delim in ('|', ',', ';'):
+                if delim in raw:
+                    for part in raw.split(delim):
+                        candidate = (part or '').strip().strip('"').strip("'")
+                        if candidate:
+                            return candidate
+                    return ''
+
+            return raw.strip('"').strip("'")
+
         def _parse_iso_utc(raw):
             txt = (str(raw or '').strip())
             if not txt:
@@ -19765,8 +19796,12 @@ def api_listing_helper_scan():
         warehouse_stock_by_base = {}
         warehouse_locations_by_base = {}
         warehouse_title_by_base = {}
+        warehouse_image_by_base = {}
         warehouse_display_upc_by_base = {}
         warehouse_tokens_by_base = {}
+        rawbol_title_by_base = {}
+        rawbol_image_by_base = {}
+        rawbol_display_upc_by_base = {}
         try:
             with sqlite3.connect('searchRack.db') as sr_conn:
                 sr_conn.row_factory = sqlite3.Row
@@ -19779,12 +19814,14 @@ def api_listing_helper_scan():
                 pos_col = sr_cols_lower.get('item_position') or sr_cols_lower.get('itemposition') or sr_cols_lower.get('position')
                 pic_col = sr_cols_lower.get('pictureposition')
                 title_col = sr_cols_lower.get('title')
+                img_col = sr_cols_lower.get('image') or sr_cols_lower.get('images')
                 if upc_col and qty_col:
                     pos_expr = f"{pos_col} AS LOC" if pos_col else "NULL AS LOC"
                     pic_expr = f"{pic_col} AS PIC" if pic_col else "NULL AS PIC"
                     title_expr = f"{title_col} AS TITLE" if title_col else "NULL AS TITLE"
+                    img_expr = f"{img_col} AS IMG" if img_col else "NULL AS IMG"
                     sr_cur.execute(f'''
-                        SELECT rowid AS RID, {upc_col} AS UPC, {qty_col} AS QTY, {pos_expr}, {pic_expr}, {title_expr}
+                        SELECT rowid AS RID, {upc_col} AS UPC, {qty_col} AS QTY, {pos_expr}, {pic_expr}, {title_expr}, {img_expr}
                         FROM SEARCHRACK
                         WHERE {upc_col} IS NOT NULL AND {upc_col} != ""
                     ''')
@@ -19825,6 +19862,9 @@ def api_listing_helper_scan():
                                 title_val = (row['TITLE'] or '').strip()
                                 if title_val and base_upc_key not in warehouse_title_by_base:
                                     warehouse_title_by_base[base_upc_key] = title_val
+                                image_val = _extract_image_url(row['IMG'])
+                                if image_val and base_upc_key not in warehouse_image_by_base:
+                                    warehouse_image_by_base[base_upc_key] = image_val
 
                                 token = str(row['RID'] if row['RID'] is not None else f"{upc_raw}:{location_label}:{qty_val}")
                                 token_list = warehouse_tokens_by_base.get(base_upc_key)
@@ -19839,6 +19879,41 @@ def api_listing_helper_scan():
                     print("Error reading searchRack: missing UPC/BARCODE or QUANTITY columns")
         except Exception as e:
             print(f"Error reading searchRack: {e}")
+
+        # Raw BOL is source of truth for Store Doctor no-listing card metadata.
+        try:
+            warehouse_base_keys = {
+                key for key in warehouse_stock_by_base.keys()
+                if key and key not in invalid_upc_values
+            }
+            if warehouse_base_keys:
+                with sqlite3.connect('rawbol.db') as rb_conn:
+                    rb_conn.row_factory = sqlite3.Row
+                    rb_cur = rb_conn.cursor()
+                    rb_cur.execute('''
+                        SELECT upc, item_description, image_url
+                        FROM raw_bol_items
+                        WHERE upc IS NOT NULL
+                          AND TRIM(upc) != ''
+                        ORDER BY COALESCE(import_date, '') DESC, rowid DESC
+                    ''')
+                    for row in rb_cur.fetchall():
+                        upc_raw = (row['upc'] or '').strip()
+                        base_upc_key = _listing_alert_base_upc_key(upc_raw)
+                        if (not base_upc_key) or (base_upc_key in invalid_upc_values) or (base_upc_key not in warehouse_base_keys):
+                            continue
+                        if upc_raw and base_upc_key not in rawbol_display_upc_by_base:
+                            rawbol_display_upc_by_base[base_upc_key] = upc_raw
+
+                        title_val = (row['item_description'] or '').strip()
+                        if title_val and base_upc_key not in rawbol_title_by_base:
+                            rawbol_title_by_base[base_upc_key] = title_val
+
+                        image_val = _extract_image_url(row['image_url'])
+                        if image_val and base_upc_key not in rawbol_image_by_base:
+                            rawbol_image_by_base[base_upc_key] = image_val
+        except Exception as e:
+            print(f"Error reading rawbol metadata for listing helper: {e}")
 
         # Pending sold orders (rackupdated=0) are inventory that will be auto-removed later.
         # We subtract these immediately so alerts fire right after sale sync, not 24-48h later.
@@ -20081,7 +20156,7 @@ def api_listing_helper_scan():
                     FROM ITEMS
                     WHERE UPC IS NOT NULL AND UPC != ""
                       AND (QUANTITY > 0 OR QUANTITY IS NULL)
-                      AND TRIM(COALESCE(STATUS, '')) = 'Active'
+                      AND LOWER(TRIM(COALESCE(STATUS, ''))) = 'active'
                       AND TRIM(COALESCE(ASIN, '')) != ''
                 ''')
                 for row in am_cur.fetchall():
@@ -20241,10 +20316,13 @@ def api_listing_helper_scan():
             if ('no_listings', snap_hash) in dismissed:
                 continue
 
+            title_val = rawbol_title_by_base.get(base_upc_key) or warehouse_title_by_base.get(base_upc_key) or ''
+            image_val = rawbol_image_by_base.get(base_upc_key) or warehouse_image_by_base.get(base_upc_key) or ''
             alerts['no_listings'].append({
-                'upc': warehouse_display_upc_by_base.get(base_upc_key) or base_upc_key,
+                'upc': rawbol_display_upc_by_base.get(base_upc_key) or warehouse_display_upc_by_base.get(base_upc_key) or base_upc_key,
                 'warehouse_base_upc': base_upc_key,
-                'title': warehouse_title_by_base.get(base_upc_key) or '',
+                'title': title_val,
+                'image': image_val,
                 'warehouse_qty': warehouse_qty,
                 'warehouse_locations': warehouse_locations_by_base.get(base_upc_key, []),
                 'severity': 'yellow',
@@ -20310,7 +20388,7 @@ def api_listing_helper_dismiss():
         conn.close()
         _listing_helper_scan_cache_clear()
 
-        return jsonify({'success': True, 'lot_number': lot_number})
+        return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e, 'listing-helper-dismiss')}), 500
 

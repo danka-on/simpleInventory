@@ -995,10 +995,11 @@ function renderNoListings(alerts) {
     const warehouseQty = Number(a.warehouse_qty || 0);
     const locationHtml = renderLocationLinks(a.warehouse_locations);
     const title = a.title || t('untitled');
+    const heroImg = a.image || '';
     return `
     <div class="alert-card yellow">
       <div class="alert-hero">
-        <img class="alert-hero-img" src="${missingImgSvg()}" data-img="" data-title="${encodeURIComponent(title)}" onclick="openListingImg(this)">
+        <img class="alert-hero-img" src="${esc(heroImg) || missingImgSvg()}" data-img="${encodeURIComponent(heroImg)}" data-title="${encodeURIComponent(title)}" onclick="openListingImg(this)" onerror="this.src='${missingImgSvg()}'">
         <div class="alert-hero-info">
           <div class="alert-hero-title">${esc(title)}</div>
           <div class="alert-hero-meta">
