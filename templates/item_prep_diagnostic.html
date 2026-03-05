@@ -40,6 +40,7 @@
   .status-bubble.active{background:#00b894;color:#fff;border-color:#00b894}
   .status-bubble.good.active{background:#2ecc71;border-color:#2ecc71}
   .status-bubble.bad.active{background:#e74c3c;border-color:#e74c3c}
+  .status-bubble.return.active{background:#8b4513;border-color:#8b4513}
   .set-position-btn{background:#3498db;color:#fff;border:none;padding:16px 24px;border-radius:12px;cursor:pointer;font-size:1.2rem;font-weight:600;display:flex;align-items:center;gap:10px;margin:12px 0}
   .set-position-btn:hover{background:#2980b9}
   .set-position-btn i{font-size:1.4rem}
@@ -93,6 +94,7 @@
     html.ss-theme-night .status-bubble.active{background:#10b981;border-color:#10b981}
     html.ss-theme-night .status-bubble.good.active{background:#22c55e;border-color:#22c55e}
     html.ss-theme-night .status-bubble.bad.active{background:#ef4444;border-color:#ef4444}
+    html.ss-theme-night .status-bubble.return.active{background:#b7791f;border-color:#b7791f}
     html.ss-theme-night .reason-btn{background:#111827;border-color:#334155;color:#e2e8f0}
     html.ss-theme-night .reason-btn.active{background:#10b981;border-color:#10b981;color:#fff}
     html.ss-theme-night input[type="text"],
@@ -232,6 +234,7 @@
       <div id="statusBubbleWrap" class="status-bubbles" style="margin: 0;">
         <button type="button" class="status-bubble good" data-status="good">Good</button>
         <button type="button" class="status-bubble bad" data-status="bad">Bad</button>
+        <button type="button" class="status-bubble return" data-status="return">Return</button>
       </div>
       
       <button type="button" class="set-position-btn" id="setPositionBtn" style="margin: 0; padding: 12px 18px; font-size: 1rem;">
@@ -348,7 +351,10 @@
   
   console.log('=== Diagnostic Edit Script Starting ===');
   const pageParams = new URLSearchParams(window.location.search);
-  const isBadFlow = pageParams.get('from') === 'bad';
+  const flowFrom = (pageParams.get('from') || '').toLowerCase();
+  const isBadFlow = flowFrom === 'bad';
+  const isReturnFlow = flowFrom === 'return';
+  const isForcedDiagnosticFlow = isBadFlow || isReturnFlow;
   // const photos = document.getElementById('photos'); // Not using file input anymore
     const preview = document.getElementById('preview');
     const qualityGroup = document.getElementById('qualityGroup');
@@ -578,12 +584,14 @@
         try{ j = await res.json(); }catch(_jsonErr){ j = null; }
         const msg = document.getElementById('msg');
         if(res.ok && j && j.success){
-          // Also POST status (status, reason) - only if status is set (good or bad)
+          // Also POST status (status, reason) when status is set.
           try{
-            const statusVal = isBadFlow ? 'bad' : (statusInput.value || '');
+            const statusVal = isBadFlow
+              ? 'bad'
+              : (isReturnFlow ? 'return' : (statusInput.value || ''));
             let continuedWithoutLot = false;
             console.log('[SAVE] Status value:', statusVal);
-            if(statusVal && (statusVal === 'good' || statusVal === 'bad')){
+            if(statusVal && (statusVal === 'good' || statusVal === 'bad' || statusVal === 'return')){
               const reasonVal = (document.getElementById('reasonSelect') && document.getElementById('reasonSelect').value) || '';
               // Read qty from URL parameter if provided (from bad flow)
               const urlParams = new URLSearchParams(window.location.search);
@@ -731,8 +739,8 @@
         updateDoneButtonState(); // Update button state when status changes
       });
     });
-    if(isBadFlow){
-      updateStatusBubbles('bad');
+    if(isForcedDiagnosticFlow){
+      updateStatusBubbles(isReturnFlow ? 'return' : 'bad');
       if(statusBubbleWrap){
         statusBubbleWrap.style.display = 'none';
       }
@@ -752,7 +760,7 @@
       const currentStatus = statusInput.value;
       
       // For "good" status, allow saving without a reason (defect is optional)
-      // For "bad" status, require a reason
+      // For non-good statuses (bad/return), require a reason
       const canSave = (currentStatus === 'good') || hasReason;
       
       if(canSave){
@@ -886,7 +894,7 @@
       // Check if coming from "bad" flow - if so, don't load existing diagnostic data
       const params = new URLSearchParams(window.location.search);
       const from = params.get('from');
-      const isNewBadEntry = (from === 'bad');
+      const isForcedFlowEntry = (from === 'bad' || from === 'return');
       
       // Load notes
       await loadNotes();
@@ -902,14 +910,14 @@
   const st = j && j.status ? j.status : null;
         const imgs = Array.isArray(j && j.images) ? j.images : [];
         
-        // Update status bubbles if a status exists (but skip if new bad entry)
-        if(!isNewBadEntry && st && st.status){
+        // Update status bubbles if a status exists (but skip for new forced-flow entries)
+        if(!isForcedFlowEntry && st && st.status){
           const statusVal = st.status;
           updateStatusBubbles(statusVal);
         }
         
-        // Only restore reason if NOT a new bad entry
-        if(!isNewBadEntry && st){
+        // Only restore reason if NOT a new forced-flow entry
+        if(!isForcedFlowEntry && st){
           const val = (st.reason||'').trim();
           const valid = ['Missing pieces','Broken','Replacement','Other'];
           reasonSelect.value = valid.includes(val) ? val : '';
@@ -1234,8 +1242,8 @@
       // Check if coming from "bad" flow - if so, set to bad and don't load existing
       const params = new URLSearchParams(window.location.search);
       const from = params.get('from');
-      if(isBadFlow || from === 'bad'){
-        updateStatusBubbles('bad');
+      if(isForcedDiagnosticFlow || from === 'bad' || from === 'return'){
+        updateStatusBubbles((isReturnFlow || from === 'return') ? 'return' : 'bad');
         return;
       }
       

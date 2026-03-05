@@ -1383,6 +1383,546 @@ def api_bulk_manifest_lookup():
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
 
+def _marketplace_sale_store_key(value):
+    raw = str(value or '').strip().lower().replace('_', '-')
+    if raw in (
+        'marketplace-sale-bulk',
+        'marketplace sale - bulk',
+        'marketplace sale bulk',
+        'marketplace-bulk',
+        'marketplace bulk',
+        'bulk-marketplace'
+    ):
+        return 'marketplace-sale-bulk'
+    return 'marketplace'
+
+def _bulk_manifest_status_key(value):
+    raw = str(value or '').strip().lower().replace(' ', '_').replace('-', '_')
+    if raw in ('sold', 'processed_sale'):
+        return 'sold'
+    if raw in ('cleanup_complete', 'cleaned'):
+        return 'cleanup_complete'
+    if raw in ('cleanup_partial', 'partial_cleanup'):
+        return 'cleanup_partial'
+    return 'created'
+
+def _bulk_manifest_parse_ids(raw_value):
+    seen = set()
+    out = []
+    for token in str(raw_value or '').split(','):
+        part = token.strip()
+        if not part:
+            continue
+        try:
+            val = int(part)
+        except Exception:
+            continue
+        if val <= 0 or val in seen:
+            continue
+        seen.add(val)
+        out.append(val)
+    return out
+
+def _bulk_manifest_money(value, default=0.0):
+    try:
+        num = float(value)
+    except Exception:
+        num = float(default or 0.0)
+    return round(max(0.0, num), 2)
+
+def _ensure_bulk_manifest_tables(cur):
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS bulk_manifests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            manifest_title TEXT NOT NULL,
+            buyer TEXT,
+            manifest_date TEXT,
+            total_items INTEGER DEFAULT 0,
+            total_units INTEGER DEFAULT 0,
+            total_original_retail REAL DEFAULT 0,
+            status TEXT DEFAULT 'created',
+            sold_at TEXT,
+            sold_session_id TEXT,
+            sold_total REAL,
+            sold_rows INTEGER DEFAULT 0,
+            cleanup_at TEXT,
+            cleanup_note TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS bulk_manifest_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            manifest_id INTEGER NOT NULL,
+            line_number INTEGER NOT NULL,
+            barcode TEXT NOT NULL,
+            title TEXT,
+            quantity INTEGER DEFAULT 1,
+            unit_price REAL DEFAULT 0,
+            line_total REAL DEFAULT 0,
+            image_url TEXT,
+            lot_number TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (manifest_id) REFERENCES bulk_manifests(id) ON DELETE CASCADE
+        )
+    ''')
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_bulk_manifests_status_created ON bulk_manifests(status, created_at DESC)')
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_bulk_manifest_items_manifest_id ON bulk_manifest_items(manifest_id)')
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_bulk_manifest_items_barcode ON bulk_manifest_items(barcode)')
+
+    try:
+        cur.execute('PRAGMA table_info(bulk_manifests)')
+        existing = {str(r[1]).lower() for r in cur.fetchall()}
+        migrations = {
+            'status': "ALTER TABLE bulk_manifests ADD COLUMN status TEXT DEFAULT 'created'",
+            'sold_at': 'ALTER TABLE bulk_manifests ADD COLUMN sold_at TEXT',
+            'sold_session_id': 'ALTER TABLE bulk_manifests ADD COLUMN sold_session_id TEXT',
+            'sold_total': 'ALTER TABLE bulk_manifests ADD COLUMN sold_total REAL',
+            'sold_rows': 'ALTER TABLE bulk_manifests ADD COLUMN sold_rows INTEGER DEFAULT 0',
+            'cleanup_at': 'ALTER TABLE bulk_manifests ADD COLUMN cleanup_at TEXT',
+            'cleanup_note': 'ALTER TABLE bulk_manifests ADD COLUMN cleanup_note TEXT',
+            'updated_at': 'ALTER TABLE bulk_manifests ADD COLUMN updated_at TEXT'
+        }
+        for col_name, ddl in migrations.items():
+            if col_name not in existing:
+                cur.execute(ddl)
+    except Exception:
+        pass
+
+@app.route('/api/bulk-manifest/create', methods=['POST'])
+def api_bulk_manifest_create():
+    """Persist a bulk manifest and its line items into marketplace.db."""
+    try:
+        data = request.get_json() or {}
+        manifest_title = str(data.get('manifest_title') or data.get('title') or 'Bulk Sale Manifest').strip() or 'Bulk Sale Manifest'
+        buyer = str(data.get('buyer') or '').strip()
+        manifest_date = str(data.get('manifest_date') or data.get('date') or '').strip() or datetime.date.today().isoformat()
+        raw_items = data.get('items') or []
+
+        if not isinstance(raw_items, list) or not raw_items:
+            return jsonify({'success': False, 'error': 'Manifest items are required'}), 400
+
+        items = []
+        invalid_rows = []
+        total_units = 0
+        total_original_retail = 0.0
+
+        for idx, raw_item in enumerate(raw_items, start=1):
+            row = raw_item if isinstance(raw_item, dict) else {}
+            barcode = _normalize_upc_preserve_suffix_for_match(
+                _normalize_scanned_upc(row.get('barcode') or row.get('upc'))
+            )
+            barcode = str(barcode or '').strip()
+            title = str(row.get('name') or row.get('title') or '').strip()
+            quantity = max(1, _coerce_int(row.get('qty') if row.get('qty') is not None else row.get('quantity'), 1))
+            unit_price = _bulk_manifest_money(
+                row.get('unit_price') if row.get('unit_price') is not None else row.get('price'),
+                default=0.0
+            )
+            image_url = str(row.get('image_url') or row.get('image') or '').strip()
+            lot_number = _normalize_lot_number(row.get('lot_number'))
+
+            if not barcode:
+                invalid_rows.append(idx)
+                continue
+            if not title:
+                title = barcode
+
+            line_total = round(quantity * unit_price, 2)
+            items.append({
+                'line_number': idx,
+                'barcode': barcode,
+                'title': title,
+                'quantity': quantity,
+                'unit_price': unit_price,
+                'line_total': line_total,
+                'image_url': image_url,
+                'lot_number': lot_number
+            })
+            total_units += quantity
+            total_original_retail += line_total
+
+        if invalid_rows:
+            return jsonify({
+                'success': False,
+                'error': f'Missing barcode on line(s): {", ".join(str(x) for x in invalid_rows)}'
+            }), 400
+        if not items:
+            return jsonify({'success': False, 'error': 'No valid manifest items to save'}), 400
+
+        now_iso = datetime.datetime.now().isoformat()
+        with db_connection('marketplace.db') as conn:
+            cur = conn.cursor()
+            _ensure_bulk_manifest_tables(cur)
+            cur.execute('''
+                INSERT INTO bulk_manifests (
+                    manifest_title, buyer, manifest_date,
+                    total_items, total_units, total_original_retail,
+                    status, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, 'created', ?, ?)
+            ''', (
+                manifest_title,
+                buyer,
+                manifest_date,
+                len(items),
+                total_units,
+                round(total_original_retail, 2),
+                now_iso,
+                now_iso
+            ))
+            manifest_id = cur.lastrowid
+
+            for item in items:
+                cur.execute('''
+                    INSERT INTO bulk_manifest_items (
+                        manifest_id, line_number, barcode, title, quantity,
+                        unit_price, line_total, image_url, lot_number, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    manifest_id,
+                    item['line_number'],
+                    item['barcode'],
+                    item['title'],
+                    item['quantity'],
+                    item['unit_price'],
+                    item['line_total'],
+                    item['image_url'],
+                    item['lot_number'],
+                    now_iso
+                ))
+
+        return jsonify({
+            'success': True,
+            'manifest': {
+                'id': manifest_id,
+                'manifest_title': manifest_title,
+                'buyer': buyer,
+                'manifest_date': manifest_date,
+                'status': 'created',
+                'total_items': len(items),
+                'total_units': total_units,
+                'total_original_retail': round(total_original_retail, 2),
+                'created_at': now_iso
+            }
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'bulk_manifest_create')}), 500
+
+@app.route('/api/bulk-manifest/history', methods=['GET'])
+def api_bulk_manifest_history():
+    """List saved bulk manifests for history and downstream integrations."""
+    try:
+        raw_statuses = str(request.args.get('status') or '').strip()
+        limit = max(1, min(300, _coerce_int(request.args.get('limit'), 120)))
+        status_filters = []
+        if raw_statuses:
+            seen = set()
+            for part in raw_statuses.split(','):
+                if not part.strip():
+                    continue
+                key = _bulk_manifest_status_key(part)
+                if key in seen:
+                    continue
+                seen.add(key)
+                status_filters.append(key)
+
+        with db_connection('marketplace.db') as conn:
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            _ensure_bulk_manifest_tables(cur)
+
+            sql = '''
+                SELECT
+                    id,
+                    manifest_title,
+                    buyer,
+                    manifest_date,
+                    total_items,
+                    total_units,
+                    total_original_retail,
+                    status,
+                    sold_at,
+                    sold_session_id,
+                    sold_total,
+                    sold_rows,
+                    cleanup_at,
+                    cleanup_note,
+                    created_at,
+                    updated_at
+                FROM bulk_manifests
+            '''
+            params = []
+            if status_filters:
+                placeholders = ','.join('?' for _ in status_filters)
+                sql += f' WHERE status IN ({placeholders})'
+                params.extend(status_filters)
+            sql += ' ORDER BY COALESCE(created_at, "") DESC, id DESC LIMIT ?'
+            params.append(limit)
+            cur.execute(sql, tuple(params))
+            rows = [dict(r) for r in cur.fetchall()]
+
+        manifests = []
+        for row in rows:
+            manifests.append({
+                'id': row.get('id'),
+                'manifest_title': str(row.get('manifest_title') or '').strip(),
+                'buyer': str(row.get('buyer') or '').strip(),
+                'manifest_date': str(row.get('manifest_date') or '').strip(),
+                'status': _bulk_manifest_status_key(row.get('status')),
+                'total_items': max(0, _coerce_int(row.get('total_items'), 0)),
+                'total_units': max(0, _coerce_int(row.get('total_units'), 0)),
+                'total_original_retail': _bulk_manifest_money(row.get('total_original_retail'), default=0.0),
+                'sold_total': _bulk_manifest_money(row.get('sold_total'), default=0.0),
+                'sold_rows': max(0, _coerce_int(row.get('sold_rows'), 0)),
+                'sold_at': str(row.get('sold_at') or '').strip(),
+                'sold_session_id': str(row.get('sold_session_id') or '').strip(),
+                'cleanup_at': str(row.get('cleanup_at') or '').strip(),
+                'cleanup_note': str(row.get('cleanup_note') or '').strip(),
+                'created_at': str(row.get('created_at') or '').strip(),
+                'updated_at': str(row.get('updated_at') or '').strip()
+            })
+
+        return jsonify({'success': True, 'manifests': manifests})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'bulk_manifest_history')}), 500
+
+@app.route('/api/bulk-manifest/<int:manifest_id>', methods=['GET'])
+def api_bulk_manifest_detail(manifest_id):
+    """Return one manifest plus line items."""
+    try:
+        with db_connection('marketplace.db') as conn:
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            _ensure_bulk_manifest_tables(cur)
+
+            cur.execute('SELECT * FROM bulk_manifests WHERE id = ?', (manifest_id,))
+            manifest_row = cur.fetchone()
+            if not manifest_row:
+                return jsonify({'success': False, 'error': 'Manifest not found'}), 404
+
+            cur.execute('''
+                SELECT
+                    id,
+                    line_number,
+                    barcode,
+                    title,
+                    quantity,
+                    unit_price,
+                    line_total,
+                    image_url,
+                    lot_number,
+                    created_at
+                FROM bulk_manifest_items
+                WHERE manifest_id = ?
+                ORDER BY line_number ASC, id ASC
+            ''', (manifest_id,))
+            item_rows = [dict(r) for r in cur.fetchall()]
+
+        manifest = dict(manifest_row)
+        out_manifest = {
+            'id': manifest.get('id'),
+            'manifest_title': str(manifest.get('manifest_title') or '').strip(),
+            'buyer': str(manifest.get('buyer') or '').strip(),
+            'manifest_date': str(manifest.get('manifest_date') or '').strip(),
+            'status': _bulk_manifest_status_key(manifest.get('status')),
+            'total_items': max(0, _coerce_int(manifest.get('total_items'), 0)),
+            'total_units': max(0, _coerce_int(manifest.get('total_units'), 0)),
+            'total_original_retail': _bulk_manifest_money(manifest.get('total_original_retail'), default=0.0),
+            'sold_total': _bulk_manifest_money(manifest.get('sold_total'), default=0.0),
+            'sold_rows': max(0, _coerce_int(manifest.get('sold_rows'), 0)),
+            'sold_at': str(manifest.get('sold_at') or '').strip(),
+            'sold_session_id': str(manifest.get('sold_session_id') or '').strip(),
+            'cleanup_at': str(manifest.get('cleanup_at') or '').strip(),
+            'cleanup_note': str(manifest.get('cleanup_note') or '').strip(),
+            'created_at': str(manifest.get('created_at') or '').strip(),
+            'updated_at': str(manifest.get('updated_at') or '').strip()
+        }
+
+        items = []
+        for row in item_rows:
+            barcode = str(row.get('barcode') or '').strip()
+            qty = max(1, _coerce_int(row.get('quantity'), 1))
+            unit_price = _bulk_manifest_money(row.get('unit_price'), default=0.0)
+            items.append({
+                'id': row.get('id'),
+                'line_number': max(1, _coerce_int(row.get('line_number'), len(items) + 1)),
+                'barcode': barcode,
+                'barcode_display': _format_upc_display(barcode),
+                'title': str(row.get('title') or '').strip() or barcode,
+                'quantity': qty,
+                'unit_price': unit_price,
+                'line_total': _bulk_manifest_money(row.get('line_total'), default=(qty * unit_price)),
+                'image_url': str(row.get('image_url') or '').strip(),
+                'lot_number': _normalize_lot_number(row.get('lot_number')),
+                'created_at': str(row.get('created_at') or '').strip()
+            })
+
+        return jsonify({
+            'success': True,
+            'manifest': out_manifest,
+            'items': items
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'bulk_manifest_detail')}), 500
+
+@app.route('/api/bulk-manifest/<int:manifest_id>/mark-sold', methods=['POST'])
+def api_bulk_manifest_mark_sold(manifest_id):
+    """Mark one manifest as sold through marketplace sale processing."""
+    try:
+        data = request.get_json() or {}
+        session_id = str(data.get('session_id') or '').strip()
+        sold_total = _bulk_manifest_money(data.get('sold_total'), default=0.0)
+        sold_rows = max(0, _coerce_int(data.get('sold_rows'), 0))
+        status = _bulk_manifest_status_key(data.get('status') or 'sold')
+        if status == 'created':
+            status = 'sold'
+        now_iso = datetime.datetime.now().isoformat()
+
+        with db_connection('marketplace.db') as conn:
+            cur = conn.cursor()
+            _ensure_bulk_manifest_tables(cur)
+            cur.execute('SELECT id FROM bulk_manifests WHERE id = ?', (manifest_id,))
+            exists = cur.fetchone()
+            if not exists:
+                return jsonify({'success': False, 'error': 'Manifest not found'}), 404
+
+            cur.execute('''
+                UPDATE bulk_manifests
+                SET status = ?,
+                    sold_at = ?,
+                    sold_session_id = ?,
+                    sold_total = ?,
+                    sold_rows = ?,
+                    updated_at = ?
+                WHERE id = ?
+            ''', (status, now_iso, session_id, sold_total, sold_rows, now_iso, manifest_id))
+
+        return jsonify({
+            'success': True,
+            'manifest_id': manifest_id,
+            'status': status,
+            'sold_at': now_iso
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'bulk_manifest_mark_sold')}), 500
+
+@app.route('/api/bulk-manifest/cleanup-items', methods=['GET'])
+def api_bulk_manifest_cleanup_items():
+    """Return merged manifest line items (barcode + qty) for move-location cleanup queues."""
+    try:
+        manifest_ids = _bulk_manifest_parse_ids(request.args.get('manifest_ids'))
+        if not manifest_ids:
+            return jsonify({'success': False, 'error': 'manifest_ids is required'}), 400
+
+        with db_connection('marketplace.db') as conn:
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            _ensure_bulk_manifest_tables(cur)
+
+            placeholders = ','.join('?' for _ in manifest_ids)
+            cur.execute(f'''
+                SELECT id, manifest_title, buyer, manifest_date, status, sold_at, created_at
+                FROM bulk_manifests
+                WHERE id IN ({placeholders})
+                ORDER BY COALESCE(created_at, '') DESC, id DESC
+            ''', tuple(manifest_ids))
+            manifests = [dict(r) for r in cur.fetchall()]
+            if not manifests:
+                return jsonify({'success': False, 'error': 'No manifests found'}), 404
+
+            cur.execute(f'''
+                SELECT manifest_id, barcode, title, quantity, unit_price, line_total, image_url, lot_number
+                FROM bulk_manifest_items
+                WHERE manifest_id IN ({placeholders})
+                ORDER BY manifest_id ASC, line_number ASC, id ASC
+            ''', tuple(manifest_ids))
+            item_rows = [dict(r) for r in cur.fetchall()]
+
+        manifest_by_id = {}
+        for manifest in manifests:
+            manifest_id = max(0, _coerce_int(manifest.get('id'), 0))
+            if manifest_id <= 0:
+                continue
+            manifest_by_id[manifest_id] = {
+                'id': manifest_id,
+                'manifest_title': str(manifest.get('manifest_title') or '').strip(),
+                'buyer': str(manifest.get('buyer') or '').strip(),
+                'manifest_date': str(manifest.get('manifest_date') or '').strip(),
+                'status': _bulk_manifest_status_key(manifest.get('status')),
+                'sold_at': str(manifest.get('sold_at') or '').strip(),
+                'created_at': str(manifest.get('created_at') or '').strip()
+            }
+
+        merged = {}
+        total_units = 0
+        for row in item_rows:
+            manifest_id = max(0, _coerce_int(row.get('manifest_id'), 0))
+            barcode = _normalize_upc_preserve_suffix_for_match(
+                _normalize_scanned_upc(row.get('barcode'))
+            )
+            barcode = str(barcode or '').strip()
+            if manifest_id <= 0 or not barcode:
+                continue
+
+            qty = max(1, _coerce_int(row.get('quantity'), 1))
+            key = _movelocation_barcode_key(barcode) or barcode.lower()
+            bucket = merged.get(key)
+            if bucket is None:
+                bucket = {
+                    'barcode': barcode,
+                    'barcode_display': _format_upc_display(barcode),
+                    'barcode_key': key,
+                    'title': str(row.get('title') or '').strip() or barcode,
+                    'image': str(row.get('image_url') or '').strip(),
+                    'quantity': 0,
+                    'unit_price_total': 0.0,
+                    'manifest_ids': [],
+                    'manifest_titles': [],
+                    'lot_numbers': []
+                }
+                merged[key] = bucket
+
+            bucket['quantity'] += qty
+            bucket['unit_price_total'] = round(
+                bucket['unit_price_total'] + _bulk_manifest_money(row.get('line_total'), default=0.0),
+                2
+            )
+            if manifest_id not in bucket['manifest_ids']:
+                bucket['manifest_ids'].append(manifest_id)
+                manifest_title = manifest_by_id.get(manifest_id, {}).get('manifest_title') or f'Manifest #{manifest_id}'
+                bucket['manifest_titles'].append(manifest_title)
+            lot_number = _normalize_lot_number(row.get('lot_number'))
+            if lot_number and lot_number not in bucket['lot_numbers']:
+                bucket['lot_numbers'].append(lot_number)
+            if not bucket.get('title'):
+                bucket['title'] = str(row.get('title') or '').strip() or barcode
+            if not bucket.get('image'):
+                bucket['image'] = str(row.get('image_url') or '').strip()
+
+            total_units += qty
+
+        merged_items = sorted(
+            merged.values(),
+            key=lambda x: (str(x.get('title') or '').lower(), str(x.get('barcode') or '').lower())
+        )
+
+        ordered_manifests = []
+        for manifest_id in manifest_ids:
+            if manifest_id in manifest_by_id:
+                ordered_manifests.append(manifest_by_id[manifest_id])
+
+        return jsonify({
+            'success': True,
+            'manifest_ids': [m['id'] for m in ordered_manifests],
+            'manifests': ordered_manifests,
+            'items': merged_items,
+            'items_count': len(merged_items),
+            'total_units': int(total_units or 0)
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'bulk_manifest_cleanup_items')}), 500
+
 @app.route('/listingagent')
 def listingagent():
     """Experimental: assisted listing page (start with eBay)."""
@@ -9961,7 +10501,7 @@ def _items_prep_items_to_list_url(upc, lot_number=''):
         from urllib.parse import quote
         upc_n = _normalize_upc_preserve_suffix_for_match(upc)
         lot_n = _normalize_lot_number(lot_number)
-        url = f"/items-to-list?q={quote(upc_n)}&status=good,bad,unchecked"
+        url = f"/items-to-list?q={quote(upc_n)}&status=good,bad,return,unchecked&direct_search=1"
         if lot_n:
             url += f"&lot={quote(lot_n)}"
         return url
@@ -12156,7 +12696,7 @@ def api_items_prep_status():
         if qty < 1:
             return jsonify({'success': False, 'error': 'qty must be at least 1'}), 400
         
-        if not upc or status not in ('good', 'bad', 'unchecked'):
+        if not upc or status not in ('good', 'bad', 'unchecked', 'return'):
             return jsonify({'success': False, 'error': 'Missing upc or invalid status'}), 400
         
         # Strip leading zeros but preserve suffix
@@ -13521,8 +14061,8 @@ def api_items_prep_create_bad_entry():
 
 @app.route('/api/items_prep/create_return_entry', methods=['POST'])
 def api_items_prep_create_return_entry():
-    """Create a suffixed entry with status 'good' and reason 'return' for items being returned to vendor.
-    Similar to bad flow but marks as good with return defect.
+    """Create a suffixed entry for return flow.
+    Similar to bad flow but tracks status as 'return'.
     JSON: { upc, qty }
     Returns: { success, suffixed_upc }
     """
@@ -13698,12 +14238,12 @@ def api_items_prep_create_return_entry():
         ''', (suffixed_upc, base_item[1], base_item[2], selected_lot, base_item[4], import_date, 
               qty, qty, qty))  # original_qty=qty, good_qty=qty, quantity=qty for this suffixed entry
         
-        # Create items_prep_status entry with status 'good' and reason 'return'
+        # Seed prep status so return rows are visible and can be finalized in diagnostic.
         ts = datetime.datetime.now(datetime.UTC).isoformat()
         cur.execute('''
             INSERT INTO items_prep_status (upc, lot_number, status, reason, note, updated_at, quantity)
             VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (suffixed_upc, _normalize_lot_number(selected_lot), 'good', 'return', '', ts, qty))
+        ''', (suffixed_upc, _normalize_lot_number(selected_lot), 'return', 'return', '', ts, qty))
 
         # Return flow consumes unchecked units from the base row.
         new_unchecked = max(0, unchecked - qty)
@@ -21415,6 +21955,8 @@ def api_bol_items():
                         status_conditions.append(f"({prep_status_expr} = 'bad' OR ({prep_status_expr} IS NULL AND COALESCE(b.bad_qty, 0) > 0 AND COALESCE(b.good_qty, 0) = 0))")
                     else:
                         status_conditions.append(f"{prep_status_expr} = 'bad'")
+                elif sf == 'return':
+                    status_conditions.append(f"{prep_status_expr} = 'return'")
             
             if status_conditions:
                 where.append(f"({' OR '.join(status_conditions)})")
@@ -21790,7 +22332,7 @@ def api_bol_items():
             if 'prep_photo_count' not in row:
                 row['prep_photo_count'] = photo_count_map.get(row_upc, 0)
 
-            return st if st in ('good', 'bad', 'unchecked') else 'unchecked'
+            return st if st in ('good', 'bad', 'unchecked', 'return') else 'unchecked'
         
         # Apply status enrichment to rows
         for r in rows:
@@ -25884,6 +26426,16 @@ def api_inventory_history():
                         else:
                             action = 'Moved'
                             source = 'Location Move'
+                    elif removal_type == 'locationcleared':
+                        if qty_change > 0:
+                            action = 'Added'
+                            source = 'Location Cleared (Now Unassigned)'
+                        elif qty_change < 0:
+                            action = 'Removed'
+                            source = 'Location Cleared (Removed From Shelf)'
+                        else:
+                            action = 'Changed'
+                            source = 'Location Cleared'
                     elif removal_type == 'automatic':
                         action = 'Removed'
                         source = 'Automatic Removal'
@@ -29649,15 +30201,16 @@ def api_movelocation_lookup_shelf():
 
 @app.route('/api/movelocation_execute', methods=['POST'])
 def api_movelocation_execute():
-    """Move scanned barcode quantities from selected source locations to one destination shelf."""
+    """Move scanned quantities to a destination shelf, or clear location codes when requested."""
     conn = None
     rem_conn = None
     try:
         data = request.get_json() or {}
         to_location = (data.get('to_location') or '').strip()
+        clear_location = bool(data.get('clear_location'))
         items = data.get('items') or []
 
-        if not to_location:
+        if not clear_location and not to_location:
             return jsonify({'success': False, 'error': 'Missing destination shelf code'}), 400
         if not isinstance(items, list) or not items:
             return jsonify({'success': False, 'error': 'Missing items list'}), 400
@@ -29704,7 +30257,9 @@ def api_movelocation_execute():
         moved_units = 0
         skipped_items = 0
         item_results = []
-        to_location_norm = to_location.lower()
+        to_location_norm = to_location.lower() if to_location else ''
+        removal_type = 'locationcleared' if clear_location else 'locationmoved'
+        target_location_for_logs = '' if clear_location else to_location
 
         def _location_match_rows(source_location_norm):
             if pos_col and pic_col:
@@ -29803,7 +30358,7 @@ def api_movelocation_execute():
                     source_location_norm = source_location.lower().strip()
                     if not source_location_norm:
                         continue
-                    if source_location_norm == to_location_norm:
+                    if (not clear_location) and source_location_norm == to_location_norm:
                         source_warnings.append(f'Source {source_location} matches destination')
                         continue
 
@@ -29867,7 +30422,7 @@ def api_movelocation_execute():
                                 if qty_col and c.lower() == qty_col.lower():
                                     val = take_qty
                                 if pos_col and c.lower() == pos_col.lower():
-                                    val = to_location
+                                    val = '' if clear_location else to_location
                                 if pic_col and c.lower() == pic_col.lower():
                                     val = ''
                                 insert_values.append(val)
@@ -29882,39 +30437,39 @@ def api_movelocation_execute():
                                 INSERT INTO removed_items
                                 (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position)
                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            ''', (None, barcode_val, title_val, take_qty, now, row_id, row_qty, new_qty, 'locationmoved', source_location))
+                            ''', (None, barcode_val, title_val, take_qty, now, row_id, row_qty, new_qty, removal_type, source_location))
                             rem_cur.execute('''
                                 INSERT INTO removed_items
                                 (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position)
                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            ''', (None, barcode_val, title_val, take_qty, now, new_id, 0, take_qty, 'locationmoved', to_location))
+                            ''', (None, barcode_val, title_val, take_qty, now, new_id, 0, take_qty, removal_type, target_location_for_logs))
                         else:
                             if pos_col and pic_col:
                                 cur.execute(
                                     f"UPDATE SEARCHRACK SET {pos_col} = ?, {pic_col} = ? WHERE {id_lookup_col} = ?",
-                                    (to_location, '', row_id)
+                                    ('' if clear_location else to_location, '', row_id)
                                 )
                             elif pos_col:
                                 cur.execute(
                                     f"UPDATE SEARCHRACK SET {pos_col} = ? WHERE {id_lookup_col} = ?",
-                                    (to_location, row_id)
+                                    ('' if clear_location else to_location, row_id)
                                 )
                             else:
                                 cur.execute(
                                     f"UPDATE SEARCHRACK SET {pic_col} = ? WHERE {id_lookup_col} = ?",
-                                    (to_location, row_id)
+                                    ('' if clear_location else to_location, row_id)
                                 )
 
                             rem_cur.execute('''
                                 INSERT INTO removed_items
                                 (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position)
                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            ''', (None, barcode_val, title_val, take_qty, now, row_id, take_qty, 0, 'locationmoved', source_location))
+                            ''', (None, barcode_val, title_val, take_qty, now, row_id, take_qty, 0, removal_type, source_location))
                             rem_cur.execute('''
                                 INSERT INTO removed_items
                                 (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position)
                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            ''', (None, barcode_val, title_val, take_qty, now, row_id, 0, take_qty, 'locationmoved', to_location))
+                            ''', (None, barcode_val, title_val, take_qty, now, row_id, 0, take_qty, removal_type, target_location_for_logs))
 
                         move_target_qty -= take_qty
                         remaining -= take_qty
@@ -29935,7 +30490,7 @@ def api_movelocation_execute():
                         detail = '; '.join(source_warnings[:3]) if source_warnings else ''
                         row_result['error'] = f'Only moved {moved_this_item} of {requested_qty}' + (f' ({detail})' if detail else '')
                 else:
-                    row_result['error'] = '; '.join(source_warnings) if source_warnings else 'Move failed'
+                    row_result['error'] = '; '.join(source_warnings) if source_warnings else ('Clear failed' if clear_location else 'Move failed')
                     skipped_items += 1
             except Exception as row_err:
                 row_result['error'] = _safe_error(row_err)
@@ -29952,11 +30507,12 @@ def api_movelocation_execute():
         if moved_units <= 0:
             return jsonify({
                 'success': False,
-                'error': 'No items were moved',
+                'error': 'No items were updated' if clear_location else 'No items were moved',
                 'moved_items': moved_items,
                 'moved_units': moved_units,
                 'skipped_items': skipped_items,
-                'item_results': item_results
+                'item_results': item_results,
+                'clear_location': clear_location
             }), 400
 
         return jsonify({
@@ -29964,10 +30520,304 @@ def api_movelocation_execute():
             'moved_items': moved_items,
             'moved_units': moved_units,
             'skipped_items': skipped_items,
-            'item_results': item_results
+            'item_results': item_results,
+            'clear_location': clear_location
         })
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
+    finally:
+        try:
+            if conn is not None:
+                conn.close()
+        except Exception:
+            pass
+        try:
+            if rem_conn is not None:
+                rem_conn.close()
+        except Exception:
+            pass
+
+@app.route('/api/movelocation_bulk_cleanup', methods=['POST'])
+def api_movelocation_bulk_cleanup():
+    """Reduce SEARCHRACK quantities from selected source locations for sold bulk-manifest barcodes."""
+    conn = None
+    rem_conn = None
+    try:
+        data = request.get_json() or {}
+        items = data.get('items') or []
+        if not isinstance(items, list) or not items:
+            return jsonify({'success': False, 'error': 'Missing items list'}), 400
+
+        manifest_ids = []
+        raw_manifest_ids = data.get('manifest_ids')
+        if isinstance(raw_manifest_ids, list):
+            seen_manifest_ids = set()
+            for raw_id in raw_manifest_ids:
+                manifest_id = _coerce_int(raw_id, 0)
+                if manifest_id <= 0 or manifest_id in seen_manifest_ids:
+                    continue
+                seen_manifest_ids.add(manifest_id)
+                manifest_ids.append(manifest_id)
+        elif raw_manifest_ids is not None:
+            manifest_ids = _bulk_manifest_parse_ids(raw_manifest_ids)
+
+        conn = sqlite3.connect('searchRack.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        schema = _searchrack_removal_schema(cur)
+
+        id_lookup_col = schema.get('id_col') or 'rowid'
+        qty_col = schema.get('qty_col')
+        if not qty_col:
+            return jsonify({'success': False, 'error': 'SEARCHRACK quantity column not found'}), 500
+
+        rem_conn = sqlite3.connect('rackhistory.db')
+        rem_cur = rem_conn.cursor()
+        _ensure_removed_items_table(rem_cur)
+        try:
+            rem_cur.execute("PRAGMA table_info(removed_items)")
+            rem_cols = [c[1] for c in rem_cur.fetchall()]
+            if 'item_position' not in rem_cols:
+                rem_cur.execute('ALTER TABLE removed_items ADD COLUMN item_position TEXT')
+                rem_conn.commit()
+        except Exception:
+            pass
+
+        now_iso = datetime.datetime.now().isoformat()
+        order_ref = f"bulk-manifest:{','.join(str(x) for x in manifest_ids)}" if manifest_ids else None
+
+        removed_items = 0
+        removed_units = 0
+        skipped_items = 0
+        requested_units = 0
+        item_results = []
+
+        for idx, raw_item in enumerate(items):
+            row_result = {
+                'index': idx,
+                'barcode': str((raw_item or {}).get('barcode') or '').strip(),
+                'from_location': str((raw_item or {}).get('from_location') or '').strip(),
+                'from_locations': [],
+                'requested_qty': 0,
+                'moved_qty': 0,
+                'removed_qty': 0,
+                'success': False
+            }
+            try:
+                barcode_raw = row_result['barcode']
+                requested_qty = max(
+                    1,
+                    _coerce_int((raw_item or {}).get('quantity') if (raw_item or {}).get('quantity') is not None else (raw_item or {}).get('qty'), 1)
+                )
+                requested_units += requested_qty
+                row_result['requested_qty'] = requested_qty
+
+                raw_from_locations = (raw_item or {}).get('from_locations')
+                source_locations = []
+                source_seen = set()
+
+                def _add_source_location(raw_loc):
+                    loc = str(raw_loc or '').strip()
+                    if not loc:
+                        return
+                    loc_key = _sold_location_key(loc)
+                    if loc_key in source_seen:
+                        return
+                    source_seen.add(loc_key)
+                    source_locations.append(loc)
+
+                if isinstance(raw_from_locations, list):
+                    for raw_loc in raw_from_locations:
+                        _add_source_location(raw_loc)
+                elif isinstance(raw_from_locations, str):
+                    text = raw_from_locations.strip()
+                    if text:
+                        if ',' in text:
+                            for part in text.split(','):
+                                _add_source_location(part)
+                        else:
+                            _add_source_location(text)
+                _add_source_location((raw_item or {}).get('from_location'))
+
+                if requested_qty > 0 and len(source_locations) > requested_qty:
+                    source_locations = source_locations[:requested_qty]
+                    row_result['selection_limited'] = True
+                row_result['from_locations'] = source_locations
+                if source_locations:
+                    row_result['from_location'] = ', '.join(source_locations)
+
+                barcode_key = _sold_removal_barcode_key(barcode_raw)
+                if not barcode_key:
+                    row_result['error'] = 'Invalid barcode'
+                    skipped_items += 1
+                    item_results.append(row_result)
+                    continue
+                if not source_locations:
+                    row_result['error'] = 'Missing source location'
+                    skipped_items += 1
+                    item_results.append(row_result)
+                    continue
+
+                matches = _searchrack_matches_for_barcode(
+                    cur,
+                    barcode_raw,
+                    schema=schema,
+                    include_zero=False
+                )
+                if not matches:
+                    row_result['error'] = f'Barcode not found in SEARCHRACK: {barcode_raw}'
+                    skipped_items += 1
+                    item_results.append(row_result)
+                    continue
+
+                matches_by_loc = {}
+                for match_row in matches:
+                    loc_key = _sold_location_key(match_row.get('location_code'))
+                    bucket = matches_by_loc.get(loc_key)
+                    if bucket is None:
+                        bucket = []
+                        matches_by_loc[loc_key] = bucket
+                    bucket.append(match_row)
+
+                for loc_rows in matches_by_loc.values():
+                    loc_rows.sort(key=lambda r: int(r.get('quantity') or 0), reverse=True)
+
+                remaining = requested_qty
+                removed_this_item = 0
+                selected_keys = [_sold_location_key(loc) for loc in source_locations]
+                source_warnings = []
+                used_locations = []
+
+                for source_location, source_key in zip(source_locations, selected_keys):
+                    if remaining <= 0:
+                        break
+
+                    loc_rows = matches_by_loc.get(source_key) or []
+                    if not loc_rows:
+                        source_warnings.append(f'Barcode not found at {source_location}')
+                        continue
+
+                    removed_from_source = 0
+                    for match_row in loc_rows:
+                        if remaining <= 0:
+                            break
+                        current_qty = max(0, _coerce_int(match_row.get('quantity'), 0))
+                        if current_qty <= 0:
+                            continue
+                        take_qty = min(current_qty, remaining)
+                        if take_qty <= 0:
+                            continue
+
+                        row_id = max(0, _coerce_int(match_row.get('id'), 0))
+                        if row_id <= 0:
+                            continue
+
+                        new_qty = max(0, current_qty - take_qty)
+                        cur.execute(
+                            f'UPDATE SEARCHRACK SET {qty_col} = ? WHERE {id_lookup_col} = ?',
+                            (new_qty, row_id)
+                        )
+
+                        rem_cur.execute('''
+                            INSERT INTO removed_items
+                            (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (
+                            order_ref,
+                            str(match_row.get('barcode') or barcode_raw),
+                            str(match_row.get('title') or match_row.get('barcode') or barcode_raw),
+                            take_qty,
+                            now_iso,
+                            row_id,
+                            current_qty,
+                            new_qty,
+                            'bulk_manifest_cleanup',
+                            str(match_row.get('location_code') or source_location or '')
+                        ))
+
+                        match_row['quantity'] = new_qty
+                        remaining -= take_qty
+                        removed_this_item += take_qty
+                        removed_from_source += take_qty
+
+                    if removed_from_source > 0:
+                        used_locations.append(source_location)
+
+                row_result['moved_qty'] = removed_this_item
+                row_result['removed_qty'] = removed_this_item
+                if used_locations:
+                    row_result['used_locations'] = used_locations
+                if removed_this_item > 0:
+                    row_result['success'] = True
+                    removed_items += 1
+                    removed_units += removed_this_item
+                    if removed_this_item < requested_qty:
+                        detail = '; '.join(source_warnings[:3]) if source_warnings else ''
+                        row_result['error'] = f'Only removed {removed_this_item} of {requested_qty}' + (f' ({detail})' if detail else '')
+                else:
+                    row_result['error'] = '; '.join(source_warnings) if source_warnings else 'No quantity removed'
+                    skipped_items += 1
+            except Exception as row_err:
+                row_result['error'] = _safe_error(row_err, 'movelocation_bulk_cleanup_row')
+                skipped_items += 1
+
+            item_results.append(row_result)
+
+        conn.commit()
+        rem_conn.commit()
+        if removed_units > 0:
+            update_data_version()
+            _invalidate_searchrack_cache()
+
+        cleanup_status = ''
+        if manifest_ids:
+            cleanup_status = 'cleanup_complete' if removed_units >= requested_units and skipped_items == 0 else ('cleanup_partial' if removed_units > 0 else '')
+            if cleanup_status:
+                cleanup_note = f'Removed {removed_units}/{requested_units} unit(s) via move-location bulk cleanup'
+                with db_connection('marketplace.db') as m_conn:
+                    m_cur = m_conn.cursor()
+                    _ensure_bulk_manifest_tables(m_cur)
+                    placeholders = ','.join('?' for _ in manifest_ids)
+                    params = [cleanup_status, now_iso, cleanup_note, now_iso]
+                    params.extend(manifest_ids)
+                    m_cur.execute(f'''
+                        UPDATE bulk_manifests
+                        SET status = ?,
+                            cleanup_at = ?,
+                            cleanup_note = ?,
+                            updated_at = ?
+                        WHERE id IN ({placeholders})
+                    ''', tuple(params))
+
+        if removed_units <= 0:
+            return jsonify({
+                'success': False,
+                'error': 'No quantities were removed from inventory',
+                'moved_items': removed_items,
+                'moved_units': removed_units,
+                'removed_items': removed_items,
+                'removed_units': removed_units,
+                'requested_units': requested_units,
+                'skipped_items': skipped_items,
+                'item_results': item_results,
+                'manifest_ids': manifest_ids,
+                'manifest_cleanup_status': cleanup_status
+            }), 400
+
+        return jsonify({
+            'success': True,
+            'moved_items': removed_items,
+            'moved_units': removed_units,
+            'removed_items': removed_items,
+            'removed_units': removed_units,
+            'requested_units': requested_units,
+            'skipped_items': skipped_items,
+            'item_results': item_results,
+            'manifest_ids': manifest_ids,
+            'manifest_cleanup_status': cleanup_status
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'movelocation_bulk_cleanup')}), 500
     finally:
         try:
             if conn is not None:
@@ -31526,10 +32376,11 @@ def api_marketplace_sale():
         data = request.get_json() or {}
         barcode = data.get('barcode', '').strip()
         title = data.get('title', '').strip()
-        quantity = int(data.get('quantity', 1))
-        price = float(data.get('price', 0))
+        quantity = max(1, _coerce_int(data.get('quantity'), 1))
+        price = _bulk_manifest_money(data.get('price'), default=0.0)
         session_id = (data.get('session_id') or '').strip() or None
         price_auto = data.get('price_auto', False)
+        store_key = _marketplace_sale_store_key(data.get('store'))
 
         if not barcode:
             return jsonify({'success': False, 'error': 'Missing barcode'}), 400
@@ -31539,19 +32390,21 @@ def api_marketplace_sale():
         if not result['success']:
             return jsonify(result), 500
         
-        # Add to sold.db (orders table) with store="marketplace"
+        # Add to sold.db (orders table). Marketplace rows are treated as already handled.
+        sold_conn = None
         try:
             sold_conn = sqlite3.connect('sold.db')
             sold_cur = sold_conn.cursor()
             
             sale_date = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            sale_order_ref = f'{store_key}-{result["id"]}'
             
             # Insert ONE row with the quantity value
             # Marketplace orders are immediately handled (isHandled='1') and don't need inventory removal
             sold_cur.execute('''INSERT INTO orders 
                 (barcode, title, price, paid_time, store, quantity, isHandled, isHandledDate, rackupdated)
                 VALUES (?, ?, ?, ?, ?, ?, '1', ?, 1)''',
-                (barcode, title, price, sale_date, 'marketplace', quantity, sale_date))
+                (barcode, title, price, sale_date, store_key, quantity, sale_date))
             
             # Auto-detect if this is a resold return
             if barcode:
@@ -31575,14 +32428,14 @@ def api_marketplace_sale():
                         SET resold = 1, resold_date = ?, resold_order_id = ?,
                             lifecycle_count = lifecycle_count + 1
                         WHERE id = ?
-                    ''', (sale_date, f'marketplace-{result["id"]}', return_id))
+                    ''', (sale_date, sale_order_ref, return_id))
                     
                     # Add auto-detected lifecycle event
                     sold_cur.execute('''
                         INSERT INTO return_lifecycle_events 
                         (return_id, event_type, event_date, auto_detected, order_id, store, notes)
                         VALUES (?, 'resold', ?, 1, ?, ?, ?)
-                    ''', (return_id, sale_date, f'marketplace-{result["id"]}', 'marketplace', 'Auto-detected from marketplace sale'))
+                    ''', (return_id, sale_date, sale_order_ref, store_key, 'Auto-detected from marketplace sale'))
                     
                     print(f'[AUTO-DETECT] Return #{return_id} marked as resold (Marketplace sale #{result["id"]})')
             
@@ -31590,9 +32443,11 @@ def api_marketplace_sale():
         except Exception as e:
             print(f'Warning: Failed to add to sold.db: {e}')
         finally:
-            sold_conn.close()
+            if sold_conn is not None:
+                sold_conn.close()
         
         # Check if item exists in searchRack.db and needs decrementing
+        rack_conn = None
         try:
             rack_conn = sqlite3.connect('searchRack.db')
             rack_conn.row_factory = sqlite3.Row
@@ -31606,6 +32461,7 @@ def api_marketplace_sale():
                 return jsonify({
                     'success': True,
                     'sale_id': result['id'],
+                    'store': store_key,
                     'needs_location_choice': True,
                     'locations': [{'area_code': loc['area_code'], 'quantity': loc['quantity']} for loc in locations]
                 })
@@ -31622,18 +32478,20 @@ def api_marketplace_sale():
                 return jsonify({
                     'success': True,
                     'sale_id': result['id'],
+                    'store': store_key,
                     'decremented': True,
                     'area_code': area_code,
                     'new_quantity': new_qty
                 })
             else:
                 # Not in rack
-                return jsonify({'success': True, 'sale_id': result['id'], 'decremented': False})
+                return jsonify({'success': True, 'sale_id': result['id'], 'store': store_key, 'decremented': False})
         except Exception as e:
             print(f'Warning: Failed to check/decrement searchRack.db: {e}')
-            return jsonify({'success': True, 'sale_id': result['id'], 'decremented': False})
+            return jsonify({'success': True, 'sale_id': result['id'], 'store': store_key, 'decremented': False})
         finally:
-            rack_conn.close()
+            if rack_conn is not None:
+                rack_conn.close()
         
     except Exception as e:
         import traceback

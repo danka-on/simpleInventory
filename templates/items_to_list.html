@@ -144,15 +144,19 @@
     .status-filter-group label{display:flex;align-items:center;gap:6px;cursor:pointer;padding:4px 10px;border-radius:999px;border:1px solid transparent;transition:all .15s ease}
     .status-filter-group label[data-status-filter="good"]{color:#15803d}
     .status-filter-group label[data-status-filter="bad"]{color:#b91c1c}
+    .status-filter-group label[data-status-filter="return"]{color:#92400e}
     .status-filter-group label[data-status-filter="unchecked"]{color:#6b7280}
     .status-filter-group label.active[data-status-filter="good"]{background:rgba(22,163,74,0.12);border-color:rgba(22,163,74,0.35);color:#15803d;font-weight:600}
     .status-filter-group label.active[data-status-filter="bad"]{background:rgba(220,38,38,0.12);border-color:rgba(220,38,38,0.35);color:#b91c1c;font-weight:600}
+    .status-filter-group label.active[data-status-filter="return"]{background:rgba(146,64,14,0.12);border-color:rgba(146,64,14,0.35);color:#92400e;font-weight:600}
     .status-filter-group label.active[data-status-filter="unchecked"]{background:rgba(107,114,128,0.12);border-color:rgba(107,114,128,0.35);color:#374151;font-weight:600}
     html.ss-theme-night .status-filter-group label[data-status-filter="good"]{color:#86efac}
     html.ss-theme-night .status-filter-group label[data-status-filter="bad"]{color:#fca5a5}
+    html.ss-theme-night .status-filter-group label[data-status-filter="return"]{color:#fcd34d}
     html.ss-theme-night .status-filter-group label[data-status-filter="unchecked"]{color:#cbd5e1}
     html.ss-theme-night .status-filter-group label.active[data-status-filter="good"]{background:rgba(34,197,94,0.18);border-color:rgba(34,197,94,0.4);color:#86efac}
     html.ss-theme-night .status-filter-group label.active[data-status-filter="bad"]{background:rgba(239,68,68,0.18);border-color:rgba(239,68,68,0.4);color:#fca5a5}
+    html.ss-theme-night .status-filter-group label.active[data-status-filter="return"]{background:rgba(180,83,9,0.22);border-color:rgba(245,158,11,0.4);color:#fde68a}
     html.ss-theme-night .status-filter-group label.active[data-status-filter="unchecked"]{background:rgba(148,163,184,0.18);border-color:rgba(148,163,184,0.35);color:#e2e8f0}
     .dropdown-section:last-child{margin-bottom:0}
     .gear-btn{background:linear-gradient(135deg,#3b82f6,#2563eb);color:#fff;font-size:1rem;padding:8px 14px;border-radius:8px;box-shadow:0 2px 8px rgba(37,99,235,0.3);transition:all 0.15s}
@@ -442,6 +446,9 @@
           <label data-status-filter="bad">
             <input type="checkbox" class="status-checkbox" value="bad" checked> Bad
           </label>
+          <label data-status-filter="return">
+            <input type="checkbox" class="status-checkbox" value="return" checked> Return
+          </label>
           <label data-status-filter="unchecked">
             <input type="checkbox" class="status-checkbox" value="unchecked"> Unchecked
           </label>
@@ -589,6 +596,7 @@ const FILTER_UI_SETTINGS_KEY = 'items_to_list_filter_ui_v1';
 const GEAR_DEFAULTS = Object.freeze({
   status_good: true,
   status_bad: true,
+  status_return: true,
   status_unchecked: false,
   lot: '',
   sort: 'last_edited',
@@ -823,6 +831,7 @@ function normalizeGearSettings(raw){
   return {
     status_good: parseBool(src.status_good, GEAR_DEFAULTS.status_good),
     status_bad: parseBool(src.status_bad, GEAR_DEFAULTS.status_bad),
+    status_return: parseBool(src.status_return, GEAR_DEFAULTS.status_return),
     status_unchecked: parseBool(src.status_unchecked, GEAR_DEFAULTS.status_unchecked),
     lot: String(src.lot || ''),
     sort: allowedSorts.has(sortRaw) ? sortRaw : GEAR_DEFAULTS.sort,
@@ -841,6 +850,7 @@ function normalizeGearSettings(raw){
 function getCurrentGearSettings(){
   const statusGoodCb = document.querySelector('.status-checkbox[value="good"]');
   const statusBadCb = document.querySelector('.status-checkbox[value="bad"]');
+  const statusReturnCb = document.querySelector('.status-checkbox[value="return"]');
   const statusUncheckedCb = document.querySelector('.status-checkbox[value="unchecked"]');
   const lotEl = document.getElementById('filter-lot');
   const sortEl = document.getElementById('sort-select');
@@ -856,6 +866,7 @@ function getCurrentGearSettings(){
   return normalizeGearSettings({
     status_good: !!(statusGoodCb && statusGoodCb.checked),
     status_bad: !!(statusBadCb && statusBadCb.checked),
+    status_return: !!(statusReturnCb && statusReturnCb.checked),
     status_unchecked: !!(statusUncheckedCb && statusUncheckedCb.checked),
     lot: lotEl ? lotEl.value : '',
     sort: sortEl ? sortEl.value : GEAR_DEFAULTS.sort,
@@ -875,6 +886,7 @@ function applyGearSettings(raw){
   const settings = normalizeGearSettings(raw);
   const statusGoodCb = document.querySelector('.status-checkbox[value="good"]');
   const statusBadCb = document.querySelector('.status-checkbox[value="bad"]');
+  const statusReturnCb = document.querySelector('.status-checkbox[value="return"]');
   const statusUncheckedCb = document.querySelector('.status-checkbox[value="unchecked"]');
   const lotEl = document.getElementById('filter-lot');
   const sortEl = document.getElementById('sort-select');
@@ -890,6 +902,7 @@ function applyGearSettings(raw){
 
   if (statusGoodCb) statusGoodCb.checked = settings.status_good;
   if (statusBadCb) statusBadCb.checked = settings.status_bad;
+  if (statusReturnCb) statusReturnCb.checked = settings.status_return;
   if (statusUncheckedCb) statusUncheckedCb.checked = settings.status_unchecked;
   if (lotEl) {
     pendingLotSelection = settings.lot || '';
@@ -930,6 +943,7 @@ function gearSettingsDifferFromDefaults(raw){
   return (
     settings.status_good !== GEAR_DEFAULTS.status_good ||
     settings.status_bad !== GEAR_DEFAULTS.status_bad ||
+    settings.status_return !== GEAR_DEFAULTS.status_return ||
     settings.status_unchecked !== GEAR_DEFAULTS.status_unchecked ||
     settings.lot !== GEAR_DEFAULTS.lot ||
     settings.sort !== GEAR_DEFAULTS.sort ||
@@ -958,6 +972,30 @@ function onGearSettingChanged(){
   updateGearResetButton();
 }
 
+function _isTruthyParamValue(v){
+  const value = String(v || '').trim().toLowerCase();
+  return ['1', 'true', 'yes', 'y', 'on'].includes(value);
+}
+
+function isDirectSearchActivated(params){
+  try{
+    const p = (params instanceof URLSearchParams) ? params : new URLSearchParams(window.location.search);
+    return _isTruthyParamValue(p.get('direct_search'));
+  }catch(e){
+    return false;
+  }
+}
+
+function applyDirectSearchFromURL(params){
+  const p = (params instanceof URLSearchParams) ? params : new URLSearchParams(window.location.search);
+  const q = (p.get('q') || '').trim();
+  const qEl = document.getElementById('filter-q');
+  if(qEl) qEl.value = q;
+  pendingLotSelection = '';
+  applyGearSettings(GEAR_DEFAULTS);
+  updateGearResetButton();
+}
+
 function setFiltersFromURL(){
   const p = new URLSearchParams(window.location.search);
   const lot = p.get('lot')||''; const q = p.get('q')||''; const sort = p.get('sort')||''; const status = p.get('status')||''; const defect = p.get('defect')||'';
@@ -967,7 +1005,7 @@ function setFiltersFromURL(){
     document.getElementById('filter-lot').value = lot;
   }
   if(p.has('sort') && sort) document.getElementById('sort-select').value = sort;
-  // If status is explicitly set in URL, use it; otherwise default to good and bad
+  // If status is explicitly set in URL, use it; otherwise keep default status mix
   if(status && status !== 'listed' && status !== 'not_listed') {
     // Uncheck all first
     document.querySelectorAll('.status-checkbox').forEach(cb => cb.checked = false);
@@ -1451,6 +1489,7 @@ function render(results){
     let pill = '<span class="status-box" title="Unchecked">unchecked</span>';
     if(status==='good') pill = '<span class="status-box" style="background:#2ecc71" title="Good">good</span>';
     if(status==='bad') pill = '<span class="status-box" style="background:#e74c3c" title="Bad">bad</span>';
+    if(status==='return') pill = '<span class="status-box" style="background:#8b4513" title="Return">return</span>';
     
     // DEBUG: Log marketplace data for first item
     if (rowIndex === 0) {
@@ -1642,6 +1681,7 @@ function updateStatusFilterHighlight(){
   const map = {
     good: document.querySelector('.status-checkbox[value="good"]'),
     bad: document.querySelector('.status-checkbox[value="bad"]'),
+    return: document.querySelector('.status-checkbox[value="return"]'),
     unchecked: document.querySelector('.status-checkbox[value="unchecked"]')
   };
   Object.entries(map).forEach(([key, el]) => {
@@ -2111,12 +2151,27 @@ async function loadLots(){
 // Initial load: restore persisted/URL filters and auto-fetch page 1.
 // Load lots first so any persisted lot filter is resolved before the first query.
 async function initializeItemsToList(){
-  restoreGearSettings();
-  restoreFilterUiSettings();
-  setFiltersFromURL();
+  const initParams = new URLSearchParams(window.location.search);
+  const directSearch = isDirectSearchActivated(initParams);
+
+  if(directSearch){
+    // Direct searches bypass persisted/gear filters and use the incoming query only.
+    restoreFilterUiSettings(); // keep UI preferences like per-page
+    applyDirectSearchFromURL(initParams);
+  } else {
+    restoreGearSettings();
+    restoreFilterUiSettings();
+    setFiltersFromURL();
+  }
+
   updateGearResetButton();
   await flushPendingMarketplaceOps();
   await loadLots();
+  if(directSearch){
+    const lotEl = document.getElementById('filter-lot');
+    if(lotEl) lotEl.value = '';
+    pendingLotSelection = '';
+  }
   currentPage = 1;
   await loadItems();
   const qInput = document.getElementById('filter-q');

@@ -1220,7 +1220,7 @@
       sessionStorage.setItem('unifiedSearchQuery', query);
       const map = {
         shelves:   '/searchrack?db=searchRack&q=' + encodeURIComponent(query),
-        processed: '/items-to-list?q=' + encodeURIComponent(query) + '&status=good,bad',
+        processed: '/items-to-list?q=' + encodeURIComponent(query) + '&direct_search=1',
         bol:       '/searchrack?db=bol&q=' + encodeURIComponent(query),
         sold:      '/searchrack?db=sold&q=' + encodeURIComponent(query),
         amazon:    '/searchrack?db=amazonStore&q=' + encodeURIComponent(query),

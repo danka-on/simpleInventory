@@ -509,6 +509,12 @@
       .manual-entry-panel .search-row .manual-add-btn {
         flex: 1 1 100%;
       }
+      .bulk-manifest-row {
+        grid-template-columns: 1fr;
+      }
+      .bulk-manifest-btn {
+        width: 100%;
+      }
     }
     @media (max-width: 480px) {
       .navbar h1 { font-size: 1.1rem; }
@@ -539,6 +545,64 @@
       white-space: nowrap;
     }
     .search-row button.manual-add-btn:hover { background: #219a52; }
+
+    .bulk-manifest-panel {
+      margin-top: 14px;
+      background: rgba(255,255,255,0.12);
+      border: 1px solid rgba(255,255,255,0.16);
+      border-radius: 12px;
+      padding: 12px;
+      text-align: left;
+    }
+    .bulk-manifest-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 8px;
+      color: rgba(255,255,255,0.8);
+      font-size: 0.86rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .bulk-manifest-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      align-items: center;
+    }
+    .bulk-manifest-select {
+      width: 100%;
+      border: none;
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 0.92rem;
+      background: rgba(255,255,255,0.94);
+      color: #111827;
+      min-height: 40px;
+    }
+    .bulk-manifest-btn {
+      padding: 10px 14px;
+      border: none;
+      border-radius: 8px;
+      background: rgba(255,255,255,0.2);
+      color: #fff;
+      cursor: pointer;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .bulk-manifest-btn:hover {
+      background: rgba(255,255,255,0.28);
+    }
+    .bulk-manifest-info {
+      margin-top: 8px;
+      min-height: 18px;
+      font-size: 0.82rem;
+      color: rgba(255,255,255,0.78);
+    }
+    .bulk-manifest-info.error { color: #fecaca; }
+    .bulk-manifest-info.ok { color: #bbf7d0; }
 
     /* Highlight animation for scan-not-found items */
     @keyframes pulse-border {
@@ -583,6 +647,13 @@
     html.ss-theme-day .manual-entry-panel { background: rgba(0,0,0,0.04); }
     html.ss-theme-day .manual-add-btn { background: #27ae60; color: #fff; }
     html.ss-theme-day .mobile-submit-bar { background: rgba(255,255,255,0.97); border-top-color: #e2e8f0; }
+    html.ss-theme-day .bulk-manifest-panel { background: rgba(255,255,255,0.76); border-color: #e2e8f0; }
+    html.ss-theme-day .bulk-manifest-head { color: #334155; }
+    html.ss-theme-day .bulk-manifest-btn { background: #1e40af; color: #fff; }
+    html.ss-theme-day .bulk-manifest-btn:hover { background: #1d4ed8; }
+    html.ss-theme-day .bulk-manifest-info { color: #334155; }
+    html.ss-theme-day .bulk-manifest-info.error { color: #b91c1c; }
+    html.ss-theme-day .bulk-manifest-info.ok { color: #166534; }
   </style>
 </head>
 <body>
@@ -619,6 +690,19 @@
           <input id="manualPrice" type="number" min="0" step="0.01" placeholder="Price" style="flex:1; max-width:120px">
           <button id="manualAddBtn" class="manual-add-btn">+ Add</button>
         </div>
+      </div>
+      <div class="bulk-manifest-panel" id="bulkManifestPanel">
+        <div class="bulk-manifest-head">
+          <span>Bulk Manifest Integration</span>
+          <button id="refreshManifestListBtn" class="bulk-manifest-btn" type="button">Refresh</button>
+        </div>
+        <div class="bulk-manifest-row">
+          <select id="bulkManifestSelect" class="bulk-manifest-select">
+            <option value="">Select a saved manifest...</option>
+          </select>
+          <button id="loadManifestBtn" class="bulk-manifest-btn" type="button">Load Manifest</button>
+        </div>
+        <div id="bulkManifestInfo" class="bulk-manifest-info"></div>
       </div>
     </div>
 
@@ -688,6 +772,14 @@
     const searchPanel = document.getElementById('searchPanel');
     const toggleManual = document.getElementById('toggleManual');
     const manualPanel = document.getElementById('manualPanel');
+    const bulkManifestSelect = document.getElementById('bulkManifestSelect');
+    const loadManifestBtn = document.getElementById('loadManifestBtn');
+    const refreshManifestListBtn = document.getElementById('refreshManifestListBtn');
+    const bulkManifestInfo = document.getElementById('bulkManifestInfo');
+    const urlParams = new URLSearchParams(window.location.search);
+
+    let bulkManifestCache = [];
+    let activeBulkManifest = null;
 
     // Toggle search panel (closes manual panel)
     toggleSearch.addEventListener('click', () => {
@@ -710,6 +802,24 @@
       if (isOpen) document.getElementById('manualTitle').focus();
     });
 
+    refreshManifestListBtn.addEventListener('click', () => {
+      loadBulkManifestHistory(parseManifestId(bulkManifestSelect.value));
+    });
+    loadManifestBtn.addEventListener('click', () => {
+      loadBulkManifest(bulkManifestSelect.value);
+    });
+    bulkManifestSelect.addEventListener('change', () => {
+      const selectedId = parseManifestId(bulkManifestSelect.value);
+      if (!selectedId) {
+        setBulkManifestInfo('Select a manifest to load it into this sale session.', null);
+        return;
+      }
+      const row = bulkManifestCache.find(x => parseManifestId(x.id) === selectedId);
+      if (!row) return;
+      const title = String(row.manifest_title || '').trim() || ('Manifest #' + selectedId);
+      setBulkManifestInfo(`Ready to load #${selectedId} (${title})`, null);
+    });
+
     function fmtMoney(v) {
       const n = isNaN(v) ? 0 : v;
       return '$' + n.toFixed(2);
@@ -722,6 +832,154 @@
 
     function hideMessage() {
       message.className = 'message';
+    }
+
+    function setBulkManifestInfo(text, tone) {
+      bulkManifestInfo.className = 'bulk-manifest-info';
+      if (tone) bulkManifestInfo.classList.add(tone);
+      bulkManifestInfo.textContent = text || '';
+    }
+
+    function normalizeManifestStatus(status) {
+      const raw = String(status || '').trim().toLowerCase();
+      if (raw === 'sold') return 'sold';
+      if (raw === 'cleanup_complete') return 'cleanup_complete';
+      if (raw === 'cleanup_partial') return 'cleanup_partial';
+      return 'created';
+    }
+
+    function manifestStatusLabel(status) {
+      const key = normalizeManifestStatus(status);
+      if (key === 'sold') return 'Sold';
+      if (key === 'cleanup_complete') return 'Cleanup Complete';
+      if (key === 'cleanup_partial') return 'Cleanup Partial';
+      return 'Created';
+    }
+
+    function parseManifestId(value) {
+      const n = Number.parseInt(value, 10);
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    }
+
+    function renderBulkManifestOptions(manifests, selectedId) {
+      const rows = Array.isArray(manifests) ? manifests : [];
+      const selected = parseManifestId(selectedId);
+      const options = ['<option value="">Select a saved manifest...</option>'];
+      rows.forEach(row => {
+        const id = parseManifestId(row.id);
+        if (!id) return;
+        const title = String(row.manifest_title || '').trim() || ('Manifest #' + id);
+        const dateText = String(row.manifest_date || '').trim() || String(row.created_at || '').slice(0, 10);
+        const units = Number(row.total_units || 0);
+        const statusText = manifestStatusLabel(row.status);
+        const selectedAttr = id === selected ? ' selected' : '';
+        options.push(`<option value="${id}"${selectedAttr}>#${id} • ${title} • ${dateText} • ${units} unit(s) • ${statusText}</option>`);
+      });
+      bulkManifestSelect.innerHTML = options.join('');
+    }
+
+    async function loadBulkManifestHistory(selectedId) {
+      setBulkManifestInfo('Loading saved manifests...', null);
+      try {
+        const resp = await fetch('/api/bulk-manifest/history?limit=120');
+        const data = await resp.json();
+        if (!data || !data.success) {
+          throw new Error((data && data.error) || 'Failed to load manifest list');
+        }
+        bulkManifestCache = Array.isArray(data.manifests) ? data.manifests : [];
+        renderBulkManifestOptions(bulkManifestCache, selectedId);
+        if (!bulkManifestCache.length) {
+          setBulkManifestInfo('No saved manifests found. Save one first from Bulk Manifest page.', null);
+        } else if (selectedId) {
+          setBulkManifestInfo('Manifest list refreshed.', 'ok');
+        } else {
+          setBulkManifestInfo('Select a manifest to load it into this sale session.', null);
+        }
+      } catch (err) {
+        bulkManifestCache = [];
+        renderBulkManifestOptions([], 0);
+        setBulkManifestInfo(err && err.message ? err.message : 'Failed to load manifest list', 'error');
+      }
+    }
+
+    function setActiveBulkManifest(manifest) {
+      activeBulkManifest = manifest || null;
+      if (!activeBulkManifest) return;
+      const title = String(activeBulkManifest.manifest_title || '').trim() || ('Manifest #' + activeBulkManifest.id);
+      const statusText = manifestStatusLabel(activeBulkManifest.status);
+      setBulkManifestInfo(`Loaded #${activeBulkManifest.id} (${title}) • ${activeBulkManifest.total_units || 0} unit(s) • ${statusText}`, 'ok');
+    }
+
+    async function loadBulkManifest(manifestId) {
+      const id = parseManifestId(manifestId);
+      if (!id) {
+        setBulkManifestInfo('Select a manifest first.', 'error');
+        return;
+      }
+      loadManifestBtn.disabled = true;
+      setBulkManifestInfo('Loading manifest #' + id + '...', null);
+      try {
+        const resp = await fetch('/api/bulk-manifest/' + encodeURIComponent(id));
+        const data = await resp.json();
+        if (!resp.ok || !data || !data.success) {
+          throw new Error((data && data.error) || 'Failed to load manifest');
+        }
+
+        const manifest = data.manifest || {};
+        const lineItems = Array.isArray(data.items) ? data.items : [];
+        if (!lineItems.length) {
+          throw new Error('Manifest has no line items');
+        }
+
+        items.clear();
+        lineItems.forEach(line => {
+          const barcode = String(line.barcode || '').trim();
+          if (!barcode) return;
+          const qty = Math.max(1, Number.parseInt(line.quantity, 10) || 1);
+          const unitPrice = Number.parseFloat(line.unit_price || 0);
+          const lineTotalRaw = Number.parseFloat(line.line_total);
+          const lineTotal = Number.isFinite(lineTotalRaw)
+            ? lineTotalRaw
+            : ((Number.isFinite(unitPrice) ? unitPrice : 0) * qty);
+          const priceText = Number.isFinite(lineTotal) && lineTotal > 0 ? lineTotal.toFixed(2) : '';
+
+          if (items.has(barcode)) {
+            const existing = items.get(barcode);
+            const oldPrice = Number.parseFloat(existing.price || 0);
+            const mergedPrice = (Number.isFinite(oldPrice) ? oldPrice : 0) + (Number.isFinite(lineTotal) ? lineTotal : 0);
+            existing.qty += qty;
+            if (!existing.title && line.title) existing.title = String(line.title || '').trim();
+            if (!existing.image && line.image_url) existing.image = String(line.image_url || '').trim();
+            existing.price = mergedPrice > 0 ? mergedPrice.toFixed(2) : existing.price;
+            items.set(barcode, existing);
+          } else {
+            items.set(barcode, {
+              barcode: barcode,
+              title: String(line.title || '').trim(),
+              image: String(line.image_url || '').trim(),
+              qty: qty,
+              price: priceText
+            });
+          }
+        });
+
+        const chosen = {
+          id: id,
+          manifest_title: String(manifest.manifest_title || '').trim(),
+          status: normalizeManifestStatus(manifest.status),
+          total_units: Number(manifest.total_units || 0),
+          total_items: Number(manifest.total_items || 0),
+          manifest_date: String(manifest.manifest_date || '').trim()
+        };
+        setActiveBulkManifest(chosen);
+        renderItems();
+        showMessage('Loaded manifest #' + id + ' into session.', 'success');
+      } catch (err) {
+        setBulkManifestInfo(err && err.message ? err.message : 'Failed to load manifest', 'error');
+        showMessage(err && err.message ? err.message : 'Failed to load manifest', 'error');
+      } finally {
+        loadManifestBtn.disabled = false;
+      }
     }
 
     async function lookupItem(barcode) {
@@ -1020,7 +1278,9 @@
       const t = (window.i18n && window.i18n.t) ? window.i18n.t : (k => k);
       if (confirm(t('marketplace_clear_confirm') || 'Clear all items?')) {
         items.clear();
+        activeBulkManifest = null;
         renderItems();
+        setBulkManifestInfo('Session cleared. Select a manifest or scan items to start.', null);
       }
     });
 
@@ -1038,6 +1298,8 @@
       const { totalQty, autoTotal } = getTotals();
       const override = parseFloat(finalTotalInput.value);
       let finalTotal = (!isNaN(override) && override >= 0) ? override : autoTotal;
+      const bulkManifestId = activeBulkManifest ? parseManifestId(activeBulkManifest.id) : 0;
+      const saleStore = bulkManifestId ? 'marketplace-sale-bulk' : 'marketplace';
 
       const itemList = Array.from(items.values());
       let priceMap = new Map();
@@ -1087,7 +1349,9 @@
               quantity: item.qty,
               price: itemPrice,
               session_id: sessionId,
-              price_auto: priceAuto
+              price_auto: priceAuto,
+              store: saleStore,
+              bulk_manifest_id: bulkManifestId || undefined
             })
           });
           const data = await resp.json();
@@ -1101,10 +1365,41 @@
       submitBtn.textContent = 'Submit Sale';
       mobileSubmitBtn.textContent = 'Submit Sale';
       if (fail === 0) {
-        showMessage((window.i18n && window.i18n.t) ? window.i18n.t('marketplace_submit_success') : 'Sale submitted successfully!', 'success');
+        let soldMarkMessage = '';
+        if (bulkManifestId) {
+          try {
+            const soldResp = await fetch('/api/bulk-manifest/' + encodeURIComponent(bulkManifestId) + '/mark-sold', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                session_id: sessionId,
+                sold_total: finalTotal,
+                sold_rows: success,
+                status: 'sold'
+              })
+            });
+            const soldData = await soldResp.json();
+            if (!soldResp.ok || !soldData || !soldData.success) {
+              throw new Error((soldData && soldData.error) || 'Failed to mark manifest sold');
+            }
+            soldMarkMessage = ` Bulk manifest #${bulkManifestId} marked as sold.`;
+          } catch (markErr) {
+            soldMarkMessage = ` Sale submitted, but manifest status update failed: ${markErr && markErr.message ? markErr.message : 'unknown error'}.`;
+          }
+        }
+        const baseSuccess = (window.i18n && window.i18n.t) ? window.i18n.t('marketplace_submit_success') : 'Sale submitted successfully!';
+        showMessage(baseSuccess + soldMarkMessage, 'success');
         items.clear();
         finalTotalInput.value = '';
+        if (bulkManifestId) {
+          setBulkManifestInfo(
+            `Sale complete for manifest #${bulkManifestId}. Open Move Location and load this manifest to remove sold qty by location.`,
+            'ok'
+          );
+        }
+        activeBulkManifest = null;
         renderItems();
+        loadBulkManifestHistory(bulkManifestId || parseManifestId(bulkManifestSelect.value));
       } else {
         const t = (window.i18n && window.i18n.t) ? window.i18n.t : (k => k);
         const msg = (t('marketplace_submit_partial') || 'Submitted {success}, failed {fail}')
@@ -1117,13 +1412,22 @@
       scanInput.focus();
     });
 
-    renderItems();
+    async function initMarketplaceSessionPage() {
+      renderItems();
+      const queryManifestId = parseManifestId(urlParams.get('manifest_id'));
+      await loadBulkManifestHistory(queryManifestId);
+      if (queryManifestId) {
+        bulkManifestSelect.value = String(queryManifestId);
+        await loadBulkManifest(queryManifestId);
+      }
 
-    // Auto-focus scan input on page load
-    setTimeout(() => {
-      scanInput.focus();
-      scanInput.select();
-    }, 100);
+      setTimeout(() => {
+        scanInput.focus();
+        scanInput.select();
+      }, 100);
+    }
+
+    initMarketplaceSessionPage();
 
     // Image modal functions
     function openSearchImg(imgEl) {

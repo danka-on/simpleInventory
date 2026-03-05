@@ -52,6 +52,12 @@
       font-size: 1.25rem;
       font-weight: 700;
     }
+    .top-actions {
+      display: inline-flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
     .btn {
       border: 1px solid var(--border);
       background: var(--card);
@@ -250,11 +256,75 @@
       text-align: right;
       padding-right: 14px;
     }
+    .history-wrap {
+      margin-top: 12px;
+    }
+    .history-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .history-head h2 {
+      margin: 0;
+      font-size: 1rem;
+    }
+    .history-table td {
+      font-size: 0.9rem;
+    }
+    .history-empty td {
+      color: var(--muted);
+      text-align: center;
+      padding: 14px 10px;
+      font-style: italic;
+    }
+    .status-tag {
+      display: inline-flex;
+      align-items: center;
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-size: 0.76rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      border: 1px solid transparent;
+    }
+    .status-tag.created {
+      background: rgba(59, 130, 246, 0.16);
+      color: #1d4ed8;
+      border-color: rgba(59, 130, 246, 0.36);
+    }
+    .status-tag.sold {
+      background: rgba(245, 158, 11, 0.18);
+      color: #b45309;
+      border-color: rgba(245, 158, 11, 0.34);
+    }
+    .status-tag.cleanup_partial {
+      background: rgba(244, 63, 94, 0.16);
+      color: #be123c;
+      border-color: rgba(244, 63, 94, 0.34);
+    }
+    .status-tag.cleanup_complete {
+      background: rgba(22, 163, 74, 0.16);
+      color: #166534;
+      border-color: rgba(22, 163, 74, 0.34);
+    }
+    .history-actions {
+      white-space: nowrap;
+      text-align: right;
+    }
+    .history-actions .btn {
+      padding: 6px 10px;
+      font-size: 0.82rem;
+      border-radius: 8px;
+    }
 
     @media (max-width: 860px) {
       .meta-grid { grid-template-columns: 1fr; }
       .topbar { flex-wrap: wrap; }
       .topbar-title { width: 100%; }
+      .top-actions { width: 100%; justify-content: flex-start; }
     }
 
     @media print {
@@ -318,7 +388,10 @@
     <div class="topbar no-print">
       <a href="/tools" class="btn">Back to Tools</a>
       <div class="topbar-title">Bulk Manifest</div>
-      <button id="printBtnTop" class="btn btn-primary" type="button">Print Sheet</button>
+      <div class="top-actions">
+        <button id="saveManifestBtn" class="btn btn-primary" type="button">Save Manifest</button>
+        <button id="printBtnTop" class="btn" type="button">Print Sheet</button>
+      </div>
     </div>
 
     <div class="sheet">
@@ -380,6 +453,33 @@
         </table>
       </div>
     </div>
+
+    <div class="sheet history-wrap no-print">
+      <div class="history-head">
+        <h2>Manifest History</h2>
+        <button id="refreshHistoryBtn" class="btn" type="button">Refresh</button>
+      </div>
+      <div id="historyStatus" class="status"></div>
+      <div class="table-wrap">
+        <table class="history-table">
+          <thead>
+            <tr>
+              <th style="width:78px;">ID</th>
+              <th style="width:130px;">Date</th>
+              <th>Title</th>
+              <th style="width:180px;">Buyer</th>
+              <th style="width:84px;text-align:center;">Rows</th>
+              <th style="width:84px;text-align:center;">Units</th>
+              <th style="width:120px;">Status</th>
+              <th style="width:172px;"></th>
+            </tr>
+          </thead>
+          <tbody id="historyBody">
+            <tr class="history-empty"><td colspan="8">No saved manifests yet.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -388,16 +488,21 @@
     const addBlankBtn = document.getElementById('addBlankBtn');
     const clearBtn = document.getElementById('clearBtn');
     const printBtnTop = document.getElementById('printBtnTop');
+    const saveManifestBtn = document.getElementById('saveManifestBtn');
+    const refreshHistoryBtn = document.getElementById('refreshHistoryBtn');
     const itemsBody = document.getElementById('itemsBody');
     const totalQtyEl = document.getElementById('totalQty');
     const totalAmountEl = document.getElementById('totalAmount');
     const statusMsgEl = document.getElementById('statusMsg');
     const generatedStampEl = document.getElementById('generatedStamp');
     const manifestDateEl = document.getElementById('manifestDate');
+    const historyBody = document.getElementById('historyBody');
+    const historyStatusEl = document.getElementById('historyStatus');
 
     const state = {
       nextId: 1,
-      items: []
+      items: [],
+      lastSavedManifestId: null
     };
 
     function esc(value) {
@@ -429,6 +534,13 @@
     function updateStamp() {
       const now = new Date();
       generatedStampEl.textContent = 'Generated: ' + now.toLocaleString();
+    }
+
+    function setHistoryStatus(message, tone) {
+      const t = String(tone || 'muted').trim();
+      historyStatusEl.className = 'status no-print';
+      if (t) historyStatusEl.classList.add(t);
+      historyStatusEl.textContent = String(message || '');
     }
 
     function setStatus(message, tone) {
@@ -611,7 +723,130 @@
       window.print();
     }
 
+    function manifestPayload() {
+      return {
+        manifest_title: String(document.getElementById('manifestTitle').value || '').trim() || 'Bulk Sale Manifest',
+        buyer: String(document.getElementById('manifestBuyer').value || '').trim(),
+        manifest_date: String(manifestDateEl.value || '').trim(),
+        items: state.items.map((item, idx) => ({
+          line_number: idx + 1,
+          barcode: String(item.barcode || '').trim(),
+          title: String(item.name || '').trim(),
+          quantity: toQty(item.qty) || 1,
+          unit_price: toPrice(item.unit_price),
+          line_total: Number((toQty(item.qty) * toPrice(item.unit_price)).toFixed(2))
+        }))
+      };
+    }
+
+    function normalizeStatus(status) {
+      const raw = String(status || '').trim().toLowerCase();
+      if (raw === 'sold') return 'sold';
+      if (raw === 'cleanup_complete') return 'cleanup_complete';
+      if (raw === 'cleanup_partial') return 'cleanup_partial';
+      return 'created';
+    }
+
+    function statusLabel(status) {
+      const key = normalizeStatus(status);
+      if (key === 'sold') return 'Sold';
+      if (key === 'cleanup_complete') return 'Cleanup Complete';
+      if (key === 'cleanup_partial') return 'Cleanup Partial';
+      return 'Created';
+    }
+
+    function renderHistory(manifests) {
+      const rows = Array.isArray(manifests) ? manifests : [];
+      if (!rows.length) {
+        historyBody.innerHTML = '<tr class="history-empty"><td colspan="8">No saved manifests yet.</td></tr>';
+        return;
+      }
+
+      const html = rows.map(row => {
+        const id = Number.parseInt(row.id, 10) || 0;
+        const statusKey = normalizeStatus(row.status);
+        const created = String(row.created_at || '').trim();
+        const createdDate = created ? new Date(created).toLocaleString() : '';
+        const sellerUrl = '/marketplace-session?manifest_id=' + encodeURIComponent(id);
+        return (
+          '<tr>' +
+            '<td>#' + esc(id) + '</td>' +
+            '<td>' + esc(String(row.manifest_date || '').trim() || createdDate) + '</td>' +
+            '<td>' + esc(String(row.manifest_title || '').trim() || ('Manifest #' + id)) + '</td>' +
+            '<td>' + esc(String(row.buyer || '').trim()) + '</td>' +
+            '<td style="text-align:center;">' + esc(Number(row.total_items || 0)) + '</td>' +
+            '<td style="text-align:center;">' + esc(Number(row.total_units || 0)) + '</td>' +
+            '<td><span class="status-tag ' + statusKey + '">' + esc(statusLabel(statusKey)) + '</span></td>' +
+            '<td class="history-actions"><a class="btn btn-primary" href="' + sellerUrl + '">Marketplace Sale</a></td>' +
+          '</tr>'
+        );
+      }).join('');
+      historyBody.innerHTML = html;
+    }
+
+    async function loadHistory() {
+      setHistoryStatus('Loading manifest history...', 'muted');
+      try {
+        const resp = await fetch('/api/bulk-manifest/history?limit=80');
+        const data = await resp.json();
+        if (!data || !data.success) {
+          throw new Error((data && data.error) || 'Failed to load history');
+        }
+        renderHistory(data.manifests || []);
+        setHistoryStatus('Loaded ' + Number((data.manifests || []).length || 0) + ' manifest(s).', 'ok');
+      } catch (err) {
+        renderHistory([]);
+        setHistoryStatus(err && err.message ? err.message : 'Failed to load history', 'error');
+      }
+    }
+
+    async function saveManifest() {
+      if (!state.items.length) {
+        setStatus('Add at least one row before saving.', 'warn');
+        return;
+      }
+      const payload = manifestPayload();
+      if (!payload.items.length) {
+        setStatus('Nothing to save.', 'warn');
+        return;
+      }
+
+      const missingBarcodeRows = payload.items
+        .map((row, idx) => ({ idx: idx + 1, barcode: String(row.barcode || '').trim() }))
+        .filter(row => !row.barcode)
+        .map(row => row.idx);
+
+      if (missingBarcodeRows.length) {
+        setStatus('Barcode required on line(s): ' + missingBarcodeRows.join(', '), 'error');
+        return;
+      }
+
+      saveManifestBtn.disabled = true;
+      setStatus('Saving manifest...', 'muted');
+      try {
+        const resp = await fetch('/api/bulk-manifest/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data || !data.success) {
+          throw new Error((data && data.error) || 'Save failed');
+        }
+        const manifestId = Number(data.manifest && data.manifest.id) || 0;
+        state.lastSavedManifestId = manifestId || null;
+        setStatus('Saved manifest #' + manifestId + '. Use "Marketplace Sale" from history to process it.', 'ok');
+        await loadHistory();
+      } catch (err) {
+        setStatus(err && err.message ? err.message : 'Failed to save manifest', 'error');
+      } finally {
+        saveManifestBtn.disabled = false;
+      }
+    }
+
     printBtnTop.addEventListener('click', printSheet);
+    saveManifestBtn.addEventListener('click', saveManifest);
+    refreshHistoryBtn.addEventListener('click', loadHistory);
     window.addEventListener('beforeprint', updateStamp);
 
     (function init() {
@@ -623,6 +858,7 @@
       manifestDateEl.value = today.toISOString().slice(0, 10);
       updateStamp();
       renderRows();
+      loadHistory();
       try { scanInput.focus({ preventScroll: true }); } catch (_) {}
     })();
   </script>

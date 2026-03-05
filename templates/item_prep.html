@@ -653,7 +653,8 @@
       if(!base) return '/items-to-list';
       const p = new URLSearchParams();
       p.set('q', base);
-      p.set('status', 'good,bad,unchecked');
+      p.set('status', 'good,bad,return,unchecked');
+      p.set('direct_search', '1');
       const lot = getActiveLotNumber();
       if(lot) p.set('lot', lot);
       return '/items-to-list?' + p.toString();
@@ -1216,20 +1217,14 @@
       // Show loading overlay
       showPageLoading();
       
-      // Create a suffixed entry with status "good" and reason "return"
+      // Create a suffixed entry, then continue through diagnostic return flow
       try {
-        const data = await postWithLotFallback('/api/items_prep/create_return_entry', {
+        let data = await postWithLotFallback('/api/items_prep/create_return_entry', {
           upc: currentUpc,
           qty: currentQty
         });
         
-        if (data.success) {
-          const statusMsg = document.getElementById('statusMsg');
-          const autoHint = data.auto_assigned ? (` <span class="bad">(auto-assigned LOT ${esc(data.lot_number || '')})</span>`) : '';
-          const forcedHint = data.forced_lot_override ? (` <span class="bad">(forced current LOT ${esc(data.lot_number || '')}, flagged)</span>`) : '';
-          const noLotHint = data.continued_without_lot ? ' <span class="bad">(continued with no LOT)</span>' : '';
-          statusMsg.innerHTML='<span class="ok">Return entry created: ' + data.suffixed_upc + ' (Qty: '+currentQty+')</span>' + autoHint + forcedHint + noLotHint;
-          
+        if (data.success && data.suffixed_upc) {
           // Store for undo
           lastEntry = {
             upc: data.suffixed_upc,
@@ -1239,14 +1234,19 @@
             action: 'return',
             lot_number: data.lot_number || getActionLotNumber()
           };
-          showUndoButton();
+          sessionStorage.setItem('lastEntry', JSON.stringify(lastEntry));
+          updateQtyDisplay(-1);
+
+          setTimeout(() => {
+            const lotParam = data.lot_number || getActionLotNumber() || '';
+            const lotQuery = lotParam ? ('&lot=' + encodeURIComponent(lotParam)) : '';
+            const requestedLotParam = data.requested_lot || getActionLotNumber() || '';
+            const requestedLotQuery = requestedLotParam ? ('&requested_lot=' + encodeURIComponent(requestedLotParam)) : '';
+            const noLotQuery = data.continued_without_lot ? '&continued_without_lot=1' : '';
+            const exceptionOverageQuery = data.exception_overage ? '&exception_overage=1' : '';
+            window.location.href = '/item-prep/diagnostic?upc='+encodeURIComponent(data.suffixed_upc)+'&from=return&qty='+currentQty+lotQuery+requestedLotQuery+noLotQuery+exceptionOverageQuery+'&return='+encodeURIComponent('/item-prep?forceFocus=1&showUndo=1');
+          }, 300);
           releaseDeferred = true;
-          setTimeout(()=>{ 
-            hidePageLoading();
-            statusMsg.textContent=''; 
-            clearCurrentResultCard();
-            endPrepAction();
-          }, 3000);
         } else {
           if(!data.cancelled){
             alert('Error creating return entry: ' + (data.error || 'Unknown error'));

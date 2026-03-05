@@ -12,12 +12,15 @@
     .btn-back{background:#dc2626;color:#fff}
     .btn-primary{background:#0ea5e9;color:#fff}
     .btn-green{background:#16a34a;color:#fff}
+    .btn-danger{background:#dc2626;color:#fff}
     .btn-gray{background:#6b7280;color:#fff}
     .btn-lite{background:#f3f4f6;border:1px solid #d1d5db;color:#111827}
+    .btn-bulk{background:#7c3aed;color:#fff}
     .panel{background:#fff;border:1px solid #d8dee9;border-radius:12px;padding:12px;margin-bottom:12px}
     .scan-row{display:grid;grid-template-columns:1fr auto;gap:8px}
     .shelf-row{margin-top:8px}
     .scan-row input,.dest input{width:100%;padding:11px;border:1px solid #cbd5e1;border-radius:8px;font-size:1rem}
+    .bulk-row select{width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:8px;font-size:.95rem;background:#fff;color:#111827;min-height:42px}
     .hint{margin-top:6px;color:#64748b;font-size:.9rem}
     .status{margin-top:6px;min-height:20px;color:#64748b;font-size:.9rem}
     .status.ok{color:#15803d;font-weight:700}
@@ -60,7 +63,9 @@
     html.ss-theme-night th{background:#1f2937;color:#cbd5e1}
     html.ss-theme-night td,html.ss-theme-night .table-wrap{border-color:#334155}
     html.ss-theme-night .scan-row input,html.ss-theme-night .dest input{background:#0f172a;color:#e5e7eb;border-color:#334155}
+    html.ss-theme-night .bulk-row select{background:#0f172a;color:#e5e7eb;border-color:#334155}
     html.ss-theme-night .btn-lite{background:#1f2937;color:#e5e7eb;border-color:#475569}
+    html.ss-theme-night .btn-danger{background:#991b1b}
     html.ss-theme-night .qty-btn{background:#082f49;color:#bae6fd;border-color:#0ea5e9}
     html.ss-theme-night .qty{background:#172554;color:#c7d2fe;border-color:#3730a3}
   </style>
@@ -81,8 +86,14 @@
       <input id="shelfInput" type="text" placeholder="Scan SHELF code and press Enter" autocomplete="off" autocapitalize="off" spellcheck="false">
       <button id="loadShelfBtn" class="btn btn-lite" type="button">Load Shelf</button>
     </div>
+    <div class="scan-row shelf-row bulk-row">
+      <select id="bulkManifestSelect" multiple size="4" aria-label="Bulk manifests">
+      </select>
+      <button id="loadBulkBtn" class="btn btn-bulk" type="button">Load Bulk(s)</button>
+    </div>
     <div class="hint">Single location auto-selects. Multiple locations: tap one or more bubbles to select sources; tap a selected bubble again for location picture preview.</div>
     <div class="hint">SHELF input accepts shelf codes only and loads all items from that shelf.</div>
+    <div class="hint">Bulk manifests: select one or more saved bulk(s), then load and remove sold quantities from exact source locations.</div>
     <div id="status" class="status"></div>
   </div>
 
@@ -94,7 +105,9 @@
       </div>
       <div class="actions">
         <button id="moveBtn" class="btn btn-green" type="button">Move</button>
-        <button id="clearBtn" class="btn btn-gray" type="button">Remove All</button>
+        <button id="bulkCleanupBtn" class="btn btn-bulk" type="button">Bulk Cleanup</button>
+        <button id="removeAllBtn" class="btn btn-danger" type="button">Remove All</button>
+        <button id="clearListBtn" class="btn btn-gray" type="button">Clear List</button>
       </div>
     </div>
 
@@ -146,11 +159,15 @@
     const scanBtn = document.getElementById('scanBtn');
     const shelfInput = document.getElementById('shelfInput');
     const loadShelfBtn = document.getElementById('loadShelfBtn');
+    const bulkManifestSelect = document.getElementById('bulkManifestSelect');
+    const loadBulkBtn = document.getElementById('loadBulkBtn');
     const statusEl = document.getElementById('status');
     const queueBody = document.getElementById('queueBody');
     const queueCount = document.getElementById('queueCount');
     const moveBtn = document.getElementById('moveBtn');
-    const clearBtn = document.getElementById('clearBtn');
+    const bulkCleanupBtn = document.getElementById('bulkCleanupBtn');
+    const removeAllBtn = document.getElementById('removeAllBtn');
+    const clearListBtn = document.getElementById('clearListBtn');
     const destPanel = document.getElementById('destPanel');
     const destInput = document.getElementById('destInput');
     const confirmMoveBtn = document.getElementById('confirmMoveBtn');
@@ -170,8 +187,11 @@
     let seq = 1;
     let scanBusy = false;
     let shelfBusy = false;
+    let bulkBusy = false;
     let moveBusy = false;
     let validShelves = [];
+    let manifestHistory = [];
+    let activeBulkManifestIds = [];
 
     function esc(v){return String(v||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
     function missingThumb(){
@@ -274,6 +294,173 @@
       if(!c) return false;
       if(validShelves.length && validShelves.includes(c)) return true;
       return /^(gr[1-5]|or[1-3]|h\d+)s?[1-9]?\d*$/i.test(code);
+    }
+
+    function normalizeManifestStatus(status){
+      const raw = String(status||'').trim().toLowerCase();
+      if(raw === 'sold') return 'sold';
+      if(raw === 'cleanup_complete') return 'cleanup_complete';
+      if(raw === 'cleanup_partial') return 'cleanup_partial';
+      return 'created';
+    }
+    function manifestStatusLabel(status){
+      const key = normalizeManifestStatus(status);
+      if(key === 'sold') return 'Sold';
+      if(key === 'cleanup_complete') return 'Cleanup Complete';
+      if(key === 'cleanup_partial') return 'Cleanup Partial';
+      return 'Created';
+    }
+    function parseManifestIds(raw){
+      const out = [];
+      const seen = new Set();
+      String(raw || '').split(',').forEach(part => {
+        const n = Number.parseInt(String(part || '').trim(), 10);
+        if(!Number.isFinite(n) || n <= 0 || seen.has(n)) return;
+        seen.add(n);
+        out.push(n);
+      });
+      return out;
+    }
+    function selectedBulkManifestIds(){
+      if(!bulkManifestSelect) return [];
+      return Array.from(bulkManifestSelect.selectedOptions || [])
+        .map(opt => Number.parseInt(opt.value, 10))
+        .filter(n => Number.isFinite(n) && n > 0);
+    }
+    function renderBulkManifestOptions(selectedIds){
+      const selected = new Set((selectedIds || []).map(x => Number.parseInt(x, 10)).filter(x => Number.isFinite(x) && x > 0));
+      const rows = Array.isArray(manifestHistory) ? manifestHistory : [];
+      if(!rows.length){
+        bulkManifestSelect.innerHTML = '<option value="" disabled>No saved manifests found</option>';
+        return;
+      }
+      let html = '';
+      rows.forEach(row => {
+        const id = Number.parseInt(row.id, 10);
+        if(!Number.isFinite(id) || id <= 0) return;
+        const title = String(row.manifest_title || '').trim() || ('Manifest #' + id);
+        const units = Number(row.total_units || 0);
+        const statusText = manifestStatusLabel(row.status);
+        const dateText = String(row.manifest_date || '').trim() || String(row.created_at || '').slice(0, 10);
+        const sel = selected.has(id) ? ' selected' : '';
+        html += `<option value="${id}"${sel}>#${id} • ${title} • ${units} unit(s) • ${statusText} • ${dateText}</option>`;
+      });
+      bulkManifestSelect.innerHTML = html || '<option value="" disabled>No saved manifests found</option>';
+    }
+    async function loadBulkManifestHistory(selectedIds){
+      try{
+        const resp = await fetch('/api/bulk-manifest/history?limit=160');
+        const data = await resp.json();
+        if(!data || !data.success) throw new Error((data && data.error) || 'Bulk manifest history unavailable');
+        manifestHistory = Array.isArray(data.manifests) ? data.manifests : [];
+        renderBulkManifestOptions(selectedIds || []);
+      }catch(err){
+        manifestHistory = [];
+        renderBulkManifestOptions([]);
+        setStatus(false, err && err.message ? err.message : 'Bulk manifest history unavailable');
+      }
+    }
+    async function loadSelectedBulkManifests(){
+      if(bulkBusy) return;
+      const ids = selectedBulkManifestIds();
+      if(!ids.length){
+        showMessage('Select Bulk Manifest', 'Select one or more bulk manifests first.');
+        setStatus(false, 'Select one or more bulk manifests first');
+        return;
+      }
+      if(queue.length && !confirm(`Replace current queue with selected bulk manifest items (#${ids.join(', #')})?`)){
+        return;
+      }
+
+      bulkBusy = true;
+      loadBulkBtn.disabled = true;
+      setStatus(null, `Loading bulk manifest items (#${ids.join(', #')})...`);
+      try{
+        const resp = await fetch('/api/bulk-manifest/cleanup-items?manifest_ids=' + encodeURIComponent(ids.join(',')));
+        const data = await resp.json();
+        if(!data || !data.success) throw new Error((data && data.error) || 'Failed to load bulk manifest items');
+
+        const sourceItems = Array.isArray(data.items) ? data.items : [];
+        if(!sourceItems.length){
+          queue = [];
+          activeBulkManifestIds = [];
+          render();
+          closeDestPanel();
+          setStatus(false, 'Selected bulk manifest(s) have no items.');
+          return;
+        }
+
+        const nextQueue = [];
+        const warnings = [];
+        for(const srcItem of sourceItems){
+          const barcode = String(srcItem.barcode || '').trim();
+          if(!barcode) continue;
+          try{
+            const lookupResp = await fetch('/api/movelocation_lookup?barcode=' + encodeURIComponent(barcode));
+            const lookupData = await lookupResp.json();
+            if(!lookupData || !lookupData.success || !lookupData.found || !lookupData.item){
+              warnings.push(`${barcode}: ${(lookupData && lookupData.error) || 'not found in SEARCHRACK'}`);
+              continue;
+            }
+
+            const item = lookupData.item;
+            const newLocs = mergeLocations([], Array.isArray(item.locations) ? item.locations : []);
+            if(!newLocs.length){
+              warnings.push(`${barcode}: no source locations found`);
+              continue;
+            }
+
+            const requestedQty = Math.max(1, Number.parseInt(srcItem.quantity, 10) || 1);
+            const row = {
+              uid: seq++,
+              barcode: String(item.barcode || barcode),
+              barcode_display: String(item.barcode_display || item.barcode || barcode),
+              barcode_key: String(item.barcode_key || barcodeKey(item.barcode || barcode)),
+              title: String(srcItem.title || item.title || barcode),
+              image: String(srcItem.image || item.image || ''),
+              total_available: Number(item.total_available || 0),
+              locations: newLocs,
+              scan_qty: requestedQty,
+              selected_location_keys: [],
+              selected_location_codes: [],
+              selected_location_key: '',
+              selected_location_code: '',
+              selected_preview_key: '',
+              manifest_ids: Array.isArray(srcItem.manifest_ids) ? srcItem.manifest_ids : ids,
+              manifest_titles: Array.isArray(srcItem.manifest_titles) ? srcItem.manifest_titles : []
+            };
+            const clamped = clampRowQty(row);
+            syncRowSelection(row);
+            if(clamped.qty < requestedQty){
+              warnings.push(`${barcode}: requested ${requestedQty}, available ${clamped.qty}`);
+            }
+            nextQueue.push(row);
+          }catch(err){
+            warnings.push(`${barcode}: lookup failed`);
+          }
+        }
+
+        queue = nextQueue;
+        activeBulkManifestIds = Array.isArray(data.manifest_ids) && data.manifest_ids.length ? data.manifest_ids : ids;
+        closeDestPanel();
+        render();
+        const units = queuedUnits();
+        if(nextQueue.length){
+          setStatus(true, `Loaded ${nextQueue.length} item(s), ${units} unit(s) from selected bulk manifest(s).`);
+        }else{
+          setStatus(false, 'No bulk manifest items could be loaded into queue.');
+        }
+        if(warnings.length){
+          showMessage('Bulk Load Warnings', warnings.join('\n'));
+        }
+      }catch(err){
+        showMessage('Bulk Load Error', err && err.message ? err.message : 'Failed to load bulk manifest items');
+        setStatus(false, err && err.message ? err.message : 'Failed to load bulk manifest items');
+      }finally{
+        bulkBusy = false;
+        loadBulkBtn.disabled = false;
+        barcodeInput.focus();
+      }
     }
 
     function mergeLocations(oldList,newList){
@@ -625,10 +812,7 @@
         showMessage('No Items', 'Scan at least one item before moving.');
         return;
       }
-      const missing = queue.filter(r => {
-        syncRowSelection(r);
-        return !((r.selected_location_keys || []).length);
-      });
+      const missing = getRowsMissingSourceSelection();
       if(missing.length){
         const list = missing.map(r => barcodeDisplay(r.barcode_display || r.barcode || '')).join(', ');
         showMessage('Select Source Location', `Choose source location for each item.\n\nMissing: ${list}`);
@@ -644,21 +828,61 @@
       destInput.value = '';
     }
 
+    function getRowsMissingSourceSelection(){
+      return queue.filter(r => {
+        syncRowSelection(r);
+        return !((r.selected_location_keys || []).length);
+      });
+    }
+    function buildQueuePayload(){
+      return queue.map(r => ({
+        barcode: r.barcode,
+        from_location: String(((r.selected_location_codes || [])[0] || r.selected_location_code || '')).trim(),
+        from_locations: (r.selected_location_codes || [])
+          .map(v => String(v || '').trim())
+          .filter(Boolean),
+        quantity: Number(r.scan_qty||0) || 1,
+        manifest_ids: Array.isArray(r.manifest_ids) ? r.manifest_ids : []
+      }));
+    }
+    function applyMoveResultToQueue(results){
+      const nextQueue = [];
+      const warnings = [];
+      queue.forEach((row, idx) => {
+        const rr = results.find(x => Number(x.index)===idx);
+        if(!rr){
+          nextQueue.push(row);
+          warnings.push(`${row.barcode}: no result returned`);
+          return;
+        }
+        const moved = Number(rr.moved_qty||0);
+        const remain = Math.max(0, Number(row.scan_qty||0) - moved);
+        if(remain > 0){
+          row.scan_qty = remain;
+          nextQueue.push(row);
+        }
+        if(rr.error) warnings.push(`${row.barcode}: ${rr.error}`);
+      });
+      queue = nextQueue;
+      render();
+      return warnings;
+    }
+
     async function submitMove(){
       if(moveBusy) return;
       if(!queue.length){ showMessage('No Items', 'No queued items to move.'); return; }
       const dest = String(destInput.value||'').trim();
       if(!dest){ showMessage('Destination Required', 'Scan or type destination shelf code.'); destInput.focus(); return; }
       if(!validShelf(dest)){ showMessage('Invalid Shelf Code', `Destination "${dest}" is not a known shelf code.`); return; }
+      const missing = getRowsMissingSourceSelection();
+      if(missing.length){
+        const list = missing.map(r => barcodeDisplay(r.barcode_display || r.barcode || '')).join(', ');
+        showMessage('Select Source Location', `Choose source location for each item.\n\nMissing: ${list}`);
+        setStatus(false, 'Select source location for all queued rows');
+        return;
+      }
 
-      const payload = queue.map(r => ({
-        barcode: r.barcode,
-        from_location: String(((r.selected_location_codes || [])[0] || r.selected_location_code || '')).trim(),
-        from_locations: (r.selected_location_codes || [])
-          .map(v => String(v || '').trim())
-          .filter(Boolean),
-        quantity: Number(r.scan_qty||0) || 1
-      }));
+      const payload = buildQueuePayload();
       if(!payload.length){ showMessage('No Items', 'No queued items to move.'); return; }
 
       moveBusy = true;
@@ -674,25 +898,7 @@
         if(!resp.ok || !data || !data.success) throw new Error((data && data.error) || 'Move failed');
 
         const results = Array.isArray(data.item_results) ? data.item_results : [];
-        const nextQueue = [];
-        const warnings = [];
-        queue.forEach((row, idx) => {
-          const rr = results.find(x => Number(x.index)===idx);
-          if(!rr){
-            nextQueue.push(row);
-            warnings.push(`${row.barcode}: no result returned`);
-            return;
-          }
-          const moved = Number(rr.moved_qty||0);
-          const remain = Math.max(0, Number(row.scan_qty||0) - moved);
-          if(remain > 0){
-            row.scan_qty = remain;
-            nextQueue.push(row);
-          }
-          if(rr.error) warnings.push(`${row.barcode}: ${rr.error}`);
-        });
-        queue = nextQueue;
-        render();
+        const warnings = applyMoveResultToQueue(results);
         closeDestPanel();
         const movedUnits = Number(data.moved_units||0);
         const movedItems = Number(data.moved_items||0);
@@ -707,6 +913,132 @@
       }finally{
         moveBusy = false;
         confirmMoveBtn.disabled = false;
+        barcodeInput.focus();
+      }
+    }
+
+    async function submitRemoveAll(){
+      if(moveBusy) return;
+      if(!queue.length){ showMessage('No Items', 'No queued items to remove location codes from.'); return; }
+      const missing = getRowsMissingSourceSelection();
+      if(missing.length){
+        const list = missing.map(r => barcodeDisplay(r.barcode_display || r.barcode || '')).join(', ');
+        showMessage('Select Source Location', `Choose source location for each item.\n\nMissing: ${list}`);
+        setStatus(false, 'Select source location for all queued rows');
+        return;
+      }
+
+      const payload = buildQueuePayload();
+      if(!payload.length){ showMessage('No Items', 'No queued items to remove location codes from.'); return; }
+
+      const rows = queue.length;
+      const units = queuedUnits();
+      const prompt = `Safety check:\n\nThis will remove location codes from ${rows} queued row(s), ${units} unit(s).\nItems stay in inventory but will have blank location.\n\nContinue?`;
+      if(!confirm(prompt)) return;
+
+      moveBusy = true;
+      removeAllBtn.disabled = true;
+      confirmMoveBtn.disabled = true;
+      setStatus(null, `Removing location codes from ${payload.length} row(s)...`);
+      try{
+        const resp = await fetch('/api/movelocation_execute', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({clear_location: true, items: payload})
+        });
+        const data = await resp.json();
+        if(!resp.ok || !data || !data.success) throw new Error((data && data.error) || 'Remove all failed');
+
+        const results = Array.isArray(data.item_results) ? data.item_results : [];
+        const warnings = applyMoveResultToQueue(results);
+        closeDestPanel();
+        const movedUnits = Number(data.moved_units||0);
+        const movedItems = Number(data.moved_items||0);
+        const skipped = Number(data.skipped_items||0);
+        setStatus(true, `Removed location codes from ${movedUnits} unit(s) across ${movedItems} row(s).`);
+        if(warnings.length || skipped > 0){
+          showMessage('Remove Completed With Warnings', `Removed location codes from ${movedUnits} unit(s).\nSkipped rows: ${skipped}.\n\n${warnings.join('\n')}`);
+        }
+      }catch(err){
+        showMessage('Remove Error', err.message || 'Remove all failed');
+        setStatus(false, err.message || 'Remove all failed');
+      }finally{
+        moveBusy = false;
+        removeAllBtn.disabled = false;
+        confirmMoveBtn.disabled = false;
+        barcodeInput.focus();
+      }
+    }
+
+    async function submitBulkCleanup(){
+      if(moveBusy) return;
+      if(!queue.length){
+        showMessage('No Items', 'No queued items to clean from inventory.');
+        return;
+      }
+      const missing = getRowsMissingSourceSelection();
+      if(missing.length){
+        const list = missing.map(r => barcodeDisplay(r.barcode_display || r.barcode || '')).join(', ');
+        showMessage('Select Source Location', `Choose source location for each item.\n\nMissing: ${list}`);
+        setStatus(false, 'Select source location for all queued rows');
+        return;
+      }
+
+      const payload = buildQueuePayload();
+      if(!payload.length){
+        showMessage('No Items', 'No queued items to clean from inventory.');
+        return;
+      }
+
+      const rows = queue.length;
+      const units = queuedUnits();
+      const manifestText = activeBulkManifestIds.length
+        ? `\nBulk manifests: #${activeBulkManifestIds.join(', #')}`
+        : '';
+      const prompt = `Safety check:\n\nThis will REMOVE sold quantity from SEARCHRACK inventory.\nRows: ${rows}\nUnits: ${units}${manifestText}\n\nContinue?`;
+      if(!confirm(prompt)) return;
+
+      moveBusy = true;
+      bulkCleanupBtn.disabled = true;
+      confirmMoveBtn.disabled = true;
+      removeAllBtn.disabled = true;
+      setStatus(null, `Removing sold quantities from ${payload.length} row(s)...`);
+      try{
+        const resp = await fetch('/api/movelocation_bulk_cleanup', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({
+            items: payload,
+            manifest_ids: activeBulkManifestIds
+          })
+        });
+        const data = await resp.json();
+        if(!resp.ok || !data || !data.success) throw new Error((data && data.error) || 'Bulk cleanup failed');
+
+        const results = Array.isArray(data.item_results) ? data.item_results : [];
+        const warnings = applyMoveResultToQueue(results);
+        closeDestPanel();
+        const removedUnits = Number(data.removed_units || data.moved_units || 0);
+        const removedItems = Number(data.removed_items || data.moved_items || 0);
+        const skipped = Number(data.skipped_items || 0);
+        setStatus(true, `Removed ${removedUnits} sold unit(s) across ${removedItems} row(s) from inventory.`);
+        if(warnings.length || skipped > 0){
+          showMessage(
+            'Bulk Cleanup Completed With Warnings',
+            `Removed ${removedUnits} unit(s).\nSkipped rows: ${skipped}.\n\n${warnings.join('\n')}`
+          );
+        }
+        if(activeBulkManifestIds.length){
+          loadBulkManifestHistory(activeBulkManifestIds);
+        }
+      }catch(err){
+        showMessage('Bulk Cleanup Error', err && err.message ? err.message : 'Bulk cleanup failed');
+        setStatus(false, err && err.message ? err.message : 'Bulk cleanup failed');
+      }finally{
+        moveBusy = false;
+        bulkCleanupBtn.disabled = false;
+        confirmMoveBtn.disabled = false;
+        removeAllBtn.disabled = false;
         barcodeInput.focus();
       }
     }
@@ -730,14 +1062,18 @@
       if(e.key === 'Enter'){ e.preventDefault(); processShelf(); }
     });
     loadShelfBtn.addEventListener('click', processShelf);
+    loadBulkBtn.addEventListener('click', loadSelectedBulkManifests);
 
     moveBtn.addEventListener('click', openDestPanel);
-    clearBtn.addEventListener('click', () => {
+    bulkCleanupBtn.addEventListener('click', submitBulkCleanup);
+    removeAllBtn.addEventListener('click', submitRemoveAll);
+    clearListBtn.addEventListener('click', () => {
       if(!queue.length) return;
-      if(!confirm(`Remove all ${queue.length} queued row(s)?`)) return;
+      if(!confirm(`Clear queued list (${queue.length} row(s))?`)) return;
       queue = [];
+      activeBulkManifestIds = [];
       render();
-      setStatus(true,'Removed all queued items');
+      setStatus(true,'Cleared queued list');
       closeDestPanel();
       barcodeInput.focus();
     });
@@ -758,9 +1094,27 @@
       else window.location.href = '/';
     });
 
-    loadValidShelves();
-    render();
-    barcodeInput.focus();
+    async function initMoveLocationPage(){
+      await loadValidShelves();
+      render();
+
+      const query = new URLSearchParams(window.location.search);
+      const queryManifestIds = parseManifestIds(query.get('bulk_manifest_ids'));
+      await loadBulkManifestHistory(queryManifestIds);
+
+      if(queryManifestIds.length && bulkManifestSelect.options.length){
+        const selected = new Set(queryManifestIds);
+        Array.from(bulkManifestSelect.options).forEach(opt => {
+          const id = Number.parseInt(opt.value, 10);
+          opt.selected = Number.isFinite(id) && selected.has(id);
+        });
+        await loadSelectedBulkManifests();
+      }
+
+      barcodeInput.focus();
+    }
+
+    initMoveLocationPage();
   </script>
 </body>
 </html>

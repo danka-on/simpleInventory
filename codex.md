@@ -48,6 +48,13 @@ This workflow:
 - restarts `sweetshelves`,
 - deletes the local temp tar.
 
+### User deployment preference (2026-03-05)
+
+When user says "let's push to pi":
+- provide only the direct `scp` commands for the relevant files (no auto-execution),
+- exclude all `.db` files,
+- wait for user confirmation (`success`) before updating this memory checkpoint.
+
 ### Push/commit intent rule
 
 When user says "push to pi" or "commit changes", treat it as:
@@ -58,9 +65,14 @@ When user says "push to pi" or "commit changes", treat it as:
 ### Last successful checkpoint
 
 - Status: success confirmed by user
-- Date: 2026-02-25
+- Date: 2026-03-05 12:59:34 -05:00
 - Branch: `pi-claude-refactor`
-- Git commit baseline for next incremental file discovery: `8a5938e` (`bigupdateprepush2`)
+- Git commit baseline for next incremental file discovery: `29c308f`
+- Files pushed in this successful checkpoint:
+  - `app.py`
+  - `templates/bulk_manifest.html`
+  - `templates/marketplace_session.html`
+  - `templates/movelocation.html`
 
 ## Architecture
 
