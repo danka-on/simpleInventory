@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ manifest.manifest_title or ('Bulk Manifest ' ~ manifest.id) }} Pictures</title>
+  <style>
+    :root {
+      --bg: #f3f4f6;
+      --card: #ffffff;
+      --ink: #0f172a;
+      --muted: #64748b;
+      --border: #d1d5db;
+      --accent: #1d4ed8;
+      --danger: #b91c1c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: "Segoe UI", Tahoma, Arial, sans-serif;
+    }
+    .page {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 16px;
+    }
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 14px;
+    }
+    .topbar-title {
+      font-size: 1.3rem;
+      font-weight: 800;
+    }
+    .topbar-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      border: 1px solid var(--border);
+      background: var(--card);
+      color: var(--ink);
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-weight: 700;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    .btn-primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    .sheet {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px;
+      box-shadow: 0 10px 24px rgba(2, 6, 23, 0.08);
+    }
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .meta-chip {
+      min-width: 180px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 12px;
+      background: rgba(29, 78, 216, 0.05);
+    }
+    .meta-label {
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      font-size: 0.76rem;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+    .meta-value {
+      font-size: 1.05rem;
+      font-weight: 800;
+    }
+    .status {
+      margin-bottom: 12px;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+    .status.error {
+      color: var(--danger);
+      font-weight: 700;
+    }
+    .gallery {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 14px;
+    }
+    .card {
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      overflow: hidden;
+      background: var(--card);
+      box-shadow: 0 8px 18px rgba(15, 23, 42, 0.06);
+    }
+    .card-image-wrap {
+      display: block;
+      background: #e5e7eb;
+    }
+    .card-image {
+      display: block;
+      width: 100%;
+      aspect-ratio: 4 / 5;
+      object-fit: cover;
+      background: #e5e7eb;
+    }
+    .card-body {
+      padding: 12px;
+    }
+    .card-title {
+      font-size: 0.92rem;
+      font-weight: 800;
+      line-height: 1.3;
+      margin-bottom: 4px;
+    }
+    .card-time {
+      color: var(--muted);
+      font-size: 0.8rem;
+      margin-bottom: 10px;
+    }
+    .card-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .card-actions .btn {
+      flex: 1 1 120px;
+      padding: 8px 10px;
+      font-size: 0.88rem;
+    }
+    .empty {
+      border: 1px dashed var(--border);
+      border-radius: 14px;
+      padding: 26px 18px;
+      text-align: center;
+      color: var(--muted);
+      font-style: italic;
+      background: rgba(148, 163, 184, 0.06);
+    }
+    @media (max-width: 720px) {
+      .page {
+        padding: 12px;
+      }
+      .sheet {
+        padding: 12px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="topbar">
+      <div class="topbar-title">{{ manifest.manifest_title or ('Bulk Manifest ' ~ manifest.id) }} Pictures</div>
+      <div class="topbar-actions">
+        <a class="btn" href="/bulk-manifest?manifest_id={{ manifest.id }}">Back to Manifest</a>
+        <a class="btn" href="/tools">Back to Tools</a>
+      </div>
+    </div>
+
+    <div class="sheet">
+      <div class="meta">
+        <div class="meta-chip">
+          <div class="meta-label">Manifest</div>
+          <div class="meta-value">#{{ manifest.id }}</div>
+        </div>
+        <div class="meta-chip">
+          <div class="meta-label">Date</div>
+          <div class="meta-value">{{ manifest.manifest_date or manifest.created_at[:10] or '-' }}</div>
+        </div>
+        <div class="meta-chip">
+          <div class="meta-label">Pictures</div>
+          <div class="meta-value">{{ photo_count }}</div>
+        </div>
+      </div>
+
+      {% if error %}
+      <div class="status error">{{ error }}</div>
+      {% elif photo_count %}
+      <div class="status">Open any picture full size or download it directly.</div>
+      {% else %}
+      <div class="status">No pictures saved on this manifest yet.</div>
+      {% endif %}
+
+      {% if photos %}
+      <div class="gallery">
+        {% for photo in photos %}
+        <div class="card">
+          <a class="card-image-wrap" href="{{ photo.image_url }}" target="_blank" rel="noopener">
+            <img class="card-image" src="{{ photo.image_url }}" alt="{{ manifest.manifest_title or ('Bulk Manifest ' ~ manifest.id) }}">
+          </a>
+          <div class="card-body">
+            <div class="card-title">{{ manifest.manifest_title or ('Bulk Manifest ' ~ manifest.id) }}</div>
+            <div class="card-time">{{ photo.created_at or 'Saved picture' }}</div>
+            <div class="card-actions">
+              <a class="btn" href="{{ photo.image_url }}" target="_blank" rel="noopener">Open Full Size</a>
+              <a class="btn btn-primary" href="{{ photo.image_url }}" download>Download</a>
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="empty">No saved pictures are attached to this manifest yet.</div>
+      {% endif %}
+    </div>
+  </div>
+</body>
+</html>

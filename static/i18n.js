@@ -1481,7 +1481,8 @@ function createTopBanner(){
           const counts = data.counts || {};
           const noWarehouse = parseInt(counts.no_warehouse, 10) || 0;
           const qtyAlert = parseInt(counts.quantity_alert, 10) || 0;
-          setCount(noWarehouse + qtyAlert);
+          const syncOverdue = parseInt(counts.sync_overdue, 10) || 0;
+          setCount(noWarehouse + qtyAlert + syncOverdue);
         }
       }catch(e){}
       finally{

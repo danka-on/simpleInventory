@@ -94,37 +94,42 @@
       margin: 0 0 10px 0;
       font-size: 1.35rem;
     }
-    .meta-grid {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(180px, 1fr));
-      gap: 10px;
-      margin-bottom: 8px;
-    }
-    .meta-field {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-    }
-    .meta-field label {
+    .auto-meta {
+      margin: 0 0 8px 0;
       color: var(--muted);
-      font-size: 0.78rem;
-      font-weight: 700;
-      letter-spacing: 0.02em;
-      text-transform: uppercase;
-    }
-    .meta-field input {
-      height: 36px;
-      border-radius: 8px;
-      border: 1px solid var(--border);
-      background: transparent;
-      color: var(--ink);
-      padding: 6px 10px;
-      font-size: 0.95rem;
+      font-size: 0.88rem;
     }
     .stamp {
       color: var(--muted);
       font-size: 0.84rem;
       margin-bottom: 10px;
+    }
+    .manifest-summary {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin: 0 0 12px 0;
+    }
+    .summary-chip {
+      min-width: 180px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 12px;
+      background: rgba(29, 78, 216, 0.06);
+    }
+    .summary-label {
+      font-size: 0.76rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+    .summary-value {
+      font-size: 1.1rem;
+      font-weight: 800;
+      color: var(--ink);
+      font-variant-numeric: tabular-nums;
     }
     .scan-row {
       display: flex;
@@ -158,6 +163,74 @@
     .status.ok { color: var(--ok); }
     .status.warn { color: var(--warn); }
     .status.error { color: var(--danger); }
+    .keyword-results-wrap {
+      margin-top: 6px;
+      margin-bottom: 8px;
+      display: none;
+      max-height: 300px;
+      overflow: auto;
+    }
+    .keyword-results-table {
+      min-width: 0;
+    }
+    .keyword-results-table td {
+      font-size: 0.88rem;
+    }
+    .keyword-results-table th,
+    .keyword-results-table td {
+      padding-top: 6px;
+      padding-bottom: 6px;
+    }
+    .keyword-results-table .thumb-col {
+      width: 78px;
+      text-align: center;
+    }
+    .keyword-thumb {
+      width: 56px;
+      height: 56px;
+      object-fit: cover;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: rgba(148, 163, 184, 0.14);
+      display: inline-block;
+    }
+    .keyword-no-thumb {
+      font-size: 0.72rem;
+      color: var(--muted);
+      display: inline-block;
+      min-width: 56px;
+      text-align: center;
+    }
+    .keyword-results-table .add-result-btn {
+      border: 1px solid var(--accent);
+      background: var(--accent);
+      color: #fff;
+      border-radius: 8px;
+      padding: 5px 8px;
+      font-size: 0.8rem;
+      cursor: pointer;
+      font-weight: 700;
+    }
+    .keyword-pager {
+      display: none;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .keyword-pager .btn {
+      padding: 6px 10px;
+      border-radius: 8px;
+      font-size: 0.82rem;
+    }
+    .keyword-page-info {
+      min-width: 140px;
+      text-align: center;
+      font-size: 0.84rem;
+      color: var(--muted);
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+    }
     .table-wrap {
       overflow-x: auto;
       border: 1px solid var(--border);
@@ -192,6 +265,9 @@
       font-weight: 700;
       color: var(--muted);
     }
+    .print-row-num {
+      display: none;
+    }
     .barcode-col {
       width: 190px;
     }
@@ -201,13 +277,6 @@
     .qty-col, .money-col {
       width: 115px;
       text-align: center;
-    }
-    .line-total {
-      font-weight: 700;
-      color: var(--accent-2);
-      text-align: right;
-      white-space: nowrap;
-      font-variant-numeric: tabular-nums;
     }
     .cell-input {
       width: 100%;
@@ -224,11 +293,28 @@
       word-break: break-word;
       line-height: 1.25;
     }
+    .print-cell-value {
+      display: none;
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+    }
+    .print-cell-value.qty {
+      text-align: center;
+    }
+    .print-cell-value.money {
+      text-align: right;
+    }
+    .print-cell-value.emphasis {
+      font-weight: 800;
+    }
     .cell-input.qty,
     .cell-input.price {
       text-align: center;
-      font-weight: 700;
+      font-weight: 600;
       font-variant-numeric: tabular-nums;
+    }
+    .cell-input.emphasis-input {
+      font-weight: 800;
     }
     .remove-btn {
       border: 1px solid #ef4444;
@@ -313,18 +399,143 @@
     .history-actions {
       white-space: nowrap;
       text-align: right;
+      display: flex;
+      gap: 6px;
+      justify-content: flex-end;
+      flex-wrap: wrap;
     }
     .history-actions .btn {
       padding: 6px 10px;
       font-size: 0.82rem;
       border-radius: 8px;
     }
+    .download-hint a {
+      color: var(--accent);
+      text-decoration: underline;
+      font-weight: 600;
+    }
+    .download-hint a:hover {
+      opacity: 0.9;
+    }
+    .editor-note {
+      display: none;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 12px;
+      margin-bottom: 10px;
+      border: 1px solid rgba(29, 78, 216, 0.24);
+      border-radius: 10px;
+      background: rgba(29, 78, 216, 0.08);
+    }
+    .editor-note.warn {
+      border-color: rgba(245, 158, 11, 0.34);
+      background: rgba(245, 158, 11, 0.12);
+    }
+    .editor-note-text {
+      font-size: 0.92rem;
+      font-weight: 600;
+      color: var(--ink);
+    }
+    .combine-row {
+      display: none;
+    }
+    .scan-select {
+      flex: 1;
+      min-width: 260px;
+      height: 42px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: var(--card);
+      color: var(--ink);
+      padding: 8px 12px;
+      font-size: 0.95rem;
+      font-weight: 600;
+    }
+    .manifest-photos {
+      margin-top: 14px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px;
+      background: rgba(15, 23, 42, 0.02);
+    }
+    .manifest-photos-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 8px;
+    }
+    .manifest-photos-head h2 {
+      margin: 0;
+      font-size: 1rem;
+    }
+    .manifest-photos-subtitle {
+      color: var(--muted);
+      font-size: 0.84rem;
+      margin-top: 3px;
+    }
+    .manifest-photos-status {
+      min-height: 0;
+      margin-bottom: 0;
+      text-align: right;
+    }
+    .manifest-photos-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+      gap: 10px;
+    }
+    .manifest-photo-card {
+      display: block;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      background: var(--card);
+      color: inherit;
+      text-decoration: none;
+      box-shadow: 0 6px 14px rgba(15, 23, 42, 0.06);
+    }
+    .manifest-photo-thumb {
+      display: block;
+      width: 100%;
+      aspect-ratio: 4 / 5;
+      object-fit: cover;
+      background: rgba(148, 163, 184, 0.14);
+    }
+    .manifest-photo-meta {
+      padding: 8px 10px 10px 10px;
+    }
+    .manifest-photo-title {
+      font-size: 0.82rem;
+      font-weight: 700;
+      color: var(--ink);
+      line-height: 1.25;
+    }
+    .manifest-photo-time {
+      font-size: 0.74rem;
+      color: var(--muted);
+      margin-top: 4px;
+    }
+    .manifest-photo-empty {
+      grid-column: 1 / -1;
+      border: 1px dashed var(--border);
+      border-radius: 12px;
+      padding: 16px 14px;
+      color: var(--muted);
+      text-align: center;
+      font-style: italic;
+      background: rgba(148, 163, 184, 0.06);
+    }
 
     @media (max-width: 860px) {
-      .meta-grid { grid-template-columns: 1fr; }
       .topbar { flex-wrap: wrap; }
       .topbar-title { width: 100%; }
       .top-actions { width: 100%; justify-content: flex-start; }
+      .manifest-photos-head {
+        flex-direction: column;
+      }
+      .manifest-photos-status {
+        text-align: left;
+      }
     }
 
     @media print {
@@ -364,21 +575,28 @@
         padding: 0;
         color: #000;
       }
-      .line-total,
       .totals-amount {
-        color: #000;
-      }
-      .meta-field input {
-        border: none;
-        padding: 0;
-        height: auto;
         color: #000;
       }
       td.name-col .cell-input {
         display: none;
       }
+      td.barcode-col .cell-input,
+      td.qty-col .cell-input,
+      td.money-col .cell-input {
+        display: none;
+      }
       td.name-col .print-name {
         display: block;
+      }
+      .print-cell-value {
+        display: block;
+      }
+      .idx-col .screen-row-num {
+        display: none;
+      }
+      .idx-col .print-row-num {
+        display: inline;
       }
     }
   </style>
@@ -389,6 +607,11 @@
       <a href="/tools" class="btn">Back to Tools</a>
       <div class="topbar-title">Bulk Manifest</div>
       <div class="top-actions">
+        <button id="newManifestBtn" class="btn" type="button" hidden>New Sheet</button>
+        <button id="deleteGoogleSheetBtn" class="btn btn-danger" type="button" hidden>Delete Google Sheet</button>
+        <button id="refreshManifestBtn" class="btn" type="button" disabled>Refresh Data</button>
+        <button id="addPicturesBtn" class="btn" type="button" hidden>Add Pictures</button>
+        <a id="viewPicturesBtn" class="btn" href="#" hidden>Pictures</a>
         <button id="saveManifestBtn" class="btn btn-primary" type="button">Save Manifest</button>
         <button id="printBtnTop" class="btn" type="button">Print Sheet</button>
       </div>
@@ -397,21 +620,17 @@
     <div class="sheet">
       <div class="sheet-head">
         <h1>Bulk Manifest</h1>
-        <div class="meta-grid">
-          <div class="meta-field">
-            <label for="manifestTitle">Manifest Title</label>
-            <input id="manifestTitle" type="text" value="Bulk Sale Manifest">
-          </div>
-          <div class="meta-field">
-            <label for="manifestBuyer">Buyer / Account</label>
-            <input id="manifestBuyer" type="text" placeholder="Customer or account name">
-          </div>
-          <div class="meta-field">
-            <label for="manifestDate">Date</label>
-            <input id="manifestDate" type="date">
-          </div>
-        </div>
+        <div id="sheetAutoMeta" class="auto-meta">Name and date are assigned automatically when you save.</div>
         <div id="generatedStamp" class="stamp"></div>
+      </div>
+      <div id="editorNote" class="editor-note no-print">
+        <div id="editorNoteText" class="editor-note-text"></div>
+      </div>
+      <div id="combineRow" class="scan-row combine-row no-print">
+        <select id="combineManifestSelect" class="scan-select" aria-label="Choose manifest to combine">
+          <option value="">Choose manifest to combine...</option>
+        </select>
+        <button id="combineManifestBtn" class="btn" type="button" disabled>Combine Manifests</button>
       </div>
 
       <div class="scan-row no-print">
@@ -421,7 +640,45 @@
         <button id="clearBtn" class="btn btn-danger" type="button">Clear List</button>
       </div>
 
+      <div class="scan-row no-print">
+        <input id="keywordInput" class="scan-input" type="text" placeholder="Search by keyword when barcode is unknown" autocomplete="off">
+        <button id="searchKeywordBtn" class="btn" type="button">Search Keyword</button>
+        <button id="toggleKeywordResultsBtn" class="btn" type="button" disabled>Minimize Results</button>
+      </div>
+      <div id="keywordStatus" class="status no-print"></div>
+      <div id="keywordResultsWrap" class="table-wrap keyword-results-wrap no-print">
+        <table class="keyword-results-table">
+          <thead>
+            <tr>
+              <th class="thumb-col">Thumb</th>
+              <th style="width:180px;">Barcode</th>
+              <th>Item Name</th>
+              <th style="width:120px;">Price</th>
+              <th style="width:120px;"></th>
+            </tr>
+          </thead>
+          <tbody id="keywordResultsBody">
+            <tr class="history-empty"><td colspan="5">Search by keyword to find items.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div id="keywordPager" class="keyword-pager no-print">
+        <button id="keywordPrevBtn" class="btn" type="button">Prev</button>
+        <span id="keywordPageInfo" class="keyword-page-info"></span>
+        <button id="keywordNextBtn" class="btn" type="button">Next</button>
+      </div>
+
       <div id="statusMsg" class="status no-print"></div>
+      <div class="manifest-summary">
+        <div class="summary-chip">
+          <div class="summary-label">Total Items</div>
+          <div id="topTotalQty" class="summary-value">0</div>
+        </div>
+        <div class="summary-chip">
+          <div class="summary-label">Total Retail Price</div>
+          <div id="topTotalAmount" class="summary-value">$0.00</div>
+        </div>
+      </div>
 
       <div class="table-wrap">
         <table>
@@ -432,25 +689,41 @@
               <th class="barcode-col">Barcode</th>
               <th class="qty-col">Qty</th>
               <th class="money-col">Original Retail</th>
-              <th class="money-col" style="text-align:right;padding-right:14px;">Total (Qty &gt; 1)</th>
               <th class="no-print" style="width:98px;"></th>
             </tr>
           </thead>
           <tbody id="itemsBody">
             <tr class="empty-row">
-              <td colspan="7">Scan a barcode to start your manifest.</td>
+              <td colspan="6">Scan a barcode to start your manifest.</td>
             </tr>
           </tbody>
           <tfoot>
             <tr>
-              <th colspan="3" style="text-align:right;">Totals</th>
+              <th colspan="3" style="text-align:right;">Total Items</th>
               <th id="totalQty" class="totals-qty">0</th>
               <th></th>
+              <th class="no-print"></th>
+            </tr>
+            <tr>
+              <th colspan="4" style="text-align:right;">Total Retail Price</th>
               <th id="totalAmount" class="totals-amount">$0.00</th>
               <th class="no-print"></th>
             </tr>
           </tfoot>
         </table>
+      </div>
+
+      <div id="bulkManifestPhotosSection" class="manifest-photos no-print" hidden>
+        <div class="manifest-photos-head">
+          <div>
+            <h2>Pictures</h2>
+            <div class="manifest-photos-subtitle">Capture or attach several pictures to this saved bulk manifest.</div>
+          </div>
+          <div id="bulkManifestPhotosStatus" class="status manifest-photos-status"></div>
+        </div>
+        <div id="bulkManifestPhotosGrid" class="manifest-photos-grid">
+          <div class="manifest-photo-empty">Save or open a manifest to attach pictures.</div>
+        </div>
       </div>
     </div>
 
@@ -460,6 +733,7 @@
         <button id="refreshHistoryBtn" class="btn" type="button">Refresh</button>
       </div>
       <div id="historyStatus" class="status"></div>
+      <div id="historyDownloadHint" class="status no-print download-hint"></div>
       <div class="table-wrap">
         <table class="history-table">
           <thead>
@@ -471,7 +745,7 @@
               <th style="width:84px;text-align:center;">Rows</th>
               <th style="width:84px;text-align:center;">Units</th>
               <th style="width:120px;">Status</th>
-              <th style="width:172px;"></th>
+              <th style="width:404px;"></th>
             </tr>
           </thead>
           <tbody id="historyBody">
@@ -482,28 +756,71 @@
     </div>
   </div>
 
+  <input id="bulkManifestPhotosInput" type="file" accept="image/*" capture="environment" multiple hidden>
+
   <script>
     const scanInput = document.getElementById('scanInput');
     const addScanBtn = document.getElementById('addScanBtn');
     const addBlankBtn = document.getElementById('addBlankBtn');
     const clearBtn = document.getElementById('clearBtn');
+    const keywordInput = document.getElementById('keywordInput');
+    const searchKeywordBtn = document.getElementById('searchKeywordBtn');
+    const toggleKeywordResultsBtn = document.getElementById('toggleKeywordResultsBtn');
+    const keywordStatusEl = document.getElementById('keywordStatus');
+    const keywordResultsWrap = document.getElementById('keywordResultsWrap');
+    const keywordResultsBody = document.getElementById('keywordResultsBody');
+    const keywordPager = document.getElementById('keywordPager');
+    const keywordPrevBtn = document.getElementById('keywordPrevBtn');
+    const keywordPageInfo = document.getElementById('keywordPageInfo');
+    const keywordNextBtn = document.getElementById('keywordNextBtn');
     const printBtnTop = document.getElementById('printBtnTop');
+    const newManifestBtn = document.getElementById('newManifestBtn');
+    const deleteGoogleSheetBtn = document.getElementById('deleteGoogleSheetBtn');
+    const refreshManifestBtn = document.getElementById('refreshManifestBtn');
+    const addPicturesBtn = document.getElementById('addPicturesBtn');
+    const viewPicturesBtn = document.getElementById('viewPicturesBtn');
     const saveManifestBtn = document.getElementById('saveManifestBtn');
     const refreshHistoryBtn = document.getElementById('refreshHistoryBtn');
+    const bulkManifestPhotosInput = document.getElementById('bulkManifestPhotosInput');
+    const bulkManifestPhotosSection = document.getElementById('bulkManifestPhotosSection');
+    const bulkManifestPhotosStatusEl = document.getElementById('bulkManifestPhotosStatus');
+    const bulkManifestPhotosGrid = document.getElementById('bulkManifestPhotosGrid');
     const itemsBody = document.getElementById('itemsBody');
     const totalQtyEl = document.getElementById('totalQty');
     const totalAmountEl = document.getElementById('totalAmount');
+    const topTotalQtyEl = document.getElementById('topTotalQty');
+    const topTotalAmountEl = document.getElementById('topTotalAmount');
     const statusMsgEl = document.getElementById('statusMsg');
+    const sheetAutoMetaEl = document.getElementById('sheetAutoMeta');
     const generatedStampEl = document.getElementById('generatedStamp');
-    const manifestDateEl = document.getElementById('manifestDate');
+    const editorNoteEl = document.getElementById('editorNote');
+    const editorNoteTextEl = document.getElementById('editorNoteText');
+    const combineRowEl = document.getElementById('combineRow');
+    const combineManifestSelect = document.getElementById('combineManifestSelect');
+    const combineManifestBtn = document.getElementById('combineManifestBtn');
     const historyBody = document.getElementById('historyBody');
     const historyStatusEl = document.getElementById('historyStatus');
+    const historyDownloadHintEl = document.getElementById('historyDownloadHint');
 
     const state = {
       nextId: 1,
       items: [],
-      lastSavedManifestId: null
+      lastSavedManifestId: null,
+      currentManifest: null,
+      editModeActive: false,
+      manifestPhotos: [],
+      manifestHistory: [],
+      searchResults: [],
+      searchQuery: '',
+      searchPage: 1,
+      searchTotalPages: 0,
+      searchTotal: 0,
+      keywordResultsCollapsed: false
     };
+    let historyRefreshTimer = 0;
+    const DEFAULT_ITEM_NAME = 'item';
+    const DEFAULT_UNIT_PRICE = 9.99;
+    const RANDOM_UNIT_PRICE_MAX = 29.99;
 
     function esc(value) {
       return String(value || '')
@@ -526,9 +843,368 @@
       return Number(parsed.toFixed(2));
     }
 
+    function itemNameOrDefault(value) {
+      const name = String(value || '').trim();
+      return name || DEFAULT_ITEM_NAME;
+    }
+
+    function priceOrDefault(value) {
+      const parsed = toPrice(value);
+      if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_UNIT_PRICE;
+      return Number(parsed.toFixed(2));
+    }
+
+    function randomManifestPrice() {
+      const minCents = Math.round(DEFAULT_UNIT_PRICE * 100);
+      const maxCents = Math.round(RANDOM_UNIT_PRICE_MAX * 100);
+      const cents = Math.floor(Math.random() * (maxCents - minCents + 1)) + minCents;
+      return Number((cents / 100).toFixed(2));
+    }
+
+    function ensureItemUnitPrice(item) {
+      const parsed = toPrice(item && item.unit_price);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        return Number(parsed.toFixed(2));
+      }
+      const fallback = randomManifestPrice();
+      if (item && typeof item === 'object') {
+        item.unit_price = fallback;
+        item.price_source = 'random';
+      }
+      return fallback;
+    }
+
     function money(value) {
       const n = Number(value || 0);
       return '$' + n.toFixed(2);
+    }
+
+    function parseManifestId(value) {
+      const parsed = Number.parseInt(value, 10);
+      if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+      return parsed;
+    }
+
+    function manifestDisplayTitle(manifest) {
+      const id = parseManifestId(manifest && manifest.id);
+      const title = String((manifest && manifest.manifest_title) || '').trim();
+      return title || (id > 0 ? ('Manifest #' + id) : 'Manifest');
+    }
+
+    function manifestDisplayDate(manifest) {
+      return String((manifest && manifest.manifest_date) || '').trim() || String((manifest && manifest.created_at) || '').slice(0, 10);
+    }
+
+    function manifestPhotoTitle(manifest) {
+      const explicit = String((manifest && manifest.manifest_title) || '').trim();
+      return explicit || ('Bulk Manifest ' + currentManifestId());
+    }
+
+    function manifestPhotoTimestamp(value) {
+      const raw = String(value || '').trim();
+      if (!raw) return '';
+      const parsed = new Date(raw);
+      if (Number.isNaN(parsed.getTime())) return raw;
+      return parsed.toLocaleString();
+    }
+
+    function currentManifestId() {
+      return parseManifestId(state.currentManifest && state.currentManifest.id);
+    }
+
+    function currentManifestHasGoogleSheet() {
+      const manifest = state.currentManifest || null;
+      if (!manifest) return false;
+      return !!String((manifest.google_sheet_url || '')).trim();
+    }
+
+    function currentManifestHasPhotos() {
+      const manifest = state.currentManifest || null;
+      if (!manifest) return false;
+      return Number(manifest.photo_count || 0) > 0;
+    }
+
+    function manifestPicturesUrl(manifestId) {
+      const id = parseManifestId(manifestId);
+      if (id <= 0) return '#';
+      return '/bulk-manifest/' + encodeURIComponent(id) + '/pictures';
+    }
+
+    function canDeleteCurrentManifestGoogleSheet() {
+      return !!(state.editModeActive && currentManifestId() > 0 && currentManifestHasGoogleSheet());
+    }
+
+    function setManifestQueryParam(manifestId) {
+      const id = parseManifestId(manifestId);
+      const nextUrl = new URL(window.location.href);
+      if (id > 0) {
+        nextUrl.searchParams.set('manifest_id', String(id));
+      } else {
+        nextUrl.searchParams.delete('manifest_id');
+      }
+      const nextPath = nextUrl.pathname + (nextUrl.search || '');
+      window.history.replaceState({}, '', nextPath);
+    }
+
+    function setCurrentManifest(manifest) {
+      const id = parseManifestId(manifest && manifest.id);
+      if (id <= 0) {
+        state.currentManifest = null;
+        state.manifestPhotos = [];
+        renderEditorMode();
+        return;
+      }
+      state.currentManifest = {
+        id: id,
+        manifest_title: String((manifest && manifest.manifest_title) || '').trim(),
+        manifest_date: String((manifest && manifest.manifest_date) || '').trim(),
+        buyer: String((manifest && manifest.buyer) || '').trim(),
+        status: normalizeStatus(manifest && manifest.status),
+        created_at: String((manifest && manifest.created_at) || '').trim(),
+        updated_at: String((manifest && manifest.updated_at) || '').trim(),
+        google_sheet_id: String((manifest && manifest.google_sheet_id) || '').trim(),
+        google_sheet_url: String((manifest && manifest.google_sheet_url) || '').trim(),
+        google_sheet_status: String((manifest && manifest.google_sheet_status) || '').trim(),
+        google_sheet_available: !!(manifest && manifest.google_sheet_available),
+        google_sheet_button_label: String((manifest && manifest.google_sheet_button_label) || '').trim(),
+        google_sheet_shared_with: String((manifest && manifest.google_sheet_shared_with) || '').trim(),
+        google_sheet_error: String((manifest && manifest.google_sheet_error) || '').trim(),
+        photo_count: Math.max(0, Number.parseInt(manifest && manifest.photo_count, 10) || 0),
+        photos_available: !!(manifest && manifest.photos_available)
+      };
+      state.lastSavedManifestId = id;
+      renderEditorMode();
+    }
+
+    function setManifestPhotosStatus(message, tone) {
+      if (!bulkManifestPhotosStatusEl) return;
+      const t = String(tone || 'muted').trim();
+      bulkManifestPhotosStatusEl.className = 'status manifest-photos-status';
+      if (t) bulkManifestPhotosStatusEl.classList.add(t);
+      bulkManifestPhotosStatusEl.textContent = String(message || '');
+    }
+
+    function renderManifestPhotos() {
+      const manifestId = currentManifestId();
+      const editing = manifestId > 0;
+      if (addPicturesBtn) addPicturesBtn.hidden = !editing;
+      if (bulkManifestPhotosSection) bulkManifestPhotosSection.hidden = !editing;
+      if (!bulkManifestPhotosGrid) return;
+      if (!editing) {
+        bulkManifestPhotosGrid.innerHTML = '<div class="manifest-photo-empty">Save or open a manifest to attach pictures.</div>';
+        setManifestPhotosStatus('', 'muted');
+        return;
+      }
+
+      const photos = Array.isArray(state.manifestPhotos) ? state.manifestPhotos : [];
+      if (!photos.length) {
+        bulkManifestPhotosGrid.innerHTML = '<div class="manifest-photo-empty">No pictures saved yet. Use Add Pictures to open the camera and attach several photos to this manifest.</div>';
+        return;
+      }
+
+      const title = manifestPhotoTitle(state.currentManifest);
+      bulkManifestPhotosGrid.innerHTML = photos.map(photo => {
+        const url = String((photo && photo.image_url) || '').trim();
+        const createdAt = manifestPhotoTimestamp(photo && photo.created_at);
+        return (
+          '<a class="manifest-photo-card" href="' + esc(url) + '" target="_blank" rel="noopener">' +
+            '<img class="manifest-photo-thumb" src="' + esc(url) + '" alt="' + esc(title) + '">' +
+            '<div class="manifest-photo-meta">' +
+              '<div class="manifest-photo-title">' + esc(title) + '</div>' +
+              '<div class="manifest-photo-time">' + esc(createdAt || 'Saved picture') + '</div>' +
+            '</div>' +
+          '</a>'
+        );
+      }).join('');
+    }
+
+    function renderCombineManifestOptions() {
+      if (!combineManifestSelect) return;
+      const currentId = currentManifestId();
+      if (currentId <= 0) {
+        combineManifestSelect.innerHTML = '<option value="">Choose manifest to combine...</option>';
+        combineManifestSelect.disabled = true;
+        combineManifestBtn.disabled = true;
+        return;
+      }
+
+      const rows = Array.isArray(state.manifestHistory) ? state.manifestHistory : [];
+      const available = rows.filter(row => {
+        const id = parseManifestId(row && row.id);
+        return id > 0 && id !== currentId;
+      });
+
+      if (!available.length) {
+        combineManifestSelect.innerHTML = '<option value="">No other saved manifests available</option>';
+        combineManifestSelect.disabled = true;
+        combineManifestBtn.disabled = true;
+        return;
+      }
+
+      const options = ['<option value="">Choose manifest to combine...</option>'];
+      available.forEach(row => {
+        const id = parseManifestId(row.id);
+        const title = manifestDisplayTitle(row);
+        const dateText = manifestDisplayDate(row);
+        const statusText = statusLabel(row.status);
+        options.push(
+          '<option value="' + id + '">#' + id + ' | ' + esc(title) + (dateText ? (' | ' + esc(dateText)) : '') + ' | ' + esc(statusText) + '</option>'
+        );
+      });
+      combineManifestSelect.innerHTML = options.join('');
+      combineManifestSelect.disabled = false;
+      combineManifestBtn.disabled = false;
+    }
+
+    function renderEditorMode() {
+      const manifest = state.currentManifest || null;
+      const manifestId = currentManifestId();
+      const editing = manifestId > 0;
+      saveManifestBtn.textContent = editing ? 'Save Changes' : 'Save Manifest';
+      if (newManifestBtn) newManifestBtn.hidden = !editing;
+      if (deleteGoogleSheetBtn) {
+        deleteGoogleSheetBtn.hidden = !canDeleteCurrentManifestGoogleSheet();
+      }
+      if (viewPicturesBtn) {
+        const hasPhotos = currentManifestHasPhotos();
+        viewPicturesBtn.hidden = !(editing && hasPhotos);
+        viewPicturesBtn.href = hasPhotos ? manifestPicturesUrl(manifestId) : '#';
+        viewPicturesBtn.textContent = hasPhotos
+          ? ('Pictures (' + Math.max(0, Number((manifest && manifest.photo_count) || 0)) + ')')
+          : 'Pictures';
+      }
+      if (sheetAutoMetaEl) {
+        sheetAutoMetaEl.textContent = editing
+          ? 'Editing a saved manifest. Save Changes updates this manifest in place.'
+          : 'Name and date are assigned automatically when you save.';
+      }
+
+      if (editorNoteEl && editorNoteTextEl) {
+        if (!editing) {
+          editorNoteEl.style.display = 'none';
+          editorNoteEl.className = 'editor-note no-print';
+          editorNoteTextEl.textContent = '';
+        } else {
+          const statusKey = normalizeStatus(manifest && manifest.status);
+          const statusText = statusLabel(statusKey);
+          const title = manifestDisplayTitle(manifest);
+          const dateText = manifestDisplayDate(manifest);
+          editorNoteEl.style.display = 'flex';
+          editorNoteEl.className = 'editor-note no-print';
+          if (statusKey !== 'created') {
+            editorNoteEl.classList.add('warn');
+          }
+          editorNoteTextEl.textContent = 'Editing #' + manifestId + ' (' + title + ')' +
+            (dateText ? (' | ' + dateText) : '') +
+            ' | ' + statusText +
+            '. Save Changes updates this manifest in place.';
+        }
+      }
+
+      if (combineRowEl) {
+        combineRowEl.style.display = editing ? 'flex' : 'none';
+      }
+      renderManifestPhotos();
+      renderCombineManifestOptions();
+    }
+
+    function editorItemFromRow(row) {
+      const rawUnitPrice = toPrice(row && (row.unit_price != null ? row.unit_price : row.price));
+      const unitPrice = rawUnitPrice > 0 ? rawUnitPrice : randomManifestPrice();
+      return {
+        id: state.nextId++,
+        barcode: String((row && (row.barcode || row.upc)) || '').trim(),
+        name: itemNameOrDefault(row && (row.name || row.title)),
+        qty: Math.max(1, toQty(row && (row.qty != null ? row.qty : row.quantity)) || 1),
+        unit_price: unitPrice,
+        price_source: rawUnitPrice > 0 ? 'saved' : 'random',
+        image_url: String((row && (row.image_url || row.image)) || '').trim(),
+        lot_number: String((row && row.lot_number) || '').trim()
+      };
+    }
+
+    function loadItemsIntoEditor(rows) {
+      state.nextId = 1;
+      state.items = (Array.isArray(rows) ? rows : []).map(editorItemFromRow);
+      renderRows();
+    }
+
+    async function loadManifestForEdit(manifestId) {
+      const id = parseManifestId(manifestId);
+      if (id <= 0) return;
+      setStatus('Loading manifest #' + id + ' for editing...', 'muted');
+      try {
+        const detail = await fetchManifestDetail(id);
+        state.editModeActive = true;
+        loadItemsIntoEditor(detail.items || []);
+        state.manifestPhotos = [];
+        setCurrentManifest(detail.manifest || { id: id });
+        setManifestQueryParam(id);
+        await loadManifestPhotos(id);
+        const tone = normalizeStatus(detail && detail.manifest && detail.manifest.status) === 'created' ? 'ok' : 'warn';
+        setStatus('Loaded manifest #' + id + ' for editing.', tone);
+      } catch (err) {
+        setStatus(err && err.message ? err.message : ('Failed to load manifest #' + id), 'error');
+      }
+    }
+
+    function startNewManifest() {
+      if ((state.items && state.items.length) || currentManifestId() > 0) {
+        if (!confirm('Start a new blank manifest? Any unsaved changes on this page will be lost.')) {
+          return;
+        }
+      }
+      state.editModeActive = false;
+      state.currentManifest = null;
+      state.lastSavedManifestId = null;
+      state.nextId = 1;
+      state.items = [];
+      state.manifestPhotos = [];
+      renderEditorMode();
+      renderRows();
+      setManifestQueryParam(0);
+      setStatus('Ready for a new manifest.', 'muted');
+      try { scanInput.focus({ preventScroll: true }); } catch (_) {}
+    }
+
+    async function combineSelectedManifest() {
+      const sourceId = parseManifestId(combineManifestSelect && combineManifestSelect.value);
+      const targetId = currentManifestId();
+      if (targetId <= 0) {
+        setStatus('Open a saved manifest before combining.', 'warn');
+        return;
+      }
+      if (sourceId <= 0) {
+        setStatus('Choose another manifest to combine into this one.', 'warn');
+        return;
+      }
+      if (sourceId === targetId) {
+        setStatus('Choose a different manifest to combine.', 'warn');
+        return;
+      }
+
+      combineManifestSelect.disabled = true;
+      combineManifestBtn.disabled = true;
+      setStatus('Combining manifest #' + sourceId + ' into manifest #' + targetId + '...', 'muted');
+      try {
+        const detail = await fetchManifestDetail(sourceId);
+        const sourceItems = Array.isArray(detail.items) ? detail.items : [];
+        if (!sourceItems.length) {
+          throw new Error('Selected manifest has no line items to combine.');
+        }
+        const newItems = sourceItems.map(editorItemFromRow);
+        state.items = newItems.concat(state.items);
+        renderRows();
+        combineManifestSelect.value = '';
+        setStatus(
+          'Added ' + newItems.length + ' row(s) from manifest #' + sourceId + ' (' + manifestDisplayTitle(detail.manifest) + '). Save Changes to keep the combined list.',
+          'ok'
+        );
+      } catch (err) {
+        setStatus(err && err.message ? err.message : 'Failed to combine manifest', 'error');
+      } finally {
+        renderCombineManifestOptions();
+      }
     }
 
     function updateStamp() {
@@ -543,11 +1219,79 @@
       historyStatusEl.textContent = String(message || '');
     }
 
+    function clearHistoryDownloadHint() {
+      if (!historyDownloadHintEl) return;
+      historyDownloadHintEl.textContent = '';
+      historyDownloadHintEl.className = 'status no-print download-hint';
+    }
+
+    function setHistoryDownloadHint(message, href, filename) {
+      if (!historyDownloadHintEl) return;
+      clearHistoryDownloadHint();
+      const cleanHref = String(href || '').trim();
+      if (!cleanHref) return;
+      const msg = String(message || '').trim() || 'If download did not start, click';
+      const link = document.createElement('a');
+      link.href = cleanHref;
+      link.download = String(filename || '').trim() || 'bulk-manifest-digital-export.csv';
+      link.textContent = 'click here';
+      link.rel = 'noopener';
+      link.target = '_blank';
+      historyDownloadHintEl.classList.add('muted');
+      historyDownloadHintEl.appendChild(document.createTextNode(msg + ' '));
+      historyDownloadHintEl.appendChild(link);
+      historyDownloadHintEl.appendChild(document.createTextNode('.'));
+    }
+
+    function setHistoryLinkHint(message, href, linkText) {
+      if (!historyDownloadHintEl) return;
+      clearHistoryDownloadHint();
+      const cleanHref = String(href || '').trim();
+      if (!cleanHref) return;
+      const msg = String(message || '').trim() || 'Open';
+      const link = document.createElement('a');
+      link.href = cleanHref;
+      link.textContent = String(linkText || 'open');
+      link.rel = 'noopener';
+      link.target = '_blank';
+      historyDownloadHintEl.classList.add('muted');
+      historyDownloadHintEl.appendChild(document.createTextNode(msg + ' '));
+      historyDownloadHintEl.appendChild(link);
+      historyDownloadHintEl.appendChild(document.createTextNode('.'));
+    }
+
     function setStatus(message, tone) {
       const t = String(tone || 'muted').trim();
       statusMsgEl.className = 'status no-print';
       if (t) statusMsgEl.classList.add(t);
       statusMsgEl.textContent = String(message || '');
+    }
+
+    function setKeywordStatus(message, tone) {
+      const t = String(tone || 'muted').trim();
+      keywordStatusEl.className = 'status no-print';
+      if (t) keywordStatusEl.classList.add(t);
+      keywordStatusEl.textContent = String(message || '');
+    }
+
+    function updateKeywordResultsToggleButton() {
+      const hasSearch = String(state.searchQuery || '').trim().length >= 2;
+      toggleKeywordResultsBtn.disabled = !hasSearch;
+      toggleKeywordResultsBtn.textContent = state.keywordResultsCollapsed ? 'Show Results' : 'Minimize Results';
+    }
+
+    function updateKeywordResultsVisibility() {
+      const hasSearch = String(state.searchQuery || '').trim().length >= 2;
+      const shouldShow = hasSearch && !state.keywordResultsCollapsed;
+      keywordResultsWrap.style.display = shouldShow ? 'block' : 'none';
+      if (!shouldShow) keywordPager.style.display = 'none';
+      updateKeywordResultsToggleButton();
+    }
+
+    function setKeywordResultsCollapsed(collapsed) {
+      state.keywordResultsCollapsed = !!collapsed;
+      updateKeywordResultsVisibility();
+      if (!state.keywordResultsCollapsed) renderKeywordPager();
     }
 
     function findItemById(id) {
@@ -560,35 +1304,55 @@
       let totalQty = 0;
       let totalAmount = 0;
       for (const item of state.items) {
+        item.name = itemNameOrDefault(item.name);
         item.qty = toQty(item.qty);
-        item.unit_price = toPrice(item.unit_price);
+        item.unit_price = ensureItemUnitPrice(item);
         totalQty += item.qty;
         totalAmount += item.qty * item.unit_price;
       }
       totalQtyEl.textContent = String(totalQty);
       totalAmountEl.textContent = money(totalAmount);
+      if (topTotalQtyEl) topTotalQtyEl.textContent = String(totalQty);
+      if (topTotalAmountEl) topTotalAmountEl.textContent = money(totalAmount);
+    }
+
+    function displayRowNumber(idx, totalCount) {
+      const rowIndex = Number.parseInt(idx, 10) || 0;
+      const count = Math.max(0, Number.parseInt(totalCount, 10) || 0);
+      return Math.max(1, count - rowIndex);
+    }
+
+    function displayPrintRowNumber(idx) {
+      const rowIndex = Number.parseInt(idx, 10) || 0;
+      return rowIndex + 1;
     }
 
     function renderRows() {
+      if (refreshManifestBtn) refreshManifestBtn.disabled = !state.items.length;
       if (!state.items.length) {
-        itemsBody.innerHTML = '<tr class="empty-row"><td colspan="7">Scan a barcode to start your manifest.</td></tr>';
+        itemsBody.innerHTML = '<tr class="empty-row"><td colspan="6">Scan a barcode to start your manifest.</td></tr>';
         recalcTotals();
         return;
       }
 
       let html = '';
+      const totalCount = state.items.length;
       state.items.forEach((item, idx) => {
+        const itemName = itemNameOrDefault(item.name);
         const qty = toQty(item.qty);
-        const unitPrice = toPrice(item.unit_price);
+        const unitPrice = ensureItemUnitPrice(item);
+        item.name = itemName;
+        item.unit_price = unitPrice;
         const line = qty * unitPrice;
-        const lineDisplay = qty > 1 ? money(line) : '';
+        const displayRetail = qty > 1 ? line : unitPrice;
+        const inputEmphasisClass = qty > 1 ? ' emphasis-input' : '';
+        const printEmphasisClass = qty > 1 ? ' emphasis' : '';
         html += '<tr>';
-        html += '<td class="idx-col">' + (idx + 1) + '</td>';
-        html += '<td class="name-col"><input class="cell-input" data-id="' + item.id + '" data-field="name" type="text" value="' + esc(item.name) + '" /><div class="print-name">' + esc(item.name) + '</div></td>';
-        html += '<td class="barcode-col"><input class="cell-input" data-id="' + item.id + '" data-field="barcode" type="text" value="' + esc(item.barcode) + '" /></td>';
-        html += '<td class="qty-col"><input class="cell-input qty" data-id="' + item.id + '" data-field="qty" type="number" min="0" step="1" value="' + qty + '" /></td>';
-        html += '<td class="money-col"><input class="cell-input price" data-id="' + item.id + '" data-field="unit_price" type="number" min="0" step="0.01" value="' + unitPrice.toFixed(2) + '" /></td>';
-        html += '<td class="line-total">' + lineDisplay + '</td>';
+        html += '<td class="idx-col"><span class="screen-row-num">' + displayRowNumber(idx, totalCount) + '</span><span class="print-row-num">' + displayPrintRowNumber(idx) + '</span></td>';
+        html += '<td class="name-col"><input class="cell-input" data-id="' + item.id + '" data-field="name" type="text" value="' + esc(itemName) + '" /><div class="print-name">' + esc(itemName) + '</div></td>';
+        html += '<td class="barcode-col"><input class="cell-input" data-id="' + item.id + '" data-field="barcode" type="text" value="' + esc(item.barcode) + '" /><div class="print-cell-value">' + esc(String(item.barcode || '').trim()) + '</div></td>';
+        html += '<td class="qty-col"><input class="cell-input qty' + inputEmphasisClass + '" data-id="' + item.id + '" data-field="qty" type="number" min="0" step="1" value="' + qty + '" /><div class="print-cell-value qty' + printEmphasisClass + '">' + qty + '</div></td>';
+        html += '<td class="money-col"><input class="cell-input price' + inputEmphasisClass + '" data-id="' + item.id + '" data-field="unit_price" type="number" min="0" step="0.01" value="' + unitPrice.toFixed(2) + '" /><div class="print-cell-value money' + printEmphasisClass + '">' + money(displayRetail) + '</div></td>';
         html += '<td class="no-print"><button class="remove-btn" data-action="remove" data-id="' + item.id + '" type="button">Remove</button></td>';
         html += '</tr>';
       });
@@ -602,12 +1366,15 @@
     }
 
     function addBlankRow(prefillBarcode) {
-      state.items.push({
+      state.items.unshift({
         id: state.nextId++,
         barcode: String(prefillBarcode || '').trim(),
-        name: '',
+        name: DEFAULT_ITEM_NAME,
         qty: 1,
-        unit_price: 0
+        unit_price: randomManifestPrice(),
+        price_source: 'random',
+        image_url: '',
+        lot_number: ''
       });
       renderRows();
     }
@@ -631,40 +1398,62 @@
       }
 
       const resolvedBarcode = String((lookup && (lookup.upc || lookup.barcode)) || raw).trim() || raw;
-      const lookedUpUnitPrice = toPrice(lookup && lookup.unit_price);
-      const existing = state.items.find(item => {
+      const lookedUpUnitPriceRaw = toPrice(lookup && lookup.unit_price);
+      const lookedUpPriceSource = String((lookup && lookup.price_source) || '').trim().toLowerCase() || 'random';
+      const lookedUpUnitPrice = lookedUpUnitPriceRaw > 0 ? lookedUpUnitPriceRaw : randomManifestPrice();
+      const lookedUpName = itemNameOrDefault(lookup && lookup.title);
+      const lookedUpImage = String((lookup && lookup.image_url) || '').trim();
+      const lookedUpLot = String((lookup && lookup.lot_number) || '').trim();
+      const existing = resolvedBarcode ? state.items.find(item => {
         return String(item.barcode || '').trim().toLowerCase() === resolvedBarcode.toLowerCase();
-      });
+      }) : null;
 
       if (existing) {
         existing.qty = toQty(existing.qty) + 1;
-        if ((!existing.name || !String(existing.name).trim()) && lookup && lookup.title) {
-          existing.name = String(lookup.title || '').trim();
+        if (!String(existing.name || '').trim()) {
+          existing.name = lookedUpName;
         }
-        if (toPrice(existing.unit_price) <= 0 && lookedUpUnitPrice > 0) {
+        const existingPrice = toPrice(existing.unit_price);
+        const existingPriceSource = String(existing.price_source || '').trim().toLowerCase();
+        if ((existingPrice <= 0 || existingPriceSource === 'random') && (lookedUpPriceSource === 'exact' || lookedUpPriceSource === 'lot_average')) {
           existing.unit_price = lookedUpUnitPrice;
+          existing.price_source = lookedUpPriceSource;
+        }
+        if (!String(existing.image_url || '').trim() && lookedUpImage) {
+          existing.image_url = lookedUpImage;
+        }
+        if (!String(existing.lot_number || '').trim() && lookedUpLot) {
+          existing.lot_number = lookedUpLot;
+        }
+        const existingIdx = state.items.findIndex(item => item && item.id === existing.id);
+        if (existingIdx > 0) {
+          const moved = state.items.splice(existingIdx, 1);
+          if (moved && moved.length) state.items.unshift(moved[0]);
         }
         renderRows();
         setStatus('Incremented quantity for ' + resolvedBarcode, 'ok');
         return;
       }
 
-      state.items.push({
+      state.items.unshift({
         id: state.nextId++,
         barcode: resolvedBarcode,
-        name: String((lookup && lookup.title) || '').trim(),
+        name: lookedUpName,
         qty: 1,
-        unit_price: lookedUpUnitPrice
+        unit_price: lookedUpUnitPrice,
+        price_source: lookedUpPriceSource,
+        image_url: lookedUpImage,
+        lot_number: lookedUpLot
       });
       renderRows();
 
       if (lookup && lookup.success && lookup.found) {
         setStatus('Added ' + resolvedBarcode, 'ok');
       } else if (lookup && lookup.success && !lookup.found) {
-        setStatus('Not found in raw BOL. Added blank line for manual item details.', 'warn');
+        setStatus('Not found in raw BOL. Added fallback item at ' + money(lookedUpUnitPrice) + '.', 'warn');
       } else {
         const msg = (lookup && lookup.error) ? lookup.error : 'Lookup failed';
-        setStatus('Lookup failed (' + msg + '). Added blank line item.', 'error');
+        setStatus('Lookup failed (' + msg + '). Added fallback item at ' + money(lookedUpUnitPrice) + '.', 'error');
       }
     }
 
@@ -681,7 +1470,15 @@
       } else if (field === 'qty') {
         item.qty = toQty(target.value);
       } else if (field === 'unit_price') {
-        item.unit_price = toPrice(target.value);
+        const parsedPrice = toPrice(target.value);
+        if (parsedPrice > 0) {
+          item.unit_price = parsedPrice;
+          item.price_source = 'manual';
+        } else {
+          item.unit_price = randomManifestPrice();
+          item.price_source = 'random';
+          setStatus('Blank price replaced with fallback price ' + money(item.unit_price) + '.', 'warn');
+        }
       }
       renderRows();
     });
@@ -704,6 +1501,30 @@
         addScannedBarcode();
       }
     });
+    searchKeywordBtn.addEventListener('click', () => searchKeyword(1));
+    toggleKeywordResultsBtn.addEventListener('click', () => {
+      setKeywordResultsCollapsed(!state.keywordResultsCollapsed);
+    });
+    keywordInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        searchKeyword(1);
+      }
+    });
+    keywordPrevBtn.addEventListener('click', () => {
+      if ((state.searchPage || 1) > 1) searchKeyword((state.searchPage || 1) - 1);
+    });
+    keywordNextBtn.addEventListener('click', () => {
+      const totalPages = Number.parseInt(state.searchTotalPages, 10) || 0;
+      const currentPage = Number.parseInt(state.searchPage, 10) || 1;
+      if (totalPages > 0 && currentPage < totalPages) searchKeyword(currentPage + 1);
+    });
+    keywordResultsBody.addEventListener('click', (event) => {
+      const btn = event.target.closest('button[data-action="add-search-result"]');
+      if (!btn) return;
+      event.preventDefault();
+      addSearchResultByIndex(btn.dataset.idx);
+    });
     addBlankBtn.addEventListener('click', () => {
       addBlankRow('');
       setStatus('Added blank line item', 'muted');
@@ -725,18 +1546,1094 @@
 
     function manifestPayload() {
       return {
-        manifest_title: String(document.getElementById('manifestTitle').value || '').trim() || 'Bulk Sale Manifest',
-        buyer: String(document.getElementById('manifestBuyer').value || '').trim(),
-        manifest_date: String(manifestDateEl.value || '').trim(),
         items: state.items.map((item, idx) => ({
           line_number: idx + 1,
           barcode: String(item.barcode || '').trim(),
-          title: String(item.name || '').trim(),
+          title: itemNameOrDefault(item.name),
           quantity: toQty(item.qty) || 1,
-          unit_price: toPrice(item.unit_price),
-          line_total: Number((toQty(item.qty) * toPrice(item.unit_price)).toFixed(2))
+          unit_price: ensureItemUnitPrice(item),
+          image_url: String(item.image_url || '').trim(),
+          lot_number: String(item.lot_number || '').trim(),
+          line_total: Number(((toQty(item.qty) || 1) * ensureItemUnitPrice(item)).toFixed(2))
         }))
       };
+    }
+
+    async function refreshManifestData() {
+      if (!state.items.length) {
+        setStatus('Add at least one row before refreshing.', 'warn');
+        return;
+      }
+
+      const manifestId = currentManifestId();
+      const payload = manifestPayload();
+      if (!payload.items.length) {
+        setStatus('Nothing to refresh.', 'warn');
+        return;
+      }
+
+      if (refreshManifestBtn) refreshManifestBtn.disabled = true;
+      if (saveManifestBtn) saveManifestBtn.disabled = true;
+      setStatus(
+        manifestId > 0
+          ? ('Refreshing manifest #' + manifestId + ' from raw BOL lookups...')
+          : 'Refreshing current manifest from raw BOL lookups...',
+        'muted'
+      );
+
+      try {
+        const resp = await fetch('/api/bulk-manifest/refresh', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify({
+            manifest_id: manifestId,
+            items: payload.items
+          })
+        });
+        const raw = await resp.text();
+        let data = null;
+        try {
+          data = raw ? JSON.parse(raw) : {};
+        } catch (_) {
+          const htmlish = String(raw || '').trim().startsWith('<');
+          if (htmlish) {
+            throw new Error('Bulk manifest refresh API returned HTML (likely session redirect).');
+          }
+          throw new Error('Bulk manifest refresh API returned invalid response.');
+        }
+        if (!resp.ok || !data || !data.success) {
+          throw new Error((data && data.error) || 'Failed to refresh manifest');
+        }
+
+        loadItemsIntoEditor(data.items || []);
+        if (data.persisted && data.manifest) {
+          setCurrentManifest(Object.assign({}, state.currentManifest || {}, data.manifest || {}, { id: manifestId }));
+          setManifestQueryParam(manifestId);
+          await loadHistory();
+          setStatus(
+            'Refreshed ' + Number((data && data.total_items) || state.items.length || 0) +
+            ' row(s) for manifest #' + manifestId + '. Google Sheet syncing automatically.',
+            'ok'
+          );
+        } else {
+          setStatus(
+            'Refreshed ' + Number((data && data.total_items) || state.items.length || 0) +
+            ' row(s) from raw BOL lookups.',
+            'ok'
+          );
+        }
+      } catch (err) {
+        setStatus(err && err.message ? err.message : 'Failed to refresh manifest', 'error');
+      } finally {
+        if (saveManifestBtn) saveManifestBtn.disabled = false;
+        if (refreshManifestBtn) refreshManifestBtn.disabled = !state.items.length;
+      }
+    }
+
+    function renderKeywordPager() {
+      const totalPages = Number.parseInt(state.searchTotalPages, 10) || 0;
+      const page = Number.parseInt(state.searchPage, 10) || 1;
+      const total = Number.parseInt(state.searchTotal, 10) || 0;
+      if (state.keywordResultsCollapsed) {
+        keywordPager.style.display = 'none';
+        return;
+      }
+      if (totalPages <= 0) {
+        keywordPager.style.display = 'none';
+        keywordPageInfo.textContent = '';
+        return;
+      }
+      keywordPager.style.display = 'flex';
+      keywordPageInfo.textContent = 'Page ' + page + ' of ' + totalPages + ' (' + total + ' total)';
+      keywordPrevBtn.disabled = page <= 1;
+      keywordNextBtn.disabled = page >= totalPages;
+    }
+
+    function renderKeywordResults(results) {
+      const rows = Array.isArray(results) ? results : [];
+      if (!rows.length) {
+        keywordResultsBody.innerHTML = '<tr class="history-empty"><td colspan="5">No matches found.</td></tr>';
+        updateKeywordResultsVisibility();
+        renderKeywordPager();
+        return;
+      }
+
+      const html = rows.map((row, idx) => {
+        const barcode = String(row.barcode || row.upc || '').trim();
+        const title = itemNameOrDefault(row.title);
+        const unitPrice = priceOrDefault(row.unit_price);
+        const thumbRaw = String(row.thumbnail_url || row.image_url || '').trim();
+        const thumbUrl = normalizeImageUrl(macyThumbUrl(thumbRaw));
+        const thumbHtml = thumbUrl
+          ? '<img class="keyword-thumb" src="' + esc(thumbUrl) + '" alt="Thumb" loading="lazy" referrerpolicy="no-referrer">'
+          : '<span class="keyword-no-thumb">No image</span>';
+        return (
+          '<tr>' +
+            '<td class="thumb-col">' + thumbHtml + '</td>' +
+            '<td>' + esc(barcode || '-') + '</td>' +
+            '<td>' + esc(title) + '</td>' +
+            '<td>' + esc(money(unitPrice)) + '</td>' +
+            '<td><button class="add-result-btn" type="button" data-action="add-search-result" data-idx="' + idx + '">Add</button></td>' +
+          '</tr>'
+        );
+      }).join('');
+      keywordResultsBody.innerHTML = html;
+      updateKeywordResultsVisibility();
+      renderKeywordPager();
+    }
+
+    async function searchKeyword(pageValue) {
+      const query = String(keywordInput.value || '').trim();
+      const requestedPage = Math.max(1, Number.parseInt(pageValue, 10) || 1);
+      if (query.length < 2) {
+        state.searchResults = [];
+        state.searchQuery = '';
+        state.searchPage = 1;
+        state.searchTotalPages = 0;
+        state.searchTotal = 0;
+        state.keywordResultsCollapsed = false;
+        setKeywordStatus('Enter at least 2 characters.', 'warn');
+        updateKeywordResultsVisibility();
+        return;
+      }
+      searchKeywordBtn.disabled = true;
+      keywordPrevBtn.disabled = true;
+      keywordNextBtn.disabled = true;
+      setKeywordStatus('Searching for "' + query + '" ...', 'muted');
+      try {
+        const resp = await fetch('/api/bulk-manifest/search?q=' + encodeURIComponent(query) + '&limit=20&page=' + requestedPage);
+        const raw = await resp.text();
+        let data = null;
+        try {
+          data = raw ? JSON.parse(raw) : {};
+        } catch (_) {
+          throw new Error('Keyword search returned an invalid response.');
+        }
+        if (!resp.ok || !data || !data.success) {
+          throw new Error((data && data.error) || 'Keyword search failed');
+        }
+        const results = Array.isArray(data.results) ? data.results : [];
+        state.searchResults = results;
+        state.searchQuery = query;
+        state.searchPage = Math.max(1, Number.parseInt(data.page, 10) || requestedPage);
+        state.searchTotalPages = Math.max(0, Number.parseInt(data.total_pages, 10) || 0);
+        state.searchTotal = Math.max(0, Number.parseInt(data.total, 10) || results.length);
+        state.keywordResultsCollapsed = false;
+        renderKeywordResults(results);
+        const pageNote = state.searchTotalPages > 0
+          ? (' Page ' + state.searchPage + ' of ' + state.searchTotalPages + '.')
+          : '';
+        setKeywordStatus('Found ' + state.searchTotal + ' result(s).' + pageNote, state.searchTotal ? 'ok' : 'warn');
+      } catch (err) {
+        state.searchResults = [];
+        state.searchQuery = '';
+        state.searchPage = 1;
+        state.searchTotalPages = 0;
+        state.searchTotal = 0;
+        state.keywordResultsCollapsed = false;
+        updateKeywordResultsVisibility();
+        setKeywordStatus(err && err.message ? err.message : 'Keyword search failed', 'error');
+      } finally {
+        searchKeywordBtn.disabled = false;
+        renderKeywordPager();
+      }
+    }
+
+    function addSearchResultByIndex(idxValue) {
+      const idx = Number.parseInt(idxValue, 10);
+      if (!Number.isFinite(idx) || idx < 0) return;
+      const rows = Array.isArray(state.searchResults) ? state.searchResults : [];
+      const row = rows[idx];
+      if (!row) return;
+
+      state.items.unshift({
+        id: state.nextId++,
+        barcode: String(row.barcode || row.upc || '').trim(),
+        name: itemNameOrDefault(row.title),
+        qty: 1,
+        unit_price: toPrice(row.unit_price) > 0 ? toPrice(row.unit_price) : randomManifestPrice(),
+        price_source: String(row.price_source || '').trim().toLowerCase() || 'random',
+        image_url: String(row.image_url || '').trim(),
+        lot_number: String(row.lot_number || '').trim()
+      });
+      renderRows();
+      setStatus('Added search result to manifest.', 'ok');
+      setKeywordResultsCollapsed(true);
+      try { scanInput.focus({ preventScroll: true }); } catch (_) {}
+    }
+
+    function normalizeImageUrl(value) {
+      let url = String(value || '').trim();
+      if (!url) return '';
+      const low = url.toLowerCase();
+      if (low === 'nan' || low === 'none' || low === 'null' || low === 'undefined') return '';
+      if (url.startsWith('/')) {
+        try {
+          url = String(window.location.origin || '').replace(/\/+$/, '') + url;
+        } catch (_) {}
+      }
+      if (url.startsWith('//')) url = 'https:' + url;
+      if (url.startsWith('http://')) url = 'https://' + url.slice('http://'.length);
+      return url;
+    }
+
+    function isMacyImageHost(hostname) {
+      const host = String(hostname || '').trim().toLowerCase();
+      return host.includes('macys.com') || host.includes('bloomingdales.com');
+    }
+
+    function macyThumbUrl(imageUrl) {
+      const normalized = normalizeImageUrl(imageUrl);
+      if (!normalized) return '';
+      try {
+        const u = new URL(normalized);
+        if (isMacyImageHost(u.hostname)) {
+          u.searchParams.set('wid', '180');
+          u.searchParams.set('hei', '220');
+          u.searchParams.set('fmt', 'jpeg');
+          u.searchParams.set('qlt', '85');
+          u.searchParams.set('op_sharpen', '1');
+          return u.toString();
+        }
+      } catch (_) {}
+      return normalized;
+    }
+
+    function macyFullImageUrl(imageUrl) {
+      const normalized = normalizeImageUrl(imageUrl);
+      if (!normalized) return '';
+      try {
+        const u = new URL(normalized);
+        if (isMacyImageHost(u.hostname)) {
+          u.search = '';
+          return u.toString();
+        }
+      } catch (_) {}
+      return normalized;
+    }
+
+    function safeExportFilename(value, ext) {
+      const raw = String(value || '').trim() || 'bulk-manifest-digital-export';
+      const safe = raw.replace(/[\\/:*?"<>|]+/g, '_').replace(/\s+/g, ' ').trim();
+      const extension = String(ext || '.csv').trim() || '.csv';
+      return (safe || 'bulk-manifest-digital-export') + extension;
+    }
+
+    function downloadTextFile(filename, text, mimeType) {
+      const payload = '\uFEFF' + String(text || '');
+      const blob = new Blob([payload], { type: String(mimeType || 'text/plain') + ';charset=utf-8' });
+      if (typeof navigator !== 'undefined' && navigator.msSaveOrOpenBlob) {
+        navigator.msSaveOrOpenBlob(blob, filename);
+        return { objectUrl: '', filename: filename };
+      }
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = objectUrl;
+      a.download = filename;
+      a.rel = 'noopener';
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      try {
+        a.click();
+      } finally {
+        a.remove();
+      }
+      setTimeout(() => {
+        try { URL.revokeObjectURL(objectUrl); } catch (_) {}
+      }, 60000);
+      return { objectUrl: objectUrl, filename: filename };
+    }
+
+    function csvEscape(value) {
+      const s = String(value == null ? '' : value);
+      if (/[",\r\n]/.test(s)) {
+        return '"' + s.replace(/"/g, '""') + '"';
+      }
+      return s;
+    }
+
+    function sheetsImageFormula(url) {
+      const normalized = normalizeImageUrl(url);
+      if (!normalized) return '';
+      const escaped = normalized.replace(/"/g, '""');
+      return '=IMAGE("' + escaped + '")';
+    }
+
+    function sheetsLinkFormula(url, label) {
+      const normalized = normalizeImageUrl(url);
+      if (!normalized) return '';
+      const escapedUrl = normalized.replace(/"/g, '""');
+      const escapedLabel = String(label || 'Open').replace(/"/g, '""');
+      return '=HYPERLINK("' + escapedUrl + '","' + escapedLabel + '")';
+    }
+
+    async function enrichManifestItemsWithRawbolImages(items) {
+      const rows = Array.isArray(items) ? items : [];
+      const cache = new Map();
+      const enriched = [];
+      let backfilled = 0;
+      let missing = 0;
+
+      for (const row of rows) {
+        const next = Object.assign({}, row || {});
+        let imageUrl = normalizeImageUrl(next.image_url || next.image || '');
+        const barcode = String(next.barcode || next.upc || '').trim();
+
+        if (!imageUrl && barcode) {
+          const key = barcode.toLowerCase();
+          if (cache.has(key)) {
+            imageUrl = cache.get(key) || '';
+          } else {
+            let found = '';
+            try {
+              const lookup = await lookupBarcode(barcode);
+              if (lookup && lookup.success) {
+                found = normalizeImageUrl(lookup.image_url || '');
+              }
+            } catch (_) {}
+            cache.set(key, found);
+            imageUrl = found;
+          }
+          if (imageUrl) backfilled += 1;
+        }
+
+        if (!imageUrl) missing += 1;
+        next.image_url = imageUrl;
+        enriched.push(next);
+      }
+
+      return { items: enriched, backfilled: backfilled, missing: missing };
+    }
+
+    function buildDigitalExportCsv(manifest, items) {
+      const manifestId = Number.parseInt(manifest && manifest.id, 10) || 0;
+      const title = String((manifest && manifest.manifest_title) || ('Bulk Manifest ' + manifestId)).trim() || ('Bulk Manifest ' + manifestId);
+      const manifestDate = String((manifest && manifest.manifest_date) || '').trim() || String((manifest && manifest.created_at) || '').slice(0, 10);
+      const exportedAt = new Date().toLocaleString();
+
+      const rows = Array.isArray(items) ? items : [];
+      let totalUnits = 0;
+      let totalRetail = 0;
+      const outRows = [];
+      outRows.push([
+        'Manifest ID',
+        'Manifest Title',
+        'Manifest Date',
+        'Exported At',
+        'Line #',
+        'Barcode',
+        'Item Name',
+        'Qty',
+        'Original Retail',
+        'Macy Thumb URL',
+        'Macy Thumb (Sheets)',
+        'Full Size URL',
+        'Full Size Link (Sheets)',
+        'Lot Number'
+      ]);
+
+      rows.forEach((row, idx) => {
+        const qty = Math.max(0, Number.parseInt(row.quantity, 10) || 0);
+        const unitPrice = priceOrDefault(row.unit_price);
+        const lineTotal = Number((qty * unitPrice).toFixed(2));
+        totalUnits += qty;
+        totalRetail += lineTotal;
+
+        const rawImage = normalizeImageUrl(String(row.image_url || '').trim());
+        const fullImage = macyFullImageUrl(rawImage);
+        const thumbImage = macyThumbUrl(rawImage);
+        const displayRetail = qty > 1 ? lineTotal : unitPrice;
+        outRows.push([
+          manifestId,
+          title,
+          manifestDate,
+          exportedAt,
+          idx + 1,
+          String(row.barcode || '').trim(),
+          itemNameOrDefault(row.title),
+          qty,
+          displayRetail.toFixed(2),
+          thumbImage,
+          sheetsImageFormula(thumbImage),
+          fullImage,
+          sheetsLinkFormula(fullImage, 'Open Full Size'),
+          String(row.lot_number || '').trim()
+        ]);
+      });
+
+      outRows.push([
+        '',
+        '',
+        '',
+        '',
+        '',
+        'Total Items',
+        totalUnits,
+        '',
+        'Total Retail Price',
+        totalRetail.toFixed(2),
+        '',
+        '',
+        '',
+        ''
+      ]);
+
+      return outRows.map(r => r.map(csvEscape).join(',')).join('\n');
+    }
+
+    async function fetchManifestDetail(manifestId) {
+      const id = Number.parseInt(manifestId, 10) || 0;
+      if (id <= 0) {
+        throw new Error('Invalid manifest selected.');
+      }
+      const resp = await fetch('/api/bulk-manifest/' + encodeURIComponent(id));
+      const raw = await resp.text();
+      let data = null;
+      try {
+        data = raw ? JSON.parse(raw) : {};
+      } catch (_) {
+        const htmlish = String(raw || '').trim().startsWith('<');
+        if (htmlish) throw new Error('Manifest detail API returned HTML (likely session redirect).');
+        throw new Error('Manifest detail API returned invalid response.');
+      }
+      if (!resp.ok || !data || !data.success) {
+        throw new Error((data && data.error) || ('Failed to load manifest #' + id));
+      }
+      return {
+        manifest: data.manifest || {},
+        items: Array.isArray(data.items) ? data.items : []
+      };
+    }
+
+    async function fetchManifestPhotos(manifestId) {
+      const id = Number.parseInt(manifestId, 10) || 0;
+      if (id <= 0) {
+        throw new Error('Invalid manifest selected.');
+      }
+      const resp = await fetch('/api/bulk-manifest/' + encodeURIComponent(id) + '/photos?ts=' + Date.now(), {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' },
+        cache: 'no-store'
+      });
+      const raw = await resp.text();
+      let data = null;
+      try {
+        data = raw ? JSON.parse(raw) : {};
+      } catch (_) {
+        const htmlish = String(raw || '').trim().startsWith('<');
+        if (htmlish) throw new Error('Manifest photos API returned HTML (likely session redirect).');
+        throw new Error('Manifest photos API returned invalid response.');
+      }
+      if (!resp.ok || !data || !data.success) {
+        throw new Error((data && data.error) || ('Failed to load pictures for manifest #' + id));
+      }
+      return {
+        manifest_title: String((data && data.manifest_title) || '').trim(),
+        photo_count: Math.max(0, Number.parseInt(data && data.photo_count, 10) || 0),
+        photos_available: !!(data && data.photos_available),
+        photos: Array.isArray(data && data.photos) ? data.photos : []
+      };
+    }
+
+    async function loadManifestPhotos(manifestId, options) {
+      const id = parseManifestId(manifestId);
+      if (id <= 0) {
+        state.manifestPhotos = [];
+        renderManifestPhotos();
+        return;
+      }
+      const quiet = !!(options && options.quiet);
+      if (!quiet) {
+        setManifestPhotosStatus('Loading pictures...', 'muted');
+      }
+      try {
+        const data = await fetchManifestPhotos(id);
+        state.manifestPhotos = Array.isArray(data.photos) ? data.photos : [];
+        if (state.currentManifest && currentManifestId() === id) {
+          if (data.manifest_title) {
+            state.currentManifest.manifest_title = data.manifest_title;
+          }
+          state.currentManifest.photo_count = Math.max(0, Number.parseInt(data.photo_count, 10) || state.manifestPhotos.length);
+          state.currentManifest.photos_available = !!data.photos_available || state.currentManifest.photo_count > 0;
+        }
+        renderManifestPhotos();
+        renderEditorMode();
+        if (!quiet) {
+          setManifestPhotosStatus(
+            state.manifestPhotos.length
+              ? ('Loaded ' + state.manifestPhotos.length + ' picture(s).')
+              : 'No pictures saved yet.',
+            state.manifestPhotos.length ? 'ok' : 'muted'
+          );
+        }
+      } catch (err) {
+        state.manifestPhotos = [];
+        renderManifestPhotos();
+        setManifestPhotosStatus(err && err.message ? err.message : 'Failed to load pictures', 'error');
+      }
+    }
+
+    async function uploadManifestPhotos() {
+      const manifestId = currentManifestId();
+      const files = Array.from((bulkManifestPhotosInput && bulkManifestPhotosInput.files) || []).filter(file => !!file);
+      if (manifestId <= 0) {
+        setStatus('Save the manifest before adding pictures.', 'warn');
+        if (bulkManifestPhotosInput) bulkManifestPhotosInput.value = '';
+        return;
+      }
+      if (!files.length) {
+        return;
+      }
+
+      const formData = new FormData();
+      files.forEach(file => {
+        formData.append('photos[]', file, file.name || 'bulk-manifest.jpg');
+      });
+
+      if (addPicturesBtn) addPicturesBtn.disabled = true;
+      if (bulkManifestPhotosInput) bulkManifestPhotosInput.disabled = true;
+      setManifestPhotosStatus('Uploading ' + files.length + ' picture(s)...', 'muted');
+
+      try {
+        const resp = await fetch('/api/bulk-manifest/' + encodeURIComponent(manifestId) + '/photos', {
+          method: 'POST',
+          body: formData
+        });
+        const raw = await resp.text();
+        let data = null;
+        try {
+          data = raw ? JSON.parse(raw) : {};
+        } catch (_) {
+          const htmlish = String(raw || '').trim().startsWith('<');
+          if (htmlish) throw new Error('Manifest photo upload returned HTML (likely session redirect).');
+          throw new Error('Manifest photo upload returned invalid response.');
+        }
+        if (!resp.ok || !data || !data.success) {
+          throw new Error((data && data.error) || ('Failed to save pictures for manifest #' + manifestId));
+        }
+        state.manifestPhotos = Array.isArray(data.photos) ? data.photos : [];
+        if (state.currentManifest) {
+          state.currentManifest.manifest_title = String((data && data.manifest_title) || state.currentManifest.manifest_title || '').trim();
+          state.currentManifest.photo_count = Math.max(0, Number.parseInt(data && data.photo_count, 10) || state.manifestPhotos.length);
+          state.currentManifest.photos_available = state.currentManifest.photo_count > 0;
+        }
+        renderManifestPhotos();
+        renderEditorMode();
+        setManifestPhotosStatus('Saved ' + files.length + ' picture(s) to manifest #' + manifestId + '.', 'ok');
+        await loadHistory();
+      } catch (err) {
+        setManifestPhotosStatus(err && err.message ? err.message : 'Failed to save pictures', 'error');
+      } finally {
+        if (bulkManifestPhotosInput) {
+          bulkManifestPhotosInput.value = '';
+          bulkManifestPhotosInput.disabled = false;
+        }
+        if (addPicturesBtn) addPicturesBtn.disabled = false;
+      }
+    }
+
+    async function fetchGoogleSheetHealthNote() {
+      try {
+        const resp = await fetch('/api/bulk-manifest/google-sheet-health?probe=1&ts=' + Date.now(), {
+          method: 'GET',
+          headers: { 'Accept': 'application/json' },
+          cache: 'no-store'
+        });
+        const raw = await resp.text();
+        let data = null;
+        try {
+          data = raw ? JSON.parse(raw) : {};
+        } catch (_) {
+          return '';
+        }
+        const health = (data && data.health) || {};
+        if (health.token_error) return String(health.token_error || '').trim();
+        if (health.cryptography_error) return String(health.cryptography_error || '').trim();
+        if (health.credentials_error) return String(health.credentials_error || '').trim();
+        if (health.credentials_present === false) return 'Google credentials.json not found on the server.';
+        if (health.service_account === false) return 'credentials.json is not a Google service account key.';
+        if (health.client_email_present === false) return 'Google service account key is missing client_email.';
+        return '';
+      } catch (_) {
+        return '';
+      }
+    }
+
+    function delay(ms) {
+      return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    async function fetchManifestGoogleSheetStatus(manifestId) {
+      const id = Number.parseInt(manifestId, 10) || 0;
+      if (id <= 0) {
+        throw new Error('Invalid manifest selected.');
+      }
+      const resp = await fetch('/api/bulk-manifest/' + encodeURIComponent(id) + '/google-sheet-status?ts=' + Date.now(), {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' },
+        cache: 'no-store'
+      });
+      const raw = await resp.text();
+      let data = null;
+      try {
+        data = raw ? JSON.parse(raw) : {};
+      } catch (_) {
+        const htmlish = String(raw || '').trim().startsWith('<');
+        if (htmlish) {
+          const note = await fetchGoogleSheetHealthNote();
+          throw new Error('Google Sheet status API returned HTML (HTTP ' + resp.status + ').' + (note ? (' ' + note) : ''));
+        }
+        throw new Error('Google Sheet status API returned invalid response.');
+      }
+      if (!resp.ok && (!data || !data.error)) {
+        throw new Error('Failed to load Google Sheet status (HTTP ' + resp.status + ').');
+      }
+      return data || {};
+    }
+
+    async function ensureManifestGoogleSheet(manifestId, options) {
+      const id = Number.parseInt(manifestId, 10) || 0;
+      if (id <= 0) {
+        throw new Error('Invalid manifest selected.');
+      }
+      const forceRefresh = !!(options && options.forceRefresh);
+      const resp = await fetch('/api/bulk-manifest/' + encodeURIComponent(id) + '/google-sheet?ts=' + Date.now() + (forceRefresh ? '&refresh=1' : ''), {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' },
+        cache: 'no-store'
+      });
+      const raw = await resp.text();
+      let data = null;
+      try {
+        data = raw ? JSON.parse(raw) : {};
+      } catch (_) {
+        const htmlish = String(raw || '').trim().startsWith('<');
+        if (htmlish) {
+          const note = await fetchGoogleSheetHealthNote();
+          throw new Error('Google Sheet API returned HTML (HTTP ' + resp.status + ').' + (note ? (' ' + note) : ''));
+        }
+        throw new Error('Google Sheet API returned invalid response.');
+      }
+      if (!resp.ok || !data || !data.success) {
+        throw new Error((data && data.error) || ('Failed to create Google Sheet for manifest #' + id));
+      }
+      const status = String((data && data.status) || '').trim().toLowerCase();
+      const readyUrl = String((data && data.sheet_url) || '').trim();
+      if ((status === 'ready' || !status) && readyUrl) {
+        return data;
+      }
+
+      if (status !== 'queued' && status !== 'processing') {
+        if (readyUrl) return data;
+        throw new Error((data && data.error) || ('Google Sheet export did not return a sheet URL for manifest #' + id));
+      }
+
+      for (let attempt = 0; attempt < 45; attempt += 1) {
+        await delay(1500);
+        const polled = await fetchManifestGoogleSheetStatus(id);
+        const pollStatus = String((polled && polled.status) || '').trim().toLowerCase();
+        const pollUrl = String((polled && polled.sheet_url) || '').trim();
+        if (pollStatus === 'error' || (polled && polled.success === false)) {
+          throw new Error((polled && polled.error) || ('Google Sheet export failed for manifest #' + id));
+        }
+        if (pollStatus === 'ready' && pollUrl) {
+          return polled;
+        }
+      }
+
+      throw new Error('Google Sheet export is still processing. Try again in a moment.');
+    }
+
+    function clearHistoryRefreshTimer() {
+      if (historyRefreshTimer) {
+        window.clearTimeout(historyRefreshTimer);
+        historyRefreshTimer = 0;
+      }
+    }
+
+    function scheduleHistoryRefresh(rows) {
+      clearHistoryRefreshTimer();
+      const list = Array.isArray(rows) ? rows : [];
+      const hasPending = list.some(row => {
+        const status = String((row && row.google_sheet_status) || '').trim().toLowerCase();
+        return status === 'queued' || status === 'processing';
+      });
+      if (!hasPending) return;
+      historyRefreshTimer = window.setTimeout(() => {
+        historyRefreshTimer = 0;
+        loadHistory();
+      }, 2200);
+    }
+
+    function manifestGoogleSheetLabel(row) {
+      const explicit = String((row && row.google_sheet_button_label) || '').trim();
+      if (explicit) return explicit;
+      return row && row.google_sheet_available ? 'Google Sheet' : 'Create Sheet';
+    }
+
+    function manifestGoogleSheetButtonClass(row) {
+      return row && row.google_sheet_available ? 'btn btn-primary' : 'btn';
+    }
+
+    function findManifestHistoryRow(manifestId) {
+      const id = Number.parseInt(manifestId, 10) || 0;
+      if (id <= 0) return null;
+      const rows = Array.isArray(state.manifestHistory) ? state.manifestHistory : [];
+      for (const row of rows) {
+        if ((Number.parseInt(row && row.id, 10) || 0) === id) {
+          return row || null;
+        }
+      }
+      return null;
+    }
+
+    function syncCurrentManifestFromHistory() {
+      const currentId = currentManifestId();
+      if (currentId <= 0 || !state.currentManifest) return;
+      const row = findManifestHistoryRow(currentId);
+      if (!row) return;
+      state.currentManifest = Object.assign({}, state.currentManifest, {
+        google_sheet_id: String((row && row.google_sheet_id) || '').trim(),
+        google_sheet_url: String((row && row.google_sheet_url) || '').trim(),
+        google_sheet_status: String((row && row.google_sheet_status) || '').trim(),
+        google_sheet_available: !!(row && row.google_sheet_available),
+        google_sheet_button_label: String((row && row.google_sheet_button_label) || '').trim(),
+        google_sheet_shared_with: String((row && row.google_sheet_shared_with) || '').trim(),
+        google_sheet_error: String((row && row.google_sheet_error) || '').trim(),
+        photo_count: Math.max(0, Number.parseInt(row && row.photo_count, 10) || 0),
+        photos_available: !!(row && row.photos_available)
+      });
+      renderEditorMode();
+    }
+
+    function buildSavedManifestPrintHtml(manifest, items, googleSheetMeta) {
+      const manifestId = Number.parseInt(manifest && manifest.id, 10) || 0;
+      const manifestTitle = String((manifest && manifest.manifest_title) || ('Bulk Manifest ' + manifestId)).trim() || ('Bulk Manifest ' + manifestId);
+      const manifestDate = String((manifest && manifest.manifest_date) || '').trim() || String((manifest && manifest.created_at) || '').slice(0, 10);
+      const generated = new Date().toLocaleString();
+      const sheetUrl = String(
+        (googleSheetMeta && googleSheetMeta.sheet_url) ||
+        (manifest && manifest.google_sheet_url) ||
+        ''
+      ).trim();
+      const qrUrlJson = JSON.stringify(sheetUrl || '');
+
+      const rows = Array.isArray(items) ? items : [];
+      let totalQty = 0;
+      let totalAmount = 0;
+
+      const bodyRows = rows.map((row, idx) => {
+        const qty = Math.max(0, Number.parseInt(row.quantity, 10) || 0);
+        const unitPrice = toPrice(row.unit_price);
+        const lineTotal = Number((qty * unitPrice).toFixed(2));
+        const displayRetail = qty > 1 ? lineTotal : unitPrice;
+        const emphasisClass = qty > 1 ? ' emphasis' : '';
+        totalQty += qty;
+        totalAmount += lineTotal;
+        return (
+          '<tr>' +
+            '<td class="idx-col">' + displayPrintRowNumber(idx) + '</td>' +
+            '<td>' + esc(String(row.title || '').trim()) + '</td>' +
+            '<td>' + esc(String(row.barcode || '').trim()) + '</td>' +
+            '<td class="num' + emphasisClass + '">' + qty + '</td>' +
+            '<td class="num' + emphasisClass + '">' + money(displayRetail) + '</td>' +
+          '</tr>'
+        );
+      }).join('');
+
+      const tableRows = bodyRows || '<tr><td colspan="5" class="empty">No line items.</td></tr>';
+      const totalMoney = money(Number(totalAmount.toFixed(2)));
+      const summaryBlock =
+        '<div class="manifest-summary">' +
+          '<div class="summary-chip">' +
+            '<div class="summary-label">Total Items</div>' +
+            '<div class="summary-value">' + esc(String(totalQty)) + '</div>' +
+          '</div>' +
+          '<div class="summary-chip">' +
+            '<div class="summary-label">Total Retail Price</div>' +
+            '<div class="summary-value">' + esc(totalMoney) + '</div>' +
+          '</div>' +
+        '</div>';
+      const sheetBlock = sheetUrl
+        ? (
+          '<div class="sheet-link-wrap">' +
+            '<div class="sheet-link-text">' +
+              '<div class="sheet-link-title">Google Sheet</div>' +
+              '<div><a href="' + esc(sheetUrl) + '" target="_blank" rel="noopener">' + esc(sheetUrl) + '</a></div>' +
+            '</div>' +
+            '<div class="sheet-qr-wrap">' +
+              '<div id="sheetQrCode" class="sheet-qr-code"></div>' +
+              '<div class="sheet-qr-label">Scan for Google Sheet</div>' +
+            '</div>' +
+          '</div>'
+        )
+        : '';
+      const autoPrintScript = sheetUrl
+        ? (
+'<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"><' + '/script>\n' +
+'<script>\n' +
+'(function(){\n' +
+'  const sheetUrl = ' + qrUrlJson + ';\n' +
+'  let printed = false;\n' +
+'  function finish(){\n' +
+'    if (printed) return;\n' +
+'    printed = true;\n' +
+'    setTimeout(function(){ try { window.focus(); window.print(); } catch (_) {} }, 450);\n' +
+'  }\n' +
+'  function renderQr(){\n' +
+'    const box = document.getElementById("sheetQrCode");\n' +
+'    if (!box || !sheetUrl || typeof QRCode === "undefined") { finish(); return; }\n' +
+'    box.innerHTML = "";\n' +
+'    try {\n' +
+'      new QRCode(box, {\n' +
+'        text: sheetUrl,\n' +
+'        width: 168,\n' +
+'        height: 168,\n' +
+'        colorDark: "#000000",\n' +
+'        colorLight: "#ffffff",\n' +
+'        correctLevel: QRCode.CorrectLevel.H\n' +
+'      });\n' +
+'    } catch (_) {}\n' +
+'    setTimeout(finish, 700);\n' +
+'  }\n' +
+'  if (document.readyState === "complete") {\n' +
+'    setTimeout(renderQr, 120);\n' +
+'  } else {\n' +
+'    window.addEventListener("load", function(){ setTimeout(renderQr, 120); }, { once: true });\n' +
+'  }\n' +
+'  setTimeout(finish, 1800);\n' +
+'})();\n' +
+'<' + '/script>\n'
+        )
+        : (
+'<script>\n' +
+'window.addEventListener("load", function(){\n' +
+'  setTimeout(function(){ try { window.focus(); window.print(); } catch (_) {} }, 250);\n' +
+'}, { once: true });\n' +
+'<' + '/script>\n'
+        );
+
+      return (
+'<!doctype html>\n' +
+'<html lang="en">\n' +
+'<head>\n' +
+'  <meta charset="utf-8">\n' +
+'  <meta name="viewport" content="width=device-width, initial-scale=1">\n' +
+'  <title>' + esc(manifestTitle) + ' - Print Manifest</title>\n' +
+'  <style>\n' +
+'    body{margin:0;background:#fff;color:#000;font-family:Segoe UI,Tahoma,Arial,sans-serif;}\n' +
+'    .sheet{padding:10mm;}\n' +
+'    h1{margin:0 0 8px 0;font-size:1.35rem;}\n' +
+'    .stamp{font-size:.88rem;color:#111;margin-bottom:6px;}\n' +
+'    .manifest-summary{display:flex;flex-wrap:wrap;gap:10px;margin:8px 0 12px 0;}\n' +
+'    .summary-chip{min-width:180px;border:1px solid #000;padding:8px 12px;}\n' +
+'    .summary-label{font-size:.76rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;}\n' +
+'    .summary-value{font-size:1.08rem;font-weight:800;font-variant-numeric:tabular-nums;}\n' +
+'    table{width:100%;border-collapse:collapse;}\n' +
+'    th,td{border:1px solid #000;text-align:left;vertical-align:middle;line-height:1.05;}\n' +
+'    th{background:#f3f4f6;color:#111;font-size:.85rem;text-transform:uppercase;letter-spacing:.02em;padding:5px 8px;}\n' +
+'    td{padding:3px 8px;}\n' +
+'    tfoot th{background:#e5e7eb;color:#111;font-weight:800;}\n' +
+'    .emphasis{font-weight:800;}\n' +
+'    .idx-col{width:46px;text-align:center;font-weight:700;}\n' +
+'    .num{text-align:right;font-variant-numeric:tabular-nums;}\n' +
+'    .empty{text-align:center;padding:8px 8px;color:#333;font-style:italic;}\n' +
+'    .sheet-link-wrap{display:flex;align-items:center;justify-content:space-between;gap:14px;margin:10px 0 14px 0;padding:10px 12px;border:1px solid #000;}\n' +
+'    .sheet-link-text{flex:1;min-width:0;}\n' +
+'    .sheet-link-title{font-weight:700;margin-bottom:4px;}\n' +
+'    .sheet-link-text a{color:#000;text-decoration:none;word-break:break-all;}\n' +
+'    .sheet-qr-wrap{text-align:center;min-width:190px;}\n' +
+'    .sheet-qr-code{width:168px;height:168px;margin:0 auto;}\n' +
+'    .sheet-qr-code img,.sheet-qr-code canvas{width:168px !important;height:168px !important;max-width:none !important;max-height:none !important;}\n' +
+'    .sheet-qr-label{font-size:.82rem;font-weight:700;margin-top:6px;}\n' +
+'  </style>\n' +
+'</head>\n' +
+'<body>\n' +
+'  <div class="sheet">\n' +
+'    <h1>Bulk Manifest</h1>\n' +
+'    <div class="stamp">Manifest: ' + esc(manifestTitle) + ' | Date: ' + esc(manifestDate || '-') + '</div>\n' +
+'    <div class="stamp">Generated: ' + esc(generated) + '</div>\n' +
+'    ' + sheetBlock + '\n' +
+'    ' + summaryBlock + '\n' +
+'    <table>\n' +
+'      <thead>\n' +
+'        <tr>\n' +
+'          <th style="width:46px;text-align:center;">#</th>\n' +
+'          <th>Item Name</th>\n' +
+'          <th style="width:190px;">Barcode</th>\n' +
+'          <th style="width:90px;text-align:right;">Qty</th>\n' +
+'          <th style="width:130px;text-align:right;">Original Retail</th>\n' +
+'        </tr>\n' +
+'      </thead>\n' +
+'      <tbody>\n' + tableRows + '\n' +
+'      </tbody>\n' +
+'      <tfoot>\n' +
+'        <tr>\n' +
+'          <th colspan="3" style="text-align:right;">Total Items</th>\n' +
+'          <th class="num">' + totalQty + '</th>\n' +
+'          <th></th>\n' +
+'        </tr>\n' +
+'        <tr>\n' +
+'          <th colspan="4" style="text-align:right;">Total Retail Price</th>\n' +
+'          <th class="num">' + esc(totalMoney) + '</th>\n' +
+'        </tr>\n' +
+'      </tfoot>\n' +
+'    </table>\n' +
+'  </div>\n' +
+'  ' + autoPrintScript +
+'</body>\n' +
+'</html>\n'
+      );
+    }
+
+    async function printManifestHistory(manifestId) {
+      const id = Number.parseInt(manifestId, 10) || 0;
+      if (id <= 0) {
+        setHistoryStatus('Invalid manifest selected for print.', 'error');
+        return;
+      }
+      clearHistoryDownloadHint();
+      const printWin = window.open('', '_blank');
+      if (!printWin) {
+        setHistoryStatus('Popup blocked. Allow popups to print manifests.', 'error');
+        return;
+      }
+      setHistoryStatus('Preparing print view for manifest #' + id + '...', 'muted');
+      try {
+        const detail = await fetchManifestDetail(id);
+        if (!detail.items.length) {
+          throw new Error('Manifest has no line items to print.');
+        }
+        let googleSheetMeta = null;
+        try {
+          googleSheetMeta = await ensureManifestGoogleSheet(id, { forceRefresh: true });
+          if (googleSheetMeta && googleSheetMeta.sheet_url) {
+            detail.manifest.google_sheet_url = googleSheetMeta.sheet_url;
+          }
+        } catch (sheetErr) {
+          const fallbackUrl = String((detail.manifest && detail.manifest.google_sheet_url) || '').trim();
+          if (fallbackUrl) {
+            googleSheetMeta = { sheet_url: fallbackUrl };
+            setHistoryStatus('Google Sheet refresh failed. Printing with the last saved sheet link.', 'warn');
+          } else {
+            setHistoryStatus('Google Sheet refresh failed. Printing without QR code.', 'warn');
+          }
+        }
+        const printHtml = buildSavedManifestPrintHtml(detail.manifest, detail.items, googleSheetMeta);
+        printWin.document.open();
+        printWin.document.write(printHtml);
+        printWin.document.close();
+        if (googleSheetMeta && googleSheetMeta.sheet_url) {
+          setHistoryStatus('Opened print manifest for #' + id + ' with Google Sheet QR.', 'ok');
+        } else {
+          setHistoryStatus('Opened print manifest for #' + id + '.', 'warn');
+        }
+      } catch (err) {
+        try { printWin.close(); } catch (_) {}
+        setHistoryStatus(err && err.message ? err.message : 'Failed to print manifest', 'error');
+      }
+    }
+
+    async function openManifestGoogleSheet(manifestId) {
+      const id = Number.parseInt(manifestId, 10) || 0;
+      if (id <= 0) {
+        setHistoryStatus('Invalid manifest selected for Google Sheet export.', 'error');
+        return;
+      }
+      clearHistoryDownloadHint();
+      const historyRow = findManifestHistoryRow(id);
+      const existingUrl = String((historyRow && historyRow.google_sheet_url) || '').trim();
+      const buttonLabel = manifestGoogleSheetLabel(historyRow).trim().toLowerCase();
+      const shouldCreateSheet = buttonLabel === 'create sheet' || !existingUrl;
+      setHistoryStatus(
+        shouldCreateSheet
+          ? ('Preparing Google Sheet for manifest #' + id + '...')
+          : ('Opening Google Sheet for manifest #' + id + '...'),
+        'muted'
+      );
+      try {
+        let sheetUrl = existingUrl;
+        let sharedWith = String((historyRow && historyRow.google_sheet_shared_with) || '').trim();
+        if (shouldCreateSheet) {
+          const data = await ensureManifestGoogleSheet(id);
+          sheetUrl = String((data && data.sheet_url) || '').trim();
+          sharedWith = String((data && data.shared_with) || '').trim();
+        }
+        if (!sheetUrl) {
+          throw new Error('Google Sheet export did not return a sheet URL.');
+        }
+        const popup = window.open(sheetUrl, '_blank', 'noopener');
+        if (popup) {
+        } else {
+          setHistoryLinkHint('Popup blocked. Open the Google Sheet here:', sheetUrl, 'Google Sheet');
+        }
+        let statusMsg = shouldCreateSheet
+          ? ('Google Sheet ready for manifest #' + id + '.')
+          : ('Opened Google Sheet for manifest #' + id + '.');
+        if (sharedWith) {
+          statusMsg += ' Shared with ' + sharedWith + '.';
+        }
+        setHistoryStatus(statusMsg, 'ok');
+        if (shouldCreateSheet) {
+          await loadHistory();
+        }
+      } catch (err) {
+        clearHistoryDownloadHint();
+        setHistoryStatus(err && err.message ? err.message : 'Failed to open Google Sheet', 'error');
+      }
+    }
+
+    async function deleteCurrentManifestGoogleSheet() {
+      const id = currentManifestId();
+      if (id <= 0) {
+        setStatus('Open a saved manifest before deleting its Google Sheet.', 'warn');
+        return;
+      }
+      if (!canDeleteCurrentManifestGoogleSheet()) {
+        setStatus('This manifest does not have a Google Sheet to delete.', 'warn');
+        return;
+      }
+      const title = manifestDisplayTitle(state.currentManifest || { id: id });
+      if (!confirm('Delete the Google Sheet linked to ' + title + '? This only removes the sheet export and keeps the manifest.')) {
+        return;
+      }
+      if (deleteGoogleSheetBtn) deleteGoogleSheetBtn.disabled = true;
+      setStatus('Deleting Google Sheet for manifest #' + id + '...', 'muted');
+      try {
+        const resp = await fetch('/api/bulk-manifest/' + encodeURIComponent(id) + '/google-sheet-delete', {
+          method: 'POST',
+          headers: { 'Accept': 'application/json' }
+        });
+        const raw = await resp.text();
+        let data = null;
+        try {
+          data = raw ? JSON.parse(raw) : {};
+        } catch (_) {
+          throw new Error('Delete Google Sheet API returned invalid response.');
+        }
+        if (!resp.ok || !data || !data.success) {
+          throw new Error((data && data.error) || 'Failed to delete Google Sheet');
+        }
+        state.currentManifest = Object.assign({}, state.currentManifest || {}, {
+          google_sheet_id: '',
+          google_sheet_url: '',
+          google_sheet_status: String((data && data.status) || 'idle').trim(),
+          google_sheet_available: !!(data && data.sheet_available),
+          google_sheet_button_label: String((data && data.button_label) || 'Create Sheet').trim(),
+          google_sheet_shared_with: '',
+          google_sheet_error: ''
+        });
+        renderEditorMode();
+        await loadHistory();
+        setStatus('Deleted Google Sheet for manifest #' + id + '.', 'ok');
+      } catch (err) {
+        setStatus(err && err.message ? err.message : 'Failed to delete Google Sheet', 'error');
+      } finally {
+        if (deleteGoogleSheetBtn) deleteGoogleSheetBtn.disabled = false;
+      }
     }
 
     function normalizeStatus(status) {
@@ -767,7 +2664,15 @@
         const statusKey = normalizeStatus(row.status);
         const created = String(row.created_at || '').trim();
         const createdDate = created ? new Date(created).toLocaleString() : '';
-        const sellerUrl = '/marketplace-session?manifest_id=' + encodeURIComponent(id);
+        const editUrl = '/bulk-manifest?manifest_id=' + encodeURIComponent(id);
+        const sellerUrl = '/marketplace-session?source=bulk-manifest&manifest_id=' + encodeURIComponent(id);
+        const picturesUrl = manifestPicturesUrl(id);
+        const sheetBtnClass = manifestGoogleSheetButtonClass(row);
+        const sheetBtnLabel = manifestGoogleSheetLabel(row);
+        const photoCount = Math.max(0, Number.parseInt(row && row.photo_count, 10) || 0);
+        const picturesBtn = photoCount > 0
+          ? ('<a class="btn" href="' + picturesUrl + '">Pictures (' + esc(photoCount) + ')</a>')
+          : '';
         return (
           '<tr>' +
             '<td>#' + esc(id) + '</td>' +
@@ -777,7 +2682,13 @@
             '<td style="text-align:center;">' + esc(Number(row.total_items || 0)) + '</td>' +
             '<td style="text-align:center;">' + esc(Number(row.total_units || 0)) + '</td>' +
             '<td><span class="status-tag ' + statusKey + '">' + esc(statusLabel(statusKey)) + '</span></td>' +
-            '<td class="history-actions"><a class="btn btn-primary" href="' + sellerUrl + '">Marketplace Sale</a></td>' +
+            '<td class="history-actions">' +
+              '<a class="btn" href="' + editUrl + '">Edit</a>' +
+              '<a class="btn btn-primary" href="' + sellerUrl + '">Marketplace Sale</a>' +
+              '<button class="btn" type="button" data-action="print" data-id="' + id + '">Print Manifest</button>' +
+              picturesBtn +
+              '<button class="' + esc(sheetBtnClass) + '" type="button" data-action="sheet" data-id="' + id + '">' + esc(sheetBtnLabel) + '</button>' +
+            '</td>' +
           '</tr>'
         );
       }).join('');
@@ -785,17 +2696,38 @@
     }
 
     async function loadHistory() {
+      clearHistoryDownloadHint();
       setHistoryStatus('Loading manifest history...', 'muted');
       try {
-        const resp = await fetch('/api/bulk-manifest/history?limit=80');
-        const data = await resp.json();
+        const resp = await fetch('/api/bulk-manifest/history?limit=160');
+        const raw = await resp.text();
+        let data = null;
+        try {
+          data = raw ? JSON.parse(raw) : {};
+        } catch (_) {
+          const htmlish = String(raw || '').trim().startsWith('<');
+          if (htmlish) {
+            throw new Error('Manifest history API returned HTML (likely missing backend route or session redirect).');
+          }
+          throw new Error('Manifest history API returned an invalid response.');
+        }
+        if (!resp.ok) {
+          throw new Error((data && data.error) || ('Failed to load history (HTTP ' + resp.status + ')'));
+        }
         if (!data || !data.success) {
           throw new Error((data && data.error) || 'Failed to load history');
         }
-        renderHistory(data.manifests || []);
-        setHistoryStatus('Loaded ' + Number((data.manifests || []).length || 0) + ' manifest(s).', 'ok');
+        state.manifestHistory = Array.isArray(data.manifests) ? data.manifests : [];
+        syncCurrentManifestFromHistory();
+        renderHistory(state.manifestHistory);
+        renderCombineManifestOptions();
+        scheduleHistoryRefresh(state.manifestHistory);
+        setHistoryStatus('Loaded ' + Number(state.manifestHistory.length || 0) + ' manifest(s).', 'ok');
       } catch (err) {
+        clearHistoryRefreshTimer();
+        state.manifestHistory = [];
         renderHistory([]);
+        renderCombineManifestOptions();
         setHistoryStatus(err && err.message ? err.message : 'Failed to load history', 'error');
       }
     }
@@ -811,20 +2743,12 @@
         return;
       }
 
-      const missingBarcodeRows = payload.items
-        .map((row, idx) => ({ idx: idx + 1, barcode: String(row.barcode || '').trim() }))
-        .filter(row => !row.barcode)
-        .map(row => row.idx);
-
-      if (missingBarcodeRows.length) {
-        setStatus('Barcode required on line(s): ' + missingBarcodeRows.join(', '), 'error');
-        return;
-      }
-
+      const editingId = currentManifestId();
+      const isUpdate = editingId > 0;
       saveManifestBtn.disabled = true;
-      setStatus('Saving manifest...', 'muted');
+      setStatus(isUpdate ? ('Saving changes to manifest #' + editingId + '...') : 'Saving manifest...', 'muted');
       try {
-        const resp = await fetch('/api/bulk-manifest/create', {
+        const resp = await fetch(isUpdate ? ('/api/bulk-manifest/' + encodeURIComponent(editingId) + '/update') : '/api/bulk-manifest/create', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
@@ -833,9 +2757,19 @@
         if (!resp.ok || !data || !data.success) {
           throw new Error((data && data.error) || 'Save failed');
         }
-        const manifestId = Number(data.manifest && data.manifest.id) || 0;
+        const manifestId = parseManifestId(data.manifest && data.manifest.id) || editingId;
         state.lastSavedManifestId = manifestId || null;
-        setStatus('Saved manifest #' + manifestId + '. Use "Marketplace Sale" from history to process it.', 'ok');
+        if (manifestId > 0) {
+          setCurrentManifest(Object.assign({}, state.currentManifest || {}, data.manifest || {}, { id: manifestId }));
+          setManifestQueryParam(manifestId);
+          await loadManifestPhotos(manifestId, { quiet: true });
+        }
+        setStatus(
+          isUpdate
+            ? ('Updated manifest #' + manifestId + '. Google Sheet syncing automatically.')
+            : ('Saved manifest #' + manifestId + '. Google Sheet syncing automatically.'),
+          'ok'
+        );
         await loadHistory();
       } catch (err) {
         setStatus(err && err.message ? err.message : 'Failed to save manifest', 'error');
@@ -845,20 +2779,64 @@
     }
 
     printBtnTop.addEventListener('click', printSheet);
+    if (newManifestBtn) {
+      newManifestBtn.addEventListener('click', startNewManifest);
+    }
+    if (deleteGoogleSheetBtn) {
+      deleteGoogleSheetBtn.addEventListener('click', deleteCurrentManifestGoogleSheet);
+    }
+    if (refreshManifestBtn) {
+      refreshManifestBtn.addEventListener('click', refreshManifestData);
+    }
+    if (addPicturesBtn) {
+      addPicturesBtn.addEventListener('click', () => {
+        if (currentManifestId() <= 0) {
+          setStatus('Save the manifest before adding pictures.', 'warn');
+          return;
+        }
+        if (bulkManifestPhotosInput) {
+          bulkManifestPhotosInput.value = '';
+          bulkManifestPhotosInput.click();
+        }
+      });
+    }
+    if (bulkManifestPhotosInput) {
+      bulkManifestPhotosInput.addEventListener('change', uploadManifestPhotos);
+    }
+    if (combineManifestBtn) {
+      combineManifestBtn.addEventListener('click', combineSelectedManifest);
+    }
     saveManifestBtn.addEventListener('click', saveManifest);
     refreshHistoryBtn.addEventListener('click', loadHistory);
+    historyBody.addEventListener('click', (event) => {
+      const btn = event.target.closest('button[data-action]');
+      if (!btn) return;
+      event.preventDefault();
+      const action = String(btn.dataset.action || '').trim();
+      if (action === 'print') {
+        printManifestHistory(btn.dataset.id);
+        return;
+      }
+      if (action === 'sheet') {
+        openManifestGoogleSheet(btn.dataset.id);
+      }
+    });
     window.addEventListener('beforeprint', updateStamp);
 
-    (function init() {
+    (async function init() {
       try {
         const theme = localStorage.getItem('ss_theme') || 'day';
         if (theme === 'night') document.documentElement.classList.add('ss-theme-night');
       } catch (_) {}
-      const today = new Date();
-      manifestDateEl.value = today.toISOString().slice(0, 10);
       updateStamp();
+      renderEditorMode();
       renderRows();
-      loadHistory();
+      updateKeywordResultsVisibility();
+      await loadHistory();
+      const queryManifestId = parseManifestId(new URLSearchParams(window.location.search).get('manifest_id'));
+      if (queryManifestId > 0) {
+        await loadManifestForEdit(queryManifestId);
+      }
       try { scanInput.focus({ preventScroll: true }); } catch (_) {}
     })();
   </script>

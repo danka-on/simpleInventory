@@ -772,11 +772,18 @@
     const searchPanel = document.getElementById('searchPanel');
     const toggleManual = document.getElementById('toggleManual');
     const manualPanel = document.getElementById('manualPanel');
+    const bulkManifestPanel = document.getElementById('bulkManifestPanel');
     const bulkManifestSelect = document.getElementById('bulkManifestSelect');
     const loadManifestBtn = document.getElementById('loadManifestBtn');
     const refreshManifestListBtn = document.getElementById('refreshManifestListBtn');
     const bulkManifestInfo = document.getElementById('bulkManifestInfo');
     const urlParams = new URLSearchParams(window.location.search);
+    const bulkManifestSource = String(urlParams.get('source') || urlParams.get('from') || '').trim().toLowerCase();
+    const showBulkManifestIntegration = bulkManifestSource === 'bulk-manifest';
+
+    if (bulkManifestPanel && !showBulkManifestIntegration) {
+      bulkManifestPanel.style.display = 'none';
+    }
 
     let bulkManifestCache = [];
     let activeBulkManifest = null;
@@ -802,23 +809,25 @@
       if (isOpen) document.getElementById('manualTitle').focus();
     });
 
-    refreshManifestListBtn.addEventListener('click', () => {
-      loadBulkManifestHistory(parseManifestId(bulkManifestSelect.value));
-    });
-    loadManifestBtn.addEventListener('click', () => {
-      loadBulkManifest(bulkManifestSelect.value);
-    });
-    bulkManifestSelect.addEventListener('change', () => {
-      const selectedId = parseManifestId(bulkManifestSelect.value);
-      if (!selectedId) {
-        setBulkManifestInfo('Select a manifest to load it into this sale session.', null);
-        return;
-      }
-      const row = bulkManifestCache.find(x => parseManifestId(x.id) === selectedId);
-      if (!row) return;
-      const title = String(row.manifest_title || '').trim() || ('Manifest #' + selectedId);
-      setBulkManifestInfo(`Ready to load #${selectedId} (${title})`, null);
-    });
+    if (showBulkManifestIntegration) {
+      refreshManifestListBtn.addEventListener('click', () => {
+        loadBulkManifestHistory(parseManifestId(bulkManifestSelect.value));
+      });
+      loadManifestBtn.addEventListener('click', () => {
+        loadBulkManifest(bulkManifestSelect.value);
+      });
+      bulkManifestSelect.addEventListener('change', () => {
+        const selectedId = parseManifestId(bulkManifestSelect.value);
+        if (!selectedId) {
+          setBulkManifestInfo('Select a manifest to load it into this sale session.', null);
+          return;
+        }
+        const row = bulkManifestCache.find(x => parseManifestId(x.id) === selectedId);
+        if (!row) return;
+        const title = String(row.manifest_title || '').trim() || ('Manifest #' + selectedId);
+        setBulkManifestInfo(`Ready to load #${selectedId} (${title})`, null);
+      });
+    }
 
     function fmtMoney(v) {
       const n = isNaN(v) ? 0 : v;
@@ -1399,7 +1408,9 @@
         }
         activeBulkManifest = null;
         renderItems();
-        loadBulkManifestHistory(bulkManifestId || parseManifestId(bulkManifestSelect.value));
+        if (showBulkManifestIntegration) {
+          loadBulkManifestHistory(bulkManifestId || parseManifestId(bulkManifestSelect.value));
+        }
       } else {
         const t = (window.i18n && window.i18n.t) ? window.i18n.t : (k => k);
         const msg = (t('marketplace_submit_partial') || 'Submitted {success}, failed {fail}')
@@ -1414,11 +1425,13 @@
 
     async function initMarketplaceSessionPage() {
       renderItems();
-      const queryManifestId = parseManifestId(urlParams.get('manifest_id'));
-      await loadBulkManifestHistory(queryManifestId);
-      if (queryManifestId) {
-        bulkManifestSelect.value = String(queryManifestId);
-        await loadBulkManifest(queryManifestId);
+      if (showBulkManifestIntegration) {
+        const queryManifestId = parseManifestId(urlParams.get('manifest_id'));
+        await loadBulkManifestHistory(queryManifestId);
+        if (queryManifestId) {
+          bulkManifestSelect.value = String(queryManifestId);
+          await loadBulkManifest(queryManifestId);
+        }
       }
 
       setTimeout(() => {

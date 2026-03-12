@@ -35,7 +35,7 @@ After deploying, restart the service on the Pi: `sudo systemctl restart sweetshe
 
 ### Preferred one-liner deploy (known working)
 
-Use this when asked to "push to pi" with a specific file list and no DB transfer:
+Use this when asked to "push", "p", or "push to pi" with a specific file list and no DB transfer:
 
 ```powershell
 $h='manager@superinventory.local'; $t="$env:TEMP\pi-deploy.tar"; tar -cf $t DBmanager.py app.py static/shelf-creator.js templates/bulk_manifest.html templates/item_prep.html templates/item_prep_diagnostic.html templates/item_prep_diagnostic_view.html templates/items_to_list.html templates/movelocation.html templates/pictureposition.html templates/ready_to_ship.html templates/shelfmanager.html templates/tools.html templates/unified_search.html; scp $t "${h}:/tmp/pi-deploy.tar"; ssh $h "tar -xf /tmp/pi-deploy.tar -C /opt/sweetshelves && rm -f /tmp/pi-deploy.tar && sudo systemctl restart sweetshelves"; Remove-Item $t -Force
@@ -50,14 +50,15 @@ This workflow:
 
 ### User deployment preference (2026-03-05)
 
-When user says "let's push to pi":
+When user says "push", "p", "let's push", or "push to pi":
 - provide only the direct `scp` commands for the relevant files (no auto-execution),
+- always include the reset command: `ssh manager@superinventory.local "sudo systemctl restart sweetshelves.service"`,
 - exclude all `.db` files,
-- wait for user confirmation (`success`) before updating this memory checkpoint.
+- wait for user confirmation (`success` or `s`) before updating this memory checkpoint.
 
 ### Push/commit intent rule
 
-When user says "push to pi" or "commit changes", treat it as:
+When user says "push", "p", "push to pi", or "commit changes", treat it as:
 - deploy/commit only the most recent relevant changes,
 - use git diff from the last successful checkpoint forward,
 - exclude all `.db` files from transfer.
@@ -65,14 +66,12 @@ When user says "push to pi" or "commit changes", treat it as:
 ### Last successful checkpoint
 
 - Status: success confirmed by user
-- Date: 2026-03-05 12:59:34 -05:00
+- Date: 2026-03-09 18:40:22 -04:00
 - Branch: `pi-claude-refactor`
-- Git commit baseline for next incremental file discovery: `29c308f`
+- Git commit baseline for next incremental file discovery: `4ce5f8c` (unchanged; no new commit created before deploy)
 - Files pushed in this successful checkpoint:
   - `app.py`
   - `templates/bulk_manifest.html`
-  - `templates/marketplace_session.html`
-  - `templates/movelocation.html`
 
 ## Architecture
 

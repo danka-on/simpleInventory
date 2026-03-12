@@ -155,6 +155,13 @@
     .alert-group-card:active { transform: translateY(0); }
     .alert-group-card.no-warehouse { border-top: 3px solid #ef4444; }
     .alert-group-card.quantity-alert { border-top: 3px solid #eab308; }
+    .alert-group-card.sync-meltdown {
+      border-top: 3px solid #ef4444;
+      background:
+        radial-gradient(circle at top right, rgba(248,113,113,0.22), transparent 42%),
+        linear-gradient(135deg, rgba(127,29,29,0.96), rgba(69,10,10,0.98));
+      box-shadow: 0 10px 28px rgba(127,29,29,0.38);
+    }
     .alert-group-card.ebay-messages { border-top: 3px solid #3b82f6; }
     .alert-group-card.amazon-messages { border-top: 3px solid #f59e0b; }
 
@@ -182,6 +189,10 @@
       background: rgba(234,179,8,0.12);
       color: #eab308;
     }
+    .alert-group-card.sync-meltdown .alert-group-icon {
+      background: rgba(254,202,202,0.16);
+      color: #fecaca;
+    }
     .alert-group-card.ebay-messages .alert-group-icon {
       background: rgba(59,130,246,0.12);
       color: #60a5fa;
@@ -203,12 +214,33 @@
     }
     .alert-group-card.no-warehouse .alert-group-count-big { color: #f87171; }
     .alert-group-card.quantity-alert .alert-group-count-big { color: #eab308; }
+    .alert-group-card.sync-meltdown .alert-group-count-big { color: #fff1f2; }
     .alert-group-card.ebay-messages .alert-group-count-big { color: #60a5fa; }
     .alert-group-card.amazon-messages .alert-group-count-big { color: #fbbf24; }
     .alert-group-label {
       font-size: 0.82rem;
       color: #94a3b8;
       font-weight: 600;
+    }
+    .alert-group-note {
+      font-size: 0.78rem;
+      font-weight: 900;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 5px;
+    }
+    .alert-group-detail {
+      font-size: 0.78rem;
+      color: #cbd5e1;
+      margin-top: 4px;
+      line-height: 1.45;
+    }
+    .alert-group-card.sync-meltdown .alert-group-note {
+      color: #fee2e2;
+    }
+    .alert-group-card.sync-meltdown .alert-group-label,
+    .alert-group-card.sync-meltdown .alert-group-detail {
+      color: #fecaca;
     }
     .alert-group-actions {
       flex-shrink: 0;
@@ -229,12 +261,22 @@
       white-space: nowrap;
     }
     .btn-mark:hover { background: #475569; color: #e2e8f0; }
+    .alert-group-card.sync-meltdown .btn-mark {
+      background: rgba(239,68,68,0.88);
+      color: #fff;
+      box-shadow: 0 6px 16px rgba(127,29,29,0.32);
+    }
+    .alert-group-card.sync-meltdown .btn-mark:hover {
+      background: #dc2626;
+      color: #fff;
+    }
     .alert-group-arrow {
       color: #475569;
       font-size: 1.1rem;
       transition: transform 0.15s ease;
     }
     .alert-group-card:hover .alert-group-arrow { transform: translateX(3px); color: #94a3b8; }
+    .alert-group-card.sync-meltdown .alert-group-arrow { color: #fecaca; }
 
     /* Marked Fixed rows */
     .marked-card {
@@ -315,6 +357,23 @@
     html.ss-theme-day .alert-group-card.no-warehouse .alert-group-icon { background: rgba(239,68,68,0.08); }
     html.ss-theme-day .alert-group-card.quantity-alert .alert-group-icon { background: rgba(234,179,8,0.08); color: #b45309; }
     html.ss-theme-day .alert-group-card.quantity-alert .alert-group-count-big { color: #b45309; }
+    html.ss-theme-day .alert-group-card.sync-meltdown {
+      background:
+        radial-gradient(circle at top right, rgba(252,165,165,0.18), transparent 42%),
+        linear-gradient(135deg, #7f1d1d, #991b1b);
+      border-color: #fecaca;
+    }
+    html.ss-theme-day .alert-group-card.sync-meltdown .alert-group-icon {
+      background: rgba(255,255,255,0.12);
+      color: #fff1f2;
+    }
+    html.ss-theme-day .alert-group-card.sync-meltdown .alert-group-count-big,
+    html.ss-theme-day .alert-group-card.sync-meltdown .alert-group-note,
+    html.ss-theme-day .alert-group-card.sync-meltdown .alert-group-label,
+    html.ss-theme-day .alert-group-card.sync-meltdown .alert-group-detail,
+    html.ss-theme-day .alert-group-card.sync-meltdown .alert-group-arrow {
+      color: #fff1f2;
+    }
     html.ss-theme-day .alert-group-card.ebay-messages .alert-group-icon { background: rgba(59,130,246,0.08); color: #1d4ed8; }
     html.ss-theme-day .alert-group-card.ebay-messages .alert-group-count-big { color: #1d4ed8; }
     html.ss-theme-day .alert-group-card.amazon-messages .alert-group-icon { background: rgba(245,158,11,0.08); color: #b45309; }
@@ -393,6 +452,7 @@
     }
     function alertTypeLabel(alertType) {
       const tkey = String(alertType || '').toLowerCase();
+      if (tkey === 'sync_overdue') return 'Sync Manager Overdue';
       if (tkey === 'no_warehouse') return t('no_stock_in_warehouse_alert');
       if (tkey === 'quantity_alert') return t('listing_quantity_exceeds_warehouse_alert');
       return tkey || t('alert_type');
@@ -432,7 +492,11 @@
     function renderActive() {
       const listEl = document.getElementById('activeList');
       const emptyEl = document.getElementById('activeEmpty');
-      const listingAlertsCount = Math.max(0, Number(state.active.length || 0));
+      const syncOverdueAlerts = state.active.filter((a) => String(a.alert_type || '').toLowerCase() === 'sync_overdue');
+      const noWarehouseAlerts = state.active.filter((a) => String(a.alert_type || '').toLowerCase() === 'no_warehouse');
+      const quantityAlerts = state.active.filter((a) => String(a.alert_type || '').toLowerCase() === 'quantity_alert');
+      const syncOverdueCount = syncOverdueAlerts.reduce((sum, a) => sum + Math.max(1, Number(a.overdue_count || 1)), 0);
+      const listingAlertsCount = Math.max(0, Number(noWarehouseAlerts.length + quantityAlerts.length + syncOverdueCount || 0));
       const ebayUnreadCount = Math.max(0, Number(state.ebayUnread || 0));
       const amazonUnreadCount = Math.max(0, Number(state.amazonUnread || 0));
       const totalActiveCount = listingAlertsCount + ebayUnreadCount + amazonUnreadCount;
@@ -446,10 +510,41 @@
 
       emptyEl.style.display = 'none';
       listEl.style.display = 'grid';
-      const quantityAlerts = state.active.filter((a) => String(a.alert_type || '').toLowerCase() === 'quantity_alert');
-      const noWarehouseAlerts = state.active.filter((a) => String(a.alert_type || '').toLowerCase() === 'no_warehouse');
-
       const cards = [];
+
+      if (syncOverdueAlerts.length) {
+        const syncAlert = syncOverdueAlerts[0] || {};
+        const overdueCount = Math.max(1, Number(syncAlert.overdue_count || syncOverdueCount || 1));
+        const intervalMinutes = Math.max(1, Number(syncAlert.sync_interval_minutes || 60));
+        const note = String(syncAlert.note || 'Contact Daniel').trim() || 'Contact Daniel';
+        const details = Array.isArray(syncAlert.overdue_items) ? syncAlert.overdue_items : [];
+        const detailText = details.slice(0, 3).map((item) => {
+          const label = String((item && item.label) || '').trim();
+          if (!label) return '';
+          const minutes = Number(item && item.minutes_since);
+          if (Number.isFinite(minutes) && minutes >= 0) {
+            return label + ' ' + minutes + 'm';
+          }
+          return label + ' never';
+        }).filter(Boolean).join(' | ');
+        cards.push(`
+          <div class="alert-group-card sync-meltdown" data-href="/sync">
+            <div class="alert-group-inner">
+              <div class="alert-group-icon"><i class="fas fa-triangle-exclamation"></i></div>
+              <div class="alert-group-info">
+                <div class="alert-group-count-big">${overdueCount}</div>
+                <div class="alert-group-note">${esc(note)}</div>
+                <div class="alert-group-label">Sync Manager overdue past ${intervalMinutes} minute${intervalMinutes === 1 ? '' : 's'}</div>
+                ${detailText ? `<div class="alert-group-detail">${esc(detailText)}</div>` : ''}
+              </div>
+              <div class="alert-group-actions">
+                <button class="btn-mark">Open Sync</button>
+                <span class="alert-group-arrow"><i class="fas fa-chevron-right"></i></span>
+              </div>
+            </div>
+          </div>
+        `);
+      }
 
       if (amazonUnreadCount > 0) {
         cards.push(`
@@ -647,10 +742,15 @@
         if (!dismissedResp.ok || !dismissedData.success) throw new Error((dismissedData && dismissedData.error) ? dismissedData.error : 'Dismissed query failed');
 
         const scanAlerts = (scanData.alerts || {});
+        const syncOverdue = Array.isArray(scanAlerts.sync_overdue) ? scanAlerts.sync_overdue : [];
         const noWarehouse = Array.isArray(scanAlerts.no_warehouse) ? scanAlerts.no_warehouse : [];
         const quantityAlerts = Array.isArray(scanAlerts.quantity_alert) ? scanAlerts.quantity_alert : [];
 
         state.active = [
+          ...syncOverdue.map((a) => ({
+            ...a,
+            alert_type: 'sync_overdue'
+          })),
           ...noWarehouse.map((a) => ({
             ...a,
             alert_type: 'no_warehouse',
@@ -686,7 +786,13 @@
           }
         }
 
-        syncGlobalAlertsBadge(state.active.length);
+        const syncBadgeCount = state.active.reduce((sum, a) => {
+          if (String(a.alert_type || '').toLowerCase() === 'sync_overdue') {
+            return sum + Math.max(1, Number(a.overdue_count || 1));
+          }
+          return sum + 1;
+        }, 0);
+        syncGlobalAlertsBadge(syncBadgeCount);
         renderActive();
         renderMarked();
       } catch (err) {
