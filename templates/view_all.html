@@ -122,6 +122,7 @@
         </div>
     </div>
 
+    <script src="/static/location-preview.js?v=20260312e"></script>
     <script>
         // Convert Python data to JavaScript
         const items = {{ items | tojson | safe }};
@@ -324,6 +325,10 @@
         }
         // Modal helper functions for rack view
         function showLocationImage(position) {
+            if (window.SSLocationPreview) {
+                window.SSLocationPreview.openForLocation(position, '', `Location: ${position}`);
+                return;
+            }
             const modal = document.getElementById('locationModal');
             const img = document.getElementById('locationImage');
             const title = document.getElementById('locationTitle');

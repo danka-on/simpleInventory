@@ -1270,6 +1270,10 @@ function _warehouseRenderInlinePreview(location, quantity){
   img.addEventListener('click', (ev) => {
     ev.preventDefault();
     ev.stopPropagation();
+    if (window.SSLocationPreview) {
+      window.SSLocationPreview.openForLocation(loc, '', `Location: ${loc}`);
+      return;
+    }
     pane.classList.toggle('expanded');
   });
 
@@ -2452,6 +2456,7 @@ if (perPageSel) {
   <div id="loading-overlay">
     <div class="spinner"></div>
   </div>
+  <script src="/static/location-preview.js?v=20260312e"></script>
   <script src="/static/i18n.js"></script>
 </body>
 </html>

@@ -1,0 +1,384 @@
+(function () {
+  if (window.SSLocationPreview) return;
+
+  const STYLE_ID = 'ss-location-preview-style';
+  const ROOT_ID = 'ss-location-preview-root';
+  const state = {
+    token: 0,
+    items: [],
+    expandedIndex: null,
+    title: 'Location Preview'
+  };
+
+  let root = null;
+  let titleEl = null;
+  let noteEl = null;
+  let bodyEl = null;
+  let closeEl = null;
+
+  function escHtml(value) {
+    return String(value == null ? '' : value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function trimValue(value) {
+    return String(value == null ? '' : value).trim();
+  }
+
+  function compactCode(value) {
+    return trimValue(value).replace(/\s+/g, '');
+  }
+
+  function looksLikePicturePath(value) {
+    const raw = trimValue(value);
+    if (!raw) return false;
+    return /^https?:\/\//i.test(raw) ||
+      raw.startsWith('/') ||
+      raw.includes('/') ||
+      /\.[a-z0-9]{2,5}$/i.test(raw);
+  }
+
+  function deriveMapKey(code) {
+    const compact = compactCode(code).toLowerCase();
+    if (!compact) return '';
+    if (/^ofloor\d+$/i.test(compact)) return compact;
+    const shelfMatch = compact.match(/^(.*)s\d+$/i);
+    if (shelfMatch) return shelfMatch[1];
+    return compact;
+  }
+
+  function ensureStyles() {
+    if (document.getElementById(STYLE_ID)) return;
+    const style = document.createElement('style');
+    style.id = STYLE_ID;
+    style.textContent = [
+      '.sslp-root{position:fixed;inset:0;display:none;align-items:center;justify-content:center;padding:18px;background:rgba(2,6,23,0.72);backdrop-filter:blur(2px);z-index:20000;}',
+      '.sslp-root.is-open{display:flex;}',
+      '.sslp-dialog{width:min(1040px,96vw);max-height:min(90vh,920px);background:#fff;border:1px solid rgba(15,23,42,0.12);border-radius:18px;box-shadow:0 28px 90px rgba(15,23,42,0.35);overflow:hidden;display:flex;flex-direction:column;}',
+      'html.ss-theme-night .sslp-dialog{background:#0f172a;border-color:rgba(148,163,184,0.24);box-shadow:0 28px 90px rgba(0,0,0,0.52);}',
+      '.sslp-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:16px 18px 12px;border-bottom:1px solid rgba(15,23,42,0.08);}',
+      'html.ss-theme-night .sslp-head{border-bottom-color:rgba(148,163,184,0.18);}',
+      '.sslp-title{font-size:1rem;font-weight:700;color:#0f172a;}',
+      'html.ss-theme-night .sslp-title{color:#f8fafc;}',
+      '.sslp-note{margin-top:4px;font-size:0.84rem;color:#64748b;}',
+      'html.ss-theme-night .sslp-note{color:#94a3b8;}',
+      '.sslp-close{border:1px solid rgba(15,23,42,0.12);background:#f8fafc;color:#475569;border-radius:10px;width:38px;height:38px;font-size:1.2rem;line-height:1;cursor:pointer;flex:0 0 auto;}',
+      '.sslp-close:hover{background:#eef2ff;color:#0f172a;}',
+      'html.ss-theme-night .sslp-close{background:#1e293b;border-color:rgba(148,163,184,0.24);color:#cbd5e1;}',
+      'html.ss-theme-night .sslp-close:hover{background:#334155;color:#f8fafc;}',
+      '.sslp-body{padding:18px;overflow:auto;}',
+      '.sslp-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;}',
+      '.sslp-card{display:flex;flex-direction:column;gap:10px;width:100%;appearance:none;border:1px solid rgba(15,23,42,0.1);border-radius:14px;background:#f8fafc;padding:12px;cursor:zoom-in;text-align:left;font:inherit;color:inherit;}',
+      '.sslp-card:hover{border-color:#3b82f6;box-shadow:0 10px 26px rgba(59,130,246,0.12);}',
+      'html.ss-theme-night .sslp-card{background:#111827;border-color:rgba(148,163,184,0.18);}',
+      'html.ss-theme-night .sslp-card:hover{border-color:#60a5fa;box-shadow:0 10px 30px rgba(37,99,235,0.24);}',
+      '.sslp-label{font-size:0.82rem;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;color:#64748b;}',
+      'html.ss-theme-night .sslp-label{color:#94a3b8;}',
+      '.sslp-image-wrap{display:flex;align-items:center;justify-content:center;min-height:220px;max-height:360px;border-radius:12px;background:#fff;border:1px solid rgba(15,23,42,0.08);overflow:hidden;}',
+      'html.ss-theme-night .sslp-image-wrap{background:#0b1220;border-color:rgba(148,163,184,0.18);}',
+      '.sslp-image{display:block;max-width:100%;max-height:100%;object-fit:contain;}',
+      '.sslp-expanded{display:flex;flex-direction:column;gap:12px;}',
+      '.sslp-expanded .sslp-image-wrap{min-height:320px;max-height:none;height:min(72vh,860px);cursor:default;}',
+      '.sslp-empty{padding:24px 8px;text-align:center;font-size:0.92rem;color:#64748b;}',
+      'html.ss-theme-night .sslp-empty{color:#94a3b8;}',
+      '@media (max-width: 640px){.sslp-root{padding:10px;}.sslp-head{padding:14px 14px 10px;}.sslp-body{padding:14px;}.sslp-grid{grid-template-columns:1fr;}.sslp-expanded .sslp-image-wrap{height:min(62vh,680px);}}'
+    ].join('');
+    document.head.appendChild(style);
+  }
+
+  function ensureDom() {
+    ensureStyles();
+    if (root) return;
+
+    root = document.createElement('div');
+    root.id = ROOT_ID;
+    root.className = 'sslp-root';
+    root.setAttribute('aria-hidden', 'true');
+    root.innerHTML = [
+      '<div class="sslp-dialog" role="dialog" aria-modal="true" aria-labelledby="sslp-title">',
+      '  <div class="sslp-head">',
+      '    <div>',
+      '      <div id="sslp-title" class="sslp-title">Location Preview</div>',
+      '      <div class="sslp-note"></div>',
+      '    </div>',
+      '    <button type="button" class="sslp-close" aria-label="Close preview">&times;</button>',
+      '  </div>',
+      '  <div class="sslp-body"></div>',
+      '</div>'
+    ].join('');
+
+    document.body.appendChild(root);
+    titleEl = root.querySelector('.sslp-title');
+    noteEl = root.querySelector('.sslp-note');
+    bodyEl = root.querySelector('.sslp-body');
+    closeEl = root.querySelector('.sslp-close');
+
+    closeEl.addEventListener('click', close);
+    root.addEventListener('click', function (event) {
+      if (event.target === root) {
+        if (state.expandedIndex !== null) {
+          state.expandedIndex = null;
+          render();
+          return;
+        }
+        close();
+      }
+    });
+
+    bodyEl.addEventListener('click', function (event) {
+      const card = event.target.closest('[data-sslp-index]');
+      if (!card) return;
+      if (state.expandedIndex !== null) return;
+      if (state.items.length <= 1) return;
+      const index = parseInt(card.getAttribute('data-sslp-index'), 10);
+      if (!Number.isFinite(index) || !state.items[index]) return;
+      state.expandedIndex = index;
+      render();
+    });
+
+    document.addEventListener('keydown', function (event) {
+      if (!root || !root.classList.contains('is-open')) return;
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      if (state.expandedIndex !== null) {
+        state.expandedIndex = null;
+        render();
+        return;
+      }
+      close();
+    });
+  }
+
+  function addCandidate(list, src) {
+    const value = trimValue(src);
+    if (!value || list.includes(value)) return;
+    list.push(value);
+  }
+
+  function withBust(list) {
+    const stamp = Date.now();
+    return list.map(function (src) {
+      return src + (src.includes('?') ? '&' : '?') + 't=' + stamp;
+    });
+  }
+
+  function shelfCandidates(code) {
+    const raw = trimValue(code);
+    const compact = compactCode(raw);
+    const lower = compact.toLowerCase();
+    const upper = compact.toUpperCase();
+    const rawUpper = raw.toUpperCase();
+    const candidates = [];
+    addCandidate(candidates, '/static/shelves/' + encodeURIComponent(lower) + '.png');
+    addCandidate(candidates, '/static/shelves/' + encodeURIComponent(compact) + '.png');
+    addCandidate(candidates, '/static/shelves/' + encodeURIComponent(raw.toLowerCase()) + '.png');
+    addCandidate(candidates, '/static/shelves/' + encodeURIComponent(raw) + '.png');
+    addCandidate(candidates, '/static/shelves/' + encodeURIComponent(upper) + '.png');
+    addCandidate(candidates, '/static/shelves/' + encodeURIComponent(rawUpper) + '.png');
+    addCandidate(candidates, '/static/shelves/originals/' + encodeURIComponent(lower) + '.png');
+    addCandidate(candidates, '/static/shelves/originals/' + encodeURIComponent(upper) + '.png');
+    addCandidate(candidates, '/static/shelves/originals/' + encodeURIComponent(rawUpper) + '.png');
+    return withBust(candidates);
+  }
+
+  function pictureCandidates(pathValue) {
+    const raw = trimValue(pathValue);
+    const compact = compactCode(raw);
+    const candidates = [];
+    if (!raw) return candidates;
+    if (/^https?:\/\//i.test(raw) || raw.startsWith('/')) {
+      addCandidate(candidates, raw);
+    } else {
+      addCandidate(candidates, '/static/pictureposition/' + encodeURIComponent(raw));
+      addCandidate(candidates, '/static/pictureposition/' + encodeURIComponent(compact));
+      addCandidate(candidates, '/static/pictureposition/' + encodeURIComponent(raw) + '.jpg');
+      addCandidate(candidates, '/static/pictureposition/' + encodeURIComponent(raw) + '.png');
+      addCandidate(candidates, '/static/pictureposition/' + encodeURIComponent(compact) + '.jpg');
+      addCandidate(candidates, '/static/pictureposition/' + encodeURIComponent(compact) + '.png');
+    }
+    return withBust(candidates);
+  }
+
+  function mapCandidates(code) {
+    const key = deriveMapKey(code);
+    const candidates = [];
+    if (!key) return candidates;
+    const lower = key.toLowerCase();
+    if (/^(or|omr|ofloor)/i.test(lower)) {
+      addCandidate(candidates, '/static/shelves/originals/officemap_' + encodeURIComponent(key) + '.png');
+      addCandidate(candidates, '/static/shelves/originals/garagemap_' + encodeURIComponent(key) + '.png');
+    } else if (/^(gr|gmid|gfloor|misc)/i.test(lower)) {
+      addCandidate(candidates, '/static/shelves/originals/garagemap_' + encodeURIComponent(key) + '.png');
+      addCandidate(candidates, '/static/shelves/originals/officemap_' + encodeURIComponent(key) + '.png');
+    } else {
+      addCandidate(candidates, '/static/shelves/originals/officemap_' + encodeURIComponent(key) + '.png');
+      addCandidate(candidates, '/static/shelves/originals/garagemap_' + encodeURIComponent(key) + '.png');
+    }
+    addCandidate(candidates, '/static/shelves/maps/' + encodeURIComponent(key) + '.png');
+    return withBust(candidates);
+  }
+
+  function loadFirstAvailable(candidates) {
+    return new Promise(function (resolve, reject) {
+      if (!Array.isArray(candidates) || !candidates.length) {
+        reject(new Error('No candidates'));
+        return;
+      }
+      let index = 0;
+      const tryNext = function () {
+        if (index >= candidates.length) {
+          reject(new Error('Image not found'));
+          return;
+        }
+        const src = candidates[index++];
+        const img = new Image();
+        img.onload = function () { resolve(src); };
+        img.onerror = function () { tryNext(); };
+        img.src = src;
+      };
+      tryNext();
+    });
+  }
+
+  async function buildItems(options) {
+    const code = trimValue(options && options.code);
+    const picturePath = trimValue(options && options.picturePath);
+    const items = [];
+
+    if (picturePath && looksLikePicturePath(picturePath)) {
+      const pictureSrc = await loadFirstAvailable(pictureCandidates(picturePath)).catch(function () { return null; });
+      if (pictureSrc) {
+        items.push({ label: 'Location image', src: pictureSrc });
+      }
+      return items;
+    }
+
+    const effectiveCode = code || picturePath;
+    if (!effectiveCode) return items;
+
+    const shelfSrc = await loadFirstAvailable(shelfCandidates(effectiveCode)).catch(function () { return null; });
+    if (shelfSrc) {
+      items.push({ label: 'Shelf photo', src: shelfSrc });
+    }
+
+    const mapSrc = await loadFirstAvailable(mapCandidates(effectiveCode)).catch(function () { return null; });
+    if (mapSrc) {
+      items.push({ label: 'Position map', src: mapSrc });
+    }
+
+    const seen = new Set();
+    return items.filter(function (item) {
+      if (!item || !item.src || seen.has(item.src)) return false;
+      seen.add(item.src);
+      return true;
+    });
+  }
+
+  function setOpen(open) {
+    ensureDom();
+    root.classList.toggle('is-open', open);
+    root.setAttribute('aria-hidden', open ? 'false' : 'true');
+  }
+
+  function render() {
+    if (!bodyEl || !titleEl || !noteEl) return;
+    titleEl.textContent = state.title || 'Location Preview';
+
+    if (!state.items.length) {
+      noteEl.textContent = '';
+      bodyEl.innerHTML = '<div class="sslp-empty">No location preview found.</div>';
+      return;
+    }
+
+    if (state.expandedIndex !== null && state.items[state.expandedIndex]) {
+      const item = state.items[state.expandedIndex];
+      noteEl.textContent = state.items.length > 1
+        ? 'Click outside the image to return to both previews.'
+        : 'Click outside the image to close.';
+      bodyEl.innerHTML = [
+        '<div class="sslp-expanded">',
+        '  <div class="sslp-label">' + escHtml(item.label) + '</div>',
+        '  <div class="sslp-image-wrap">',
+        '    <img class="sslp-image" src="' + escHtml(item.src) + '" alt="' + escHtml(item.label) + '" loading="lazy">',
+        '  </div>',
+        '</div>'
+      ].join('');
+      return;
+    }
+
+    noteEl.textContent = state.items.length > 1
+      ? 'Click either image to enlarge it.'
+      : 'Click outside the preview to close.';
+    bodyEl.innerHTML = '<div class="sslp-grid">' + state.items.map(function (item, index) {
+      return [
+        '<button type="button" class="sslp-card" data-sslp-index="' + index + '">',
+        '  <div class="sslp-label">' + escHtml(item.label) + '</div>',
+        '  <div class="sslp-image-wrap">',
+        '    <img class="sslp-image" src="' + escHtml(item.src) + '" alt="' + escHtml(item.label) + '" loading="lazy">',
+        '  </div>',
+        '</button>'
+      ].join('');
+    }).join('') + '</div>';
+  }
+
+  async function open(options) {
+    ensureDom();
+    state.token += 1;
+    const token = state.token;
+    state.title = trimValue(options && options.title) || 'Location Preview';
+    state.items = [];
+    state.expandedIndex = null;
+    titleEl.textContent = state.title;
+    noteEl.textContent = 'Loading location preview...';
+    bodyEl.innerHTML = '<div class="sslp-empty">Loading location preview...</div>';
+    setOpen(true);
+
+    const items = await buildItems(options || {});
+    if (token !== state.token) return;
+    state.items = items;
+    const requestedIndex = parseInt(options && options.startExpandedIndex, 10);
+    state.expandedIndex = Number.isFinite(requestedIndex) && requestedIndex >= 0 && requestedIndex < items.length
+      ? requestedIndex
+      : null;
+    render();
+  }
+
+  function close() {
+    if (!root) return;
+    state.expandedIndex = null;
+    state.items = [];
+    setOpen(false);
+    if (bodyEl) bodyEl.innerHTML = '';
+    if (noteEl) noteEl.textContent = '';
+  }
+
+  function openForLocation(locationCode, previewKey, title, startExpandedIndex) {
+    const code = trimValue(locationCode);
+    const key = trimValue(previewKey);
+    if (key && looksLikePicturePath(key)) {
+      return open({
+        code: '',
+        picturePath: key,
+        title: trimValue(title) || ('Location: ' + (code || key)),
+        startExpandedIndex: startExpandedIndex
+      });
+    }
+    return open({
+      code: code || key,
+      picturePath: '',
+      title: trimValue(title) || ('Location: ' + (code || key)),
+      startExpandedIndex: startExpandedIndex
+    });
+  }
+
+  window.SSLocationPreview = {
+    open: open,
+    close: close,
+    openForLocation: openForLocation,
+    looksLikePicturePath: looksLikePicturePath
+  };
+})();

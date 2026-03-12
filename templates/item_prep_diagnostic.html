@@ -1226,6 +1226,10 @@
         modalImg.src = imgPath;
         modal.style.display = 'flex';
       } else if(shelfCode){
+        if (window.SSLocationPreview) {
+          window.SSLocationPreview.openForLocation(shelfCode, '', `Location: ${String(shelfCode || '').toUpperCase()}`);
+          return;
+        }
         // Show shelf image from static/shelves/
         const modal = document.getElementById('imgModal');
         const modalImg = document.getElementById('modalImg');
@@ -1317,6 +1321,7 @@
       }
     });
   </script>
+  <script src="/static/location-preview.js?v=20260312e"></script>
   <script src="/static/i18n.js"></script>
 </body>
 </html>

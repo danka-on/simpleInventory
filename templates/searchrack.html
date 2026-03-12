@@ -1397,8 +1397,11 @@ async function onViewLocation(e){
             // Picture position can be .jpg, .png, or any format - use as-is
             showViewModal(`<div><h4>Picture Position</h4><img src="/static/pictureposition/${picture}?t=${Date.now()}" style="max-width:640px;max-height:60vh;" onerror="this.src='${missingThumb(720,480,'Image missing')}'"></div>`);
         } else if(itemPosition){
-            // Use the item_position from data attribute (already lowercase from rendering)
-            showViewModal(`<div><h4>Shelf Position</h4><img src="/static/shelves/${itemPosition}.png?t=${Date.now()}" style="max-width:640px;max-height:60vh;" onerror="this.src='${missingThumb(720,480,'Image missing')}'"></div>`);
+            if (window.SSLocationPreview) {
+                window.SSLocationPreview.openForLocation(itemPosition, '', `Location: ${itemPosition.toUpperCase()}`);
+            } else {
+                showViewModal(`<div><h4>Shelf Position</h4><img src="/static/shelves/${itemPosition}.png?t=${Date.now()}" style="max-width:640px;max-height:60vh;" onerror="this.src='${missingThumb(720,480,'Image missing')}'"></div>`);
+            }
         } else {
             showViewModal('<div class="small-muted">No location info available</div>');
         }
@@ -1417,7 +1420,11 @@ async function onViewLocation(e){
             if(j.pictureposition){
                 showViewModal(`<div><h4>Picture Position</h4><img src="/static/pictureposition/${j.pictureposition}?t=${Date.now()}" style="max-width:640px;max-height:60vh;" onerror="this.src='${missingThumb(720,480,'Image missing')}'"></div>`);
             } else if(j.item_position){
-                showViewModal(`<div><h4>Shelf Position</h4><img src="/static/shelves/${j.item_position.toLowerCase()}.png?t=${Date.now()}" style="max-width:640px;max-height:60vh;" onerror="this.src='${missingThumb(720,480,'Image missing')}'"></div>`);
+                if (window.SSLocationPreview) {
+                    window.SSLocationPreview.openForLocation(j.item_position, '', `Location: ${j.item_position.toUpperCase()}`);
+                } else {
+                    showViewModal(`<div><h4>Shelf Position</h4><img src="/static/shelves/${j.item_position.toLowerCase()}.png?t=${Date.now()}" style="max-width:640px;max-height:60vh;" onerror="this.src='${missingThumb(720,480,'Image missing')}'"></div>`);
+                }
             } else {
                 showViewModal('<div class="small-muted">No location info available</div>');
             }
@@ -1442,8 +1449,11 @@ function onViewLocationMulti(e){
     if(image && image.match(/\.(jpg|jpeg|png)$/i)){
         showViewModal(`<div><h4>Location: ${esc(code)}</h4><img src="/static/pictureposition/${image}?t=${Date.now()}" style="max-width:640px;max-height:60vh;" onerror="this.src='${missingThumb(720,480,'Image missing')}'"></div>`);
     } else {
-        // Use code for shelf position
-        showViewModal(`<div><h4>Location: ${esc(code)}</h4><img src="/static/shelves/${code.toLowerCase()}.png?t=${Date.now()}" style="max-width:640px;max-height:60vh;" onerror="this.src='${missingThumb(720,480,'Image missing')}'"></div>`);
+        if (window.SSLocationPreview) {
+            window.SSLocationPreview.openForLocation(code, '', `Location: ${code.toUpperCase()}`);
+        } else {
+            showViewModal(`<div><h4>Location: ${esc(code)}</h4><img src="/static/shelves/${code.toLowerCase()}.png?t=${Date.now()}" style="max-width:640px;max-height:60vh;" onerror="this.src='${missingThumb(720,480,'Image missing')}'"></div>`);
+        }
     }
 }
 
@@ -2050,16 +2060,109 @@ function renderShelfSelector(locationId) {
 }
 
 // Update shelf image preview
+function browsePreviewMapKey(shelfCode) {
+    const compact = String(shelfCode || '').trim().replace(/\s+/g, '').toLowerCase();
+    if (!compact) return '';
+    if (/^ofloor\d+$/i.test(compact)) return compact;
+    const match = compact.match(/^(.*)s\d+$/i);
+    return match ? match[1] : compact;
+}
+
+function browsePreviewMapUrl(shelfCode) {
+    const key = browsePreviewMapKey(shelfCode);
+    if (!key) return '';
+    if (/^(or|omr|ofloor)/i.test(key)) {
+        return `/static/shelves/originals/officemap_${encodeURIComponent(key)}.png`;
+    }
+    if (/^(gr|gmid|gfloor|misc)/i.test(key)) {
+        return `/static/shelves/originals/garagemap_${encodeURIComponent(key)}.png`;
+    }
+    return '';
+}
+
 function updateShelfPreview(shelfCode) {
     const preview = document.getElementById('shelf-image-preview');
-    const imageUrl = `/static/shelves/${encodeURIComponent(shelfCode)}.png`;
-    
+    const normalizedCode = String(shelfCode || '').trim();
+    const lowerCode = normalizedCode.toLowerCase();
+    const upperCode = normalizedCode.toUpperCase();
+    const shelfDisplayUrl = `/static/shelves/${encodeURIComponent(lowerCode)}.png`;
+    const shelfDisplayUpperUrl = `/static/shelves/${encodeURIComponent(upperCode)}.png`;
+    const shelfFallbackUrl = `/static/shelves/originals/${encodeURIComponent(lowerCode)}.png`;
+    const shelfFallbackUpperUrl = `/static/shelves/originals/${encodeURIComponent(upperCode)}.png`;
+    const mapKey = browsePreviewMapKey(normalizedCode);
+    const mapUrl = browsePreviewMapUrl(normalizedCode);
+
+    if (!normalizedCode) {
+        preview.innerHTML = '<span style="color:#999;">Select a shelf to view image</span>';
+        return;
+    }
+
+    const cards = [
+        `
+        <button type="button" class="browse-preview-card" data-preview-index="0" style="border:1px solid #dbe3ef;border-radius:10px;background:#fff;padding:10px;cursor:zoom-in;text-align:left;display:flex;flex-direction:column;gap:8px;">
+            <div style="font-size:0.78rem;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;color:#64748b;">Shelf Photo</div>
+            <div style="min-height:220px;display:flex;align-items:center;justify-content:center;border:1px solid #e5e7eb;border-radius:8px;background:#fff;overflow:hidden;">
+                <img data-role="browse-shelf-image" src="${shelfDisplayUrl}" alt="${esc(normalizedCode)}" style="display:block;max-width:100%;max-height:320px;object-fit:contain;">
+            </div>
+        </button>
+        `
+    ];
+
+    if (mapUrl) {
+        cards.push(`
+        <button type="button" class="browse-preview-card" data-preview-index="1" data-preview-map="1" style="border:1px solid #dbe3ef;border-radius:10px;background:#fff;padding:10px;cursor:zoom-in;text-align:left;display:flex;flex-direction:column;gap:8px;">
+            <div style="font-size:0.78rem;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;color:#64748b;">Position Map</div>
+            <div style="min-height:220px;display:flex;align-items:center;justify-content:center;border:1px solid #e5e7eb;border-radius:8px;background:#fff;overflow:hidden;">
+                <img data-role="browse-map-image" src="${mapUrl}" alt="${esc(mapKey)} map" style="display:block;max-width:100%;max-height:320px;object-fit:contain;">
+            </div>
+        </button>
+        `);
+    }
+
     preview.innerHTML = `
-        <img src="${imageUrl}" 
-             alt="${esc(shelfCode)}" 
-             style="max-width:100%; max-height:400px; border-radius:4px;"
-             onerror="this.parentElement.innerHTML='<span style=\'color:#999;\'>No image available for ${esc(shelfCode)}</span>';">
+        <div class="browse-preview-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;width:100%;align-items:start;">
+            ${cards.join('')}
+        </div>
+        <div style="margin-top:10px;font-size:0.82rem;color:#64748b;">Click either image to expand.</div>
     `;
+
+    const shelfImg = preview.querySelector('[data-role="browse-shelf-image"]');
+    if (shelfImg) {
+        const fallbacks = [shelfDisplayUpperUrl, shelfFallbackUrl, shelfFallbackUpperUrl]
+            .filter((value, index, list) => value && list.indexOf(value) === index);
+        shelfImg.addEventListener('error', function handleShelfError() {
+            const nextIndex = parseInt(this.dataset.fallbackIndex || '0', 10);
+            if (nextIndex < fallbacks.length) {
+                this.dataset.fallbackIndex = String(nextIndex + 1);
+                this.src = fallbacks[nextIndex];
+                return;
+            }
+            const card = this.closest('.browse-preview-card');
+            if (card) {
+                card.innerHTML = `<div style="padding:18px 10px;text-align:center;color:#999;">No image available for ${esc(normalizedCode)}</div>`;
+            }
+        });
+    }
+
+    const mapImg = preview.querySelector('[data-role="browse-map-image"]');
+    if (mapImg) {
+        mapImg.addEventListener('error', function handleMapError() {
+            const card = this.closest('[data-preview-map]');
+            if (card) card.remove();
+            const grid = preview.querySelector('.browse-preview-grid');
+            if (grid && grid.children.length <= 1) {
+                grid.style.gridTemplateColumns = 'minmax(0, 1fr)';
+            }
+        });
+    }
+
+    preview.querySelectorAll('.browse-preview-card').forEach((card) => {
+        card.addEventListener('click', () => {
+            if (!window.SSLocationPreview) return;
+            const index = parseInt(card.getAttribute('data-preview-index'), 10);
+            window.SSLocationPreview.openForLocation(normalizedCode, '', `Location: ${normalizedCode}`, index);
+        });
+    });
 }
 
 // Select a location (group) and search all items in that group
@@ -2455,6 +2558,10 @@ async function showNotRemoved(orderId) {
 
 // Helper to show location popup from inv status modal
 function showLocPopupFromInvStatus(locCode, locLower) {
+    if (window.SSLocationPreview) {
+        window.SSLocationPreview.openForLocation(locCode || locLower, '', `Location: ${String(locCode || locLower || '').toUpperCase()}`);
+        return;
+    }
     // Try to show shelf image
     const filename = locLower ? locLower.replace(/\.png$/i, '') + '.png' : '';
     if (filename) {
@@ -2507,6 +2614,7 @@ showNotRemoved = async function(orderId) {
 };
 
 </script>
+<script src="/static/location-preview.js?v=20260312e"></script>
 <script src="/static/i18n.js"></script>
 </body>
 </html>

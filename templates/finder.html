@@ -244,6 +244,7 @@
     }
     html.ss-theme-night .confirm-box .btn-no:hover { background: #475569; }
   </style>
+  <script src="/static/location-preview.js?v=20260312e"></script>
   <script src="/static/i18n.js"></script>
 </head>
 <body>
@@ -416,6 +417,10 @@ function syncSearchFromTokens() {
 
 // Location popup
 function showLocPopup(locCode, picPos) {
+  if (window.SSLocationPreview) {
+    window.SSLocationPreview.openForLocation(locCode, picPos, `Location: ${locCode}`);
+    return;
+  }
   document.getElementById('locPopupTitle').textContent = locCode;
   const img = document.getElementById('locPopupImg');
   // DEPRECATED: pictureposition field — images now live in /static/shelves/

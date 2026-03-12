@@ -709,6 +709,7 @@
     </div>
   </div>
 
+  <script src="/static/location-preview.js?v=20260312e"></script>
   <script>
     const searchInput = document.getElementById('searchInput');
     const searchBtn   = document.getElementById('searchBtn');
@@ -882,6 +883,10 @@
     }
 
     async function openLocationPreview(locationCode, picturePath) {
+      if (window.SSLocationPreview) {
+        window.SSLocationPreview.openForLocation(locationCode, picturePath, `Location: ${locationCode || picturePath}`);
+        return;
+      }
       const code = String(locationCode || '').trim();
       const picture = String(picturePath || '').trim();
       const label = code || picture || 'Location';

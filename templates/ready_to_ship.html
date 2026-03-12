@@ -1188,6 +1188,83 @@ function locationPreviewUrl(rawKey) {
     return `/static/shelves/${encodeURIComponent(key.toLowerCase())}.png`;
 }
 
+function openLocationMediaPreview(locationCode, previewKey, startExpandedIndex) {
+    const code = String(locationCode || '').trim();
+    const key = String(previewKey || '').trim();
+    if (window.SSLocationPreview) {
+        window.SSLocationPreview.openForLocation(code, key, `Location: ${code || key}`, startExpandedIndex);
+        return true;
+    }
+    return false;
+}
+
+function readyToShipMapKey(rawValue) {
+    const compact = String(rawValue || '').trim().replace(/\s+/g, '').toLowerCase();
+    if (!compact) return '';
+    if (/^ofloor\d+$/i.test(compact)) return compact;
+    const shelfMatch = compact.match(/^(.*)s\d+$/i);
+    return shelfMatch ? shelfMatch[1] : compact;
+}
+
+function readyToShipMapUrl(rawValue) {
+    const key = readyToShipMapKey(rawValue);
+    if (!key) return '';
+    if (/^(or|omr|ofloor)/i.test(key)) {
+        return `/static/shelves/originals/officemap_${encodeURIComponent(key)}.png`;
+    }
+    if (/^(gr|gmid|gfloor|misc)/i.test(key)) {
+        return `/static/shelves/originals/garagemap_${encodeURIComponent(key)}.png`;
+    }
+    return '';
+}
+
+function readyToShipLocationPreviewHtml(locationCode, previewKey) {
+    const code = String(locationCode || '').trim();
+    const key = String(previewKey || code || '').trim();
+    if (!code && !key) return '';
+
+    const pictureLike = /\.(jpe?g|png|gif|webp)$/i.test(key) || /^https?:\/\//i.test(key) || key.startsWith('/') || key.includes('/');
+    const safeCode = esc(code || key);
+    const safeKey = esc(key);
+
+    if (pictureLike) {
+        const src = /^https?:\/\//i.test(key) || key.startsWith('/')
+            ? key
+            : `/static/pictureposition/${encodeURIComponent(key)}`;
+        return `
+            <div style="display:grid;grid-template-columns:minmax(0,1fr);gap:10px;margin-top:10px;">
+                <button type="button" class="rt-location-thumb" data-location-code="${safeCode}" data-preview-key="${safeKey}" data-preview-index="0" onclick="event.stopPropagation();event.preventDefault();openLocationMediaPreview(this.dataset.locationCode,this.dataset.previewKey,this.dataset.previewIndex);return false;" style="border:1px solid rgba(59,130,246,0.7);border-radius:14px;background:linear-gradient(180deg,rgba(30,64,175,0.34),rgba(15,23,42,0.86));padding:10px;cursor:zoom-in;box-shadow:0 10px 24px rgba(30,64,175,0.18);">
+                    <div style="font-size:0.72rem;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;color:#fff;margin-bottom:6px;">Location Image</div>
+                    <img src="${esc(src)}" alt="${safeCode}" class="popup-loc-image" style="width:100%;max-width:260px;max-height:200px;object-fit:contain;border-radius:10px;" onerror="this.closest('button').style.display='none'">
+                </button>
+            </div>
+        `;
+    }
+
+    const lowerCode = code.toLowerCase();
+    const upperCode = code.toUpperCase();
+    const shelfDisplay = `/static/shelves/${encodeURIComponent(lowerCode)}.png`;
+    const shelfDisplayUpper = `/static/shelves/${encodeURIComponent(upperCode)}.png`;
+    const shelfFallback = `/static/shelves/originals/${encodeURIComponent(lowerCode)}.png`;
+    const shelfFallbackUpper = `/static/shelves/originals/${encodeURIComponent(upperCode)}.png`;
+    const mapUrl = readyToShipMapUrl(code);
+
+    return `
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-top:10px;">
+            <button type="button" class="rt-location-thumb" data-location-code="${safeCode}" data-preview-key="${safeCode}" data-preview-index="0" onclick="event.stopPropagation();event.preventDefault();openLocationMediaPreview(this.dataset.locationCode,this.dataset.previewKey,this.dataset.previewIndex);return false;" style="border:1px solid rgba(59,130,246,0.7);border-radius:14px;background:linear-gradient(180deg,rgba(30,64,175,0.34),rgba(15,23,42,0.86));padding:10px;cursor:zoom-in;box-shadow:0 10px 24px rgba(30,64,175,0.18);">
+                <div style="font-size:0.72rem;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;color:#fff;margin-bottom:6px;">Shelf Photo</div>
+                <img src="${shelfDisplay}" alt="${safeCode}" class="popup-loc-image" style="width:100%;max-width:260px;max-height:200px;object-fit:contain;border-radius:10px;" onerror="if(!this.dataset.fallbackStage){this.dataset.fallbackStage='1';this.src='${shelfDisplayUpper}';}else if(this.dataset.fallbackStage==='1'){this.dataset.fallbackStage='2';this.src='${shelfFallback}';}else if(this.dataset.fallbackStage==='2'){this.dataset.fallbackStage='3';this.src='${shelfFallbackUpper}';}else{this.closest('button').style.display='none';}">
+            </button>
+            ${mapUrl ? `
+                <button type="button" class="rt-location-thumb" data-location-code="${safeCode}" data-preview-key="${safeCode}" data-preview-index="1" onclick="event.stopPropagation();event.preventDefault();openLocationMediaPreview(this.dataset.locationCode,this.dataset.previewKey,this.dataset.previewIndex);return false;" style="border:1px solid rgba(59,130,246,0.7);border-radius:14px;background:linear-gradient(180deg,rgba(30,64,175,0.34),rgba(15,23,42,0.86));padding:10px;cursor:zoom-in;box-shadow:0 10px 24px rgba(30,64,175,0.18);">
+                    <div style="font-size:0.72rem;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;color:#fff;margin-bottom:6px;">Position Map</div>
+                    <img src="${mapUrl}" alt="${safeCode} map" class="popup-loc-image" style="width:100%;max-width:260px;max-height:200px;object-fit:contain;border-radius:10px;" onerror="this.closest('button').style.display='none'">
+                </button>
+            ` : ''}
+        </div>
+    `;
+}
+
 async function fetchOrderLocationOptions(orderId) {
     const response = await fetch(`/api/ready-to-ship/location-options/${encodeURIComponent(orderId)}?_t=${Date.now()}`, {
         cache: 'no-store'
@@ -1311,8 +1388,7 @@ function promptLocationAllocation(order, options) {
                 const isSelected = parsePosInt(loc.selected_qty, 0) > 0;
                 const safeCode = esc(loc.location_code);
                 const hasPreview = !!String(loc.preview_key || '').trim();
-                const previewLabel = loc.preview_open ? 'Hide' : 'View';
-                const previewSrc = hasPreview ? locationPreviewUrl(loc.preview_key) : '';
+                const previewLabel = 'View';
                 return `
                     <div class="loc-alloc-item ${isSelected ? 'is-selected' : ''}" data-index="${idx}">
                         <div class="loc-alloc-top">
@@ -1324,11 +1400,6 @@ function promptLocationAllocation(order, options) {
                                 ${previewLabel}
                             </button>
                         </div>
-                        ${loc.preview_open && hasPreview ? `
-                            <div class="loc-alloc-preview">
-                                <img src="${esc(previewSrc)}" alt="${safeCode}" loading="lazy" onerror="this.src='${missingPreviewDataUrl}'">
-                            </div>
-                        ` : ''}
                         ${isSelected ? `
                             <div class="loc-alloc-controls">
                                 <button type="button" data-role="dec" data-index="${idx}">-</button>
@@ -1407,8 +1478,7 @@ function promptLocationAllocation(order, options) {
 
             if (role === 'view') {
                 if (!String(loc.preview_key || '').trim()) return;
-                loc.preview_open = !loc.preview_open;
-                renderState();
+                openLocationMediaPreview(loc.location_code, loc.preview_key);
             }
         });
 
@@ -1727,6 +1797,20 @@ function setupEventDelegation() {
             return;
         }
 
+        const locThumb = e.target.closest('.rt-location-thumb');
+        const locOpen = e.target.closest('.rt-location-open');
+        if (locThumb || locOpen) {
+            e.preventDefault();
+            e.stopPropagation();
+            const target = locThumb || locOpen;
+            openLocationMediaPreview(
+                target.getAttribute('data-location-code') || '',
+                target.getAttribute('data-preview-key') || '',
+                target.getAttribute('data-preview-index')
+            );
+            return;
+        }
+
         // Handle order detail popups
         const titleLink = e.target.closest('.order-title-link');
         const infoLink = e.target.closest('.order-info-link');
@@ -2033,23 +2117,15 @@ function showOrderPopup(title, imageUrl, info, loc, price, paidTime, barcode) {
                 content += `<div class="popup-group-title" style="font-size: 0.95rem; font-weight: 600; margin-bottom: 8px;">${groupTitle}:</div>`;
 
                 groups[groupName].forEach((location, index) => {
-                    const locCode = esc(location.code || '');
-                    const locImage = esc(location.image || location.code || '');
+                    const rawCode = location.code || '';
+                    const rawImage = location.image || location.code || '';
+                    const locCode = esc(rawCode);
                     const qty = location.quantity || 1;
-                    const uniqueId = 'loc-' + Math.random().toString(36).substr(2, 9);
 
                     content += `<div style="margin-left: 12px; margin-bottom: 8px;">`;
-                    content += `<span class="popup-link" onclick="document.getElementById('${uniqueId}').style.display=document.getElementById('${uniqueId}').style.display==='none'?'block':'none'" style="cursor: pointer; text-decoration: underline; font-weight: 500;">${locCode}</span>`;
+                    content += `<button type="button" class="popup-link rt-location-open" data-location-code="${esc(rawCode)}" data-preview-key="${esc(rawImage)}" data-preview-index="0" onclick="event.stopPropagation();event.preventDefault();openLocationMediaPreview(this.dataset.locationCode,this.dataset.previewKey,this.dataset.previewIndex);return false;" style="cursor:pointer;text-decoration:underline;font-weight:600;background:none;border:none;padding:0;color:#fff;">${locCode}</button>`;
                     content += ` <span class="popup-qty" style="font-size: 0.9rem;">(Qty: ${qty})</span>`;
-
-                    // Hidden image that shows on click
-                    content += `<div id="${uniqueId}" style="display: none; margin-top: 8px; margin-bottom: 12px;">`;
-                    if (locImage.match(/\.(jpg|jpeg|png)$/i)) {
-                        content += `<img src="/static/pictureposition/${locImage}" alt="${locCode}" class="popup-loc-image" style="max-width: 260px; border-radius: 10px;" onerror="this.src='${missingDataUrlPopup}'">`;
-                    } else {
-                        content += `<img src="/static/shelves/${locImage.toLowerCase()}.png" alt="${locCode}" class="popup-loc-image" style="max-width: 260px; border-radius: 10px;" onerror="this.src='${missingDataUrlPopup}'">`;
-                    }
-                    content += `</div>`;
+                    content += readyToShipLocationPreviewHtml(rawCode, rawImage);
                     content += `</div>`;
                 });
 
@@ -2057,13 +2133,9 @@ function showOrderPopup(title, imageUrl, info, loc, price, paidTime, barcode) {
             });
         } else {
             // Single location (string)
-            content += `<div class="popup-loc-line" style="font-size: 0.98rem; margin-bottom: 12px; font-weight: 500;">Location: ${esc(loc)}</div>`;
-
-            if (loc.match(/\.(jpg|jpeg|png)$/i)) {
-                content += `<img src="/static/pictureposition/${esc(loc)}" alt="${esc(loc)}" class="popup-loc-image" style="max-width: 280px; border-radius: 12px; margin-bottom: 18px;" onerror="this.src='${missingDataUrlPopup}'">`;
-            } else {
-                content += `<img src="/static/shelves/${esc(loc.toLowerCase())}.png" alt="${esc(loc)}" class="popup-loc-image" style="max-width: 280px; border-radius: 12px; margin-bottom: 18px;" onerror="this.src='${missingDataUrlPopup}'">`;
-            }
+            const rawLoc = String(loc || '');
+            content += `<div class="popup-loc-line" style="font-size: 0.98rem; margin-bottom: 12px; font-weight: 500;">Location: <button type="button" class="popup-link rt-location-open" data-location-code="${esc(rawLoc)}" data-preview-key="${esc(rawLoc)}" data-preview-index="0" onclick="event.stopPropagation();event.preventDefault();openLocationMediaPreview(this.dataset.locationCode,this.dataset.previewKey,this.dataset.previewIndex);return false;" style="cursor:pointer;text-decoration:underline;background:none;border:none;padding:0;color:#fff;font-weight:600;">${esc(rawLoc)}</button></div>`;
+            content += readyToShipLocationPreviewHtml(rawLoc, rawLoc);
         }
     }
 
@@ -2106,6 +2178,7 @@ function fmtET(ts){
 window.OrderManager = OrderManager;
 window.showOrderPopup = showOrderPopup;
 window.fetchAndShowSoldOrders = fetchAndShowSoldOrders;
+window.openLocationMediaPreview = openLocationMediaPreview;
 
 })();
 </script>
@@ -2129,6 +2202,7 @@ window.fetchAndShowSoldOrders = fetchAndShowSoldOrders;
     setTimeout(checkTokenStatus, 10 * 60 * 1000);
 })();
 </script>
+<script src="/static/location-preview.js?v=20260312e"></script>
 <script src="/static/i18n.js"></script>
 </body>
 </html>

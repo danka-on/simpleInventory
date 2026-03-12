@@ -1151,6 +1151,10 @@ function openListingImg(el) {
   modal.style.display = 'flex';
 }
 function openLocationImage(location) {
+  if (window.SSLocationPreview) {
+    window.SSLocationPreview.openForLocation(location, '', `${t('location')}: ${location}`);
+    return false;
+  }
   const modal = document.getElementById('imgModal');
   const imgEl = document.getElementById('imgModalImg');
   const titleEl = document.getElementById('imgModalTitle');
@@ -1266,6 +1270,7 @@ document.addEventListener('click', function(e) {
   openLocationImage(location);
 });
 </script>
+<script src="/static/location-preview.js?v=20260312e"></script>
 <script src="/static/i18n.js"></script>
 </body>
 </html>

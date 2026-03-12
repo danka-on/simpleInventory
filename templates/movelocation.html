@@ -154,6 +154,7 @@
     </div>
   </div>
 
+  <script src="/static/location-preview.js?v=20260312e"></script>
   <script>
     const barcodeInput = document.getElementById('barcodeInput');
     const scanBtn = document.getElementById('scanBtn');
@@ -262,6 +263,10 @@
     function openPreview(location){
       const loc = String(location||'').trim();
       if(!loc) return;
+      if (window.SSLocationPreview) {
+        window.SSLocationPreview.openForLocation(loc, '', `Location: ${loc}`);
+        return;
+      }
       imgTitle.textContent = 'Location Preview - ' + loc;
       imgBody.innerHTML = '<div style="margin-bottom:8px;color:#64748b;">' + esc(loc) + '</div><img id="locImg" alt="Location image">';
       imgModal.style.display = 'flex';
