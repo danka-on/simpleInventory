@@ -24,6 +24,8 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
       border-bottom: 1px solid rgba(255,255,255,0.1);
       z-index: 100;
     }
@@ -32,12 +34,18 @@
       font-size: 1.3rem;
       font-weight: 600;
       color: #fff;
+      flex: 1;
+      text-align: center;
     }
     .nav-links {
       display: flex;
       gap: 12px;
       align-items: center;
+      justify-content: flex-end;
+      flex: 1;
+      flex-wrap: wrap;
     }
+    .nav-spacer { flex: 1; }
     .nav-link {
       color: rgba(255,255,255,0.7);
       text-decoration: none;
@@ -615,6 +623,183 @@
       border-color: #667eea !important;
     }
 
+    .loc-alloc-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(2, 6, 23, 0.72);
+      backdrop-filter: blur(3px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 10050;
+      padding: 16px;
+    }
+    .loc-alloc-card {
+      width: min(700px, 96vw);
+      max-height: 90vh;
+      overflow-y: auto;
+      background: #0f172a;
+      border: 1px solid rgba(148, 163, 184, 0.25);
+      border-radius: 16px;
+      padding: 18px 18px 16px;
+      box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
+    }
+    .loc-alloc-title {
+      margin: 0 0 8px;
+      font-size: 1rem;
+      font-weight: 700;
+      color: #f8fafc;
+    }
+    .loc-alloc-subtitle {
+      margin: 0 0 12px;
+      font-size: 0.86rem;
+      color: #94a3b8;
+      line-height: 1.45;
+    }
+    .loc-alloc-summary {
+      margin: 0 0 14px;
+      font-size: 0.86rem;
+      font-weight: 600;
+      color: #f8fafc;
+      background: rgba(59, 130, 246, 0.12);
+      border: 1px solid rgba(59, 130, 246, 0.3);
+      border-radius: 10px;
+      padding: 9px 11px;
+    }
+    .loc-alloc-summary.ok {
+      color: #bbf7d0;
+      background: rgba(16, 185, 129, 0.12);
+      border-color: rgba(16, 185, 129, 0.36);
+    }
+    .loc-alloc-summary.bad {
+      color: #fecaca;
+      background: rgba(239, 68, 68, 0.13);
+      border-color: rgba(239, 68, 68, 0.3);
+    }
+    .loc-alloc-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .loc-alloc-item {
+      border: 1px solid rgba(148, 163, 184, 0.24);
+      border-radius: 12px;
+      padding: 10px;
+      background: rgba(15, 23, 42, 0.66);
+      transition: border-color 0.15s ease, background 0.15s ease;
+    }
+    .loc-alloc-item.is-selected {
+      border-color: rgba(16, 185, 129, 0.6);
+      background: rgba(16, 185, 129, 0.14);
+    }
+    .loc-alloc-top {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .loc-alloc-bubble {
+      width: auto;
+      flex: 1;
+      border: 1px solid rgba(148, 163, 184, 0.3);
+      border-radius: 999px;
+      background: rgba(30, 41, 59, 0.85);
+      color: #e2e8f0;
+      padding: 8px 12px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      font-size: 0.82rem;
+      font-weight: 600;
+    }
+    .loc-alloc-item.is-selected .loc-alloc-bubble {
+      background: rgba(16, 185, 129, 0.22);
+      border-color: rgba(16, 185, 129, 0.65);
+      color: #ecfdf5;
+    }
+    .loc-alloc-bubble small {
+      color: #93c5fd;
+      font-weight: 600;
+      font-size: 0.75rem;
+    }
+    .loc-alloc-item.is-selected .loc-alloc-bubble small {
+      color: #bbf7d0;
+    }
+    .loc-alloc-view {
+      border: 1px solid rgba(148, 163, 184, 0.35);
+      border-radius: 999px;
+      background: rgba(30, 41, 59, 0.9);
+      color: #cbd5e1;
+      padding: 7px 11px;
+      cursor: pointer;
+      font-size: 0.74rem;
+      font-weight: 700;
+    }
+    .loc-alloc-view:hover {
+      background: rgba(59, 130, 246, 0.2);
+      color: #fff;
+    }
+    .loc-alloc-view:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+    .loc-alloc-controls {
+      margin-top: 10px;
+      display: grid;
+      grid-template-columns: 36px 1fr 36px;
+      gap: 8px;
+      align-items: center;
+    }
+    .loc-alloc-controls button {
+      border: 1px solid rgba(148, 163, 184, 0.3);
+      border-radius: 10px;
+      background: rgba(30, 41, 59, 0.92);
+      color: #fff;
+      padding: 8px 0;
+      cursor: pointer;
+      font-size: 1rem;
+      font-weight: 700;
+    }
+    .loc-alloc-controls input {
+      width: 100%;
+      border: 1px solid rgba(148, 163, 184, 0.25);
+      border-radius: 10px;
+      background: rgba(15, 23, 42, 0.9);
+      color: #f8fafc;
+      padding: 8px 10px;
+      text-align: center;
+      font-size: 0.9rem;
+      font-weight: 700;
+    }
+    .loc-alloc-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-top: 10px;
+    }
+    .loc-alloc-actions button {
+      border: none;
+      border-radius: 10px;
+      padding: 10px 16px;
+      font-size: 0.88rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .loc-alloc-cancel {
+      background: rgba(148, 163, 184, 0.18);
+      color: #e2e8f0;
+    }
+    .loc-alloc-confirm {
+      background: linear-gradient(135deg, #3b82f6, #2563eb);
+      color: #fff;
+    }
+    .loc-alloc-confirm:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
     /* Day mode overrides */
     html.ss-theme-day body { background: var(--bg, #f9f9f9); color: var(--ink, #111827); }
     html.ss-theme-day .navbar { background: rgba(255,255,255,0.85); border-bottom-color: rgba(0,0,0,0.08); }
@@ -659,10 +844,12 @@
 <body>
   <!-- Top Navigation -->
   <nav class="navbar">
-    <div style="width:120px;"></div>
+    <div class="nav-spacer"></div>
     <h1 data-i18n="marketplace_session">Marketplace Sale</h1>
-    <div class="nav-links" style="margin-right: 120px;">
+    <div class="nav-links">
       <a href="/marketplace-stats" class="nav-link">📊 History</a>
+      <a href="/marketplace-schedule-pickup" class="nav-link">Schedule Pickup</a>
+      <a href="/marketplace-live-pickups" class="nav-link">Live Pickups</a>
     </div>
   </nav>
 
@@ -758,6 +945,7 @@
 
   <script>
     const items = new Map();
+    const pendingLookups = new Map();
     const scanInput = document.getElementById('scanInput');
     const itemsList = document.getElementById('itemsList');
     const message = document.getElementById('message');
@@ -832,6 +1020,25 @@
     function fmtMoney(v) {
       const n = isNaN(v) ? 0 : v;
       return '$' + n.toFixed(2);
+    }
+
+    function esc(value) {
+      return String(value == null ? '' : value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function parsePosInt(value, fallback = 0) {
+      const n = Number.parseInt(value, 10);
+      return Number.isFinite(n) ? n : fallback;
+    }
+
+    function normalizeLocationKey(value) {
+      const raw = String(value == null ? '' : value).trim().toLowerCase();
+      return raw || '__no_code__';
     }
 
     function showMessage(text, type) {
@@ -1002,6 +1209,233 @@
       return { title: '', image: '' };
     }
 
+    function promptMarketplaceLocationAllocation(item, options) {
+      return new Promise((resolve) => {
+        const existing = document.getElementById('marketplace-location-allocation-popup');
+        if (existing) existing.remove();
+
+        const requiredQty = Math.max(1, parsePosInt(options.quantity ?? item.qty, 1));
+        const locations = Array.isArray(options.locations) ? options.locations : [];
+        if (!locations.length) {
+          resolve([]);
+          return;
+        }
+
+        const state = locations.map((loc) => ({
+          location_key: normalizeLocationKey(loc.location_key || loc.location_code),
+          location_code: String(loc.location_code || '(No Code)'),
+          available_qty: Math.max(0, parsePosInt(loc.available_qty, 0)),
+          selected_qty: 0,
+          preview_key: String(loc.preview_key || loc.location_code || '').trim()
+        }));
+
+        const overlay = document.createElement('div');
+        overlay.id = 'marketplace-location-allocation-popup';
+        overlay.className = 'loc-alloc-overlay';
+
+        const card = document.createElement('div');
+        card.className = 'loc-alloc-card';
+        card.onclick = (e) => e.stopPropagation();
+
+        const title = document.createElement('h3');
+        title.className = 'loc-alloc-title';
+        title.textContent = 'Select Removal Location(s)';
+
+        const subtitle = document.createElement('p');
+        subtitle.className = 'loc-alloc-subtitle';
+        subtitle.innerHTML = `Item <strong>${esc(item.title || item.barcode || '')}</strong> needs <strong>${requiredQty}</strong> unit(s) removed from inventory.`;
+
+        const summary = document.createElement('div');
+        summary.className = 'loc-alloc-summary';
+
+        const list = document.createElement('div');
+        list.className = 'loc-alloc-list';
+
+        const actions = document.createElement('div');
+        actions.className = 'loc-alloc-actions';
+        actions.innerHTML = `
+          <button type="button" class="loc-alloc-cancel">Cancel</button>
+          <button type="button" class="loc-alloc-confirm">Use Selection</button>
+        `;
+
+        card.appendChild(title);
+        card.appendChild(subtitle);
+        card.appendChild(summary);
+        card.appendChild(list);
+        card.appendChild(actions);
+        overlay.appendChild(card);
+        document.body.appendChild(overlay);
+
+        const cancelBtn = actions.querySelector('.loc-alloc-cancel');
+        const confirmBtn = actions.querySelector('.loc-alloc-confirm');
+
+        const totalSelected = () => state.reduce((acc, loc) => acc + parsePosInt(loc.selected_qty, 0), 0);
+
+        function clampQty(index, rawQty) {
+          const loc = state[index];
+          if (!loc) return;
+          let qty = parsePosInt(rawQty, 0);
+          if (qty < 0) qty = 0;
+          if (qty > loc.available_qty) qty = loc.available_qty;
+          loc.selected_qty = qty;
+        }
+
+        function renderState() {
+          const selected = totalSelected();
+          const remaining = requiredQty - selected;
+          const canFulfill = options.can_fulfill !== false;
+
+          if (!canFulfill) {
+            summary.className = 'loc-alloc-summary bad';
+            summary.textContent = `Not enough inventory available (have ${options.total_available || 0}, need ${requiredQty}).`;
+          } else if (remaining === 0) {
+            summary.className = 'loc-alloc-summary ok';
+            summary.textContent = `Ready: selected ${selected} / ${requiredQty}.`;
+          } else if (remaining > 0) {
+            summary.className = 'loc-alloc-summary';
+            summary.textContent = `Select ${remaining} more unit(s). Selected ${selected} / ${requiredQty}.`;
+          } else {
+            summary.className = 'loc-alloc-summary bad';
+            summary.textContent = `Selected ${selected} / ${requiredQty} (remove ${Math.abs(remaining)} unit(s) from selection).`;
+          }
+
+          confirmBtn.disabled = !canFulfill || remaining !== 0;
+
+          list.innerHTML = state.map((loc, idx) => {
+            const isSelected = parsePosInt(loc.selected_qty, 0) > 0;
+            return `
+              <div class="loc-alloc-item ${isSelected ? 'is-selected' : ''}" data-index="${idx}">
+                <div class="loc-alloc-top">
+                  <button type="button" class="loc-alloc-bubble" data-role="toggle" data-index="${idx}">
+                    <span>${esc(loc.location_code)}</span>
+                    <small>Avail ${loc.available_qty}</small>
+                  </button>
+                  <button type="button" class="loc-alloc-view" data-role="view" data-index="${idx}" ${loc.preview_key ? '' : 'disabled'}>
+                    View
+                  </button>
+                </div>
+                ${isSelected ? `
+                  <div class="loc-alloc-controls">
+                    <button type="button" data-role="dec" data-index="${idx}">-</button>
+                    <input type="number" min="0" max="${loc.available_qty}" value="${loc.selected_qty}" data-role="qty" data-index="${idx}">
+                    <button type="button" data-role="inc" data-index="${idx}">+</button>
+                  </div>
+                ` : ''}
+              </div>
+            `;
+          }).join('');
+        }
+
+        function closeWith(value) {
+          document.removeEventListener('keydown', onKeyDown);
+          overlay.remove();
+          resolve(value);
+        }
+
+        function onKeyDown(e) {
+          if (e.key === 'Escape') {
+            e.preventDefault();
+            closeWith(null);
+          }
+        }
+        document.addEventListener('keydown', onKeyDown);
+
+        overlay.onclick = (e) => {
+          if (e.target === overlay) closeWith(null);
+        };
+        cancelBtn.onclick = () => closeWith(null);
+        confirmBtn.onclick = () => {
+          const allocations = state
+            .filter(loc => parsePosInt(loc.selected_qty, 0) > 0)
+            .map(loc => ({
+              location_key: loc.location_key,
+              location_code: loc.location_code,
+              quantity: parsePosInt(loc.selected_qty, 0)
+            }));
+          closeWith(allocations);
+        };
+
+        list.addEventListener('click', (e) => {
+          const target = e.target.closest('[data-role]');
+          if (!target) return;
+          const idx = parsePosInt(target.getAttribute('data-index'), -1);
+          if (idx < 0 || !state[idx]) return;
+          const role = target.getAttribute('data-role');
+          const loc = state[idx];
+
+          if (role === 'toggle') {
+            if (parsePosInt(loc.selected_qty, 0) > 0) {
+              loc.selected_qty = 0;
+            } else {
+              const remaining = requiredQty - totalSelected();
+              const seed = remaining > 0 ? remaining : 1;
+              clampQty(idx, Math.min(loc.available_qty, seed));
+            }
+            renderState();
+            return;
+          }
+          if (role === 'dec') {
+            clampQty(idx, parsePosInt(loc.selected_qty, 0) - 1);
+            renderState();
+            return;
+          }
+          if (role === 'inc') {
+            clampQty(idx, parsePosInt(loc.selected_qty, 0) + 1);
+            renderState();
+            return;
+          }
+          if (role === 'view') {
+            if (!window.SSLocationPreview || !loc.preview_key) return;
+            window.SSLocationPreview.openForLocation(loc.location_code, loc.preview_key, `Location: ${loc.location_code}`);
+          }
+        });
+
+        list.addEventListener('input', (e) => {
+          const input = e.target.closest('input[data-role="qty"]');
+          if (!input) return;
+          const idx = parsePosInt(input.getAttribute('data-index'), -1);
+          if (idx < 0 || !state[idx]) return;
+          clampQty(idx, input.value);
+          renderState();
+        });
+
+        renderState();
+      });
+    }
+
+    async function submitMarketplaceItem(item, context) {
+      const payload = {
+        barcode: item.barcode,
+        title: item.title || '',
+        quantity: item.qty,
+        price: context.itemPrice,
+        session_id: context.sessionId,
+        price_auto: context.priceAuto,
+        store: context.saleStore,
+        bulk_manifest_id: context.bulkManifestId || undefined
+      };
+
+      while (true) {
+        const resp = await fetch('/api/marketplace/sale', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await resp.json().catch(() => ({ success: false, error: 'Invalid server response' }));
+
+        if (data.success) return data;
+        if (data.location_selection_required) {
+          const chosen = await promptMarketplaceLocationAllocation(item, data);
+          if (!chosen || !chosen.length) {
+            return { success: false, cancelled: true, error: 'Location selection cancelled' };
+          }
+          payload.allocations = chosen;
+          continue;
+        }
+        return data;
+      }
+    }
+
     async function searchByName(q) {
       const resultsEl = document.getElementById('searchResults');
       if (!q) return;
@@ -1125,29 +1559,50 @@
     });
 
     async function addScan(barcode) {
-      if (!barcode) return;
-      if (items.has(barcode)) {
-        const item = items.get(barcode);
+      const normalized = String(barcode || '').trim();
+      if (!normalized) return;
+
+      if (items.has(normalized)) {
+        const item = items.get(normalized);
         item.qty += 1;
-        items.set(barcode, item);
+        items.set(normalized, item);
         renderItems();
         return;
       }
-      const info = await lookupItem(barcode);
+
+      const pending = pendingLookups.get(normalized);
+      if (pending) {
+        pending.qty += 1;
+        return;
+      }
+
+      pendingLookups.set(normalized, { qty: 1 });
+      const info = await lookupItem(normalized);
+      const pendingState = pendingLookups.get(normalized) || { qty: 1 };
+      pendingLookups.delete(normalized);
       const isNotFound = !info.title && !info.image;
-      items.set(barcode, {
-        barcode,
-        title: info.title || '',
-        image: info.image || '',
-        qty: 1,
-        price: ''
-      });
+
+      if (items.has(normalized)) {
+        const item = items.get(normalized);
+        item.qty += pendingState.qty;
+        if (!item.title && info.title) item.title = info.title;
+        if (!item.image && info.image) item.image = info.image;
+        items.set(normalized, item);
+      } else {
+        items.set(normalized, {
+          barcode: normalized,
+          title: info.title || '',
+          image: info.image || '',
+          qty: pendingState.qty,
+          price: ''
+        });
+      }
       renderItems();
 
       if (isNotFound) {
         showMessage('Item not in system \u2014 enter a name below', 'error');
         setTimeout(() => {
-          const card = document.querySelector(`.item-card[data-barcode="${barcode}"]`);
+          const card = document.querySelector(`.item-card[data-barcode="${normalized}"]`);
           if (card) {
             const titleEl = card.querySelector('.title-input');
             if (titleEl) titleEl.focus();
@@ -1345,29 +1800,37 @@
 
       let success = 0;
       let fail = 0;
+      let submitStopped = false;
+      const warnings = [];
       for (const item of itemList) {
         const itemPrice = priceMap.get(item.barcode) || 0;
         const priceAuto = priceAutoMap.get(item.barcode) || false;
         try {
-          const resp = await fetch('/api/marketplace/sale', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              barcode: item.barcode,
-              title: item.title || '',
-              quantity: item.qty,
-              price: itemPrice,
-              session_id: sessionId,
-              price_auto: priceAuto,
-              store: saleStore,
-              bulk_manifest_id: bulkManifestId || undefined
-            })
+          const data = await submitMarketplaceItem(item, {
+            itemPrice,
+            priceAuto,
+            sessionId,
+            saleStore,
+            bulkManifestId
           });
-          const data = await resp.json();
-          if (data.success) success += 1;
-          else fail += 1;
+
+          if (data.success) {
+            success += 1;
+            if (data.inventory_removal_error) {
+              warnings.push(`${item.barcode}: ${data.inventory_removal_error}`);
+            }
+          } else {
+            fail += 1;
+            if (data.cancelled) {
+              submitStopped = true;
+              warnings.push(`${item.barcode}: location selection cancelled`);
+              break;
+            }
+            warnings.push(`${item.barcode}: ${data.error || 'Sale failed'}`);
+          }
         } catch (e) {
           fail += 1;
+          warnings.push(`${item.barcode}: ${e && e.message ? e.message : 'Sale failed'}`);
         }
       }
 
@@ -1397,7 +1860,8 @@
           }
         }
         const baseSuccess = (window.i18n && window.i18n.t) ? window.i18n.t('marketplace_submit_success') : 'Sale submitted successfully!';
-        showMessage(baseSuccess + soldMarkMessage, 'success');
+        const warningText = warnings.length ? ` Inventory warning: ${warnings.slice(0, 2).join(' | ')}` : '';
+        showMessage(baseSuccess + soldMarkMessage + warningText, warnings.length ? 'error' : 'success');
         items.clear();
         finalTotalInput.value = '';
         if (bulkManifestId) {
@@ -1416,7 +1880,8 @@
         const msg = (t('marketplace_submit_partial') || 'Submitted {success}, failed {fail}')
           .replace('{success}', success)
           .replace('{fail}', fail);
-        showMessage(msg, 'error');
+        const extra = warnings.length ? ' ' + warnings.slice(0, 2).join(' | ') : '';
+        showMessage(msg + (submitStopped ? ' Submission stopped.' : '') + extra, 'error');
       }
       submitBtn.disabled = false;
       mobileSubmitBtn.disabled = false;
@@ -1469,6 +1934,7 @@
       if (e.target === this) closeImgModal();
     });
   </script>
+  <script src="/static/location-preview.js?v=20260313b"></script>
   <script src="/static/i18n.js"></script>
 </body>
 </html>

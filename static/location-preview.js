@@ -44,11 +44,12 @@
 
   function deriveMapKey(code) {
     const compact = compactCode(code).toLowerCase();
-    if (!compact) return '';
-    if (/^ofloor\d+$/i.test(compact)) return compact;
-    const shelfMatch = compact.match(/^(.*)s\d+$/i);
+    const baseCode = compact.replace(/b\d+$/i, '');
+    if (!baseCode) return '';
+    if (/^ofloor\d+$/i.test(baseCode)) return baseCode;
+    const shelfMatch = baseCode.match(/^(.*)s\d+$/i);
     if (shelfMatch) return shelfMatch[1];
-    return compact;
+    return baseCode;
   }
 
   function ensureStyles() {
@@ -173,15 +174,51 @@
     const upper = compact.toUpperCase();
     const rawUpper = raw.toUpperCase();
     const candidates = [];
-    addCandidate(candidates, '/static/shelves/' + encodeURIComponent(lower) + '.png');
-    addCandidate(candidates, '/static/shelves/' + encodeURIComponent(compact) + '.png');
-    addCandidate(candidates, '/static/shelves/' + encodeURIComponent(raw.toLowerCase()) + '.png');
-    addCandidate(candidates, '/static/shelves/' + encodeURIComponent(raw) + '.png');
-    addCandidate(candidates, '/static/shelves/' + encodeURIComponent(upper) + '.png');
-    addCandidate(candidates, '/static/shelves/' + encodeURIComponent(rawUpper) + '.png');
-    addCandidate(candidates, '/static/shelves/originals/' + encodeURIComponent(lower) + '.png');
-    addCandidate(candidates, '/static/shelves/originals/' + encodeURIComponent(upper) + '.png');
-    addCandidate(candidates, '/static/shelves/originals/' + encodeURIComponent(rawUpper) + '.png');
+    const mapKey = deriveMapKey(raw);
+    const normalizedMapKey = mapKey || lower;
+    const isGarageCode = /^(gr|gmid|gfloor|misc)/i.test(normalizedMapKey);
+    const isOfficeCode = /^(or|omr|ofloor)/i.test(normalizedMapKey);
+    if (isGarageCode) {
+      addCandidate(candidates, '/shelf-base/' + encodeURIComponent(lower) + '.png');
+      addCandidate(candidates, '/shelf-base/' + encodeURIComponent(compact) + '.png');
+      addCandidate(candidates, '/shelf-base/' + encodeURIComponent(raw.toLowerCase()) + '.png');
+      addCandidate(candidates, '/shelf-base/' + encodeURIComponent(raw) + '.png');
+      addCandidate(candidates, '/shelf-base/' + encodeURIComponent(upper) + '.png');
+      addCandidate(candidates, '/shelf-base/' + encodeURIComponent(rawUpper) + '.png');
+    }
+    if (isOfficeCode) {
+      addCandidate(candidates, '/shelf-base/' + encodeURIComponent(lower) + '.png');
+      addCandidate(candidates, '/shelf-base/' + encodeURIComponent(compact) + '.png');
+      addCandidate(candidates, '/shelf-base/' + encodeURIComponent(raw.toLowerCase()) + '.png');
+      addCandidate(candidates, '/shelf-base/' + encodeURIComponent(raw) + '.png');
+      addCandidate(candidates, '/shelf-base/' + encodeURIComponent(upper) + '.png');
+      addCandidate(candidates, '/shelf-base/' + encodeURIComponent(rawUpper) + '.png');
+      addCandidate(candidates, '/shelf-image/' + encodeURIComponent(lower) + '.png');
+      addCandidate(candidates, '/shelf-image/' + encodeURIComponent(compact) + '.png');
+      addCandidate(candidates, '/shelf-image/' + encodeURIComponent(raw.toLowerCase()) + '.png');
+      addCandidate(candidates, '/shelf-image/' + encodeURIComponent(raw) + '.png');
+      addCandidate(candidates, '/shelf-image/' + encodeURIComponent(upper) + '.png');
+      addCandidate(candidates, '/shelf-image/' + encodeURIComponent(rawUpper) + '.png');
+      addCandidate(candidates, '/shelf-original/' + encodeURIComponent(lower) + '.png');
+      addCandidate(candidates, '/shelf-original/' + encodeURIComponent(compact) + '.png');
+      addCandidate(candidates, '/shelf-original/' + encodeURIComponent(raw.toLowerCase()) + '.png');
+      addCandidate(candidates, '/shelf-original/' + encodeURIComponent(raw) + '.png');
+      addCandidate(candidates, '/shelf-original/' + encodeURIComponent(upper) + '.png');
+      addCandidate(candidates, '/shelf-original/' + encodeURIComponent(rawUpper) + '.png');
+    } else {
+      addCandidate(candidates, '/shelf-image/' + encodeURIComponent(lower) + '.png');
+      addCandidate(candidates, '/shelf-image/' + encodeURIComponent(compact) + '.png');
+      addCandidate(candidates, '/shelf-image/' + encodeURIComponent(raw.toLowerCase()) + '.png');
+      addCandidate(candidates, '/shelf-image/' + encodeURIComponent(raw) + '.png');
+      addCandidate(candidates, '/shelf-image/' + encodeURIComponent(upper) + '.png');
+      addCandidate(candidates, '/shelf-image/' + encodeURIComponent(rawUpper) + '.png');
+      addCandidate(candidates, '/shelf-original/' + encodeURIComponent(lower) + '.png');
+      addCandidate(candidates, '/shelf-original/' + encodeURIComponent(compact) + '.png');
+      addCandidate(candidates, '/shelf-original/' + encodeURIComponent(raw.toLowerCase()) + '.png');
+      addCandidate(candidates, '/shelf-original/' + encodeURIComponent(raw) + '.png');
+      addCandidate(candidates, '/shelf-original/' + encodeURIComponent(upper) + '.png');
+      addCandidate(candidates, '/shelf-original/' + encodeURIComponent(rawUpper) + '.png');
+    }
     return withBust(candidates);
   }
 
@@ -209,16 +246,21 @@
     if (!key) return candidates;
     const lower = key.toLowerCase();
     if (/^(or|omr|ofloor)/i.test(lower)) {
-      addCandidate(candidates, '/static/shelves/originals/officemap_' + encodeURIComponent(key) + '.png');
-      addCandidate(candidates, '/static/shelves/originals/garagemap_' + encodeURIComponent(key) + '.png');
+      addCandidate(candidates, '/static/shelves/office/maps/officemap_' + encodeURIComponent(key) + '.png');
+      addCandidate(candidates, '/static/shelves/maps/office/officemap_' + encodeURIComponent(key) + '.png');
+      addCandidate(candidates, '/static/shelves/garage/maps/garagemap_' + encodeURIComponent(key) + '.png');
+      addCandidate(candidates, '/static/shelves/maps/garage/garagemap_' + encodeURIComponent(key) + '.png');
     } else if (/^(gr|gmid|gfloor|misc)/i.test(lower)) {
-      addCandidate(candidates, '/static/shelves/originals/garagemap_' + encodeURIComponent(key) + '.png');
-      addCandidate(candidates, '/static/shelves/originals/officemap_' + encodeURIComponent(key) + '.png');
+      addCandidate(candidates, '/static/shelves/garage/maps/garagemap_' + encodeURIComponent(key) + '.png');
+      addCandidate(candidates, '/static/shelves/maps/garage/garagemap_' + encodeURIComponent(key) + '.png');
+      addCandidate(candidates, '/static/shelves/office/maps/officemap_' + encodeURIComponent(key) + '.png');
+      addCandidate(candidates, '/static/shelves/maps/office/officemap_' + encodeURIComponent(key) + '.png');
     } else {
-      addCandidate(candidates, '/static/shelves/originals/officemap_' + encodeURIComponent(key) + '.png');
-      addCandidate(candidates, '/static/shelves/originals/garagemap_' + encodeURIComponent(key) + '.png');
+      addCandidate(candidates, '/static/shelves/office/maps/officemap_' + encodeURIComponent(key) + '.png');
+      addCandidate(candidates, '/static/shelves/maps/office/officemap_' + encodeURIComponent(key) + '.png');
+      addCandidate(candidates, '/static/shelves/garage/maps/garagemap_' + encodeURIComponent(key) + '.png');
+      addCandidate(candidates, '/static/shelves/maps/garage/garagemap_' + encodeURIComponent(key) + '.png');
     }
-    addCandidate(candidates, '/static/shelves/maps/' + encodeURIComponent(key) + '.png');
     return withBust(candidates);
   }
 

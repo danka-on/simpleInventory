@@ -69,6 +69,15 @@
                     <input type="text" id="shelf-code" placeholder="e.g., gr1s1, or2s3" autocomplete="off">
                     <div id="code-validation" class="validation-message"></div>
                 </div>
+                <div class="form-group" style="margin-top:-6px;">
+                    <label style="display:flex;align-items:center;gap:10px;font-weight:600;cursor:pointer;">
+                        <input type="checkbox" id="original-only" style="width:18px;height:18px;">
+                        <span>Original</span>
+                    </label>
+                    <div style="margin-top:6px;font-size:0.9rem;color:#667085;">
+                        Save the clean photo to originals for later markup. Existing shelf image stays unchanged unless this shelf does not have one yet.
+                    </div>
+                </div>
                 
                 <!-- Camera Section (Mobile) -->
                 <div id="camera-section" style="display: none;">
@@ -188,7 +197,7 @@
         </div>
     </div>
     
-    <script src="{{ url_for('static', filename='shelf-creator.js') }}?v=8"></script>
+    <script src="{{ url_for('static', filename='shelf-creator.js') }}?v=10"></script>
     <script src="/static/i18n.js"></script>
 </body>
 </html>

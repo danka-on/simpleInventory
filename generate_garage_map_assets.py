@@ -9,9 +9,16 @@ from PIL import Image, ImageDraw, ImageFont
 
 ROOT = Path(__file__).resolve().parent
 SHELF_DIR = ROOT / "static" / "shelves"
-ORIGINALS_DIR = SHELF_DIR / "originals"
-MAP_SOURCE = ORIGINALS_DIR / "garagemap.png"
-BASES_DIR = ORIGINALS_DIR / "garage_map_bases"
+AREA_DIR = SHELF_DIR / "garage"
+ORIGINALS_DIR = AREA_DIR / "originals"
+MAPS_DIR = AREA_DIR / "maps"
+SHELF_PICS_DIR = AREA_DIR / "shelf_pics"
+MAP_SOURCE = MAPS_DIR / "garagemap.png"
+LEGACY_MAP_SOURCE = SHELF_DIR / "maps" / "garage" / "garagemap.png"
+# "bases" now live in shelf_pics.
+BASES_DIR = SHELF_PICS_DIR
+LEGACY_BASES_DIR = SHELF_DIR / "maps" / "garage" / "bases"
+LEGACY_ORIGINALS_DIR = SHELF_DIR / "originals"
 FONT_PATH = Path(r"C:\Windows\Fonts\arial.ttf")
 
 TARGETS = {
@@ -40,22 +47,28 @@ TARGETS = {
         "codes": ["gfloor3"],
     },
     "gfloor4": {
-        "rect": (137, 704, 224, 763),
+        "rect": (138, 711, 197, 770),
         "label": "4",
-        "arrow": ((250, 673), (181, 704)),
+        "arrow": ((245, 682), (167, 711)),
         "codes": ["gfloor4"],
     },
     "gfloor5": {
-        "rect": (244, 708, 312, 760),
+        "rect": (202, 711, 262, 770),
         "label": "5",
-        "arrow": ((314, 674), (278, 708)),
+        "arrow": ((308, 682), (232, 711)),
         "codes": ["gfloor5"],
     },
     "gfloor6": {
-        "rect": (329, 704, 397, 761),
+        "rect": (268, 709, 329, 771),
         "label": "6",
-        "arrow": ((397, 674), (362, 704)),
+        "arrow": ((371, 682), (299, 709)),
         "codes": ["gfloor6"],
+    },
+    "gfloor7": {
+        "rect": (333, 708, 403, 770),
+        "label": "7",
+        "arrow": ((435, 682), (368, 708)),
+        "codes": ["gfloor7"],
     },
     "gmid2": {
         "rect": (366, 410, 465, 511),
@@ -156,8 +169,16 @@ def draw_arrow(draw: ImageDraw.ImageDraw, start: tuple[int, int], end: tuple[int
 
 def find_existing_source(code: str) -> Path | None:
     candidates = [
+        BASES_DIR / f"{code}.png",
+        LEGACY_BASES_DIR / f"{code}.png",
+        ORIGINALS_DIR / f"{code}.png",
+        ORIGINALS_DIR / f"{code.upper()}.png",
+        SHELF_PICS_DIR / f"{code}.png",
+        SHELF_PICS_DIR / f"{code.upper()}.png",
         SHELF_DIR / f"{code}.png",
         SHELF_DIR / f"{code.upper()}.png",
+        LEGACY_ORIGINALS_DIR / f"{code}.png",
+        LEGACY_ORIGINALS_DIR / f"{code.upper()}.png",
         ORIGINALS_DIR / f"{code}.png",
         ORIGINALS_DIR / f"{code.upper()}.png",
     ]
@@ -165,6 +186,12 @@ def find_existing_source(code: str) -> Path | None:
         if candidate.exists():
             return candidate
     return None
+
+
+def resolve_map_source() -> Path:
+    if MAP_SOURCE.exists():
+        return MAP_SOURCE
+    return LEGACY_MAP_SOURCE
 
 
 def ensure_base_sources(display_codes: list[str]) -> None:
@@ -180,7 +207,8 @@ def ensure_base_sources(display_codes: list[str]) -> None:
 
 
 def build_map_asset(key: str, config: dict[str, object]) -> Image.Image:
-    base = Image.open(MAP_SOURCE).convert("RGBA")
+    MAPS_DIR.mkdir(parents=True, exist_ok=True)
+    base = Image.open(resolve_map_source()).convert("RGBA")
     draw = ImageDraw.Draw(base, "RGBA")
     rect = config["rect"]
     label = str(config["label"])
@@ -204,58 +232,17 @@ def build_map_asset(key: str, config: dict[str, object]) -> Image.Image:
 
     draw_arrow(draw, arrow_start, arrow_end)
 
-    out_path = ORIGINALS_DIR / f"garagemap_{key}.png"
+    out_path = MAPS_DIR / f"garagemap_{key}.png"
     base.save(out_path)
     return base
 
 
-def build_composite(display_code: str, map_image: Image.Image, title_label: str) -> bool:
-    source = BASES_DIR / f"{display_code}.png"
-    if not source.exists():
-        return False
-
-    shelf = Image.open(source).convert("RGBA")
-
-    caption_font = load_font(14)
-    map_width = min(400, map_image.width)
-    map_height = round(map_image.height * (map_width / map_image.width))
-    map_resized = map_image.resize((map_width, map_height), Image.Resampling.LANCZOS)
-
-    pad = 18
-    label_h = 24
-    canvas_w = shelf.width
-    canvas_h = shelf.height + pad + label_h + map_resized.height + pad
-    canvas = Image.new("RGBA", (canvas_w, canvas_h), (255, 255, 255, 255))
-    canvas.alpha_composite(shelf, (0, 0))
-
-    draw = ImageDraw.Draw(canvas)
-    sep_y = shelf.height + 8
-    draw.line((24, sep_y, canvas_w - 24, sep_y), fill=(214, 214, 214, 255), width=2)
-    draw.text((24, shelf.height + 16), f"Garage map - {title_label} highlighted", fill=(72, 72, 72, 255), font=caption_font)
-
-    map_x = (canvas_w - map_resized.width) // 2
-    map_y = shelf.height + pad + label_h
-    canvas.alpha_composite(map_resized, (map_x, map_y))
-    canvas.save(SHELF_DIR / f"{display_code}.png")
-    return True
-
-
 def main() -> None:
-    display_codes: list[str] = []
-    for config in TARGETS.values():
-        display_codes.extend(config["codes"])
-    ensure_base_sources(display_codes)
-
-    generated_composites: list[str] = []
     for key, config in TARGETS.items():
-        map_image = build_map_asset(key, config)
-        title_label = str(config["label"])
-        for code in config["codes"]:
-            if build_composite(code, map_image, title_label):
-                generated_composites.append(code)
+        build_map_asset(key, config)
 
     print("Generated garage map assets for", ", ".join(sorted(TARGETS)))
-    print("Updated shelf composites:", ", ".join(sorted(generated_composites)) or "(map assets only)")
+    print("Shelf/map combo images are no longer generated.")
 
 
 if __name__ == "__main__":

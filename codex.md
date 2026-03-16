@@ -66,12 +66,23 @@ When user says "push", "p", "push to pi", or "commit changes", treat it as:
 ### Last successful checkpoint
 
 - Status: success confirmed by user
-- Date: 2026-03-09 18:40:22 -04:00
+- Date: 2026-03-16 19:42:56 -04:00
 - Branch: `pi-claude-refactor`
-- Git commit baseline for next incremental file discovery: `4ce5f8c` (unchanged; no new commit created before deploy)
+- Git commit baseline for next incremental file discovery: `4ce5f8c` (unchanged; no new commit created before deploy, so use the pushed file list below to avoid resending already-deployed uncommitted changes)
 - Files pushed in this successful checkpoint:
   - `app.py`
-  - `templates/bulk_manifest.html`
+  - `organize_shelf_storage.py`
+  - `generate_garage_map_assets.py`
+  - `generate_office_map_assets.py`
+  - `static/location-preview.js`
+  - `static/shelf-creator.js`
+  - `templates/ready_to_ship.html`
+  - `templates/searchrack.html`
+  - `templates/shelfmanager.html`
+  - `static/shelves/office`
+  - `static/shelves/garage`
+  - `static/shelves/hallway`
+  - `static/shelves/misc`
 
 ## Architecture
 

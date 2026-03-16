@@ -145,19 +145,15 @@
     .status-filter-group label[data-status-filter="good"]{color:#15803d}
     .status-filter-group label[data-status-filter="bad"]{color:#b91c1c}
     .status-filter-group label[data-status-filter="return"]{color:#92400e}
-    .status-filter-group label[data-status-filter="unchecked"]{color:#6b7280}
     .status-filter-group label.active[data-status-filter="good"]{background:rgba(22,163,74,0.12);border-color:rgba(22,163,74,0.35);color:#15803d;font-weight:600}
     .status-filter-group label.active[data-status-filter="bad"]{background:rgba(220,38,38,0.12);border-color:rgba(220,38,38,0.35);color:#b91c1c;font-weight:600}
     .status-filter-group label.active[data-status-filter="return"]{background:rgba(146,64,14,0.12);border-color:rgba(146,64,14,0.35);color:#92400e;font-weight:600}
-    .status-filter-group label.active[data-status-filter="unchecked"]{background:rgba(107,114,128,0.12);border-color:rgba(107,114,128,0.35);color:#374151;font-weight:600}
     html.ss-theme-night .status-filter-group label[data-status-filter="good"]{color:#86efac}
     html.ss-theme-night .status-filter-group label[data-status-filter="bad"]{color:#fca5a5}
     html.ss-theme-night .status-filter-group label[data-status-filter="return"]{color:#fcd34d}
-    html.ss-theme-night .status-filter-group label[data-status-filter="unchecked"]{color:#cbd5e1}
     html.ss-theme-night .status-filter-group label.active[data-status-filter="good"]{background:rgba(34,197,94,0.18);border-color:rgba(34,197,94,0.4);color:#86efac}
     html.ss-theme-night .status-filter-group label.active[data-status-filter="bad"]{background:rgba(239,68,68,0.18);border-color:rgba(239,68,68,0.4);color:#fca5a5}
     html.ss-theme-night .status-filter-group label.active[data-status-filter="return"]{background:rgba(180,83,9,0.22);border-color:rgba(245,158,11,0.4);color:#fde68a}
-    html.ss-theme-night .status-filter-group label.active[data-status-filter="unchecked"]{background:rgba(148,163,184,0.18);border-color:rgba(148,163,184,0.35);color:#e2e8f0}
     .dropdown-section:last-child{margin-bottom:0}
     .gear-btn{background:linear-gradient(135deg,#3b82f6,#2563eb);color:#fff;font-size:1rem;padding:8px 14px;border-radius:8px;box-shadow:0 2px 8px rgba(37,99,235,0.3);transition:all 0.15s}
     .gear-btn:hover{box-shadow:0 4px 14px rgba(37,99,235,0.4);transform:translateY(-1px)}
@@ -449,9 +445,6 @@
           <label data-status-filter="return">
             <input type="checkbox" class="status-checkbox" value="return" checked> Return
           </label>
-          <label data-status-filter="unchecked">
-            <input type="checkbox" class="status-checkbox" value="unchecked"> Unchecked
-          </label>
         </div>
       </div>
       <div class="dropdown-section">
@@ -477,6 +470,7 @@
             <option value="Missing pieces">Missing pieces</option>
             <option value="Wrong item">Wrong item</option>
             <option value="Broken">Broken</option>
+            <option value="Box damage">Box damage</option>
             <option value="Return">Return</option>
             <option value="Replacement">Replacement</option>
             <option value="Other">Other</option>
@@ -597,7 +591,6 @@ const GEAR_DEFAULTS = Object.freeze({
   status_good: true,
   status_bad: true,
   status_return: true,
-  status_unchecked: false,
   lot: '',
   sort: 'last_edited',
   defect: '',
@@ -621,6 +614,8 @@ let fullColumnSortLoaded = false;
 let fullColumnSortCacheKey = '';
 let fullColumnSortResults = [];
 let fullColumnSortStats = null;
+let listingAgentQueueState = Object.create(null);
+let listingAgentQueueLookupToken = 0;
 const FULL_COLUMN_SORT_LIMIT = 50000;
 const PENDING_MARKETPLACE_OPS_KEY = 'items_to_list_pending_marketplace_ops_v1';
 const PENDING_MARKETPLACE_OP_MAX_AGE_MS = 10 * 60 * 1000;
@@ -634,6 +629,70 @@ function _clearGlobalColumnSortCache(){
   fullColumnSortCacheKey = '';
   fullColumnSortResults = [];
   fullColumnSortStats = null;
+}
+
+function _listagentQueueKey(rawValue){
+  const raw = String(rawValue || '').trim();
+  if(!raw) return '';
+  return raw.includes('-') ? raw.split('-')[0].trim() : raw;
+}
+
+function _listagentQueueUiState(queueItem){
+  if(!queueItem){
+    return {
+      label: '+',
+      title: 'Add to Listing Agent queue',
+      disabled: false,
+      active: false
+    };
+  }
+  const status = String(queueItem.status || '').trim().toLowerCase();
+  if(status === 'done'){
+    return {
+      label: 'Done',
+      title: 'Already completed in Listing Agent',
+      disabled: true,
+      active: true
+    };
+  }
+  return {
+    label: 'In queue',
+    title: 'In Listing Agent queue',
+    disabled: true,
+    active: true
+  };
+}
+
+async function hydrateListingAgentQueueState(rows){
+  const upcs = Array.from(new Set(
+    (Array.isArray(rows) ? rows : [])
+      .map(row => _listagentQueueKey(row && row.upc))
+      .filter(Boolean)
+  ));
+  if(!upcs.length) return;
+
+  const token = ++listingAgentQueueLookupToken;
+  try{
+    const resp = await fetch('/api/listingagent/queue/statuses', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({upcs}),
+      cache: 'no-store'
+    });
+    const j = await resp.json().catch(() => ({}));
+    if(token !== listingAgentQueueLookupToken) return;
+    if(!resp.ok || !j || !j.success){
+      console.error('Failed to hydrate Listing Agent queue state', j && j.error ? j.error : ('HTTP ' + resp.status));
+      return;
+    }
+    const items = (j.items && typeof j.items === 'object') ? j.items : {};
+    upcs.forEach(upc => {
+      listingAgentQueueState[upc] = items[upc] || null;
+    });
+  }catch(err){
+    if(token !== listingAgentQueueLookupToken) return;
+    console.error('Error hydrating Listing Agent queue state:', err);
+  }
 }
 
 function _buildBolItemsQueryContext(){
@@ -832,7 +891,6 @@ function normalizeGearSettings(raw){
     status_good: parseBool(src.status_good, GEAR_DEFAULTS.status_good),
     status_bad: parseBool(src.status_bad, GEAR_DEFAULTS.status_bad),
     status_return: parseBool(src.status_return, GEAR_DEFAULTS.status_return),
-    status_unchecked: parseBool(src.status_unchecked, GEAR_DEFAULTS.status_unchecked),
     lot: String(src.lot || ''),
     sort: allowedSorts.has(sortRaw) ? sortRaw : GEAR_DEFAULTS.sort,
     defect: String(src.defect || ''),
@@ -851,7 +909,6 @@ function getCurrentGearSettings(){
   const statusGoodCb = document.querySelector('.status-checkbox[value="good"]');
   const statusBadCb = document.querySelector('.status-checkbox[value="bad"]');
   const statusReturnCb = document.querySelector('.status-checkbox[value="return"]');
-  const statusUncheckedCb = document.querySelector('.status-checkbox[value="unchecked"]');
   const lotEl = document.getElementById('filter-lot');
   const sortEl = document.getElementById('sort-select');
   const defectEl = document.getElementById('filter-defect');
@@ -867,7 +924,6 @@ function getCurrentGearSettings(){
     status_good: !!(statusGoodCb && statusGoodCb.checked),
     status_bad: !!(statusBadCb && statusBadCb.checked),
     status_return: !!(statusReturnCb && statusReturnCb.checked),
-    status_unchecked: !!(statusUncheckedCb && statusUncheckedCb.checked),
     lot: lotEl ? lotEl.value : '',
     sort: sortEl ? sortEl.value : GEAR_DEFAULTS.sort,
     defect: defectEl ? defectEl.value : '',
@@ -887,7 +943,6 @@ function applyGearSettings(raw){
   const statusGoodCb = document.querySelector('.status-checkbox[value="good"]');
   const statusBadCb = document.querySelector('.status-checkbox[value="bad"]');
   const statusReturnCb = document.querySelector('.status-checkbox[value="return"]');
-  const statusUncheckedCb = document.querySelector('.status-checkbox[value="unchecked"]');
   const lotEl = document.getElementById('filter-lot');
   const sortEl = document.getElementById('sort-select');
   const defectEl = document.getElementById('filter-defect');
@@ -903,7 +958,6 @@ function applyGearSettings(raw){
   if (statusGoodCb) statusGoodCb.checked = settings.status_good;
   if (statusBadCb) statusBadCb.checked = settings.status_bad;
   if (statusReturnCb) statusReturnCb.checked = settings.status_return;
-  if (statusUncheckedCb) statusUncheckedCb.checked = settings.status_unchecked;
   if (lotEl) {
     pendingLotSelection = settings.lot || '';
     lotEl.value = settings.lot || '';
@@ -944,7 +998,6 @@ function gearSettingsDifferFromDefaults(raw){
     settings.status_good !== GEAR_DEFAULTS.status_good ||
     settings.status_bad !== GEAR_DEFAULTS.status_bad ||
     settings.status_return !== GEAR_DEFAULTS.status_return ||
-    settings.status_unchecked !== GEAR_DEFAULTS.status_unchecked ||
     settings.lot !== GEAR_DEFAULTS.lot ||
     settings.sort !== GEAR_DEFAULTS.sort ||
     settings.defect !== GEAR_DEFAULTS.defect ||
@@ -1171,11 +1224,11 @@ function _locationImageCandidates(location){
     if(!candidates.includes(src)) candidates.push(src);
   };
 
-  add('/static/shelves/' + encodeURIComponent(raw) + '.png');
-  add('/static/shelves/' + encodeURIComponent(compact) + '.png');
-  add('/static/shelves/' + encodeURIComponent(lower) + '.png');
-  add('/static/shelves/' + encodeURIComponent(compactLower) + '.png');
-  add('/static/shelves/' + encodeURIComponent(compactUpper) + '.png');
+  add('/shelf-image/' + encodeURIComponent(raw) + '.png');
+  add('/shelf-image/' + encodeURIComponent(compact) + '.png');
+  add('/shelf-image/' + encodeURIComponent(lower) + '.png');
+  add('/shelf-image/' + encodeURIComponent(compactLower) + '.png');
+  add('/shelf-image/' + encodeURIComponent(compactUpper) + '.png');
 
   add('/static/pictureposition/' + encodeURIComponent(raw));
   add('/static/pictureposition/' + encodeURIComponent(compact));
@@ -1485,12 +1538,13 @@ function render(results){
     // Extract base UPC without suffix for copy button (with padding)
     const baseUpc = upc.includes('-') ? upc.split('-')[0] : upc;
     // Listing Agent queue should use the raw base UPC (no padding) so /api/listingagent/upc/<upc> matches DB rows.
-    const queueUpc = (upcRaw || '').toString().trim().includes('-') ? (upcRaw || '').toString().trim().split('-')[0] : (upcRaw || '').toString().trim();
+    const queueUpc = _listagentQueueKey(upcRaw);
     const queueTitleEnc = encodeURIComponent((r.title || '').toString());
     const last_edited = esc(r.last_edited||'');
     const status = (r.status||'').toLowerCase();
-    const queueBtn = `<button type="button" class="btn btn-sm btn-primary btn-listagent-queue" data-upc="${queueUpc}" data-title="${queueTitleEnc}" data-item-status="${esc(status)}" title="Add to Listing Agent queue">+</button>`;
-    let pill = '<span class="status-box" title="Unchecked">unchecked</span>';
+    const queueUi = _listagentQueueUiState(listingAgentQueueState[queueUpc] || null);
+    const queueBtn = `<button type="button" class="btn btn-sm btn-primary btn-listagent-queue${queueUi.active ? ' btn-copied' : ''}" data-upc="${queueUpc}" data-title="${queueTitleEnc}" data-item-status="${esc(status)}" title="${esc(queueUi.title)}" ${queueUi.disabled ? 'disabled' : ''}>${esc(queueUi.label)}</button>`;
+    let pill = '<span class="status-box" style="background:#64748b" title="Status">status</span>';
     if(status==='good') pill = '<span class="status-box" style="background:#2ecc71" title="Good">good</span>';
     if(status==='bad') pill = '<span class="status-box" style="background:#e74c3c" title="Bad">bad</span>';
     if(status==='return') pill = '<span class="status-box" style="background:#8b4513" title="Return">return</span>';
@@ -1536,14 +1590,14 @@ function render(results){
     const actionBtn = `<div style="display:flex;flex-direction:column;gap:4px;align-items:flex-start">${amazonCheckbox}${ebayCheckbox}${fbCheckbox}</div>`;
     
     // Diagnostic link moved into its own Info column (first column)
-    const diagLink = `<button class="btn btn-sm diag-link" style="background:transparent;border:1px solid #0066cc;color:#0066cc;border-radius:6px;padding:6px 10px;cursor:pointer" data-upc="${apiUpc}" data-lot="${esc(r.lot_number||'')}">Open</button>`;
+    const diagLink = `<button class="btn btn-sm diag-link" style="background:transparent;border:1px solid #0066cc;color:#0066cc;border-radius:6px;padding:6px 10px;cursor:pointer" data-upc="${apiUpc}" data-lot="${esc(r.lot_number||'')}" data-status="${esc(status)}">Open</button>`;
     const photoCount = Number(r.photo_count || 0);
     const hasPhotos = photoCount > 0;
     const picsTitle = hasPhotos ? `${photoCount} photo${photoCount===1?'':'s'}` : '';
     const picsStyle = hasPhotos
       ? 'color:#2196F3;font-weight:600;cursor:pointer;font-size:0.9rem'
       : 'display:none;color:#2196F3;font-weight:600;cursor:pointer;font-size:0.9rem';
-    const picsBtn = `<span class="pics-count" data-upc="${apiUpc}" data-lot="${esc(r.lot_number||'')}" title="${esc(picsTitle)}" style="${picsStyle}">${hasPhotos ? '📷' : ''}</span>`;
+    const picsBtn = `<span class="pics-count" data-upc="${apiUpc}" data-lot="${esc(r.lot_number||'')}" data-status="${esc(status)}" title="${esc(picsTitle)}" style="${picsStyle}">${hasPhotos ? '📷' : ''}</span>`;
     const whAvail = Number(r.warehouse_available || 0);
     const qtyRaw = Number(r.quantity);
     const qty = Number.isFinite(qtyRaw) ? qtyRaw : 0;
@@ -1578,10 +1632,12 @@ function render(results){
       ? `<td style="text-align:center" title="${esc(whTitle)}"><button type="button" class="warehouse-info-btn" data-base-upc="${esc(whBase)}" data-locations="${esc(whLocationsEncoded)}"><span style="${whStyle}">${whAvail}</span></button></td>`
       : `<td style="text-align:center" title="${esc(whTitle)}"><span style="${whStyle}">${whAvail}</span></td>`;
     const defectTextRaw = String(r.defect || '').trim();
-    const defectDisplay = defectTextRaw || (Number(r.set_note_flag) === 1 ? 'SET' : '');
+    const defectDisplay = defectTextRaw
+      ? defectTextRaw.replace(/\s*\|\s*/g, ', ')
+      : (Number(r.set_note_flag) === 1 ? 'SET' : '');
     // Notes icon - show 📝 if note exists and make it clickable
     const hasNote = r.note && String(r.note).trim().length > 0;
-    const noteCell = hasNote ? `<td style="text-align:center;font-size:1.2rem"><span class="note-icon" data-upc="${apiUpc}" style="cursor:pointer" title="Click to view notes">📝</span></td>` : `<td style="text-align:center"></td>`;
+    const noteCell = hasNote ? `<td style="text-align:center;font-size:1.2rem"><span class="note-icon" data-upc="${apiUpc}" data-status="${esc(status)}" style="cursor:pointer" title="Click to view notes">📝</span></td>` : `<td style="text-align:center"></td>`;
     html += `<tr>`;
     if (selectMode) {
       // Allow selection of all items (base barcodes will be reset instead of deleted)
@@ -1685,8 +1741,7 @@ function updateStatusFilterHighlight(){
   const map = {
     good: document.querySelector('.status-checkbox[value="good"]'),
     bad: document.querySelector('.status-checkbox[value="bad"]'),
-    return: document.querySelector('.status-checkbox[value="return"]'),
-    unchecked: document.querySelector('.status-checkbox[value="unchecked"]')
+    return: document.querySelector('.status-checkbox[value="return"]')
   };
   Object.entries(map).forEach(([key, el]) => {
     if(!el) return;
@@ -1846,6 +1901,7 @@ function onOpenDiag(e){
   e.preventDefault();
   const upc = e.currentTarget.dataset.upc; if(!upc) return;
   const lot = e.currentTarget.dataset.lot || '';
+  const rowStatus = (e.currentTarget.dataset.status || '').trim();
   // Build a compact return URL consisting of the active filter params so we can return to the same list state
   const params = new URLSearchParams(window.location.search);
   const returnParams = [];
@@ -1854,6 +1910,7 @@ function onOpenDiag(e){
   const ret = '/items-to-list' + (returnParams.length? ('?'+returnParams.join('&')) : '');
   let url = '/item-prep/diagnostic/view?upc='+encodeURIComponent(upc)+'&from=items&return='+encodeURIComponent(ret);
   if(lot) url += '&lot='+encodeURIComponent(lot);
+  if(rowStatus) url += '&row_status='+encodeURIComponent(rowStatus);
   window.location.href = url;
 }
 
@@ -1862,6 +1919,7 @@ async function onOpenPics(e){
   const upc = e.currentTarget.dataset.upc || e.currentTarget.getAttribute('data-upc');
   if(!upc) return;
   const lot = e.currentTarget.dataset.lot || '';
+  const rowStatus = (e.currentTarget.dataset.status || '').trim();
   const modal = document.getElementById('picsModal');
   const area = document.getElementById('picsGrid');
   const large = document.getElementById('picsLarge');
@@ -1877,12 +1935,14 @@ async function onOpenPics(e){
   const ret = '/items-to-list' + (returnParams.length? ('?'+returnParams.join('&')) : '');
   let diagUrl = '/item-prep/diagnostic?upc='+encodeURIComponent(upc)+'&from=items&return='+encodeURIComponent(ret);
   if(lot) diagUrl += '&lot='+encodeURIComponent(lot);
+  if(rowStatus) diagUrl += '&row_status='+encodeURIComponent(rowStatus);
   editLink.href = diagUrl;
-  dlAll.href = '/api/items_prep/diagnostic/'+encodeURIComponent(upc)+'/photos.zip';
+  dlAll.href = '/api/items_prep/diagnostic/'+encodeURIComponent(upc)+'/photos.zip' + (rowStatus ? ('?row_status=' + encodeURIComponent(rowStatus)) : '');
   try{
     const photoParams = new URLSearchParams();
-    photoParams.set('include_related', '1');
+    photoParams.set('exact_scope', '1');
     if(lot) photoParams.set('lot', lot);
+    if(rowStatus) photoParams.set('row_status', rowStatus);
     const res = await fetch('/api/items_prep/diagnostic/'+encodeURIComponent(upc)+'?'+photoParams.toString());
     if(!res.ok){ area.innerHTML = '<div class="small-muted">Failed to load</div>'; modal.style.display='flex'; return; }
     const j = await res.json();
@@ -1905,13 +1965,17 @@ async function onOpenPics(e){
 async function onOpenNotes(e){
   e.preventDefault();
   const upc = e.currentTarget.dataset.upc;
+  const rowStatus = (e.currentTarget.dataset.status || '').trim();
   if(!upc) return;
   const modal = document.getElementById('notesModal');
   const content = document.getElementById('notesModalContent');
   content.innerHTML = '<div class="small-muted">Loading...</div>';
   modal.style.display = 'flex';
   try{
-    const res = await fetch('/api/items_prep/notes/'+encodeURIComponent(upc));
+    const params = new URLSearchParams();
+    if(rowStatus) params.set('row_status', rowStatus);
+    const qs = params.toString();
+    const res = await fetch('/api/items_prep/notes/'+encodeURIComponent(upc)+(qs ? ('?'+qs) : ''));
     if(!res.ok){ 
       content.innerHTML = '<div class="small-muted">Failed to load notes</div>'; 
       return; 
@@ -2113,13 +2177,16 @@ async function onAddToListingAgentQueue(e){
     const resp = await fetch('/api/listingagent/queue/add', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({upc, title, source: 'list_manager', item_status, added_mode: 'auto'})
+      body: JSON.stringify({upc, title, source: 'list_manager', item_status, added_mode: 'my'})
     });
     const j = await resp.json().catch(()=> ({}));
     if(resp.ok && j && j.success){
-      btn.textContent = j.added ? 'Queued' : 'In queue';
-      btn.title = 'In Listing Agent queue';
+      listingAgentQueueState[upc] = j.item || { upc, status: 'queued', added_mode: 'my' };
+      const queueUi = _listagentQueueUiState(listingAgentQueueState[upc]);
+      btn.textContent = queueUi.label;
+      btn.title = queueUi.title;
       btn.classList.add('btn-copied');
+      btn.disabled = true;
       return;
     }
     btn.textContent = oldText;
@@ -2384,6 +2451,7 @@ async function loadItems(e, opts = {}){
     syncPerPageDropdown();
     updateSummary(totalCount, uniqueCount, totalQty);
     lastRenderedResults = pageResults;
+    await hydrateListingAgentQueueState(pageResults);
     render(pageResults);
     renderPagination(totalCount, page, limit);
     if(overlay) overlay.style.display = 'none';
@@ -2435,6 +2503,7 @@ async function loadItems(e, opts = {}){
 
   updateSummary(filtered_count, filtered_unique_upcs, filtered_total_quantity);
   lastRenderedResults = results;
+  await hydrateListingAgentQueueState(results);
   render(results);
   renderPagination(filtered_count, page, limit);
 
@@ -2456,7 +2525,7 @@ if (perPageSel) {
   <div id="loading-overlay">
     <div class="spinner"></div>
   </div>
-  <script src="/static/location-preview.js?v=20260312e"></script>
+  <script src="/static/location-preview.js?v=20260313b"></script>
   <script src="/static/i18n.js"></script>
 </body>
 </html>

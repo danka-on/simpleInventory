@@ -538,7 +538,7 @@
                 ${detailText ? `<div class="alert-group-detail">${esc(detailText)}</div>` : ''}
               </div>
               <div class="alert-group-actions">
-                <button class="btn-mark">Open Sync</button>
+                <button class="btn-mark btn-mark-group" data-alert-type="sync_overdue">Dismiss</button>
                 <span class="alert-group-arrow"><i class="fas fa-chevron-right"></i></span>
               </div>
             </div>
@@ -765,7 +765,7 @@
 
         state.marked = ((dismissedData.dismissed || [])).filter((r) => {
           const tval = String(r.alert_type || '').toLowerCase();
-          return tval === 'no_warehouse' || tval === 'quantity_alert';
+          return tval === 'no_warehouse' || tval === 'quantity_alert' || tval === 'sync_overdue';
         });
 
         state.ebayUnread = 0;

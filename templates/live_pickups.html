@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Live Pickups</title>
+  <style>
+    :root {
+      --bg: #f4f7f9;
+      --panel: #ffffff;
+      --text: #1f2933;
+      --muted: #6b7a89;
+      --border: #dce5ec;
+      --green-bg: #ecfdf3;
+      --green-border: #24a148;
+      --yellow-bg: #fff7db;
+      --yellow-border: #d4a106;
+      --red-bg: #fef2f2;
+      --red-border: #d92d20;
+      --shadow: 0 16px 36px rgba(15, 23, 42, 0.08);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(180deg, #edf5f3 0%, var(--bg) 100%);
+      color: var(--text);
+    }
+
+    .page {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 24px 18px 56px;
+    }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      gap: 14px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-bottom: 20px;
+    }
+
+    .topbar h1 {
+      margin: 0;
+      font-size: 2rem;
+    }
+
+    .nav-links {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .nav-link {
+      background: #fff;
+      color: var(--text);
+      text-decoration: none;
+      padding: 12px 16px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      transition: 0.2s ease;
+    }
+
+    .nav-link:hover {
+      transform: translateY(-1px);
+      border-color: #bfd0dc;
+    }
+
+    .intro {
+      margin: 0 0 20px;
+      color: var(--muted);
+      line-height: 1.5;
+      max-width: 760px;
+    }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+      margin-bottom: 18px;
+    }
+
+    .summary-card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 18px;
+      box-shadow: var(--shadow);
+    }
+
+    .summary-card .label {
+      color: var(--muted);
+      font-size: 0.88rem;
+      margin-bottom: 6px;
+    }
+
+    .summary-card .value {
+      font-size: 1.9rem;
+      font-weight: 800;
+    }
+
+    .legend {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 18px;
+    }
+
+    .legend-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 14px;
+      border-radius: 999px;
+      font-weight: 600;
+      background: #fff;
+      border: 1px solid var(--border);
+    }
+
+    .legend-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 999px;
+    }
+
+    .list {
+      display: grid;
+      gap: 14px;
+    }
+
+    .pickup-card {
+      display: grid;
+      grid-template-columns: 92px 1fr auto;
+      gap: 16px;
+      align-items: center;
+      padding: 18px;
+      border-radius: 20px;
+      box-shadow: var(--shadow);
+      border-left: 8px solid transparent;
+    }
+
+    .pickup-card.green {
+      background: var(--green-bg);
+      border-left-color: var(--green-border);
+    }
+
+    .pickup-card.yellow {
+      background: var(--yellow-bg);
+      border-left-color: var(--yellow-border);
+    }
+
+    .pickup-card.red {
+      background: var(--red-bg);
+      border-left-color: var(--red-border);
+    }
+
+    .thumb {
+      width: 92px;
+      height: 92px;
+      border-radius: 18px;
+      object-fit: cover;
+      background: rgba(255, 255, 255, 0.8);
+      border: 1px solid rgba(31, 41, 51, 0.08);
+    }
+
+    .thumb.placeholder {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--muted);
+      font-size: 0.8rem;
+    }
+
+    .title {
+      margin: 0 0 6px;
+      font-size: 1.15rem;
+      font-weight: 800;
+    }
+
+    .meta,
+    .submeta {
+      color: #364152;
+      margin: 0 0 4px;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.7);
+      border: 1px solid rgba(31, 41, 51, 0.08);
+      font-size: 0.82rem;
+      font-weight: 700;
+      color: #213547;
+      margin-top: 8px;
+    }
+
+    .status-panel {
+      text-align: right;
+      min-width: 180px;
+    }
+
+    .status-label {
+      font-weight: 800;
+      font-size: 1rem;
+      margin-bottom: 6px;
+    }
+
+    .status-time {
+      color: #364152;
+      font-size: 0.93rem;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 18px;
+      box-shadow: var(--shadow);
+    }
+
+    .empty {
+      text-align: center;
+      padding: 48px 18px;
+      color: var(--muted);
+    }
+
+    .error {
+      margin-bottom: 18px;
+      padding: 14px 16px;
+      border-radius: 14px;
+      background: #fef2f2;
+      color: #b42318;
+      border: 1px solid #f7c7c7;
+      display: none;
+    }
+
+    .error.show {
+      display: block;
+    }
+
+    @media (max-width: 900px) {
+      .summary-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .pickup-card {
+        grid-template-columns: 1fr;
+      }
+
+      .status-panel {
+        text-align: left;
+        min-width: 0;
+      }
+    }
+
+    @media (max-width: 560px) {
+      .summary-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="topbar">
+      <div>
+        <h1>Live Pickups</h1>
+      </div>
+      <div class="nav-links">
+        <a class="nav-link" href="/marketplace-session">Back to Marketplace Session</a>
+        <a class="nav-link" href="/marketplace-schedule-pickup">Schedule Pickup</a>
+      </div>
+    </div>
+
+    <p class="intro">
+      Scheduled pickups stay green by default, switch to yellow within one hour, and turn red within ten minutes or after the time has passed.
+    </p>
+
+    <div id="errorBox" class="error"></div>
+
+    <div class="summary-grid">
+      <div class="summary-card">
+        <div class="label">Total scheduled</div>
+        <div id="totalCount" class="value">0</div>
+      </div>
+      <div class="summary-card">
+        <div class="label">Green</div>
+        <div id="greenCount" class="value">0</div>
+      </div>
+      <div class="summary-card">
+        <div class="label">Yellow</div>
+        <div id="yellowCount" class="value">0</div>
+      </div>
+      <div class="summary-card">
+        <div class="label">Red</div>
+        <div id="redCount" class="value">0</div>
+      </div>
+    </div>
+
+    <div class="legend">
+      <div class="legend-chip"><span class="legend-dot" style="background:#24a148;"></span> More than 1 hour away</div>
+      <div class="legend-chip"><span class="legend-dot" style="background:#d4a106;"></span> Within 1 hour</div>
+      <div class="legend-chip"><span class="legend-dot" style="background:#d92d20;"></span> Within 10 minutes or overdue</div>
+    </div>
+
+    <div class="panel">
+      <div id="pickupList" class="list"></div>
+    </div>
+  </div>
+
+  <script>
+    const pickupList = document.getElementById('pickupList');
+    const errorBox = document.getElementById('errorBox');
+    const totalCount = document.getElementById('totalCount');
+    const greenCount = document.getElementById('greenCount');
+    const yellowCount = document.getElementById('yellowCount');
+    const redCount = document.getElementById('redCount');
+
+    let currentPickups = [];
+
+    function showError(text) {
+      errorBox.textContent = text;
+      errorBox.classList.add('show');
+    }
+
+    function clearError() {
+      errorBox.textContent = '';
+      errorBox.classList.remove('show');
+    }
+
+    function escapeHtml(value) {
+      return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function formatSource(source) {
+      if (source === 'facebook') return 'Facebook listing';
+      if (source === 'rawbol') return 'Raw BOL';
+      return 'Manual';
+    }
+
+    function buildThumb(imageUrl) {
+      if (imageUrl) {
+        return `<img class="thumb" src="${escapeHtml(imageUrl)}" alt="">`;
+      }
+      return '<div class="thumb placeholder">No image</div>';
+    }
+
+    function formatAbsolute(date) {
+      return date.toLocaleString([], {
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit'
+      });
+    }
+
+    function formatMinutes(totalMinutes) {
+      const minutes = Math.abs(totalMinutes);
+      const hours = Math.floor(minutes / 60);
+      const remainder = minutes % 60;
+      if (!hours) {
+        return `${remainder} min`;
+      }
+      if (!remainder) {
+        return `${hours} hr`;
+      }
+      return `${hours} hr ${remainder} min`;
+    }
+
+    function getStatus(pickup) {
+      const scheduled = new Date(pickup.scheduled_at);
+      const diffMinutes = Math.round((scheduled.getTime() - Date.now()) / 60000);
+
+      if (diffMinutes <= 10) {
+        return {
+          tone: 'red',
+          label: diffMinutes < 0 ? `Overdue by ${formatMinutes(diffMinutes)}` :
+            diffMinutes === 0 ? 'Due now' : `Due in ${formatMinutes(diffMinutes)}`
+        };
+      }
+
+      if (diffMinutes <= 60) {
+        return {
+          tone: 'yellow',
+          label: `Within 1 hour (${formatMinutes(diffMinutes)})`
+        };
+      }
+
+      return {
+        tone: 'green',
+        label: `Scheduled in ${formatMinutes(diffMinutes)}`
+      };
+    }
+
+    function renderPickups() {
+      const counts = { green: 0, yellow: 0, red: 0 };
+      totalCount.textContent = currentPickups.length;
+
+      if (!currentPickups.length) {
+        greenCount.textContent = '0';
+        yellowCount.textContent = '0';
+        redCount.textContent = '0';
+        pickupList.innerHTML = '<div class="empty">No scheduled pickups yet.</div>';
+        return;
+      }
+
+      const sorted = [...currentPickups].sort((a, b) => {
+        return new Date(a.scheduled_at) - new Date(b.scheduled_at);
+      });
+
+      pickupList.innerHTML = sorted.map((pickup) => {
+        const scheduledDate = new Date(pickup.scheduled_at);
+        const status = getStatus(pickup);
+        counts[status.tone] += 1;
+
+        return `
+          <div class="pickup-card ${status.tone}">
+            ${buildThumb(pickup.image_url || '')}
+            <div>
+              <p class="title">${escapeHtml(pickup.title || pickup.barcode || 'Pickup item')}</p>
+              <p class="meta">${escapeHtml(pickup.barcode || 'No barcode saved')}</p>
+              <p class="submeta">${escapeHtml(formatAbsolute(scheduledDate))}</p>
+              <span class="badge">${escapeHtml(formatSource(pickup.source || 'manual'))}</span>
+            </div>
+            <div class="status-panel">
+              <div class="status-label">${escapeHtml(status.label)}</div>
+              <div class="status-time">${escapeHtml(`${pickup.pickup_date} at ${pickup.pickup_time}`)}</div>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      greenCount.textContent = counts.green;
+      yellowCount.textContent = counts.yellow;
+      redCount.textContent = counts.red;
+    }
+
+    async function loadPickups() {
+      try {
+        const response = await fetch('/api/marketplace/pickups?status=scheduled&limit=250');
+        const data = await response.json();
+        if (!data.success) {
+          throw new Error(data.error || 'Could not load pickups');
+        }
+        currentPickups = data.pickups || [];
+        clearError();
+        renderPickups();
+      } catch (error) {
+        showError(error.message || 'Could not load pickups.');
+      }
+    }
+
+    loadPickups();
+    setInterval(loadPickups, 30000);
+    setInterval(renderPickups, 10000);
+  </script>
+</body>
+</html>

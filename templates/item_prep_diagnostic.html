@@ -253,10 +253,11 @@
       <!-- Move the status select up so it is near the pill visually -->
       <!-- Status dropdown removed, now using bubbles above -->
 
-      <label style="font-weight:600;font-size:1.05rem">Defect:</label>
+      <label style="font-weight:600;font-size:1.05rem">Defect (select one or more):</label>
       <div class="reason-group" role="group" aria-label="Select defect">
         <button type="button" class="reason-btn" data-val="Missing pieces">Missing pieces</button>
         <button type="button" class="reason-btn" data-val="Broken">Broken</button>
+        <button type="button" class="reason-btn" data-val="Box damage">Box damage</button>
         <button type="button" class="reason-btn" data-val="Replacement">Replacement</button>
         <button type="button" class="reason-btn" data-val="Other">Other</button>
       </div>
@@ -360,10 +361,36 @@
     const qualityGroup = document.getElementById('qualityGroup');
   const reasonSelect = document.getElementById('reasonSelect');
   const reasonBtns = Array.from(document.querySelectorAll('.reason-btn'));
+    const reasonSeparator = ' | ';
+    const allowedReasons = reasonBtns.map(btn => btn.dataset.val);
     let currentQuality = 'med'; // 'low' | 'med' | 'high' - default to medium
     function uid(){ return 'id_'+Math.random().toString(36).slice(2); }
     const pendingFiles = []; // {id, file, quality} - not used anymore
     const capturedFiles = []; // {id, file, quality} - stores camera captures
+
+    function parseReasonSelection(rawValue){
+      const text = String(rawValue || '').trim();
+      if(!text) return [];
+      const seen = new Set();
+      const out = [];
+      text.split(/\s*\|\s*|\s*,\s*/).forEach(part => {
+        const val = String(part || '').trim();
+        if(!val || !allowedReasons.includes(val) || seen.has(val)) return;
+        seen.add(val);
+        out.push(val);
+      });
+      return out;
+    }
+
+    function syncReasonButtonsFromValue(rawValue){
+      const selected = parseReasonSelection(rawValue);
+      const selectedSet = new Set(selected);
+      reasonBtns.forEach(btn => {
+        btn.classList.toggle('active', selectedSet.has(btn.dataset.val));
+      });
+      reasonSelect.value = selected.join(reasonSeparator);
+      updateDoneButtonState();
+    }
 
     function makeThumb(entry, source){
       const url = URL.createObjectURL(entry.file);
@@ -723,6 +750,27 @@
     const statusBubbles = document.querySelectorAll('.status-bubble');
     const statusBubbleWrap = document.getElementById('statusBubbleWrap');
     const statusInput = document.getElementById('statusInput');
+
+    function notesAreAllowedForStatus(status){
+      const normalized = String(status || '').trim().toLowerCase();
+      return ['good', 'bad', 'return'].includes(normalized);
+    }
+
+    function updateNoteComposerState(){
+      const noteInput = document.getElementById('newNoteInput');
+      const addBtn = document.getElementById('addNoteBtn');
+      if(!noteInput || !addBtn) return;
+      const currentStatus = isBadFlow
+        ? 'bad'
+        : (isReturnFlow ? 'return' : (statusInput.value || ''));
+      const allowed = notesAreAllowedForStatus(currentStatus);
+      noteInput.disabled = !allowed;
+      addBtn.disabled = !allowed;
+      noteInput.placeholder = allowed ? 'Add a note...' : 'Select Good, Bad, or Return first';
+      addBtn.title = allowed ? 'Add note' : 'Notes require Good, Bad, or Return status';
+      addBtn.style.opacity = allowed ? '1' : '0.55';
+      addBtn.style.cursor = allowed ? 'pointer' : 'not-allowed';
+    }
     
     function updateStatusBubbles(selectedStatus){
       statusBubbles.forEach(bubble => {
@@ -730,6 +778,7 @@
         bubble.classList.toggle('active', status === selectedStatus);
       });
       statusInput.value = selectedStatus;
+      updateNoteComposerState();
     }
     
     statusBubbles.forEach(bubble => {
@@ -784,20 +833,19 @@
       }
     }
 
-    // Reason buttons sync with select and toggle when clicked again
+    // Reason buttons support multi-select and keep a stable display order.
     reasonBtns.forEach(btn=>{
       btn.addEventListener('click', ()=>{
-        const isActive = btn.classList.contains('active');
-        // clear all
-        reasonBtns.forEach(b=> b.classList.remove('active'));
-        if(!isActive){
-          btn.classList.add('active');
-          reasonSelect.value = btn.dataset.val;
+        const current = parseReasonSelection(reasonSelect.value);
+        const selected = new Set(current);
+        const val = btn.dataset.val;
+        if(selected.has(val)){
+          selected.delete(val);
         } else {
-          // toggle off
-          reasonSelect.value = '';
+          selected.add(val);
         }
-        updateDoneButtonState();
+        const ordered = allowedReasons.filter(reason => selected.has(reason));
+        syncReasonButtonsFromValue(ordered.join(reasonSeparator));
       });
     });
     
@@ -918,13 +966,7 @@
         
         // Only restore reason if NOT a new forced-flow entry
         if(!isForcedFlowEntry && st){
-          const val = (st.reason||'').trim();
-          const valid = ['Missing pieces','Broken','Replacement','Other'];
-          reasonSelect.value = valid.includes(val) ? val : '';
-          const targetBtn = reasonBtns.find(b=> b.dataset.val === reasonSelect.value);
-          if(targetBtn){ reasonBtns.forEach(b=> b.classList.remove('active')); targetBtn.classList.add('active'); }
-          // Update Done button state after loading existing reason
-          updateDoneButtonState();
+          syncReasonButtonsFromValue((st.reason||'').trim());
         }
         if(imgs.length){
           const card = document.getElementById('existingCard');
@@ -1045,6 +1087,7 @@
 
     // Auto-select "bad" status is now handled in loadExistingStatus function
     // No default defect selection
+    syncReasonButtonsFromValue('');
 
     // Top-right Done button functionality (same as Complete button)
     document.getElementById('doneBtn').addEventListener('click', async ()=>{
@@ -1117,6 +1160,10 @@
     }
 
     async function addNote(){
+      if(!notesAreAllowedForStatus(isBadFlow ? 'bad' : (isReturnFlow ? 'return' : statusInput.value))){
+        alert('Notes can only be added to Good, Bad, or Return rows.');
+        return;
+      }
       const upc = '{{ upc }}'.trim();
       const input = document.getElementById('newNoteInput');
       const note = (input.value || '').trim();
@@ -1164,6 +1211,7 @@
     document.getElementById('newNoteInput').addEventListener('keydown', (e)=>{
       if(e.key === 'Enter'){ e.preventDefault(); addNote(); }
     });
+    updateNoteComposerState();
 
     // Position functionality - bind directly since script is at end of body
     console.log('=== About to look for setPositionBtn ===');
@@ -1233,7 +1281,7 @@
         // Show shelf image from static/shelves/
         const modal = document.getElementById('imgModal');
         const modalImg = document.getElementById('modalImg');
-        modalImg.src = `/static/shelves/${shelfCode.toLowerCase()}.png?t=${Date.now()}`;
+        modalImg.src = `/shelf-image/${encodeURIComponent(shelfCode.toLowerCase())}.png?t=${Date.now()}`;
         modal.style.display = 'flex';
       }
     }
@@ -1321,7 +1369,7 @@
       }
     });
   </script>
-  <script src="/static/location-preview.js?v=20260312e"></script>
+  <script src="/static/location-preview.js?v=20260313b"></script>
   <script src="/static/i18n.js"></script>
 </body>
 </html>

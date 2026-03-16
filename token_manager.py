@@ -8,8 +8,36 @@ TOKEN_FILE = os.path.join(BASE_DIR, "tokens.json")
 
 CLIENT_ID = os.getenv("EBAY_CLIENT_ID", "your_id")
 CLIENT_SECRET = os.getenv("EBAY_CLIENT_SECRET", "your_secret")
-SCOPE = os.getenv("EBAY_SCOPE", "https://api.ebay.com/oauth/api_scope")
 TOKEN_URL = "https://api.ebay.com/identity/v1/oauth2/token"
+GENERIC_SCOPE = "https://api.ebay.com/oauth/api_scope"
+DEFAULT_USER_SCOPES = [
+    "https://api.ebay.com/oauth/api_scope/sell.inventory",
+    "https://api.ebay.com/oauth/api_scope/sell.fulfillment",
+    "https://api.ebay.com/oauth/api_scope/sell.logistics",
+    "https://api.ebay.com/oauth/api_scope/sell.finances",
+    "https://api.ebay.com/oauth/api_scope/sell.account",
+    "https://api.ebay.com/oauth/api_scope/sell.marketing",
+    "https://api.ebay.com/oauth/api_scope/sell.analytics.readonly",
+]
+
+def _scope_tokens(value):
+    seen = set()
+    out = []
+    for token in str(value or "").replace(",", " ").split():
+        scope = token.strip()
+        if not scope or scope in seen:
+            continue
+        seen.add(scope)
+        out.append(scope)
+    return out
+
+def _normalize_user_scope(value):
+    scopes = _scope_tokens(value)
+    if GENERIC_SCOPE in scopes and any(scope != GENERIC_SCOPE for scope in scopes):
+        scopes = [scope for scope in scopes if scope != GENERIC_SCOPE]
+    return " ".join(scopes)
+
+SCOPE = _normalize_user_scope(os.getenv("EBAY_SCOPE") or " ".join(DEFAULT_USER_SCOPES))
 
 def load_tokens():
     with open(TOKEN_FILE) as f:

@@ -11,6 +11,7 @@ Write-Host "🚀 Deploying to $User@$HostName..." -ForegroundColor Cyan
 Write-Host "Transferring Python modules..." -ForegroundColor Yellow
 scp .\app.py "$User@$HostName`:$RemotePath/"
 scp .\DBmanager.py "$User@$HostName`:$RemotePath/"
+scp .\organize_shelf_storage.py "$User@$HostName`:$RemotePath/"
 
 # Never SCP database files (.db) from PC to Pi.
 # The Pi has its own live databases.
@@ -28,17 +29,24 @@ scp .\templates\item_prep.html "$User@$HostName`:$RemotePath/templates/"
 scp .\templates\listingagent.html "$User@$HostName`:$RemotePath/templates/"
 scp .\templates\listingagent_mobile.html "$User@$HostName`:$RemotePath/templates/"
 scp .\templates\price_master.html "$User@$HostName`:$RemotePath/templates/"
+scp .\templates\ready_to_ship.html "$User@$HostName`:$RemotePath/templates/"
+scp .\templates\searchrack.html "$User@$HostName`:$RemotePath/templates/"
 
 # Transfer static files
 Write-Host "Transferring static assets..." -ForegroundColor Yellow
 scp .\static\i18n.js "$User@$HostName`:$RemotePath/static/"
+scp .\static\location-preview.js "$User@$HostName`:$RemotePath/static/"
 scp .\static\shelf-creator.css "$User@$HostName`:$RemotePath/static/"
 scp .\static\shelf-creator.js "$User@$HostName`:$RemotePath/static/"
-scp .\static\shelves\*.png "$User@$HostName`:$RemotePath/static/shelves/"
-scp .\static\shelves\originals\*.png "$User@$HostName`:$RemotePath/static/shelves/originals/"
+scp -r .\static\shelves\office "$User@$HostName`:$RemotePath/static/shelves/"
+scp -r .\static\shelves\garage "$User@$HostName`:$RemotePath/static/shelves/"
+scp -r .\static\shelves\hallway "$User@$HostName`:$RemotePath/static/shelves/"
+scp -r .\static\shelves\misc "$User@$HostName`:$RemotePath/static/shelves/"
 
 Write-Host "✅ Deployment complete!" -ForegroundColor Green
 Write-Host "💡 Restart the Flask app on the Pi to see changes" -ForegroundColor Cyan
+Write-Host "💡 Pi cleanup dry run: ssh $User@$HostName `"python3 $RemotePath/organize_shelf_storage.py $RemotePath/static/shelves --dry-run`"" -ForegroundColor Cyan
+Write-Host "💡 Pi cleanup apply:   ssh $User@$HostName `"python3 $RemotePath/organize_shelf_storage.py $RemotePath/static/shelves`"" -ForegroundColor Cyan
 
 # Log deployment timestamp locally
 $LogPath = Join-Path $PSScriptRoot "deploy-log.txt"

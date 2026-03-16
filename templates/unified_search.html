@@ -709,7 +709,7 @@
     </div>
   </div>
 
-  <script src="/static/location-preview.js?v=20260312e"></script>
+  <script src="/static/location-preview.js?v=20260313b"></script>
   <script>
     const searchInput = document.getElementById('searchInput');
     const searchBtn   = document.getElementById('searchBtn');
@@ -846,10 +846,10 @@
 
       if (code) {
         const compact = code.replace(/\s+/g, '');
-        add('/static/shelves/' + encodeURIComponent(code.toLowerCase()) + '.png');
-        add('/static/shelves/' + encodeURIComponent(compact.toLowerCase()) + '.png');
-        add('/static/shelves/' + encodeURIComponent(code) + '.png');
-        add('/static/shelves/' + encodeURIComponent(compact) + '.png');
+        add('/shelf-image/' + encodeURIComponent(code.toLowerCase()) + '.png');
+        add('/shelf-image/' + encodeURIComponent(compact.toLowerCase()) + '.png');
+        add('/shelf-image/' + encodeURIComponent(code) + '.png');
+        add('/shelf-image/' + encodeURIComponent(compact) + '.png');
         add('/static/pictureposition/' + encodeURIComponent(code));
         add('/static/pictureposition/' + encodeURIComponent(compact));
         add('/static/pictureposition/' + encodeURIComponent(code) + '.jpg');

@@ -727,10 +727,10 @@ function _locationImageCandidates(location) {
   if (isPathLike || hasExt) {
     add('/static/pictureposition/' + baseName);
     const shelfStem = decodeURIComponent(baseName).replace(/\.[a-z0-9]{2,5}$/i, '').toLowerCase();
-    if (shelfStem) add('/static/shelves/' + encodeURIComponent(shelfStem) + '.png');
+    if (shelfStem) add('/shelf-image/' + encodeURIComponent(shelfStem) + '.png');
   } else {
     const code = clean.toLowerCase();
-    add('/static/shelves/' + encodeURIComponent(code) + '.png');
+    add('/shelf-image/' + encodeURIComponent(code) + '.png');
     add('/static/pictureposition/' + encodeURIComponent(clean));
   }
 
@@ -1270,7 +1270,7 @@ document.addEventListener('click', function(e) {
   openLocationImage(location);
 });
 </script>
-<script src="/static/location-preview.js?v=20260312e"></script>
+<script src="/static/location-preview.js?v=20260313b"></script>
 <script src="/static/i18n.js"></script>
 </body>
 </html>

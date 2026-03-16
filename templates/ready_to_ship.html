@@ -309,6 +309,57 @@
       transition: color 0.15s ease;
     }
     .sold-td-small a:hover { color: #bfdbfe; text-decoration: underline; }
+    .rt-title-wrap {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      min-width: 0;
+    }
+    .rt-title-copy {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .rt-title-link {
+      display: inline-block;
+      max-width: 220px;
+      white-space: normal;
+      word-break: break-word;
+      line-height: 1.3;
+    }
+    .rt-prep-flag-slot {
+      min-height: 24px;
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .rt-prep-flag {
+      border: 1px solid rgba(251, 191, 36, 0.35);
+      background: rgba(245, 158, 11, 0.14);
+      color: #fde68a;
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      line-height: 1;
+    }
+    .rt-prep-flag:hover {
+      background: rgba(245, 158, 11, 0.22);
+      text-decoration: none;
+    }
+    .rt-prep-flag.is-defect {
+      border-color: rgba(248, 113, 113, 0.35);
+      background: rgba(239, 68, 68, 0.16);
+      color: #fecaca;
+    }
+    .rt-prep-flag.is-defect:hover {
+      background: rgba(239, 68, 68, 0.24);
+    }
 
     /* Status buttons */
     .status-btn {
@@ -403,6 +454,216 @@
     .order-popup-card .popup-close-btn:hover {
       box-shadow: 0 6px 20px rgba(59,130,246,0.4) !important;
     }
+    .order-popup-card .rt-prep-section {
+      text-align: left;
+      margin-top: 18px;
+      padding-top: 18px;
+      border-top: 1px solid rgba(255,255,255,0.08);
+    }
+    .order-popup-card .rt-prep-summary {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 10px 0 14px;
+    }
+    .order-popup-card .rt-prep-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 10px;
+      border-radius: 999px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.01em;
+    }
+    .order-popup-card .rt-prep-chip.meta {
+      background: rgba(59,130,246,0.14);
+      color: #bfdbfe;
+      border: 1px solid rgba(96,165,250,0.28);
+    }
+    .order-popup-card .rt-prep-chip.alert {
+      background: rgba(239,68,68,0.14);
+      color: #fecaca;
+      border: 1px solid rgba(248,113,113,0.28);
+    }
+    .order-popup-card .rt-prep-entry-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .order-popup-card .rt-prep-entry {
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(15,23,42,0.6);
+      border-radius: 14px;
+      padding: 12px;
+    }
+    .order-popup-card .rt-prep-entry-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 10px;
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+    }
+    .order-popup-card .rt-prep-entry-title {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+    }
+    .order-popup-card .rt-prep-chip.upc {
+      background: rgba(255,255,255,0.08);
+      color: #f8fafc;
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+    .order-popup-card .rt-prep-chip.status-good {
+      background: rgba(16,185,129,0.14);
+      color: #a7f3d0;
+      border: 1px solid rgba(52,211,153,0.25);
+    }
+    .order-popup-card .rt-prep-chip.status-bad {
+      background: rgba(239,68,68,0.14);
+      color: #fecaca;
+      border: 1px solid rgba(248,113,113,0.28);
+    }
+    .order-popup-card .rt-prep-chip.status-return {
+      background: rgba(245,158,11,0.14);
+      color: #fde68a;
+      border: 1px solid rgba(251,191,36,0.28);
+    }
+    .order-popup-card .rt-prep-chip.status-unchecked {
+      background: rgba(148,163,184,0.14);
+      color: #cbd5e1;
+      border: 1px solid rgba(148,163,184,0.28);
+    }
+    .order-popup-card .rt-prep-chip.relevance {
+      background: rgba(168,85,247,0.14);
+      color: #ddd6fe;
+      border: 1px solid rgba(192,132,252,0.28);
+    }
+    .order-popup-card .rt-prep-defect {
+      margin-bottom: 10px;
+      font-size: 0.88rem;
+      font-weight: 700;
+      color: #fca5a5;
+    }
+    .order-popup-card .rt-prep-notes {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .order-popup-card .rt-prep-note {
+      border-radius: 10px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.06);
+      padding: 9px 10px;
+    }
+    .order-popup-card .rt-prep-note.is-status {
+      background: rgba(59,130,246,0.12);
+      border-color: rgba(96,165,250,0.24);
+    }
+    .order-popup-card .rt-prep-note-text {
+      font-size: 0.9rem;
+      line-height: 1.4;
+      color: #e2e8f0;
+      word-break: break-word;
+    }
+    .order-popup-card .rt-prep-note-meta {
+      margin-top: 5px;
+      font-size: 0.74rem;
+      color: #94a3b8;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .order-popup-card .rt-prep-images {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .order-popup-card .rt-prep-image-link {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      height: 96px;
+      padding: 6px;
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: #0f172a;
+      cursor: zoom-in;
+    }
+    .order-popup-card .rt-prep-image-link img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      object-position: center;
+      background: #0f172a;
+      border-radius: 8px;
+    }
+    .rt-prep-image-modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(2, 6, 23, 0.82);
+      backdrop-filter: blur(4px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 11050;
+      padding: 18px;
+      animation: fadeIn 0.18s ease;
+    }
+    .rt-prep-image-modal-card {
+      position: relative;
+      width: min(980px, 94vw);
+      max-height: 92vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px 16px 10px;
+      border-radius: 18px;
+      background: rgba(15, 23, 42, 0.96);
+      border: 1px solid rgba(255,255,255,0.1);
+      box-shadow: 0 20px 48px rgba(0,0,0,0.42);
+    }
+    .rt-prep-image-modal-card img {
+      display: block;
+      max-width: 100%;
+      max-height: calc(92vh - 56px);
+      object-fit: contain;
+      border-radius: 12px;
+      background: #020617;
+    }
+    .rt-prep-image-modal-close {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      width: 38px;
+      height: 38px;
+      border: none;
+      border-radius: 999px;
+      background: rgba(15, 23, 42, 0.84);
+      color: #f8fafc;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1rem;
+      box-shadow: 0 8px 20px rgba(0,0,0,0.24);
+    }
+    .rt-prep-image-modal-close:hover {
+      background: rgba(30, 41, 59, 0.96);
+    }
+    .order-popup-card .rt-prep-loading,
+    .order-popup-card .rt-prep-empty,
+    .order-popup-card .rt-prep-error {
+      font-size: 0.9rem;
+      color: #94a3b8;
+      padding: 8px 0 2px;
+    }
+    .order-popup-card .rt-prep-error { color: #fca5a5; }
 
     /* Required allocation popup for multi-location sold items */
     .loc-alloc-overlay {
@@ -707,6 +968,16 @@
     html.ss-theme-day .rt-table tbody tr:hover { background: rgba(59,130,246,0.04); }
     html.ss-theme-day .sold-td-small a { color: #2563eb; }
     html.ss-theme-day .sold-td-small a:hover { color: #1d4ed8; }
+    html.ss-theme-day .rt-prep-flag {
+      background: rgba(245,158,11,0.12);
+      border-color: rgba(217,119,6,0.22);
+      color: #92400e;
+    }
+    html.ss-theme-day .rt-prep-flag.is-defect {
+      background: rgba(239,68,68,0.12);
+      border-color: rgba(220,38,38,0.2);
+      color: #b91c1c;
+    }
     html.ss-theme-day #completed-orders-table thead th { background: rgba(16,185,129,0.08); }
     html.ss-theme-day .rt-empty { color: #9ca3af !important; }
     html.ss-theme-day .order-popup-card {
@@ -728,6 +999,87 @@
     }
     html.ss-theme-day .order-popup-card .popup-close-btn {
       background: linear-gradient(135deg, #3b82f6, #2563eb) !important;
+    }
+    html.ss-theme-day .order-popup-card .rt-prep-section {
+      border-top-color: #e5e7eb;
+    }
+    html.ss-theme-day .order-popup-card .rt-prep-chip.meta {
+      background: rgba(37,99,235,0.1);
+      color: #1d4ed8;
+      border-color: rgba(37,99,235,0.18);
+    }
+    html.ss-theme-day .order-popup-card .rt-prep-chip.alert {
+      background: rgba(220,38,38,0.1);
+      color: #b91c1c;
+      border-color: rgba(220,38,38,0.18);
+    }
+    html.ss-theme-day .order-popup-card .rt-prep-entry {
+      background: #f8fbff;
+      border-color: #dbe5ef;
+    }
+    html.ss-theme-day .order-popup-card .rt-prep-chip.upc {
+      background: #ffffff;
+      color: #111827;
+      border-color: #dbe5ef;
+    }
+    html.ss-theme-day .order-popup-card .rt-prep-chip.status-good {
+      background: rgba(22,163,74,0.1);
+      color: #15803d;
+      border-color: rgba(22,163,74,0.18);
+    }
+    html.ss-theme-day .order-popup-card .rt-prep-chip.status-bad {
+      background: rgba(220,38,38,0.1);
+      color: #b91c1c;
+      border-color: rgba(220,38,38,0.18);
+    }
+    html.ss-theme-day .order-popup-card .rt-prep-chip.status-return {
+      background: rgba(217,119,6,0.1);
+      color: #b45309;
+      border-color: rgba(217,119,6,0.18);
+    }
+    html.ss-theme-day .order-popup-card .rt-prep-chip.status-unchecked {
+      background: rgba(100,116,139,0.1);
+      color: #475569;
+      border-color: rgba(100,116,139,0.18);
+    }
+    html.ss-theme-day .order-popup-card .rt-prep-chip.relevance {
+      background: rgba(124,58,237,0.1);
+      color: #6d28d9;
+      border-color: rgba(124,58,237,0.18);
+    }
+    html.ss-theme-day .order-popup-card .rt-prep-defect { color: #b91c1c; }
+    html.ss-theme-day .order-popup-card .rt-prep-note {
+      background: #ffffff;
+      border-color: #e5e7eb;
+    }
+    html.ss-theme-day .order-popup-card .rt-prep-note.is-status {
+      background: rgba(37,99,235,0.08);
+      border-color: rgba(37,99,235,0.16);
+    }
+    html.ss-theme-day .order-popup-card .rt-prep-note-text { color: #111827; }
+    html.ss-theme-day .order-popup-card .rt-prep-note-meta,
+    html.ss-theme-day .order-popup-card .rt-prep-loading,
+    html.ss-theme-day .order-popup-card .rt-prep-empty { color: #6b7280; }
+    html.ss-theme-day .order-popup-card .rt-prep-error { color: #b91c1c; }
+    html.ss-theme-day .order-popup-card .rt-prep-image-link,
+    html.ss-theme-day .order-popup-card .rt-prep-image-link img {
+      background: #ffffff;
+      border-color: #e5e7eb;
+    }
+    html.ss-theme-day .rt-prep-image-modal {
+      background: rgba(15, 23, 42, 0.7);
+    }
+    html.ss-theme-day .rt-prep-image-modal-card {
+      background: rgba(255,255,255,0.98);
+      border-color: rgba(15,23,42,0.08);
+    }
+    html.ss-theme-day .rt-prep-image-modal-card img {
+      background: #f8fafc;
+    }
+    html.ss-theme-day .rt-prep-image-modal-close {
+      background: rgba(255,255,255,0.92);
+      color: #111827;
+      border: 1px solid rgba(15,23,42,0.08);
     }
     html.ss-theme-day .loc-alloc-card {
       background: #e4ebf4;
@@ -996,6 +1348,51 @@ function formatUpcDisplay(code) {
     return s;
 }
 
+function stripLeadingZerosNumeric(value) {
+    const s = String(value || '').trim();
+    if (!s) return '';
+    if (/^\d+$/.test(s)) {
+        const stripped = s.replace(/^0+/, '');
+        return stripped || '0';
+    }
+    return s;
+}
+
+function normalizePrepLookupBarcode(value) {
+    const s = String(value || '').trim();
+    if (!s) return '';
+    if (s.includes('-')) {
+        const parts = s.split('-', 2);
+        return `${stripLeadingZerosNumeric(parts[0])}-${String(parts[1] || '').trim()}`;
+    }
+    return stripLeadingZerosNumeric(s);
+}
+
+function renderReadyToShipPrepFlag(order) {
+    const summary = order && order.prep_alert_summary ? order.prep_alert_summary : null;
+    if (!summary || !summary.has_alerts) return '';
+    const entryCount = parsePosInt(summary.entry_count, 0);
+    const defectCount = parsePosInt(summary.defect_count, 0);
+    const noteCount = parsePosInt(summary.note_count, 0);
+    const imageCount = parsePosInt(summary.image_count, 0);
+    const detailBits = [];
+    if (defectCount > 0) detailBits.push(`${defectCount} defect${defectCount === 1 ? '' : 's'}`);
+    if (noteCount > 0) detailBits.push(`${noteCount} note${noteCount === 1 ? '' : 's'}`);
+    if (imageCount > 0) detailBits.push(`${imageCount} photo${imageCount === 1 ? '' : 's'}`);
+    const title = detailBits.length ? detailBits.join(' | ') : 'Prep note';
+    const label = entryCount > 1 ? `Prep ${entryCount}` : 'Prep note';
+    const icon = defectCount > 0 ? 'fa-triangle-exclamation' : 'fa-note-sticky';
+    const cls = defectCount > 0 ? 'rt-prep-flag is-defect' : 'rt-prep-flag is-note';
+    return `<button type="button" class="order-prep-link ${cls}" data-order-id="${order.id}" title="${esc(title)}"><i class="fas ${icon}"></i><span>${esc(label)}</span></button>`;
+}
+
+function patchReadyToShipPrepFlag(orderId) {
+    const order = OrderManager.getOrder(orderId);
+    const slot = document.querySelector(`.rt-prep-flag-slot[data-order-id="${String(orderId)}"]`);
+    if (!slot) return;
+    slot.innerHTML = renderReadyToShipPrepFlag(order);
+}
+
 function tdTitle(order) {
     const fullTitle = esc(order.title || '');
     const imgSrc = esc(order.image || order.image_url || '');
@@ -1003,7 +1400,7 @@ function tdTitle(order) {
     const thumbHtml = imgSrc
         ? `<img src="${imgSrc}" style="width:44px;height:44px;object-fit:cover;border-radius:8px;margin-right:10px;vertical-align:middle;border:1px solid rgba(255,255,255,0.08);" onerror="this.src='${missingDataUrlThumb}'" loading="lazy">`
         : `<img src='${missingDataUrlThumb}' style="width:44px;height:44px;object-fit:cover;border-radius:8px;margin-right:10px;vertical-align:middle;border:1px solid rgba(255,255,255,0.08);">`;
-    return `<td class='sold-td-small'><a href="#" class="order-title-link" data-order-id="${order.id}" style="display:flex;align-items:center;">${thumbHtml}<span style="display:inline-block;max-width:220px;vertical-align:middle;">${fullTitle}</span></a></td>`;
+    return `<td class='sold-td-small'><div class="rt-title-wrap">${thumbHtml}<div class="rt-title-copy"><a href="#" class="order-title-link rt-title-link" data-order-id="${order.id}">${fullTitle}</a><div class="rt-prep-flag-slot" data-order-id="${order.id}">${renderReadyToShipPrepFlag(order)}</div></div></div></td>`;
 }
 
 function tdInfo(order) {
@@ -1166,6 +1563,56 @@ function renderSoldOrders(orders, fromCache = false) {
     if (!fromCache) {
         OrderManager.saveToLocalStorage();
     }
+
+    refreshReadyToShipPrepSummaries(dedupedOrders).catch(err => {
+        console.warn('Failed to refresh prep summaries:', err);
+    });
+}
+
+let readyToShipPrepSummaryRequest = 0;
+
+async function refreshReadyToShipPrepSummaries(orders) {
+    const list = Array.isArray(orders) ? orders : [];
+    const barcodeMap = new Map();
+    list.forEach(order => {
+        const key = normalizePrepLookupBarcode(order && order.barcode);
+        if (!key) return;
+        if (!barcodeMap.has(key)) barcodeMap.set(key, []);
+        barcodeMap.get(key).push(String(order.id));
+    });
+    const barcodes = Array.from(barcodeMap.keys());
+    if (!barcodes.length) return;
+
+    const reqId = ++readyToShipPrepSummaryRequest;
+    const res = await fetch('/api/ready-to-ship/prep-summaries', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        cache: 'no-store',
+        body: JSON.stringify({ barcodes })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (reqId !== readyToShipPrepSummaryRequest) return;
+    if (!res.ok || !data || !data.success) {
+        throw new Error((data && data.error) || 'Failed to load prep summaries');
+    }
+
+    const summaries = data.summaries || {};
+    OrderManager.getOrders().forEach(order => {
+        const key = normalizePrepLookupBarcode(order && order.barcode);
+        if (!key) return;
+        const summary = summaries[key] || {
+            has_alerts: false,
+            entry_count: 0,
+            note_count: 0,
+            defect_count: 0,
+            image_count: 0,
+            latest_at: '',
+            has_suffixed: false
+        };
+        order.prep_alert_summary = summary;
+        patchReadyToShipPrepFlag(order.id);
+    });
+    OrderManager.saveToLocalStorage();
 }
 
 function parsePosInt(value, fallback = 0) {
@@ -1185,7 +1632,7 @@ function locationPreviewUrl(rawKey) {
     if (/\.(jpe?g|png|gif|webp)$/i.test(key)) {
         return `/static/pictureposition/${encodeURIComponent(key)}`;
     }
-    return `/static/shelves/${encodeURIComponent(key.toLowerCase())}.png`;
+    return `/shelf-image/${encodeURIComponent(key.toLowerCase())}.png`;
 }
 
 function openLocationMediaPreview(locationCode, previewKey, startExpandedIndex) {
@@ -1200,20 +1647,51 @@ function openLocationMediaPreview(locationCode, previewKey, startExpandedIndex) 
 
 function readyToShipMapKey(rawValue) {
     const compact = String(rawValue || '').trim().replace(/\s+/g, '').toLowerCase();
-    if (!compact) return '';
-    if (/^ofloor\d+$/i.test(compact)) return compact;
-    const shelfMatch = compact.match(/^(.*)s\d+$/i);
-    return shelfMatch ? shelfMatch[1] : compact;
+    const baseCode = compact.replace(/b\d+$/i, '');
+    if (!baseCode) return '';
+    if (/^ofloor\d+$/i.test(baseCode)) return baseCode;
+    const shelfMatch = baseCode.match(/^(.*)s\d+$/i);
+    return shelfMatch ? shelfMatch[1] : baseCode;
+}
+
+function readyToShipUniqueUrls(values) {
+    return Array.from(new Set((values || []).filter(Boolean)));
+}
+
+function readyToShipBuildFallbackJs(choices, terminalJs) {
+    const fallbacks = readyToShipUniqueUrls(choices).slice(1);
+    if (!fallbacks.length) return terminalJs;
+    const branches = fallbacks.map((src, index) => {
+        const safeSrc = String(src || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        const clause = index === 0
+            ? '!this.dataset.fallbackIndex'
+            : `this.dataset.fallbackIndex==='${index}'`;
+        const keyword = index === 0 ? 'if' : 'else if';
+        return `${keyword}(${clause}){this.dataset.fallbackIndex='${index + 1}';this.src='${safeSrc}';}`;
+    }).join('');
+    return `${branches}else{${terminalJs}}`;
 }
 
 function readyToShipMapUrl(rawValue) {
     const key = readyToShipMapKey(rawValue);
     if (!key) return '';
     if (/^(or|omr|ofloor)/i.test(key)) {
-        return `/static/shelves/originals/officemap_${encodeURIComponent(key)}.png`;
+        return `/static/shelves/office/maps/officemap_${encodeURIComponent(key)}.png`;
     }
     if (/^(gr|gmid|gfloor|misc)/i.test(key)) {
-        return `/static/shelves/originals/garagemap_${encodeURIComponent(key)}.png`;
+        return `/static/shelves/garage/maps/garagemap_${encodeURIComponent(key)}.png`;
+    }
+    return '';
+}
+
+function readyToShipLegacyMapUrl(rawValue) {
+    const key = readyToShipMapKey(rawValue);
+    if (!key) return '';
+    if (/^(or|omr|ofloor)/i.test(key)) {
+        return `/static/shelves/maps/office/officemap_${encodeURIComponent(key)}.png`;
+    }
+    if (/^(gr|gmid|gfloor|misc)/i.test(key)) {
+        return `/static/shelves/maps/garage/garagemap_${encodeURIComponent(key)}.png`;
     }
     return '';
 }
@@ -1232,35 +1710,65 @@ function readyToShipLocationPreviewHtml(locationCode, previewKey) {
             ? key
             : `/static/pictureposition/${encodeURIComponent(key)}`;
         return `
-            <div style="display:grid;grid-template-columns:minmax(0,1fr);gap:10px;margin-top:10px;">
-                <button type="button" class="rt-location-thumb" data-location-code="${safeCode}" data-preview-key="${safeKey}" data-preview-index="0" onclick="event.stopPropagation();event.preventDefault();openLocationMediaPreview(this.dataset.locationCode,this.dataset.previewKey,this.dataset.previewIndex);return false;" style="border:1px solid rgba(59,130,246,0.7);border-radius:14px;background:linear-gradient(180deg,rgba(30,64,175,0.34),rgba(15,23,42,0.86));padding:10px;cursor:zoom-in;box-shadow:0 10px 24px rgba(30,64,175,0.18);">
-                    <div style="font-size:0.72rem;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;color:#fff;margin-bottom:6px;">Location Image</div>
-                    <img src="${esc(src)}" alt="${safeCode}" class="popup-loc-image" style="width:100%;max-width:260px;max-height:200px;object-fit:contain;border-radius:10px;" onerror="this.closest('button').style.display='none'">
-                </button>
+            <div style="margin-top:10px;">
+                <div class="browse-preview-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;width:100%;align-items:start;">
+                    <button type="button" class="rt-location-thumb browse-preview-card" data-location-code="${safeCode}" data-preview-key="${safeKey}" data-preview-index="0" onclick="event.stopPropagation();event.preventDefault();openLocationMediaPreview(this.dataset.locationCode,this.dataset.previewKey,this.dataset.previewIndex);return false;" style="border:1px solid #dbe3ef;border-radius:10px;background:#fff;padding:10px;cursor:zoom-in;text-align:left;display:flex;flex-direction:column;gap:8px;">
+                        <div style="font-size:0.78rem;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;color:#64748b;">Location Image</div>
+                        <div style="min-height:220px;display:flex;align-items:center;justify-content:center;border:1px solid #e5e7eb;border-radius:8px;background:#fff;overflow:hidden;">
+                            <img src="${esc(src)}" alt="${safeCode}" class="popup-loc-image" style="display:block;max-width:100%;max-height:320px;object-fit:contain;" onerror="this.closest('button').style.display='none'">
+                        </div>
+                    </button>
+                </div>
+                <div style="margin-top:10px;font-size:0.82rem;color:#64748b;">Click image to expand.</div>
             </div>
         `;
     }
 
     const lowerCode = code.toLowerCase();
     const upperCode = code.toUpperCase();
-    const shelfDisplay = `/static/shelves/${encodeURIComponent(lowerCode)}.png`;
-    const shelfDisplayUpper = `/static/shelves/${encodeURIComponent(upperCode)}.png`;
-    const shelfFallback = `/static/shelves/originals/${encodeURIComponent(lowerCode)}.png`;
-    const shelfFallbackUpper = `/static/shelves/originals/${encodeURIComponent(upperCode)}.png`;
-    const mapUrl = readyToShipMapUrl(code);
+    const mapStem = readyToShipMapKey(code);
+    const isGarageShelf = /^(gr|gmid|gfloor|misc)/i.test(mapStem);
+    const isOfficeShelf = /^(or|omr|ofloor)/i.test(mapStem);
+    const shelfBase = isGarageShelf ? `/shelf-base/${encodeURIComponent(lowerCode)}.png` : '';
+    const shelfBaseUpper = isGarageShelf ? `/shelf-base/${encodeURIComponent(upperCode)}.png` : '';
+    const shelfBaseLegacy = '';
+    const shelfBaseUpperLegacy = '';
+    const shelfOfficeBase = isOfficeShelf ? `/shelf-base/${encodeURIComponent(lowerCode)}.png` : '';
+    const shelfOfficeBaseUpper = isOfficeShelf ? `/shelf-base/${encodeURIComponent(upperCode)}.png` : '';
+    const shelfOfficeBaseLegacy = '';
+    const shelfOfficeBaseUpperLegacy = '';
+    const shelfDisplay = `/shelf-image/${encodeURIComponent(lowerCode)}.png`;
+    const shelfDisplayUpper = `/shelf-image/${encodeURIComponent(upperCode)}.png`;
+    const shelfOriginal = `/shelf-original/${encodeURIComponent(lowerCode)}.png`;
+    const shelfOriginalUpper = `/shelf-original/${encodeURIComponent(upperCode)}.png`;
+    const mapUrlChoices = readyToShipUniqueUrls([readyToShipMapUrl(code), readyToShipLegacyMapUrl(code)]);
+    const mapUrl = mapUrlChoices[0] || '';
+    const shelfUrlChoices = readyToShipUniqueUrls(isOfficeShelf
+        ? [shelfOfficeBase, shelfOfficeBaseUpper, shelfOfficeBaseLegacy, shelfOfficeBaseUpperLegacy, shelfDisplay, shelfDisplayUpper, shelfOriginal, shelfOriginalUpper]
+        : [shelfBase, shelfBaseUpper, shelfBaseLegacy, shelfBaseUpperLegacy, shelfDisplay, shelfDisplayUpper, shelfOriginal, shelfOriginalUpper]);
+    const primaryShelf = shelfUrlChoices[0] || '';
+    const shelfFallbackJs = readyToShipBuildFallbackJs(shelfUrlChoices, "this.closest('button').style.display='none'");
+    const mapFallbackJs = readyToShipBuildFallbackJs(mapUrlChoices, "this.closest('button').style.display='none'");
 
     return `
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-top:10px;">
-            <button type="button" class="rt-location-thumb" data-location-code="${safeCode}" data-preview-key="${safeCode}" data-preview-index="0" onclick="event.stopPropagation();event.preventDefault();openLocationMediaPreview(this.dataset.locationCode,this.dataset.previewKey,this.dataset.previewIndex);return false;" style="border:1px solid rgba(59,130,246,0.7);border-radius:14px;background:linear-gradient(180deg,rgba(30,64,175,0.34),rgba(15,23,42,0.86));padding:10px;cursor:zoom-in;box-shadow:0 10px 24px rgba(30,64,175,0.18);">
-                <div style="font-size:0.72rem;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;color:#fff;margin-bottom:6px;">Shelf Photo</div>
-                <img src="${shelfDisplay}" alt="${safeCode}" class="popup-loc-image" style="width:100%;max-width:260px;max-height:200px;object-fit:contain;border-radius:10px;" onerror="if(!this.dataset.fallbackStage){this.dataset.fallbackStage='1';this.src='${shelfDisplayUpper}';}else if(this.dataset.fallbackStage==='1'){this.dataset.fallbackStage='2';this.src='${shelfFallback}';}else if(this.dataset.fallbackStage==='2'){this.dataset.fallbackStage='3';this.src='${shelfFallbackUpper}';}else{this.closest('button').style.display='none';}">
-            </button>
-            ${mapUrl ? `
-                <button type="button" class="rt-location-thumb" data-location-code="${safeCode}" data-preview-key="${safeCode}" data-preview-index="1" onclick="event.stopPropagation();event.preventDefault();openLocationMediaPreview(this.dataset.locationCode,this.dataset.previewKey,this.dataset.previewIndex);return false;" style="border:1px solid rgba(59,130,246,0.7);border-radius:14px;background:linear-gradient(180deg,rgba(30,64,175,0.34),rgba(15,23,42,0.86));padding:10px;cursor:zoom-in;box-shadow:0 10px 24px rgba(30,64,175,0.18);">
-                    <div style="font-size:0.72rem;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;color:#fff;margin-bottom:6px;">Position Map</div>
-                    <img src="${mapUrl}" alt="${safeCode} map" class="popup-loc-image" style="width:100%;max-width:260px;max-height:200px;object-fit:contain;border-radius:10px;" onerror="this.closest('button').style.display='none'">
+        <div style="margin-top:10px;">
+            <div class="browse-preview-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;width:100%;align-items:start;">
+                <button type="button" class="rt-location-thumb browse-preview-card" data-location-code="${safeCode}" data-preview-key="${safeCode}" data-preview-index="0" onclick="event.stopPropagation();event.preventDefault();openLocationMediaPreview(this.dataset.locationCode,this.dataset.previewKey,this.dataset.previewIndex);return false;" style="border:1px solid #dbe3ef;border-radius:10px;background:#fff;padding:10px;cursor:zoom-in;text-align:left;display:flex;flex-direction:column;gap:8px;">
+                    <div style="font-size:0.78rem;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;color:#64748b;">Shelf Photo</div>
+                    <div style="min-height:220px;display:flex;align-items:center;justify-content:center;border:1px solid #e5e7eb;border-radius:8px;background:#fff;overflow:hidden;">
+                        <img src="${primaryShelf}" alt="${safeCode}" class="popup-loc-image" style="display:block;max-width:100%;max-height:320px;object-fit:contain;" onerror="${shelfFallbackJs}">
+                    </div>
                 </button>
-            ` : ''}
+                ${mapUrl ? `
+                    <button type="button" class="rt-location-thumb browse-preview-card" data-location-code="${safeCode}" data-preview-key="${safeCode}" data-preview-index="1" onclick="event.stopPropagation();event.preventDefault();openLocationMediaPreview(this.dataset.locationCode,this.dataset.previewKey,this.dataset.previewIndex);return false;" style="border:1px solid #dbe3ef;border-radius:10px;background:#fff;padding:10px;cursor:zoom-in;text-align:left;display:flex;flex-direction:column;gap:8px;">
+                        <div style="font-size:0.78rem;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;color:#64748b;">Position Map</div>
+                        <div style="min-height:220px;display:flex;align-items:center;justify-content:center;border:1px solid #e5e7eb;border-radius:8px;background:#fff;overflow:hidden;">
+                            <img src="${mapUrl}" alt="${safeCode} map" class="popup-loc-image" style="display:block;max-width:100%;max-height:320px;object-fit:contain;" onerror="${mapFallbackJs}">
+                        </div>
+                    </button>
+                ` : ''}
+            </div>
+            <div style="margin-top:10px;font-size:0.82rem;color:#64748b;">${mapUrl ? 'Click either image to expand.' : 'Click image to expand.'}</div>
         </div>
     `;
 }
@@ -1811,35 +2319,51 @@ function setupEventDelegation() {
             return;
         }
 
+        const prepImage = e.target.closest('.rt-prep-image-link');
+        if (prepImage) {
+            e.preventDefault();
+            e.stopPropagation();
+            openReadyToShipPrepImageModal(
+                prepImage.getAttribute('data-image-url') || '',
+                {
+                    alt: prepImage.getAttribute('data-image-alt') || 'Prep image',
+                    rotation: prepImage.getAttribute('data-image-rotation') || '0'
+                }
+            );
+            return;
+        }
+
+        const prepImageClose = e.target.closest('[data-role="close-prep-image"]');
+        if (prepImageClose) {
+            e.preventDefault();
+            e.stopPropagation();
+            closeReadyToShipPrepImageModal();
+            return;
+        }
+
+        if (e.target && e.target.id === 'rt-prep-image-modal') {
+            e.preventDefault();
+            e.stopPropagation();
+            closeReadyToShipPrepImageModal();
+            return;
+        }
+
         // Handle order detail popups
         const titleLink = e.target.closest('.order-title-link');
         const infoLink = e.target.closest('.order-info-link');
         const locLink = e.target.closest('.order-loc-link');
+        const prepLink = e.target.closest('.order-prep-link');
 
-        if (titleLink || infoLink || locLink) {
+        if (titleLink || infoLink || locLink || prepLink) {
             e.preventDefault();
             e.stopPropagation();
-            const link = titleLink || infoLink || locLink;
+            const link = prepLink || titleLink || infoLink || locLink;
             const orderId = link.getAttribute('data-order-id');
             console.log('Link clicked:', orderId);
             const order = OrderManager.getOrder(orderId);
 
             if (order) {
-                if (titleLink) {
-                    showOrderPopup(order.title, order.image || order.image_url, null, null, null, null, order.barcode);
-                } else if (infoLink) {
-                    const buyer = order.shipping_name || '';
-                    const address = [order.shipping_street1, order.shipping_street2, order.shipping_city,
-                                    order.shipping_state, order.shipping_postal_code, order.shipping_country]
-                        .filter(Boolean).join(' ');
-                    const info = `${buyer}${address ? ' - ' + address : ''}`;
-                    const price = order.price ? `$${parseFloat(order.price).toFixed(2)}` : 'N/A';
-                    const paidTime = order.paid_time ? fmtET(order.paid_time) : 'N/A';
-                    showOrderPopup(null, null, info, null, price, paidTime);
-                } else if (locLink) {
-                    // Pass locations array if available, otherwise single location
-                    showOrderPopup(null, null, null, order.locations || order.location);
-                }
+                showOrderPopup(order, { focusPrep: !!prepLink });
             } else {
                 console.error('Order not found in cache:', orderId);
             }
@@ -2009,9 +2533,182 @@ window.addEventListener('storage', function(e) {
 // ORDER DETAIL POPUP
 // ============================================================================
 
-function showOrderPopup(title, imageUrl, info, loc, price, paidTime, barcode) {
+function applyPrepSummaryToMatchingOrders(barcode, summary) {
+    const key = normalizePrepLookupBarcode(barcode);
+    if (!key) return;
+    OrderManager.getOrders().forEach(order => {
+        if (normalizePrepLookupBarcode(order && order.barcode) !== key) return;
+        order.prep_alert_summary = summary || {
+            has_alerts: false,
+            entry_count: 0,
+            note_count: 0,
+            defect_count: 0,
+            image_count: 0,
+            latest_at: '',
+            has_suffixed: false
+        };
+        patchReadyToShipPrepFlag(order.id);
+    });
+}
+
+function closeReadyToShipPrepImageModal() {
+    const existing = document.getElementById('rt-prep-image-modal');
+    if (existing) existing.remove();
+}
+
+function openReadyToShipPrepImageModal(imageUrl, options) {
+    const src = String(imageUrl || '').trim();
+    if (!src) return;
+    closeReadyToShipPrepImageModal();
+    const opts = options && typeof options === 'object' ? options : {};
+    const rotation = parsePosInt(opts.rotation, 0);
+    const alt = esc(opts.alt || 'Prep image');
+    const modal = document.createElement('div');
+    modal.id = 'rt-prep-image-modal';
+    modal.className = 'rt-prep-image-modal';
+    modal.innerHTML = `
+        <div class="rt-prep-image-modal-card" role="dialog" aria-modal="true" aria-label="Prep image preview">
+            <button type="button" class="rt-prep-image-modal-close" data-role="close-prep-image" aria-label="Close image preview">
+                <i class="fas fa-times"></i>
+            </button>
+            <img src="${esc(src)}" alt="${alt}"${rotation ? ` style="transform: rotate(${rotation}deg);"` : ''}>
+        </div>
+    `;
+    document.body.appendChild(modal);
+}
+
+function renderReadyToShipPrepContextHtml(context) {
+    const summary = context && context.summary ? context.summary : {};
+    const entries = Array.isArray(context && context.entries) ? context.entries : [];
+    const chips = [];
+    const entryCount = parsePosInt(summary.entry_count, 0);
+    const noteCount = parsePosInt(summary.note_count, 0);
+    const defectCount = parsePosInt(summary.defect_count, 0);
+    const imageCount = parsePosInt(summary.image_count, 0);
+    if (entryCount > 0) chips.push(`<span class="rt-prep-chip meta"><i class="fas fa-layer-group"></i> ${entryCount} row${entryCount === 1 ? '' : 's'}</span>`);
+    if (noteCount > 0) chips.push(`<span class="rt-prep-chip meta"><i class="fas fa-note-sticky"></i> ${noteCount} note${noteCount === 1 ? '' : 's'}</span>`);
+    if (defectCount > 0) chips.push(`<span class="rt-prep-chip alert"><i class="fas fa-triangle-exclamation"></i> ${defectCount} defect${defectCount === 1 ? '' : 's'}</span>`);
+    if (imageCount > 0) chips.push(`<span class="rt-prep-chip meta"><i class="fas fa-camera"></i> ${imageCount} photo${imageCount === 1 ? '' : 's'}</span>`);
+    if (summary.latest_at) chips.push(`<span class="rt-prep-chip meta"><i class="fas fa-clock"></i> ${esc(fmtET(summary.latest_at))}</span>`);
+
+    const entryHtml = entries.map(entry => {
+        const chipsLocal = [
+            `<span class="rt-prep-chip upc">${esc(formatUpcDisplay(entry.scope_upc || ''))}</span>`
+        ];
+        const statusLabel = String(entry.display_status || '').trim();
+        if (statusLabel) {
+            chipsLocal.push(`<span class="rt-prep-chip status-${esc(statusLabel)}">${esc(statusLabel.toUpperCase())}</span>`);
+        }
+
+        const notes = Array.isArray(entry.notes) ? entry.notes : [];
+        const images = Array.isArray(entry.images) ? entry.images : [];
+        const notesHtml = notes.length
+            ? `<div class="rt-prep-notes">${notes.map(note => `
+                <div class="rt-prep-note ${note.kind === 'status' ? 'is-status' : ''}">
+                    <div class="rt-prep-note-text">${esc(note.note || '')}</div>
+                    <div class="rt-prep-note-meta">
+                        <span>${note.kind === 'status' ? 'Status note' : 'Note'}</span>
+                        ${note.created_at ? `<span>${esc(fmtET(note.created_at))}</span>` : ''}
+                    </div>
+                </div>
+            `).join('')}</div>`
+            : '';
+
+        const hiddenNoteCount = Math.max(0, parsePosInt(entry.note_count, 0) - notes.length);
+        const imagesHtml = images.length
+            ? `<div class="rt-prep-images">${images.map(img => {
+                const angle = parsePosInt(img.rotation, 0);
+                const rotate = angle ? ` style="transform: rotate(${angle}deg);"` : '';
+                return `<button type="button" class="rt-prep-image-link" data-image-url="${esc(img.image_url || '')}" data-image-alt="${esc(entry.scope_upc || 'Prep image')}" data-image-rotation="${angle}" title="${esc(fmtET(img.created_at || '') || 'Open image')}"><img src="${esc(img.image_url || '')}" alt="${esc(entry.scope_upc || 'Prep image')}"${rotate}></button>`;
+            }).join('')}</div>`
+            : '';
+        const hiddenImageCount = Math.max(0, parsePosInt(entry.image_count, 0) - images.length);
+
+        return `
+            <div class="rt-prep-entry">
+                <div class="rt-prep-entry-head">
+                    <div class="rt-prep-entry-title">${chipsLocal.join('')}</div>
+                    <div class="popup-muted">${entry.latest_at ? esc(fmtET(entry.latest_at)) : ''}</div>
+                </div>
+                ${entry.reason ? `<div class="rt-prep-defect">Defect: ${esc(entry.reason)}</div>` : ''}
+                ${notesHtml}
+                ${hiddenNoteCount > 0 ? `<div class="popup-muted" style="margin-top:8px;">+${hiddenNoteCount} older note${hiddenNoteCount === 1 ? '' : 's'}</div>` : ''}
+                ${imagesHtml}
+                ${hiddenImageCount > 0 ? `<div class="popup-muted" style="margin-top:8px;">+${hiddenImageCount} older photo${hiddenImageCount === 1 ? '' : 's'}</div>` : ''}
+            </div>
+        `;
+    }).join('');
+
+    return `
+        <div class="popup-muted" style="font-size:0.88rem;line-height:1.45;">Most relevant recent /items-to-list rows are shown first. Older related entries are kept below so prior prep notes and defects still stay visible.</div>
+        ${chips.length ? `<div class="rt-prep-summary">${chips.join('')}</div>` : ''}
+        <div class="rt-prep-entry-list">${entryHtml}</div>
+    `;
+}
+
+async function loadReadyToShipPrepContext(order, host, forceVisible) {
+    if (!host || !order || !order.barcode) return;
+    const wrap = host.closest('.rt-prep-section');
+    const lookupBarcode = normalizePrepLookupBarcode(order.barcode);
+    if (!lookupBarcode) {
+        if (wrap) wrap.style.display = 'none';
+        return;
+    }
+
+    if (wrap && (forceVisible || (order.prep_alert_summary && order.prep_alert_summary.has_alerts))) {
+        wrap.style.display = '';
+        host.innerHTML = '<div class="rt-prep-loading">Loading prep notes and defects...</div>';
+    }
+
+    try {
+        const res = await fetch(`/api/ready-to-ship/prep-context/${encodeURIComponent(lookupBarcode)}?_t=${Date.now()}`, { cache: 'no-store' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data || !data.success) {
+            throw new Error((data && data.error) || 'Failed to load prep context');
+        }
+
+        applyPrepSummaryToMatchingOrders(lookupBarcode, data.summary);
+        if (!data.has_alerts) {
+            if (forceVisible) {
+                if (wrap) wrap.style.display = '';
+                host.innerHTML = '<div class="rt-prep-empty">No item-prep notes, defects, or photos are attached to this barcode right now.</div>';
+            } else if (wrap) {
+                wrap.style.display = 'none';
+            }
+            return;
+        }
+
+        if (wrap) wrap.style.display = '';
+        host.innerHTML = renderReadyToShipPrepContextHtml(data);
+        host.querySelectorAll('.rt-prep-image-link').forEach(btn => {
+            btn.addEventListener('click', (evt) => {
+                evt.preventDefault();
+                evt.stopPropagation();
+                openReadyToShipPrepImageModal(
+                    btn.getAttribute('data-image-url') || '',
+                    {
+                        alt: btn.getAttribute('data-image-alt') || 'Prep image',
+                        rotation: btn.getAttribute('data-image-rotation') || '0'
+                    }
+                );
+            });
+        });
+        if (forceVisible) {
+            setTimeout(() => {
+                try { wrap.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch (e) {}
+            }, 30);
+        }
+    } catch (err) {
+        console.warn('Prep context error:', err);
+        if (wrap) wrap.style.display = '';
+        host.innerHTML = `<div class="rt-prep-error">${esc(String(err && err.message ? err.message : err))}</div>`;
+    }
+}
+
+function showOrderPopup(order, options = {}) {
     const oldPopup = document.getElementById('order-popup');
     if (oldPopup) oldPopup.remove();
+    const focusPrep = !!(options && options.focusPrep);
 
     const overlay = document.createElement('div');
     overlay.id = 'order-popup';
@@ -2037,7 +2734,7 @@ function showOrderPopup(title, imageUrl, info, loc, price, paidTime, barcode) {
     popup.style.cssText = `
         border-radius: 16px;
         padding: 28px 24px;
-        max-width: 380px;
+        max-width: min(820px, 94vw);
         max-height: 80vh;
         overflow-y: auto;
         text-align: center;
@@ -2047,6 +2744,15 @@ function showOrderPopup(title, imageUrl, info, loc, price, paidTime, barcode) {
     popup.onclick = (e) => e.stopPropagation();
 
     const missingDataUrlPopup = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="360" height="220"><rect width="100%" height="100%" fill="#1e293b"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#475569" font-size="18">Image missing</text></svg>');
+    const title = order && order.title ? order.title : '';
+    const imageUrl = order ? (order.image || order.image_url) : '';
+    const buyer = order && order.shipping_name ? order.shipping_name : '';
+    const address = order ? [order.shipping_street1, order.shipping_street2, order.shipping_city, order.shipping_state, order.shipping_postal_code, order.shipping_country].filter(Boolean).join(' ') : '';
+    const price = order && order.price ? `$${parseFloat(order.price).toFixed(2)}` : '';
+    const paidTime = order && order.paid_time ? fmtET(order.paid_time) : '';
+    const barcode = order && order.barcode ? order.barcode : '';
+    const loc = order ? (order.locations || order.location) : null;
+    const prepSummary = order && order.prep_alert_summary ? order.prep_alert_summary : null;
 
     let content = '';
 
@@ -2063,10 +2769,7 @@ function showOrderPopup(title, imageUrl, info, loc, price, paidTime, barcode) {
         content += `<div class="popup-muted" style="font-size: 0.9rem; margin-bottom: 12px;"><strong>Barcode:</strong> ${esc(formatUpcDisplay(barcode))}</div>`;
     }
 
-    if (info) {
-        const infoParts = info.split(' - ');
-        const buyer = infoParts[0] || '';
-        const address = infoParts[1] || '';
+    if (buyer || address || price || paidTime) {
         content += `
             <div style="max-width: 300px; margin: 0 auto;">
                 <div style="margin-bottom: 10px;">
@@ -2139,6 +2842,17 @@ function showOrderPopup(title, imageUrl, info, loc, price, paidTime, barcode) {
         }
     }
 
+    if (barcode) {
+        const prepVisible = !!(focusPrep || (prepSummary && prepSummary.has_alerts));
+        content += `
+            <div class="rt-prep-section" style="${prepVisible ? '' : 'display:none;'}">
+                <div class="popup-group-title" style="font-size:1rem;font-weight:700;">Prep Notes / Defects</div>
+                <div class="popup-muted" style="margin-top:4px;">Shows the newest most relevant items-to-list entries first, then older related rows.</div>
+                <div data-prep-host style="margin-top:6px;">${prepVisible ? '<div class="rt-prep-loading">Loading prep notes and defects...</div>' : ''}</div>
+            </div>
+        `;
+    }
+
     popup.innerHTML = content + `
         <button class="popup-close-btn" onclick="this.closest('#order-popup').remove()" style="
             margin-top: 16px;
@@ -2154,12 +2868,23 @@ function showOrderPopup(title, imageUrl, info, loc, price, paidTime, barcode) {
 
     overlay.appendChild(popup);
     document.body.appendChild(overlay);
+
+    const prepHost = popup.querySelector('[data-prep-host]');
+    if (prepHost && barcode) {
+        loadReadyToShipPrepContext(order, prepHost, focusPrep);
+    }
 }
 
 // Simplified attachPopups - now only used for legacy compatibility
 function attachPopups() {
     // Event delegation handles clicks now, this is just a placeholder
 }
+
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        closeReadyToShipPrepImageModal();
+    }
+});
 // Friendly Eastern Time formatter used across pages
 function fmtET(ts){
     try{
@@ -2202,7 +2927,7 @@ window.openLocationMediaPreview = openLocationMediaPreview;
     setTimeout(checkTokenStatus, 10 * 60 * 1000);
 })();
 </script>
-<script src="/static/location-preview.js?v=20260312e"></script>
+<script src="/static/location-preview.js?v=20260313b"></script>
 <script src="/static/i18n.js"></script>
 </body>
 </html>

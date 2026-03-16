@@ -154,7 +154,7 @@
     </div>
   </div>
 
-  <script src="/static/location-preview.js?v=20260312e"></script>
+  <script src="/static/location-preview.js?v=20260313b"></script>
   <script>
     const barcodeInput = document.getElementById('barcodeInput');
     const scanBtn = document.getElementById('scanBtn');
@@ -246,11 +246,11 @@
       const compactUpper = compact.toUpperCase();
       const list = [];
       const add = s => { if(s && !list.includes(s)) list.push(s); };
-      add('/static/shelves/' + encodeURIComponent(raw) + '.png');
-      add('/static/shelves/' + encodeURIComponent(compact) + '.png');
-      add('/static/shelves/' + encodeURIComponent(lower) + '.png');
-      add('/static/shelves/' + encodeURIComponent(compactLower) + '.png');
-      add('/static/shelves/' + encodeURIComponent(compactUpper) + '.png');
+      add('/shelf-image/' + encodeURIComponent(raw) + '.png');
+      add('/shelf-image/' + encodeURIComponent(compact) + '.png');
+      add('/shelf-image/' + encodeURIComponent(lower) + '.png');
+      add('/shelf-image/' + encodeURIComponent(compactLower) + '.png');
+      add('/shelf-image/' + encodeURIComponent(compactUpper) + '.png');
       add('/static/pictureposition/' + encodeURIComponent(raw));
       add('/static/pictureposition/' + encodeURIComponent(compact));
       add('/static/pictureposition/' + encodeURIComponent(raw) + '.jpg');

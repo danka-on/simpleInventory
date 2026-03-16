@@ -244,7 +244,7 @@
     }
     html.ss-theme-night .confirm-box .btn-no:hover { background: #475569; }
   </style>
-  <script src="/static/location-preview.js?v=20260312e"></script>
+  <script src="/static/location-preview.js?v=20260313b"></script>
   <script src="/static/i18n.js"></script>
 </head>
 <body>
@@ -429,7 +429,7 @@ function showLocPopup(locCode, picPos) {
   // Shelf images are lowercase .png files named after the position code
   const filename = raw ? raw.toLowerCase().replace(/\.png$/i, '') + '.png' : '';
   if (filename) {
-    img.src = '/static/shelves/' + filename + '?t=' + Date.now();
+    img.src = '/shelf-image/' + encodeURIComponent(filename.replace(/\.png$/i, '')) + '.png?t=' + Date.now();
     img.style.display = 'block';
     img.onerror = function() { this.style.display = 'none'; };
   } else {

@@ -510,6 +510,16 @@ def store_ebay_order(order):
             existing = cur.fetchone()
         if existing:
             cur.execute('''UPDATE orders SET
+                checkout_status = COALESCE(?, checkout_status),
+                shipping_name = COALESCE(?, shipping_name),
+                shipping_street1 = COALESCE(?, shipping_street1),
+                shipping_street2 = COALESCE(?, shipping_street2),
+                shipping_city = COALESCE(?, shipping_city),
+                shipping_state = COALESCE(?, shipping_state),
+                shipping_postal_code = COALESCE(?, shipping_postal_code),
+                shipping_country = COALESCE(?, shipping_country),
+                paid_time = COALESCE(?, paid_time),
+                shipped_time = COALESCE(?, shipped_time),
                 title = COALESCE(?, title),
                 quantity = COALESCE(?, quantity),
                 price = COALESCE(?, price),
@@ -522,6 +532,16 @@ def store_ebay_order(order):
                 lot_number = COALESCE(?, lot_number)
                 WHERE id = ?''',
                 (
+                    order.get('checkout_status'),
+                    order.get('shipping_name'),
+                    order.get('shipping_street1'),
+                    order.get('shipping_street2'),
+                    order.get('shipping_city'),
+                    order.get('shipping_state'),
+                    order.get('shipping_postal_code'),
+                    order.get('shipping_country'),
+                    order.get('paid_time'),
+                    order.get('shipped_time'),
                     title_val,
                     order.get('quantity'),
                     order.get('price'),

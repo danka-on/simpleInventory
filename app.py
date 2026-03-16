@@ -2,7 +2,7 @@
 
 from contextlib import nullcontext
 
-from flask import Flask, request, send_file, url_for, render_template, jsonify, redirect, session, make_response
+from flask import Flask, request, send_file, url_for, render_template, jsonify, redirect, session, make_response, has_app_context
 from flask_caching import Cache
 from flask_compress import Compress
 from werkzeug.exceptions import RequestEntityTooLarge
@@ -497,6 +497,305 @@ def _save_order_removal_allocations(cur, order_row_id, allocations):
             INSERT INTO order_removal_allocations (order_row_id, location_key, location_code, quantity)
             VALUES (?, ?, ?, ?)
         ''', (order_row_id, location_key, location_code, qty))
+
+
+def _marketplace_lookup_rawbol_item(barcode):
+    variants = _marketplace_upc_lookup_variants(barcode)
+    if not variants:
+        return None
+
+    conn = None
+    try:
+        conn = sqlite3.connect('rawbol.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+
+        placeholders = ','.join('?' for _ in variants)
+        cur.execute(f'''
+            SELECT rowid AS _rowid_, upc, item_description, image_url
+            FROM raw_bol_items
+            WHERE upc IS NOT NULL
+              AND TRIM(upc) != ''
+              AND LOWER(TRIM(upc)) IN ({placeholders})
+            ORDER BY rowid DESC
+        ''', tuple(variants))
+        rows = cur.fetchall()
+        if not rows:
+            return None
+
+        target = str(_normalize_upc(barcode) or '').strip().lower()
+
+        def _score(row):
+            raw_upc = str(row['upc'] or '').strip().lower()
+            exact = 1 if raw_upc == target else 0
+            return (exact, int(row['_rowid_'] or 0))
+
+        best = max(rows, key=_score)
+        return {
+            'upc': str(best['upc'] or '').strip(),
+            'title': str(best['item_description'] or '').strip(),
+            'image_url': str(best['image_url'] or '').strip(),
+        }
+    except Exception:
+        return None
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def _normalize_marketplace_allocations(incoming_allocations):
+    grouped = {}
+    if not isinstance(incoming_allocations, list):
+        return []
+    for alloc in incoming_allocations:
+        if not isinstance(alloc, dict):
+            continue
+        qty = max(0, _coerce_int(alloc.get('quantity', alloc.get('qty')), 0))
+        if qty <= 0:
+            continue
+        location_code = _sold_location_label(alloc.get('location_code') or alloc.get('code'))
+        location_key = _sold_location_key(alloc.get('location_key') or location_code)
+        bucket = grouped.get(location_key)
+        if bucket is None:
+            bucket = {
+                'location_key': location_key,
+                'location_code': location_code,
+                'quantity': 0
+            }
+            grouped[location_key] = bucket
+        bucket['quantity'] += qty
+    return list(grouped.values())
+
+
+def _build_marketplace_removal_plan(barcode, quantity, allocations=None):
+    rack_conn = None
+    try:
+        rack_conn = sqlite3.connect('searchRack.db')
+        rack_conn.row_factory = sqlite3.Row
+        rack_cur = rack_conn.cursor()
+
+        matches = _searchrack_matches_for_barcode(rack_cur, barcode, include_zero=False)
+        location_groups = _group_searchrack_matches_by_location(matches)
+        locations = [
+            {
+                'location_key': g['location_key'],
+                'location_code': g['location_code'],
+                'available_qty': max(0, _coerce_int(g.get('available_qty'), 0)),
+                'preview_key': str(g.get('preview_key') or g.get('location_code') or '').strip()
+            }
+            for g in location_groups
+        ]
+        total_available = sum(max(0, _coerce_int(x.get('available_qty'), 0)) for x in locations)
+        normalized_allocations = _normalize_marketplace_allocations(allocations)
+
+        plan = {
+            'success': True,
+            'needs_choice': len(locations) > 1 and not normalized_allocations,
+            'locations': locations,
+            'total_available': total_available,
+            'can_fulfill': total_available >= max(1, _coerce_int(quantity, 1)),
+            'normalized_allocations': normalized_allocations,
+            'planned_steps': []
+        }
+
+        sold_qty = max(1, _coerce_int(quantity, 1))
+        if not location_groups:
+            return plan
+
+        group_map = {g['location_key']: g for g in location_groups}
+
+        if normalized_allocations:
+            alloc_total = 0
+            for alloc in normalized_allocations:
+                loc_key = alloc['location_key']
+                qty = max(0, _coerce_int(alloc['quantity'], 0))
+                group = group_map.get(loc_key)
+                if not group:
+                    return {
+                        'success': False,
+                        'error': f"Unknown location selected: {alloc['location_code']}",
+                        'locations': locations,
+                        'total_available': total_available,
+                        'can_fulfill': total_available >= sold_qty
+                    }
+                group_available = max(0, _coerce_int(group.get('available_qty'), 0))
+                if qty > group_available:
+                    return {
+                        'success': False,
+                        'error': f"Selected quantity exceeds available for {alloc['location_code']}",
+                        'locations': locations,
+                        'total_available': total_available,
+                        'can_fulfill': total_available >= sold_qty
+                    }
+                alloc_total += qty
+            if alloc_total != sold_qty:
+                return {
+                    'success': False,
+                    'error': f'Selected location quantities must total {sold_qty}',
+                    'locations': locations,
+                    'total_available': total_available,
+                    'can_fulfill': total_available >= sold_qty
+                }
+
+            for alloc in normalized_allocations:
+                remaining = max(0, _coerce_int(alloc['quantity'], 0))
+                group = group_map.get(alloc['location_key']) or {}
+                for row_match in group.get('rows') or []:
+                    if remaining <= 0:
+                        break
+                    available = max(0, _coerce_int(row_match.get('quantity'), 0))
+                    if available <= 0:
+                        continue
+                    take = min(available, remaining)
+                    if take <= 0:
+                        continue
+                    plan['planned_steps'].append({
+                        'searchrack_id': int(row_match['id']),
+                        'location_code': group.get('location_code') or row_match.get('location_code'),
+                        'quantity': int(take)
+                    })
+                    remaining -= take
+                if remaining > 0:
+                    return {
+                        'success': False,
+                        'error': f"Insufficient inventory in selected location {alloc['location_code']}",
+                        'locations': locations,
+                        'total_available': total_available,
+                        'can_fulfill': total_available >= sold_qty
+                    }
+            return plan
+
+        if len(location_groups) == 1:
+            remaining = sold_qty
+            group = location_groups[0]
+            for row_match in group.get('rows') or []:
+                if remaining <= 0:
+                    break
+                available = max(0, _coerce_int(row_match.get('quantity'), 0))
+                if available <= 0:
+                    continue
+                take = min(available, remaining)
+                if take <= 0:
+                    continue
+                plan['planned_steps'].append({
+                    'searchrack_id': int(row_match['id']),
+                    'location_code': group.get('location_code') or row_match.get('location_code'),
+                    'quantity': int(take)
+                })
+                remaining -= take
+            if remaining > 0:
+                plan['planned_steps'] = []
+            return plan
+
+        return plan
+    finally:
+        if rack_conn is not None:
+            rack_conn.close()
+
+
+def _apply_marketplace_removal_plan(plan, *, order_ref, barcode, title, removal_type='manual_sold_removal'):
+    steps = list((plan or {}).get('planned_steps') or [])
+    if not steps:
+        return {'removed': False, 'removed_units': 0, 'locations': []}
+
+    rack_conn = None
+    rem_conn = None
+    try:
+        rack_conn = sqlite3.connect('searchRack.db')
+        rack_conn.row_factory = sqlite3.Row
+        rack_cur = rack_conn.cursor()
+        schema = _searchrack_removal_schema(rack_cur)
+        qty_col = schema.get('qty_col')
+        id_lookup_col = schema.get('id_col') or 'rowid'
+        pos_col = schema.get('pos_col')
+        if not qty_col:
+            return {'removed': False, 'removed_units': 0, 'locations': [], 'error': 'SEARCHRACK quantity column not found'}
+
+        rem_conn = sqlite3.connect('rackhistory.db')
+        rem_cur = rem_conn.cursor()
+        _ensure_removed_items_table(rem_cur)
+
+        removed_units = 0
+        used_locations = []
+        now_iso = datetime.datetime.now().isoformat()
+
+        for step in steps:
+            row_id = max(0, _coerce_int(step.get('searchrack_id'), 0))
+            take_qty = max(0, _coerce_int(step.get('quantity'), 0))
+            if row_id <= 0 or take_qty <= 0:
+                continue
+
+            pos_expr = f", {pos_col} AS _item_position" if pos_col else ""
+            rack_cur.execute(
+                f"SELECT {qty_col} AS _qty{pos_expr} FROM SEARCHRACK WHERE {id_lookup_col} = ?",
+                (row_id,)
+            )
+            row = rack_cur.fetchone()
+            if not row:
+                return {
+                    'removed': removed_units > 0,
+                    'removed_units': removed_units,
+                    'locations': used_locations,
+                    'error': f'Inventory row no longer exists for {step.get("location_code")}'
+                }
+
+            current_qty = max(0, _coerce_int(row['_qty'], 0))
+            if current_qty < take_qty:
+                return {
+                    'removed': removed_units > 0,
+                    'removed_units': removed_units,
+                    'locations': used_locations,
+                    'error': f'Inventory changed before removal could complete for {step.get("location_code")}'
+                }
+
+            new_qty = current_qty - take_qty
+            rack_cur.execute(
+                f'UPDATE SEARCHRACK SET {qty_col} = ? WHERE {id_lookup_col} = ?',
+                (new_qty, row_id)
+            )
+
+            item_position = str((row['_item_position'] if '_item_position' in row.keys() else '') or '').strip()
+            location_code = _sold_location_label(step.get('location_code') or item_position)
+            rem_cur.execute('''
+                INSERT INTO removed_items
+                (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                order_ref,
+                barcode,
+                title or '',
+                take_qty,
+                now_iso,
+                row_id,
+                current_qty,
+                new_qty,
+                removal_type,
+                item_position or location_code
+            ))
+            removed_units += take_qty
+            if location_code not in used_locations:
+                used_locations.append(location_code)
+
+        rack_conn.commit()
+        rem_conn.commit()
+        return {'removed': removed_units > 0, 'removed_units': removed_units, 'locations': used_locations}
+    except Exception as e:
+        try:
+            if rack_conn is not None:
+                rack_conn.rollback()
+        except Exception:
+            pass
+        try:
+            if rem_conn is not None:
+                rem_conn.rollback()
+        except Exception:
+            pass
+        return {'removed': False, 'removed_units': 0, 'locations': [], 'error': str(e)}
+    finally:
+        if rack_conn is not None:
+            rack_conn.close()
+        if rem_conn is not None:
+            rem_conn.close()
 
 def _ensure_listing_alerts_tables():
     """Create listing_alerts.db tables if they don't exist."""
@@ -1064,6 +1363,359 @@ def inject_server_info():
 import re as _re
 _I18N_SRC_PAT = _re.compile(r'src=(["\'])/static/i18n\.js(?:\?[^"\']*)?\1')
 _I18N_CACHE_V = int(getattr(app, 'start_time', 0) or 0)
+_SHELF_ROOT_DIR = BASE_DIR / 'static' / 'shelves'
+_OFFICE_AREA_DIR = _SHELF_ROOT_DIR / 'office'
+_GARAGE_AREA_DIR = _SHELF_ROOT_DIR / 'garage'
+_HALLWAY_AREA_DIR = _SHELF_ROOT_DIR / 'hallway'
+_MISC_AREA_DIR = _SHELF_ROOT_DIR / 'misc'
+_OFFICE_MAP_DIR = _OFFICE_AREA_DIR / 'maps'
+_GARAGE_MAP_DIR = _GARAGE_AREA_DIR / 'maps'
+_HALLWAY_MAP_DIR = _HALLWAY_AREA_DIR / 'maps'
+_MISC_MAP_DIR = _MISC_AREA_DIR / 'maps'
+_OFFICE_ORIGINALS_DIR = _OFFICE_AREA_DIR / 'originals'
+_GARAGE_ORIGINALS_DIR = _GARAGE_AREA_DIR / 'originals'
+_HALLWAY_ORIGINALS_DIR = _HALLWAY_AREA_DIR / 'originals'
+_MISC_ORIGINALS_DIR = _MISC_AREA_DIR / 'originals'
+_OFFICE_SHELF_PICS_DIR = _OFFICE_AREA_DIR / 'shelf_pics'
+_GARAGE_SHELF_PICS_DIR = _GARAGE_AREA_DIR / 'shelf_pics'
+_HALLWAY_SHELF_PICS_DIR = _HALLWAY_AREA_DIR / 'shelf_pics'
+_MISC_SHELF_PICS_DIR = _MISC_AREA_DIR / 'shelf_pics'
+# "bases" now live directly in each area's shelf_pics folder.
+_OFFICE_BASES_DIR = _OFFICE_SHELF_PICS_DIR
+_GARAGE_BASES_DIR = _GARAGE_SHELF_PICS_DIR
+_LEGACY_MAPS_DIR = _SHELF_ROOT_DIR / 'maps'
+_LEGACY_OFFICE_MAP_DIR = _LEGACY_MAPS_DIR / 'office'
+_LEGACY_GARAGE_MAP_DIR = _LEGACY_MAPS_DIR / 'garage'
+_LEGACY_HALLWAY_MAP_DIR = _LEGACY_MAPS_DIR / 'hallway'
+_LEGACY_MISC_MAP_DIR = _LEGACY_MAPS_DIR / 'misc'
+_LEGACY_OFFICE_BASES_DIR = _LEGACY_OFFICE_MAP_DIR / 'bases'
+_LEGACY_GARAGE_BASES_DIR = _LEGACY_GARAGE_MAP_DIR / 'bases'
+_LEGACY_SHELF_ORIGINALS_DIR = _SHELF_ROOT_DIR / 'originals'
+_LEGACY_MARKED_DIR = _SHELF_ROOT_DIR / 'marked'
+_LEGACY_OFFICE_SHELF_PICS_DIR = _LEGACY_MARKED_DIR / 'office'
+_LEGACY_GARAGE_SHELF_PICS_DIR = _LEGACY_MARKED_DIR / 'garage'
+_LEGACY_HALLWAY_SHELF_PICS_DIR = _LEGACY_MARKED_DIR / 'hallway'
+_LEGACY_MISC_SHELF_PICS_DIR = _LEGACY_MARKED_DIR / 'misc'
+_OFFICE_PREVIEW_BASE_PAT = _re.compile(r'^(?:or[1-6]s\d+|omr[12]s\d+|ofloor[1-6])$', _re.IGNORECASE)
+_GARAGE_PREVIEW_BASE_PAT = _re.compile(r'^(?:gfloor[1-7]|gmid[12]|misc1|gr(?:[1-4]|6|7)(?:s\d+)?)$', _re.IGNORECASE)
+_OFFICE_SHELF_PAT = _re.compile(r'^(?:or\d+s\d+(?:b\d+)?|omr\d+s\d+(?:b\d+)?|ofloor\d+(?:b\d+)?)$', _re.IGNORECASE)
+_GARAGE_SHELF_PAT = _re.compile(r'^(?:gr\d+s\d+(?:b\d+)?|gmid\d+(?:b\d+)?|gfloor\d+(?:b\d+)?|misc\d+(?:b\d+)?)$', _re.IGNORECASE)
+_HALLWAY_SHELF_PAT = _re.compile(r'^(?:h(?:[1-9]|1[0-4])|ho[1-3])$', _re.IGNORECASE)
+_MISC_SHELF_PAT = _re.compile(r'^mb\d+$', _re.IGNORECASE)
+
+
+def _shelf_area_for_code(code):
+    normalized = (code or '').strip()
+    if not normalized:
+        return None
+    if _OFFICE_SHELF_PAT.fullmatch(normalized):
+        return 'office'
+    if _GARAGE_SHELF_PAT.fullmatch(normalized):
+        return 'garage'
+    if _HALLWAY_SHELF_PAT.fullmatch(normalized):
+        return 'hallway'
+    if _MISC_SHELF_PAT.fullmatch(normalized):
+        return 'misc'
+    return None
+
+
+def _area_storage_dir(area, kind):
+    mapping = {
+        'office': {
+            'maps': _OFFICE_MAP_DIR,
+            'originals': _OFFICE_ORIGINALS_DIR,
+            'shelf_pics': _OFFICE_SHELF_PICS_DIR,
+            'bases': _OFFICE_BASES_DIR,
+        },
+        'garage': {
+            'maps': _GARAGE_MAP_DIR,
+            'originals': _GARAGE_ORIGINALS_DIR,
+            'shelf_pics': _GARAGE_SHELF_PICS_DIR,
+            'bases': _GARAGE_BASES_DIR,
+        },
+        'hallway': {
+            'maps': _HALLWAY_MAP_DIR,
+            'originals': _HALLWAY_ORIGINALS_DIR,
+            'shelf_pics': _HALLWAY_SHELF_PICS_DIR,
+            'bases': None,
+        },
+        'misc': {
+            'maps': _MISC_MAP_DIR,
+            'originals': _MISC_ORIGINALS_DIR,
+            'shelf_pics': _MISC_SHELF_PICS_DIR,
+            'bases': None,
+        },
+    }
+    return (mapping.get(area) or {}).get(kind)
+
+
+def _add_unique_path(candidates, path):
+    if path is not None and path not in candidates:
+        candidates.append(path)
+
+
+def _preview_base_path_for_code(code):
+    normalized = (code or '').strip().lower()
+    if not normalized:
+        return None
+    if _OFFICE_PREVIEW_BASE_PAT.fullmatch(normalized):
+        return _OFFICE_BASES_DIR / f'{normalized}.png'
+    if _GARAGE_PREVIEW_BASE_PAT.fullmatch(normalized):
+        return _GARAGE_BASES_DIR / f'{normalized}.png'
+    return None
+
+
+def _legacy_preview_base_path_for_code(code):
+    normalized = (code or '').strip().lower()
+    if not normalized:
+        return None
+    if _OFFICE_PREVIEW_BASE_PAT.fullmatch(normalized):
+        return _LEGACY_OFFICE_BASES_DIR / f'{normalized}.png'
+    if _GARAGE_PREVIEW_BASE_PAT.fullmatch(normalized):
+        return _LEGACY_GARAGE_BASES_DIR / f'{normalized}.png'
+    return None
+
+
+def _preview_base_lookup_codes(code):
+    normalized = (code or '').strip().lower()
+    if not normalized:
+        return []
+    results = [normalized]
+    compact = _re.sub(r'b\d+$', '', normalized)
+    if compact and compact not in results:
+        results.append(compact)
+    return results
+
+
+def _original_shelf_image_path_for_code(code):
+    normalized = (code or '').strip()
+    if not normalized:
+        return None
+    area = _shelf_area_for_code(normalized)
+    area_originals_dir = _area_storage_dir(area, 'originals') if area else None
+    if area_originals_dir is not None:
+        return area_originals_dir / f'{normalized}.png'
+    return _LEGACY_SHELF_ORIGINALS_DIR / f'{normalized}.png'
+
+
+def _shelf_original_path_candidates(code):
+    raw = str(code or '').strip()
+    if not raw:
+        return []
+    variants = []
+    for value in (raw, raw.lower(), raw.upper()):
+        if value and value not in variants:
+            variants.append(value)
+    dirs = []
+    preferred_area = _shelf_area_for_code(raw)
+    for area in (preferred_area, 'office', 'garage', 'hallway', 'misc'):
+        directory = _area_storage_dir(area, 'originals') if area else None
+        if directory is not None and directory not in dirs:
+            dirs.append(directory)
+    if _LEGACY_SHELF_ORIGINALS_DIR not in dirs:
+        dirs.append(_LEGACY_SHELF_ORIGINALS_DIR)
+    candidates = []
+    for directory in dirs:
+        for value in variants:
+            _add_unique_path(candidates, directory / f'{value}.png')
+    return candidates
+
+
+def _resolve_shelf_original_path(code, existing_only=False):
+    for candidate in _shelf_original_path_candidates(code):
+        if candidate.exists():
+            return candidate
+    if existing_only:
+        return None
+    raw = str(code or '').strip()
+    if not raw:
+        return None
+    return _original_shelf_image_path_for_code(raw)
+
+
+def _truthy_form_value(value):
+    return str(value or '').strip().lower() in ('1', 'true', 'yes', 'on')
+
+
+def _preferred_shelf_display_dir(code):
+    normalized = (code or '').strip()
+    if not normalized:
+        return _SHELF_ROOT_DIR
+    area = _shelf_area_for_code(normalized)
+    preferred = _area_storage_dir(area, 'shelf_pics') if area else None
+    if preferred is not None:
+        return preferred
+    return _SHELF_ROOT_DIR
+
+
+def _shelf_display_path_candidates(code):
+    raw = str(code or '').strip()
+    if not raw:
+        return []
+    variants = []
+    for value in (raw, raw.lower(), raw.upper()):
+        if value and value not in variants:
+            variants.append(value)
+    dirs = []
+    for directory in (
+        _preferred_shelf_display_dir(raw),
+        _SHELF_ROOT_DIR,
+        _OFFICE_SHELF_PICS_DIR,
+        _GARAGE_SHELF_PICS_DIR,
+        _HALLWAY_SHELF_PICS_DIR,
+        _MISC_SHELF_PICS_DIR,
+        _LEGACY_OFFICE_SHELF_PICS_DIR,
+        _LEGACY_GARAGE_SHELF_PICS_DIR,
+        _LEGACY_HALLWAY_SHELF_PICS_DIR,
+        _LEGACY_MISC_SHELF_PICS_DIR,
+        _LEGACY_OFFICE_MAP_DIR,
+        _LEGACY_GARAGE_MAP_DIR,
+        _LEGACY_HALLWAY_MAP_DIR,
+        _LEGACY_MISC_MAP_DIR,
+    ):
+        if directory not in dirs:
+            dirs.append(directory)
+    candidates = []
+    for directory in dirs:
+        for value in variants:
+            path = directory / f'{value}.png'
+            if path not in candidates:
+                candidates.append(path)
+    return candidates
+
+
+def _resolve_shelf_display_path(code, existing_only=False):
+    for candidate in _shelf_display_path_candidates(code):
+        if candidate.exists():
+            return candidate
+    if existing_only:
+        return None
+    raw = str(code or '').strip()
+    if not raw:
+        return None
+    return _preferred_shelf_display_dir(raw) / f'{raw}.png'
+
+
+def _iter_shelf_display_files():
+    by_code = {}
+    scan_specs = (
+        (_SHELF_ROOT_DIR, None, 0),
+        (_LEGACY_OFFICE_MAP_DIR, _OFFICE_SHELF_PAT, 1),
+        (_LEGACY_GARAGE_MAP_DIR, _GARAGE_SHELF_PAT, 1),
+        (_LEGACY_HALLWAY_MAP_DIR, _HALLWAY_SHELF_PAT, 1),
+        (_LEGACY_MISC_MAP_DIR, _MISC_SHELF_PAT, 1),
+        (_LEGACY_OFFICE_SHELF_PICS_DIR, _OFFICE_SHELF_PAT, 2),
+        (_LEGACY_GARAGE_SHELF_PICS_DIR, _GARAGE_SHELF_PAT, 2),
+        (_LEGACY_HALLWAY_SHELF_PICS_DIR, _HALLWAY_SHELF_PAT, 2),
+        (_LEGACY_MISC_SHELF_PICS_DIR, _MISC_SHELF_PAT, 2),
+        (_OFFICE_SHELF_PICS_DIR, _OFFICE_SHELF_PAT, 3),
+        (_GARAGE_SHELF_PICS_DIR, _GARAGE_SHELF_PAT, 3),
+        (_HALLWAY_SHELF_PICS_DIR, _HALLWAY_SHELF_PAT, 3),
+        (_MISC_SHELF_PICS_DIR, _MISC_SHELF_PAT, 3),
+    )
+    for directory, pattern, priority in scan_specs:
+        if not directory.exists():
+            continue
+        for path in directory.iterdir():
+            if not path.is_file() or path.suffix.lower() != '.png':
+                continue
+            if pattern and not pattern.fullmatch(path.stem):
+                continue
+            key = path.stem.lower()
+            current = by_code.get(key)
+            if current is None:
+                by_code[key] = (path, priority)
+                continue
+            current_path, current_priority = current
+            if priority > current_priority or (
+                priority == current_priority and path.stat().st_mtime >= current_path.stat().st_mtime
+            ):
+                by_code[key] = (path, priority)
+    return [item[0] for item in by_code.values()]
+
+
+@app.route('/shelf-image/<path:code>.png')
+def shelf_image(code):
+    image_path = _resolve_shelf_display_path(code, existing_only=True)
+    if image_path is None or not image_path.exists():
+        return '', 404
+    return send_file(str(image_path), mimetype='image/png')
+
+
+def _preview_base_path_candidates(code):
+    candidates = []
+    for lookup_code in _preview_base_lookup_codes(code):
+        _add_unique_path(candidates, _preview_base_path_for_code(lookup_code))
+        _add_unique_path(candidates, _legacy_preview_base_path_for_code(lookup_code))
+        for original_candidate in _shelf_original_path_candidates(lookup_code):
+            _add_unique_path(candidates, original_candidate)
+    return candidates
+
+
+def _resolve_preview_base_path(code):
+    for candidate in _preview_base_path_candidates(code):
+        if candidate.exists():
+            return candidate
+    return None
+
+
+@app.route('/shelf-original/<path:code>.png')
+def shelf_original(code):
+    image_path = _resolve_shelf_original_path(code, existing_only=True)
+    if image_path is None or not image_path.exists():
+        return '', 404
+    return send_file(str(image_path), mimetype='image/png')
+
+
+@app.route('/shelf-base/<path:code>.png')
+def shelf_base_image(code):
+    image_path = _resolve_preview_base_path(code)
+    if image_path is None or not image_path.exists():
+        return '', 404
+    return send_file(str(image_path), mimetype='image/png')
+
+
+def _sync_preview_base_image(code, source_path):
+    base_path = _preview_base_path_for_code(code)
+    if not base_path:
+        return
+    source = Path(source_path)
+    if not source.is_absolute():
+        source = BASE_DIR / source
+    if not source.exists():
+        return
+    if source.resolve() == base_path.resolve():
+        return
+    base_path.parent.mkdir(parents=True, exist_ok=True)
+    base_path.write_bytes(source.read_bytes())
+
+
+def _sync_original_to_preview_base(code):
+    orig_path = _resolve_shelf_original_path(code, existing_only=True)
+    if orig_path is None or not orig_path.exists():
+        return
+    _sync_preview_base_image(code, orig_path)
+
+
+def _rename_preview_base_image(old_code, new_code):
+    old_path = _preview_base_path_for_code(old_code)
+    if not old_path or not old_path.exists():
+        return
+    new_path = _preview_base_path_for_code(new_code)
+    if not new_path:
+        old_path.unlink(missing_ok=True)
+        return
+    if new_path == old_path:
+        return
+    new_path.parent.mkdir(parents=True, exist_ok=True)
+    new_path.write_bytes(old_path.read_bytes())
+    old_path.unlink(missing_ok=True)
+
+
+def _delete_preview_base_image(code):
+    base_path = _preview_base_path_for_code(code)
+    if base_path and base_path.exists():
+        base_path.unlink(missing_ok=True)
 
 @app.after_request
 def add_no_cache_headers(response):
@@ -4202,6 +4854,46 @@ def listingagent_mobile():
         return "Missing upc", 400
     return render_template('listingagent_mobile.html', upc=upc)
 
+@app.route('/items-to-list/mobile-photos')
+def items_to_list_mobile_photos():
+    """Mobile helper: camera upload page for Items-to-List row-scoped photos."""
+    upc = _normalize_upc_preserve_suffix_for_match(request.args.get('upc') or '')
+    if not upc:
+        return "Missing upc", 400
+    row_status = _normalize_prep_row_status(request.args.get('row_status') or request.args.get('status'))
+    title = str(request.args.get('title') or '').strip()
+    return_path = str(request.args.get('return') or '').strip()
+    if not title:
+        conn = None
+        try:
+            conn = sqlite3.connect('bol.db')
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            cur.execute('''
+                SELECT item_description
+                FROM bol_items
+                WHERE upc = ? COLLATE NOCASE
+                ORDER BY import_date DESC, id DESC
+                LIMIT 1
+            ''', (upc,))
+            row = cur.fetchone()
+            title = str((row['item_description'] if row else '') or '').strip()
+        except Exception:
+            title = ''
+        finally:
+            try:
+                if conn is not None:
+                    conn.close()
+            except Exception:
+                pass
+    return render_template(
+        'items_to_list_mobile_photos.html',
+        upc=upc,
+        row_status=row_status,
+        title=title,
+        return_path=(return_path if return_path.startswith('/') else '')
+    )
+
 def _listingagent_init_settings_table(cur):
     cur.execute('''
         CREATE TABLE IF NOT EXISTS listing_agent_settings (
@@ -4345,6 +5037,18 @@ def _listagent_init_tables(cur):
             cur.execute('ALTER TABLE listing_queue ADD COLUMN removed_at TEXT')
         if 'added_mode' not in cols:
             cur.execute("ALTER TABLE listing_queue ADD COLUMN added_mode TEXT NOT NULL DEFAULT 'my'")
+    except Exception:
+        pass
+
+    # Legacy fix: manual queue adds from Item Manager were incorrectly tagged as auto.
+    try:
+        cur.execute("""
+            UPDATE listing_queue
+            SET added_mode = 'my'
+            WHERE status IN ('queued', 'done')
+              AND COALESCE(NULLIF(TRIM(source), ''), '') = 'list_manager'
+              AND COALESCE(NULLIF(TRIM(added_mode), ''), 'my') = 'auto'
+        """)
     except Exception:
         pass
 
@@ -4944,7 +5648,10 @@ def _preplog_apply_quantity_change(entry, *, old_qty, new_qty):
             return False, f'Item {upc} not found'
         target_id = int(target_row[0])
         target_lot = _normalize_lot_number(target_row[2]) or lot_hint
-        is_suffixed = ('-' in upc and upc.rsplit('-', 1)[-1].isdigit())
+        is_suffixed = _is_items_to_list_suffixed_upc(upc)
+
+        if status in ('bad', 'return') and not is_suffixed:
+            return False, 'BAD and RETURN quantity edits require a suffixed UPC. Base UPC rows cannot be special entries.'
 
         if status == 'good':
             if is_suffixed:
@@ -5021,7 +5728,7 @@ def _preplog_apply_quantity_change(entry, *, old_qty, new_qty):
                 WHERE id = ?
             ''', (new_base_unchecked, base_id))
 
-            _upsert_status_qty(upc, target_lot, 'good', (reason or 'return'), note, new_qty_n)
+            _upsert_status_qty(upc, target_lot, 'return', (reason or 'return'), note, new_qty_n)
 
         conn.commit()
         try:
@@ -5113,15 +5820,22 @@ def _listagent_add_to_queue(upc, *, title=None, source=None, item_status=None, a
         row = cur.fetchone()
         if row:
             qid = row['id']
-            if title or source or item_status:
+            should_update_metadata = (
+                title is not None or
+                source is not None or
+                item_status is not None or
+                added_mode in ('my', 'auto')
+            )
+            if should_update_metadata:
                 cur.execute('''
                     UPDATE listing_queue
                     SET
                         title = COALESCE(NULLIF(title, ''), ?),
                         source = COALESCE(NULLIF(source, ''), ?),
+                        added_mode = COALESCE(?, COALESCE(NULLIF(TRIM(added_mode), ''), 'my')),
                         item_status = COALESCE(?, item_status)
                     WHERE id = ?
-                ''', (title, source, item_status, qid))
+                ''', (title, source, added_mode, item_status, qid))
             cur.execute('SELECT * FROM listing_queue WHERE id = ? LIMIT 1', (qid,))
             return _listagent_row_to_dict(cur.fetchone()), False
 
@@ -5194,6 +5908,66 @@ def _listagent_get_queue(*, limit=50, added_mode=''):
         params.append(limit)
         cur.execute(sql, tuple(params))
         return [_listagent_row_to_dict(r) for r in cur.fetchall()]
+
+def _listagent_get_queue_statuses(upcs, *, added_mode=''):
+    mode = _listagent_normalize_added_mode(added_mode, default='')
+    if mode not in ('my', 'auto'):
+        mode = ''
+
+    requested = []
+    requested_seen = set()
+    variant_to_requested = {}
+    all_variants = []
+
+    for raw in upcs or []:
+        key = (raw or '').strip()
+        if not key or key in requested_seen:
+            continue
+        requested_seen.add(key)
+        requested.append(key)
+        for variant in _listagent_upc_variants(key):
+            if variant not in variant_to_requested:
+                variant_to_requested[variant] = []
+            if key not in variant_to_requested[variant]:
+                variant_to_requested[variant].append(key)
+            if variant not in all_variants:
+                all_variants.append(variant)
+
+    if not requested or not all_variants:
+        return {}
+
+    placeholders = ','.join('?' for _ in all_variants)
+    with db_connection('listagent.db') as conn:
+        cur = conn.cursor()
+        _listagent_init_tables(cur)
+        sql = '''
+            SELECT *
+            FROM listing_queue
+            WHERE upc IN (''' + placeholders + ''')
+              AND status IN ('queued', 'done')
+        '''
+        params = list(all_variants)
+        if mode:
+            sql += " AND COALESCE(NULLIF(TRIM(added_mode), ''), 'my') = ?"
+            params.append(mode)
+        sql += '''
+            ORDER BY CASE WHEN status = 'queued' THEN 0 ELSE 1 END, added_at DESC, id DESC
+        '''
+        cur.execute(sql, tuple(params))
+        rows = cur.fetchall()
+
+    out = {}
+    for row in rows:
+        item = _listagent_row_to_dict(row)
+        if not item:
+            continue
+        matched_requested = []
+        for variant in _listagent_upc_variants(item.get('upc') or ''):
+            matched_requested.extend(variant_to_requested.get(variant, []))
+        for key in matched_requested:
+            if key not in out:
+                out[key] = item
+    return out
 
 def _listagent_mark_listed(upc, *, platform=None, listing_id=None, offer_id=None, sku=None, asin=None, url=None,
                            marketplace_id=None, title=None, price=None, quantity=None,
@@ -5467,6 +6241,35 @@ def api_listingagent_queue():
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e, 'listingagent:queue_get')}), 500
 
+@app.route('/api/listingagent/queue/statuses', methods=['POST'])
+def api_listingagent_queue_statuses():
+    """Get queue membership for a specific set of UPCs."""
+    try:
+        data = request.json or {}
+        raw_upcs = data.get('upcs') or []
+        if isinstance(raw_upcs, str):
+            raw_upcs = [raw_upcs]
+        if not isinstance(raw_upcs, list):
+            return jsonify({'success': False, 'error': 'upcs must be a list'}), 400
+        upcs = []
+        seen = set()
+        for raw in raw_upcs[:250]:
+            key = (raw or '').strip()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            upcs.append(key)
+        added_mode = _listagent_normalize_added_mode(
+            data.get('added_mode') or data.get('queue_mode') or data.get('mode'),
+            default=''
+        )
+        if added_mode not in ('my', 'auto'):
+            added_mode = ''
+        items = _listagent_get_queue_statuses(upcs, added_mode=added_mode)
+        return jsonify({'success': True, 'items': items})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'listingagent:queue_statuses')}), 500
+
 @app.route('/api/listingagent/queue/add', methods=['POST'])
 def api_listingagent_queue_add():
     """Add a UPC to the Listing Agent queue."""
@@ -5668,6 +6471,9 @@ def api_preplog_update():
             try:
                 upc = _normalize_upc_preserve_suffix_for_match(_normalize_upc(updated.get('upc')))
                 lot_number = _normalize_lot_number(updated.get('lot_number'))
+                status_value = _normalize_prep_row_status(updated.get('status'))
+                note_allowed = status_value in ('good', 'bad', 'return')
+                synced_note = cleaned_note if note_allowed else ''
                 # Keep prep status timestamps in UTC format for stable last_edited sorting.
                 ts = datetime.datetime.now(datetime.UTC).isoformat()
                 conn_b = None
@@ -5688,7 +6494,7 @@ def api_preplog_update():
                             SET note = ?, updated_at = ?
                             WHERE upc = ? COLLATE NOCASE
                               AND COALESCE(lot_number, '') = ? COLLATE NOCASE
-                        ''', (cleaned_note, ts, target_upc, status_lot))
+                        ''', (synced_note or None, ts, target_upc, status_lot))
                         updated_any = updated_any or bool(cur_b.rowcount)
                     if upc:
                         try:
@@ -5713,19 +6519,19 @@ def api_preplog_update():
                                 ''', (upc,))
                                 target_note_row = cur_b.fetchone()
 
-                            if cleaned_note:
+                            if synced_note:
                                 if target_note_row:
                                     target_note_id = int(target_note_row[0])
                                     target_note_text = (target_note_row[1] or '').strip()
-                                    if target_note_text != cleaned_note:
+                                    if target_note_text != synced_note:
                                         cur_b.execute('''
                                             UPDATE items_prep_notes
                                             SET note = ?, created_at = ?
                                             WHERE id = ?
-                                        ''', (cleaned_note, ts, target_note_id))
+                                        ''', (synced_note, ts, target_note_id))
                                         updated_any = updated_any or bool(cur_b.rowcount)
                                 else:
-                                    cur_b.execute('INSERT INTO items_prep_notes (upc, note, created_at) VALUES (?,?,?)', (upc, cleaned_note, ts))
+                                    cur_b.execute('INSERT INTO items_prep_notes (upc, note, created_at) VALUES (?,?,?)', (upc, synced_note, ts))
                                     updated_any = True
                             elif target_note_row:
                                 target_note_id = int(target_note_row[0])
@@ -5884,7 +6690,12 @@ def api_preplog_reassign_lot():
         if qty < 1:
             qty = 1
 
-        is_suffixed = ('-' in upc and upc.rsplit('-', 1)[-1].isdigit())
+        is_suffixed = _is_items_to_list_suffixed_upc(upc)
+        if status in ('bad', 'return') and not is_suffixed:
+            return jsonify({
+                'success': False,
+                'error': 'BAD and RETURN lot reassign require a suffixed UPC. Base UPC rows cannot be special entries.'
+            }), 400
 
         conn = sqlite3.connect('bol.db', isolation_level='IMMEDIATE')
         cur = conn.cursor()
@@ -12058,6 +12869,589 @@ def _normalize_listing_source(value, default='system'):
         return 'system'
     return default or 'system'
 
+def _normalize_prep_row_status(value):
+    raw = str(value or '').strip().lower().replace(' ', '_')
+    return raw if raw in ('good', 'bad', 'return', 'unchecked') else ''
+
+def _is_items_to_list_suffixed_upc(upc):
+    upc_n = _normalize_upc_preserve_suffix_for_match(upc)
+    if not upc_n or '-' not in upc_n:
+        return False
+    base, suffix = upc_n.rsplit('-', 1)
+    return bool(base and suffix)
+
+def _items_to_list_bucket_status(upc, good_qty=0, bad_qty=0):
+    try:
+        good_qty_n = int(good_qty or 0)
+    except Exception:
+        good_qty_n = 0
+    try:
+        bad_qty_n = int(bad_qty or 0)
+    except Exception:
+        bad_qty_n = 0
+
+    is_suffixed = _is_items_to_list_suffixed_upc(upc)
+    if good_qty_n > 0 and (not is_suffixed or bad_qty_n <= 0):
+        return 'good'
+    if is_suffixed and bad_qty_n > 0:
+        return 'bad'
+    return ''
+
+def _items_to_list_effective_status(upc, explicit_status='', good_qty=0, bad_qty=0):
+    status_n = _normalize_prep_row_status(explicit_status)
+    if status_n == 'good':
+        return status_n
+    if status_n in ('bad', 'return'):
+        if _is_items_to_list_suffixed_upc(upc):
+            return status_n
+        # Base UPCs are reserved for canonical non-special rows. Ignore corrupted
+        # BAD/RETURN states and fall back to quantity buckets so the visible row stays canonical.
+        status_n = ''
+    if status_n == 'unchecked':
+        return ''
+    if status_n:
+        return status_n
+    return _items_to_list_bucket_status(upc, good_qty=good_qty, bad_qty=bad_qty)
+
+def _items_to_list_asset_scope(upc, row_status=''):
+    """Scope Items-to-List notes/photos by status+barcode; suffixed barcodes are already unique."""
+    upc_n = _normalize_upc_preserve_suffix_for_match(upc)
+    status_n = _normalize_prep_row_status(row_status)
+    if not upc_n:
+        return '', ''
+    if '-' in upc_n:
+        return upc_n, ''
+    return upc_n, status_n
+
+def _items_prep_scope_has_actionable_status(cur, upc, row_status='', lot_number=''):
+    """
+    Notes only make sense on actionable prep rows.
+    Unchecked rows should not carry notes, even if legacy data exists.
+    """
+    scope_upc, _scope_status = _items_to_list_asset_scope(upc, row_status)
+    if not scope_upc:
+        return False
+
+    explicit_status = _normalize_prep_row_status(row_status)
+    if _items_to_list_effective_status(scope_upc, explicit_status) in ('good', 'bad', 'return'):
+        return True
+    if explicit_status == 'unchecked':
+        return False
+
+    lot_n = _normalize_lot_number(lot_number)
+
+    try:
+        status_row = _select_prep_status_row(cur, scope_upc, lot_n, columns='status')
+        status_value = _items_to_list_effective_status(scope_upc, status_row[0]) if status_row else ''
+        if status_value in ('good', 'bad', 'return'):
+            return True
+    except Exception:
+        pass
+
+    try:
+        if lot_n:
+            cur.execute('''
+                SELECT COALESCE(good_qty, 0), COALESCE(bad_qty, 0)
+                FROM bol_items
+                WHERE upc = ? COLLATE NOCASE
+                  AND lot_number = ? COLLATE NOCASE
+                ORDER BY import_date DESC, id DESC
+                LIMIT 1
+            ''', (scope_upc, lot_n))
+            bol_row = cur.fetchone()
+        else:
+            cur.execute('''
+                SELECT COALESCE(good_qty, 0), COALESCE(bad_qty, 0)
+                FROM bol_items
+                WHERE upc = ? COLLATE NOCASE
+                ORDER BY import_date DESC, id DESC
+                LIMIT 1
+            ''', (scope_upc,))
+            bol_row = cur.fetchone()
+        if bol_row:
+            return bool(_items_to_list_bucket_status(scope_upc, good_qty=bol_row[0], bad_qty=bol_row[1]))
+    except Exception:
+        pass
+
+    return False
+
+def _ready_to_ship_prep_related_like(base_upc):
+    safe = str(base_upc or '').replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+    return f'{safe}-%'
+
+def _ready_to_ship_prep_sort_value(value):
+    raw = str(value or '').strip()
+    if not raw:
+        return 0.0
+    try:
+        cleaned = raw.replace('Z', '+00:00')
+        dt = datetime.datetime.fromisoformat(cleaned)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=datetime.timezone.utc)
+        return dt.timestamp()
+    except Exception:
+        return 0.0
+
+def _ready_to_ship_prep_relevance(requested_upc, scope_upc):
+    requested = _normalize_upc_preserve_suffix_for_match(requested_upc)
+    scope = _normalize_upc_preserve_suffix_for_match(scope_upc)
+    if not requested or not scope:
+        return 99
+    requested_base = requested.split('-', 1)[0]
+    scope_base = scope.split('-', 1)[0]
+    requested_has_suffix = '-' in requested
+    scope_has_suffix = '-' in scope
+
+    if requested_has_suffix:
+        if scope.lower() == requested.lower():
+            return 0
+        if scope.lower() == requested_base.lower():
+            return 1
+        if scope_base.lower() == requested_base.lower():
+            return 2
+        return 3
+
+    if scope_has_suffix and scope_base.lower() == requested_base.lower():
+        return 0
+    if scope.lower() == requested_base.lower():
+        return 1
+    if scope_base.lower() == requested_base.lower():
+        return 2
+    return 3
+
+def _ready_to_ship_prep_relevance_label(requested_upc, scope_upc):
+    requested = _normalize_upc_preserve_suffix_for_match(requested_upc)
+    scope = _normalize_upc_preserve_suffix_for_match(scope_upc)
+    if not requested or not scope:
+        return 'Related entry'
+    requested_base = requested.split('-', 1)[0]
+    scope_base = scope.split('-', 1)[0]
+    requested_has_suffix = '-' in requested
+    scope_has_suffix = '-' in scope
+
+    if requested_has_suffix:
+        if scope.lower() == requested.lower():
+            return 'Direct item'
+        if scope.lower() == requested_base.lower():
+            return 'Base item'
+        if scope_base.lower() == requested_base.lower():
+            return 'Related suffixed item'
+        return 'Related entry'
+
+    if scope_has_suffix and scope_base.lower() == requested_base.lower():
+        return 'Possible suffixed item'
+    if scope.lower() == requested_base.lower():
+        return 'Direct item'
+    if scope_base.lower() == requested_base.lower():
+        return 'Related item'
+    return 'Related entry'
+
+def _build_ready_to_ship_prep_context(cur, barcode, include_details=True, max_notes_per_entry=12, max_images_per_entry=8):
+    requested_upc = _normalize_upc_preserve_suffix_for_match(barcode)
+    if not requested_upc:
+        return {
+            'requested_barcode': '',
+            'base_barcode': '',
+            'has_alerts': False,
+            'summary': {
+                'has_alerts': False,
+                'entry_count': 0,
+                'note_count': 0,
+                'defect_count': 0,
+                'image_count': 0,
+                'latest_at': '',
+                'has_suffixed': False
+            },
+            'entries': []
+        }
+
+    requested_base = requested_upc.split('-', 1)[0]
+    like_related = _ready_to_ship_prep_related_like(requested_base)
+
+    entry_map = {}
+
+    def ensure_entry(scope_upc, scope_status=''):
+        key = (str(scope_upc or '').strip().lower(), str(scope_status or '').strip().lower())
+        if key not in entry_map:
+            entry_map[key] = {
+                'scope_upc': scope_upc,
+                'row_status': scope_status,
+                'status': scope_status or '',
+                'reason': '',
+                'latest_at': '',
+                'notes': [],
+                'images': [],
+                'note_count': 0,
+                'image_count': 0,
+                'has_suffixed': '-' in str(scope_upc or ''),
+                '_note_keys': set(),
+                '_image_ids': set(),
+            }
+        return entry_map[key]
+
+    def push_timestamp(entry, value):
+        raw = str(value or '').strip()
+        if not raw:
+            return
+        if _ready_to_ship_prep_sort_value(raw) >= _ready_to_ship_prep_sort_value(entry.get('latest_at')):
+            entry['latest_at'] = raw
+
+    bol_visible_status_by_scope = {}
+
+    def entry_scope_key(entry):
+        return _normalize_upc_preserve_suffix_for_match(entry.get('scope_upc'))
+
+    def entry_base_key(entry):
+        scope_key = entry_scope_key(entry)
+        return scope_key.split('-', 1)[0] if scope_key else ''
+
+    def entry_display_status(entry):
+        return str(entry.get('display_status') or entry.get('row_status') or entry.get('status') or '').strip().lower()
+
+    def entry_visible_status(entry):
+        scope_key = entry_scope_key(entry)
+        status = _items_to_list_effective_status(scope_key, entry_display_status(entry))
+        if status in ('good', 'bad', 'return'):
+            return status
+        return str(bol_visible_status_by_scope.get(scope_key) or '').strip().lower()
+
+    def is_visible_items_to_list_entry(entry):
+        return entry_visible_status(entry) in ('good', 'bad', 'return')
+
+    def merge_orphan_entry_into(target, source):
+        push_timestamp(target, source.get('latest_at'))
+        target['has_suffixed'] = bool(target.get('has_suffixed') or source.get('has_suffixed'))
+
+        source_note_keys = source.get('_note_keys') or set()
+        target_note_keys = target.get('_note_keys')
+        if not isinstance(target_note_keys, set):
+            target_note_keys = set(target_note_keys or [])
+            target['_note_keys'] = target_note_keys
+        existing_target_note_keys = set(target_note_keys)
+        added_note_count = 0
+        for note_key in source_note_keys:
+            if note_key in target_note_keys:
+                continue
+            target_note_keys.add(note_key)
+            added_note_count += 1
+        if added_note_count:
+            target['note_count'] = int(target.get('note_count') or 0) + added_note_count
+        if include_details:
+            existing_note_ids = {
+                str(note.get('id') or '')
+                for note in (target.get('notes') or [])
+            }
+            for note in (source.get('notes') or []):
+                note_id = str(note.get('id') or '')
+                dedupe_key = (
+                    note.get('kind'),
+                    str(note.get('note') or '').strip().lower(),
+                    str(note.get('created_at') or '').strip()
+                )
+                if note_id in existing_note_ids or dedupe_key in existing_target_note_keys:
+                    continue
+                target.setdefault('notes', []).append(note)
+                existing_note_ids.add(note_id)
+
+        source_image_ids = source.get('_image_ids') or set()
+        target_image_ids = target.get('_image_ids')
+        if not isinstance(target_image_ids, set):
+            target_image_ids = set(target_image_ids or [])
+            target['_image_ids'] = target_image_ids
+        added_image_count = 0
+        for image_id in source_image_ids:
+            if image_id in target_image_ids:
+                continue
+            target_image_ids.add(image_id)
+            added_image_count += 1
+        if added_image_count:
+            target['image_count'] = int(target.get('image_count') or 0) + added_image_count
+        if include_details:
+            existing_image_ids = {
+                int(img.get('id') or 0)
+                for img in (target.get('images') or [])
+                if str(img.get('id') or '').isdigit()
+            }
+            for image in (source.get('images') or []):
+                image_id = image.get('id')
+                if image_id in existing_image_ids:
+                    continue
+                target.setdefault('images', []).append(image)
+                if str(image_id or '').isdigit():
+                    existing_image_ids.add(int(image_id))
+
+    try:
+        cur.execute('''
+            SELECT upc, COALESCE(status, '') AS status, COALESCE(reason, '') AS reason,
+                   COALESCE(note, '') AS note, COALESCE(updated_at, '') AS updated_at,
+                   COALESCE(quantity, 0) AS quantity
+            FROM items_prep_status
+            WHERE upc = ? COLLATE NOCASE
+               OR upc LIKE ? ESCAPE '\\'
+            ORDER BY updated_at DESC, id DESC
+        ''', (requested_base, like_related))
+        status_rows = [dict(r) for r in cur.fetchall()]
+    except Exception:
+        status_rows = []
+
+    for row in status_rows:
+        raw_upc = _normalize_upc_preserve_suffix_for_match(row.get('upc'))
+        status_value = _normalize_prep_row_status(row.get('status'))
+        scope_upc, scope_status = _items_to_list_asset_scope(raw_upc, status_value)
+        if not scope_upc:
+            continue
+        entry = ensure_entry(scope_upc, scope_status)
+        if status_value and not entry.get('status'):
+            entry['status'] = status_value
+        reason_text = str(row.get('reason') or '').strip()
+        if reason_text and (
+            not entry.get('reason')
+            or _ready_to_ship_prep_sort_value(row.get('updated_at')) >= _ready_to_ship_prep_sort_value(entry.get('latest_at'))
+        ):
+            entry['reason'] = reason_text
+        push_timestamp(entry, row.get('updated_at'))
+        note_text = str(row.get('note') or '').strip()
+        note_at = str(row.get('updated_at') or '').strip()
+        if note_text:
+            note_key = ('status', note_text.lower(), note_at)
+            if note_key not in entry['_note_keys']:
+                entry['_note_keys'].add(note_key)
+                entry['note_count'] += 1
+                if include_details and len(entry['notes']) < max_notes_per_entry:
+                    entry['notes'].append({
+                        'id': f"status-{scope_upc}-{scope_status or 'none'}-{len(entry['notes'])}",
+                        'note': note_text,
+                        'created_at': note_at,
+                        'kind': 'status'
+                    })
+
+    try:
+        cur.execute('''
+            SELECT id, upc, COALESCE(row_status, '') AS row_status,
+                   COALESCE(note, '') AS note, COALESCE(created_at, '') AS created_at
+            FROM items_prep_notes
+            WHERE upc = ? COLLATE NOCASE
+               OR upc LIKE ? ESCAPE '\\'
+            ORDER BY created_at DESC, id DESC
+        ''', (requested_base, like_related))
+        note_rows = [dict(r) for r in cur.fetchall()]
+    except Exception:
+        note_rows = []
+
+    for row in note_rows:
+        raw_upc = _normalize_upc_preserve_suffix_for_match(row.get('upc'))
+        scope_upc, scope_status = _items_to_list_asset_scope(raw_upc, row.get('row_status'))
+        if not scope_upc:
+            continue
+        entry = ensure_entry(scope_upc, scope_status)
+        note_text = str(row.get('note') or '').strip()
+        note_at = str(row.get('created_at') or '').strip()
+        if not note_text:
+            continue
+        note_key = ('note', note_text.lower(), note_at)
+        if note_key in entry['_note_keys']:
+            continue
+        entry['_note_keys'].add(note_key)
+        entry['note_count'] += 1
+        push_timestamp(entry, note_at)
+        if include_details and len(entry['notes']) < max_notes_per_entry:
+            entry['notes'].append({
+                'id': row.get('id'),
+                'note': note_text,
+                'created_at': note_at,
+                'kind': 'note'
+            })
+
+    try:
+        cur.execute('''
+            SELECT id, upc, COALESCE(row_status, '') AS row_status,
+                   COALESCE(image_path, '') AS image_path, COALESCE(created_at, '') AS created_at,
+                   COALESCE(rotation, 0) AS rotation
+            FROM items_prep_images
+            WHERE (upc = ? COLLATE NOCASE OR upc LIKE ? ESCAPE '\\')
+              AND (deleted_at IS NULL OR TRIM(COALESCE(deleted_at, '')) = '')
+            ORDER BY created_at DESC, id DESC
+        ''', (requested_base, like_related))
+        image_rows = [dict(r) for r in cur.fetchall()]
+    except Exception:
+        image_rows = []
+
+    for row in image_rows:
+        raw_upc = _normalize_upc_preserve_suffix_for_match(row.get('upc'))
+        scope_upc, scope_status = _items_to_list_asset_scope(raw_upc, row.get('row_status'))
+        if not scope_upc:
+            continue
+        entry = ensure_entry(scope_upc, scope_status)
+        image_id = row.get('id')
+        if image_id in entry['_image_ids']:
+            continue
+        entry['_image_ids'].add(image_id)
+        entry['image_count'] += 1
+        push_timestamp(entry, row.get('created_at'))
+        image_path = str(row.get('image_path') or '').strip()
+        if include_details and image_path and len(entry['images']) < max_images_per_entry:
+            image_url = image_path if image_path.startswith(('http://', 'https://', '/')) else f"/static/{image_path}"
+            entry['images'].append({
+                'id': image_id,
+                'image_path': image_path,
+                'image_url': image_url,
+                'created_at': row.get('created_at') or '',
+                'rotation': int(row.get('rotation') or 0)
+            })
+
+    try:
+        cur.execute('''
+            SELECT upc,
+                   MAX(
+                       CASE
+                           WHEN INSTR(COALESCE(upc, ''), '-') > 0 AND COALESCE(bad_qty, 0) > 0 THEN 2
+                           WHEN COALESCE(good_qty, 0) > 0 THEN 1
+                           ELSE 0
+                       END
+                   ) AS visibility_rank
+            FROM bol_items
+            WHERE upc = ? COLLATE NOCASE
+               OR upc LIKE ? ESCAPE '\\'
+            GROUP BY upc
+        ''', (requested_base, like_related))
+        for row in cur.fetchall():
+            scope_upc = _normalize_upc_preserve_suffix_for_match(row['upc'])
+            if not scope_upc:
+                continue
+            rank = int(row['visibility_rank'] or 0)
+            if rank >= 2:
+                bol_visible_status_by_scope[scope_upc] = 'bad'
+            elif rank == 1:
+                bol_visible_status_by_scope[scope_upc] = 'good'
+    except Exception:
+        bol_visible_status_by_scope = {}
+
+    working_entries = []
+
+    for entry in entry_map.values():
+        if entry['note_count'] <= 0 and not str(entry.get('reason') or '').strip() and entry['image_count'] <= 0:
+            continue
+        entry['relevance_rank'] = _ready_to_ship_prep_relevance(requested_upc, entry.get('scope_upc'))
+        entry['relevance_label'] = _ready_to_ship_prep_relevance_label(requested_upc, entry.get('scope_upc'))
+        entry['display_status'] = entry_visible_status(entry)
+        if entry['display_status'] and not str(entry.get('status') or '').strip():
+            entry['status'] = entry['display_status']
+        entry['display_label'] = entry.get('scope_upc') or ''
+        working_entries.append(entry)
+
+    # Notes/photos can exist on a base UPC without a visible /items-to-list row.
+    # When that happens, fold those orphan assets into the related visible row so
+    # Ready to Ship doesn't report a fake second "entry" for the same prep item.
+    merged_entries = []
+    for entry in working_entries:
+        if is_visible_items_to_list_entry(entry):
+            merged_entries.append(entry)
+            continue
+
+        entry_base = entry_base_key(entry)
+        if not entry_base:
+            merged_entries.append(entry)
+            continue
+
+        candidate_entries = [
+            candidate for candidate in working_entries
+            if candidate is not entry
+            and is_visible_items_to_list_entry(candidate)
+            and entry_base_key(candidate).lower() == entry_base.lower()
+        ]
+        if not candidate_entries:
+            continue
+
+        source_scope = entry_scope_key(entry).lower()
+        exact_scope = [
+            candidate for candidate in candidate_entries
+            if entry_scope_key(candidate).lower() == source_scope
+        ]
+        if exact_scope:
+            candidate_entries = exact_scope
+
+        requested_key = requested_upc.lower()
+        if len(candidate_entries) > 1:
+            exact_requested = [
+                candidate for candidate in candidate_entries
+                if entry_scope_key(candidate).lower() == requested_key
+            ]
+            if exact_requested:
+                candidate_entries = exact_requested
+
+        candidate_entries.sort(
+            key=lambda candidate: (
+                int(candidate.get('relevance_rank', 99)),
+                -_ready_to_ship_prep_sort_value(candidate.get('latest_at')),
+                0 if '-' in str(candidate.get('scope_upc') or '') else 1,
+                str(candidate.get('scope_upc') or '').lower()
+            )
+        )
+        merge_orphan_entry_into(candidate_entries[0], entry)
+
+    entries = []
+    note_total = 0
+    defect_total = 0
+    image_total = 0
+    latest_at = ''
+    has_suffixed = False
+
+    for entry in merged_entries:
+        if entry['note_count'] <= 0 and not str(entry.get('reason') or '').strip() and entry['image_count'] <= 0:
+            continue
+        note_total += int(entry.get('note_count') or 0)
+        image_total += int(entry.get('image_count') or 0)
+        if str(entry.get('reason') or '').strip():
+            defect_total += 1
+        if entry.get('has_suffixed'):
+            has_suffixed = True
+        if _ready_to_ship_prep_sort_value(entry.get('latest_at')) >= _ready_to_ship_prep_sort_value(latest_at):
+            latest_at = entry.get('latest_at') or latest_at
+        if include_details:
+            entry['notes'] = sorted(
+                entry['notes'],
+                key=lambda n: (_ready_to_ship_prep_sort_value(n.get('created_at')), int(n.get('id') or 0) if str(n.get('id') or '').isdigit() else 0),
+                reverse=True
+            )[:max_notes_per_entry]
+            entry['images'] = sorted(
+                entry['images'],
+                key=lambda img: (_ready_to_ship_prep_sort_value(img.get('created_at')), int(img.get('id') or 0) if str(img.get('id') or '').isdigit() else 0),
+                reverse=True
+            )[:max_images_per_entry]
+        else:
+            entry.pop('notes', None)
+            entry.pop('images', None)
+        entry.pop('_note_keys', None)
+        entry.pop('_image_ids', None)
+        entries.append(entry)
+
+    entries.sort(
+        key=lambda e: (
+            int(e.get('relevance_rank', 99)),
+            -_ready_to_ship_prep_sort_value(e.get('latest_at')),
+            str(e.get('scope_upc') or '').lower(),
+            str(e.get('row_status') or '').lower()
+        )
+    )
+
+    summary = {
+        'has_alerts': bool(entries),
+        'entry_count': len(entries),
+        'note_count': note_total,
+        'defect_count': defect_total,
+        'image_count': image_total,
+        'latest_at': latest_at,
+        'has_suffixed': has_suffixed
+    }
+    payload = {
+        'requested_barcode': requested_upc,
+        'base_barcode': requested_base,
+        'has_alerts': summary['has_alerts'],
+        'summary': summary,
+        'entries': entries if include_details else []
+    }
+    return payload
+
 def _listing_source_label(value):
     norm = _normalize_listing_source(value, default='system')
     if norm == 'listing_center':
@@ -12767,7 +14161,7 @@ def _items_prep_items_to_list_url(upc, lot_number=''):
         from urllib.parse import quote
         upc_n = _normalize_upc_preserve_suffix_for_match(upc)
         lot_n = _normalize_lot_number(lot_number)
-        url = f"/items-to-list?q={quote(upc_n)}&status=good,bad,return,unchecked&direct_search=1"
+        url = f"/items-to-list?q={quote(upc_n)}&status=good,bad,return&direct_search=1"
         if lot_n:
             url += f"&lot={quote(lot_n)}"
         return url
@@ -13028,6 +14422,8 @@ def _ensure_items_prep_tables(force=False):
             cur.execute("ALTER TABLE items_prep_images ADD COLUMN expires_at TEXT")
         if 'trash_path' not in cols:
             cur.execute("ALTER TABLE items_prep_images ADD COLUMN trash_path TEXT")
+        if 'row_status' not in cols:
+            cur.execute("ALTER TABLE items_prep_images ADD COLUMN row_status TEXT DEFAULT ''")
         # Add rotation column to keep track of image orientation (degrees)
         if 'rotation' not in cols:
             try:
@@ -13036,10 +14432,17 @@ def _ensure_items_prep_tables(force=False):
                 # some older sqlite versions may behave differently; ignore errors
                 pass
 
+        cur.execute("PRAGMA table_info(items_prep_notes)")
+        note_cols = [r[1] for r in cur.fetchall()]
+        if 'row_status' not in note_cols:
+            cur.execute("ALTER TABLE items_prep_notes ADD COLUMN row_status TEXT DEFAULT ''")
+
         # Speed up per-UPC image/note lookups used by list views.
         cur.execute('CREATE INDEX IF NOT EXISTS idx_items_prep_images_upc ON items_prep_images(upc)')
         cur.execute('CREATE INDEX IF NOT EXISTS idx_items_prep_images_upc_deleted ON items_prep_images(upc, deleted_at)')
+        cur.execute('CREATE INDEX IF NOT EXISTS idx_items_prep_images_upc_status_deleted ON items_prep_images(upc, row_status, deleted_at)')
         cur.execute('CREATE INDEX IF NOT EXISTS idx_items_prep_notes_upc ON items_prep_notes(upc)')
+        cur.execute('CREATE INDEX IF NOT EXISTS idx_items_prep_notes_upc_status ON items_prep_notes(upc, row_status)')
 
         # Exception audit trail for intentional overage adds.
         cur.execute('''
@@ -14001,9 +15404,8 @@ def item_prep_diagnostic_page():
 @app.route('/item-prep/diagnostic/view')
 def item_prep_diagnostic_view_page():
     upc_raw = request.args.get('upc', '').strip()
-    # Strip leading zeros from numeric barcode values
-    upc_stripped = _strip_leading_zeros_numeric(upc_raw)
-    upc = _normalize_upc(upc_stripped)
+    upc = _normalize_upc_preserve_suffix_for_match(upc_raw)
+    selected_status = _normalize_prep_row_status(request.args.get('row_status') or request.args.get('status'))
     
     # If coming from Item Manager with lot parameter, set it in session
     lot = request.args.get('lot', '').strip()
@@ -14026,7 +15428,24 @@ def item_prep_diagnostic_view_page():
         selected_lot = _preferred_lot_from_request()
         row = _select_prep_status_row(cur, upc, selected_lot, columns='status, reason, note, updated_at, quantity, lot_number')
         status = dict(row) if row else None
-        cur.execute("SELECT id, image_path, created_at FROM items_prep_images WHERE upc = ? COLLATE NOCASE AND (deleted_at IS NULL OR TRIM(COALESCE(deleted_at,'')) = '') ORDER BY created_at DESC, id DESC", (upc,))
+        asset_scope_upc, asset_scope_status = _items_to_list_asset_scope(upc, selected_status)
+        if selected_status or ('-' in asset_scope_upc):
+            cur.execute('''
+                SELECT id, image_path, created_at, COALESCE(row_status, '') AS row_status
+                FROM items_prep_images
+                WHERE upc = ? COLLATE NOCASE
+                  AND COALESCE(row_status, '') = ? COLLATE NOCASE
+                  AND (deleted_at IS NULL OR TRIM(COALESCE(deleted_at,'')) = '')
+                ORDER BY created_at DESC, id DESC
+            ''', (asset_scope_upc, asset_scope_status))
+        else:
+            cur.execute('''
+                SELECT id, image_path, created_at, COALESCE(row_status, '') AS row_status
+                FROM items_prep_images
+                WHERE upc = ? COLLATE NOCASE
+                  AND (deleted_at IS NULL OR TRIM(COALESCE(deleted_at,'')) = '')
+                ORDER BY created_at DESC, id DESC
+            ''', (asset_scope_upc,))
         images = [dict(r) for r in cur.fetchall()]
         if selected_lot:
             cur.execute('''
@@ -14078,7 +15497,15 @@ def item_prep_diagnostic_view_page():
     finally:
         if conn is not None:
             conn.close()
-    return render_template('item_prep_diagnostic_view.html', upc=upc, status=status, images=images, bol=bol, selected_lot=selected_lot)
+    return render_template(
+        'item_prep_diagnostic_view.html',
+        upc=upc,
+        status=status,
+        images=images,
+        bol=bol,
+        selected_lot=selected_lot,
+        selected_status=selected_status
+    )
 
 @app.route('/item-prep-no-barcode')
 def item_prep_no_barcode_page():
@@ -14964,6 +16391,10 @@ def api_items_prep_status():
         
         if not upc or status not in ('good', 'bad', 'unchecked', 'return'):
             return jsonify({'success': False, 'error': 'Missing upc or invalid status'}), 400
+
+        if status == 'unchecked':
+            reason = ''
+            note = ''
         
         # Strip leading zeros but preserve suffix
         upc = _normalize_upc_preserve_suffix_for_match(upc)
@@ -15793,7 +17224,130 @@ def api_items_prep_status():
                 pass
 
             return jsonify({'success': True, 'upc': suffixed_upc, 'action': 'converted_to_bad', 'quantity': 1})
-        
+
+        if status == 'return' and '-' not in str(upc):
+            print(f'[RETURN] Converting base item {base_upc} to RETURN')
+
+            cur.execute('''
+                SELECT id, item_description, image_url, lot_number, bol_number, unchecked_qty, bad_qty, original_qty, good_qty
+                FROM bol_items
+                WHERE upc = ? COLLATE NOCASE
+                ORDER BY import_date DESC, id DESC
+                LIMIT 1
+            ''', (base_upc,))
+            base_item = cur.fetchone()
+
+            if not base_item:
+                return jsonify({'success': False, 'error': f'Base UPC {base_upc} not found in bol_items'}), 404
+
+            resolved_base_lot = _normalize_lot_number(base_item[3])
+            base_row_id = int(base_item[0])
+            unchecked = base_item[5]
+            current_bad = int(base_item[6] or 0)
+            original_qty = int(base_item[7] or 0)
+            current_good = int(base_item[8] or 0)
+            if unchecked is None:
+                unchecked = max(0, original_qty - current_good - current_bad)
+            else:
+                unchecked = int(unchecked or 0)
+
+            if qty > unchecked:
+                exception_overage_applied = True
+                if allow_overage_exception:
+                    print(
+                        f'[RETURN][EXCEPTION] Allowing overage return-entry for {base_upc}: '
+                        f'requested={qty}, unchecked={unchecked}'
+                    )
+                else:
+                    print(
+                        f'[RETURN][EXCEPTION][AUTO] Unchecked gate bypassed for {base_upc}: '
+                        f'requested={qty}, unchecked={unchecked}'
+                    )
+
+            suffixed_upc = _next_clean_suffix(base_upc)
+            return_reason = reason or 'return'
+
+            cur.execute('''
+                INSERT INTO bol_items (
+                    upc, item_description, image_url, lot_number, bol_number, import_date,
+                    temporary, original_qty, unchecked_qty, good_qty, bad_qty, quantity
+                )
+                VALUES (?, ?, ?, ?, ?, ?, 0, ?, 0, ?, 0, ?)
+            ''', (suffixed_upc, base_item[1], base_item[2], '', base_item[4], ts, qty, qty, qty))
+
+            cur.execute('''
+                INSERT INTO items_prep_status (upc, lot_number, status, reason, note, quantity, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (suffixed_upc, '', 'return', return_reason, note, qty, ts))
+
+            new_unchecked = max(0, unchecked - qty)
+            cur.execute('''
+                UPDATE bol_items
+                SET unchecked_qty = ?
+                WHERE id = ?
+            ''', (new_unchecked, base_row_id))
+
+            if exception_overage_applied:
+                _items_prep_record_exception(
+                    cur,
+                    upc=suffixed_upc,
+                    base_upc=base_upc,
+                    lot_number='',
+                    action='return_overage_override',
+                    quantity=qty,
+                    unchecked_remaining=unchecked,
+                    source='item-prep',
+                    note=exception_note or 'Return entry created as exception after unchecked quantity was exhausted.',
+                    meta={
+                        'status': 'return',
+                        'requested_qty': qty,
+                        'unchecked_before': unchecked,
+                        'allow_overage_exception': True,
+                        'requested_lot': requested_lot_norm,
+                        'assigned_lot': '',
+                        'forced_lot_override': False,
+                        'source_lot': resolved_base_lot
+                    }
+                )
+
+            conn.commit()
+            update_data_version()
+
+            try:
+                _preplog_add_entry(
+                    upc=suffixed_upc,
+                    base_upc=base_upc,
+                    status='return',
+                    quantity=qty,
+                    note=note or None,
+                    reason=return_reason,
+                    source='item-prep',
+                    meta={
+                        'action': 'converted_to_return',
+                        'requested_lot': requested_lot_norm,
+                        'lot_number': '',
+                        'assigned_lot': '',
+                        'continued_without_lot': True,
+                        'source_lot': resolved_base_lot,
+                        'exception_overage': bool(exception_overage_applied),
+                        'unchecked_before': unchecked if exception_overage_applied else None
+                    },
+                    dedupe=True
+                )
+            except Exception:
+                pass
+
+            return jsonify({
+                'success': True,
+                'upc': suffixed_upc,
+                'base_upc': base_upc,
+                'action': 'converted_to_return',
+                'quantity': qty,
+                'lot_number': '',
+                'continued_without_lot': True,
+                'exception_overage': bool(exception_overage_applied)
+            })
+
         # Normal BAD/UNCHECKED flow - UPC already has suffix or is being updated
         # Just update the existing entry directly
         if allow_no_lot:
@@ -16060,49 +17614,26 @@ def api_items_prep_create_bad_entry():
         upc = _normalize_upc_preserve_suffix_for_match(upc)
         
         base_upc = upc.split('-')[0] if '-' in upc else upc
-        requested_lot = _preferred_lot_from_request(data)
-        allow_no_lot = _coerce_bool(data.get('allow_no_lot'))
-        force_requested_lot = _coerce_bool(
-            data.get('force_requested_lot') if data.get('force_requested_lot') is not None else data.get('override_lot')
-        )
+        requested_lot_input = _normalize_lot_number(_preferred_lot_from_request(data))
+        requested_lot = ''
+        allow_no_lot = True
+        force_requested_lot = False
         allow_overage_exception = _coerce_bool(
             data.get('allow_overage_exception') if data.get('allow_overage_exception') is not None else data.get('force_exception')
         )
         exception_overage_applied = False
-        if allow_no_lot:
-            requested_lot = ''
-            force_requested_lot = False
         
         conn = sqlite3.connect('bol.db', isolation_level='IMMEDIATE')
         cur = conn.cursor()
         _ensure_items_prep_tables()
-        requested_lot_norm = _normalize_lot_number(requested_lot)
-        lot_mismatch, suggested_lot = _check_requested_lot_mismatch(cur, base_upc, requested_lot_norm)
-        if lot_mismatch and not allow_no_lot and not force_requested_lot:
-            return jsonify(_lot_mismatch_payload(
-                upc=base_upc,
-                requested_lot=requested_lot_norm,
-                suggested_lot=suggested_lot
-            )), 409
-        if allow_no_lot:
-            lot_info = {
-                'requested_lot': '',
-                'assigned_lot': '',
-                'auto_assigned': False,
-                'auto_assign_reason': ''
-            }
-            selected_lot = ''
-        elif force_requested_lot and requested_lot_norm:
-            lot_info = {
-                'requested_lot': requested_lot_norm,
-                'assigned_lot': requested_lot_norm,
-                'auto_assigned': False,
-                'auto_assign_reason': 'forced_requested_lot'
-            }
-            selected_lot = requested_lot_norm
-        else:
-            lot_info = _resolve_action_lot_assignment(cur, base_upc, requested_lot)
-            selected_lot = _normalize_lot_number(lot_info.get('assigned_lot'))
+        requested_lot_norm = ''
+        lot_info = {
+            'requested_lot': '',
+            'assigned_lot': '',
+            'auto_assigned': False,
+            'auto_assign_reason': ''
+        }
+        selected_lot = ''
         
         # Find next available suffix for bad items
         # Check BOTH bol_items AND prep tables to avoid reusing deleted suffixes with orphaned data
@@ -16351,49 +17882,20 @@ def api_items_prep_create_return_entry():
         upc = _normalize_upc_preserve_suffix_for_match(upc)
         
         base_upc = upc.split('-')[0] if '-' in upc else upc
-        requested_lot = _preferred_lot_from_request(data)
-        allow_no_lot = _coerce_bool(data.get('allow_no_lot'))
-        force_requested_lot = _coerce_bool(
-            data.get('force_requested_lot') if data.get('force_requested_lot') is not None else data.get('override_lot')
-        )
+        requested_lot_input = _normalize_lot_number(_preferred_lot_from_request(data))
+        requested_lot = ''
+        allow_no_lot = True
+        force_requested_lot = False
         allow_overage_exception = _coerce_bool(
             data.get('allow_overage_exception') if data.get('allow_overage_exception') is not None else data.get('force_exception')
         )
         exception_overage_applied = False
-        if allow_no_lot:
-            requested_lot = ''
-            force_requested_lot = False
         
         conn = sqlite3.connect('bol.db', isolation_level='IMMEDIATE')
         cur = conn.cursor()
         _ensure_items_prep_tables()
-        requested_lot_norm = _normalize_lot_number(requested_lot)
-        lot_mismatch, suggested_lot = _check_requested_lot_mismatch(cur, base_upc, requested_lot_norm)
-        if lot_mismatch and not allow_no_lot and not force_requested_lot:
-            return jsonify(_lot_mismatch_payload(
-                upc=base_upc,
-                requested_lot=requested_lot_norm,
-                suggested_lot=suggested_lot
-            )), 409
-        if allow_no_lot:
-            lot_info = {
-                'requested_lot': '',
-                'assigned_lot': '',
-                'auto_assigned': False,
-                'auto_assign_reason': ''
-            }
-            selected_lot = ''
-        elif force_requested_lot and requested_lot_norm:
-            lot_info = {
-                'requested_lot': requested_lot_norm,
-                'assigned_lot': requested_lot_norm,
-                'auto_assigned': False,
-                'auto_assign_reason': 'forced_requested_lot'
-            }
-            selected_lot = requested_lot_norm
-        else:
-            lot_info = _resolve_action_lot_assignment(cur, base_upc, requested_lot)
-            selected_lot = _normalize_lot_number(lot_info.get('assigned_lot'))
+        requested_lot_norm = ''
+        selected_lot = ''
         
         # Find next available suffix for return items
         suffix_num = 1
@@ -16427,47 +17929,25 @@ def api_items_prep_create_return_entry():
             # Suffix is available
             break
         
-        # Get base item details (non-strict: fallback to latest lot when needed).
-        if selected_lot:
-            cur.execute('''
-                SELECT id, item_description, image_url, lot_number, bol_number, unchecked_qty, bad_qty, original_qty, good_qty
-                FROM bol_items
-                WHERE upc = ? COLLATE NOCASE
-                  AND lot_number = ? COLLATE NOCASE
-                ORDER BY import_date DESC, id DESC
-                LIMIT 1
-            ''', (base_upc, selected_lot))
-            base_item = cur.fetchone()
-        else:
-            base_item = None
-        if not base_item:
-            cur.execute('''
-                SELECT id, item_description, image_url, lot_number, bol_number, unchecked_qty, bad_qty, original_qty, good_qty
-                FROM bol_items
-                WHERE upc = ? COLLATE NOCASE
-                ORDER BY import_date DESC, id DESC
-                LIMIT 1
-            ''', (base_upc,))
-            base_item = cur.fetchone()
+        # Return rows stay lotless; use the latest base UPC row without lot matching.
+        cur.execute('''
+            SELECT id, item_description, image_url, lot_number, bol_number, unchecked_qty, bad_qty, original_qty, good_qty
+            FROM bol_items
+            WHERE upc = ? COLLATE NOCASE
+            ORDER BY import_date DESC, id DESC
+            LIMIT 1
+        ''', (base_upc,))
+        base_item = cur.fetchone()
         
         if not base_item:
             return jsonify({'success': False, 'error': f'Base UPC {base_upc} not found in bol_items'}), 404
 
         resolved_base_lot = _normalize_lot_number(base_item[3])
-        if allow_no_lot:
-            selected_lot = ''
-        elif force_requested_lot and requested_lot_norm:
-            selected_lot = requested_lot_norm
-        else:
-            selected_lot = resolved_base_lot
-        requested_lot_norm = _normalize_lot_number(lot_info.get('requested_lot'))
-        auto_assigned = bool(selected_lot and (not requested_lot_norm or selected_lot.lower() != requested_lot_norm.lower()))
-        forced_lot_override = bool(force_requested_lot and selected_lot)
-        auto_assign_reason = lot_info.get('auto_assign_reason') or (
-            'requested_lot_unavailable_used_latest' if requested_lot_norm and auto_assigned else (
-                'no_lot_requested_used_latest' if auto_assigned else ''
-            )
-        )
+        selected_lot = ''
+        requested_lot_norm = ''
+        auto_assigned = False
+        forced_lot_override = False
+        auto_assign_reason = ''
 
         base_row_id = int(base_item[0])
         unchecked = base_item[5]
@@ -16513,18 +17993,11 @@ def api_items_prep_create_return_entry():
 
         # Return flow consumes unchecked units from the base row.
         new_unchecked = max(0, unchecked - qty)
-        if force_requested_lot and selected_lot:
-            cur.execute('''
-                UPDATE bol_items
-                SET unchecked_qty = ?, lot_number = ?
-                WHERE id = ?
-            ''', (new_unchecked, selected_lot, base_row_id))
-        else:
-            cur.execute('''
-                UPDATE bol_items
-                SET unchecked_qty = ?
-                WHERE id = ?
-            ''', (new_unchecked, base_row_id))
+        cur.execute('''
+            UPDATE bol_items
+            SET unchecked_qty = ?
+            WHERE id = ?
+        ''', (new_unchecked, base_row_id))
 
         if exception_overage_applied:
             _items_prep_record_exception(
@@ -16542,9 +18015,11 @@ def api_items_prep_create_return_entry():
                     'requested_qty': qty,
                     'unchecked_before': unchecked,
                     'allow_overage_exception': True,
-                    'requested_lot': requested_lot_norm,
+                    'requested_lot': '',
                     'assigned_lot': selected_lot,
-                    'forced_lot_override': bool(forced_lot_override)
+                    'forced_lot_override': False,
+                    'source_lot': resolved_base_lot,
+                    'ignored_requested_lot': requested_lot_input
                 }
             )
         
@@ -16572,17 +18047,18 @@ def api_items_prep_create_return_entry():
                 source='item-prep',
                 meta={
                     'action': 'create_return_entry',
-                    'requested_lot': requested_lot_norm,
+                    'requested_lot': '',
                     'lot_number': selected_lot,
                     'assigned_lot': selected_lot,
-                    'auto_assigned': bool(auto_assigned),
+                    'auto_assigned': False,
                     'auto_assign_reason': auto_assign_reason,
-                    'continued_without_lot': bool(allow_no_lot),
+                    'continued_without_lot': True,
                     'source_lot': resolved_base_lot,
-                    'forced_lot_override': bool(forced_lot_override),
-                    'needs_review': bool(auto_assigned or forced_lot_override),
+                    'forced_lot_override': False,
+                    'needs_review': False,
                     'exception_overage': bool(exception_overage_applied),
-                    'unchecked_before': unchecked if exception_overage_applied else None
+                    'unchecked_before': unchecked if exception_overage_applied else None,
+                    'ignored_requested_lot': requested_lot_input
                 },
                 dedupe=True
             )
@@ -16595,13 +18071,13 @@ def api_items_prep_create_return_entry():
             'base_upc': base_upc,
             'lot_number': selected_lot,
             'requested_lot': requested_lot_norm,
-            'auto_assigned': bool(auto_assigned),
+            'auto_assigned': False,
             'auto_assign_reason': auto_assign_reason,
-            'forced_lot_override': bool(forced_lot_override),
-            'continued_without_lot': bool(allow_no_lot),
+            'forced_lot_override': False,
+            'continued_without_lot': True,
             'unchecked_qty': new_unchecked,
             'exception_overage': bool(exception_overage_applied),
-            'items_to_list_url': _items_prep_items_to_list_url(base_upc, selected_lot)
+            'items_to_list_url': _items_prep_items_to_list_url(base_upc, '')
         })
         
     except Exception as e:
@@ -17451,8 +18927,12 @@ def api_items_prep_diagnostic_get(upc):
         # Strip leading zeros from numeric base while preserving suffix (e.g. 071..-4 -> 71..-4)
         upc_n = _normalize_upc_preserve_suffix_for_match(upc_raw)
         lot_number = _preferred_lot_from_request()
+        row_status = _normalize_prep_row_status(request.args.get('row_status') or request.args.get('status'))
         include_related_arg = request.args.get('include_related')
         include_related = True if include_related_arg is None else _coerce_bool(include_related_arg)
+        exact_scope = _coerce_bool(request.args.get('exact_scope'))
+        if exact_scope:
+            include_related = False
         include_bol_image = _coerce_bool(request.args.get('include_bol_image'))
         try:
             max_images = int(request.args.get('max_images') or 0)
@@ -17592,14 +19072,26 @@ def api_items_prep_diagnostic_get(upc):
                 image_lookup = manifest_lookup
 
         if not images:
+            asset_scope_upc, asset_scope_status = _items_to_list_asset_scope(upc_n, row_status)
             for cand in candidate_upcs:
-                cur.execute(
-                    "SELECT id, image_path, created_at, rotation FROM items_prep_images "
-                    "WHERE upc = ? COLLATE NOCASE "
-                    "AND (deleted_at IS NULL OR TRIM(COALESCE(deleted_at,'')) = '') "
-                    "ORDER BY created_at DESC, id DESC",
-                    (cand,)
-                )
+                if exact_scope or row_status or ('-' in asset_scope_upc and cand.lower() == asset_scope_upc.lower()):
+                    scope_upc, scope_status = _items_to_list_asset_scope(cand, row_status)
+                    cur.execute(
+                        "SELECT id, image_path, created_at, rotation, COALESCE(row_status, '') AS row_status FROM items_prep_images "
+                        "WHERE upc = ? COLLATE NOCASE "
+                        "AND COALESCE(row_status, '') = ? COLLATE NOCASE "
+                        "AND (deleted_at IS NULL OR TRIM(COALESCE(deleted_at,'')) = '') "
+                        "ORDER BY created_at DESC, id DESC",
+                        (scope_upc, scope_status)
+                    )
+                else:
+                    cur.execute(
+                        "SELECT id, image_path, created_at, rotation, COALESCE(row_status, '') AS row_status FROM items_prep_images "
+                        "WHERE upc = ? COLLATE NOCASE "
+                        "AND (deleted_at IS NULL OR TRIM(COALESCE(deleted_at,'')) = '') "
+                        "ORDER BY created_at DESC, id DESC",
+                        (cand,)
+                    )
                 rows = [dict(r) for r in cur.fetchall()]
                 if rows:
                     images = rows
@@ -17730,6 +19222,8 @@ def api_items_prep_diagnostic_history(upc):
 
         base_upc = upc_n.split('-', 1)[0] if '-' in upc_n else upc_n
         requested_lot = _normalize_lot_number(_preferred_lot_from_request())
+        requested_row_status = _normalize_prep_row_status(request.args.get('row_status') or request.args.get('status'))
+        exact_row_status = '' if '-' in upc_n else requested_row_status
         limit = _listingagent_parse_int(request.args.get('limit'), 200) or 200
         limit = max(1, min(limit, 1000))
         fetch_limit = max(100, min(limit * 4, 4000))
@@ -17776,6 +19270,12 @@ def api_items_prep_diagnostic_history(upc):
                 return True
             return lot_key.lower() == requested_lot.lower()
 
+        def _matches_row_status(event_status='', event_row_status=''):
+            if not exact_row_status:
+                return True
+            candidate = _normalize_prep_row_status(event_row_status or event_status)
+            return bool(candidate and candidate == exact_row_status)
+
         def _append_event(payload):
             if not isinstance(payload, dict):
                 return
@@ -17807,6 +19307,8 @@ def api_items_prep_diagnostic_history(upc):
         for row in prep_rows:
             row_upc = row.get('upc')
             if not _matches_upc(row_upc):
+                continue
+            if not _matches_row_status(row.get('status'), row.get('status')):
                 continue
 
             meta = row.get('meta') if isinstance(row.get('meta'), dict) else _preplog_meta_dict(row)
@@ -17903,6 +19405,9 @@ def api_items_prep_diagnostic_history(upc):
                 continue
 
             meta = _listinglog_meta_dict(row)
+            meta_row_status = _normalize_prep_row_status(meta.get('row_status') or meta.get('status'))
+            if not _matches_row_status('', meta_row_status):
+                continue
             event_lot = _normalize_lot_number(
                 meta.get('lot_number')
                 or meta.get('target_lot')
@@ -18003,6 +19508,7 @@ def api_items_prep_diagnostic_history(upc):
             'upc': upc_n,
             'base_upc': base_upc,
             'lot_number': requested_lot,
+            'row_status': exact_row_status,
             'items': items,
             'count': len(items)
         })
@@ -18017,15 +19523,24 @@ def api_items_prep_diagnostic_delete_photos(upc):
     conn = None
     try:
         upc_norm = _normalize_upc(upc)
-        # Strip leading zeros to match item manager behavior
-        upc_n = _strip_leading_zeros_numeric(upc_norm)
+        upc_n = _normalize_upc_preserve_suffix_for_match(upc_norm)
+        row_status = _normalize_prep_row_status(request.args.get('row_status') or request.args.get('status'))
+        scope_upc, scope_status = _items_to_list_asset_scope(upc_n, row_status)
         hard = (request.args.get('hard') or '0') in ('1','true','yes')
         _ensure_items_prep_tables()
         conn = sqlite3.connect('bol.db')
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         if hard:
-            cur.execute('SELECT id, image_path, trash_path, deleted_at FROM items_prep_images WHERE upc = ? COLLATE NOCASE', (upc_n,))
+            if row_status or ('-' in scope_upc):
+                cur.execute('''
+                    SELECT id, image_path, trash_path, deleted_at
+                    FROM items_prep_images
+                    WHERE upc = ? COLLATE NOCASE
+                      AND COALESCE(row_status, '') = ? COLLATE NOCASE
+                ''', (scope_upc, scope_status))
+            else:
+                cur.execute('SELECT id, image_path, trash_path, deleted_at FROM items_prep_images WHERE upc = ? COLLATE NOCASE', (scope_upc,))
             rows = cur.fetchall()
             for r in rows:
                 # remove from whichever exists
@@ -18037,13 +19552,32 @@ def api_items_prep_diagnostic_delete_photos(upc):
                                 os.remove(abs_path)
                         except Exception as fe:
                             print('Failed hard remove photo', abs_path, fe)
-            cur.execute('DELETE FROM items_prep_images WHERE upc = ? COLLATE NOCASE', (upc_n,))
+            if row_status or ('-' in scope_upc):
+                cur.execute('''
+                    DELETE FROM items_prep_images
+                    WHERE upc = ? COLLATE NOCASE
+                      AND COALESCE(row_status, '') = ? COLLATE NOCASE
+                ''', (scope_upc, scope_status))
+            else:
+                cur.execute('DELETE FROM items_prep_images WHERE upc = ? COLLATE NOCASE', (scope_upc,))
             deleted = cur.rowcount
             conn.commit()
             return jsonify({'success': True, 'deleted': deleted, 'hard': True})
         else:
             # Soft delete only active (not already deleted) rows
-            cur.execute("SELECT id, image_path FROM items_prep_images WHERE upc = ? COLLATE NOCASE AND (deleted_at IS NULL OR TRIM(COALESCE(deleted_at,'')) = '')", (upc_n,))
+            if row_status or ('-' in scope_upc):
+                cur.execute('''
+                    SELECT id, image_path
+                    FROM items_prep_images
+                    WHERE upc = ? COLLATE NOCASE
+                      AND COALESCE(row_status, '') = ? COLLATE NOCASE
+                      AND (deleted_at IS NULL OR TRIM(COALESCE(deleted_at,'')) = '')
+                ''', (scope_upc, scope_status))
+            else:
+                cur.execute(
+                    "SELECT id, image_path FROM items_prep_images WHERE upc = ? COLLATE NOCASE AND (deleted_at IS NULL OR TRIM(COALESCE(deleted_at,'')) = '')",
+                    (scope_upc,)
+                )
             rows = cur.fetchall()
             deleted = 0
             for r in rows:
@@ -18053,7 +19587,7 @@ def api_items_prep_diagnostic_delete_photos(upc):
                 abs_path = os.path.join(app.root_path, 'static', rel) if not os.path.isabs(rel) else rel
                 new_rel = None
                 if os.path.isfile(abs_path):
-                    new_rel = _move_to_trash(abs_path, upc_n)
+                    new_rel = _move_to_trash(abs_path, scope_upc)
                 # mark as deleted with expiry
                 del_at = _now_iso()
                 import datetime as _dt
@@ -18078,9 +19612,10 @@ def api_items_prep_diagnostic_add_photos(upc):
     conn = None
     try:
         upc_norm = _normalize_upc(upc)
-        # Strip leading zeros to match item manager behavior
-        upc_n = _strip_leading_zeros_numeric(upc_norm)
-        if not upc_n:
+        upc_n = _normalize_upc_preserve_suffix_for_match(upc_norm)
+        row_status = _normalize_prep_row_status(request.form.get('row_status') or request.form.get('status') or request.args.get('row_status') or request.args.get('status'))
+        scope_upc, scope_status = _items_to_list_asset_scope(upc_n, row_status)
+        if not scope_upc:
             return jsonify({'success': False, 'error': 'Missing upc'}), 400
         _ensure_items_prep_tables()
         from werkzeug.utils import secure_filename
@@ -18111,15 +19646,18 @@ def api_items_prep_diagnostic_add_photos(upc):
                         rot = int(rotations[idx] or 0)
                 except Exception:
                     rot = 0
-                cur.execute('INSERT INTO items_prep_images (upc, image_path, created_at, rotation) VALUES (?,?,?,?)', (upc_n, rel, ts, rot))
+                cur.execute(
+                    'INSERT INTO items_prep_images (upc, row_status, image_path, created_at, rotation) VALUES (?,?,?,?,?)',
+                    (scope_upc, scope_status, rel, ts, rot)
+                )
                 img_id = cur.lastrowid
-                out.append({'id': img_id, 'image_path': rel, 'created_at': ts, 'rotation': rot})
+                out.append({'id': img_id, 'image_path': rel, 'created_at': ts, 'rotation': rot, 'row_status': scope_status})
             except Exception as se:
                 print('Failed to save diagnostic image (add):', se)
         conn.commit()
         
         # Clear cache for this UPC to ensure fresh data on next lookup
-        cache_key = f"view//api/bol_lookup?upc={upc_n}"
+        cache_key = f"view//api/bol_lookup?upc={scope_upc}"
         cache.delete(cache_key)
         
         return jsonify({'success': True, 'images': out})
@@ -18492,13 +20030,31 @@ def api_items_prep_notes_get(upc):
     conn = None
     try:
         upc_norm = _normalize_upc(upc)
-        # Strip leading zeros to match item manager behavior
-        upc_n = _strip_leading_zeros_numeric(upc_norm)
+        upc_n = _normalize_upc_preserve_suffix_for_match(upc_norm)
+        row_status = _normalize_prep_row_status(request.args.get('row_status') or request.args.get('status'))
+        scope_upc, scope_status = _items_to_list_asset_scope(upc_n, row_status)
+        lot_number = _normalize_lot_number(_preferred_lot_from_request(request.args))
         _ensure_items_prep_tables()
         conn = sqlite3.connect('bol.db')
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
-        cur.execute('SELECT id, note, created_at FROM items_prep_notes WHERE upc = ? COLLATE NOCASE ORDER BY created_at DESC', (upc_n,))
+        if not _items_prep_scope_has_actionable_status(cur, scope_upc, row_status, lot_number):
+            return jsonify({'success': True, 'notes': []})
+        if row_status or ('-' in scope_upc):
+            cur.execute('''
+                SELECT id, note, created_at, COALESCE(row_status, '') AS row_status
+                FROM items_prep_notes
+                WHERE upc = ? COLLATE NOCASE
+                  AND COALESCE(row_status, '') = ? COLLATE NOCASE
+                ORDER BY created_at DESC
+            ''', (scope_upc, scope_status))
+        else:
+            cur.execute('''
+                SELECT id, note, created_at, COALESCE(row_status, '') AS row_status
+                FROM items_prep_notes
+                WHERE upc = ? COLLATE NOCASE
+                ORDER BY created_at DESC
+            ''', (scope_upc,))
         notes = [dict(r) for r in cur.fetchall()]
         return jsonify({'success': True, 'notes': notes})
     except Exception as e:
@@ -18514,27 +20070,31 @@ def api_items_prep_notes_add():
     try:
         data = request.get_json() or {}
         upc_norm = _normalize_upc(data.get('upc'))
-        # Strip leading zeros to match item manager behavior
-        upc = _strip_leading_zeros_numeric(upc_norm)
+        row_status = _normalize_prep_row_status(data.get('row_status') or data.get('status'))
+        upc = _normalize_upc_preserve_suffix_for_match(upc_norm)
+        scope_upc, scope_status = _items_to_list_asset_scope(upc, row_status)
         note = (data.get('note') or '').strip()
         lot_number = _normalize_lot_number(_preferred_lot_from_request(data))
         source = _normalize_listing_source(data.get('source'), default='user')
-        if not upc or not note:
+        if not scope_upc or not note:
             return jsonify({'success': False, 'error': 'Missing upc or note'}), 400
         _ensure_items_prep_tables()
         import datetime
         ts = datetime.datetime.now(datetime.UTC).isoformat()
         conn = sqlite3.connect('bol.db')
         cur = conn.cursor()
+        if not _items_prep_scope_has_actionable_status(cur, scope_upc, row_status, lot_number):
+            return jsonify({'success': False, 'error': 'Notes can only be added to Good, Bad, or Return rows.'}), 400
         # Avoid duplicate note rows for identical UPC + note payload.
         cur.execute('''
             SELECT id, created_at
             FROM items_prep_notes
             WHERE upc = ? COLLATE NOCASE
+              AND COALESCE(row_status, '') = ? COLLATE NOCASE
               AND TRIM(COALESCE(note, '')) = ?
             ORDER BY created_at DESC, id DESC
             LIMIT 1
-        ''', (upc, note))
+        ''', (scope_upc, scope_status, note))
         existing = cur.fetchone()
         if existing:
             return jsonify({
@@ -18543,7 +20103,10 @@ def api_items_prep_notes_add():
                 'created_at': existing[1],
                 'deduped': True
             })
-        cur.execute('INSERT INTO items_prep_notes (upc, note, created_at) VALUES (?,?,?)', (upc, note, ts))
+        cur.execute(
+            'INSERT INTO items_prep_notes (upc, row_status, note, created_at) VALUES (?,?,?,?)',
+            (scope_upc, scope_status, note, ts)
+        )
         note_id = cur.lastrowid
         conn.commit()
         try:
@@ -18552,7 +20115,7 @@ def api_items_prep_notes_add():
             pass
         try:
             _listinglog_add_entry(
-                upc=upc,
+                upc=scope_upc,
                 platform='item_manager',
                 action='note_add',
                 source=source,
@@ -18561,6 +20124,7 @@ def api_items_prep_notes_add():
                     'note_id': note_id,
                     'note': note,
                     'lot_number': lot_number,
+                    'row_status': scope_status,
                     'changes': {'note': {'from': None, 'to': note}},
                     'via': 'api_items_prep_notes_add'
                 }
@@ -18584,10 +20148,11 @@ def api_items_prep_notes_delete(note_id):
         lot_number = _normalize_lot_number(_preferred_lot_from_request())
         conn = sqlite3.connect('bol.db')
         cur = conn.cursor()
-        cur.execute('SELECT upc, note FROM items_prep_notes WHERE id = ? LIMIT 1', (note_id,))
+        cur.execute('SELECT upc, note, COALESCE(row_status, \'\') FROM items_prep_notes WHERE id = ? LIMIT 1', (note_id,))
         existing = cur.fetchone()
         note_upc = _normalize_upc_preserve_suffix_for_match(_normalize_upc(existing[0])) if existing else ''
         note_text = str(existing[1] or '').strip() if existing else ''
+        note_status = _normalize_prep_row_status(existing[2]) if existing else ''
         cur.execute('DELETE FROM items_prep_notes WHERE id = ?', (note_id,))
         deleted = cur.rowcount
         conn.commit()
@@ -18608,6 +20173,7 @@ def api_items_prep_notes_delete(note_id):
                             'note_id': note_id,
                             'note': note_text,
                             'lot_number': lot_number,
+                            'row_status': note_status,
                             'changes': {'note': {'from': note_text, 'to': None}},
                             'via': 'api_items_prep_notes_delete'
                         }
@@ -18936,6 +20502,65 @@ def price_master_page():
 def ready_to_ship_page():
     """Ready to Ship orders page."""
     return render_template('ready_to_ship.html')
+
+@app.route('/api/ready-to-ship/prep-summaries', methods=['POST'])
+def ready_to_ship_prep_summaries():
+    try:
+        data = request.get_json(silent=True) or {}
+        raw_barcodes = data.get('barcodes') or []
+        if not isinstance(raw_barcodes, list):
+            return jsonify({'success': False, 'error': 'barcodes must be an array'}), 400
+
+        normalized = []
+        seen = set()
+        for raw in raw_barcodes:
+            upc = _normalize_upc_preserve_suffix_for_match(raw)
+            if not upc:
+                continue
+            key = upc.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            normalized.append(upc)
+
+        if not normalized:
+            return jsonify({'success': True, 'summaries': {}})
+
+        _ensure_items_prep_tables()
+        with db_connection('bol.db') as conn:
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            payload = {}
+            for upc in normalized:
+                context = _build_ready_to_ship_prep_context(cur, upc, include_details=False)
+                payload[upc] = context.get('summary') or {
+                    'has_alerts': False,
+                    'entry_count': 0,
+                    'note_count': 0,
+                    'defect_count': 0,
+                    'image_count': 0,
+                    'latest_at': '',
+                    'has_suffixed': False
+                }
+        return jsonify({'success': True, 'summaries': payload})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'ready_to_ship:prep_summaries')}), 500
+
+@app.route('/api/ready-to-ship/prep-context/<barcode>', methods=['GET'])
+def ready_to_ship_prep_context(barcode):
+    try:
+        upc = _normalize_upc_preserve_suffix_for_match(barcode)
+        if not upc:
+            return jsonify({'success': False, 'error': 'Missing barcode'}), 400
+        _ensure_items_prep_tables()
+        with db_connection('bol.db') as conn:
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            context = _build_ready_to_ship_prep_context(cur, upc, include_details=True)
+        context['success'] = True
+        return jsonify(context)
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'ready_to_ship:prep_context')}), 500
 
 @app.route('/alerts')
 def alerts_page():
@@ -20413,7 +22038,7 @@ def _labelmaster_ebay_scope_state():
     scope_known = bool(token_scope_tokens)
     has_logistics_scope = any('sell.logistics' in s for s in token_scope_tokens)
     env_has_logistics_scope = any('sell.logistics' in s for s in env_scope_tokens)
-    has_effective_logistics_scope = has_logistics_scope or (not scope_known and env_has_logistics_scope)
+    has_effective_logistics_scope = has_logistics_scope or not scope_known
 
     return {
         'connected': ebay_connected,
@@ -21033,12 +22658,12 @@ def api_labelmaster_status():
 
     if not ebay_connected:
         ebay_reason = 'eBay OAuth token missing (run ebay_oauth_setup.py)'
-    elif not env_has_logistics_scope:
-        ebay_reason = 'EBAY_SCOPE is missing sell.logistics (update .env and reauthorize eBay)'
     elif scope_known and not has_logistics_scope:
         ebay_reason = 'Missing sell.logistics scope (reauthorize eBay app)'
     elif missing:
         ebay_reason = f"Missing defaults: {', '.join(missing)}"
+    elif not env_has_logistics_scope:
+        ebay_reason = 'EBAY_SCOPE does not advertise sell.logistics; proceeding because token scope metadata is unavailable'
     elif not scope_known:
         # Some refresh-token responses omit scope in tokens.json; treat as unknown instead of hard-failing.
         ebay_reason = 'Scope could not be introspected from token metadata (not blocking)'
@@ -21162,14 +22787,6 @@ def api_labelmaster_buy():
 
         if store == 'ebay':
             scope_state = _labelmaster_ebay_scope_state()
-            if not scope_state.get('env_has_sell_logistics_scope'):
-                return jsonify({
-                    'success': False,
-                    'error': (
-                        'EBAY_SCOPE is missing sell.logistics. Add '
-                        'https://api.ebay.com/oauth/api_scope/sell.logistics to .env and reauthorize eBay.'
-                    )
-                }), 400
             if scope_state.get('scope_known') and not scope_state.get('has_sell_logistics_scope'):
                 return jsonify({
                     'success': False,
@@ -21177,6 +22794,10 @@ def api_labelmaster_buy():
                         'eBay token does not include sell.logistics. Reauthorize eBay OAuth and retry.'
                     )
                 }), 400
+            if not scope_state.get('env_has_sell_logistics_scope'):
+                logger.warning(
+                    'labelmaster: buy proceeding with unknown token scope while EBAY_SCOPE lacks sell.logistics'
+                )
             result = _labelmaster_buy_ebay(order, settings)
         else:
             ship_to = data.get('ship_to')
@@ -21195,7 +22816,8 @@ def api_labelmaster_buy():
             'format': result.get('format')
         })
     except Exception as e:
-        if str(e) == 'NEED_ADDRESS':
+        err_msg = str(e)
+        if err_msg == 'NEED_ADDRESS':
             return jsonify({
                 'success': False,
                 'need_address': True,
@@ -21208,8 +22830,17 @@ def api_labelmaster_buy():
                     'name': order.get('shipping_name') or order.get('buyer_name') or '',
                 }
             }), 400
+        if (
+            'sell.logistics' in err_msg or
+            'ACCESS 1100' in err_msg or
+            err_msg.startswith('Missing ship-to address') or
+            err_msg.startswith('Ship-from defaults are missing') or
+            err_msg.startswith('Package dimensions are required') or
+            err_msg.startswith('Package weight is required')
+        ):
+            return jsonify({'success': False, 'error': err_msg}), 400
         logger.error(f"labelmaster:buy: {e}", exc_info=True)
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': err_msg}), 500
 
 @app.route('/api/labelmaster/print', methods=['POST'])
 def api_labelmaster_print():
@@ -22598,7 +24229,7 @@ def api_listing_helper_scan():
             dismissed = {(r[0], r[1]) for r in alerts_cur.fetchall()}
 
         sync_overdue_alert = _sync_manager_overdue_alert()
-        if sync_overdue_alert:
+        if sync_overdue_alert and ('sync_overdue', sync_overdue_alert.get('hash')) not in dismissed:
             alerts['sync_overdue'].append(sync_overdue_alert)
 
         # Get warehouse stock (sum qty by UPC/Barcode) + locations where items exist.
@@ -24128,8 +25759,16 @@ def api_bol_items():
         # else: allow limits between 100 and 50000 for stats
         offset = (page - 1) * limit
         
-        # Parse comma-separated status filters (e.g., "good,bad")
+        # Parse comma-separated status filters (e.g., "good,bad").
+        # /items-to-list only surfaces actionable rows now, so unchecked is ignored.
         status_filters = [s.strip() for s in status_filter.split(',') if s.strip()] if status_filter else []
+        allowed_status_filters = ('good', 'bad', 'return')
+        normalized_status_filters = []
+        for raw_status in status_filters:
+            normalized = raw_status.replace(' ', '_').strip().lower()
+            if normalized in allowed_status_filters and normalized not in normalized_status_filters:
+                normalized_status_filters.append(normalized)
+        status_filters = normalized_status_filters
         
         # Get listed/not_listed filters
         listed_flag = request.args.get('listed', '').strip().lower() == 'true'
@@ -24180,6 +25819,18 @@ def api_bol_items():
         prep_updated_expr = "COALESCE(s_exact.updated_at, s_fallback.updated_at)"
         prep_qty_expr = "COALESCE(s_exact.quantity, s_fallback.quantity)"
         prep_lot_expr = "COALESCE(s_exact.lot_number, s_fallback.lot_number, '')"
+        prep_status_value_expr = f"LOWER(TRIM(COALESCE({prep_status_expr}, '')))"
+        suffixed_upc_expr = "INSTR(COALESCE(b.upc, ''), '-') > 0"
+        explicit_suffixed_special_status_expr = f"({prep_status_value_expr} IN ('bad', 'return') AND {suffixed_upc_expr})"
+        invalid_base_special_status_expr = f"({prep_status_value_expr} IN ('bad', 'return') AND NOT ({suffixed_upc_expr}))"
+        fallback_source_expr = f"({prep_status_value_expr} = '' OR {invalid_base_special_status_expr})"
+        fallback_good_expr = (
+            f"({fallback_source_expr} AND COALESCE(b.good_qty, 0) > 0 "
+            f"AND (NOT ({suffixed_upc_expr}) OR COALESCE(b.bad_qty, 0) <= 0))"
+        )
+        fallback_bad_expr = (
+            f"({fallback_source_expr} AND {suffixed_upc_expr} AND COALESCE(b.bad_qty, 0) > 0)"
+        )
         # Canonicalize duplicate corruption rows (same UPC+LOT) to newest row only.
         # MAX(id) is much faster than per-row ORDER BY and is backed by idx_bol_items_upc_lotnorm_id.
         where.append('''
@@ -24204,31 +25855,39 @@ def api_bol_items():
             where.append('(b.upc LIKE ? COLLATE NOCASE OR b.item_description LIKE ? COLLATE NOCASE)')
             like = f"%{q_stripped}%"
             params.extend([like, like])
+
+        # /items-to-list should only show rows that were actually prepped into a visible status.
+        if status_filter_has_good_qty and status_filter_has_bad_qty:
+            visible_status_clause = (
+                f"(({prep_status_value_expr} = 'good') "
+                f"OR {explicit_suffixed_special_status_expr} "
+                f"OR {fallback_good_expr} "
+                f"OR {fallback_bad_expr})"
+            )
+        else:
+            visible_status_clause = (
+                f"(({prep_status_value_expr} = 'good') "
+                f"OR {explicit_suffixed_special_status_expr})"
+            )
+        where.append(visible_status_clause)
         
         # Apply status filter in SQL WHERE clause (supports multiple statuses)
         if status_filters:
             status_conditions = []
             for sf in status_filters:
-                sf = sf.replace(' ', '_')
-                if sf == 'unchecked':
-                    # Unchecked: no prep_status OR explicit 'unchecked', AND exclude suffixed items (BAD flow temporaries)
-                    unchecked_clause = f"({prep_status_expr} IS NULL OR {prep_status_expr} = 'unchecked')"
-                    if status_filter_has_good_qty and status_filter_has_bad_qty:
-                        unchecked_clause = f"({unchecked_clause} AND COALESCE(b.good_qty, 0) = 0 AND COALESCE(b.bad_qty, 0) = 0)"
-                    status_conditions.append(f"({unchecked_clause} AND b.upc NOT LIKE '%-%')")
-                elif sf == 'good':
+                if sf == 'good':
                     # Good rows can still exist with missing status metadata after complex undo/delete history.
                     if status_filter_has_good_qty:
-                        status_conditions.append(f"({prep_status_expr} = 'good' OR ({prep_status_expr} IS NULL AND COALESCE(b.good_qty, 0) > 0 AND COALESCE(b.bad_qty, 0) = 0))")
+                        status_conditions.append(f"({prep_status_value_expr} = 'good' OR {fallback_good_expr})")
                     else:
-                        status_conditions.append(f"{prep_status_expr} = 'good'")
+                        status_conditions.append(f"{prep_status_value_expr} = 'good'")
                 elif sf == 'bad':
                     if status_filter_has_bad_qty:
-                        status_conditions.append(f"({prep_status_expr} = 'bad' OR ({prep_status_expr} IS NULL AND COALESCE(b.bad_qty, 0) > 0 AND COALESCE(b.good_qty, 0) = 0))")
+                        status_conditions.append(f"(({prep_status_value_expr} = 'bad' AND {suffixed_upc_expr}) OR {fallback_bad_expr})")
                     else:
-                        status_conditions.append(f"{prep_status_expr} = 'bad'")
+                        status_conditions.append(f"({prep_status_value_expr} = 'bad' AND {suffixed_upc_expr})")
                 elif sf == 'return':
-                    status_conditions.append(f"{prep_status_expr} = 'return'")
+                    status_conditions.append(f"({prep_status_value_expr} = 'return' AND {suffixed_upc_expr})")
             
             if status_conditions:
                 where.append(f"({' OR '.join(status_conditions)})")
@@ -24254,8 +25913,8 @@ def api_bol_items():
         
         # Apply defect filter (filter by prep_reason column)
         if defect_filter:
-            where.append(f"{prep_reason_expr} = ?")
-            params.append(defect_filter)
+            where.append(f"{prep_reason_expr} LIKE ? COLLATE NOCASE")
+            params.append(f"%{defect_filter}%")
         
         # Build WHERE clause only when we actually have conditions
         where_sql = (' WHERE ' + ' AND '.join(where)) if where else ''
@@ -24512,30 +26171,33 @@ def api_bol_items():
                     k2.execute(f'''
                         SELECT
                             upc,
+                            COALESCE(row_status, '') as row_status,
                             COUNT(*) as note_count,
                             MAX(CASE WHEN INSTR(COALESCE(note, ''), 'Set of ') > 0 THEN 1 ELSE 0 END) as set_note_flag
                         FROM items_prep_notes
                         WHERE upc IN ({placeholders})
-                        GROUP BY upc
+                        GROUP BY upc, COALESCE(row_status, '')
                     ''', tuple(page_upcs))
                     for rr in k2.fetchall():
                         raw_upc = rr['upc']
                         if raw_upc:
-                            note_map[_normalize_upc(raw_upc)] = rr['note_count']
-                            set_note_map[_normalize_upc(raw_upc)] = int(rr['set_note_flag'] or 0)
+                            scope_key = _items_to_list_asset_scope(raw_upc, rr['row_status'])
+                            note_map[scope_key] = int(rr['note_count'] or 0)
+                            set_note_map[scope_key] = int(rr['set_note_flag'] or 0)
 
                     # Active (not deleted) photo counts for each UPC on the current page.
                     k2.execute(f'''
-                        SELECT upc, COUNT(*) as photo_count
+                        SELECT upc, COALESCE(row_status, '') as row_status, COUNT(*) as photo_count
                         FROM items_prep_images
                         WHERE upc IN ({placeholders})
                           AND (deleted_at IS NULL OR TRIM(COALESCE(deleted_at, '')) = '')
-                        GROUP BY upc
+                        GROUP BY upc, COALESCE(row_status, '')
                     ''', tuple(page_upcs))
                     for rr in k2.fetchall():
                         raw_upc = rr['upc']
                         if raw_upc:
-                            photo_count_map[_normalize_upc(raw_upc)] = int(rr['photo_count'] or 0)
+                            scope_key = _items_to_list_asset_scope(raw_upc, rr['row_status'])
+                            photo_count_map[scope_key] = int(rr['photo_count'] or 0)
         except Exception:
             status_map = {}
             note_map = {}
@@ -24544,9 +26206,33 @@ def api_bol_items():
 
         # Enrich rows with status map for any missing joins
         def status_of(row):
-            st = (row.get('prep_status') or '').strip().lower()
             row_upc = _normalize_upc(row.get('upc'))
             row_lot = _normalize_lot_number(row.get('lot_number'))
+            raw_status = _normalize_prep_row_status(row.get('prep_status'))
+            invalid_base_special = raw_status in ('bad', 'return') and not _is_items_to_list_suffixed_upc(row_upc)
+            try:
+                good_bucket = int(row.get('good_qty') or 0)
+            except Exception:
+                good_bucket = 0
+            try:
+                bad_bucket = int(row.get('bad_qty') or 0)
+            except Exception:
+                bad_bucket = 0
+            st = _items_to_list_effective_status(
+                row_upc,
+                row.get('prep_status'),
+                good_qty=good_bucket,
+                bad_qty=bad_bucket
+            )
+            if st in ('good', 'bad', 'return') and st != raw_status:
+                row['prep_status'] = st
+                if st == 'good':
+                    row['prep_quantity'] = good_bucket
+                elif st == 'bad':
+                    row['prep_quantity'] = bad_bucket
+                if invalid_base_special:
+                    row['prep_reason'] = ''
+                    row['prep_note'] = ''
 
             if not st:
                 sm = status_map.get((row_upc, row_lot)) or status_map.get((row_upc, ''))
@@ -24555,18 +26241,26 @@ def api_bol_items():
                     row['prep_reason'] = sm.get('prep_reason')
                     row['prep_note'] = sm.get('prep_note')
                     row['prep_updated_at'] = sm.get('prep_updated_at')
-                    st = (row.get('prep_status') or '').strip().lower()
+                    st = _items_to_list_effective_status(
+                        row_upc,
+                        row.get('prep_status'),
+                        good_qty=good_bucket,
+                        bad_qty=bad_bucket
+                    )
+                    raw_status = _normalize_prep_row_status(row.get('prep_status'))
+                    invalid_base_special = raw_status in ('bad', 'return') and not _is_items_to_list_suffixed_upc(row_upc)
+                    if st in ('good', 'bad', 'return') and st != raw_status:
+                        row['prep_status'] = st
+                        if st == 'good':
+                            row['prep_quantity'] = good_bucket
+                        elif st == 'bad':
+                            row['prep_quantity'] = bad_bucket
+                        if invalid_base_special:
+                            row['prep_reason'] = ''
+                            row['prep_note'] = ''
             if not st:
                 # Final fallback: infer status from quantity buckets so edge-case rows
                 # still render under Good/Bad filters even if prep status metadata is missing.
-                try:
-                    good_bucket = int(row.get('good_qty') or 0)
-                except Exception:
-                    good_bucket = 0
-                try:
-                    bad_bucket = int(row.get('bad_qty') or 0)
-                except Exception:
-                    bad_bucket = 0
                 unchecked_raw = row.get('unchecked_qty')
                 if unchecked_raw is None:
                     try:
@@ -24584,38 +26278,40 @@ def api_bol_items():
                     st = 'unchecked'
                     row['prep_status'] = 'unchecked'
                     row['prep_quantity'] = unchecked_bucket
-                elif bad_bucket > 0 and good_bucket <= 0:
-                    st = 'bad'
-                    row['prep_status'] = 'bad'
-                    row['prep_quantity'] = bad_bucket
-                elif good_bucket > 0 and bad_bucket <= 0:
-                    st = 'good'
-                    row['prep_status'] = 'good'
-                    row['prep_quantity'] = good_bucket
-                elif bad_bucket > 0:
-                    st = 'bad'
-                    row['prep_status'] = 'bad'
-                    row['prep_quantity'] = bad_bucket
+                else:
+                    st = _items_to_list_bucket_status(row_upc, good_qty=good_bucket, bad_qty=bad_bucket)
+                    if st == 'good':
+                        row['prep_status'] = 'good'
+                        row['prep_quantity'] = good_bucket
+                    elif st == 'bad':
+                        row['prep_status'] = 'bad'
+                        row['prep_quantity'] = bad_bucket
 
+            scope_key = _items_to_list_asset_scope(row_upc, st)
             if 'prep_note_count' not in row:
-                row['prep_note_count'] = note_map.get(row_upc, 0)
+                row['prep_note_count'] = note_map.get(scope_key, 0)
             if 'prep_set_note' not in row:
-                row['prep_set_note'] = set_note_map.get(row_upc, 0)
+                row['prep_set_note'] = set_note_map.get(scope_key, 0)
             if 'prep_photo_count' not in row:
-                row['prep_photo_count'] = photo_count_map.get(row_upc, 0)
+                row['prep_photo_count'] = photo_count_map.get(scope_key, 0)
 
-            return st if st in ('good', 'bad', 'unchecked', 'return') else 'unchecked'
+            return st if st in ('good', 'bad', 'return') else ''
         
-        # Apply status enrichment to rows
+        # Apply status enrichment and drop any remaining unchecked/legacy rows.
+        visible_rows = []
         for r in rows:
-            status_of(r)
+            if status_of(r) in ('good', 'bad', 'return'):
+                visible_rows.append(r)
+        rows = visible_rows
         
         # Normalize for UI
         results = []
         for r in rows:
             # Determine last_edited: prefer items_prep_status.updated_at, fall back to import_date
             last_edited = r.get('prep_updated_at') or r.get('import_date') or ''
-            status = (r.get('prep_status') or 'unchecked').strip().lower()
+            status = (r.get('prep_status') or '').strip().lower()
+            if status not in ('good', 'bad', 'return'):
+                continue
             upc_raw = r.get('upc') or ''
             warehouse_base_upc = _warehouse_base_upc(r.get('upc'))
             warehouse_available = max(0, int(warehouse_available_by_base.get(warehouse_base_upc, 0) or 0))
@@ -25391,15 +27087,38 @@ def api_cleanup_temporary_entry():
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
     finally:
         conn.close()
+
+@app.route('/api/items_prep/diagnostic/<upc>/photos.zip', methods=['GET'])
 def api_items_prep_diagnostic_photos_zip(upc):
     """Bundle all diagnostic photos for a UPC into a zip and return as attachment."""
+    conn = None
     try:
-        upc_n = _normalize_upc(upc)
+        upc_n = _normalize_upc_preserve_suffix_for_match(_normalize_upc(upc))
+        if not upc_n:
+            return jsonify({'error': 'Missing upc'}), 400
+        row_status = _normalize_prep_row_status(request.args.get('row_status') or request.args.get('status'))
+        scope_upc, scope_status = _items_to_list_asset_scope(upc_n, row_status)
         _ensure_items_prep_tables()
         conn = sqlite3.connect('bol.db')
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
-        cur.execute("SELECT image_path FROM items_prep_images WHERE upc = ? COLLATE NOCASE AND (deleted_at IS NULL OR TRIM(COALESCE(deleted_at,'')) = '') ORDER BY created_at DESC, id DESC", (upc_n,))
+        if row_status or ('-' in scope_upc):
+            cur.execute('''
+                SELECT image_path
+                FROM items_prep_images
+                WHERE upc = ? COLLATE NOCASE
+                  AND COALESCE(row_status, '') = ? COLLATE NOCASE
+                  AND (deleted_at IS NULL OR TRIM(COALESCE(deleted_at,'')) = '')
+                ORDER BY created_at DESC, id DESC
+            ''', (scope_upc, scope_status))
+        else:
+            cur.execute('''
+                SELECT image_path
+                FROM items_prep_images
+                WHERE upc = ? COLLATE NOCASE
+                  AND (deleted_at IS NULL OR TRIM(COALESCE(deleted_at,'')) = '')
+                ORDER BY created_at DESC, id DESC
+            ''', (scope_upc,))
         rows = cur.fetchall()
         if not rows:
             return jsonify({'error': 'No photos for this UPC'}), 404
@@ -25421,12 +27140,16 @@ def api_items_prep_diagnostic_photos_zip(upc):
                 except Exception as e:
                     print('Zip add failed:', e)
         mem.seek(0)
-        filename = f"diagnostic_{upc_n}.zip"
+        filename = f"diagnostic_{scope_upc}{('_' + scope_status) if scope_status else ''}.zip"
         return send_file(mem, mimetype='application/zip', as_attachment=True, download_name=filename)
     except Exception as e:
         return jsonify({'error': _safe_error(e)}), 500
     finally:
-        conn.close()
+        try:
+            if conn is not None:
+                conn.close()
+        except Exception:
+            pass
 
 @app.route("/token-status")
 @require_debug_mode
@@ -26380,142 +28103,177 @@ def orders():
 
 
 def get_ebay_orders(days=90):
-    print(f"Getting eBay orders for the last {days} days...")
-    # Trading API endpoint
-    url = "https://api.ebay.com/ws/api.dll"
-    headers = {
-        "X-EBAY-API-SITEID": "0",
-        "X-EBAY-API-COMPATIBILITY-LEVEL": "967",
-        "X-EBAY-API-CALL-NAME": "GetOrders",
-        "X-EBAY-API-DEV-NAME": os.getenv("EBAY_PROD_DEV_ID"),
-        "X-EBAY-API-APP-NAME": os.getenv("EBAY_PROD_APP_ID"),
-        "X-EBAY-API-CERT-NAME": os.getenv("EBAY_PROD_CERT_ID"),
-        "Content-Type": "text/xml"
-    }
-    xml_payload = f'''
-    <?xml version="1.0" encoding="utf-8"?>
-    <GetOrdersRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-      <RequesterCredentials>
-        <eBayAuthToken>{os.getenv("EBAY_OLDAUTH_TOKEN")}</eBayAuthToken>
-      </RequesterCredentials>
-      <OrderRole>Seller</OrderRole>
-      <OrderStatus>All</OrderStatus>
-      <NumberOfDays>{days}</NumberOfDays>
-      <Pagination>
-        <EntriesPerPage>100</EntriesPerPage>
-        <PageNumber>1</PageNumber>
-      </Pagination>
-    </GetOrdersRequest>
-    '''
+    print(f"Getting eBay orders for the last {days} days via Fulfillment API...")
 
-
-    response = requests.post(url, headers=headers, data=xml_payload, timeout=30)
-    root = ET.fromstring(response.text)
-    print(root)
-    '''
-    rough_string = ET.tostring(root, encoding="utf-8")
-    # Parse that into a minidom object
-    dom = minidom.parseString(rough_string)
-    # Pretty print
-    pretty_xml = dom.toprettyxml(indent="  ")
-    print(pretty_xml)
-    '''
-
-    ns = {'ebay': 'urn:ebay:apis:eBLBaseComponents'}
-    print("right before for loop")
-    for order in root.findall('.//ebay:Order', ns):
-        print("inside first for loop")
-        order_id = order.find('ebay:OrderID', ns)
-        paid_time = order.find('ebay:PaidTime', ns)
-        shipped_time = order.find('ebay:ShippedTime', ns)
-        checkout_status = order.find('.//ebay:CheckoutStatus/ebay:Status', ns)
-        shipping = order.find('.//ebay:ShippingAddress', ns)
-        shipping_name = shipping.find('ebay:Name', ns) if shipping is not None else None
-        shipping_street1 = shipping.find('ebay:Street1', ns) if shipping is not None else None
-        shipping_street2 = shipping.find('ebay:Street2', ns) if shipping is not None else None
-        shipping_city = shipping.find('ebay:CityName', ns) if shipping is not None else None
-        shipping_state = shipping.find('ebay:StateOrProvince', ns) if shipping is not None else None
-        shipping_postal_code = shipping.find('ebay:PostalCode', ns) if shipping is not None else None
-        shipping_country = shipping.find('ebay:Country', ns) if shipping is not None else None
-        
-        # Extract shipping costs
-        shipping_service_cost = order.find('.//ebay:ShippingServiceSelected/ebay:ShippingServiceCost', ns)
-        shipping_insurance_cost = order.find('.//ebay:ShippingServiceSelected/ebay:ShippingInsuranceCost', ns)
-        
-        print("inside first for loop end")
+    def _amount_value(node, default=None):
+        if isinstance(node, dict):
+            node = node.get('value')
         try:
-            for transaction in order.findall('.//ebay:Transaction', ns):
-                print("Storing eBay order transaction...")
-                item = transaction.find('ebay:Item', ns)
-                item_id = item.find('ebay:ItemID', ns) if item is not None else None
-                title = item.find('ebay:Title', ns) if item is not None else None
-                quantity = transaction.find('ebay:QuantityPurchased', ns)
-                price = transaction.find('.//ebay:TransactionPrice', ns)
-                seller_fee = transaction.find('.//ebay:FinalValueFee', ns)
-                taxes = transaction.find('.//ebay:Taxes/ebay:TotalTaxAmount', ns)
-                fees = transaction.find('.//ebay:TransactionSiteID', ns)  # Placeholder, adjust as needed
-                
-                # Extract actual cost of shipping from transaction
-                shipping_cost = transaction.find('.//ebay:ActualShippingCost', ns)
-                
-                # Calculate estimated eBay seller fees (12.9% average: 12% FV fee + ~0.9% payment processing)
-                # eBay charges fees on total amount (item price + shipping)
-                item_price = float(price.text) if price is not None and price.text.replace('.', '', 1).isdigit() else 0
-                shipping_amount = float(shipping_cost.text) if shipping_cost is not None and shipping_cost.text.replace('.', '', 1).isdigit() else 0
-                estimated_seller_fee = (item_price + shipping_amount) * 0.129
-                
-                # Extract image URL from item and convert to high-res string
-                picture_url = item.find('.//ebay:PictureDetails/ebay:GalleryURL', ns) if item is not None else None
-                high_res_url = get_high_res_image_url(picture_url.text) if (picture_url is not None and picture_url.text) else None
+            return float(node)
+        except (TypeError, ValueError):
+            return default
+
+    def _pick_contact(order_payload):
+        instructions = order_payload.get('fulfillmentStartInstructions') or []
+        shipping_step = instructions[0].get('shippingStep') if instructions and isinstance(instructions[0], dict) else {}
+        ship_to = shipping_step.get('shipTo') if isinstance(shipping_step, dict) else {}
+        if ship_to:
+            return ship_to
+        buyer = order_payload.get('buyer') or {}
+        return buyer.get('buyerRegistrationAddress') or {}
+
+    def _pick_contact_address(contact):
+        if not isinstance(contact, dict):
+            return {}
+        return contact.get('contactAddress') or {}
+
+    def _first_payment_date(order_payload):
+        payments = ((order_payload.get('paymentSummary') or {}).get('payments') or [])
+        for payment in payments:
+            payment_date = str((payment or {}).get('paymentDate') or '').strip()
+            if payment_date:
+                return payment_date
+        return str(order_payload.get('creationDate') or order_payload.get('lastModifiedDate') or '').strip()
+
+    def _estimate_line_fee(line_total, subtotal, total_fee, line_count):
+        if total_fee is None:
+            return None
+        if subtotal and line_total is not None:
+            try:
+                return round(total_fee * (line_total / subtotal), 4)
+            except Exception:
+                return None
+        if line_count == 1:
+            return round(total_fee, 4)
+        return None
+
+    days = max(1, min(int(days or 90), 730))
+    token = get_access_token()
+    if not token:
+        raise Exception('Missing eBay OAuth token (run ebay_oauth_setup.py)')
+
+    created_from = (datetime.datetime.utcnow() - datetime.timedelta(days=days)).strftime('%Y-%m-%dT%H:%M:%S.000Z')
+    url = "https://api.ebay.com/sell/fulfillment/v1/order"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+    }
+
+    total_orders = 0
+    total_lines = 0
+    offset = 0
+    limit = 200
+
+    while True:
+        params = {
+            "filter": f"creationdate:[{created_from}..]",
+            "limit": limit,
+            "offset": offset
+        }
+        response = requests.get(url, headers=headers, params=params, timeout=30)
+        if response.status_code >= 400:
+            body = response.text[:500]
+            raise Exception(f"eBay Fulfillment getOrders failed ({response.status_code}): {body}")
+
+        payload = response.json() if response.text else {}
+        orders = payload.get('orders') or []
+        if not orders:
+            break
+
+        total_orders += len(orders)
+        print(f"Retrieved {len(orders)} eBay order(s) at offset {offset}")
+
+        for order in orders:
+            order_id = str(order.get('orderId') or order.get('legacyOrderId') or '').strip()
+            if not order_id:
+                continue
+
+            contact = _pick_contact(order)
+            address = _pick_contact_address(contact)
+            payment_date = _first_payment_date(order)
+            order_status = str(order.get('orderPaymentStatus') or '').strip()
+            fulfillment_status = str(order.get('orderFulfillmentStatus') or '').strip()
+            shipped_time = str(order.get('lastModifiedDate') or '').strip() if fulfillment_status == 'FULFILLED' else None
+
+            order_total_fee = _amount_value(order.get('totalMarketplaceFee'))
+            order_subtotal = _amount_value((order.get('pricingSummary') or {}).get('priceSubtotal'))
+            order_tax = _amount_value((order.get('pricingSummary') or {}).get('tax'))
+            line_items = order.get('lineItems') or []
+
+            for line_item in line_items:
+                total_lines += 1
+                quantity = line_item.get('quantity')
+                try:
+                    quantity = int(quantity)
+                except (TypeError, ValueError):
+                    quantity = 1
+
+                line_total = _amount_value(line_item.get('lineItemCost'))
+                if line_total is None:
+                    line_total = _amount_value(line_item.get('total'))
+
+                unit_price = None
+                if line_total is not None and quantity > 0:
+                    unit_price = round(line_total / quantity, 4)
+
+                line_shipping_cost = _amount_value(((line_item.get('deliveryCost') or {}).get('shippingCost')))
+                if line_shipping_cost is None and len(line_items) == 1:
+                    line_shipping_cost = _amount_value((order.get('pricingSummary') or {}).get('deliveryCost'))
+
+                line_tax = None
+                if order_tax is not None:
+                    if len(line_items) == 1:
+                        line_tax = order_tax
+                    else:
+                        line_total_for_tax = _amount_value(line_item.get('total'))
+                        order_total_for_tax = _amount_value((order.get('pricingSummary') or {}).get('total'))
+                        if line_total_for_tax is not None and order_total_for_tax:
+                            try:
+                                line_tax = round(order_tax * (line_total_for_tax / order_total_for_tax), 4)
+                            except Exception:
+                                line_tax = None
+
+                legacy_item_id = str(line_item.get('legacyItemId') or '').strip()
+                item_id = legacy_item_id or str(line_item.get('lineItemId') or '').strip() or None
+
                 store_ebay_order({
-                    'order_id': order_id.text if order_id is not None else None,
-                    'item_id': item_id.text if item_id is not None else None,
-                    'title': title.text if title is not None else None,
-                    'quantity': int(quantity.text) if quantity is not None and quantity.text.isdigit() else None,
-                    'price': float(price.text) if price is not None and price.text.replace('.', '', 1).isdigit() else None,
-                    'checkout_status': checkout_status.text if checkout_status is not None else None,
-                    'shipping_name': shipping_name.text if shipping_name is not None else None,
-                    'shipping_street1': shipping_street1.text if shipping_street1 is not None else None,
-                    'shipping_street2': shipping_street2.text if shipping_street2 is not None else None,
-                    'shipping_city': shipping_city.text if shipping_city is not None else None,
-                    'shipping_state': shipping_state.text if shipping_state is not None else None,
-                    'shipping_postal_code': shipping_postal_code.text if shipping_postal_code is not None else None,
-                    'shipping_country': shipping_country.text if shipping_country is not None else None,
-                    'paid_time': paid_time.text if paid_time is not None else None,
-                    'shipped_time': shipped_time.text if shipped_time is not None else None,
-                    'seller_fee': estimated_seller_fee,
-                    'taxes': float(taxes.text) if taxes is not None and taxes.text.replace('.', '', 1).isdigit() else None,
-                    'fees': fees.text if fees is not None else None,
-                    'shipping_cost': shipping_amount if shipping_amount > 0 else None,
-                    'image': high_res_url,
+                    'order_id': order_id,
+                    'item_id': item_id,
+                    'title': line_item.get('title'),
+                    'quantity': quantity,
+                    'price': unit_price,
+                    'checkout_status': order_status,
+                    'shipping_name': str(contact.get('fullName') or '').strip() or None,
+                    'shipping_street1': str(address.get('addressLine1') or '').strip() or None,
+                    'shipping_street2': str(address.get('addressLine2') or '').strip() or None,
+                    'shipping_city': str(address.get('city') or '').strip() or None,
+                    'shipping_state': str(address.get('stateOrProvince') or '').strip() or None,
+                    'shipping_postal_code': str(address.get('postalCode') or '').strip() or None,
+                    'shipping_country': str(address.get('countryCode') or '').strip() or None,
+                    'paid_time': payment_date or None,
+                    'shipped_time': shipped_time,
+                    'seller_fee': _estimate_line_fee(line_total, order_subtotal, order_total_fee, len(line_items)),
+                    'taxes': line_tax,
+                    'fees': None,
+                    'shipping_cost': line_shipping_cost,
+                    'image': None,
+                    'barcode': None,
                     'isHandled': '',
                     'isHandledDate': ''
                 })
-                print("Transaction stored:", {
-                    'order_id': order_id.text if order_id is not None else None,
-                    'item_id': item_id.text if item_id is not None else None,
-                    'title': title.text if title is not None else None,
-                    'quantity': int(quantity.text) if quantity is not None and quantity.text.isdigit() else None,
-                    'price': float(price.text) if price is not None and price.text.replace('.', '', 1).isdigit() else None,
-                    'checkout_status': checkout_status.text if checkout_status is not None else None,
-                    'shipping_name': shipping_name.text if shipping_name is not None else None,
-                    'shipping_street1': shipping_street1.text if shipping_street1 is not None else None,
-                    'shipping_street2': shipping_street2.text if shipping_street2 is not None else None,
-                    'shipping_city': shipping_city.text if shipping_city is not None else None,
-                    'shipping_state': shipping_state.text if shipping_state is not None else None,
-                    'shipping_postal_code': shipping_postal_code.text if shipping_postal_code is not None else None,
-                    'shipping_country': shipping_country.text if shipping_country is not None else None,
-                    'paid_time': paid_time.text if paid_time is not None else None,
-                    'shipped_time': shipped_time.text if shipped_time is not None else None,
-                    'seller_fee': float(seller_fee.text) if seller_fee is not None and seller_fee.text.replace('.', '', 1).isdigit() else None,
-                    'taxes': float(taxes.text) if taxes is not None and taxes.text.replace('.', '', 1).isdigit() else None,
-                    'fees': fees.text if fees is not None else None,
-                    'image': picture_url,
-                    'isHandled': '',
-                    'isHandledDate': ''
-                })
-        except Exception as e:
-            print("Failed to connect to sold.db:", e)
+
+        total = payload.get('total')
+        try:
+            total = int(total)
+        except (TypeError, ValueError):
+            total = 0
+
+        offset += len(orders)
+        if len(orders) < limit or (total and offset >= total):
+            break
+
+    print(f"Stored/updated {total_lines} eBay sold line item(s) from {total_orders} order(s)")
 
 def finalize_barcodes():
     print("🔎 Finalizing barcodes in ebayStore.db...")
@@ -31301,69 +33059,72 @@ def api_update_shelf():
         if not old_code:
             return jsonify({'success': False, 'error': 'old_code is required'}), 400
 
-        shelves_dir = os.path.join('static', 'shelves')
-        old_path = os.path.join(shelves_dir, f"{old_code}.png")
-        
-        orig_dir = os.path.join(shelves_dir, 'originals')
-        os.makedirs(orig_dir, exist_ok=True)
-        old_orig_path = os.path.join(orig_dir, f"{old_code}.png")
+        old_path = _resolve_shelf_display_path(old_code, existing_only=True)
+        old_orig_path = _resolve_shelf_original_path(old_code, existing_only=True)
+        target_code = new_code if new_code else old_code
+        original_only = _truthy_form_value(request.form.get('original_only'))
+        target_display_path = _resolve_shelf_display_path(target_code, existing_only=False)
+        existing_target_display_path = _resolve_shelf_display_path(target_code, existing_only=True)
 
         # If image provided, overwrite or write to new path
         file = request.files.get('image')
+        saved_display_file = False
         if file:
-            target_code = new_code if new_code else old_code
-            target_path = os.path.join(shelves_dir, f"{target_code}.png")
-            file.save(target_path)
+            should_save_display = (not original_only) or (existing_target_display_path is None and old_path is None)
+            if should_save_display and target_display_path is not None:
+                target_display_path.parent.mkdir(parents=True, exist_ok=True)
+                file.save(str(target_display_path))
+                _sync_preview_base_image(target_code, target_display_path)
+                saved_display_file = True
             
         # If original image provided, save it
         orig_file = request.files.get('original_image')
+        saved_original_file = False
         if orig_file:
-            target_code = new_code if new_code else old_code
-            target_orig_path = os.path.join(orig_dir, f"{target_code}.png")
-            orig_file.save(target_orig_path)
+            target_orig_path = _resolve_shelf_original_path(target_code, existing_only=False)
+            if target_orig_path is not None:
+                target_orig_path.parent.mkdir(parents=True, exist_ok=True)
+                orig_file.save(str(target_orig_path))
+                _sync_original_to_preview_base(target_code)
+                saved_original_file = True
 
         # If renaming requested and file exists, rename on disk
         if new_code and new_code != old_code:
-            new_path = os.path.join(shelves_dir, f"{new_code}.png")
+            new_path = _resolve_shelf_display_path(new_code, existing_only=False)
             # If image was uploaded we already saved to new_path; otherwise rename existing file
-            if not os.path.exists(new_path) and os.path.exists(old_path):
-                os.rename(old_path, new_path)
-            elif os.path.exists(new_path) and os.path.exists(old_path):
+            if new_path is not None and not new_path.exists() and old_path is not None and old_path.exists():
+                new_path.parent.mkdir(parents=True, exist_ok=True)
+                os.rename(str(old_path), str(new_path))
+            elif new_path is not None and new_path.exists() and old_path is not None and old_path.exists() and old_path != new_path:
                 # New file created by upload, remove old file to prevent duplication
                 try:
-                    os.remove(old_path)
+                    os.remove(str(old_path))
                 except Exception as e:
                     print(f"Error removing old shelf file: {e}")
             
             # Rename original if it exists and wasn't just uploaded
-            new_orig_path = os.path.join(orig_dir, f"{new_code}.png")
-            if not os.path.exists(new_orig_path) and os.path.exists(old_orig_path):
-                os.rename(old_orig_path, new_orig_path)
-            elif os.path.exists(new_orig_path) and os.path.exists(old_orig_path):
+            new_orig_path = _resolve_shelf_original_path(new_code, existing_only=False)
+            if old_orig_path is not None and new_orig_path is not None and not new_orig_path.exists() and old_orig_path.exists():
+                os.rename(str(old_orig_path), str(new_orig_path))
+            elif old_orig_path is not None and new_orig_path is not None and new_orig_path.exists() and old_orig_path.exists():
                 # New original created by upload, remove old original
                 try:
-                    os.remove(old_orig_path)
+                    os.remove(str(old_orig_path))
                 except Exception as e:
                     print(f"Error removing old original file: {e}")
 
             # Cascade rename into searchRack.db (SEARCHRACK.ITEM_POSITION)
-            sconn = None
             try:
                 # Update searchRack.db
-                sconn = sqlite3.connect('searchRack.db')
-                scur = sconn.cursor()
-                scur.execute("UPDATE SEARCHRACK SET ITEM_POSITION = ? WHERE LOWER(TRIM(ITEM_POSITION)) = LOWER(TRIM(?))", (new_code, old_code))
-                s_updated = scur.rowcount
-                
-                # Also update the shelves table to maintain metadata link
-                scur.execute("UPDATE shelves SET shelf_name = ? WHERE shelf_name = ?", (new_code, old_code))
-                
-                sconn.commit()
+                with db_connection('searchRack.db', row_factory=False) as sconn:
+                    scur = sconn.cursor()
+                    scur.execute("UPDATE SEARCHRACK SET ITEM_POSITION = ? WHERE LOWER(TRIM(ITEM_POSITION)) = LOWER(TRIM(?))", (new_code, old_code))
+                    s_updated = scur.rowcount
+
+                    # Also update the shelves table to maintain metadata link
+                    scur.execute("UPDATE shelves SET shelf_name = ? WHERE shelf_name = ?", (new_code, old_code))
             except Exception:
                 s_updated = None
-            finally:
-                if sconn:
-                    sconn.close()
 
             # Log rename cascade results
             try:
@@ -31371,6 +33132,10 @@ def api_update_shelf():
                     lf.write(f"SHELF_RENAME: {time.strftime('%Y-%m-%d %H:%M:%S')} {old_code} -> {new_code} searchRack_updated={s_updated}\n")
             except Exception:
                 pass
+            if saved_display_file or saved_original_file:
+                _delete_preview_base_image(old_code)
+            else:
+                _rename_preview_base_image(old_code, new_code)
 
         return jsonify({'success': True})
     except Exception as e:
@@ -31486,15 +33251,15 @@ def api_clear_shelf_inventory(code):
 
 @app.route('/api/list_shelves', methods=['GET'])
 def api_list_shelves():
-    """Return list of shelf images from static/shelves as JSON, with optional sorting and counts."""
+    """Return list of shelf images from the resolved shelf image folders as JSON."""
     try:
         sort = (request.args.get('sort') or 'created').lower()
-        shelves_dir = os.path.join(app.root_path, 'static', 'shelves')
         results = []
         codes = []
-        if os.path.isdir(shelves_dir):
-            files = [f for f in os.listdir(shelves_dir) if f.lower().endswith('.png')]
-            codes = [os.path.splitext(f)[0] for f in files]
+        files = _iter_shelf_display_files()
+        if files:
+            codes = [path.stem for path in files]
+            normalized_codes = [code.lower().strip() for code in codes if code]
 
             # Query created_at and group_id from searchRack.db.shelves
             created_map = {}
@@ -31506,12 +33271,17 @@ def api_list_shelves():
             try:
                 conn = sqlite3.connect(sdb_path)
                 cur = conn.cursor()
-                if codes:
-                    placeholders = ','.join('?' for _ in codes)
-                    cur.execute(f"SELECT shelf_name, created_at, group_id FROM shelves WHERE shelf_name IN ({placeholders})", tuple(codes))
+                if normalized_codes:
+                    placeholders = ','.join('?' for _ in normalized_codes)
+                    cur.execute(
+                        f"SELECT shelf_name, created_at, group_id FROM shelves WHERE LOWER(TRIM(shelf_name)) IN ({placeholders})",
+                        tuple(normalized_codes),
+                    )
                     for r in cur.fetchall():
-                        created_map[r[0]] = r[1]
-                        group_map[r[0]] = r[2]
+                        key = str(r[0] or '').lower().strip()
+                        if key:
+                            created_map[key] = r[1]
+                            group_map[key] = r[2]
             except Exception:
                 created_map = {}
                 group_map = {}
@@ -31529,23 +33299,24 @@ def api_list_shelves():
             finally:
                 conn.close()
 
-            for fname in files:
-                code = os.path.splitext(fname)[0]
-                path = os.path.join(shelves_dir, fname)
+            for path in files:
+                code = path.stem
+                fname = path.name
                 try:
-                    mtime = os.path.getmtime(path)
+                    mtime = path.stat().st_mtime
                 except Exception:
                     mtime = 0
-                url = url_for('static', filename=f'shelves/{fname}')
-                count = counts_map.get(code.lower().strip(), 0)
+                url = url_for('shelf_image', code=code)
+                normalized_code = code.lower().strip()
+                count = counts_map.get(normalized_code, 0)
                 # Default to group 1 (Ungrouped) if not set
-                group_id = group_map.get(code, 1)
+                group_id = group_map.get(normalized_code, 1)
                 results.append({
                     'code': code, 
                     'filename': fname, 
                     'url': url, 
                     'lastModified': int(mtime), 
-                    'created_at': created_map.get(code), 
+                    'created_at': created_map.get(normalized_code), 
                     'count': int(count),
                     'group_id': group_id
                 })
@@ -31612,46 +33383,76 @@ def api_shelf_counts():
 
 def ensure_shelf_groups_table():
     """Ensure shelf_groups table exists and shelves table has group_id column"""
+    conn = None
     try:
-        conn = sqlite3.connect('searchRack.db')
-        cur = conn.cursor()
-        
-        # Create shelves table if it doesn't exist
-        cur.execute('''
-            CREATE TABLE IF NOT EXISTS shelves (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                shelf_name TEXT NOT NULL,
-                location TEXT,
-                notes TEXT,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        # Create shelf_groups table if it doesn't exist
-        cur.execute('''
-            CREATE TABLE IF NOT EXISTS shelf_groups (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        # Check if shelves table has group_id column
-        cur.execute('PRAGMA table_info(shelves)')
-        columns = [row[1] for row in cur.fetchall()]
-        
-        if 'group_id' not in columns:
-            # Add group_id column (defaults to NULL, meaning ungrouped)
-            cur.execute('ALTER TABLE shelves ADD COLUMN group_id INTEGER')
-            print('[SHELF_GROUPS] Added group_id column to shelves table')
-        
-        # Ensure default group exists (id=1, name="Default Group")
-        cur.execute('SELECT id FROM shelf_groups WHERE id = 1')
-        if not cur.fetchone():
-            cur.execute('INSERT INTO shelf_groups (id, name) VALUES (1, ?)', ('Default Group',))
-            print('[SHELF_GROUPS] Created default group')
-        
-        conn.commit()
+        if has_app_context():
+            with db_connection('searchRack.db', row_factory=False) as conn_ctx:
+                cur = conn_ctx.cursor()
+
+                # Create shelves table if it doesn't exist
+                cur.execute('''
+                    CREATE TABLE IF NOT EXISTS shelves (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        shelf_name TEXT NOT NULL,
+                        location TEXT,
+                        notes TEXT,
+                        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                    )
+                ''')
+
+                # Create shelf_groups table if it doesn't exist
+                cur.execute('''
+                    CREATE TABLE IF NOT EXISTS shelf_groups (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name TEXT NOT NULL,
+                        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                    )
+                ''')
+
+                # Check if shelves table has group_id column
+                cur.execute('PRAGMA table_info(shelves)')
+                columns = [row[1] for row in cur.fetchall()]
+
+                if 'group_id' not in columns:
+                    # Add group_id column (defaults to NULL, meaning ungrouped)
+                    cur.execute('ALTER TABLE shelves ADD COLUMN group_id INTEGER')
+                    print('[SHELF_GROUPS] Added group_id column to shelves table')
+
+                # Ensure default group exists (id=1, name="Default Group")
+                cur.execute('SELECT id FROM shelf_groups WHERE id = 1')
+                if not cur.fetchone():
+                    cur.execute('INSERT INTO shelf_groups (id, name) VALUES (1, ?)', ('Default Group',))
+                    print('[SHELF_GROUPS] Created default group')
+        else:
+            conn = sqlite3.connect(str(BASE_DIR / 'searchRack.db'), timeout=30.0)
+            cur = conn.cursor()
+
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS shelves (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    shelf_name TEXT NOT NULL,
+                    location TEXT,
+                    notes TEXT,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS shelf_groups (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            cur.execute('PRAGMA table_info(shelves)')
+            columns = [row[1] for row in cur.fetchall()]
+            if 'group_id' not in columns:
+                cur.execute('ALTER TABLE shelves ADD COLUMN group_id INTEGER')
+                print('[SHELF_GROUPS] Added group_id column to shelves table')
+            cur.execute('SELECT id FROM shelf_groups WHERE id = 1')
+            if not cur.fetchone():
+                cur.execute('INSERT INTO shelf_groups (id, name) VALUES (1, ?)', ('Default Group',))
+                print('[SHELF_GROUPS] Created default group')
+            conn.commit()
         return True
     except Exception as e:
         print(f'[SHELF_GROUPS] Error ensuring tables: {e}')
@@ -31659,7 +33460,8 @@ def ensure_shelf_groups_table():
         traceback.print_exc()
         return False
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
 
 @app.route('/api/groups', methods=['GET'])
 def api_get_groups():
@@ -31806,7 +33608,6 @@ def api_move_shelves():
 @app.route('/api/upload_shelf', methods=['POST'])
 def api_upload_shelf():
     """Upload a shelf image and associate it with a group"""
-    conn = None
     try:
         group_id = request.form.get('group_id', 1)  # Default to group 1
         try:
@@ -31832,40 +33633,44 @@ def api_upload_shelf():
         shelf_code = re.sub(r'[<>:"/\\|?*]', '_', shelf_code)
         
         # Save the image
-        shelves_dir = os.path.join('static', 'shelves')
-        os.makedirs(shelves_dir, exist_ok=True)
-        file_path = os.path.join(shelves_dir, f"{shelf_code}.png")
-        file.save(file_path)
+        _SHELF_ROOT_DIR.mkdir(parents=True, exist_ok=True)
+        original_only = _truthy_form_value(request.form.get('original_only'))
+        target_display_path = _resolve_shelf_display_path(shelf_code, existing_only=False)
+        existing_display_path = _resolve_shelf_display_path(shelf_code, existing_only=True)
+        should_save_display = (not original_only) or (existing_display_path is None)
+        if should_save_display and target_display_path is not None:
+            target_display_path.parent.mkdir(parents=True, exist_ok=True)
+            file.save(str(target_display_path))
+            _sync_preview_base_image(shelf_code, target_display_path)
         
         # Save original image if provided
         if 'original_image' in request.files:
             orig_file = request.files['original_image']
             if orig_file.filename:
-                orig_dir = os.path.join(shelves_dir, 'originals')
-                os.makedirs(orig_dir, exist_ok=True)
-                orig_path = os.path.join(orig_dir, f"{shelf_code}.png")
-                orig_file.save(orig_path)
+                orig_path = _resolve_shelf_original_path(shelf_code, existing_only=False)
+                if orig_path is not None:
+                    orig_path.parent.mkdir(parents=True, exist_ok=True)
+                    orig_file.save(str(orig_path))
+                    _sync_original_to_preview_base(shelf_code)
         
         # Create or update shelf entry in database
         ensure_shelf_groups_table()
-        conn = sqlite3.connect('searchRack.db')
-        cur = conn.cursor()
-        
-        # Check if shelf already exists
-        cur.execute('SELECT id FROM shelves WHERE shelf_name = ?', (shelf_code,))
-        existing_row = cur.fetchone()
-        
-        if existing_row:
-            # Update existing shelf's group
-            cur.execute('UPDATE shelves SET group_id = ? WHERE id = ?', (group_id, existing_row[0]))
-        else:
-            # Insert new shelf
-            cur.execute('''
-                INSERT INTO shelves (shelf_name, group_id, created_at)
-                VALUES (?, ?, CURRENT_TIMESTAMP)
-            ''', (shelf_code, group_id))
-        
-        conn.commit()
+        with db_connection('searchRack.db', row_factory=False) as conn:
+            cur = conn.cursor()
+
+            # Check if shelf already exists
+            cur.execute('SELECT id FROM shelves WHERE shelf_name = ?', (shelf_code,))
+            existing_row = cur.fetchone()
+
+            if existing_row:
+                # Update existing shelf's group
+                cur.execute('UPDATE shelves SET group_id = ? WHERE id = ?', (group_id, existing_row[0]))
+            else:
+                # Insert new shelf
+                cur.execute('''
+                    INSERT INTO shelves (shelf_name, group_id, created_at)
+                    VALUES (?, ?, CURRENT_TIMESTAMP)
+                ''', (shelf_code, group_id))
         
         return jsonify({
             'success': True,
@@ -31874,9 +33679,6 @@ def api_upload_shelf():
         })
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
-    finally:
-        if conn:
-            conn.close()
 
 @app.route('/api/delete_shelf', methods=['POST'])
 def api_delete_shelf():
@@ -31928,38 +33730,33 @@ def api_delete_shelf():
         
         # Delete shelf image file
         if code_to_delete:
-            # Try exact match first
-            shelf_file = os.path.join('static', 'shelves', f"{code_to_delete}.png")
-            orig_file = os.path.join('static', 'shelves', 'originals', f"{code_to_delete}.png")
+            shelf_file = _resolve_shelf_display_path(code_to_delete, existing_only=True)
+            orig_file = _resolve_shelf_original_path(code_to_delete, existing_only=True)
             
-            if os.path.exists(shelf_file):
+            if shelf_file is not None and shelf_file.exists():
                 try:
-                    os.remove(shelf_file)
+                    os.remove(str(shelf_file))
                     print(f"[DELETE_SHELF] Deleted file: {shelf_file}")
                 except Exception as e:
                     print(f"[DELETE_SHELF] Error deleting file {shelf_file}: {e}")
             
-            if os.path.exists(orig_file):
+            if orig_file is not None and orig_file.exists():
                 try:
-                    os.remove(orig_file)
+                    os.remove(str(orig_file))
                     print(f"[DELETE_SHELF] Deleted original file: {orig_file}")
                 except Exception as e:
                     print(f"[DELETE_SHELF] Error deleting original file {orig_file}: {e}")
+            _delete_preview_base_image(code_to_delete)
             
-            if not os.path.exists(shelf_file):
-                # Try case-insensitive search for file
-                print(f"[DELETE_SHELF] File {shelf_file} not found, trying case-insensitive search")
-                shelves_dir = os.path.join('static', 'shelves')
-                if os.path.exists(shelves_dir):
-                    for f in os.listdir(shelves_dir):
-                        if f.lower() == f"{code_to_delete}.png".lower():
-                            full_path = os.path.join(shelves_dir, f)
-                            try:
-                                os.remove(full_path)
-                                print(f"[DELETE_SHELF] Deleted file (case-insensitive match): {full_path}")
-                            except Exception as e:
-                                print(f"[DELETE_SHELF] Error deleting file {full_path}: {e}")
-                            break
+            if shelf_file is None or not shelf_file.exists():
+                print(f"[DELETE_SHELF] File for {code_to_delete} not found in resolved location, trying all candidates")
+                for candidate in _shelf_display_path_candidates(code_to_delete):
+                    if candidate.exists():
+                        try:
+                            os.remove(str(candidate))
+                            print(f"[DELETE_SHELF] Deleted file (candidate match): {candidate}")
+                        except Exception as e:
+                            print(f"[DELETE_SHELF] Error deleting file {candidate}: {e}")
         
         return jsonify({
             'success': True,
@@ -33888,7 +35685,7 @@ def update_sync_timestamp(key):
         )''')
         
         from datetime import datetime
-        timestamp = datetime.now().isoformat()
+        timestamp = datetime.now().astimezone().isoformat()
         cur.execute('INSERT OR REPLACE INTO sync_status (key, value) VALUES (?, ?)', (f'{key}_last', timestamp))
         
         conn.commit()
@@ -33905,19 +35702,20 @@ def _sync_status_parse_timestamp(raw_value):
         normalized = raw.replace('Z', '+00:00') if raw.endswith('Z') else raw
         dt = datetime.datetime.fromisoformat(normalized)
         if dt.tzinfo is None:
-            return dt.replace(tzinfo=datetime.timezone.utc)
+            local_tz = datetime.datetime.now().astimezone().tzinfo or datetime.timezone.utc
+            return dt.replace(tzinfo=local_tz).astimezone(datetime.timezone.utc)
         return dt.astimezone(datetime.timezone.utc)
     except Exception:
         return None
 
 def _sync_manager_overdue_alert():
-    sync_targets = (
+    sync_targets = [
         ('ebay_orders_last', 'eBay Orders'),
         ('ebay_listings_last', 'eBay Listings'),
         ('amazon_orders_last', 'Amazon Orders'),
         ('amazon_listings_last', 'Amazon Listings'),
         ('amazon_upcs_last', 'Amazon UPCs')
-    )
+    ]
     conn = None
     try:
         conn = sqlite3.connect('sync_settings.db')
@@ -33939,22 +35737,27 @@ def _sync_manager_overdue_alert():
 
     sync_interval = max(1, _coerce_int(status.get('sync_interval', 60), 60))
     now_utc = datetime.datetime.now(datetime.timezone.utc)
+    if str(status.get('auto_upc_enabled', 'true')).strip().lower() != 'true':
+        sync_targets = [item for item in sync_targets if item[0] != 'amazon_upcs_last']
+
+    last_auto_sync_dt = _sync_status_parse_timestamp(status.get('last_auto_sync'))
+    if last_auto_sync_dt is not None:
+        last_auto_minutes = max(0, int((now_utc - last_auto_sync_dt).total_seconds() // 60))
+        if last_auto_minutes <= sync_interval:
+            return None
+
+    freshest_minutes = None
     overdue_items = []
 
     for key, label in sync_targets:
         raw_last = status.get(key)
         last_dt = _sync_status_parse_timestamp(raw_last)
         if last_dt is None:
-            overdue_items.append({
-                'key': key,
-                'label': label,
-                'last_sync': str(raw_last or '').strip(),
-                'minutes_since': None,
-                'never_synced': True
-            })
             continue
 
         minutes_since = max(0, int((now_utc - last_dt).total_seconds() // 60))
+        if freshest_minutes is None or minutes_since < freshest_minutes:
+            freshest_minutes = minutes_since
         if minutes_since > sync_interval:
             overdue_items.append({
                 'key': key,
@@ -33967,10 +35770,13 @@ def _sync_manager_overdue_alert():
     if not overdue_items:
         return None
 
+    if freshest_minutes is not None and freshest_minutes <= sync_interval:
+        return None
+
     snapshot_parts = [
         str(sync_interval),
         '|'.join(
-            f"{item['key']}:{item['last_sync']}:{item['minutes_since'] if item['minutes_since'] is not None else 'never'}"
+            f"{item['key']}:{item['last_sync']}"
             for item in overdue_items
         )
     ]
@@ -34612,6 +36418,16 @@ def marketplace_stats():
     """Marketplace sales statistics page."""
     return render_template('marketplace_stats.html')
 
+@app.route('/marketplace-schedule-pickup')
+def marketplace_schedule_pickup():
+    """Marketplace pickup scheduling page."""
+    return render_template('schedule_pickup.html')
+
+@app.route('/marketplace-live-pickups')
+def marketplace_live_pickups():
+    """Live scheduled marketplace pickups board."""
+    return render_template('live_pickups.html')
+
 @app.route('/api/marketplace/generate-barcode', methods=['POST'])
 def marketplace_generate_barcode():
     """Generate auto-incremented 888 prefix barcode for marketplace manual entries."""
@@ -34691,28 +36507,18 @@ def api_marketplace_lookup():
         barcode = request.args.get('barcode', '').strip()
         if not barcode:
             return jsonify({'success': False, 'error': 'Missing barcode'}), 400
-        
-        # Try to find in rawbol.db
-        rawbol_conn = sqlite3.connect('rawbol.db')
-        rawbol_conn.row_factory = sqlite3.Row
-        rawbol_cur = rawbol_conn.cursor()
-        
-        rawbol_cur.execute('SELECT item_description, image_url FROM raw_bol_items WHERE upc = ? COLLATE NOCASE LIMIT 1', (barcode,))
-        row = rawbol_cur.fetchone()
-        
+
+        row = _marketplace_lookup_rawbol_item(barcode)
         if row:
             return jsonify({
                 'success': True,
                 'found': True,
-                'title': row['item_description'],
-                'image_url': row['image_url']
+                'title': row.get('title') or '',
+                'image_url': row.get('image_url') or ''
             })
-        else:
-            return jsonify({'success': True, 'found': False, 'title': '', 'image_url': ''})
+        return jsonify({'success': True, 'found': False, 'title': '', 'image_url': ''})
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
-    finally:
-        rawbol_conn.close()
 
 @app.route('/api/marketplace/search', methods=['GET'])
 def api_marketplace_search():
@@ -34737,6 +36543,112 @@ def api_marketplace_search():
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
 
+@app.route('/api/marketplace/pickups/search', methods=['GET'])
+def api_marketplace_pickups_search():
+    """Search rawbol.db for pickup scheduling by title or barcode."""
+    try:
+        q = (request.args.get('q') or '').strip()
+        if not q:
+            return jsonify({'success': False, 'error': 'Missing q'}), 400
+
+        q_upc = _normalize_upc(q)
+        like_q = f'%{q}%'
+        like_upc = f'%{q_upc}%'
+
+        with db_connection('rawbol.db') as conn:
+            cur = conn.cursor()
+            cur.execute('''
+                SELECT upc, item_description, image_url, lot_number, import_date, created_at
+                FROM raw_bol_items
+                WHERE (
+                    item_description LIKE ? COLLATE NOCASE
+                    OR upc = ? COLLATE NOCASE
+                    OR REPLACE(COALESCE(upc, ''), '.0', '') = ? COLLATE NOCASE
+                    OR upc LIKE ? COLLATE NOCASE
+                )
+                ORDER BY created_at DESC, import_date DESC, id DESC
+                LIMIT 80
+            ''', (like_q, q_upc, q_upc, like_upc))
+            rows = cur.fetchall()
+
+        seen = set()
+        results = []
+        for row in rows:
+            barcode = _normalize_upc(row['upc'])
+            title = str(row['item_description'] or '').strip()
+            key = (barcode or title).lower()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            results.append({
+                'barcode': barcode,
+                'title': title,
+                'image_url': str(row['image_url'] or '').strip(),
+                'lot_number': str(row['lot_number'] or '').strip(),
+                'import_date': str(row['import_date'] or '').strip(),
+            })
+            if len(results) >= 25:
+                break
+
+        return jsonify({'success': True, 'results': results})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'marketplace-pickup-search')}), 500
+
+@app.route('/api/marketplace/pickups', methods=['GET'])
+def api_marketplace_pickups():
+    """List scheduled marketplace pickups."""
+    try:
+        from marketplace_manager import get_marketplace_pickups
+
+        status = (request.args.get('status') or 'scheduled').strip() or None
+        limit = request.args.get('limit', type=int)
+        result = get_marketplace_pickups(status=status, limit=limit)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'marketplace-pickups:list')}), 500
+
+@app.route('/api/marketplace/pickups', methods=['POST'])
+def api_marketplace_pickups_create():
+    """Create a scheduled marketplace pickup."""
+    try:
+        from marketplace_manager import add_marketplace_pickup
+
+        data = request.get_json() or {}
+        title = str(data.get('title') or '').strip()
+        barcode = _normalize_upc(data.get('barcode'))
+        pickup_date = str(data.get('pickup_date') or '').strip() or datetime.datetime.now().strftime('%Y-%m-%d')
+        pickup_time_raw = str(data.get('pickup_time') or '').strip()
+        pickup_time = pickup_time_raw[:5] if len(pickup_time_raw) >= 5 else pickup_time_raw
+        image_url = str(data.get('image_url') or '').strip()
+        source = str(data.get('source') or 'manual').strip() or 'manual'
+        notes = str(data.get('notes') or '').strip()
+
+        if not pickup_time:
+            return jsonify({'success': False, 'error': 'Missing pickup time'}), 400
+
+        rawbol_item = _marketplace_lookup_rawbol_item(barcode) if barcode else None
+        if not title and rawbol_item:
+            title = str(rawbol_item.get('title') or '').strip()
+        if not image_url and rawbol_item:
+            image_url = str(rawbol_item.get('image_url') or '').strip()
+        if not title and barcode:
+            title = barcode
+
+        result = add_marketplace_pickup(
+            title=title,
+            pickup_date=pickup_date,
+            pickup_time=pickup_time,
+            barcode=barcode,
+            image_url=image_url,
+            source=source,
+            notes=notes
+        )
+
+        status_code = 200 if result.get('success') else 400
+        return jsonify(result), status_code
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'marketplace-pickups:create')}), 500
+
 @app.route('/api/marketplace/sale', methods=['POST'])
 def api_marketplace_sale():
     """Create a new marketplace sale and add to sold.db."""
@@ -34751,9 +36663,38 @@ def api_marketplace_sale():
         session_id = (data.get('session_id') or '').strip() or None
         price_auto = data.get('price_auto', False)
         store_key = _marketplace_sale_store_key(data.get('store'))
+        incoming_allocations = data.get('allocations')
 
         if not barcode:
             return jsonify({'success': False, 'error': 'Missing barcode'}), 400
+
+        rawbol_item = _marketplace_lookup_rawbol_item(barcode)
+        if not title and rawbol_item:
+            title = str(rawbol_item.get('title') or '').strip()
+
+        removal_plan = _build_marketplace_removal_plan(barcode, quantity, incoming_allocations)
+        if not removal_plan.get('success', False):
+            return jsonify({
+                'success': False,
+                'error': removal_plan.get('error') or 'Invalid location selection',
+                'location_selection_required': False,
+                'locations': removal_plan.get('locations') or [],
+                'total_available': removal_plan.get('total_available', 0),
+                'can_fulfill': removal_plan.get('can_fulfill', False)
+            }), 400
+
+        if removal_plan.get('needs_choice'):
+            return jsonify({
+                'success': False,
+                'error': 'Location selection required for this item',
+                'location_selection_required': True,
+                'barcode': barcode,
+                'title': title,
+                'quantity': quantity,
+                'locations': removal_plan.get('locations') or [],
+                'total_available': removal_plan.get('total_available', 0),
+                'can_fulfill': removal_plan.get('can_fulfill', False)
+            }), 409
 
         # Add to marketplace.db
         result = add_marketplace_sale(barcode, title, quantity, price, session_id=session_id, price_auto=price_auto)
@@ -34775,6 +36716,9 @@ def api_marketplace_sale():
                 (barcode, title, price, paid_time, store, quantity, isHandled, isHandledDate, rackupdated)
                 VALUES (?, ?, ?, ?, ?, ?, '1', ?, 1)''',
                 (barcode, title, price, sale_date, store_key, quantity, sale_date))
+            sold_order_id = sold_cur.lastrowid
+            _ensure_order_removal_allocations_table(sold_cur)
+            _save_order_removal_allocations(sold_cur, sold_order_id, removal_plan.get('normalized_allocations') or [])
             
             # Auto-detect if this is a resold return
             if barcode:
@@ -34815,53 +36759,32 @@ def api_marketplace_sale():
         finally:
             if sold_conn is not None:
                 sold_conn.close()
-        
-        # Check if item exists in searchRack.db and needs decrementing
-        rack_conn = None
-        try:
-            rack_conn = sqlite3.connect('searchRack.db')
-            rack_conn.row_factory = sqlite3.Row
-            rack_cur = rack_conn.cursor()
-            
-            rack_cur.execute('SELECT area_code, quantity FROM rack WHERE barcode = ? COLLATE NOCASE', (barcode,))
-            locations = rack_cur.fetchall()
-            
-            if len(locations) > 1:
-                # Multiple locations - return them for user to choose
-                return jsonify({
-                    'success': True,
-                    'sale_id': result['id'],
-                    'store': store_key,
-                    'needs_location_choice': True,
-                    'locations': [{'area_code': loc['area_code'], 'quantity': loc['quantity']} for loc in locations]
-                })
-            elif len(locations) == 1:
-                # Single location - auto-decrement
-                area_code = locations[0]['area_code']
-                current_qty = locations[0]['quantity']
-                new_qty = max(0, current_qty - quantity)
-                
-                rack_cur.execute('UPDATE rack SET quantity = ? WHERE barcode = ? COLLATE NOCASE AND area_code = ?',
-                               (new_qty, barcode, area_code))
-                rack_conn.commit()
-                
-                return jsonify({
-                    'success': True,
-                    'sale_id': result['id'],
-                    'store': store_key,
-                    'decremented': True,
-                    'area_code': area_code,
-                    'new_quantity': new_qty
-                })
-            else:
-                # Not in rack
-                return jsonify({'success': True, 'sale_id': result['id'], 'store': store_key, 'decremented': False})
-        except Exception as e:
-            print(f'Warning: Failed to check/decrement searchRack.db: {e}')
-            return jsonify({'success': True, 'sale_id': result['id'], 'store': store_key, 'decremented': False})
-        finally:
-            if rack_conn is not None:
-                rack_conn.close()
+
+        removal_result = _apply_marketplace_removal_plan(
+            removal_plan,
+            order_ref=sale_order_ref,
+            barcode=barcode,
+            title=title or (rawbol_item or {}).get('title') or ''
+        )
+
+        response = {
+            'success': True,
+            'sale_id': result['id'],
+            'store': store_key,
+            'inventory_removed': bool(removal_result.get('removed')),
+            'removed_units': max(0, _coerce_int(removal_result.get('removed_units'), 0)),
+            'removed_locations': removal_result.get('locations') or [],
+            'needs_location_choice': False
+        }
+        removal_error = str(removal_result.get('error') or '').strip()
+        if removal_error:
+            response['inventory_removal_error'] = removal_error
+        elif removal_plan.get('locations') and not removal_plan.get('can_fulfill', True):
+            response['inventory_removal_error'] = (
+                f"Not enough inventory available to remove {quantity} unit(s); "
+                f"only {removal_plan.get('total_available', 0)} available."
+            )
+        return jsonify(response)
         
     except Exception as e:
         import traceback
@@ -36616,27 +38539,17 @@ def api_duplicate_shelf():
             new_name = f"{base_name_prefix}dupe{counter}"
         
         # Copy file
-        src_path = os.path.join('static', 'shelves', f"{source_name}.png")
-        dst_path = os.path.join('static', 'shelves', f"{new_name}.png")
+        src_path = _resolve_shelf_display_path(source_name, existing_only=True)
+        dst_path = _resolve_shelf_display_path(new_name, existing_only=False)
         
-        if not os.path.exists(src_path):
-             # Try to find source file case-insensitively
-             shelves_dir = os.path.join('static', 'shelves')
-             found = False
-             if os.path.exists(shelves_dir):
-                for f in os.listdir(shelves_dir):
-                    if f.lower() == f"{source_name}.png".lower():
-                        src_path = os.path.join(shelves_dir, f)
-                        found = True
-                        break
-             
-             if not found:
-                return jsonify({'success': False, 'error': 'Source image not found'}), 404
+        if src_path is None or not src_path.exists():
+            return jsonify({'success': False, 'error': 'Source image not found'}), 404
              
         try:
-            shutil.copy2(src_path, dst_path)
+            dst_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(str(src_path), str(dst_path))
             # Update timestamp to now so it sorts correctly as newest
-            os.utime(dst_path, None)
+            os.utime(str(dst_path), None)
         except Exception as e:
             return jsonify({'success': False, 'error': _safe_error(e, 'Failed to copy image')}), 500
         

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import shutil
+import subprocess
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
@@ -9,8 +10,16 @@ from PIL import Image, ImageDraw, ImageFont
 
 ROOT = Path(__file__).resolve().parent
 SHELF_DIR = ROOT / "static" / "shelves"
-ORIGINALS_DIR = SHELF_DIR / "originals"
-MAP_SOURCE = ORIGINALS_DIR / "officemap.jpg"
+AREA_DIR = SHELF_DIR / "office"
+ORIGINALS_DIR = AREA_DIR / "originals"
+MAPS_DIR = AREA_DIR / "maps"
+SHELF_PICS_DIR = AREA_DIR / "shelf_pics"
+MAP_SOURCE = MAPS_DIR / "officemap.jpg"
+LEGACY_MAP_SOURCE = SHELF_DIR / "maps" / "office" / "officemap.jpg"
+# "bases" now live in shelf_pics.
+BASES_DIR = SHELF_PICS_DIR
+LEGACY_BASES_DIR = SHELF_DIR / "maps" / "office" / "bases"
+LEGACY_ORIGINALS_DIR = SHELF_DIR / "originals"
 FONT_PATH = Path(r"C:\Windows\Fonts\arial.ttf")
 
 TARGETS = {
@@ -107,6 +116,12 @@ def load_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     return ImageFont.load_default()
 
 
+def resolve_map_source() -> Path:
+    if MAP_SOURCE.exists():
+        return MAP_SOURCE
+    return LEGACY_MAP_SOURCE
+
+
 def fit_font(label: str, rect: tuple[int, int, int, int]) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     width = rect[2] - rect[0]
     height = rect[3] - rect[1]
@@ -146,17 +161,75 @@ def draw_arrow(draw: ImageDraw.ImageDraw, start: tuple[int, int], end: tuple[int
     draw.polygon([(ex, ey), left, right], fill=color)
 
 
-def ensure_originals(display_codes: list[str]) -> None:
-    ORIGINALS_DIR.mkdir(parents=True, exist_ok=True)
+def restore_base_from_git_history(display_code: str, base_path: Path) -> bool:
+    rel_path = f"static/shelves/{display_code}.png"
+    try:
+        log_result = subprocess.run(
+            ["git", "log", "--format=%H", "--", rel_path],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        commits = [line.strip() for line in log_result.stdout.splitlines() if line.strip()]
+        if len(commits) < 2:
+            return False
+        for commit in commits[1:]:
+            show_result = subprocess.run(
+                ["git", "show", f"{commit}:{rel_path}"],
+                cwd=ROOT,
+                capture_output=True,
+                check=False,
+            )
+            if show_result.returncode == 0 and show_result.stdout:
+                base_path.write_bytes(show_result.stdout)
+                return True
+    except Exception:
+        return False
+    return False
+
+
+def ensure_base_sources(display_codes: list[str]) -> None:
+    BASES_DIR.mkdir(parents=True, exist_ok=True)
     for code in display_codes:
-        public_path = SHELF_DIR / f"{code}.png"
+        public_path = SHELF_PICS_DIR / f"{code}.png"
         original_path = ORIGINALS_DIR / f"{code}.png"
-        if public_path.exists() and not original_path.exists():
-            shutil.copy2(public_path, original_path)
+        legacy_base_path = LEGACY_BASES_DIR / f"{code}.png"
+        base_path = BASES_DIR / f"{code}.png"
+        if base_path.exists():
+            continue
+        if legacy_base_path.exists():
+            shutil.copy2(legacy_base_path, base_path)
+            continue
+        if public_path.exists() and original_path.exists():
+            try:
+                with Image.open(public_path) as public_img, Image.open(original_path) as original_img:
+                    if public_img.width == original_img.width and public_img.height <= original_img.height + 4:
+                        shutil.copy2(public_path, base_path)
+                        continue
+            except Exception:
+                pass
+        if restore_base_from_git_history(code, base_path):
+            continue
+        if public_path.exists() and original_path.exists():
+            try:
+                with Image.open(public_path) as public_img, Image.open(original_path) as original_img:
+                    crop_h = min(public_img.height, original_img.height)
+                    if crop_h > 0 and public_img.height > crop_h:
+                        cropped = public_img.convert("RGBA").crop((0, 0, public_img.width, crop_h))
+                        cropped.save(base_path)
+                        continue
+            except Exception:
+                pass
+        if original_path.exists():
+            shutil.copy2(original_path, base_path)
+        elif public_path.exists():
+            shutil.copy2(public_path, base_path)
 
 
 def build_map_asset(key: str, config: dict[str, object]) -> Image.Image:
-    base = Image.open(MAP_SOURCE).convert("RGBA")
+    MAPS_DIR.mkdir(parents=True, exist_ok=True)
+    base = Image.open(resolve_map_source()).convert("RGBA")
     draw = ImageDraw.Draw(base, "RGBA")
     rect = config["rect"]
     label = str(config["label"])
@@ -180,51 +253,17 @@ def build_map_asset(key: str, config: dict[str, object]) -> Image.Image:
 
     draw_arrow(draw, arrow_start, arrow_end)
 
-    out_path = ORIGINALS_DIR / f"officemap_{key}.png"
+    out_path = MAPS_DIR / f"officemap_{key}.png"
     base.save(out_path)
     return base
 
 
-def build_composite(display_code: str, map_image: Image.Image, title_label: str) -> None:
-    clean_source = ORIGINALS_DIR / f"{display_code}.png"
-    shelf = Image.open(clean_source).convert("RGBA")
-
-    caption_font = load_font(14)
-    map_width = 400
-    map_height = round(map_image.height * (map_width / map_image.width))
-    map_resized = map_image.resize((map_width, map_height), Image.Resampling.LANCZOS)
-
-    pad = 18
-    label_h = 24
-    canvas_w = shelf.width
-    canvas_h = shelf.height + pad + label_h + map_resized.height + pad
-    canvas = Image.new("RGBA", (canvas_w, canvas_h), (255, 255, 255, 255))
-    canvas.alpha_composite(shelf, (0, 0))
-
-    draw = ImageDraw.Draw(canvas)
-    sep_y = shelf.height + 8
-    draw.line((24, sep_y, canvas_w - 24, sep_y), fill=(214, 214, 214, 255), width=2)
-    draw.text((24, shelf.height + 16), f"Office map - {title_label} highlighted", fill=(72, 72, 72, 255), font=caption_font)
-
-    map_x = (canvas_w - map_resized.width) // 2
-    map_y = shelf.height + pad + label_h
-    canvas.alpha_composite(map_resized, (map_x, map_y))
-    canvas.save(SHELF_DIR / f"{display_code}.png")
-
-
 def main() -> None:
-    display_codes: list[str] = []
-    for config in TARGETS.values():
-        display_codes.extend(config["codes"])
-    ensure_originals(display_codes)
-
     for key, config in TARGETS.items():
-        map_image = build_map_asset(key, config)
-        title_label = str(config["label"])
-        for code in config["codes"]:
-            build_composite(code, map_image, title_label)
+        build_map_asset(key, config)
 
     print("Generated office map assets for", ", ".join(sorted(TARGETS)))
+    print("Shelf/map combo images are no longer generated.")
 
 
 if __name__ == "__main__":

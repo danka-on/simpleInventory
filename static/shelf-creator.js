@@ -687,6 +687,8 @@ function editShelf() {
     state.isEditing = true;
     document.getElementById('form-title').textContent = `Edit Shelf: ${code}`;
     document.getElementById('shelf-code').value = code;
+    const originalOnlyCheckbox = document.getElementById('original-only');
+    if (originalOnlyCheckbox) originalOnlyCheckbox.checked = false;
     state.currentImage = null;
     state.rectX = 0;
     state.rectY = 0;
@@ -886,6 +888,8 @@ function resetForm() {
     invalidatePendingImageWork();
     invalidateSaveFlow();
     document.getElementById('shelf-code').value = '';
+    const originalOnlyCheckbox = document.getElementById('original-only');
+    if (originalOnlyCheckbox) originalOnlyCheckbox.checked = false;
     document.getElementById('code-validation').textContent = '';
     document.getElementById('shelf-code').classList.remove('valid', 'invalid');
     resetSaveButtonUI();
@@ -1215,6 +1219,26 @@ function stopCamera() {
 /**
  * Reset the rectangle to allow drawing a new one
  */
+function buildOriginalImageCandidates(code) {
+    const raw = String(code || '').trim();
+    const compact = raw.replace(/\s+/g, '');
+    const lower = compact.toLowerCase();
+    const upper = compact.toUpperCase();
+    const candidates = [];
+    const add = (src) => {
+        if (src && !candidates.includes(src)) candidates.push(src);
+    };
+
+    add(`/shelf-original/${encodeURIComponent(lower)}.png`);
+    add(`/shelf-original/${encodeURIComponent(upper)}.png`);
+    add(`/shelf-original/${encodeURIComponent(raw)}.png`);
+    add(`/shelf-base/${encodeURIComponent(lower)}.png`);
+    add(`/shelf-base/${encodeURIComponent(upper)}.png`);
+    add(`/shelf-base/${encodeURIComponent(raw)}.png`);
+
+    return candidates;
+}
+
 function resetRect() {
     console.log('Resetting rectangle');
     state.rectX = 0;
@@ -1226,24 +1250,31 @@ function resetRect() {
     // If we are editing, try to load the original clean image
     if (state.isEditing && state.currentShelfCode) {
         const imageToken = state.imageLoadToken;
-        const originalUrl = `/static/shelves/originals/${state.currentShelfCode}.png`;
-        const img = new Image();
-        img.crossOrigin = 'anonymous';
-        
-        img.onload = () => {
-            if (imageToken !== state.imageLoadToken) return;
-            console.log('Loaded original clean image for redraw');
-            state.currentImage = img;
-            redrawCanvas();
+        const originalUrls = buildOriginalImageCandidates(state.currentShelfCode);
+        const tryNext = (index) => {
+            if (index >= originalUrls.length) {
+                if (imageToken !== state.imageLoadToken) return;
+                console.log('No original image found, sticking with current image');
+                redrawCanvas();
+                return;
+            }
+
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            img.onload = () => {
+                if (imageToken !== state.imageLoadToken) return;
+                console.log('Loaded original clean image for redraw');
+                state.currentImage = img;
+                redrawCanvas();
+            };
+            img.onerror = () => {
+                if (imageToken !== state.imageLoadToken) return;
+                tryNext(index + 1);
+            };
+            img.src = originalUrls[index] + '?_=' + Date.now();
         };
-        
-        img.onerror = () => {
-            if (imageToken !== state.imageLoadToken) return;
-            console.log('No original image found, sticking with current image');
-            redrawCanvas();
-        };
-        
-        img.src = originalUrl + '?_=' + Date.now();
+
+        tryNext(0);
     } else {
         redrawCanvas();
     }
@@ -1664,6 +1695,7 @@ function saveShelf() {
     
     const code = document.getElementById('shelf-code').value.trim();
     const hasImage = state.currentImage !== null;
+    const originalOnly = !!(document.getElementById('original-only') && document.getElementById('original-only').checked);
     
     console.log('Save shelf check:', {
         code: code,
@@ -1720,24 +1752,35 @@ function saveShelf() {
         }
     };
 
+    const controller = new AbortController();
+    state.saveAbortController = controller;
+
     // Safety timeout in case toBlob or fetch hangs indefinitely
     state.saveTimeoutId = setTimeout(() => {
         if (saveToken !== state.saveRequestToken) return;
         console.error('Save operation timed out');
+        try {
+            controller.abort();
+        } catch (abortErr) {
+            console.warn('Failed to abort timed out save request:', abortErr);
+        }
         showError('Save operation timed out. Please try again.');
         finishSave(true);
-    }, 30000); // 30 seconds
+    }, 90000); // 90 seconds for slower mobile/Pi uploads
 
-    // Helper to get blob from original image (clean)
+    // Helper to get a clean shelf image blob matching the editor canvas size.
+    // This keeps uploads small instead of sending a full camera-resolution PNG.
     const getOriginalBlob = () => {
         return new Promise(resolve => {
             if (!state.currentImage) return resolve(null);
             try {
                 const tempCanvas = document.createElement('canvas');
-                tempCanvas.width = state.currentImage.width;
-                tempCanvas.height = state.currentImage.height;
+                const targetWidth = Math.max(1, Math.round(state.canvas?.width || state.currentImage.width || 0));
+                const targetHeight = Math.max(1, Math.round(state.canvas?.height || state.currentImage.height || 0));
+                tempCanvas.width = targetWidth;
+                tempCanvas.height = targetHeight;
                 const ctx = tempCanvas.getContext('2d');
-                ctx.drawImage(state.currentImage, 0, 0);
+                ctx.drawImage(state.currentImage, 0, 0, targetWidth, targetHeight);
                 tempCanvas.toBlob(blob => resolve(blob), 'image/png');
             } catch (e) {
                 console.error('Error creating original blob:', e);
@@ -1745,9 +1788,6 @@ function saveShelf() {
             }
         });
     };
-
-    const controller = new AbortController();
-    state.saveAbortController = controller;
 
     const applySaveSuccess = (message) => {
         finishSave(false);
@@ -1773,24 +1813,28 @@ function saveShelf() {
                 
                 console.log('Blob created, size:', blob.size);
                 const formData = new FormData();
-                formData.append('image', blob, `${code}.png`);
+                const origBlob = await getOriginalBlob();
+                const uploadBlob = (originalOnly && origBlob) ? origBlob : blob;
+                formData.append('image', uploadBlob, `${code}.png`);
                 
                 // Also save original image (clean)
-                const origBlob = await getOriginalBlob();
                 if (origBlob) {
                     console.log('Original blob created, size:', origBlob.size);
                     formData.append('original_image', origBlob, `${code}.png`);
                 }
+                if (originalOnly) {
+                    formData.append('original_only', '1');
+                }
 
                 let endpoint = '/api/upload_shelf';
-                let successMessage = 'Shelf saved successfully!';
+                let successMessage = originalOnly ? 'Original saved successfully!' : 'Shelf saved successfully!';
 
                 if (state.isEditing) {
                     const oldCode = state.currentShelfCode;
                     formData.append('old_code', oldCode);
                     if (oldCode !== code) formData.append('new_code', code);
                     endpoint = '/api/update_shelf';
-                    successMessage = 'Shelf updated successfully!';
+                    successMessage = originalOnly ? 'Original updated successfully!' : 'Shelf updated successfully!';
                     console.log('Updating shelf via /api/update_shelf');
                 } else {
                     formData.append('code', code);

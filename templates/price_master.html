@@ -377,12 +377,30 @@
       color: var(--pm-muted);
       white-space: nowrap;
     }
+    .th-sortable{
+      cursor: pointer;
+      user-select: none;
+    }
+    .th-sortable:hover{
+      color: var(--pm-ink);
+    }
+    .th-sortable .sort-ind{
+      font-size: 0.82em;
+      opacity: 0.8;
+      margin-left: 4px;
+      display: inline-block;
+      min-width: 10px;
+      text-align: center;
+    }
     html.ss-has-top-banner .tableWrap thead th{
       top: 0 !important;
     }
     html.ss-theme-night thead th{
       background: var(--pm-card);
       border-bottom-color: rgba(255,255,255,0.08);
+    }
+    html.ss-theme-night .th-sortable:hover{
+      color: #e2e8f0;
     }
     tbody td{
       border-bottom: 1px solid rgba(0,0,0,0.05);
@@ -766,10 +784,10 @@
               <th style="width:90px;">Store</th>
               <th>Item</th>
               <th style="width:150px;">ID</th>
-              <th style="width:100px;">Price</th>
+              <th class="th-sortable" data-sort-column="price" title="Sort by price" role="button" tabindex="0" aria-sort="none" style="width:100px;">Price <span class="sort-ind" data-sort-indicator="price"></span></th>
               <th style="width:110px;">New Price</th>
-              <th style="width:130px;">List Age</th>
-              <th style="width:150px;">Since Change</th>
+              <th class="th-sortable" data-sort-column="list_age" title="Sort by list age" role="button" tabindex="0" aria-sort="ascending" style="width:130px;">List Age <span class="sort-ind" data-sort-indicator="list_age"></span></th>
+              <th class="th-sortable" data-sort-column="since_change" title="Sort by time since last change" role="button" tabindex="0" aria-sort="none" style="width:150px;">Since Change <span class="sort-ind" data-sort-indicator="since_change"></span></th>
             </tr>
           </thead>
           <tbody id="pmTbody"></tbody>
@@ -830,6 +848,11 @@
     const feedCheckAttempts = {};
     let lastFeedId = null;
     const ebayUpdateKey = 'pm_last_ebay_updates';
+    const headerSortMap = {
+      price: {asc: 'price_low', desc: 'price_high'},
+      list_age: {asc: 'list_new', desc: 'list_old'},
+      since_change: {asc: 'chg_new', desc: 'chg_old'}
+    };
 
     function setLastFeedId(id){
       if(!id) return;
@@ -884,6 +907,44 @@
 
     function keyFor(it){
       return `${it.platform}:${it.listing_key}`;
+    }
+
+    function sortDirectionForColumn(column){
+      const map = headerSortMap[String(column || '').trim()];
+      if(!map) return null;
+      if(state.sort === map.asc) return 'asc';
+      if(state.sort === map.desc) return 'desc';
+      return null;
+    }
+
+    function setSort(sortValue){
+      const next = String(sortValue || '').trim();
+      if(!next) return;
+      state.sort = next;
+      const sortSelect = $('pmSort');
+      if(sortSelect && sortSelect.value !== next) sortSelect.value = next;
+      render();
+    }
+
+    function toggleHeaderSort(column){
+      const key = String(column || '').trim();
+      const map = headerSortMap[key];
+      if(!map) return;
+      const dir = sortDirectionForColumn(key);
+      setSort(dir === 'asc' ? map.desc : map.asc);
+    }
+
+    function updateSortHeaderUi(){
+      const sortSelect = $('pmSort');
+      if(sortSelect && sortSelect.value !== state.sort) sortSelect.value = state.sort;
+
+      document.querySelectorAll('th.th-sortable[data-sort-column]').forEach((el) => {
+        const key = el.getAttribute('data-sort-column') || '';
+        const dir = sortDirectionForColumn(key);
+        const indicator = el.querySelector('[data-sort-indicator]');
+        if(indicator) indicator.textContent = dir === 'asc' ? '▲' : (dir === 'desc' ? '▼' : '');
+        el.setAttribute('aria-sort', dir === 'asc' ? 'ascending' : (dir === 'desc' ? 'descending' : 'none'));
+      });
     }
 
     function toNumber(v){
@@ -1043,6 +1104,7 @@
       const rows = applyFilters();
       state.lastRenderKeys = rows.map(keyFor);
       updateKpis(rows);
+      updateSortHeaderUi();
 
       const val = toNumber(state.value);
       setStatus(rows.length ? `${rows.length} listing(s)` : 'No results');
@@ -1280,7 +1342,7 @@
     // ─── EVENT BINDINGS ───
     $('refreshBtn').addEventListener('click', loadListings);
     $('pmSearch').addEventListener('input', (e) => { state.q = e.target.value || ''; render(); });
-    $('pmSort').addEventListener('change', (e) => { state.sort = e.target.value; render(); });
+    $('pmSort').addEventListener('change', (e) => { setSort(e.target.value); });
     $('pmMode').addEventListener('change', (e) => { state.mode = e.target.value; render(); });
     $('pmValue').addEventListener('input', (e) => {
       const raw = (e.target.value || '').trim();
@@ -1333,6 +1395,16 @@
     $('clearLogBtn').addEventListener('click', () => { $('pmLog').textContent = ''; });
     $('fabClearBtn').addEventListener('click', () => { state.selected.clear(); render(); });
     document.querySelectorAll('.spill').forEach(b => b.addEventListener('click', () => setStoreFilter(b.getAttribute('data-store'))));
+    document.querySelectorAll('th.th-sortable[data-sort-column]').forEach((el) => {
+      const triggerSort = () => toggleHeaderSort(el.getAttribute('data-sort-column'));
+      el.addEventListener('click', triggerSort);
+      el.addEventListener('keydown', (e) => {
+        if(e.key === 'Enter' || e.key === ' '){
+          e.preventDefault();
+          triggerSort();
+        }
+      });
+    });
 
     // Collapsible log
     $('logToggle').addEventListener('click', (e) => {

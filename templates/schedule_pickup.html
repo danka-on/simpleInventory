@@ -1,0 +1,736 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Schedule Pickup</title>
+  <style>
+    :root {
+      --bg: #f4f6f8;
+      --card: #ffffff;
+      --border: #d9e1e7;
+      --text: #1f2933;
+      --muted: #6b7a89;
+      --primary: #1d7af2;
+      --primary-dark: #155fc2;
+      --success: #1f9d55;
+      --shadow: 0 14px 30px rgba(15, 23, 42, 0.08);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(180deg, #eef4fb 0%, var(--bg) 100%);
+      color: var(--text);
+    }
+
+    .page {
+      max-width: 940px;
+      margin: 0 auto;
+      padding: 24px 18px 48px;
+    }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 22px;
+      flex-wrap: wrap;
+    }
+
+    .topbar h1 {
+      margin: 0;
+      font-size: 2rem;
+    }
+
+    .nav-links {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .nav-link,
+    .btn {
+      border: none;
+      border-radius: 12px;
+      padding: 12px 16px;
+      font-size: 0.95rem;
+      text-decoration: none;
+      cursor: pointer;
+      transition: 0.2s ease;
+    }
+
+    .nav-link {
+      background: #ffffff;
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+
+    .nav-link:hover {
+      border-color: #b8c7d5;
+      transform: translateY(-1px);
+    }
+
+    .intro {
+      color: var(--muted);
+      margin: 0 0 22px;
+      max-width: 700px;
+      line-height: 1.5;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid rgba(217, 225, 231, 0.9);
+      border-radius: 20px;
+      padding: 22px;
+      box-shadow: var(--shadow);
+      margin-bottom: 18px;
+    }
+
+    .card h2 {
+      margin: 0 0 8px;
+      font-size: 1.1rem;
+    }
+
+    .card p {
+      margin: 0 0 16px;
+      color: var(--muted);
+    }
+
+    .field {
+      margin-bottom: 16px;
+      position: relative;
+    }
+
+    .field label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 600;
+      font-size: 0.95rem;
+    }
+
+    .field input,
+    .field select {
+      width: 100%;
+      padding: 14px 16px;
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      background: #fff;
+      font-size: 1rem;
+      color: var(--text);
+    }
+
+    .field input:focus,
+    .field select:focus {
+      outline: none;
+      border-color: #8fb8ff;
+      box-shadow: 0 0 0 4px rgba(29, 122, 242, 0.12);
+    }
+
+    .field small {
+      display: block;
+      margin-top: 7px;
+      color: var(--muted);
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: 1.3fr 0.9fr;
+      gap: 16px;
+      align-items: end;
+    }
+
+    .time-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .btn {
+      background: var(--primary);
+      color: #fff;
+      font-weight: 600;
+    }
+
+    .btn:hover {
+      background: var(--primary-dark);
+    }
+
+    .btn.secondary {
+      background: #edf4ff;
+      color: #175ab5;
+      border: 1px solid #cfe0ff;
+    }
+
+    .btn.secondary:hover {
+      background: #dfeeff;
+    }
+
+    .actions {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 6px;
+    }
+
+    .suggestions,
+    .results {
+      margin-top: 10px;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      overflow: hidden;
+      background: #fff;
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    .suggestion-item,
+    .result-item {
+      width: 100%;
+      display: grid;
+      grid-template-columns: 60px 1fr auto;
+      gap: 12px;
+      align-items: center;
+      padding: 12px 14px;
+      border: none;
+      border-bottom: 1px solid #edf1f5;
+      background: #fff;
+      text-align: left;
+    }
+
+    .suggestion-item:last-child,
+    .result-item:last-child {
+      border-bottom: none;
+    }
+
+    .suggestion-item {
+      cursor: pointer;
+    }
+
+    .suggestion-item:hover,
+    .result-item:hover {
+      background: #f8fbff;
+    }
+
+    .thumb {
+      width: 60px;
+      height: 60px;
+      object-fit: cover;
+      border-radius: 12px;
+      background: #e9eef4;
+    }
+
+    .thumb.placeholder {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.75rem;
+      color: var(--muted);
+    }
+
+    .item-title {
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+
+    .item-meta {
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    .pick-btn {
+      border: none;
+      border-radius: 10px;
+      padding: 10px 14px;
+      background: #ecfdf3;
+      color: #13663b;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .selected-card {
+      display: grid;
+      grid-template-columns: 84px 1fr;
+      gap: 16px;
+      align-items: center;
+      padding: 16px;
+      border-radius: 18px;
+      background: #f7fbff;
+      border: 1px solid #d7e7ff;
+    }
+
+    .selected-card img,
+    .selected-card .thumb {
+      width: 84px;
+      height: 84px;
+      border-radius: 16px;
+    }
+
+    .selected-label {
+      font-size: 0.82rem;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      color: #2563eb;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+
+    .message {
+      padding: 14px 16px;
+      border-radius: 14px;
+      margin-bottom: 18px;
+      display: none;
+      font-weight: 600;
+    }
+
+    .message.show {
+      display: block;
+    }
+
+    .message.success {
+      background: #ecfdf3;
+      color: #13663b;
+      border: 1px solid #c9f1d8;
+    }
+
+    .message.error {
+      background: #fef2f2;
+      color: #b42318;
+      border: 1px solid #f7c7c7;
+    }
+
+    .empty-box {
+      padding: 16px;
+      color: var(--muted);
+      text-align: center;
+    }
+
+    @media (max-width: 760px) {
+      .row,
+      .time-grid,
+      .suggestion-item,
+      .result-item,
+      .selected-card {
+        grid-template-columns: 1fr;
+      }
+
+      .suggestion-item,
+      .result-item {
+        text-align: left;
+      }
+
+      .pick-btn {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="topbar">
+      <div>
+        <h1>Schedule Pickup</h1>
+      </div>
+      <div class="nav-links">
+        <a class="nav-link" href="/marketplace-session">Back to Marketplace Session</a>
+        <a class="nav-link" href="/marketplace-live-pickups">Live Pickups</a>
+      </div>
+    </div>
+
+    <p class="intro">
+      Start by typing a name or barcode. While you type, we suggest Facebook listings only. Raw BOL search runs only when you press Search.
+    </p>
+
+    <div id="message" class="message"></div>
+
+    <div class="card">
+      <h2>Item</h2>
+      <p>Pick from Facebook listings, or search rawbol when you need something else.</p>
+
+      <div class="row">
+        <div class="field">
+          <label for="pickupQuery">Item name or barcode</label>
+          <input id="pickupQuery" type="text" placeholder="Start typing item name or barcode">
+          <small>Suggestions below come from Facebook listings.</small>
+          <div id="suggestions" class="suggestions hidden"></div>
+        </div>
+
+        <div class="field">
+          <label for="fbListingSelect">Facebook listings dropdown</label>
+          <select id="fbListingSelect">
+            <option value="">Choose a Facebook listing</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button id="searchBtn" class="btn secondary" type="button">Search rawbol</button>
+        <button id="clearBtn" class="btn secondary" type="button">Clear selection</button>
+      </div>
+
+      <div id="selectedWrap" class="field hidden" style="margin-top: 18px;">
+        <label>Selected item</label>
+        <div id="selectedItemCard" class="selected-card"></div>
+      </div>
+
+      <div class="field" style="margin-top: 18px; margin-bottom: 0;">
+        <label>Raw BOL results</label>
+        <div id="searchResults" class="results hidden"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Pickup time</h2>
+      <p>Day starts on today by default. Change it if needed, then confirm.</p>
+
+      <div class="time-grid">
+        <div class="field">
+          <label for="pickupDate">Day</label>
+          <input id="pickupDate" type="date">
+        </div>
+
+        <div class="field">
+          <label for="pickupTime">Hour</label>
+          <input id="pickupTime" type="time" step="300">
+        </div>
+      </div>
+
+      <div class="actions">
+        <button id="confirmBtn" class="btn" type="button">Confirm pickup</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const state = {
+      fbListings: [],
+      selectedItem: null,
+      searching: false
+    };
+
+    const pickupQuery = document.getElementById('pickupQuery');
+    const fbListingSelect = document.getElementById('fbListingSelect');
+    const suggestions = document.getElementById('suggestions');
+    const searchResults = document.getElementById('searchResults');
+    const selectedWrap = document.getElementById('selectedWrap');
+    const selectedItemCard = document.getElementById('selectedItemCard');
+    const pickupDate = document.getElementById('pickupDate');
+    const pickupTime = document.getElementById('pickupTime');
+    const confirmBtn = document.getElementById('confirmBtn');
+    const messageBox = document.getElementById('message');
+
+    function showMessage(text, type) {
+      messageBox.textContent = text;
+      messageBox.className = `message show ${type}`;
+    }
+
+    function clearMessage() {
+      messageBox.textContent = '';
+      messageBox.className = 'message';
+    }
+
+    function escapeHtml(value) {
+      return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function formatOptionLabel(item) {
+      const barcode = item.upc || item.barcode || '';
+      return barcode ? `${item.title} (${barcode})` : item.title;
+    }
+
+    function buildThumb(imageUrl) {
+      if (imageUrl) {
+        return `<img src="${escapeHtml(imageUrl)}" alt="">`;
+      }
+      return '<div class="thumb placeholder">No image</div>';
+    }
+
+    function formatDateInput(date) {
+      const local = new Date(date.getTime() - (date.getTimezoneOffset() * 60000));
+      return local.toISOString().slice(0, 10);
+    }
+
+    function setDefaultDateTime() {
+      const now = new Date();
+      const today = formatDateInput(now);
+      now.setHours(now.getHours() + 1, 0, 0, 0);
+      const hh = String(now.getHours()).padStart(2, '0');
+      const mm = String(now.getMinutes()).padStart(2, '0');
+      pickupDate.value = today;
+      pickupTime.value = `${hh}:${mm}`;
+    }
+
+    function normalizeSelection(item, source) {
+      return {
+        title: item.title || '',
+        barcode: item.upc || item.barcode || '',
+        image_url: item.image || item.image_url || '',
+        source: source || item.source || 'manual'
+      };
+    }
+
+    function renderSelectedItem() {
+      if (!state.selectedItem) {
+        selectedWrap.classList.add('hidden');
+        selectedItemCard.innerHTML = '';
+        return;
+      }
+
+      const item = state.selectedItem;
+      const sourceLabel = item.source === 'facebook' ? 'Facebook listing' :
+        item.source === 'rawbol' ? 'Raw BOL search' : 'Manual';
+
+      selectedItemCard.innerHTML = `
+        ${buildThumb(item.image_url)}
+        <div>
+          <div class="selected-label">${escapeHtml(sourceLabel)}</div>
+          <div class="item-title">${escapeHtml(item.title || item.barcode)}</div>
+          <div class="item-meta">${escapeHtml(item.barcode || 'No barcode saved')}</div>
+        </div>
+      `;
+      selectedWrap.classList.remove('hidden');
+    }
+
+    function clearSelection() {
+      state.selectedItem = null;
+      renderSelectedItem();
+      pickupQuery.value = '';
+      fbListingSelect.value = '';
+      suggestions.classList.add('hidden');
+      suggestions.innerHTML = '';
+      searchResults.classList.add('hidden');
+      searchResults.innerHTML = '';
+      clearMessage();
+    }
+
+    function renderSuggestions() {
+      const query = pickupQuery.value.trim().toLowerCase();
+      if (!query) {
+        suggestions.innerHTML = '';
+        suggestions.classList.add('hidden');
+        return;
+      }
+
+      const matches = state.fbListings.filter((item) => {
+        const title = (item.title || '').toLowerCase();
+        const barcode = String(item.upc || '').toLowerCase();
+        return title.includes(query) || barcode.includes(query);
+      }).slice(0, 8);
+
+      if (!matches.length) {
+        suggestions.innerHTML = '';
+        suggestions.classList.add('hidden');
+        return;
+      }
+
+      suggestions.innerHTML = matches.map((item, index) => `
+        <button type="button" class="suggestion-item" data-index="${index}">
+          ${buildThumb(item.image || '')}
+          <div>
+            <div class="item-title">${escapeHtml(item.title || 'Untitled item')}</div>
+            <div class="item-meta">${escapeHtml(item.upc || 'No barcode')}${item.quantity ? ` | FB qty ${escapeHtml(item.quantity)}` : ''}</div>
+          </div>
+          <span class="pick-btn">Use</span>
+        </button>
+      `).join('');
+
+      suggestions.classList.remove('hidden');
+
+      [...suggestions.querySelectorAll('.suggestion-item')].forEach((button, index) => {
+        button.addEventListener('click', () => {
+          const selected = matches[index];
+          state.selectedItem = normalizeSelection(selected, 'facebook');
+          pickupQuery.value = selected.title || selected.upc || '';
+          fbListingSelect.value = selected.upc || '';
+          suggestions.classList.add('hidden');
+          renderSelectedItem();
+          clearMessage();
+        });
+      });
+    }
+
+    function renderSearchResults(results) {
+      if (!results.length) {
+        searchResults.innerHTML = '<div class="empty-box">No raw BOL matches found.</div>';
+        searchResults.classList.remove('hidden');
+        return;
+      }
+
+      searchResults.innerHTML = results.map((item, index) => `
+        <div class="result-item" data-index="${index}">
+          ${buildThumb(item.image_url || '')}
+          <div>
+            <div class="item-title">${escapeHtml(item.title || item.barcode || 'Untitled item')}</div>
+            <div class="item-meta">${escapeHtml(item.barcode || 'No barcode')}${item.lot_number ? ` | Lot ${escapeHtml(item.lot_number)}` : ''}</div>
+          </div>
+          <button type="button" class="pick-btn">Use</button>
+        </div>
+      `).join('');
+
+      searchResults.classList.remove('hidden');
+
+      [...searchResults.querySelectorAll('.result-item')].forEach((row, index) => {
+        row.querySelector('.pick-btn').addEventListener('click', () => {
+          const selected = results[index];
+          state.selectedItem = normalizeSelection(selected, 'rawbol');
+          pickupQuery.value = selected.title || selected.barcode || '';
+          suggestions.classList.add('hidden');
+          renderSelectedItem();
+          clearMessage();
+        });
+      });
+    }
+
+    async function loadFbListings() {
+      try {
+        const response = await fetch('/api/fb/listings');
+        const data = await response.json();
+        if (!data.success) {
+          throw new Error(data.error || 'Could not load Facebook listings');
+        }
+
+        state.fbListings = (data.listings || [])
+          .filter((item) => item.title || item.upc)
+          .sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+
+        fbListingSelect.innerHTML = '<option value="">Choose a Facebook listing</option>' + state.fbListings.map((item) => {
+          const value = item.upc || '';
+          return `<option value="${escapeHtml(value)}">${escapeHtml(formatOptionLabel(item))}</option>`;
+        }).join('');
+      } catch (error) {
+        showMessage(error.message || 'Could not load Facebook listings.', 'error');
+      }
+    }
+
+    async function searchRawbol() {
+      const query = pickupQuery.value.trim();
+      if (!query || state.searching) {
+        return;
+      }
+
+      state.searching = true;
+      clearMessage();
+      searchResults.innerHTML = '<div class="empty-box">Searching raw BOL...</div>';
+      searchResults.classList.remove('hidden');
+
+      try {
+        const response = await fetch(`/api/marketplace/pickups/search?q=${encodeURIComponent(query)}`);
+        const data = await response.json();
+        if (!data.success) {
+          throw new Error(data.error || 'Search failed');
+        }
+        renderSearchResults(data.results || []);
+      } catch (error) {
+        showMessage(error.message || 'Search failed.', 'error');
+      } finally {
+        state.searching = false;
+      }
+    }
+
+    function buildPayload() {
+      const query = pickupQuery.value.trim();
+      const selected = state.selectedItem;
+
+      let title = selected ? selected.title : query;
+      let barcode = selected ? selected.barcode : '';
+      let imageUrl = selected ? selected.image_url : '';
+      let source = selected ? selected.source : 'manual';
+
+      if (!selected && /^[A-Za-z0-9.-]+$/.test(query) && /\d/.test(query)) {
+        barcode = query;
+      }
+
+      return {
+        title,
+        barcode,
+        image_url: imageUrl,
+        source,
+        pickup_date: pickupDate.value,
+        pickup_time: pickupTime.value
+      };
+    }
+
+    async function confirmPickup() {
+      const payload = buildPayload();
+      if (!payload.title && !payload.barcode) {
+        showMessage('Choose an item first.', 'error');
+        return;
+      }
+      if (!payload.pickup_date || !payload.pickup_time) {
+        showMessage('Choose pickup day and hour.', 'error');
+        return;
+      }
+
+      confirmBtn.disabled = true;
+      confirmBtn.textContent = 'Saving...';
+      clearMessage();
+
+      try {
+        const response = await fetch('/api/marketplace/pickups', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await response.json();
+        if (!data.success) {
+          throw new Error(data.error || 'Could not save pickup');
+        }
+
+        showMessage('Pickup scheduled. Opening live pickups...', 'success');
+        setTimeout(() => {
+          window.location.href = '/marketplace-live-pickups';
+        }, 700);
+      } catch (error) {
+        showMessage(error.message || 'Could not save pickup.', 'error');
+      } finally {
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = 'Confirm pickup';
+      }
+    }
+
+    pickupQuery.addEventListener('input', () => {
+      state.selectedItem = null;
+      renderSelectedItem();
+      renderSuggestions();
+    });
+
+    pickupQuery.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        searchRawbol();
+      }
+    });
+
+    fbListingSelect.addEventListener('change', () => {
+      const selected = state.fbListings.find((item) => (item.upc || '') === fbListingSelect.value);
+      if (!selected) {
+        state.selectedItem = null;
+        renderSelectedItem();
+        return;
+      }
+      state.selectedItem = normalizeSelection(selected, 'facebook');
+      pickupQuery.value = selected.title || selected.upc || '';
+      suggestions.classList.add('hidden');
+      renderSelectedItem();
+      clearMessage();
+    });
+
+    document.getElementById('searchBtn').addEventListener('click', searchRawbol);
+    document.getElementById('clearBtn').addEventListener('click', clearSelection);
+    confirmBtn.addEventListener('click', confirmPickup);
+
+    setDefaultDateTime();
+    loadFbListings();
+  </script>
+</body>
+</html>

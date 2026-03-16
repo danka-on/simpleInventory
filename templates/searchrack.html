@@ -1400,7 +1400,7 @@ async function onViewLocation(e){
             if (window.SSLocationPreview) {
                 window.SSLocationPreview.openForLocation(itemPosition, '', `Location: ${itemPosition.toUpperCase()}`);
             } else {
-                showViewModal(`<div><h4>Shelf Position</h4><img src="/static/shelves/${itemPosition}.png?t=${Date.now()}" style="max-width:640px;max-height:60vh;" onerror="this.src='${missingThumb(720,480,'Image missing')}'"></div>`);
+                showViewModal(`<div><h4>Shelf Position</h4><img src="/shelf-image/${encodeURIComponent(itemPosition)}.png?t=${Date.now()}" style="max-width:640px;max-height:60vh;" onerror="this.src='${missingThumb(720,480,'Image missing')}'"></div>`);
             }
         } else {
             showViewModal('<div class="small-muted">No location info available</div>');
@@ -1423,7 +1423,7 @@ async function onViewLocation(e){
                 if (window.SSLocationPreview) {
                     window.SSLocationPreview.openForLocation(j.item_position, '', `Location: ${j.item_position.toUpperCase()}`);
                 } else {
-                    showViewModal(`<div><h4>Shelf Position</h4><img src="/static/shelves/${j.item_position.toLowerCase()}.png?t=${Date.now()}" style="max-width:640px;max-height:60vh;" onerror="this.src='${missingThumb(720,480,'Image missing')}'"></div>`);
+                    showViewModal(`<div><h4>Shelf Position</h4><img src="/shelf-image/${encodeURIComponent(j.item_position.toLowerCase())}.png?t=${Date.now()}" style="max-width:640px;max-height:60vh;" onerror="this.src='${missingThumb(720,480,'Image missing')}'"></div>`);
                 }
             } else {
                 showViewModal('<div class="small-muted">No location info available</div>');
@@ -1452,7 +1452,7 @@ function onViewLocationMulti(e){
         if (window.SSLocationPreview) {
             window.SSLocationPreview.openForLocation(code, '', `Location: ${code.toUpperCase()}`);
         } else {
-            showViewModal(`<div><h4>Location: ${esc(code)}</h4><img src="/static/shelves/${code.toLowerCase()}.png?t=${Date.now()}" style="max-width:640px;max-height:60vh;" onerror="this.src='${missingThumb(720,480,'Image missing')}'"></div>`);
+            showViewModal(`<div><h4>Location: ${esc(code)}</h4><img src="/shelf-image/${encodeURIComponent(code.toLowerCase())}.png?t=${Date.now()}" style="max-width:640px;max-height:60vh;" onerror="this.src='${missingThumb(720,480,'Image missing')}'"></div>`);
         }
     }
 }
@@ -2062,20 +2062,33 @@ function renderShelfSelector(locationId) {
 // Update shelf image preview
 function browsePreviewMapKey(shelfCode) {
     const compact = String(shelfCode || '').trim().replace(/\s+/g, '').toLowerCase();
-    if (!compact) return '';
-    if (/^ofloor\d+$/i.test(compact)) return compact;
-    const match = compact.match(/^(.*)s\d+$/i);
-    return match ? match[1] : compact;
+    const baseCode = compact.replace(/b\d+$/i, '');
+    if (!baseCode) return '';
+    if (/^ofloor\d+$/i.test(baseCode)) return baseCode;
+    const match = baseCode.match(/^(.*)s\d+$/i);
+    return match ? match[1] : baseCode;
 }
 
 function browsePreviewMapUrl(shelfCode) {
     const key = browsePreviewMapKey(shelfCode);
     if (!key) return '';
     if (/^(or|omr|ofloor)/i.test(key)) {
-        return `/static/shelves/originals/officemap_${encodeURIComponent(key)}.png`;
+        return `/static/shelves/office/maps/officemap_${encodeURIComponent(key)}.png`;
     }
     if (/^(gr|gmid|gfloor|misc)/i.test(key)) {
-        return `/static/shelves/originals/garagemap_${encodeURIComponent(key)}.png`;
+        return `/static/shelves/garage/maps/garagemap_${encodeURIComponent(key)}.png`;
+    }
+    return '';
+}
+
+function browsePreviewLegacyMapUrl(shelfCode) {
+    const key = browsePreviewMapKey(shelfCode);
+    if (!key) return '';
+    if (/^(or|omr|ofloor)/i.test(key)) {
+        return `/static/shelves/maps/office/officemap_${encodeURIComponent(key)}.png`;
+    }
+    if (/^(gr|gmid|gfloor|misc)/i.test(key)) {
+        return `/static/shelves/maps/garage/garagemap_${encodeURIComponent(key)}.png`;
     }
     return '';
 }
@@ -2085,12 +2098,30 @@ function updateShelfPreview(shelfCode) {
     const normalizedCode = String(shelfCode || '').trim();
     const lowerCode = normalizedCode.toLowerCase();
     const upperCode = normalizedCode.toUpperCase();
-    const shelfDisplayUrl = `/static/shelves/${encodeURIComponent(lowerCode)}.png`;
-    const shelfDisplayUpperUrl = `/static/shelves/${encodeURIComponent(upperCode)}.png`;
-    const shelfFallbackUrl = `/static/shelves/originals/${encodeURIComponent(lowerCode)}.png`;
-    const shelfFallbackUpperUrl = `/static/shelves/originals/${encodeURIComponent(upperCode)}.png`;
-    const mapKey = browsePreviewMapKey(normalizedCode);
-    const mapUrl = browsePreviewMapUrl(normalizedCode);
+    const mapStem = browsePreviewMapKey(normalizedCode);
+    const isGarageShelf = /^(gr|gmid|gfloor|misc)/i.test(mapStem);
+    const isOfficeShelf = /^(or|omr|ofloor)/i.test(mapStem);
+    const shelfBaseUrl = isGarageShelf ? `/shelf-base/${encodeURIComponent(lowerCode)}.png` : '';
+    const shelfBaseUpperUrl = isGarageShelf ? `/shelf-base/${encodeURIComponent(upperCode)}.png` : '';
+    const shelfBaseLegacyUrl = '';
+    const shelfBaseUpperLegacyUrl = '';
+    const shelfOfficeBaseUrl = isOfficeShelf ? `/shelf-base/${encodeURIComponent(lowerCode)}.png` : '';
+    const shelfOfficeBaseUpperUrl = isOfficeShelf ? `/shelf-base/${encodeURIComponent(upperCode)}.png` : '';
+    const shelfOfficeBaseLegacyUrl = '';
+    const shelfOfficeBaseUpperLegacyUrl = '';
+    const shelfDisplayUrl = `/shelf-image/${encodeURIComponent(lowerCode)}.png`;
+    const shelfDisplayUpperUrl = `/shelf-image/${encodeURIComponent(upperCode)}.png`;
+    const shelfOriginalUrl = `/shelf-original/${encodeURIComponent(lowerCode)}.png`;
+    const shelfOriginalUpperUrl = `/shelf-original/${encodeURIComponent(upperCode)}.png`;
+    const mapKey = mapStem;
+    const mapUrlChoices = [browsePreviewMapUrl(normalizedCode), browsePreviewLegacyMapUrl(normalizedCode)]
+        .filter((value, index, list) => value && list.indexOf(value) === index);
+    const mapUrl = mapUrlChoices[0] || '';
+    const primaryShelfCandidates = isOfficeShelf
+        ? [shelfOfficeBaseUrl, shelfOfficeBaseUpperUrl, shelfOfficeBaseLegacyUrl, shelfOfficeBaseUpperLegacyUrl, shelfDisplayUrl, shelfDisplayUpperUrl, shelfOriginalUrl, shelfOriginalUpperUrl]
+        : [shelfBaseUrl, shelfBaseUpperUrl, shelfBaseLegacyUrl, shelfBaseUpperLegacyUrl, shelfDisplayUrl, shelfDisplayUpperUrl, shelfOriginalUrl, shelfOriginalUpperUrl];
+    const shelfUrlChoices = primaryShelfCandidates.filter((value, index, list) => value && list.indexOf(value) === index);
+    const primaryShelfUrl = shelfUrlChoices[0] || '';
 
     if (!normalizedCode) {
         preview.innerHTML = '<span style="color:#999;">Select a shelf to view image</span>';
@@ -2102,7 +2133,7 @@ function updateShelfPreview(shelfCode) {
         <button type="button" class="browse-preview-card" data-preview-index="0" style="border:1px solid #dbe3ef;border-radius:10px;background:#fff;padding:10px;cursor:zoom-in;text-align:left;display:flex;flex-direction:column;gap:8px;">
             <div style="font-size:0.78rem;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;color:#64748b;">Shelf Photo</div>
             <div style="min-height:220px;display:flex;align-items:center;justify-content:center;border:1px solid #e5e7eb;border-radius:8px;background:#fff;overflow:hidden;">
-                <img data-role="browse-shelf-image" src="${shelfDisplayUrl}" alt="${esc(normalizedCode)}" style="display:block;max-width:100%;max-height:320px;object-fit:contain;">
+                <img data-role="browse-shelf-image" src="${primaryShelfUrl}" alt="${esc(normalizedCode)}" style="display:block;max-width:100%;max-height:320px;object-fit:contain;">
             </div>
         </button>
         `
@@ -2128,8 +2159,7 @@ function updateShelfPreview(shelfCode) {
 
     const shelfImg = preview.querySelector('[data-role="browse-shelf-image"]');
     if (shelfImg) {
-        const fallbacks = [shelfDisplayUpperUrl, shelfFallbackUrl, shelfFallbackUpperUrl]
-            .filter((value, index, list) => value && list.indexOf(value) === index);
+        const fallbacks = shelfUrlChoices.slice(1);
         shelfImg.addEventListener('error', function handleShelfError() {
             const nextIndex = parseInt(this.dataset.fallbackIndex || '0', 10);
             if (nextIndex < fallbacks.length) {
@@ -2146,7 +2176,14 @@ function updateShelfPreview(shelfCode) {
 
     const mapImg = preview.querySelector('[data-role="browse-map-image"]');
     if (mapImg) {
+        const mapFallbacks = mapUrlChoices.slice(1);
         mapImg.addEventListener('error', function handleMapError() {
+            const nextIndex = parseInt(this.dataset.fallbackIndex || '0', 10);
+            if (nextIndex < mapFallbacks.length) {
+                this.dataset.fallbackIndex = String(nextIndex + 1);
+                this.src = mapFallbacks[nextIndex];
+                return;
+            }
             const card = this.closest('[data-preview-map]');
             if (card) card.remove();
             const grid = preview.querySelector('.browse-preview-grid');
@@ -2568,7 +2605,7 @@ function showLocPopupFromInvStatus(locCode, locLower) {
         const html = `
             <div style="text-align:center;padding:10px;">
                 <h4 style="margin-bottom:10px;">${locCode}</h4>
-                <img src="/static/shelves/${filename}?t=${Date.now()}"
+                <img src="/shelf-image/${encodeURIComponent(filename.replace(/\.png$/i, ''))}.png?t=${Date.now()}"
                      style="max-width:100%;max-height:60vh;border-radius:10px;"
                      onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22400%22 height=%22300%22><rect fill=%22%23f0f0f0%22 width=%22100%25%22 height=%22100%25%22/><text x=%2250%25%22 y=%2250%25%22 text-anchor=%22middle%22 fill=%22%237f8c8d%22>No Image</text></svg>'">
                 <br>
@@ -2614,7 +2651,7 @@ showNotRemoved = async function(orderId) {
 };
 
 </script>
-<script src="/static/location-preview.js?v=20260312e"></script>
+<script src="/static/location-preview.js?v=20260313b"></script>
 <script src="/static/i18n.js"></script>
 </body>
 </html>

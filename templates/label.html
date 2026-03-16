@@ -506,6 +506,7 @@
       overflow:auto;
       max-height: 65vh;
       overscroll-behavior: contain;
+      isolation: isolate;
     }
     table{
       width: 100%;
@@ -513,15 +514,13 @@
       border-spacing: 0;
       font-size: 0.9rem;
     }
-    thead{
-      position: sticky;
-      top: 0;
-      z-index: 4;
+    .tableWrap thead{
+      position: static;
     }
-    thead th{
+    .tableWrap thead th{
       position: sticky;
       top: 0;
-      z-index: 5;
+      z-index: 3;
       background: var(--lm-card);
       border-bottom: 2px solid var(--lm-border);
       box-shadow: 0 1px 0 rgba(0,0,0,0.04);
@@ -534,9 +533,13 @@
       color: var(--lm-muted);
       white-space: nowrap;
     }
-    html.ss-theme-night thead th{
+    html.ss-theme-night .tableWrap thead th{
       background: var(--lm-card);
       border-bottom-color: rgba(255,255,255,0.08);
+    }
+    html.ss-has-top-banner .tableWrap thead,
+    html.ss-has-top-banner .tableWrap thead th{
+      top: 0 !important;
     }
     tbody td{
       border-bottom: 1px solid rgba(0,0,0,0.05);
@@ -739,7 +742,12 @@
       transition: transform .12s, filter .12s;
       white-space: nowrap;
     }
-    .fabBtn:hover{ transform: translateY(-1px); filter: brightness(1.05); }
+    .fabBtn:hover:not(:disabled){ transform: translateY(-1px); filter: brightness(1.05); }
+    .fabBtn:disabled{
+      cursor: not-allowed;
+      opacity: 0.5;
+      filter: none;
+    }
     .fabBtnBuy{
       background: linear-gradient(135deg, #0ea5e9, #06b6d4);
       color: #fff;
@@ -1141,6 +1149,32 @@
       return `${store}:${id}`;
     }
 
+    function capabilityForStore(rawStore){
+      const store = normalizeStore(rawStore);
+      if(store === 'ebay') return state.status.ebay || { connected: false, supported: false, reason: 'eBay status unavailable' };
+      if(store === 'amazon') return state.status.amazon || { connected: false, supported: false, reason: 'Amazon status unavailable' };
+      return { connected: false, supported: false, reason: 'Not supported' };
+    }
+
+    function canBuyOrder(order){
+      const cap = capabilityForStore(order && order.store);
+      return !!(cap && cap.connected && cap.supported);
+    }
+
+    function buyReasonForOrder(order){
+      if(canBuyOrder(order)) return 'Buy shipping label';
+      const cap = capabilityForStore(order && order.store);
+      return cap.reason || (cap.connected ? 'Not supported' : 'Not connected');
+    }
+
+    function canPrintOrder(order){
+      return !!(order && order.label_ready);
+    }
+
+    function printReasonForOrder(order){
+      return canPrintOrder(order) ? 'Open purchased label' : 'Buy a label first';
+    }
+
     function escapeHtml(s){
       return String(s ?? '')
         .replaceAll('&', '&amp;')
@@ -1298,6 +1332,27 @@
       if(!fab) return;
       fab.classList.toggle('visible', count > 0);
       $('fabCount').textContent = String(count);
+      updateBulkButtons();
+    }
+
+    function updateBulkButtons(){
+      const buyBtn = $('buySelectedBtn');
+      const printBtn = $('printSelectedBtn');
+      if(!buyBtn || !printBtn) return;
+
+      const selectedOrders = Array.from(state.selected).map(getOrderByKey).filter(Boolean);
+      const buyableCount = selectedOrders.filter(canBuyOrder).length;
+      const printableCount = selectedOrders.filter(canPrintOrder).length;
+
+      buyBtn.disabled = buyableCount === 0;
+      printBtn.disabled = printableCount === 0;
+
+      buyBtn.title = buyableCount
+        ? `Buy labels for ${buyableCount} selected order(s)`
+        : 'No selected orders can buy labels right now';
+      printBtn.title = printableCount
+        ? `Open labels for ${printableCount} selected order(s)`
+        : 'No selected orders have purchased labels yet';
     }
 
     function updateKpis(shown){
@@ -1342,9 +1397,10 @@
         const k = keyFor(it);
         const selected = state.selected.has(k);
         const store = normalizeStore(it.store);
-        const cap = store === 'ebay' ? state.status.ebay : (store === 'amazon' ? state.status.amazon : null);
-        const canAction = cap ? (cap.connected && cap.supported) : false;
-        const reason = cap ? (cap.reason || (cap.connected ? 'Not supported' : 'Not connected')) : 'Not supported';
+        const canBuy = canBuyOrder(it);
+        const canPrint = canPrintOrder(it);
+        const buyReason = buyReasonForOrder(it);
+        const printReason = printReasonForOrder(it);
 
         const shipTo = [
           it.shipping_name,
@@ -1374,8 +1430,8 @@
           <td><span class="statusBadge ${st.cls}">${st.icon} ${escapeHtml(st.text)}</span></td>
           <td>
             <div style="display:flex;gap:4px;">
-              <button class="rowBtn rowBtnBuy btnBuy" data-key="${k}" ${canAction ? '' : 'disabled'} title="${escapeHtml(reason)}">Buy</button>
-              <button class="rowBtn btnPrint" data-key="${k}" ${canAction ? '' : 'disabled'} title="${escapeHtml(reason)}">Print</button>
+              <button class="rowBtn rowBtnBuy btnBuy" data-key="${k}" ${canBuy ? '' : 'disabled'} title="${escapeHtml(buyReason)}">Buy</button>
+              <button class="rowBtn btnPrint" data-key="${k}" ${canPrint ? '' : 'disabled'} title="${escapeHtml(printReason)}">Print</button>
             </div>
           </td>
         `;
@@ -1410,6 +1466,7 @@
           amazon: j.amazon || state.status.amazon
         };
         updateStatusPills();
+        if(state.orders.length) render();
       }catch(e){
         log(`Status check failed: ${e.message}`);
       }
@@ -1588,14 +1645,30 @@
       }
     }
 
-    async function bulkAction(fn){
+    async function bulkAction(kind, fn){
       if(state.selected.size === 0){
         log('Select at least one order.');
         return;
       }
-      for(const key of state.selected){
-        const order = getOrderByKey(key);
-        if(!order) continue;
+      const selectedOrders = Array.from(state.selected).map(getOrderByKey).filter(Boolean);
+      const actionableOrders = selectedOrders.filter(order => kind === 'print' ? canPrintOrder(order) : canBuyOrder(order));
+      const skipped = selectedOrders.length - actionableOrders.length;
+
+      if(!actionableOrders.length){
+        log(kind === 'print' ? 'No selected orders have a purchased label yet.' : 'No selected orders are ready for label purchase.');
+        updateBulkButtons();
+        return;
+      }
+
+      if(skipped > 0){
+        log(kind === 'print'
+          ? `Skipped ${skipped} selected order(s) with no purchased label.`
+          : `Skipped ${skipped} selected order(s) that are not ready for label purchase.`
+        );
+      }
+
+      for(const order of actionableOrders){
+        const key = keyFor(order);
         await fn({target: {getAttribute: () => key}});
       }
     }
@@ -1645,8 +1718,8 @@
       }
       render();
     });
-    $('buySelectedBtn').addEventListener('click', () => bulkAction(onBuyLabel));
-    $('printSelectedBtn').addEventListener('click', () => bulkAction(onPrintLabel));
+    $('buySelectedBtn').addEventListener('click', () => bulkAction('buy', onBuyLabel));
+    $('printSelectedBtn').addEventListener('click', () => bulkAction('print', onPrintLabel));
     $('clearLogBtn').addEventListener('click', () => { $('lmLog').textContent = ''; });
     $('fabClearBtn').addEventListener('click', () => { state.selected.clear(); render(); });
     document.querySelectorAll('.spill').forEach(b => b.addEventListener('click', () => setStoreFilter(b.getAttribute('data-store'))));

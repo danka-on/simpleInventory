@@ -27,15 +27,16 @@ CLIENT_ID = os.getenv("EBAY_CLIENT_ID")
 CLIENT_SECRET = os.getenv("EBAY_CLIENT_SECRET")
 RUNAME = os.getenv("EBAY_RUNAME")
 
-# Define the base scopes you want - add/remove as needed
+# User OAuth scopes for authorization-code flow.
+# eBay support confirmed the generic api_scope should be omitted once Logistics
+# access is assigned to the application.
 BASE_SCOPES = [
-    "https://api.ebay.com/oauth/api_scope",                        # Basic access
-    "https://api.ebay.com/oauth/api_scope/sell.inventory",         # Inventory/listings management
-    "https://api.ebay.com/oauth/api_scope/sell.fulfillment",       # Orders/fulfillment
-    "https://api.ebay.com/oauth/api_scope/sell.finances",          # Payouts & financial data
-    "https://api.ebay.com/oauth/api_scope/sell.account",           # Business policies (read/write)
-    "https://api.ebay.com/oauth/api_scope/sell.marketing",         # Promoted listings
-    "https://api.ebay.com/oauth/api_scope/sell.analytics.readonly", # Seller analytics
+    "https://api.ebay.com/oauth/api_scope/sell.inventory",
+    "https://api.ebay.com/oauth/api_scope/sell.fulfillment",
+    "https://api.ebay.com/oauth/api_scope/sell.finances",
+    "https://api.ebay.com/oauth/api_scope/sell.account",
+    "https://api.ebay.com/oauth/api_scope/sell.marketing",
+    "https://api.ebay.com/oauth/api_scope/sell.analytics.readonly",
 ]
 LOGISTICS_SCOPE = "https://api.ebay.com/oauth/api_scope/sell.logistics"
 
