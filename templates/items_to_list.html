@@ -129,6 +129,122 @@
     .small-muted{color:#777;font-size:0.9rem}
     .modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;align-items:center;justify-content:center}
     .modal .card{background:#fff;padding:18px;border-radius:8px;max-width:720px;max-height:80vh;overflow:auto}
+    .note-icon-btn{
+      background:transparent;
+      border:none;
+      cursor:pointer;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      gap:4px;
+      padding:4px 6px;
+      border-radius:8px;
+      font-size:1.05rem;
+    }
+    .note-icon-btn:hover{background:rgba(15,23,42,0.06)}
+    .note-audio-flag{font-size:0.88rem;line-height:1}
+    .media-trigger{
+      background:#eff6ff;
+      color:#1d4ed8;
+      border:1px solid #bfdbfe;
+      border-radius:999px;
+      padding:4px 8px;
+      cursor:pointer;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      gap:8px;
+      font-size:0.88rem;
+      font-weight:700;
+      font-family:inherit;
+    }
+    .media-trigger:hover{background:#dbeafe}
+    .media-trigger-part{display:inline-flex;align-items:center;gap:4px}
+    .media-trigger-part.video{color:#b91c1c}
+    .notes-section{margin-bottom:14px}
+    .notes-section:last-child{margin-bottom:0}
+    .notes-section-title{font-size:0.92rem;font-weight:700;margin-bottom:8px;color:#475569;text-transform:uppercase;letter-spacing:0.04em}
+    .voice-note-card{
+      padding:10px;
+      margin-bottom:8px;
+      background:#f8fafc;
+      border-radius:8px;
+      border:1px solid #e2e8f0;
+    }
+    .voice-note-card:last-child{margin-bottom:0}
+    .voice-note-card audio{width:100%;margin-top:8px}
+    .mixed-media-title{font-weight:700}
+    .mixed-media-stage{
+      position:relative;
+      text-align:center;
+      background:#f6f6f6;
+      padding:12px;
+      border-radius:8px;
+      min-height:220px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      flex-direction:column;
+      gap:10px;
+    }
+    .mixed-media-stage img,
+    .mixed-media-stage video{
+      max-width:100%;
+      max-height:60vh;
+      border-radius:8px;
+    }
+    .mixed-media-grid{
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+      justify-content:center;
+      margin-top:8px;
+    }
+    .mixed-media-thumb{
+      position:relative;
+      width:120px;
+      height:120px;
+      padding:0;
+      border-radius:10px;
+      overflow:hidden;
+      cursor:pointer;
+      border:1px solid #dbe3ef;
+      background:#f8fafc;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+    }
+    .text-note-card{
+      padding:10px;
+      margin-bottom:8px;
+      background:#f9f9f9;
+      border-radius:6px;
+      border-left:3px solid #00b894;
+    }
+    .text-note-card:last-child{margin-bottom:0}
+    .mixed-media-thumb img,
+    .mixed-media-thumb video{
+      width:100%;
+      height:100%;
+      object-fit:cover;
+      display:block;
+    }
+    .mixed-media-badge{
+      position:absolute;
+      top:8px;
+      left:8px;
+      background:rgba(15,23,42,0.8);
+      color:#fff;
+      padding:3px 7px;
+      border-radius:999px;
+      font-size:0.72rem;
+      font-weight:700;
+      letter-spacing:0.03em;
+    }
+    .mixed-media-thumb.active{
+      outline:3px solid #2563eb;
+      outline-offset:2px;
+    }
     .btn-sm{padding:6px 10px;font-size:0.9rem}
     .btn-copy{background:rgba(32,201,151,0.3) !important;color:#00875a !important;border:1px solid rgba(32,201,151,0.5) !important}
     .btn-copied{background:rgba(46,204,113,0.85) !important;color:#fff !important;font-weight:600 !important}
@@ -170,6 +286,16 @@
     html.ss-theme-night .status-box { background: #475569; }
     html.ss-theme-night .small-muted { color: var(--muted, #94a3b8); }
     html.ss-theme-night .modal .card { background: var(--card, #1e293b); color: var(--ink, #e2e8f0); border: 1px solid rgba(255,255,255,0.1); }
+    html.ss-theme-night .note-icon-btn:hover{background:rgba(255,255,255,0.08)}
+    html.ss-theme-night .media-trigger{background:rgba(29,78,216,0.24);border-color:rgba(96,165,250,0.4);color:#bfdbfe}
+    html.ss-theme-night .media-trigger:hover{background:rgba(37,99,235,0.34)}
+    html.ss-theme-night .media-trigger-part.video{color:#fca5a5}
+    html.ss-theme-night .notes-section-title{color:#cbd5e1}
+    html.ss-theme-night .voice-note-card{background:rgba(15,23,42,0.45);border-color:rgba(148,163,184,0.25)}
+    html.ss-theme-night .text-note-card{background:rgba(15,23,42,0.45);border-left-color:#34d399}
+    html.ss-theme-night .mixed-media-stage{background:rgba(15,23,42,0.55)}
+    html.ss-theme-night .mixed-media-thumb{background:rgba(15,23,42,0.45);border-color:rgba(148,163,184,0.3)}
+    html.ss-theme-night .mixed-media-badge{background:rgba(2,6,23,0.88)}
     html.ss-theme-night .warehouse-loc-btn{background:rgba(30,64,175,0.25);border-color:#3b82f6;color:#bfdbfe}
     html.ss-theme-night .warehouse-loc-btn:hover{background:rgba(37,99,235,0.35)}
     html.ss-theme-night .warehouse-loc-btn.active{background:#3b82f6;border-color:#60a5fa;color:#0f172a}
@@ -540,7 +666,7 @@
   <!-- Notes modal: shows all notes for an item -->
   <div id="notesModal" class="modal"><div class="card" style="max-width:600px; width:95%;">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-      <h3 style="margin:0">📝 Notes</h3>
+      <h3 style="margin:0">📝 Notes & Voice</h3>
       <button id="closeNotes" class="btn-sm">Close</button>
     </div>
     <div id="notesModalContent" style="max-height:400px;overflow-y:auto"></div>
@@ -567,15 +693,15 @@
   <!-- Pics preview modal: shows thumbnails and an edit button linking to diagnostic edit -->
   <div id="picsModal" class="modal"><div class="card" style="max-width:800px; width:95%;">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-      <div style="font-weight:700">Photos</div>
+      <div id="picsModalTitle" class="mixed-media-title">Media</div>
       <div><button id="closePics" class="btn-sm">Close</button></div>
     </div>
     <div id="picsPreviewArea" style="display:flex;gap:12px;flex-direction:column;align-items:stretch;">
-      <div id="picsLarge" style="text-align:center;background:#f6f6f6;padding:12px;border-radius:8px;min-height:220px;display:flex;align-items:center;justify-content:center;"></div>
-      <div id="picsGrid" style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:8px"></div>
+      <div id="picsLarge" class="mixed-media-stage"></div>
+      <div id="picsGrid" class="mixed-media-grid"></div>
       <div style="display:flex;justify-content:flex-end;margin-top:10px">
         <a id="picsEditLink" class="btn btn-sm" href="#" style="background:#e74c3c;color:#fff;margin-right:8px">Edit Diagnostic</a>
-        <a id="picsDownloadAll" class="btn btn-sm" href="#" style="background:#3498db;color:#fff">Download All</a>
+        <a id="picsDownloadAll" class="btn btn-sm" href="#" style="background:#3498db;color:#fff">Download Photos</a>
       </div>
     </div>
   </div></div>
@@ -584,6 +710,39 @@
 <script>
 function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function missingThumb(width=48,height=48,text='No Img'){ return 'data:image/svg+xml;utf8,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="'+width+'" height="'+height+'"><rect width="100%" height="100%" fill="#f8f8f8"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#b0b0b0" font-size="10">'+text+'</text></svg>'); }
+function resolveStaticAssetUrl(rawPath){
+  const raw = String(rawPath || '').trim();
+  if(!raw) return '';
+  if(/^https?:\/\//i.test(raw) || raw.startsWith('/')) return raw;
+  if(raw.startsWith('static/')) return '/' + raw;
+  return '/static/' + raw.replace(/^\/+/, '');
+}
+function formatEasternDateTime(value){
+  const raw = String(value || '').trim();
+  if(!raw) return '';
+  const dt = new Date(raw);
+  if(Number.isNaN(dt.getTime())) return raw;
+  return dt.toLocaleString('en-US', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true
+  });
+}
+function renderLargeMediaHtml(item){
+  if(!item) return '<div class="small-muted">No media selected</div>';
+  const src = esc(item.src || '');
+  const label = item.media_type === 'video' ? 'VIDEO' : 'PHOTO';
+  const metaBits = [label];
+  if(item.created_at) metaBits.push(formatEasternDateTime(item.created_at));
+  if(item.media_type === 'video'){
+    return `<div class="mixed-media-badge">${label}</div><video src="${src}" controls playsinline preload="metadata"></video><div class="small-muted">${esc(metaBits.join(' | '))}</div>`;
+  }
+  return `<div class="mixed-media-badge">${label}</div><img src="${src}" alt="${label}"><div class="small-muted">${esc(metaBits.join(' | '))}</div>`;
+}
 
 const GEAR_SETTINGS_KEY = 'items_to_list_gear_settings_v1';
 const FILTER_UI_SETTINGS_KEY = 'items_to_list_filter_ui_v1';
@@ -1616,7 +1775,7 @@ function onOpenAutoListings(e){
 function render(results){
   let html = '<table><thead><tr>';
   if (selectMode) html += '<th>Select</th>';
-  html += `<th>Info</th><th>Status</th><th>Notes</th><th>Foto</th><th>Defect</th><th class="th-sortable" data-sort-key="quantity" title="Sort by quantity" role="button" tabindex="0">PREP <span class="sort-ind">${_sortIndicator('quantity')}</span></th><th class="th-sortable" data-sort-key="warehouse_available" title="Sort by warehouse quantity" role="button" tabindex="0">Warehouse <span class="sort-ind">${_sortIndicator('warehouse_available')}</span></th><th>Title</th><th>UPC</th><th>Marketplaces</th><th>Last Edited</th><th>+ Listing Agent</th></tr></thead><tbody>`;
+  html += `<th>Info</th><th>Status</th><th>Notes</th><th>Media</th><th>Defect</th><th class="th-sortable" data-sort-key="quantity" title="Sort by quantity" role="button" tabindex="0">PREP <span class="sort-ind">${_sortIndicator('quantity')}</span></th><th class="th-sortable" data-sort-key="warehouse_available" title="Sort by warehouse quantity" role="button" tabindex="0">Warehouse <span class="sort-ind">${_sortIndicator('warehouse_available')}</span></th><th>Title</th><th>UPC</th><th>Marketplaces</th><th>Last Edited</th><th>+ Listing Agent</th></tr></thead><tbody>`;
   let rowIndex = 0;
   const viewResults = _sortedRenderResults(results);
   for (const r of viewResults) {
@@ -1688,12 +1847,20 @@ function render(results){
     // Diagnostic link moved into its own Info column (first column)
     const diagLink = `<button class="btn btn-sm diag-link" style="background:transparent;border:1px solid #0066cc;color:#0066cc;border-radius:6px;padding:6px 10px;cursor:pointer" data-upc="${apiUpc}" data-lot="${esc(r.lot_number||'')}" data-status="${esc(status)}">Open</button>`;
     const photoCount = Number(r.photo_count || 0);
+    const videoCount = Number(r.video_count || 0);
     const hasPhotos = photoCount > 0;
-    const picsTitle = hasPhotos ? `${photoCount} photo${photoCount===1?'':'s'}` : '';
-    const picsStyle = hasPhotos
-      ? 'color:#2196F3;font-weight:600;cursor:pointer;font-size:0.9rem'
-      : 'display:none;color:#2196F3;font-weight:600;cursor:pointer;font-size:0.9rem';
-    const picsBtn = `<span class="pics-count" data-upc="${apiUpc}" data-lot="${esc(r.lot_number||'')}" data-status="${esc(status)}" title="${esc(picsTitle)}" style="${picsStyle}">${hasPhotos ? '📷' : ''}</span>`;
+    const hasVideos = videoCount > 0;
+    const hasAnyMedia = hasPhotos || hasVideos;
+    const mediaTitleParts = [];
+    if(hasPhotos) mediaTitleParts.push(`${photoCount} photo${photoCount===1?'':'s'}`);
+    if(hasVideos) mediaTitleParts.push(`${videoCount} video${videoCount===1?'':'s'}`);
+    const picsTitle = mediaTitleParts.join(' | ');
+    const picsBtn = hasAnyMedia
+      ? `<button type="button" class="pics-count media-trigger" data-upc="${apiUpc}" data-lot="${esc(r.lot_number||'')}" data-status="${esc(status)}" title="${esc(picsTitle || 'Open media')}">`+
+          `${hasPhotos ? `<span class="media-trigger-part"><span>📷</span><span>${photoCount}</span></span>` : ''}`+
+          `${hasVideos ? `<span class="media-trigger-part video"><span>🎥</span><span>${videoCount}</span></span>` : ''}`+
+        `</button>`
+      : '';
     const whAvail = Number(r.warehouse_available || 0);
     const qtyRaw = Number(r.quantity);
     const qty = Number.isFinite(qtyRaw) ? qtyRaw : 0;
@@ -1731,9 +1898,21 @@ function render(results){
     const defectDisplay = defectTextRaw
       ? defectTextRaw.replace(/\s*\|\s*/g, ', ')
       : (Number(r.set_note_flag) === 1 ? 'SET' : '');
-    // Notes icon - show 📝 if note exists and make it clickable
-    const hasNote = r.note && String(r.note).trim().length > 0;
-    const noteCell = hasNote ? `<td style="text-align:center;font-size:1.2rem"><span class="note-icon" data-upc="${apiUpc}" data-status="${esc(status)}" style="cursor:pointer" title="Click to view notes">📝</span></td>` : `<td style="text-align:center"></td>`;
+    const audioCount = Number(r.audio_count || 0);
+    const hasTextNote = r.note && String(r.note).trim().length > 0;
+    const hasVoiceNote = audioCount > 0;
+    const hasNote = hasTextNote || hasVoiceNote;
+    const noteTitleParts = [];
+    if(hasTextNote) noteTitleParts.push('Text notes');
+    if(hasVoiceNote) noteTitleParts.push(`${audioCount} voice note${audioCount===1?'':'s'}`);
+    const noteCell = hasNote
+      ? `<td style="text-align:center;font-size:1.05rem">`+
+          `<button type="button" class="note-icon note-icon-btn" data-upc="${apiUpc}" data-status="${esc(status)}" title="${esc(noteTitleParts.join(' | ') || 'Open notes')}">`+
+            `<span>📝</span>`+
+            `${hasVoiceNote ? '<span class="note-audio-flag">🔊</span>' : ''}`+
+          `</button>`+
+        `</td>`
+      : `<td style="text-align:center"></td>`;
     html += `<tr>`;
     if (selectMode) {
       // Allow selection of all items (base barcodes will be reset instead of deleted)
@@ -1744,7 +1923,7 @@ function render(results){
             `<div>${pill}</div>`+
           `</div></td>`+
             noteCell+
-            `<td style="text-align:center">${picsBtn}</td>`+
+            `<td style="text-align:center">${picsBtn || ''}</td>`+
             `<td>${esc(defectDisplay)}</td>`+
              qtyCell+
              whCell+
@@ -2016,36 +2195,106 @@ async function onOpenPics(e){
   const large = document.getElementById('picsLarge');
   const editLink = document.getElementById('picsEditLink');
   const dlAll = document.getElementById('picsDownloadAll');
+  const titleEl = document.getElementById('picsModalTitle');
+  if(titleEl) titleEl.textContent = 'Media';
   area.innerHTML = '<div class="small-muted">Loading...</div>';
-  large.innerHTML = '';
+  large.innerHTML = '<div class="small-muted">Loading...</div>';
   const ret = buildCurrentItemsToListUrl();
   let diagUrl = '/item-prep/diagnostic?upc='+encodeURIComponent(upc)+'&from=items&return='+encodeURIComponent(ret);
   if(lot) diagUrl += '&lot='+encodeURIComponent(lot);
   if(rowStatus) diagUrl += '&row_status='+encodeURIComponent(rowStatus);
   editLink.href = diagUrl;
   dlAll.href = '/api/items_prep/diagnostic/'+encodeURIComponent(upc)+'/photos.zip' + (rowStatus ? ('?row_status=' + encodeURIComponent(rowStatus)) : '');
+  dlAll.style.display = 'none';
   try{
     const photoParams = new URLSearchParams();
     photoParams.set('exact_scope', '1');
     if(lot) photoParams.set('lot', lot);
     if(rowStatus) photoParams.set('row_status', rowStatus);
-    const res = await fetch('/api/items_prep/diagnostic/'+encodeURIComponent(upc)+'?'+photoParams.toString());
-    if(!res.ok){ area.innerHTML = '<div class="small-muted">Failed to load</div>'; modal.style.display='flex'; return; }
-    const j = await res.json();
-    const imgs = j.images || [];
-    if(imgs.length===0){ area.innerHTML = '<div class="small-muted">No photos</div>'; modal.style.display='flex'; return; }
+    const mediaParams = new URLSearchParams();
+    if(rowStatus) mediaParams.set('row_status', rowStatus);
+    mediaParams.set('media_type', 'video');
+
+    const [photoRes, videoRes] = await Promise.all([
+      fetch('/api/items_prep/diagnostic/'+encodeURIComponent(upc)+'?'+photoParams.toString()),
+      fetch('/api/items_prep/media/'+encodeURIComponent(upc)+'?'+mediaParams.toString())
+    ]);
+
+    const photoJson = photoRes.ok ? await photoRes.json() : null;
+    const videoJson = videoRes.ok ? await videoRes.json() : null;
+    const imgs = Array.isArray(photoJson && photoJson.images) ? photoJson.images : [];
+    const videos = Array.isArray(videoJson && videoJson.items) ? videoJson.items : [];
+    const mediaItems = [];
+
+    imgs.forEach((im, idx) => {
+      const src = resolveStaticAssetUrl(im && im.image_path);
+      if(!src) return;
+      mediaItems.push({
+        id: 'photo-' + (im && im.id ? im.id : idx),
+        media_type: 'photo',
+        src,
+        created_at: im && im.created_at ? im.created_at : ''
+      });
+    });
+    videos.forEach((item, idx) => {
+      const src = resolveStaticAssetUrl(item && item.file_path);
+      if(!src) return;
+      mediaItems.push({
+        id: 'video-' + (item && item.id ? item.id : idx),
+        media_type: 'video',
+        src,
+        created_at: item && item.created_at ? item.created_at : ''
+      });
+    });
+
+    if(titleEl){
+      const titleBits = [];
+      if(imgs.length) titleBits.push(`${imgs.length} photo${imgs.length===1?'':'s'}`);
+      if(videos.length) titleBits.push(`${videos.length} video${videos.length===1?'':'s'}`);
+      titleEl.textContent = titleBits.length ? `Media • ${titleBits.join(' • ')}` : 'Media';
+    }
+    if(imgs.length){
+      dlAll.style.display = 'inline-flex';
+    }
+    if(mediaItems.length===0){
+      area.innerHTML = '<div class="small-muted">No photos or videos</div>';
+      large.innerHTML = '<div class="small-muted">No media found for this item.</div>';
+      modal.style.display='flex';
+      return;
+    }
     area.innerHTML = '';
-    imgs.forEach((im, idx)=>{
-      const src = (im.image_path && im.image_path.indexOf('static/')===-1) ? ('/static/'+im.image_path) : im.image_path;
-      const wrap = document.createElement('div'); wrap.style.display='flex'; wrap.style.flexDirection='column'; wrap.style.alignItems='center';
-      const t = document.createElement('img'); t.src = src; t.style.width='120px'; t.style.height='120px'; t.style.objectFit='cover'; t.style.borderRadius='8px'; t.style.cursor='pointer';
-      t.addEventListener('click', ()=>{ large.innerHTML = `<img src="${src}" style="max-width:100%;max-height:60vh;border-radius:8px">`; });
-      wrap.appendChild(t);
+    let activeThumb = null;
+    const setActiveMedia = (item, thumbEl) => {
+      large.innerHTML = renderLargeMediaHtml(item);
+      if(activeThumb) activeThumb.classList.remove('active');
+      if(thumbEl){
+        thumbEl.classList.add('active');
+        activeThumb = thumbEl;
+      }
+    };
+    mediaItems.forEach((item, idx)=>{
+      const wrap = document.createElement('button');
+      wrap.type = 'button';
+      wrap.className = 'mixed-media-thumb';
+      wrap.title = item.media_type === 'video' ? 'Open video' : 'Open photo';
+      if(item.media_type === 'video'){
+        wrap.innerHTML = `<video src="${esc(item.src)}" muted playsinline preload="metadata"></video><div class="mixed-media-badge">VIDEO</div>`;
+      } else {
+        wrap.innerHTML = `<img src="${esc(item.src)}" alt="Photo"><div class="mixed-media-badge">PHOTO</div>`;
+      }
+      wrap.addEventListener('click', ()=> setActiveMedia(item, wrap));
       area.appendChild(wrap);
-      if(idx===0){ large.innerHTML = `<img src="${src}" style="max-width:100%;max-height:60vh;border-radius:8px">`; }
+      if(idx===0){
+        setActiveMedia(item, wrap);
+      }
     });
     modal.style.display = 'flex';
-  }catch(e){ area.innerHTML = '<div class="small-muted">Error loading images</div>'; modal.style.display='flex'; }
+  }catch(e){
+    console.error('Error loading media:', e);
+    area.innerHTML = '<div class="small-muted">Error loading media</div>';
+    large.innerHTML = '<div class="small-muted">Error loading media</div>';
+    modal.style.display='flex';
+  }
 }
 
 async function onOpenNotes(e){
@@ -2060,28 +2309,59 @@ async function onOpenNotes(e){
   try{
     const params = new URLSearchParams();
     if(rowStatus) params.set('row_status', rowStatus);
-    const qs = params.toString();
-    const res = await fetch('/api/items_prep/notes/'+encodeURIComponent(upc)+(qs ? ('?'+qs) : ''));
-    if(!res.ok){ 
-      content.innerHTML = '<div class="small-muted">Failed to load notes</div>'; 
-      return; 
+    const notesQs = params.toString();
+    const audioParams = new URLSearchParams(params.toString());
+    audioParams.set('media_type', 'audio');
+    const [notesRes, audioRes] = await Promise.all([
+      fetch('/api/items_prep/notes/'+encodeURIComponent(upc)+(notesQs ? ('?'+notesQs) : '')),
+      fetch('/api/items_prep/media/'+encodeURIComponent(upc)+'?'+audioParams.toString())
+    ]);
+    const notesJson = notesRes.ok ? await notesRes.json() : null;
+    const audioJson = audioRes.ok ? await audioRes.json() : null;
+    const notes = Array.isArray(notesJson && notesJson.notes) ? notesJson.notes : [];
+    const audioItems = Array.isArray(audioJson && audioJson.items) ? audioJson.items : [];
+
+    const sections = [];
+    if(audioItems.length){
+      sections.push(
+        `<div class="notes-section">`+
+          `<div class="notes-section-title">Voice Note${audioItems.length===1?'':'s'}</div>`+
+          audioItems.map((item, idx)=>{
+            const src = resolveStaticAssetUrl(item && item.file_path);
+            const date = formatEasternDateTime(item && item.created_at);
+            return `<div class="voice-note-card">`+
+              `<div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap">`+
+                `<strong>Voice note ${idx + 1}</strong>`+
+                `<span class="small-muted">${esc(date)}</span>`+
+              `</div>`+
+              `<audio controls preload="metadata" src="${esc(src)}"></audio>`+
+            `</div>`;
+          }).join('')+
+        `</div>`
+      );
     }
-    const j = await res.json();
-    const notes = j.notes || [];
-    if(notes.length === 0){
-      content.innerHTML = '<div class="small-muted">No notes found.</div>';
-    } else {
-      content.innerHTML = notes.map(n=>{
-        const date = new Date(n.created_at).toLocaleString('en-US', {timeZone:'America/New_York', year:'numeric', month:'2-digit', day:'2-digit', hour:'numeric', minute:'2-digit', hour12:true});
-        return `<div style="padding:10px;margin-bottom:8px;background:#f9f9f9;border-radius:6px;border-left:3px solid #00b894">
-          <div style="font-size:0.9rem;color:#666;margin-bottom:4px">${date}</div>
-          <div>${esc(n.note)}</div>
-        </div>`;
-      }).join('');
+    if(notes.length){
+      sections.push(
+        `<div class="notes-section">`+
+          `<div class="notes-section-title">Text Notes</div>`+
+          notes.map(n=>{
+            const date = formatEasternDateTime(n && n.created_at);
+            return `<div class="text-note-card">`+
+              `<div class="small-muted" style="margin-bottom:4px">${esc(date)}</div>`+
+              `<div>${esc(n && n.note)}</div>`+
+            `</div>`;
+          }).join('')+
+        `</div>`
+      );
     }
+    if(sections.length === 0){
+      content.innerHTML = '<div class="small-muted">No notes or voice note found.</div>';
+      return;
+    }
+    content.innerHTML = sections.join('');
   }catch(err){
     console.error('Error loading notes:', err);
-    content.innerHTML = '<div class="small-muted">Error loading notes</div>';
+    content.innerHTML = '<div class="small-muted">Error loading notes or voice note</div>';
   }
 }
 

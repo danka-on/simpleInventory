@@ -50,6 +50,106 @@
             background: #2ecc71 !important;
             color: #fff !important;
         }
+        .barcode-editor {
+            display: none;
+            margin: 20px auto 28px;
+            padding: 16px;
+            border: 1px solid #d7e1ea;
+            border-radius: 12px;
+            background: #f8fbfd;
+            box-shadow: 0 6px 18px rgba(15, 23, 42, 0.06);
+            text-align: left;
+            max-width: 460px;
+        }
+        .barcode-editor-title {
+            font-size: 1.05em;
+            font-weight: 800;
+            color: #1f2937;
+            margin-bottom: 12px;
+        }
+        .barcode-entry-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            background: #2ecc71;
+            color: #fff;
+            border-radius: 10px;
+            padding: 12px 14px;
+            margin-bottom: 10px;
+        }
+        .barcode-entry-main {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            min-width: 0;
+            flex: 1;
+        }
+        .barcode-entry-code {
+            font-family: monospace;
+            font-size: 1.05em;
+            font-weight: 700;
+            word-break: break-all;
+        }
+        .barcode-entry-meta {
+            font-size: 0.82em;
+            font-weight: 600;
+            opacity: 0.96;
+        }
+        .barcode-entry-actions {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-shrink: 0;
+        }
+        .suffix-pill {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(255,255,255,0.18);
+            border-radius: 999px;
+            padding: 6px 10px;
+        }
+        .suffix-pill button,
+        .barcode-remove-btn {
+            border: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .suffix-pill button {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.26);
+            color: #fff;
+            font-size: 1.05em;
+            font-weight: 900;
+            margin: 0;
+            padding: 0;
+        }
+        .suffix-pill button:disabled {
+            opacity: 0.45;
+            cursor: default;
+        }
+        .suffix-pill span {
+            min-width: 82px;
+            text-align: center;
+            font-size: 0.78em;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+        }
+        .barcode-remove-btn {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: rgba(231, 76, 60, 0.9);
+            color: #fff;
+            font-size: 0.95em;
+            padding: 0;
+        }
         </style>
 </head>
 <body>
@@ -64,6 +164,10 @@
         <div id="barcode-check" class="checkitem">
             <span id="barcode-status">Loading...</span>
         </div>
+    </div>
+    <div id="barcodeEditorCard" class="barcode-editor">
+        <div class="barcode-editor-title">Barcodes Ready To Add</div>
+        <div id="barcodeEditorList"></div>
     </div>
     <form id="addItemForm" action="/additemtrue" method="POST">
         <!-- Hidden fields to pass barcode, position, and pictureposition from sessionStorage -->
@@ -91,24 +195,94 @@
             </div>
         </div>
     </form>
+    <script src="/static/barcode-entry-state.js"></script>
     <script>
-    // Populate hidden form fields from sessionStorage on page load
-    document.addEventListener('DOMContentLoaded', function() {
-        const barcode = sessionStorage.getItem('barcode') || '';
+    const barcodeEntryState = window.BarcodeEntryState;
+
+    function formatUpcDisplay(code) {
+        const s = String(code || '').trim();
+        if (/^\d+$/.test(s) && s.length <= 12) return s.padStart(12, '0');
+        return s;
+    }
+
+    function getBarcodeEntries() {
+        return barcodeEntryState ? barcodeEntryState.loadEntries() : [];
+    }
+
+    function getSerializedBarcode() {
+        const entries = getBarcodeEntries();
+        if (barcodeEntryState && entries.length) {
+            return barcodeEntryState.serializeEntries(entries);
+        }
+        return sessionStorage.getItem('barcode') || '';
+    }
+
+    function syncAddItemFormFields() {
         const itemPosition = sessionStorage.getItem('item_position') || '';
         const picturePosition = sessionStorage.getItem('pictureposition_path') || '';
-        
-        document.getElementById('form_barcode').value = barcode;
+        document.getElementById('form_barcode').value = getSerializedBarcode();
         document.getElementById('form_position').value = itemPosition;
         document.getElementById('form_pictureposition').value = picturePosition;
-    });
+    }
+
+    function persistBarcodeEntries(entries) {
+        if (barcodeEntryState) {
+            barcodeEntryState.saveEntries(entries);
+        }
+        syncAddItemFormFields();
+        updateChecklist();
+        renderBarcodeEditor();
+    }
+
+    function renderBarcodeEditor() {
+        const card = document.getElementById('barcodeEditorCard');
+        const list = document.getElementById('barcodeEditorList');
+        if (!card || !list) return;
+
+        const entries = getBarcodeEntries();
+        if (!entries.length) {
+            card.style.display = 'none';
+            list.innerHTML = '';
+            return;
+        }
+
+        card.style.display = 'block';
+        list.innerHTML = entries.map((item, index) => {
+            const displayCode = barcodeEntryState
+                ? barcodeEntryState.displayCode(item, formatUpcDisplay)
+                : formatUpcDisplay(item.code || '');
+            const suffixLabel = item.suffix > 0 ? `Suffix ${item.suffix}` : 'Base';
+            const metaText = item.suffix > 0
+                ? 'Singular suffix item'
+                : (item.quantity > 1 ? `Qty ${item.quantity} | Use + to split one out as a suffix item` : 'Qty 1');
+            return `
+                <div class="barcode-entry-row">
+                    <div class="barcode-entry-main">
+                        <div class="barcode-entry-code">${displayCode}</div>
+                        <div class="barcode-entry-meta">${metaText}</div>
+                    </div>
+                    <div class="barcode-entry-actions">
+                        <div class="suffix-pill">
+                            <button type="button" onclick="adjustAddItemSuffix(${index}, -1)" ${item.suffix > 0 ? '' : 'disabled'}>-</button>
+                            <span>${suffixLabel}</span>
+                            <button type="button" onclick="adjustAddItemSuffix(${index}, 1)">+</button>
+                        </div>
+                        <button type="button" class="barcode-remove-btn" onclick="removeAddItemBarcode(${index})" title="Remove one">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
     
     function updateChecklist() {
         const t = (key, fallback) => (window.i18n && window.i18n.t) ? window.i18n.t(key) : (fallback || key);
         // If both are set, prefer picturePosition (picture takes precedence)
         const itemPosition = sessionStorage.getItem('item_position');
         const picturePosition = sessionStorage.getItem('pictureposition_path');
-        const barcode = sessionStorage.getItem('barcode');
+        const barcodeEntries = getBarcodeEntries();
+        const barcode = getSerializedBarcode();
         // Position logic
         let posText = '', posColor = '', posGoto = '';
         if (picturePosition) {
@@ -129,12 +303,17 @@
         let barText = '', barColor = '', barGoto = '';
         const isLocked = sessionStorage.getItem('positionLocked') === 'true';
         if (barcode) {
-            // Check if multiple barcodes (comma-separated)
-            const barcodes = barcode.split(',');
-            if (barcodes.length > 1) {
-                barText = `${t('barcodes_set', 'Barcodes set')} (${barcodes.length}) <i class=\"fas fa-pen edit-icon\"></i>`;
+            const totalCount = barcodeEntryState && barcodeEntries.length
+                ? barcodeEntryState.totalCount(barcodeEntries)
+                : barcode.split(',').filter(Boolean).length;
+            if (totalCount > 1) {
+                barText = `${t('barcodes_set', 'Barcodes set')} (${totalCount}) <i class=\"fas fa-pen edit-icon\"></i>`;
             } else {
-                barText = `${t('barcode_set', 'Barcode set')} - ${barcode} <i class=\"fas fa-pen edit-icon\"></i>`;
+                const firstEntry = barcodeEntries[0];
+                const displayCode = firstEntry && barcodeEntryState
+                    ? barcodeEntryState.displayCode(firstEntry, formatUpcDisplay)
+                    : barcode;
+                barText = `${t('barcode_set', 'Barcode set')} - ${displayCode} <i class=\"fas fa-pen edit-icon\"></i>`;
             }
             barColor = '#2ecc71';
             barGoto = isLocked ? '/multibarcode' : '/barcode';
@@ -169,7 +348,27 @@
         }
     }
     // Always show checklist on load
-    document.addEventListener('DOMContentLoaded', updateChecklist);
+    window.adjustAddItemSuffix = function(index, delta) {
+        if (!barcodeEntryState) return;
+        const entries = getBarcodeEntries();
+        const nextEntries = delta > 0
+            ? barcodeEntryState.incrementSuffix(entries, index)
+            : barcodeEntryState.decrementSuffix(entries, index);
+        persistBarcodeEntries(nextEntries);
+    };
+
+    window.removeAddItemBarcode = function(index) {
+        if (!barcodeEntryState) return;
+        const entries = getBarcodeEntries();
+        const nextEntries = barcodeEntryState.removeOne(entries, index);
+        persistBarcodeEntries(nextEntries);
+    };
+
+    document.addEventListener('DOMContentLoaded', function() {
+        syncAddItemFormFields();
+        updateChecklist();
+        renderBarcodeEditor();
+    });
     // --- Auto-submit timer logic ---
     let autoSubmitTimeout = null;
     let timerInterval = null;
@@ -271,17 +470,21 @@
         e.preventDefault();
         sessionStorage.removeItem('item_position');
         sessionStorage.removeItem('barcode');
+        sessionStorage.removeItem('barcode_entries');
         sessionStorage.removeItem('pictureposition_path');
         // Optionally clear any other related sessionStorage keys
         // Do NOT submit any form or reload to a new page
         // Instead, update checklist and visually reset
+        syncAddItemFormFields();
         updateChecklist();
+        renderBarcodeEditor();
     });
 
     document.getElementById('exitBtn').addEventListener('click', function(e) {
         e.preventDefault();
         sessionStorage.removeItem('item_position');
         sessionStorage.removeItem('barcode');
+        sessionStorage.removeItem('barcode_entries');
         sessionStorage.removeItem('pictureposition_path');
         sessionStorage.removeItem('positionLocked');
         // Notify server to clear lock state

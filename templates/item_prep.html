@@ -64,6 +64,116 @@
       box-shadow:0 1px 2px rgba(0,0,0,0.08);
     }
     .btn-set-note:hover{background:#f2c842}
+    .voice-note-btn{
+      position:relative;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      width:46px;
+      min-width:46px;
+      height:46px;
+      padding:0;
+      border-radius:16px;
+      border:1px solid rgba(148,163,184,0.35);
+      background:linear-gradient(180deg,#ffffff 0%,#eef4f8 100%);
+      color:#0f172a;
+      cursor:pointer;
+      user-select:none;
+      touch-action:none;
+      box-shadow:0 10px 22px rgba(15,23,42,0.12), inset 0 1px 0 rgba(255,255,255,0.92);
+      transition:transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease, background 0.18s ease, color 0.18s ease;
+    }
+    .voice-note-btn:hover{
+      transform:translateY(-1px);
+      box-shadow:0 14px 28px rgba(15,23,42,0.14), inset 0 1px 0 rgba(255,255,255,0.95);
+    }
+    .voice-note-btn:active{transform:translateY(0)}
+    .voice-note-btn.recording{
+      border-color:#ef4444;
+      background:linear-gradient(180deg,#fff1f2 0%,#ffd7dd 100%);
+      color:#991b1b;
+      box-shadow:0 18px 34px rgba(220,38,38,0.24), inset 0 1px 0 rgba(255,255,255,0.85);
+      animation:pulse-rec 1.15s ease-in-out infinite;
+    }
+    .voice-note-btn.ready{
+      border-color:#60a5fa;
+      background:linear-gradient(180deg,#f8fbff 0%,#dbeafe 100%);
+      color:#1d4ed8;
+      box-shadow:0 14px 28px rgba(37,99,235,0.18), inset 0 1px 0 rgba(255,255,255,0.9);
+    }
+    .voice-note-icon-wrap{
+      position:relative;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      width:100%;
+      height:100%;
+    }
+    .voice-note-icon{
+      width:19px;
+      height:19px;
+      display:block;
+    }
+    .voice-note-recording-dot{
+      position:absolute;
+      right:10px;
+      bottom:9px;
+      width:8px;
+      height:8px;
+      border-radius:999px;
+      background:#cbd5e1;
+      box-shadow:0 0 0 0 rgba(148,163,184,0);
+      transition:background 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+    }
+    .voice-note-btn.ready .voice-note-recording-dot{
+      background:#2563eb;
+      box-shadow:0 0 0 5px rgba(37,99,235,0.14);
+    }
+    .voice-note-btn.recording .voice-note-recording-dot{
+      background:#ef4444;
+      box-shadow:0 0 0 0 rgba(239,68,68,0.35);
+      animation:voice-dot-live 1.15s ease-in-out infinite;
+      transform:scale(1.05);
+    }
+    .voice-note-status{
+      margin-top:6px;
+      font-size:0.85rem;
+      color:#64748b;
+      font-weight:500;
+    }
+    .voice-note-status.error{color:#b91c1c;font-weight:600}
+    .voice-note-preview{
+      display:none;
+      align-items:center;
+      gap:8px;
+      margin-top:8px;
+      padding:10px 12px;
+      border:1px solid #cfe0f5;
+      background:linear-gradient(180deg,#f8fbff 0%,#eff6ff 100%);
+      border-radius:16px;
+      box-shadow:inset 0 1px 0 rgba(255,255,255,0.85);
+    }
+    .voice-note-preview.active{display:flex}
+    .voice-note-preview audio{flex:1;min-width:0;height:36px}
+    .voice-note-clear{
+      border:none;
+      border-radius:12px;
+      background:#dbeafe;
+      color:#1d4ed8;
+      padding:8px 12px;
+      font-weight:700;
+      cursor:pointer;
+    }
+    @keyframes pulse-rec{
+      0%{box-shadow:0 0 0 0 rgba(220,38,38,0.35)}
+      70%{box-shadow:0 0 0 10px rgba(220,38,38,0)}
+      100%{box-shadow:0 0 0 0 rgba(220,38,38,0)}
+    }
+    @keyframes voice-dot-live{
+      0%{box-shadow:0 0 0 0 rgba(239,68,68,0.36)}
+      70%{box-shadow:0 0 0 9px rgba(239,68,68,0)}
+      100%{box-shadow:0 0 0 0 rgba(239,68,68,0)}
+    }
     .setqty-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:100002;align-items:center;justify-content:center;padding:16px}
     .setqty-overlay.active{display:flex}
     .setqty-card{background:#fff;border:1px solid #e3e3e3;border-radius:14px;max-width:420px;width:100%;padding:16px;box-shadow:0 12px 36px rgba(0,0,0,0.22)}
@@ -149,6 +259,8 @@
       .note-row{gap:6px}
       .note-input{height:34px;padding:6px 10px;font-size:0.9rem}
       .btn-set-note{height:34px;padding:6px 10px;font-size:0.84rem;min-width:58px}
+      .voice-note-btn{width:42px;min-width:42px;height:42px;border-radius:14px}
+      .voice-note-recording-dot{right:8px;bottom:8px}
       .qty-display{margin:6px 0;padding:8px;gap:6px}
       .qty-label{margin-bottom:2px;font-size:0.66rem}
       .qty-number{font-size:1.7rem}
@@ -178,6 +290,16 @@
     html.ss-theme-night .note-input::placeholder { color:#7f7031 !important; }
     html.ss-theme-night .btn-set-note { background:#eab308; color:#3b2f00; border-color:#ca8a04; }
     html.ss-theme-night .btn-set-note:hover { background:#dca307; }
+    html.ss-theme-night .voice-note-btn { background:linear-gradient(180deg,#263244 0%,#172131 100%); border-color:rgba(148,163,184,0.4); color:#f8fafc; box-shadow:0 14px 28px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.05); }
+    html.ss-theme-night .voice-note-btn.recording { background:linear-gradient(180deg,#7f1d1d 0%,#450a0a 100%); border-color:#f87171; color:#fee2e2; box-shadow:0 18px 34px rgba(127,29,29,0.4), inset 0 1px 0 rgba(255,255,255,0.06); }
+    html.ss-theme-night .voice-note-btn.ready { background:linear-gradient(180deg,#1d4ed8 0%,#1e3a8a 100%); border-color:#60a5fa; color:#eff6ff; box-shadow:0 18px 34px rgba(30,64,175,0.32), inset 0 1px 0 rgba(255,255,255,0.06); }
+    html.ss-theme-night .voice-note-recording-dot { background:#64748b; }
+    html.ss-theme-night .voice-note-btn.ready .voice-note-recording-dot { background:#bfdbfe; box-shadow:0 0 0 5px rgba(191,219,254,0.14); }
+    html.ss-theme-night .voice-note-btn.recording .voice-note-recording-dot { background:#fecaca; }
+    html.ss-theme-night .voice-note-status { color: var(--muted, #94a3b8); }
+    html.ss-theme-night .voice-note-status.error { color:#fca5a5; }
+    html.ss-theme-night .voice-note-preview { background:linear-gradient(180deg,#0f1d31 0%,#082f49 100%); border-color:#1d4ed8; box-shadow:inset 0 1px 0 rgba(255,255,255,0.04); }
+    html.ss-theme-night .voice-note-clear { background:#1e3a8a; color:#dbeafe; }
     html.ss-theme-night .setqty-card { background: var(--card, #1e293b); border-color: rgba(255,255,255,0.1); }
     html.ss-theme-night .setqty-title { color: var(--ink-bright, #f8fafc); }
     html.ss-theme-night .setqty-note-preview { color: var(--muted, #94a3b8); }
@@ -272,10 +394,27 @@
         </div>
       </div>
       <input type="file" id="tempThumbInput" accept="image/*" capture="environment" style="display:none">
+      <input type="file" id="quickVoiceFallbackInput" accept="audio/*" capture style="display:none">
       <div class="note-wrap">
         <div class="note-row">
+          <button type="button" class="voice-note-btn" id="quickVoiceNoteBtn" aria-label="Hold to record voice note" title="Hold to record voice note">
+            <span class="voice-note-icon-wrap" aria-hidden="true">
+              <svg class="voice-note-icon" viewBox="0 0 24 24" fill="none">
+                <rect x="8" y="3" width="8" height="13" rx="4" fill="currentColor"></rect>
+                <path d="M6 11.5C6 14.8137 8.68629 17.5 12 17.5C15.3137 17.5 18 14.8137 18 11.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+                <path d="M12 17.5V21" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+                <path d="M9 21H15" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+              </svg>
+              <span class="voice-note-recording-dot"></span>
+            </span>
+          </button>
           <input id="quickPrepNote" class="note-input" type="text" placeholder="Add note (optional)">
           <button type="button" class="btn btn-set-note" id="setNoteBtn">Set</button>
+        </div>
+        <div id="quickVoiceNoteStatus" class="voice-note-status">Press and hold the mic to record one voice note</div>
+        <div id="quickVoiceNotePreview" class="voice-note-preview">
+          <audio id="quickVoiceNotePlayer" controls preload="metadata"></audio>
+          <button type="button" id="quickVoiceNoteClearBtn" class="voice-note-clear">Clear</button>
         </div>
       </div>
       <img id="hero" class="hero" src="" alt="item image" onerror="this.style.display='none'" style="margin-top:10px">
@@ -493,6 +632,191 @@
     let prepActionInFlight = false;
     const LOOKUP_DEDUPE_WINDOW_MS = 1200;
     let scanErrorAudioCtx = null;
+    let quickVoiceRecorder = null;
+    let quickVoiceStream = null;
+    let quickVoiceChunks = [];
+    let quickVoiceNoteFile = null;
+    let quickVoiceNoteUrl = '';
+    let quickVoicePointerId = null;
+    let quickVoiceMimeType = '';
+
+    function getQuickVoiceStatusEl(){
+      return document.getElementById('quickVoiceNoteStatus');
+    }
+
+    function getQuickVoiceBtn(){
+      return document.getElementById('quickVoiceNoteBtn');
+    }
+
+    function preferredQuickVoiceMimeType(){
+      const candidates = [
+        'audio/webm;codecs=opus',
+        'audio/webm',
+        'audio/mp4',
+        'audio/ogg;codecs=opus'
+      ];
+      if(!window.MediaRecorder || typeof MediaRecorder.isTypeSupported !== 'function'){
+        return '';
+      }
+      for(const candidate of candidates){
+        try{
+          if(MediaRecorder.isTypeSupported(candidate)) return candidate;
+        }catch(_){}
+      }
+      return '';
+    }
+
+    function quickVoiceExtensionForMime(mimeType){
+      const mime = String(mimeType || '').toLowerCase();
+      if(mime.includes('mp4') || mime.includes('aac') || mime.includes('m4a')) return '.m4a';
+      if(mime.includes('ogg')) return '.ogg';
+      return '.webm';
+    }
+
+    function setQuickVoiceStatus(text, isError=false){
+      const el = getQuickVoiceStatusEl();
+      if(!el) return;
+      el.textContent = String(text || '');
+      el.classList.toggle('error', !!isError);
+    }
+
+    function renderQuickVoiceNote(){
+      const preview = document.getElementById('quickVoiceNotePreview');
+      const player = document.getElementById('quickVoiceNotePlayer');
+      const btn = getQuickVoiceBtn();
+      if(!preview || !player || !btn) return;
+      if(quickVoiceNoteFile && quickVoiceNoteUrl){
+        player.src = quickVoiceNoteUrl;
+        preview.classList.add('active');
+        btn.classList.add('ready');
+        if(!quickVoiceRecorder){
+          setQuickVoiceStatus('Voice note ready. Press and hold the mic again to replace it.');
+        }
+      } else {
+        player.removeAttribute('src');
+        try{ player.load(); }catch(_){}
+        preview.classList.remove('active');
+        btn.classList.remove('ready');
+        if(!quickVoiceRecorder){
+          setQuickVoiceStatus('Press and hold the mic to record one voice note');
+        }
+      }
+    }
+
+    function stopQuickVoiceStream(){
+      try{
+        if(quickVoiceStream){
+          quickVoiceStream.getTracks().forEach(track => track.stop());
+        }
+      }catch(_){}
+      quickVoiceStream = null;
+    }
+
+    function clearQuickVoiceNote(){
+      try{
+        if(quickVoiceRecorder && quickVoiceRecorder.state !== 'inactive'){
+          quickVoiceRecorder.stop();
+        }
+      }catch(_){}
+      quickVoiceRecorder = null;
+      stopQuickVoiceStream();
+      const btn = getQuickVoiceBtn();
+      if(btn) btn.classList.remove('recording');
+      if(quickVoiceNoteUrl){
+        try{ URL.revokeObjectURL(quickVoiceNoteUrl); }catch(_){}
+      }
+      quickVoiceNoteUrl = '';
+      quickVoiceNoteFile = null;
+      quickVoiceChunks = [];
+      quickVoiceMimeType = '';
+      quickVoicePointerId = null;
+      renderQuickVoiceNote();
+    }
+
+    function setQuickVoiceNoteFile(file){
+      clearQuickVoiceNote();
+      if(!file) return;
+      quickVoiceNoteFile = file;
+      quickVoiceNoteUrl = URL.createObjectURL(file);
+      renderQuickVoiceNote();
+    }
+
+    function hasQuickVoiceNote(){
+      return !!quickVoiceNoteFile;
+    }
+
+    async function startQuickVoiceRecording(){
+      if(quickVoiceRecorder) return true;
+      if(!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder)){
+        return false;
+      }
+      try{
+        quickVoiceStream = await navigator.mediaDevices.getUserMedia({audio:true});
+        quickVoiceChunks = [];
+        quickVoiceMimeType = preferredQuickVoiceMimeType();
+        quickVoiceRecorder = quickVoiceMimeType
+          ? new MediaRecorder(quickVoiceStream, {mimeType: quickVoiceMimeType})
+          : new MediaRecorder(quickVoiceStream);
+        quickVoiceRecorder.addEventListener('dataavailable', (event)=>{
+          if(event.data && event.data.size > 0){
+            quickVoiceChunks.push(event.data);
+          }
+        });
+        quickVoiceRecorder.addEventListener('stop', ()=>{
+          try{
+            const mimeType = quickVoiceRecorder && quickVoiceRecorder.mimeType ? quickVoiceRecorder.mimeType : quickVoiceMimeType || 'audio/webm';
+            const blob = new Blob(quickVoiceChunks, {type: mimeType});
+            const ext = quickVoiceExtensionForMime(mimeType);
+            const file = new File([blob], `prep_voice_${Date.now()}${ext}`, {type: mimeType});
+            setQuickVoiceNoteFile(file);
+          }catch(e){
+            console.error('Failed finalizing voice note:', e);
+            setQuickVoiceStatus('Voice note could not be saved', true);
+          } finally {
+            quickVoiceRecorder = null;
+            quickVoiceChunks = [];
+            quickVoiceMimeType = '';
+            stopQuickVoiceStream();
+          }
+        }, {once:true});
+        quickVoiceRecorder.start();
+        const btn = getQuickVoiceBtn();
+        if(btn) btn.classList.add('recording');
+        setQuickVoiceStatus('Recording now. Release to save.');
+        return true;
+      }catch(e){
+        console.error('Voice note recording unavailable:', e);
+        stopQuickVoiceStream();
+        quickVoiceRecorder = null;
+        quickVoiceChunks = [];
+        quickVoiceMimeType = '';
+        return false;
+      }
+    }
+
+    async function stopQuickVoiceRecording(){
+      const btn = getQuickVoiceBtn();
+      if(btn) btn.classList.remove('recording');
+      const recorder = quickVoiceRecorder;
+      if(!recorder) return;
+      if(recorder.state !== 'inactive'){
+        recorder.stop();
+      }
+    }
+
+    async function uploadQuickVoiceNote(targetUpc, rowStatus){
+      if(!quickVoiceNoteFile || !targetUpc) return {success:true, skipped:true};
+      const fd = new FormData();
+      fd.append('media', quickVoiceNoteFile, quickVoiceNoteFile.name || `prep_voice_${Date.now()}.webm`);
+      fd.append('media_type', 'audio');
+      fd.append('replace_existing', '1');
+      if(rowStatus) fd.append('row_status', rowStatus);
+      const res = await fetch('/api/items_prep/media/' + encodeURIComponent(targetUpc), {
+        method: 'POST',
+        body: fd
+      });
+      return res.json().catch(() => ({success:false, error:'Voice note upload failed'}));
+    }
 
     function normalizeScannedUpc(raw){
       return String(raw || '').replace(/\s+/g, '').trim();
@@ -665,6 +989,7 @@
       if(prepSummary) prepSummary.textContent = '';
       const quickNoteEl = document.getElementById('quickPrepNote');
       if(quickNoteEl) quickNoteEl.value = '';
+      clearQuickVoiceNote();
       clearScanValidationMsg();
       closeSetQtyModal();
       document.getElementById('manualUpc').value = '';
@@ -777,6 +1102,7 @@
         currentLookupInfo = null;
         const prepSummary = document.getElementById('prepSummary');
         if(prepSummary) prepSummary.textContent = '';
+        clearQuickVoiceNote();
         // Auto-clear the input after lookup completes
         document.getElementById('manualUpc').value = '';
         return;
@@ -836,6 +1162,7 @@
         }
       }
       clearQuickPrepNote();
+      clearQuickVoiceNote();
       resEl.classList.remove('hidden'); actions.classList.remove('hidden');
       statusMsg.textContent='';
       // Hide No Barcode button when item is displayed
@@ -1085,6 +1412,9 @@
     const setQtyCancelBtn = document.getElementById('setQtyCancelBtn');
     const setQtyApplyBtn = document.getElementById('setQtyApplyBtn');
     const setQtyOverlay = document.getElementById('setQtyOverlay');
+    const quickVoiceNoteBtn = document.getElementById('quickVoiceNoteBtn');
+    const quickVoiceFallbackInput = document.getElementById('quickVoiceFallbackInput');
+    const quickVoiceNoteClearBtn = document.getElementById('quickVoiceNoteClearBtn');
 
     if(setNoteBtn) setNoteBtn.onclick = ()=>{ openSetQtyModal('manual'); };
     if(setQtyMinusBtn) setQtyMinusBtn.onclick = ()=>{ setQtyModalValue -= 1; updateSetQtyModalUi(); };
@@ -1101,6 +1431,59 @@
         closeSetQtyModal(getSetQtyDismissChoice());
       }
     });
+    if(quickVoiceNoteBtn){
+      quickVoiceNoteBtn.addEventListener('pointerdown', async (e)=>{
+        if(!currentUpc){
+          setQuickVoiceStatus('Look up an item first', true);
+          return;
+        }
+        e.preventDefault();
+        quickVoicePointerId = e.pointerId;
+        try{
+          if(quickVoiceNoteBtn.setPointerCapture){
+            quickVoiceNoteBtn.setPointerCapture(e.pointerId);
+          }
+        }catch(_){}
+        const started = await startQuickVoiceRecording();
+        if(!started && quickVoiceFallbackInput){
+          setQuickVoiceStatus('Opening microphone...');
+          quickVoiceFallbackInput.click();
+        }
+      });
+    }
+    document.addEventListener('pointerup', async (e)=>{
+      if(quickVoicePointerId === null) return;
+      if(e.pointerId !== quickVoicePointerId) return;
+      quickVoicePointerId = null;
+      if(quickVoiceRecorder){
+        await stopQuickVoiceRecording();
+      }
+    });
+    document.addEventListener('pointercancel', async (e)=>{
+      if(quickVoicePointerId === null) return;
+      if(e.pointerId !== quickVoicePointerId) return;
+      quickVoicePointerId = null;
+      if(quickVoiceRecorder){
+        await stopQuickVoiceRecording();
+      }
+    });
+    if(quickVoiceFallbackInput){
+      quickVoiceFallbackInput.addEventListener('change', ()=>{
+        const file = quickVoiceFallbackInput.files && quickVoiceFallbackInput.files[0] ? quickVoiceFallbackInput.files[0] : null;
+        if(file){
+          setQuickVoiceNoteFile(file);
+        } else if(!hasQuickVoiceNote()){
+          setQuickVoiceStatus('Press and hold the mic to record one voice note');
+        }
+        quickVoiceFallbackInput.value = '';
+      });
+    }
+    if(quickVoiceNoteClearBtn){
+      quickVoiceNoteClearBtn.addEventListener('click', ()=>{
+        clearQuickVoiceNote();
+      });
+    }
+    renderQuickVoiceNote();
     
     document.getElementById('undoBtn').onclick = async ()=>{
       if(!lastEntry) return;
@@ -1150,13 +1533,23 @@
           return;
         }
         const quickNote = getQuickPrepNoteText();
+        const hasVoiceNote = hasQuickVoiceNote();
         // Show loading overlay
         showPageLoading();
-        let result = await setStatus(currentUpc, 'good', currentQty, quickNote ? {note: quickNote} : undefined);
+        const goodExtraPayload = {};
+        if(quickNote) goodExtraPayload.note = quickNote;
+        if(hasVoiceNote) goodExtraPayload.has_media_note = true;
+        let result = await setStatus(
+          currentUpc,
+          'good',
+          currentQty,
+          Object.keys(goodExtraPayload).length ? goodExtraPayload : undefined
+        );
         const statusMsg = document.getElementById('statusMsg');
         
         if(result && result.success){ 
           let noteSaveError = '';
+          let voiceSaveError = '';
           const resultUpc = result.upc || currentUpc;
           const resultBaseUpc = result.base_upc || (String(resultUpc || '').includes('-') ? String(resultUpc).split('-')[0] : String(resultUpc || currentUpc || ''));
           if(quickNote){
@@ -1169,6 +1562,18 @@
               }
             }catch(e){
               noteSaveError = ' (note not saved)';
+            }
+          }
+          if(hasVoiceNote){
+            try{
+              const voiceResp = await uploadQuickVoiceNote(resultUpc, 'good');
+              if(voiceResp && voiceResp.success){
+                clearQuickVoiceNote();
+              } else {
+                voiceSaveError = ' (voice note not saved)';
+              }
+            }catch(e){
+              voiceSaveError = ' (voice note not saved)';
             }
           }
           // Store for undo with action type
@@ -1184,7 +1589,7 @@
           showUndoButton();
           const exceptionTag = result.exception_overage ? ' <span class="bad">(saved as exception)</span>' : '';
           const forcedTag = result.forced_lot_override ? (' <span class="bad">(forced current LOT ' + esc(result.lot_number || '') + ', flagged)</span>') : '';
-          statusMsg.innerHTML='<span class="ok">Marked GOOD (Qty: '+currentQty+')</span>' + exceptionTag + forcedTag + (noteSaveError ? (' <span class="bad">' + noteSaveError + '</span>') : '');
+          statusMsg.innerHTML='<span class="ok">Marked GOOD (Qty: '+currentQty+')</span>' + exceptionTag + forcedTag + (noteSaveError ? (' <span class="bad">' + noteSaveError + '</span>') : '') + (voiceSaveError ? (' <span class="bad">' + voiceSaveError + '</span>') : '');
         } else { 
           const errorMsg = result && result.error ? result.error : 'Unknown error';
           console.error('Failed to mark good:', result);
@@ -1219,12 +1624,23 @@
       
       // Create a suffixed entry, then continue through diagnostic return flow
       try {
+        const hasVoiceNote = hasQuickVoiceNote();
         let data = await postWithLotFallback('/api/items_prep/create_return_entry', {
           upc: currentUpc,
           qty: currentQty
         });
         
         if (data.success && data.suffixed_upc) {
+          if(hasVoiceNote){
+            try{
+              const voiceResp = await uploadQuickVoiceNote(data.suffixed_upc, 'return');
+              if(voiceResp && voiceResp.success){
+                clearQuickVoiceNote();
+              }
+            }catch(e){
+              console.error('Return voice note upload failed:', e);
+            }
+          }
           // Store for undo
           lastEntry = {
             upc: data.suffixed_upc,
@@ -1274,6 +1690,7 @@
           return;
         }
         const quickNote = getQuickPrepNoteText();
+        const hasVoiceNote = hasQuickVoiceNote();
         // Show loading overlay
         showPageLoading();
         let data = await postWithLotFallback('/api/items_prep/create_bad_entry', {
@@ -1289,6 +1706,16 @@
                 clearQuickPrepNote();
               }
             }catch(e){}
+          }
+          if(hasVoiceNote){
+            try{
+              const voiceResp = await uploadQuickVoiceNote(data.suffixed_upc || currentUpc, 'bad');
+              if(voiceResp && voiceResp.success){
+                clearQuickVoiceNote();
+              }
+            }catch(e){
+              console.error('Bad voice note upload failed:', e);
+            }
           }
           // Store for undo
           lastEntry = {upc: data.suffixed_upc, status: 'bad', qty: currentQty, base_upc: currentUpc, lot_number: data.lot_number || getActionLotNumber() || ''};
@@ -1432,6 +1859,7 @@
       }catch{}
     });
     window.addEventListener('beforeunload', stopScanner);
+    window.addEventListener('beforeunload', stopQuickVoiceStream);
 
     // Auto-trigger lookup if ?upc= is provided OR if coming from no-barcode page
     window.addEventListener('DOMContentLoaded', async ()=>{

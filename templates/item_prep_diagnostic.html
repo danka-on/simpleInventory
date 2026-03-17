@@ -8,11 +8,16 @@
   <style>
     body{font-family:Segoe UI,Arial,sans-serif;background:#f7fafc;margin:0;padding:18px}
     .top{display:flex;align-items:center;gap:10px;justify-content:space-between}
+    .diag-title-wrap{display:flex;align-items:center;justify-content:center;gap:12px;flex:1;min-width:0}
+    .diag-title-wrap h2{margin:0}
     .btn{padding:10px 16px;border-radius:8px;border:none;cursor:pointer}
     .btn-primary{background:#00b894;color:#fff}
     .btn-danger{background:#e74c3c;color:#fff}
   .card{background:#fff;border:1px solid #e8e8e8;border-radius:12px;padding:16px;margin-top:14px}
   .row{display:flex;gap:10px;flex-wrap:wrap}
+  .suffix-marker-wrap{display:none;align-items:center;justify-content:center;flex-shrink:0}
+  .suffix-marker{display:inline-flex;align-items:center;justify-content:center;min-width:56px;height:56px;padding:0 14px;border-radius:18px;background:linear-gradient(180deg,#fff1f2 0%,#ffe4e6 100%);border:3px solid #fda4af;color:#be123c;font-size:1.9rem;font-weight:900;line-height:1;box-shadow:0 10px 22px rgba(190,24,93,0.18)}
+  .suffix-marker-label{display:none}
   /* Camera overlay controls */
   .cam-wrap{position:relative;display:block;width:100%;max-width:420px}
   .cam-wrap{margin:0 auto}
@@ -44,6 +49,105 @@
   .set-position-btn{background:#3498db;color:#fff;border:none;padding:16px 24px;border-radius:12px;cursor:pointer;font-size:1.2rem;font-weight:600;display:flex;align-items:center;gap:10px;margin:12px 0}
   .set-position-btn:hover{background:#2980b9}
   .set-position-btn i{font-size:1.4rem}
+  .voice-note-row{display:flex;align-items:center;gap:12px;margin-top:14px;flex-wrap:wrap}
+  .voice-note-btn{
+    position:relative;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    width:54px;
+    min-width:54px;
+    height:54px;
+    padding:0;
+    border-radius:18px;
+    border:1px solid rgba(148,163,184,0.35);
+    background:linear-gradient(180deg,#ffffff 0%,#eef4f8 100%);
+    color:#0f172a;
+    cursor:pointer;
+    user-select:none;
+    touch-action:none;
+    box-shadow:0 12px 24px rgba(15,23,42,0.12), inset 0 1px 0 rgba(255,255,255,0.92);
+    transition:transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease, background 0.18s ease, color 0.18s ease;
+  }
+  .voice-note-btn:hover{
+    transform:translateY(-1px);
+    box-shadow:0 16px 30px rgba(15,23,42,0.15), inset 0 1px 0 rgba(255,255,255,0.95);
+  }
+  .voice-note-btn:active{transform:translateY(0)}
+  .voice-note-btn.recording{
+    background:linear-gradient(180deg,#fff1f2 0%,#ffd7dd 100%);
+    border-color:#ef4444;
+    color:#991b1b;
+    box-shadow:0 20px 36px rgba(220,38,38,0.24), inset 0 1px 0 rgba(255,255,255,0.86);
+    animation:diag-rec-pulse 1.15s ease-in-out infinite;
+  }
+  .voice-note-btn.ready{
+    background:linear-gradient(180deg,#f8fbff 0%,#dbeafe 100%);
+    border-color:#60a5fa;
+    color:#1d4ed8;
+    box-shadow:0 16px 30px rgba(37,99,235,0.2), inset 0 1px 0 rgba(255,255,255,0.92);
+  }
+  .voice-note-icon-wrap{
+    position:relative;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    width:100%;
+    height:100%;
+  }
+  .voice-note-icon{
+    width:21px;
+    height:21px;
+    display:block;
+  }
+  .voice-note-recording-dot{
+    position:absolute;
+    right:11px;
+    bottom:11px;
+    width:9px;
+    height:9px;
+    border-radius:999px;
+    background:#cbd5e1;
+    box-shadow:0 0 0 0 rgba(148,163,184,0);
+    transition:background 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+  }
+  .voice-note-btn.ready .voice-note-recording-dot{
+    background:#2563eb;
+    box-shadow:0 0 0 5px rgba(37,99,235,0.14);
+  }
+  .voice-note-btn.recording .voice-note-recording-dot{
+    background:#ef4444;
+    box-shadow:0 0 0 0 rgba(239,68,68,0.35);
+    animation:voice-dot-live 1.15s ease-in-out infinite;
+    transform:scale(1.05);
+  }
+  .voice-note-hint{font-size:0.94rem;color:#64748b;font-weight:500}
+  .voice-note-player{display:none;align-items:center;gap:8px;margin-top:10px;padding:12px 14px;border:1px solid #cfe0f5;background:linear-gradient(180deg,#f8fbff 0%,#eff6ff 100%);border-radius:16px;box-shadow:inset 0 1px 0 rgba(255,255,255,0.86)}
+  .voice-note-player.active{display:flex}
+  .voice-note-player audio{flex:1;min-width:0}
+  .voice-note-player .clear-btn{border:none;border-radius:12px;background:#dbeafe;color:#1d4ed8;padding:8px 12px;font-weight:700;cursor:pointer}
+  .capture-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
+  .capture-btn{flex:1;min-width:180px;background:#2563eb;color:#fff;border:none;padding:14px 18px;border-radius:12px;cursor:pointer;font-size:1rem;font-weight:700;display:flex;align-items:center;justify-content:center;gap:10px}
+  .capture-btn.video{background:#7c3aed}
+  .media-preview{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
+  .media-preview-card{position:relative;width:132px;min-height:132px;padding:8px;border-radius:12px;background:#f8fafc;border:1px solid #dbe3ea}
+  .media-preview-card img,.media-preview-card video{width:100%;height:100px;object-fit:cover;border-radius:10px;background:#e5e7eb}
+  .media-preview-card video{background:#0f172a}
+  .media-preview-label{margin-top:8px;font-size:0.78rem;color:#475569;font-weight:700;text-transform:uppercase;letter-spacing:0.04em}
+  .saved-video-list{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
+  .saved-video-card{position:relative;width:180px;padding:8px;border-radius:12px;background:#f8fafc;border:1px solid #dbe3ea}
+  .saved-video-card video{width:100%;border-radius:10px;background:#0f172a}
+  .saved-video-card .del-x{top:6px;right:6px}
+  @keyframes diag-rec-pulse{
+    0%{box-shadow:0 0 0 0 rgba(220,38,38,0.35)}
+    70%{box-shadow:0 0 0 12px rgba(220,38,38,0)}
+    100%{box-shadow:0 0 0 0 rgba(220,38,38,0)}
+  }
+  @keyframes voice-dot-live{
+    0%{box-shadow:0 0 0 0 rgba(239,68,68,0.36)}
+    70%{box-shadow:0 0 0 10px rgba(239,68,68,0)}
+    100%{box-shadow:0 0 0 0 rgba(239,68,68,0)}
+  }
     label{display:block;margin-top:8px}
     /* Prominent reason selection */
   .reason-group{display:flex;gap:10px;flex-wrap:wrap;margin:8px 0}
@@ -82,6 +186,8 @@
     html.ss-theme-night body{background:#0f172a;color:#e2e8f0}
     html.ss-theme-night .top h2{color:#e2e8f0}
     html.ss-theme-night .card{background:#1e293b;border:1px solid rgba(255,255,255,0.08);box-shadow:0 10px 28px rgba(0,0,0,0.45)}
+    html.ss-theme-night .suffix-marker{background:linear-gradient(180deg,#3f0d1d 0%,#63142a 100%);border-color:#fb7185;color:#ffe4e6;box-shadow:0 16px 34px rgba(0,0,0,0.38)}
+    html.ss-theme-night .suffix-marker-label{color:#fda4af}
     html.ss-theme-night label,
     html.ss-theme-night .row{color:#e2e8f0}
     html.ss-theme-night .btn{color:#e2e8f0}
@@ -90,6 +196,20 @@
     html.ss-theme-night .btn-complete{background:#22c55e;box-shadow:0 8px 18px rgba(34,197,94,0.22)}
     html.ss-theme-night .set-position-btn{background:#2563eb}
     html.ss-theme-night .set-position-btn:hover{background:#1d4ed8}
+    html.ss-theme-night .voice-note-btn{background:linear-gradient(180deg,#263244 0%,#172131 100%);border-color:rgba(148,163,184,0.4);color:#f8fafc;box-shadow:0 16px 30px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.05)}
+    html.ss-theme-night .voice-note-btn.recording{background:linear-gradient(180deg,#7f1d1d 0%,#450a0a 100%);border-color:#f87171;color:#fee2e2;box-shadow:0 22px 38px rgba(127,29,29,0.42), inset 0 1px 0 rgba(255,255,255,0.06)}
+    html.ss-theme-night .voice-note-btn.ready{background:linear-gradient(180deg,#1d4ed8 0%,#1e3a8a 100%);border-color:#60a5fa;color:#eff6ff;box-shadow:0 20px 34px rgba(30,64,175,0.34), inset 0 1px 0 rgba(255,255,255,0.06)}
+    html.ss-theme-night .voice-note-recording-dot{background:#64748b}
+    html.ss-theme-night .voice-note-btn.ready .voice-note-recording-dot{background:#bfdbfe;box-shadow:0 0 0 5px rgba(191,219,254,0.14)}
+    html.ss-theme-night .voice-note-btn.recording .voice-note-recording-dot{background:#fecaca}
+    html.ss-theme-night .voice-note-hint{color:#94a3b8}
+    html.ss-theme-night .voice-note-player{background:linear-gradient(180deg,#0f1d31 0%,#082f49 100%);border-color:#1d4ed8;box-shadow:inset 0 1px 0 rgba(255,255,255,0.04)}
+    html.ss-theme-night .voice-note-player .clear-btn{background:#1e3a8a;color:#dbeafe}
+    html.ss-theme-night .capture-btn{background:#1d4ed8}
+    html.ss-theme-night .capture-btn.video{background:#6d28d9}
+    html.ss-theme-night .media-preview-card,
+    html.ss-theme-night .saved-video-card{background:#111827;border-color:#334155}
+    html.ss-theme-night .media-preview-label{color:#cbd5e1}
     html.ss-theme-night .status-bubble{background:#111827;border-color:#334155;color:#e2e8f0}
     html.ss-theme-night .status-bubble.active{background:#10b981;border-color:#10b981}
     html.ss-theme-night .status-bubble.good.active{background:#22c55e;border-color:#22c55e}
@@ -129,8 +249,10 @@
       body{padding:10px}
       .top{margin-bottom:6px}
       .top h2{font-size:1.2rem;margin:0}
+      .diag-title-wrap{gap:8px}
       .btn{padding:8px 12px;font-size:0.9rem}
       .card{padding:10px;margin-top:8px}
+      .suffix-marker{min-width:46px;height:46px;padding:0 12px;border-radius:15px;font-size:1.45rem}
       .cam-wrap{max-width:340px}
       video{max-height:220px}
       .cam-btn{padding:14px 18px;font-size:1rem}
@@ -202,7 +324,12 @@
 </script>
   <div class="top">
     <a id="back-link" href="/"><button class="btn btn-danger">Back</button></a>
-    <h2>Diagnostic</h2>
+    <div class="diag-title-wrap">
+      <h2>Diagnostic</h2>
+      <div class="suffix-marker-wrap" id="suffixMarkerWrap" aria-live="polite">
+        <div class="suffix-marker" id="suffixMarkerValue" title="Suffix item"></div>
+      </div>
+    </div>
     <div style="display:flex;gap:8px">
       <button type="button" class="btn" id="resetBtn" style="background:#f39c12;color:#fff;display:flex;align-items:center;gap:6px" title="Reset to original unchecked state">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -262,46 +389,62 @@
         <button type="button" class="reason-btn" data-val="Other">Other</button>
       </div>
       <input type="hidden" name="reason" id="reasonSelect" required>
-      
+
+      <div class="voice-note-row">
+        <button type="button" id="recordNoteBtn" class="voice-note-btn" aria-label="Hold to record voice note" title="Hold to record voice note">
+          <span class="voice-note-icon-wrap" aria-hidden="true">
+            <svg class="voice-note-icon" viewBox="0 0 24 24" fill="none">
+              <rect x="8" y="3" width="8" height="13" rx="4" fill="currentColor"></rect>
+              <path d="M6 11.5C6 14.8137 8.68629 17.5 12 17.5C15.3137 17.5 18 14.8137 18 11.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+              <path d="M12 17.5V21" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+              <path d="M9 21H15" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+            </svg>
+            <span class="voice-note-recording-dot"></span>
+          </span>
+        </button>
+        <div id="recordNoteHint" class="voice-note-hint">Press and hold the mic to record one voice note for this item</div>
+      </div>
+      <div id="voiceNotePlayerWrap" class="voice-note-player">
+        <audio id="voiceNotePlayer" controls preload="metadata"></audio>
+        <button type="button" id="clearVoiceNoteBtn" class="clear-btn">Clear</button>
+      </div>
+      <input type="file" id="diagVoiceFallbackInput" accept="audio/*" capture style="display:none">
+
       <label style="font-weight:700;font-size:1.3rem;margin-top:16px">Notes:</label>
       <div id="notesContainer" style="display:flex;flex-direction:column;gap:8px;margin:8px 0;max-height:240px;overflow-y:auto"></div>
       <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
         <input type="text" id="newNoteInput" placeholder="Add a note..." style="flex:1;padding:18px;border:1px solid #ddd;border-radius:8px;font-size:1.1rem;height:60px">
         <button type="button" id="addNoteBtn" class="btn btn-primary" style="padding:18px 22px;font-size:1.1rem">+ Add</button>
       </div>
-      
-      <label style="font-weight:600;font-size:1.05rem">Photos:</label>
-      <button type="button" id="startCameraBtn" class="btn" style="background:#2196F3;color:#fff;padding:16px 24px;font-size:1.2rem;font-weight:600;margin-top:8px;display:flex;align-items:center;justify-content:center;gap:10px;width:100%">
-        <i class="fas fa-camera" style="font-size:1.4rem"></i> START CAMERA
-      </button>
-      <button type="button" id="stopCameraBtn" class="btn" style="background:#e74c3c;color:#fff;padding:16px 24px;font-size:1.2rem;font-weight:600;margin-top:8px;display:none;align-items:center;justify-content:center;gap:10px;width:100%">
-        <i class="fas fa-times" style="font-size:1.4rem"></i> CLOSE CAMERA
-      </button>
-      <div style="margin-top:8px">
-        <div class="small-muted" style="display:none;align-items:center;gap:10px;justify-content:space-between;flex-wrap:wrap" id="cameraControls">
-          <span>Camera mode</span>
-          <div style="display:flex;align-items:center;gap:8px">
-            <span>Quality:</span>
-            <div id="qualityGroup" style="display:flex;gap:6px">
-              <button type="button" class="btn" data-q="low" style="padding:6px 10px">Low</button>
-              <button type="button" class="btn" data-q="med" style="padding:6px 10px;background:#00b894;color:#fff">Med</button>
-              <button type="button" class="btn" data-q="high" style="padding:6px 10px">High</button>
-            </div>
-          </div>
-        </div>
-          <div id="preview" class="preview"></div>
-        <div class="cam-row" style="display:none" id="cameraView">
-          <div class="cam-wrap">
-            <video id="cam" playsinline muted style="width:100%;aspect-ratio:1/1;background:#222;border-radius:8px;display:block"></video>
-            <canvas id="canvas" style="display:none"></canvas>
-            <!-- Overlayed controls centered bottom -->
-            <div class="cam-overlay-btn">
-              <button type="button" class="cam-btn large" id="captureBtn">Capture</button>
-            </div>
-          </div>
-          <!-- reset button relocated under Complete (hidden/off-screen) -->
+
+      <label style="font-weight:600;font-size:1.05rem">Photos / Video:</label>
+      <div class="capture-actions">
+        <button type="button" id="takePhotoBtn" class="capture-btn">
+          <i class="fas fa-camera" style="font-size:1.2rem"></i> Take Photo
+        </button>
+        <button type="button" id="takeVideoBtn" class="capture-btn video">
+          <i class="fas fa-video" style="font-size:1.2rem"></i> Take Video
+        </button>
+      </div>
+      <input type="file" id="capturePhotoInput" accept="image/*" capture="environment" style="display:none">
+      <input type="file" id="captureVideoInput" accept="video/*" capture="environment" style="display:none">
+      <div id="preview" class="media-preview"></div>
+      <div id="savedVideoList" class="saved-video-list"></div>
+      <button type="button" id="startCameraBtn" style="display:none" aria-hidden="true"></button>
+      <button type="button" id="stopCameraBtn" style="display:none" aria-hidden="true"></button>
+      <div id="cameraControls" style="display:none" aria-hidden="true">
+        <div id="qualityGroup">
+          <button type="button" data-q="low"></button>
+          <button type="button" data-q="med"></button>
+          <button type="button" data-q="high"></button>
         </div>
       </div>
+      <div id="cameraView" style="display:none" aria-hidden="true">
+        <video id="cam" playsinline muted></video>
+        <canvas id="canvas" style="display:none"></canvas>
+        <button type="button" id="captureBtn"></button>
+      </div>
+      <button type="button" id="resetCamHiddenBtn" style="display:none" aria-hidden="true"></button>
       <div class="complete-wrap">
           <button type="button" class="btn-complete" id="completeBtn">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle;margin-right:8px">
@@ -310,8 +453,6 @@
           </svg>
           Done
         </button>
-          <!-- Hidden reset button placed below the Complete button to keep camera centered; visually off-screen but reachable via script or CSS if needed -->
-          <button type="button" id="resetCamHiddenBtn" style="position:relative;left:-9999px;visibility:hidden;" aria-hidden="true">Reset Cam Hidden</button>
       </div>
     </form>
     <div id="msg" style="margin-top:10px"></div>
@@ -356,9 +497,38 @@
   const isBadFlow = flowFrom === 'bad';
   const isReturnFlow = flowFrom === 'return';
   const isForcedDiagnosticFlow = isBadFlow || isReturnFlow;
+  function extractNumericSuffix(rawUpc){
+    const normalized = String(rawUpc || '').trim();
+    const match = normalized.match(/-(\d+)$/);
+    return match ? match[1] : '';
+  }
+  function renderSuffixMarker(){
+    const markerWrap = document.getElementById('suffixMarkerWrap');
+    const markerValue = document.getElementById('suffixMarkerValue');
+    if(!markerWrap || !markerValue) return;
+    const suffix = isBadFlow ? extractNumericSuffix('{{ upc }}') : '';
+    if(!suffix){
+      markerWrap.style.display = 'none';
+      markerValue.textContent = '';
+      return;
+    }
+    markerValue.textContent = suffix;
+    markerWrap.style.display = 'flex';
+  }
   // const photos = document.getElementById('photos'); // Not using file input anymore
     const preview = document.getElementById('preview');
     const qualityGroup = document.getElementById('qualityGroup');
+    const takePhotoBtn = document.getElementById('takePhotoBtn');
+    const takeVideoBtn = document.getElementById('takeVideoBtn');
+    const capturePhotoInput = document.getElementById('capturePhotoInput');
+    const captureVideoInput = document.getElementById('captureVideoInput');
+    const savedVideoList = document.getElementById('savedVideoList');
+    const recordNoteBtn = document.getElementById('recordNoteBtn');
+    const recordNoteHint = document.getElementById('recordNoteHint');
+    const voiceNotePlayerWrap = document.getElementById('voiceNotePlayerWrap');
+    const voiceNotePlayer = document.getElementById('voiceNotePlayer');
+    const clearVoiceNoteBtn = document.getElementById('clearVoiceNoteBtn');
+    const diagVoiceFallbackInput = document.getElementById('diagVoiceFallbackInput');
   const reasonSelect = document.getElementById('reasonSelect');
   const reasonBtns = Array.from(document.querySelectorAll('.reason-btn'));
     const reasonSeparator = ' | ';
@@ -367,6 +537,16 @@
     function uid(){ return 'id_'+Math.random().toString(36).slice(2); }
     const pendingFiles = []; // {id, file, quality} - not used anymore
     const capturedFiles = []; // {id, file, quality} - stores camera captures
+    const pendingVideos = []; // {id, file}
+    let savedVideoItems = [];
+    let diagVoiceRecorder = null;
+    let diagVoiceStream = null;
+    let diagVoiceChunks = [];
+    let diagVoicePendingFile = null;
+    let diagVoicePendingUrl = '';
+    let diagVoiceSavedItem = null;
+    let diagVoicePointerId = null;
+    let diagVoiceMimeType = '';
 
     function parseReasonSelection(rawValue){
       const text = String(rawValue || '').trim();
@@ -392,6 +572,192 @@
       updateDoneButtonState();
     }
 
+    function activeRowStatus(){
+      return isBadFlow
+        ? 'bad'
+        : (isReturnFlow ? 'return' : (statusInput.value || ''));
+    }
+
+    function setVoiceHint(text, isError=false){
+      if(!recordNoteHint) return;
+      recordNoteHint.textContent = String(text || '');
+      recordNoteHint.style.color = isError ? '#b91c1c' : '';
+    }
+
+    function preferredDiagVoiceMimeType(){
+      const candidates = [
+        'audio/webm;codecs=opus',
+        'audio/webm',
+        'audio/mp4',
+        'audio/ogg;codecs=opus'
+      ];
+      if(!window.MediaRecorder || typeof MediaRecorder.isTypeSupported !== 'function'){
+        return '';
+      }
+      for(const candidate of candidates){
+        try{
+          if(MediaRecorder.isTypeSupported(candidate)) return candidate;
+        }catch(_){}
+      }
+      return '';
+    }
+
+    function diagVoiceExtensionForMime(mimeType){
+      const mime = String(mimeType || '').toLowerCase();
+      if(mime.includes('mp4') || mime.includes('aac') || mime.includes('m4a')) return '.m4a';
+      if(mime.includes('ogg')) return '.ogg';
+      return '.webm';
+    }
+
+    function revokeDiagVoicePendingUrl(){
+      if(diagVoicePendingUrl){
+        try{ URL.revokeObjectURL(diagVoicePendingUrl); }catch(_){}
+      }
+      diagVoicePendingUrl = '';
+    }
+
+    function clearDiagVoicePending(){
+      revokeDiagVoicePendingUrl();
+      diagVoicePendingFile = null;
+      renderVoiceNotePlayer();
+    }
+
+    function setDiagVoicePendingFile(file){
+      clearDiagVoicePending();
+      if(!file) return;
+      diagVoicePendingFile = file;
+      diagVoicePendingUrl = URL.createObjectURL(file);
+      renderVoiceNotePlayer();
+    }
+
+    function stopDiagVoiceStream(){
+      try{
+        if(diagVoiceStream){
+          diagVoiceStream.getTracks().forEach(track => track.stop());
+        }
+      }catch(_){}
+      diagVoiceStream = null;
+    }
+
+    function renderVoiceNotePlayer(){
+      if(!voiceNotePlayerWrap || !voiceNotePlayer || !recordNoteBtn) return;
+      const savedSrc = diagVoiceSavedItem && diagVoiceSavedItem.file_path ? `/static/${diagVoiceSavedItem.file_path}` : '';
+      const pendingSrc = diagVoicePendingFile && diagVoicePendingUrl ? diagVoicePendingUrl : '';
+      const src = pendingSrc || savedSrc;
+      if(src){
+        voiceNotePlayer.src = src;
+        voiceNotePlayerWrap.classList.add('active');
+        recordNoteBtn.classList.add('ready');
+        setVoiceHint(pendingSrc ? 'Voice note ready. Tap Done to save it.' : 'Saved voice note attached to this item.');
+      } else {
+        voiceNotePlayer.removeAttribute('src');
+        try{ voiceNotePlayer.load(); }catch(_){}
+        voiceNotePlayerWrap.classList.remove('active');
+        recordNoteBtn.classList.remove('ready');
+        if(!diagVoiceRecorder){
+          setVoiceHint('Press and hold the mic to record one voice note for this item');
+        }
+      }
+      if(clearVoiceNoteBtn){
+        clearVoiceNoteBtn.textContent = pendingSrc ? 'Clear' : 'Delete';
+      }
+    }
+
+    function renderSavedVideos(){
+      if(!savedVideoList) return;
+      savedVideoList.innerHTML = '';
+      const pendingPrefix = document.createDocumentFragment();
+      pendingVideos.forEach(entry => {
+        const card = document.createElement('div');
+        card.className = 'saved-video-card';
+        const video = document.createElement('video');
+        const url = URL.createObjectURL(entry.file);
+        video.src = url;
+        video.controls = true;
+        video.preload = 'metadata';
+        video.addEventListener('loadeddata', ()=>{ try{ URL.revokeObjectURL(url); }catch(_){} }, {once:true});
+        const del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'del-x';
+        del.textContent = '×';
+        del.addEventListener('click', ()=>{
+          const idx = pendingVideos.findIndex(item => item.id === entry.id);
+          if(idx > -1) pendingVideos.splice(idx, 1);
+          renderSavedVideos();
+        });
+        const label = document.createElement('div');
+        label.className = 'media-preview-label';
+        label.textContent = 'Pending Video';
+        card.appendChild(video);
+        card.appendChild(del);
+        card.appendChild(label);
+        pendingPrefix.appendChild(card);
+      });
+      savedVideoList.appendChild(pendingPrefix);
+      (savedVideoItems || []).forEach(item => {
+        const card = document.createElement('div');
+        card.className = 'saved-video-card';
+        const video = document.createElement('video');
+        video.src = `/static/${item.file_path}`;
+        video.controls = true;
+        video.preload = 'metadata';
+        const del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'del-x';
+        del.textContent = '×';
+        del.addEventListener('click', async ()=>{
+          if(!confirm('Delete this video?')) return;
+          try{
+            const res = await fetch(`/api/items_prep/media/${item.id}`, { method: 'DELETE' });
+            const j = await res.json();
+            if(!(j && j.success)){
+              alert('Failed to delete video: ' + (j && j.error || 'unknown'));
+              return;
+            }
+            savedVideoItems = savedVideoItems.filter(existing => Number(existing.id) !== Number(item.id));
+            renderSavedVideos();
+          }catch(e){
+            alert('Error deleting video: ' + e);
+          }
+        });
+        card.appendChild(video);
+        card.appendChild(del);
+        savedVideoList.appendChild(card);
+      });
+    }
+
+    async function loadDiagnosticMedia(){
+      const upc = '{{ upc }}'.trim();
+      if(!upc) return;
+      const rowStatus = activeRowStatus();
+      const params = new URLSearchParams();
+      if(rowStatus) params.set('row_status', rowStatus);
+      try{
+        const audioParams = new URLSearchParams(params.toString());
+        audioParams.set('media_type', 'audio');
+        const audioRes = await fetch(`/api/items_prep/media/${encodeURIComponent(upc)}?${audioParams.toString()}`);
+        const audioJson = await audioRes.json();
+        diagVoiceSavedItem = audioJson && audioJson.success && Array.isArray(audioJson.items) && audioJson.items.length
+          ? audioJson.items[0]
+          : null;
+      }catch(_){
+        diagVoiceSavedItem = null;
+      }
+      try{
+        const videoParams = new URLSearchParams(params.toString());
+        videoParams.set('media_type', 'video');
+        const videoRes = await fetch(`/api/items_prep/media/${encodeURIComponent(upc)}?${videoParams.toString()}`);
+        const videoJson = await videoRes.json();
+        savedVideoItems = videoJson && videoJson.success && Array.isArray(videoJson.items)
+          ? videoJson.items
+          : [];
+      }catch(_){
+        savedVideoItems = [];
+      }
+      renderVoiceNotePlayer();
+      renderSavedVideos();
+    }
+
     function makeThumb(entry, source){
       const url = URL.createObjectURL(entry.file);
       const wrap = document.createElement('div');
@@ -400,6 +766,7 @@
       const del = document.createElement('button'); del.type='button'; del.className='del-x'; del.textContent='×';
       del.dataset.id = entry.id; del.dataset.source = source;
       const badge = document.createElement('span'); badge.className='badge-quality'; badge.dataset.badge = entry.id; badge.textContent = ((entry.quality||'').toUpperCase()||'');
+      if(!entry.quality) badge.style.display = 'none';
       badge.title = 'Click to change quality';
       del.addEventListener('click', ()=>{
         // remove from arrays
@@ -568,6 +935,146 @@
     }
     function blobToImage(blob){ return new Promise((resolve)=>{ const url=URL.createObjectURL(blob); const img=new Image(); img.onload=()=>{ URL.revokeObjectURL(url); resolve(img); }; img.src=url; }); }
 
+    if(takePhotoBtn && capturePhotoInput){
+      takePhotoBtn.addEventListener('click', ()=> capturePhotoInput.click());
+      capturePhotoInput.addEventListener('change', ()=>{
+        const files = Array.from(capturePhotoInput.files || []);
+        files.forEach(file => {
+          const entry = {id: uid(), file, quality: ''};
+          capturedFiles.push(entry);
+          makeThumb(entry, 'captured');
+        });
+        capturePhotoInput.value = '';
+      });
+    }
+
+    if(takeVideoBtn && captureVideoInput){
+      takeVideoBtn.addEventListener('click', ()=> captureVideoInput.click());
+      captureVideoInput.addEventListener('change', ()=>{
+        const files = Array.from(captureVideoInput.files || []);
+        files.forEach(file => pendingVideos.push({id: uid(), file}));
+        captureVideoInput.value = '';
+        renderSavedVideos();
+      });
+    }
+
+    if(recordNoteBtn){
+      recordNoteBtn.addEventListener('pointerdown', async (e)=>{
+        e.preventDefault();
+        diagVoicePointerId = e.pointerId;
+        try{
+          if(recordNoteBtn.setPointerCapture){
+            recordNoteBtn.setPointerCapture(e.pointerId);
+          }
+        }catch(_){}
+        const started = await (async ()=>{
+          if(diagVoiceRecorder) return true;
+          if(!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder)){
+            return false;
+          }
+          try{
+            diagVoiceStream = await navigator.mediaDevices.getUserMedia({audio:true});
+            diagVoiceChunks = [];
+            diagVoiceMimeType = preferredDiagVoiceMimeType();
+            diagVoiceRecorder = diagVoiceMimeType
+              ? new MediaRecorder(diagVoiceStream, {mimeType: diagVoiceMimeType})
+              : new MediaRecorder(diagVoiceStream);
+            diagVoiceRecorder.addEventListener('dataavailable', (event)=>{
+              if(event.data && event.data.size > 0){
+                diagVoiceChunks.push(event.data);
+              }
+            });
+            diagVoiceRecorder.addEventListener('stop', ()=>{
+              try{
+                const mimeType = diagVoiceRecorder && diagVoiceRecorder.mimeType ? diagVoiceRecorder.mimeType : diagVoiceMimeType || 'audio/webm';
+                const blob = new Blob(diagVoiceChunks, {type: mimeType});
+                const ext = diagVoiceExtensionForMime(mimeType);
+                const file = new File([blob], `diag_voice_${Date.now()}${ext}`, {type: mimeType});
+                setDiagVoicePendingFile(file);
+              }catch(err){
+                console.error('Voice note finalization failed:', err);
+                setVoiceHint('Voice note could not be saved', true);
+              } finally {
+                diagVoiceRecorder = null;
+                diagVoiceChunks = [];
+                diagVoiceMimeType = '';
+                stopDiagVoiceStream();
+                recordNoteBtn.classList.remove('recording');
+              }
+            }, {once:true});
+            diagVoiceRecorder.start();
+            recordNoteBtn.classList.add('recording');
+            setVoiceHint('Recording now. Release to save.');
+            return true;
+          }catch(err){
+            console.error('Diagnostic voice recording unavailable:', err);
+            stopDiagVoiceStream();
+            diagVoiceRecorder = null;
+            diagVoiceChunks = [];
+            diagVoiceMimeType = '';
+            return false;
+          }
+        })();
+        if(!started && diagVoiceFallbackInput){
+          setVoiceHint('Opening microphone...');
+          diagVoiceFallbackInput.click();
+        }
+      });
+    }
+
+    document.addEventListener('pointerup', async (e)=>{
+      if(diagVoicePointerId === null || e.pointerId !== diagVoicePointerId) return;
+      diagVoicePointerId = null;
+      if(recordNoteBtn) recordNoteBtn.classList.remove('recording');
+      if(diagVoiceRecorder && diagVoiceRecorder.state !== 'inactive'){
+        diagVoiceRecorder.stop();
+      }
+    });
+
+    document.addEventListener('pointercancel', async (e)=>{
+      if(diagVoicePointerId === null || e.pointerId !== diagVoicePointerId) return;
+      diagVoicePointerId = null;
+      if(recordNoteBtn) recordNoteBtn.classList.remove('recording');
+      if(diagVoiceRecorder && diagVoiceRecorder.state !== 'inactive'){
+        diagVoiceRecorder.stop();
+      }
+    });
+
+    if(diagVoiceFallbackInput){
+      diagVoiceFallbackInput.addEventListener('change', ()=>{
+        const file = diagVoiceFallbackInput.files && diagVoiceFallbackInput.files[0] ? diagVoiceFallbackInput.files[0] : null;
+        if(file){
+          setDiagVoicePendingFile(file);
+        } else {
+          renderVoiceNotePlayer();
+        }
+        diagVoiceFallbackInput.value = '';
+      });
+    }
+
+    if(clearVoiceNoteBtn){
+      clearVoiceNoteBtn.addEventListener('click', async ()=>{
+        if(diagVoicePendingFile){
+          clearDiagVoicePending();
+          return;
+        }
+        if(!diagVoiceSavedItem) return;
+        if(!confirm('Delete this voice note?')) return;
+        try{
+          const res = await fetch(`/api/items_prep/media/${diagVoiceSavedItem.id}`, { method: 'DELETE' });
+          const j = await res.json();
+          if(!(j && j.success)){
+            alert('Failed to delete voice note: ' + (j && j.error || 'unknown'));
+            return;
+          }
+          diagVoiceSavedItem = null;
+          renderVoiceNotePlayer();
+        }catch(err){
+          alert('Error deleting voice note: ' + err);
+        }
+      });
+    }
+
     document.getElementById('completeBtn').onclick = async ()=>{
       // Check if button is disabled
       if(document.getElementById('completeBtn').disabled) return;
@@ -613,10 +1120,9 @@
         if(res.ok && j && j.success){
           // Also POST status (status, reason) when status is set.
           try{
-            const statusVal = isBadFlow
-              ? 'bad'
-              : (isReturnFlow ? 'return' : (statusInput.value || ''));
+            const statusVal = activeRowStatus();
             let continuedWithoutLot = false;
+            let finalUpc = '{{ upc }}';
             console.log('[SAVE] Status value:', statusVal);
             if(statusVal && (statusVal === 'good' || statusVal === 'bad' || statusVal === 'return')){
               const reasonVal = (document.getElementById('reasonSelect') && document.getElementById('reasonSelect').value) || '';
@@ -672,6 +1178,7 @@
                 return;
               }
               continuedWithoutLot = !!statusData.continued_without_lot;
+              finalUpc = statusData.upc || finalUpc;
               
               // Update sessionStorage with the actual UPC that was created (important for bad status with suffixed UPCs)
               // SKIP this if editing from Item Manager - we don't want to change the original UPC
@@ -688,6 +1195,44 @@
               }
             } else {
               console.log('[SAVE] Status not set or invalid, skipping status save');
+            }
+
+            if(diagVoicePendingFile){
+              const voiceFd = new FormData();
+              voiceFd.append('media', diagVoicePendingFile, diagVoicePendingFile.name || `diag_voice_${Date.now()}.webm`);
+              voiceFd.append('media_type', 'audio');
+              voiceFd.append('replace_existing', '1');
+              if(statusVal) voiceFd.append('row_status', statusVal);
+              const voiceRes = await fetch('/api/items_prep/media/' + encodeURIComponent(finalUpc), {
+                method: 'POST',
+                body: voiceFd
+              });
+              const voiceJson = await voiceRes.json().catch(()=>({success:false, error:'Voice note upload failed'}));
+              if(!(voiceJson && voiceJson.success)){
+                msg.textContent = 'Voice note upload failed: ' + ((voiceJson && voiceJson.error) || 'Unknown error');
+                return;
+              }
+              clearDiagVoicePending();
+            }
+
+            if(pendingVideos.length){
+              const videoFd = new FormData();
+              pendingVideos.forEach(entry => {
+                videoFd.append('media[]', entry.file, entry.file.name || `diag_video_${Date.now()}.mp4`);
+              });
+              videoFd.append('media_type', 'video');
+              if(statusVal) videoFd.append('row_status', statusVal);
+              const videoRes = await fetch('/api/items_prep/media/' + encodeURIComponent(finalUpc), {
+                method: 'POST',
+                body: videoFd
+              });
+              const videoJson = await videoRes.json().catch(()=>({success:false, error:'Video upload failed'}));
+              if(!(videoJson && videoJson.success)){
+                msg.textContent = 'Video upload failed: ' + ((videoJson && videoJson.error) || 'Unknown error');
+                return;
+              }
+              pendingVideos.splice(0, pendingVideos.length);
+              renderSavedVideos();
             }
           }catch(e){ 
             console.error('[SAVE] Status save error:', e);
@@ -779,6 +1324,7 @@
       });
       statusInput.value = selectedStatus;
       updateNoteComposerState();
+      loadDiagnosticMedia().catch(()=>{});
     }
     
     statusBubbles.forEach(bubble => {
@@ -793,6 +1339,10 @@
       if(statusBubbleWrap){
         statusBubbleWrap.style.display = 'none';
       }
+      const setPositionBtn = document.getElementById('setPositionBtn');
+      if(setPositionBtn){
+        setPositionBtn.style.display = 'none';
+      }
       statusBubbles.forEach(bubble => {
         bubble.disabled = true;
         bubble.style.pointerEvents = 'none';
@@ -800,6 +1350,7 @@
       });
     }
     window.addEventListener('beforeunload', stopCam);
+    window.addEventListener('beforeunload', stopDiagVoiceStream);
 
     // Function to update Done button state
     function updateDoneButtonState(){
@@ -851,6 +1402,7 @@
     
     // Initialize Done buttons as disabled on page load
     window.addEventListener('DOMContentLoaded', ()=>{
+      renderSuffixMarker();
       updateDoneButtonState();
     });
 
@@ -861,6 +1413,12 @@
       const summary = document.getElementById('liveListingsSummary');
       const body = document.getElementById('liveListingsBody');
       if(!card || !summary || !body) return;
+      if(isForcedDiagnosticFlow){
+        card.style.display = 'none';
+        summary.textContent = '';
+        body.innerHTML = '';
+        return;
+      }
 
       summary.textContent = 'Loading live listings...';
       body.innerHTML = '';
@@ -946,6 +1504,7 @@
       
       // Load notes
       await loadNotes();
+      await loadDiagnosticMedia();
       await loadLiveListings();
       
       try{
@@ -1135,7 +1694,10 @@
       const upc = '{{ upc }}'.trim();
       if(!upc) return;
       try{
-        const res = await fetch(`/api/items_prep/notes/${encodeURIComponent(upc)}`);
+        const params = new URLSearchParams();
+        const rowStatus = activeRowStatus();
+        if(rowStatus) params.set('row_status', rowStatus);
+        const res = await fetch(`/api/items_prep/notes/${encodeURIComponent(upc)}${params.toString() ? ('?' + params.toString()) : ''}`);
         const j = await res.json();
         if(!j.success) return;
         const container = document.getElementById('notesContainer');
@@ -1169,10 +1731,11 @@
       const note = (input.value || '').trim();
       if(!note) return;
       try{
+        const rowStatus = activeRowStatus();
         const res = await fetch('/api/items_prep/notes', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({ upc, note })
+          body: JSON.stringify({ upc, note, row_status: rowStatus })
         });
         const j = await res.json();
         if(j.success){

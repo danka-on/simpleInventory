@@ -163,6 +163,7 @@
         </div>
     </div>
 
+    <script src="/static/barcode-entry-state.js"></script>
     <script>
         // DOM Elements
         const scannedResultInput = document.getElementById('scanned_result');
@@ -170,7 +171,12 @@
         const t = (key, fallback) => (window.i18n && window.i18n.t) ? window.i18n.t(key) : fallback;
         const invalidModal = document.getElementById('invalidModal');
         const invalidModalClose = document.getElementById('invalidModalClose');
+        const barcodeEntryState = window.BarcodeEntryState;
         let invalidModalOpen = false;
+        const SINGLE_SCAN_CAPTURE_MS = 700;
+        let pendingSingleBarcode = '';
+        let pendingSingleSuffix = 0;
+        let pendingSingleSubmitTimer = null;
 
         // Macy barcode filtering
         let allowedUPCs = [];
@@ -301,6 +307,72 @@
             const s = String(code || '').trim();
             if (/^\d+$/.test(s) && s.length <= 12) return s.padStart(12, '0');
             return s;
+        }
+
+        function clearPendingSingleSubmit() {
+            if (pendingSingleSubmitTimer) {
+                clearTimeout(pendingSingleSubmitTimer);
+                pendingSingleSubmitTimer = null;
+            }
+        }
+
+        function currentSingleActualCode() {
+            if (!pendingSingleBarcode) return '';
+            return pendingSingleSuffix > 0
+                ? `${pendingSingleBarcode}-${pendingSingleSuffix}`
+                : pendingSingleBarcode;
+        }
+
+        function updatePendingSingleDisplay() {
+            const finalCode = currentSingleActualCode();
+            if (!finalCode) return;
+            document.getElementById('scanned_result').value = finalCode;
+            scannedResultInput.style.background = '#e0ffe0';
+        }
+
+        function commitPendingSingleBarcode() {
+            clearPendingSingleSubmit();
+            const finalCode = currentSingleActualCode();
+            if (!finalCode) return;
+
+            if (barcodeEntryState) {
+                barcodeEntryState.saveEntries(
+                    barcodeEntryState.setSingleScanSuffix(pendingSingleBarcode, pendingSingleSuffix)
+                );
+            } else {
+                sessionStorage.setItem('barcode', finalCode);
+            }
+            document.getElementById('scanned_result').value = finalCode;
+
+            const urlParams = new URLSearchParams(window.location.search);
+            const returnTo = urlParams.get('return');
+
+            if (returnTo === 'marketplace') {
+                window.location.href = '/marketplace-sale?scanned=true';
+                return;
+            }
+
+            const form = document.getElementById('scan_form');
+            if (form) {
+                form.submit();
+            }
+        }
+
+        function queueSingleBarcode(code) {
+            const normalized = String(code || '').trim();
+            if (!normalized) return;
+
+            if (pendingSingleBarcode === normalized) {
+                pendingSingleSuffix += 1;
+            } else {
+                pendingSingleBarcode = normalized;
+                pendingSingleSuffix = 0;
+            }
+
+            playBeep();
+            updatePendingSingleDisplay();
+            clearPendingSingleSubmit();
+            pendingSingleSubmitTimer = setTimeout(commitPendingSingleBarcode, SINGLE_SCAN_CAPTURE_MS);
         }
 
         // Handle barcode input for manual or scanner input
@@ -503,25 +575,7 @@
                 return;
             }
 
-            // Valid barcode - save and handle return
-            document.getElementById('scanned_result').value = code;
-            sessionStorage.setItem('barcode', code);
-            playBeep();
-
-            // Check if we came from marketplace
-            const urlParams = new URLSearchParams(window.location.search);
-            const returnTo = urlParams.get('return');
-
-            if (returnTo === 'marketplace') {
-                // Return to marketplace with scanned code
-                window.location.href = '/marketplace-sale?scanned=true';
-            } else {
-                // Normal flow - submit the form
-                const form = document.getElementById('scan_form');
-                if (form) {
-                    form.submit();
-                }
-            }
+            queueSingleBarcode(code);
         }
 
         function fetchAllowedUPCs() {
@@ -562,7 +616,10 @@
                 checkPictureUploadStatus();
             }
             // PERSIST BARCODE: If barcode exists in sessionStorage, pre-fill input
-            const storedBarcode = sessionStorage.getItem('barcode');
+            const storedEntries = barcodeEntryState ? barcodeEntryState.loadEntries() : [];
+            const storedBarcode = (barcodeEntryState && storedEntries.length)
+                ? barcodeEntryState.serializeEntries(storedEntries)
+                : sessionStorage.getItem('barcode');
             if (storedBarcode) {
                 scannedResultInput.value = storedBarcode;
                 scannedResultInput.style.background = '#e0ffe0';
@@ -615,6 +672,7 @@
         e.preventDefault();
         sessionStorage.removeItem('item_position');
         sessionStorage.removeItem('barcode');
+        sessionStorage.removeItem('barcode_entries');
         sessionStorage.removeItem('pictureposition_path');
         sessionStorage.removeItem('positionLocked');
         // Notify server to clear lock state

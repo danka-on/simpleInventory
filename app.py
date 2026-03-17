@@ -2052,6 +2052,11 @@ def send_email_smtp(to_emails, subject, body, html_body=None):
 def tools():
     return render_template('tools.html')
 
+@app.route('/prep-media-cleaner')
+def prep_media_cleaner_page():
+    """Management cleaner for prep photos, audio, and video files."""
+    return render_template('prep_media_cleaner.html')
+
 @app.route('/bulk-manifest')
 def bulk_manifest_page():
     """Bulk manifest builder for scanned barcode sale sheets."""
@@ -14602,6 +14607,17 @@ def _ensure_items_prep_tables(force=False):
                 created_at TEXT
             )
         ''')
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS items_prep_media (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                upc TEXT,
+                row_status TEXT DEFAULT '',
+                media_type TEXT,
+                file_path TEXT,
+                mime_type TEXT,
+                created_at TEXT
+            )
+        ''')
 
         cur.execute("PRAGMA table_info(items_prep_images)")
         cols = [r[1] for r in cur.fetchall()]
@@ -14626,12 +14642,24 @@ def _ensure_items_prep_tables(force=False):
         if 'row_status' not in note_cols:
             cur.execute("ALTER TABLE items_prep_notes ADD COLUMN row_status TEXT DEFAULT ''")
 
+        cur.execute("PRAGMA table_info(items_prep_media)")
+        media_cols = [r[1] for r in cur.fetchall()]
+        if media_cols:
+            if 'row_status' not in media_cols:
+                cur.execute("ALTER TABLE items_prep_media ADD COLUMN row_status TEXT DEFAULT ''")
+            if 'media_type' not in media_cols:
+                cur.execute("ALTER TABLE items_prep_media ADD COLUMN media_type TEXT DEFAULT ''")
+            if 'mime_type' not in media_cols:
+                cur.execute("ALTER TABLE items_prep_media ADD COLUMN mime_type TEXT DEFAULT ''")
+
         # Speed up per-UPC image/note lookups used by list views.
         cur.execute('CREATE INDEX IF NOT EXISTS idx_items_prep_images_upc ON items_prep_images(upc)')
         cur.execute('CREATE INDEX IF NOT EXISTS idx_items_prep_images_upc_deleted ON items_prep_images(upc, deleted_at)')
         cur.execute('CREATE INDEX IF NOT EXISTS idx_items_prep_images_upc_status_deleted ON items_prep_images(upc, row_status, deleted_at)')
         cur.execute('CREATE INDEX IF NOT EXISTS idx_items_prep_notes_upc ON items_prep_notes(upc)')
         cur.execute('CREATE INDEX IF NOT EXISTS idx_items_prep_notes_upc_status ON items_prep_notes(upc, row_status)')
+        cur.execute('CREATE INDEX IF NOT EXISTS idx_items_prep_media_upc ON items_prep_media(upc)')
+        cur.execute('CREATE INDEX IF NOT EXISTS idx_items_prep_media_scope ON items_prep_media(upc, row_status, media_type)')
 
         # Exception audit trail for intentional overage adds.
         cur.execute('''
@@ -14767,6 +14795,353 @@ def _move_to_trash(abs_path, upc):
     except Exception as e:
         print('Failed move to trash:', e)
         return None
+
+def _items_prep_delete_media_rows(cur, upc, row_status=None, media_type=None):
+    """Hard-delete prep media rows and files for one scoped UPC."""
+    try:
+        conditions = ['upc = ? COLLATE NOCASE']
+        params = [upc]
+        if row_status is not None:
+            conditions.append("COALESCE(row_status, '') = ? COLLATE NOCASE")
+            params.append(_normalize_prep_row_status(row_status))
+        if media_type:
+            conditions.append("COALESCE(media_type, '') = ? COLLATE NOCASE")
+            params.append(str(media_type).strip().lower())
+        where_sql = ' AND '.join(conditions)
+        cur.execute(f'SELECT id, file_path FROM items_prep_media WHERE {where_sql}', tuple(params))
+        rows = cur.fetchall()
+        for row in rows:
+            rel = row['file_path'] if isinstance(row, sqlite3.Row) else row[1]
+            if not rel:
+                continue
+            abs_path = os.path.join(app.root_path, 'static', rel) if not os.path.isabs(rel) else rel
+            try:
+                if os.path.isfile(abs_path):
+                    os.remove(abs_path)
+            except Exception as fe:
+                print('Failed hard remove media', abs_path, fe)
+        cur.execute(f'DELETE FROM items_prep_media WHERE {where_sql}', tuple(params))
+        return int(cur.rowcount or 0)
+    except Exception as e:
+        print('Failed deleting prep media rows:', e)
+        return 0
+
+def _prep_media_cleaner_abs_path(raw_path):
+    raw = str(raw_path or '').strip()
+    if not raw:
+        return ''
+    if os.path.isabs(raw):
+        return raw
+    if raw.startswith('/static/'):
+        raw = raw[len('/static/'):]
+    elif raw.startswith('static/'):
+        raw = raw[len('static/'):]
+    raw = raw.replace('/', os.sep).lstrip('\\/')
+    return os.path.join(app.root_path, 'static', raw)
+
+def _prep_media_cleaner_format_bytes(size_bytes):
+    try:
+        value = float(size_bytes or 0)
+    except Exception:
+        value = 0.0
+    units = ['B', 'KB', 'MB', 'GB', 'TB']
+    idx = 0
+    while value >= 1024.0 and idx < len(units) - 1:
+        value /= 1024.0
+        idx += 1
+    if idx == 0:
+        return f"{int(value)} {units[idx]}"
+    return f"{value:.2f} {units[idx]}"
+
+def _prep_media_cleaner_allowed_types(raw_types=None):
+    allowed = {'image', 'audio', 'video'}
+    if raw_types is None:
+        return ['image', 'audio', 'video']
+    if isinstance(raw_types, str):
+        parts = [p.strip().lower() for p in raw_types.split(',') if p.strip()]
+    elif isinstance(raw_types, (list, tuple, set)):
+        parts = [str(p or '').strip().lower() for p in raw_types if str(p or '').strip()]
+    else:
+        parts = []
+    resolved = [p for p in parts if p in allowed]
+    return resolved or ['image', 'audio', 'video']
+
+def _prep_media_cleaner_normalize_upc_filter(raw_upc):
+    raw = str(raw_upc or '').strip()
+    if not raw:
+        return ''
+    try:
+        return _normalize_upc_preserve_suffix_for_match(_normalize_upc(raw))
+    except Exception:
+        return raw
+
+def _prep_media_cleaner_row_lots(raw_upc, row_status, status_lot_map, any_status_lots, bol_lot_map):
+    try:
+        upc = _normalize_upc_preserve_suffix_for_match(_normalize_upc(raw_upc))
+    except Exception:
+        upc = str(raw_upc or '').strip()
+    status_key = _normalize_prep_row_status(row_status)
+    base_upc = upc.split('-', 1)[0].strip()
+    lots = set()
+    if status_key:
+        lots.update(status_lot_map.get((upc, status_key), set()))
+        if not lots and base_upc and base_upc != upc:
+            lots.update(status_lot_map.get((base_upc, status_key), set()))
+    if not lots:
+        lots.update(any_status_lots.get(upc, set()))
+    if not lots and base_upc and base_upc != upc:
+        lots.update(any_status_lots.get(base_upc, set()))
+    if not lots:
+        lots.update(bol_lot_map.get(upc, set()))
+    if not lots and base_upc and base_upc != upc:
+        lots.update(bol_lot_map.get(base_upc, set()))
+    return sorted(lots)
+
+def _prep_media_cleaner_load_rows():
+    """Return active prep media rows (photos/audio/video) with size and lot metadata."""
+    _ensure_items_prep_tables()
+    conn = sqlite3.connect('bol.db')
+    conn.row_factory = sqlite3.Row
+    try:
+        cur = conn.cursor()
+
+        status_lot_map = {}
+        any_status_lots = {}
+        lot_options = set()
+        cur.execute('''
+            SELECT upc, COALESCE(lot_number, '') AS lot_number, LOWER(COALESCE(status, '')) AS status
+            FROM items_prep_status
+            WHERE TRIM(COALESCE(lot_number, '')) != ''
+        ''')
+        for row in cur.fetchall():
+            upc = _normalize_upc_preserve_suffix_for_match(_normalize_upc(row['upc']))
+            lot = _normalize_lot_number(row['lot_number'])
+            status = _normalize_prep_row_status(row['status'])
+            if not upc or not lot:
+                continue
+            lot_options.add(lot)
+            any_status_lots.setdefault(upc, set()).add(lot)
+            if status:
+                status_lot_map.setdefault((upc, status), set()).add(lot)
+
+        bol_lot_map = {}
+        cur.execute('''
+            SELECT upc, COALESCE(lot_number, '') AS lot_number
+            FROM bol_items
+            WHERE TRIM(COALESCE(lot_number, '')) != ''
+        ''')
+        for row in cur.fetchall():
+            upc = _normalize_upc_preserve_suffix_for_match(_normalize_upc(row['upc']))
+            lot = _normalize_lot_number(row['lot_number'])
+            if not upc or not lot:
+                continue
+            lot_options.add(lot)
+            bol_lot_map.setdefault(upc, set()).add(lot)
+
+        rows = []
+
+        cur.execute('''
+            SELECT id, upc, COALESCE(row_status, '') AS row_status, image_path, created_at
+            FROM items_prep_images
+            WHERE deleted_at IS NULL OR TRIM(COALESCE(deleted_at, '')) = ''
+            ORDER BY created_at DESC, id DESC
+        ''')
+        for row in cur.fetchall():
+            rel_path = str(row['image_path'] or '').strip()
+            abs_path = _prep_media_cleaner_abs_path(rel_path)
+            exists = bool(abs_path and os.path.isfile(abs_path))
+            try:
+                size_bytes = os.path.getsize(abs_path) if exists else 0
+            except Exception:
+                size_bytes = 0
+            lots = _prep_media_cleaner_row_lots(row['upc'], row['row_status'], status_lot_map, any_status_lots, bol_lot_map)
+            created_at = str(row['created_at'] or '').strip()
+            rows.append({
+                'row_id': int(row['id']),
+                'source_table': 'items_prep_images',
+                'media_type': 'image',
+                'upc': str(row['upc'] or '').strip(),
+                'row_status': _normalize_prep_row_status(row['row_status']),
+                'created_at': created_at,
+                'created_date': created_at[:10] if len(created_at) >= 10 else '',
+                'relative_path': rel_path,
+                'exists': exists,
+                'size_bytes': int(size_bytes or 0),
+                'size_label': _prep_media_cleaner_format_bytes(size_bytes),
+                'lots': lots,
+                'lot_label': lots[0] if len(lots) == 1 else (', '.join(lots[:3]) if lots else ''),
+                'lot_match_safe': len(lots) == 1
+            })
+
+        cur.execute('''
+            SELECT id, upc, COALESCE(row_status, '') AS row_status, COALESCE(media_type, '') AS media_type, file_path, created_at
+            FROM items_prep_media
+            WHERE COALESCE(media_type, '') IN ('audio', 'video')
+            ORDER BY created_at DESC, id DESC
+        ''')
+        for row in cur.fetchall():
+            media_type = str(row['media_type'] or '').strip().lower()
+            rel_path = str(row['file_path'] or '').strip()
+            abs_path = _prep_media_cleaner_abs_path(rel_path)
+            exists = bool(abs_path and os.path.isfile(abs_path))
+            try:
+                size_bytes = os.path.getsize(abs_path) if exists else 0
+            except Exception:
+                size_bytes = 0
+            lots = _prep_media_cleaner_row_lots(row['upc'], row['row_status'], status_lot_map, any_status_lots, bol_lot_map)
+            created_at = str(row['created_at'] or '').strip()
+            rows.append({
+                'row_id': int(row['id']),
+                'source_table': 'items_prep_media',
+                'media_type': media_type,
+                'upc': str(row['upc'] or '').strip(),
+                'row_status': _normalize_prep_row_status(row['row_status']),
+                'created_at': created_at,
+                'created_date': created_at[:10] if len(created_at) >= 10 else '',
+                'relative_path': rel_path,
+                'exists': exists,
+                'size_bytes': int(size_bytes or 0),
+                'size_label': _prep_media_cleaner_format_bytes(size_bytes),
+                'lots': lots,
+                'lot_label': lots[0] if len(lots) == 1 else (', '.join(lots[:3]) if lots else ''),
+                'lot_match_safe': len(lots) == 1
+            })
+
+        rows.sort(key=lambda item: (str(item.get('created_at') or ''), int(item.get('row_id') or 0)), reverse=True)
+        return rows, sorted(lot_options, reverse=True)
+    finally:
+        conn.close()
+
+def _prep_media_cleaner_filter_rows(rows, *, media_types=None, upc='', lot='', date_from='', date_to=''):
+    selected_types = set(_prep_media_cleaner_allowed_types(media_types))
+    upc_filter = _prep_media_cleaner_normalize_upc_filter(upc)
+    upc_filter_is_exact = '-' in upc_filter if upc_filter else False
+    lot_filter = _normalize_lot_number(lot)
+    date_from = str(date_from or '').strip()
+    date_to = str(date_to or '').strip()
+    filtered = []
+    skipped_ambiguous_lot = 0
+
+    for row in rows:
+        media_type = str(row.get('media_type') or '').strip().lower()
+        if media_type not in selected_types:
+            continue
+
+        row_upc = _prep_media_cleaner_normalize_upc_filter(row.get('upc'))
+        if upc_filter:
+            if upc_filter_is_exact:
+                if row_upc != upc_filter:
+                    continue
+            else:
+                row_base = row_upc.split('-', 1)[0].strip()
+                if row_base != upc_filter:
+                    continue
+
+        row_date = str(row.get('created_date') or '').strip()
+        if date_from and (not row_date or row_date < date_from):
+            continue
+        if date_to and (not row_date or row_date > date_to):
+            continue
+
+        if lot_filter:
+            lots = row.get('lots') or []
+            if lot_filter not in lots:
+                continue
+            if len(lots) != 1:
+                skipped_ambiguous_lot += 1
+                continue
+
+        filtered.append(row)
+
+    return filtered, skipped_ambiguous_lot
+
+def _prep_media_cleaner_summary(rows):
+    summary = {
+        'image': {'count': 0, 'bytes': 0},
+        'audio': {'count': 0, 'bytes': 0},
+        'video': {'count': 0, 'bytes': 0},
+        'all': {'count': 0, 'bytes': 0}
+    }
+    for row in rows:
+        media_type = str(row.get('media_type') or '').strip().lower()
+        size_bytes = int(row.get('size_bytes') or 0)
+        if media_type in summary:
+            summary[media_type]['count'] += 1
+            summary[media_type]['bytes'] += size_bytes
+        summary['all']['count'] += 1
+        summary['all']['bytes'] += size_bytes
+    for payload in summary.values():
+        payload['size_label'] = _prep_media_cleaner_format_bytes(payload['bytes'])
+    return summary
+
+def _prep_media_cleaner_delete_rows(rows):
+    deleted_counts = {'image': 0, 'audio': 0, 'video': 0}
+    deleted_bytes = {'image': 0, 'audio': 0, 'video': 0}
+    missing_file_rows = 0
+    image_ids = []
+    media_ids = []
+
+    for row in rows:
+        media_type = str(row.get('media_type') or '').strip().lower()
+        rel_path = str(row.get('relative_path') or '').strip()
+        abs_path = _prep_media_cleaner_abs_path(rel_path)
+        file_deleted = False
+        if abs_path:
+            try:
+                if os.path.isfile(abs_path):
+                    os.remove(abs_path)
+                    file_deleted = True
+            except Exception as exc:
+                print('Failed deleting prep cleaner file', abs_path, exc)
+        if file_deleted:
+            deleted_bytes[media_type] = deleted_bytes.get(media_type, 0) + int(row.get('size_bytes') or 0)
+        else:
+            missing_file_rows += 1
+
+        if row.get('source_table') == 'items_prep_images':
+            image_ids.append(int(row['row_id']))
+        elif row.get('source_table') == 'items_prep_media':
+            media_ids.append(int(row['row_id']))
+        deleted_counts[media_type] = deleted_counts.get(media_type, 0) + 1
+
+    conn = sqlite3.connect('bol.db', isolation_level='IMMEDIATE')
+    try:
+        cur = conn.cursor()
+        if image_ids:
+            for chunk_start in range(0, len(image_ids), 500):
+                chunk = image_ids[chunk_start:chunk_start + 500]
+                placeholders = ','.join('?' for _ in chunk)
+                cur.execute(f'DELETE FROM items_prep_images WHERE id IN ({placeholders})', tuple(chunk))
+        if media_ids:
+            for chunk_start in range(0, len(media_ids), 500):
+                chunk = media_ids[chunk_start:chunk_start + 500]
+                placeholders = ','.join('?' for _ in chunk)
+                cur.execute(f'DELETE FROM items_prep_media WHERE id IN ({placeholders})', tuple(chunk))
+        conn.commit()
+    finally:
+        conn.close()
+
+    try:
+        update_data_version()
+    except Exception:
+        pass
+
+    total_deleted = sum(deleted_counts.values())
+    total_bytes = sum(deleted_bytes.values())
+    return {
+        'deleted_count': total_deleted,
+        'deleted_bytes': total_bytes,
+        'deleted_size_label': _prep_media_cleaner_format_bytes(total_bytes),
+        'deleted_by_type': {
+            media_type: {
+                'count': deleted_counts.get(media_type, 0),
+                'bytes': deleted_bytes.get(media_type, 0),
+                'size_label': _prep_media_cleaner_format_bytes(deleted_bytes.get(media_type, 0))
+            }
+            for media_type in ('image', 'audio', 'video')
+        },
+        'missing_file_rows': int(missing_file_rows or 0)
+    }
 
 def _purge_expired_trash():
     try:
@@ -16558,7 +16933,7 @@ def api_items_prep_status():
     """Upsert preparation status for a UPC.
     
     NEW LOGIC:
-    - GOOD flow: Base UPC is default; if a note is provided, create a suffixed GOOD special-case entry
+    - GOOD flow: Base UPC is default; if a note or voice note is provided, create a suffixed GOOD special-case entry
     - BAD flow: UPC should already be suffixed (created by Bad button), just update status
     - Base qty is only decremented when status is finalized (Good immediately, Bad on Complete)
     """
@@ -16569,6 +16944,7 @@ def api_items_prep_status():
         status = (data.get('status') or '').strip().lower()
         reason = (data.get('reason') or '').strip()
         note = (data.get('note') or '').strip()
+        has_media_note = _coerce_bool(data.get('has_media_note'))
         exception_note = (data.get('exception_note') or '').strip()
         raw_qty = data.get('qty', 1)
         try:
@@ -16605,7 +16981,7 @@ def api_items_prep_status():
         
         print(f'[STATUS API] Received UPC: {data.get("upc")}, Normalized: {upc}, Base: {base_upc}, Status: {status}')
         print(f'[STATUS API] UPC has suffix: {upc != base_upc}')
-        print(f'[STATUS API] Reason: "{reason}", Note: "{note}", Qty: {qty}')
+        print(f'[STATUS API] Reason: "{reason}", Note: "{note}", MediaNote: {has_media_note}, Qty: {qty}')
         print(f'[STATUS API] Requested LOT: {requested_lot or "(none)"}')
         
         conn = sqlite3.connect('bol.db', isolation_level='IMMEDIATE')
@@ -16647,6 +17023,13 @@ def api_items_prep_status():
                         continue
                 except Exception:
                     pass
+                try:
+                    cur.execute('SELECT 1 FROM items_prep_media WHERE upc = ? COLLATE NOCASE LIMIT 1', (candidate,))
+                    if cur.fetchone():
+                        suffix_num += 1
+                        continue
+                except Exception:
+                    pass
                 return candidate
             raise RuntimeError(f'Unable to allocate suffix for {base_upc_value} after {max_suffix_attempts} attempts')
         
@@ -16666,12 +17049,13 @@ def api_items_prep_status():
             forced_lot_override = bool(force_requested_lot and selected_lot)
             print(f'[STATUS API] Resolved LOT for GOOD flow: {selected_lot or "(none)"}')
 
-            # Special-case GOOD with note: create a dedicated suffixed GOOD entry.
-            # This preserves per-unit notes/photos without collapsing into base UPC state.
+            # Special-case GOOD with typed note or voice note: create a dedicated suffixed GOOD entry.
+            # This preserves per-unit notes/photos/media without collapsing into base UPC state.
+            has_special_good_note = bool(note or has_media_note)
             temp_note_suffix_row = None
-            if note and upc != base_upc:
+            if has_special_good_note and upc != base_upc:
                 # Lookup can return a temporary suffixed duplicate for already-prepped UPCs.
-                # If user adds a note on that row, keep it as a distinct suffixed GOOD entry
+                # If user adds a note/media on that row, keep it as a distinct suffixed GOOD entry
                 # instead of collapsing back into the base UPC.
                 existing_suffixed_status = _select_prep_status_row(cur, upc, selected_lot, columns='status')
                 existing_suffixed_status_val = (
@@ -16690,7 +17074,7 @@ def api_items_prep_status():
                     if _tmp_row and int(_tmp_row[1] or 0) == 1:
                         temp_note_suffix_row = _tmp_row
 
-            if note and (upc == base_upc or temp_note_suffix_row):
+            if has_special_good_note and (upc == base_upc or temp_note_suffix_row):
                 suffixed_upc = upc if temp_note_suffix_row else _next_clean_suffix(base_upc)
                 print(f'[GOOD] Creating noted special-case suffix {suffixed_upc} for base {base_upc}')
 
@@ -16837,7 +17221,8 @@ def api_items_prep_status():
                             'requested_lot': requested_lot_norm,
                             'assigned_lot': selected_lot,
                             'forced_lot_override': bool(forced_lot_override),
-                            'special_case_note': True
+                            'special_case_note': True,
+                            'special_case_media_note': bool(has_media_note)
                         }
                     )
 
@@ -16852,6 +17237,7 @@ def api_items_prep_status():
                         'assigned_lot': selected_lot,
                         'photo_upc': suffixed_upc,
                         'special_case_note': True,
+                        'special_case_media_note': bool(has_media_note),
                         'affects_base_good': True
                     }
                     if selected_lot and (not requested_lot_norm or selected_lot.lower() != requested_lot_norm.lower()):
@@ -17241,23 +17627,22 @@ def api_items_prep_status():
         # BAD/UNCHECKED flow - upc should already be suffixed if coming from Bad button
         # Just upsert the status (no qty changes here, that happens in diagnostic Complete)
         
-        # Special case: If changing GOOD (base UPC) to BAD, need to create a suffixed entry
-        # Check if we're working with a base UPC (no suffix) - this is a GOOD->BAD conversion
+        # Special case: If changing a base UPC to BAD, create a finalized suffixed row
+        # in both items_prep_status and bol_items so /items-to-list can surface it.
         if status == 'bad' and '-' not in str(upc):
-            # This is a GOOD item (base UPC) being changed to BAD
-            print(f'[BAD] Converting GOOD item {base_upc} to BAD')
+            print(f'[BAD] Converting base item {base_upc} to BAD')
             
-            # Resolve lot for this UPC (explicit/session lot first), unless user opted to continue without lot.
             if allow_no_lot:
                 selected_lot = ''
             elif force_requested_lot and requested_lot_norm:
                 selected_lot = requested_lot_norm
             else:
                 selected_lot = _resolve_bol_lot_for_upc(cur, base_upc, requested_lot)
+
             if selected_lot:
-                # Get the bol_items entry to decrement its quantity
                 cur.execute('''
-                    SELECT id, quantity
+                    SELECT id, quantity, item_description, image_url, lot_number, bol_number,
+                           good_qty, bad_qty, unchecked_qty, original_qty
                     FROM bol_items 
                     WHERE upc = ? COLLATE NOCASE 
                       AND lot_number = ? COLLATE NOCASE
@@ -17267,7 +17652,8 @@ def api_items_prep_status():
                 ''', (base_upc, selected_lot))
             else:
                 cur.execute('''
-                    SELECT id, quantity
+                    SELECT id, quantity, item_description, image_url, lot_number, bol_number,
+                           good_qty, bad_qty, unchecked_qty, original_qty
                     FROM bol_items
                     WHERE upc = ? COLLATE NOCASE
                       AND (itemprepped IS NULL OR itemprepped = 0)
@@ -17276,97 +17662,136 @@ def api_items_prep_status():
                 ''', (base_upc,))
             
             bol_row = cur.fetchone()
-            if bol_row:
-                bol_id, current_bol_qty = bol_row
-                current_bol_qty = current_bol_qty or 1
-                
-                # Decrement bol_items quantity by 1
-                if current_bol_qty > 1:
-                    new_bol_qty = current_bol_qty - 1
-                    cur.execute('UPDATE bol_items SET quantity = ? WHERE id = ?', (new_bol_qty, bol_id))
-                    print(f'[BAD] Decremented bol_items quantity for {base_upc} from {current_bol_qty} to {new_bol_qty}')
-                # If qty=1, leave it at 1 so the GOOD item stays visible with qty=1
-            
-            # Check if the GOOD item exists in items_prep_status
-            # If it doesn't exist, we need to create it with the remaining quantity
-            base_status_lot = _resolve_prep_status_lot(cur, base_upc, selected_lot)
-            good_row = _select_prep_status_row(cur, base_upc, selected_lot, columns='quantity')
-            
-            if good_row:
-                # Entry exists in items_prep_status
-                good_qty = good_row[0] if good_row[0] is not None else 1
-                
-                # Check if we actually decremented bol_items (meaning original qty > 1)
-                if bol_row and current_bol_qty > 1:
-                    # Original had multiple units - keep remaining as GOOD
-                    # Use bol_items quantity as source of truth for remaining GOOD units
-                    remaining_qty = new_bol_qty  # This is current_bol_qty - 1
-                    cur.execute('''
-                        UPDATE items_prep_status
-                        SET quantity = ?
-                        WHERE upc = ? COLLATE NOCASE
-                          AND COALESCE(lot_number, '') = ? COLLATE NOCASE
-                    ''', (remaining_qty, base_upc, base_status_lot))
-                    print(f'[BAD] Set GOOD status qty for {base_upc} to {remaining_qty} (bol_items was decremented)')
-                else:
-                    # Original qty was 1 - all units now BAD, set to unchecked
-                    cur.execute('''
-                        UPDATE items_prep_status
-                        SET status = ?, quantity = ?
-                        WHERE upc = ? COLLATE NOCASE
-                          AND COALESCE(lot_number, '') = ? COLLATE NOCASE
-                    ''', ('unchecked', 1, base_upc, base_status_lot))
-                    print(f'[BAD] Set {base_upc} to unchecked (original bol_items qty was 1)')
+            if not bol_row:
+                conn.rollback()
+                return jsonify({'success': False, 'error': f'Base UPC {base_upc} not found in bol_items'}), 404
+
+            bol_id = int(bol_row[0])
+            current_bol_qty = int(bol_row[1] or 1)
+            base_desc = bol_row[2] or ''
+            base_img = bol_row[3] or ''
+            resolved_base_lot = _normalize_lot_number(bol_row[4])
+            base_bol = bol_row[5] or ''
+            current_good = int(bol_row[6] or 0)
+            current_bad = int(bol_row[7] or 0)
+            current_unchecked = bol_row[8]
+            original_qty = int(bol_row[9] or 0)
+            if current_unchecked is None:
+                current_unchecked = max(0, original_qty - current_good - current_bad)
             else:
-                # No entry in items_prep_status - create one with remaining bol_items quantity
-                # After decrement, bol_items now has the remaining GOOD quantity
-                if bol_row and current_bol_qty > 1:
-                    # We decremented from 2+ to at least 1
-                    remaining_qty = new_bol_qty  # This is current_bol_qty - 1
-                    cur.execute('''
-                        INSERT INTO items_prep_status (upc, lot_number, status, reason, note, quantity, updated_at)
-                        VALUES (?,?,?,?,?,?,?)
-                    ''', (base_upc, _normalize_lot_number(selected_lot), 'good', '', '', remaining_qty, ts))
-                    print(f'[BAD] Created GOOD status entry {base_upc} with qty={remaining_qty}')
+                current_unchecked = int(current_unchecked or 0)
+
+            if not selected_lot and not allow_no_lot:
+                selected_lot = resolved_base_lot
+
+            base_status_row = _select_prep_status_row(cur, base_upc, selected_lot, columns='status, quantity')
+            base_status_value = (
+                str(base_status_row[0] or '').strip().lower()
+                if base_status_row else ''
+            )
+            move_from_good = (base_status_value == 'good' and current_good > 0)
+            source_bucket = 'good' if move_from_good else 'unchecked'
+            source_available = current_good if move_from_good else current_unchecked
+
+            if qty > source_available:
+                exception_overage_applied = True
+                if allow_overage_exception:
+                    print(
+                        f'[BAD][EXCEPTION] Allowing base-to-bad overage for {base_upc}: '
+                        f'source={source_bucket}, requested={qty}, available={source_available}'
+                    )
                 else:
-                    # We had qty=1, didn't decrement, so set to unchecked (all units now BAD)
+                    print(
+                        f'[BAD][EXCEPTION][AUTO] Base-to-bad gate bypassed for {base_upc}: '
+                        f'source={source_bucket}, requested={qty}, available={source_available}'
+                    )
+
+            remaining_good = max(0, current_good - qty) if move_from_good else current_good
+            remaining_unchecked = current_unchecked if move_from_good else max(0, current_unchecked - qty)
+            new_bad = current_bad + qty
+
+            if selected_lot:
+                cur.execute('''
+                    UPDATE bol_items
+                    SET good_qty = ?, bad_qty = ?, unchecked_qty = ?, lot_number = ?
+                    WHERE id = ?
+                ''', (remaining_good, new_bad, remaining_unchecked, selected_lot, bol_id))
+            else:
+                cur.execute('''
+                    UPDATE bol_items
+                    SET good_qty = ?, bad_qty = ?, unchecked_qty = ?
+                    WHERE id = ?
+                ''', (remaining_good, new_bad, remaining_unchecked, bol_id))
+
+            print(
+                f'[BAD] Updated base {base_upc}: good_qty {current_good}->{remaining_good}, '
+                f'bad_qty {current_bad}->{new_bad}, unchecked_qty {current_unchecked}->{remaining_unchecked}'
+            )
+
+            base_status_lot = _resolve_prep_status_lot(cur, base_upc, selected_lot)
+            base_remaining_status = 'good' if remaining_good > 0 else ('unchecked' if remaining_unchecked > 0 else '')
+            base_remaining_qty = remaining_good if remaining_good > 0 else remaining_unchecked
+            existing_base_status = _select_prep_status_row(cur, base_upc, selected_lot, columns='upc')
+
+            if base_remaining_status:
+                if existing_base_status:
+                    cur.execute('''
+                        UPDATE items_prep_status
+                        SET status = ?, reason = '', note = '', quantity = ?, updated_at = ?
+                        WHERE upc = ? COLLATE NOCASE
+                          AND COALESCE(lot_number, '') = ? COLLATE NOCASE
+                    ''', (base_remaining_status, base_remaining_qty, ts, base_upc, base_status_lot))
+                else:
                     cur.execute('''
                         INSERT INTO items_prep_status (upc, lot_number, status, reason, note, quantity, updated_at)
                         VALUES (?,?,?,?,?,?,?)
-                    ''', (base_upc, _normalize_lot_number(selected_lot), 'unchecked', '', '', 1, ts))
-                    print(f'[BAD] Created unchecked status entry {base_upc} (original qty was 1)')
-            
-            # Find next available suffix (check items_prep_status only)
-            # We do this BEFORE commit to ensure atomicity
-            suffix_num = 1
-            max_suffix_attempts = 50
-            suffixed_upc = None
-            
-            for attempt in range(max_suffix_attempts):
-                test_suffixed = f"{base_upc}-{suffix_num}"
-                cur.execute('SELECT upc FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (test_suffixed,))
-                if not cur.fetchone():
-                    suffixed_upc = test_suffixed
-                    print(f'[BAD] Found available suffix: {suffixed_upc}')
-                    break
-                suffix_num += 1
-            
-            if not suffixed_upc:
-                conn.rollback()
-                return jsonify({'success': False, 'error': f'Could not find available suffix after {max_suffix_attempts} attempts'}), 500
-            
-            # Create new suffixed entry (BAD) with quantity=1
-            try:
+                    ''', (base_upc, _normalize_lot_number(selected_lot), base_remaining_status, '', '', base_remaining_qty, ts))
+            elif existing_base_status:
                 cur.execute('''
-                    INSERT INTO items_prep_status (upc, lot_number, status, reason, note, quantity, updated_at)
-                    VALUES (?,?,?,?,?,?,?)
-                ''', (suffixed_upc, _normalize_lot_number(selected_lot), status, reason, note, 1, ts))
-                print(f'[BAD] Created BAD status entry {suffixed_upc} with qty=1')
-            except Exception as e:
-                # If insert fails, rollback everything and return error
-                print(f'[BAD] Failed to create {suffixed_upc}. Error: {e}')
-                conn.rollback()
-                return jsonify({'success': False, 'error': _safe_error(e, 'Failed to create BAD entry')}), 500
+                    DELETE FROM items_prep_status
+                    WHERE upc = ? COLLATE NOCASE
+                      AND COALESCE(lot_number, '') = ? COLLATE NOCASE
+                ''', (base_upc, base_status_lot))
+
+            suffixed_upc = _next_clean_suffix(base_upc)
+            print(f'[BAD] Allocated suffix {suffixed_upc} for base-to-bad conversion')
+
+            cur.execute('''
+                INSERT INTO bol_items (
+                    upc, item_description, image_url, lot_number, bol_number, import_date,
+                    temporary, original_qty, unchecked_qty, good_qty, bad_qty, quantity
+                )
+                VALUES (?, ?, ?, ?, ?, ?, 0, ?, 0, 0, ?, ?)
+            ''', (suffixed_upc, base_desc, base_img, selected_lot, base_bol, ts, qty, qty, qty))
+
+            cur.execute('''
+                INSERT INTO items_prep_status (upc, lot_number, status, reason, note, quantity, updated_at)
+                VALUES (?,?,?,?,?,?,?)
+            ''', (suffixed_upc, _normalize_lot_number(selected_lot), status, reason, note, qty, ts))
+            print(f'[BAD] Created BAD rows for {suffixed_upc} with qty={qty}')
+
+            if exception_overage_applied:
+                _items_prep_record_exception(
+                    cur,
+                    upc=suffixed_upc,
+                    base_upc=base_upc,
+                    lot_number=selected_lot,
+                    action='base_to_bad_overage_override',
+                    quantity=qty,
+                    unchecked_remaining=source_available,
+                    source='item-prep',
+                    note=exception_note or 'Base item converted to BAD as exception after source quantity was exhausted.',
+                    meta={
+                        'status': 'bad',
+                        'requested_qty': qty,
+                        'source_bucket': source_bucket,
+                        'source_available': source_available,
+                        'requested_lot': requested_lot_norm,
+                        'assigned_lot': selected_lot,
+                        'forced_lot_override': bool(force_requested_lot and selected_lot),
+                        'legacy_quantity_before': current_bol_qty
+                    }
+                )
             
             # Commit all changes atomically
             conn.commit()
@@ -17402,7 +17827,7 @@ def api_items_prep_status():
                     upc=suffixed_upc,
                     base_upc=base_upc,
                     status='bad',
-                    quantity=1,
+                    quantity=qty,
                     note=log_note or None,
                     reason=reason or None,
                     source='item-prep',
@@ -17412,7 +17837,14 @@ def api_items_prep_status():
             except Exception:
                 pass
 
-            return jsonify({'success': True, 'upc': suffixed_upc, 'action': 'converted_to_bad', 'quantity': 1})
+            return jsonify({
+                'success': True,
+                'upc': suffixed_upc,
+                'action': 'converted_to_bad',
+                'quantity': qty,
+                'lot_number': selected_lot,
+                'exception_overage': bool(exception_overage_applied)
+            })
 
         if status == 'return' and '-' not in str(upc):
             print(f'[RETURN] Converting base item {base_upc} to RETURN')
@@ -17854,6 +18286,13 @@ def api_items_prep_create_bad_entry():
                     continue
             except Exception:
                 pass
+            try:
+                cur.execute('SELECT upc FROM items_prep_media WHERE upc = ? COLLATE NOCASE LIMIT 1', (suffixed_upc,))
+                if cur.fetchone():
+                    suffix_num += 1
+                    continue
+            except Exception:
+                pass
             
             # Suffix is clean - no bol_items entry and no orphaned prep data
             break
@@ -18114,6 +18553,13 @@ def api_items_prep_create_return_entry():
                     continue
             except Exception:
                 pass
+            try:
+                cur.execute('SELECT upc FROM items_prep_media WHERE upc = ? COLLATE NOCASE LIMIT 1', (suffixed_upc,))
+                if cur.fetchone():
+                    suffix_num += 1
+                    continue
+            except Exception:
+                pass
             
             # Suffix is available
             break
@@ -18298,6 +18744,7 @@ def api_items_prep_cleanup_temp():
         if deleted:
             # Keep prep status in sync when a temporary BAD entry is abandoned.
             cur.execute('DELETE FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (upc,))
+            _items_prep_delete_media_rows(cur, upc)
         conn.commit()
         return jsonify({'success': True, 'deleted': deleted})
     except Exception as e:
@@ -18707,6 +19154,7 @@ def _items_prep_undo_core(*, upc, status, qty=1, base_upc=None, lot_number=None,
                         cur.execute('DELETE FROM items_prep_notes WHERE upc = ? COLLATE NOCASE', (upc,))
                     except Exception:
                         pass
+                    _items_prep_delete_media_rows(cur, upc)
 
                     base_key = (base_upc or '').strip() or upc.split('-', 1)[0]
                     if row_lot:
@@ -18821,6 +19269,7 @@ def _items_prep_undo_core(*, upc, status, qty=1, base_upc=None, lot_number=None,
                         cur.execute('DELETE FROM items_prep_notes WHERE upc = ? COLLATE NOCASE', (upc,))
                     except Exception:
                         pass
+                    _items_prep_delete_media_rows(cur, upc)
 
                 if base_upc:
                     base_lot = _normalize_lot_number(row_lot or lot_number)
@@ -18891,6 +19340,7 @@ def _items_prep_undo_core(*, upc, status, qty=1, base_upc=None, lot_number=None,
                         cur.execute('DELETE FROM items_prep_notes WHERE upc = ? COLLATE NOCASE', (upc,))
                     except Exception:
                         pass
+                    _items_prep_delete_media_rows(cur, upc)
 
                 if base_upc:
                     base_lot = _normalize_lot_number(row_lot or lot_number)
@@ -20378,6 +20828,291 @@ def api_items_prep_notes_delete(note_id):
         if conn is not None:
             conn.close()
 
+@app.route('/api/items_prep/media/<upc>', methods=['GET'])
+def api_items_prep_media_get(upc):
+    """Get audio/video attachments for a prep UPC."""
+    conn = None
+    try:
+        upc_norm = _normalize_upc(upc)
+        upc_n = _normalize_upc_preserve_suffix_for_match(upc_norm)
+        row_status = _normalize_prep_row_status(request.args.get('row_status') or request.args.get('status'))
+        media_type = str(request.args.get('media_type') or request.args.get('type') or '').strip().lower()
+        if media_type and media_type not in ('audio', 'video'):
+            return jsonify({'success': False, 'error': 'Invalid media type'}), 400
+        scope_upc, scope_status = _items_to_list_asset_scope(upc_n, row_status)
+        _ensure_items_prep_tables()
+        conn = sqlite3.connect('bol.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        params = []
+        sql = '''
+            SELECT id, upc, COALESCE(row_status, '') AS row_status, COALESCE(media_type, '') AS media_type,
+                   file_path, COALESCE(mime_type, '') AS mime_type, created_at
+            FROM items_prep_media
+            WHERE upc = ? COLLATE NOCASE
+        '''
+        params.append(scope_upc)
+        if row_status or ('-' in scope_upc):
+            sql += " AND COALESCE(row_status, '') = ? COLLATE NOCASE"
+            params.append(scope_status)
+        if media_type:
+            sql += " AND COALESCE(media_type, '') = ? COLLATE NOCASE"
+            params.append(media_type)
+        sql += " ORDER BY created_at DESC, id DESC"
+        cur.execute(sql, tuple(params))
+        items = [dict(r) for r in cur.fetchall()]
+        return jsonify({'success': True, 'items': items})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e)}), 500
+    finally:
+        if conn is not None:
+            conn.close()
+
+@app.route('/api/items_prep/media/<upc>', methods=['POST'])
+def api_items_prep_media_add(upc):
+    """Upload audio/video attachments for a prep UPC."""
+    conn = None
+    try:
+        upc_norm = _normalize_upc(upc)
+        upc_n = _normalize_upc_preserve_suffix_for_match(upc_norm)
+        row_status = _normalize_prep_row_status(request.form.get('row_status') or request.form.get('status') or request.args.get('row_status') or request.args.get('status'))
+        media_type = str(request.form.get('media_type') or request.form.get('type') or request.args.get('media_type') or request.args.get('type') or '').strip().lower()
+        replace_existing = _coerce_bool(
+            request.form.get('replace_existing') if request.form.get('replace_existing') is not None else request.args.get('replace_existing')
+        )
+        if media_type not in ('audio', 'video'):
+            return jsonify({'success': False, 'error': 'Invalid media type'}), 400
+        scope_upc, scope_status = _items_to_list_asset_scope(upc_n, row_status)
+        if not scope_upc:
+            return jsonify({'success': False, 'error': 'Missing upc'}), 400
+        _ensure_items_prep_tables()
+        from werkzeug.utils import secure_filename
+        save_dir = os.path.join(app.root_path, 'static', 'items_prep')
+        os.makedirs(save_dir, exist_ok=True)
+        files = request.files.getlist('media[]') or request.files.getlist('media') or ([] if 'file' not in request.files else [request.files['file']])
+        if not files:
+            return jsonify({'success': False, 'error': 'No files uploaded'}), 400
+        import datetime
+        ts = datetime.datetime.now(datetime.UTC).isoformat()
+        conn = sqlite3.connect('bol.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        exact_scope = row_status or ('-' in scope_upc)
+        delete_scope_status = scope_status if exact_scope else None
+        if replace_existing:
+            _items_prep_delete_media_rows(cur, scope_upc, row_status=delete_scope_status, media_type=media_type)
+        out = []
+        for idx, f in enumerate(files):
+            if not f or not getattr(f, 'filename', ''):
+                continue
+            fn = secure_filename(f.filename)
+            _name, ext = os.path.splitext(fn)
+            mime_type = str(getattr(f, 'mimetype', '') or '').strip()
+            if not ext:
+                if media_type == 'audio':
+                    ext = '.webm' if 'webm' in mime_type else '.m4a'
+                else:
+                    ext = '.mp4' if 'mp4' in mime_type else '.webm'
+            unique = f"{scope_upc}_{media_type}_{int(time.time()*1000)}_{idx}{ext}"
+            abs_path = os.path.join(save_dir, unique)
+            f.save(abs_path)
+            rel = f"items_prep/{unique}"
+            cur.execute(
+                '''
+                    INSERT INTO items_prep_media (upc, row_status, media_type, file_path, mime_type, created_at)
+                    VALUES (?,?,?,?,?,?)
+                ''',
+                (scope_upc, scope_status if exact_scope else '', media_type, rel, mime_type, ts)
+            )
+            out.append({
+                'id': int(cur.lastrowid),
+                'upc': scope_upc,
+                'row_status': scope_status if exact_scope else '',
+                'media_type': media_type,
+                'file_path': rel,
+                'mime_type': mime_type,
+                'created_at': ts
+            })
+        conn.commit()
+        try:
+            update_data_version()
+        except Exception:
+            pass
+        return jsonify({'success': True, 'items': out})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e)}), 500
+    finally:
+        if conn is not None:
+            conn.close()
+
+@app.route('/api/items_prep/media/<int:media_id>', methods=['DELETE'])
+def api_items_prep_media_delete(media_id):
+    """Delete one prep audio/video attachment."""
+    conn = None
+    try:
+        _ensure_items_prep_tables()
+        conn = sqlite3.connect('bol.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute('''
+            SELECT id, upc, COALESCE(row_status, '') AS row_status, COALESCE(media_type, '') AS media_type, file_path
+            FROM items_prep_media
+            WHERE id = ?
+        ''', (media_id,))
+        row = cur.fetchone()
+        if not row:
+            return jsonify({'success': False, 'error': 'Media not found'}), 404
+        rel = str(row['file_path'] or '').strip()
+        if rel:
+            abs_path = os.path.join(app.root_path, 'static', rel) if not os.path.isabs(rel) else rel
+            try:
+                if os.path.isfile(abs_path):
+                    os.remove(abs_path)
+            except Exception as fe:
+                print('Failed hard remove prep media', abs_path, fe)
+        cur.execute('DELETE FROM items_prep_media WHERE id = ?', (media_id,))
+        conn.commit()
+        try:
+            update_data_version()
+        except Exception:
+            pass
+        return jsonify({'success': True, 'deleted': 1})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e)}), 500
+    finally:
+        if conn is not None:
+            conn.close()
+
+@app.route('/api/prep-media-cleaner/overview', methods=['GET'])
+def api_prep_media_cleaner_overview():
+    """Return prep media storage totals and lot suggestions for cleaner UI."""
+    try:
+        rows, lot_options = _prep_media_cleaner_load_rows()
+        summary = _prep_media_cleaner_summary(rows)
+        recent_by_type = {}
+        for media_type in ('image', 'audio', 'video'):
+            recent_rows = [row for row in rows if row.get('media_type') == media_type][:5]
+            recent_by_type[media_type] = [
+                {
+                    'upc': row.get('upc') or '',
+                    'lot_label': row.get('lot_label') or '',
+                    'created_at': row.get('created_at') or '',
+                    'size_bytes': int(row.get('size_bytes') or 0),
+                    'size_label': row.get('size_label') or '0 B'
+                }
+                for row in recent_rows
+            ]
+        return jsonify({
+            'success': True,
+            'summary': summary,
+            'lot_options': lot_options[:300],
+            'recent_by_type': recent_by_type
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'prep_media_cleaner_overview')}), 500
+
+@app.route('/api/prep-media-cleaner/query', methods=['GET'])
+def api_prep_media_cleaner_query():
+    """Return filtered prep media rows for preview/cleanup."""
+    try:
+        media_types = _prep_media_cleaner_allowed_types(request.args.get('media_types'))
+        upc = request.args.get('upc') or ''
+        lot = request.args.get('lot') or ''
+        date_from = request.args.get('date_from') or ''
+        date_to = request.args.get('date_to') or ''
+        try:
+            limit = max(1, min(500, int(request.args.get('limit') or 200)))
+        except Exception:
+            limit = 200
+
+        rows, _lot_options = _prep_media_cleaner_load_rows()
+        matched_rows, skipped_ambiguous_lot = _prep_media_cleaner_filter_rows(
+            rows,
+            media_types=media_types,
+            upc=upc,
+            lot=lot,
+            date_from=date_from,
+            date_to=date_to
+        )
+        summary = _prep_media_cleaner_summary(matched_rows)
+        preview_rows = matched_rows[:limit]
+        return jsonify({
+            'success': True,
+            'filters': {
+                'media_types': media_types,
+                'upc': str(upc or '').strip(),
+                'lot': _normalize_lot_number(lot),
+                'date_from': str(date_from or '').strip(),
+                'date_to': str(date_to or '').strip()
+            },
+            'summary': summary,
+            'total_matches': len(matched_rows),
+            'displayed_matches': len(preview_rows),
+            'skipped_ambiguous_lot': skipped_ambiguous_lot,
+            'rows': [
+                {
+                    'row_id': int(row.get('row_id') or 0),
+                    'source_table': row.get('source_table') or '',
+                    'media_type': row.get('media_type') or '',
+                    'upc': row.get('upc') or '',
+                    'row_status': row.get('row_status') or '',
+                    'created_at': row.get('created_at') or '',
+                    'size_bytes': int(row.get('size_bytes') or 0),
+                    'size_label': row.get('size_label') or '0 B',
+                    'lot_label': row.get('lot_label') or '',
+                    'lots': row.get('lots') or [],
+                    'exists': bool(row.get('exists')),
+                    'relative_path': row.get('relative_path') or ''
+                }
+                for row in preview_rows
+            ]
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'prep_media_cleaner_query')}), 500
+
+@app.route('/api/prep-media-cleaner/delete', methods=['POST'])
+def api_prep_media_cleaner_delete():
+    """Hard-delete prep photos/audio/video by current filter scope."""
+    try:
+        data = request.get_json(silent=True) or {}
+        media_types = _prep_media_cleaner_allowed_types(data.get('media_types'))
+        upc = data.get('upc') or ''
+        lot = data.get('lot') or ''
+        date_from = data.get('date_from') or ''
+        date_to = data.get('date_to') or ''
+
+        rows, _lot_options = _prep_media_cleaner_load_rows()
+        matched_rows, skipped_ambiguous_lot = _prep_media_cleaner_filter_rows(
+            rows,
+            media_types=media_types,
+            upc=upc,
+            lot=lot,
+            date_from=date_from,
+            date_to=date_to
+        )
+        if not matched_rows:
+            return jsonify({
+                'success': False,
+                'error': 'No matching prep media found for this cleanup request.',
+                'skipped_ambiguous_lot': skipped_ambiguous_lot
+            }), 400
+
+        delete_result = _prep_media_cleaner_delete_rows(matched_rows)
+        return jsonify({
+            'success': True,
+            'filters': {
+                'media_types': media_types,
+                'upc': str(upc or '').strip(),
+                'lot': _normalize_lot_number(lot),
+                'date_from': str(date_from or '').strip(),
+                'date_to': str(date_to or '').strip()
+            },
+            'skipped_ambiguous_lot': skipped_ambiguous_lot,
+            **delete_result
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'prep_media_cleaner_delete')}), 500
+
 @app.route('/api/items_prep/location/<upc>', methods=['GET'])
 def api_items_prep_location_get(upc):
     """Get location for a UPC."""
@@ -20622,6 +21357,7 @@ def api_items_prep_reset():
                 cur.execute('DELETE FROM items_prep_notes WHERE upc = ? COLLATE NOCASE', (upc,))
             except Exception:
                 pass  # Table may not exist
+            _items_prep_delete_media_rows(cur, upc)
 
         # 3) Restore quantity buckets in bol_items (id-scoped).
         cur.execute('PRAGMA table_info(bol_items)')
@@ -26325,6 +27061,8 @@ def api_bol_items():
         note_map = {}
         set_note_map = {}
         photo_count_map = {}
+        audio_count_map = {}
+        video_count_map = {}
         page_upcs = set()
         for r in rows:
             u = r.get('upc')
@@ -26374,6 +27112,40 @@ def api_bol_items():
                             note_map[scope_key] = int(rr['note_count'] or 0)
                             set_note_map[scope_key] = int(rr['set_note_flag'] or 0)
 
+                    k2.execute(f'''
+                        SELECT
+                            upc,
+                            COALESCE(row_status, '') as row_status,
+                            COUNT(*) as audio_count
+                        FROM items_prep_media
+                        WHERE upc IN ({placeholders})
+                          AND COALESCE(media_type, '') = 'audio'
+                        GROUP BY upc, COALESCE(row_status, '')
+                    ''', tuple(page_upcs))
+                    for rr in k2.fetchall():
+                        raw_upc = rr['upc']
+                        if raw_upc:
+                            scope_key = _items_to_list_asset_scope(raw_upc, rr['row_status'])
+                            audio_count = int(rr['audio_count'] or 0)
+                            audio_count_map[scope_key] = audio_count
+                            note_map[scope_key] = int(note_map.get(scope_key, 0) or 0) + audio_count
+
+                    k2.execute(f'''
+                        SELECT
+                            upc,
+                            COALESCE(row_status, '') as row_status,
+                            COUNT(*) as video_count
+                        FROM items_prep_media
+                        WHERE upc IN ({placeholders})
+                          AND COALESCE(media_type, '') = 'video'
+                        GROUP BY upc, COALESCE(row_status, '')
+                    ''', tuple(page_upcs))
+                    for rr in k2.fetchall():
+                        raw_upc = rr['upc']
+                        if raw_upc:
+                            scope_key = _items_to_list_asset_scope(raw_upc, rr['row_status'])
+                            video_count_map[scope_key] = int(rr['video_count'] or 0)
+
                     # Active (not deleted) photo counts for each UPC on the current page.
                     k2.execute(f'''
                         SELECT upc, COALESCE(row_status, '') as row_status, COUNT(*) as photo_count
@@ -26392,6 +27164,8 @@ def api_bol_items():
             note_map = {}
             set_note_map = {}
             photo_count_map = {}
+            audio_count_map = {}
+            video_count_map = {}
 
         # Enrich rows with status map for any missing joins
         def status_of(row):
@@ -26483,6 +27257,10 @@ def api_bol_items():
                 row['prep_set_note'] = set_note_map.get(scope_key, 0)
             if 'prep_photo_count' not in row:
                 row['prep_photo_count'] = photo_count_map.get(scope_key, 0)
+            if 'prep_audio_count' not in row:
+                row['prep_audio_count'] = audio_count_map.get(scope_key, 0)
+            if 'prep_video_count' not in row:
+                row['prep_video_count'] = video_count_map.get(scope_key, 0)
 
             return st if st in ('good', 'bad', 'return') else ''
         
@@ -26568,7 +27346,9 @@ def api_bol_items():
             
             # Check if item has notes in items_prep_notes table
             has_notes = r.get('prep_note_count', 0) > 0
+            audio_count = int(r.get('prep_audio_count') or 0)
             photo_count = int(r.get('prep_photo_count') or 0)
+            video_count = int(r.get('prep_video_count') or 0)
             
             results.append({
                 'id': r.get('id'),
@@ -26590,7 +27370,9 @@ def api_bol_items():
                 'warehouse_location_details': warehouse_location_details,
                 'note': 'yes' if has_notes else '',
                 'set_note_flag': bool(r.get('prep_set_note') or 0),
+                'audio_count': audio_count,
                 'photo_count': photo_count,
+                'video_count': video_count,
                 # Marketplace listing columns
                 'listed_amazon': r.get('listed_amazon'),
                 'listed_amazon_date': r.get('listed_amazon_date'),
@@ -26752,6 +27534,7 @@ def api_bulk_delete_bol_items():
                     cur.execute('DELETE FROM items_prep_notes WHERE upc = ? COLLATE NOCASE', (upc,))
                 except Exception:
                     pass
+                _items_prep_delete_media_rows(cur, upc)
 
         # Reset base entries by row id and lot-specific raw quantity.
         if reset_rows:
@@ -26811,6 +27594,7 @@ def api_bulk_delete_bol_items():
                         cur.execute('DELETE FROM items_prep_notes WHERE upc = ? COLLATE NOCASE', (upc,))
                     except Exception:
                         pass
+                    _items_prep_delete_media_rows(cur, upc)
 
                     cur.execute('PRAGMA table_info(bol_items)')
                     cols = [col[1].lower() for col in cur.fetchall()]
@@ -27651,7 +28435,8 @@ def additemtrue():
     # Traditional form submission - return HTML
     # Add script to clear sessionStorage after successful add
     clear_script = '''<script>
-        sessionStorage.removeItem('barcode');'''
+        sessionStorage.removeItem('barcode');
+        sessionStorage.removeItem('barcode_entries');'''
     # Only clear position if not locked
     if not same_position:
         clear_script += '''
@@ -27665,6 +28450,7 @@ def additemtrue():
         redirect_script = '''<script>
         // Clear all session storage including lock state
         sessionStorage.removeItem('barcode');
+        sessionStorage.removeItem('barcode_entries');
         sessionStorage.removeItem('item_position');
         sessionStorage.removeItem('pictureposition_path');
         sessionStorage.removeItem('positionLocked');

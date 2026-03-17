@@ -150,6 +150,69 @@
             flex: 1;
             font-family: monospace;
         }
+
+        .barcode-item-main {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            flex: 1;
+            min-width: 0;
+        }
+
+        .barcode-item-meta {
+            font-size: 0.82em;
+            font-weight: 600;
+            opacity: 0.95;
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .barcode-item-controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-left: 12px;
+        }
+
+        .suffix-editor {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(255, 255, 255, 0.18);
+            padding: 6px 10px;
+            border-radius: 999px;
+        }
+
+        .suffix-btn {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            border: none;
+            background: rgba(255, 255, 255, 0.26);
+            color: #fff;
+            cursor: pointer;
+            font-size: 1.05em;
+            font-weight: 900;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0;
+            padding: 0;
+        }
+
+        .suffix-btn:disabled {
+            opacity: 0.45;
+            cursor: default;
+        }
+
+        .suffix-label {
+            min-width: 82px;
+            text-align: center;
+            font-size: 0.78em;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+        }
         
         .barcode-item .delete-btn {
             background: rgba(255, 255, 255, 0.2);
@@ -348,10 +411,11 @@
 
     <!-- ZXing Library -->
     <script src="https://unpkg.com/@zxing/library@0.19.1/umd/index.min.js"></script>
+    <script src="/static/barcode-entry-state.js"></script>
     
     <script>
-        // Store barcodes as objects with code and quantity
-        let barcodeItems = [];
+        const barcodeEntryState = window.BarcodeEntryState;
+        let barcodeItems = barcodeEntryState ? barcodeEntryState.loadEntries() : [];
         let codeReader = null;
         let selectedDeviceId = null;
         
@@ -474,6 +538,22 @@
             if (/^\d+$/.test(s) && s.length <= 12) return s.padStart(12, '0');
             return s;
         }
+
+        function formatBarcodeEntry(item) {
+            if (!barcodeEntryState) return formatUpcDisplay(item.code || '');
+            return barcodeEntryState.displayCode(item, formatUpcDisplay);
+        }
+
+        function formatSuffixLabel(item) {
+            return item && item.suffix > 0 ? `Suffix ${item.suffix}` : 'Base';
+        }
+
+        function persistBarcodeItems() {
+            if (barcodeEntryState) {
+                barcodeItems = barcodeEntryState.saveEntries(barcodeItems);
+            }
+            return barcodeItems;
+        }
         
         // Add barcode to list
         function addBarcode(code) {
@@ -491,17 +571,18 @@
                 return;
             }
             
-            // Check if barcode already exists
-            const existingItem = barcodeItems.find(item => item.code === code);
-            if (existingItem) {
-                // Increment quantity
-                existingItem.quantity++;
-                playBeep();
+            if (barcodeEntryState) {
+                barcodeItems = barcodeEntryState.addBaseScan(barcodeItems, code);
+                persistBarcodeItems();
             } else {
-                // Add new barcode with quantity 1
-                barcodeItems.push({ code: code, quantity: 1 });
-                playBeep();
+                const existingItem = barcodeItems.find(item => item.code === code);
+                if (existingItem) {
+                    existingItem.quantity++;
+                } else {
+                    barcodeItems.push({ code: code, quantity: 1, suffix: 0 });
+                }
             }
+            playBeep();
             
             // Flash green
             barcodeInput.classList.add('flash-green');
@@ -517,16 +598,32 @@
         
         // Remove one quantity of barcode from list
         function removeBarcode(index) {
-            const item = barcodeItems[index];
-            if (item.quantity > 1) {
-                // Decrease quantity
-                item.quantity--;
+            if (barcodeEntryState) {
+                barcodeItems = barcodeEntryState.removeOne(barcodeItems, index);
+                persistBarcodeItems();
             } else {
-                // Remove item completely
-                barcodeItems.splice(index, 1);
+                const item = barcodeItems[index];
+                if (item.quantity > 1) {
+                    item.quantity--;
+                } else {
+                    barcodeItems.splice(index, 1);
+                }
             }
             updateList();
         }
+
+        function adjustSuffix(index, delta) {
+            if (!barcodeEntryState) return;
+            if (delta > 0) {
+                barcodeItems = barcodeEntryState.incrementSuffix(barcodeItems, index);
+            } else {
+                barcodeItems = barcodeEntryState.decrementSuffix(barcodeItems, index);
+            }
+            persistBarcodeItems();
+            updateList();
+            barcodeInput.focus();
+        }
+        window.adjustSuffix = adjustSuffix;
         
         // Update the barcode list display
         function updateList() {
@@ -541,20 +638,32 @@
             } else {
                 barcodeListEl.innerHTML = barcodeItems.map((item, index) => `
                     <div class="barcode-item">
-                        <span class="barcode-text">
-                            ${formatUpcDisplay(item.code)}
-                            ${item.quantity > 1 ? `<span style="margin-left: 10px; background: rgba(255,255,255,0.3); padding: 4px 10px; border-radius: 12px; font-size: 0.9em;">(${item.quantity}x)</span>` : ''}
-                        </span>
-                        <button class="delete-btn" onclick="removeBarcode(${index})" title="Remove one">
-                            <i class="fas fa-times"></i>
-                        </button>
+                        <div class="barcode-item-main">
+                            <span class="barcode-text">${formatBarcodeEntry(item)}</span>
+                            <div class="barcode-item-meta">
+                                <span>${item.suffix > 0 ? 'Singular suffix item' : `Qty ${item.quantity}`}</span>
+                                ${item.suffix === 0 && item.quantity > 1 ? '<span>Use + to split one out as a suffix item</span>' : ''}
+                            </div>
+                        </div>
+                        <div class="barcode-item-controls">
+                            <div class="suffix-editor">
+                                <button class="suffix-btn" onclick="adjustSuffix(${index}, -1)" ${item.suffix > 0 ? '' : 'disabled'} title="Lower suffix">-</button>
+                                <span class="suffix-label">${formatSuffixLabel(item)}</span>
+                                <button class="suffix-btn" onclick="adjustSuffix(${index}, 1)" title="Raise suffix">+</button>
+                            </div>
+                            <button class="delete-btn" onclick="removeBarcode(${index})" title="Remove one">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
                     </div>
                 `).join('');
                 doneButton.disabled = false;
             }
             
             // Calculate total items including quantities
-            const totalItems = barcodeItems.reduce((sum, item) => sum + item.quantity, 0);
+            const totalItems = barcodeEntryState
+                ? barcodeEntryState.totalCount(barcodeItems)
+                : barcodeItems.reduce((sum, item) => sum + item.quantity, 0);
             countBadge.textContent = totalItems === 1 ? '1 item' : `${totalItems} items`;
         }
         
@@ -632,18 +741,15 @@
         // Submit barcodes function (shared by Done button and auto-submit)
         function submitBarcodes() {
             if (barcodeItems.length === 0) return;
-            
-            // Expand quantities into individual barcodes
-            const expandedBarcodes = [];
-            barcodeItems.forEach(item => {
-                for (let i = 0; i < item.quantity; i++) {
-                    expandedBarcodes.push(item.code);
-                }
-            });
-            
-            // Store barcodes as comma-separated string
-            const barcodesString = expandedBarcodes.join(',');
-            sessionStorage.setItem('barcode', barcodesString);
+
+            const barcodesString = barcodeEntryState
+                ? barcodeEntryState.serializeEntries(barcodeItems)
+                : barcodeItems.map(item => item.code).join(',');
+            if (barcodeEntryState) {
+                barcodeItems = barcodeEntryState.saveEntries(barcodeItems);
+            } else {
+                sessionStorage.setItem('barcode', barcodesString);
+            }
             
             // Submit to /submitbarcode via POST
             const form = document.createElement('form');
@@ -670,12 +776,15 @@
         
         document.getElementById('skipBtn').addEventListener('click', function() {
             // Skip directly to add item page (empty barcode)
+            sessionStorage.removeItem('barcode');
+            sessionStorage.removeItem('barcode_entries');
             window.location.href = '/additem';
         });
         
         document.getElementById('exitBtn').addEventListener('click', function() {
             // Clear all session storage and go home
             sessionStorage.removeItem('barcode');
+            sessionStorage.removeItem('barcode_entries');
             sessionStorage.removeItem('item_position');
             sessionStorage.removeItem('pictureposition_path');
             sessionStorage.removeItem('positionLocked');
@@ -696,6 +805,8 @@
                 codeReader.reset();
             }
         });
+
+        updateList();
     </script>
 </body>
 </html>

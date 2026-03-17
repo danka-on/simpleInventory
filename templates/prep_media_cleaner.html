@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Prep Media Cleaner</title>
+  <style>
+    :root{
+      --bg:#f6f8fb;
+      --card:#ffffff;
+      --ink:#1f2937;
+      --muted:#64748b;
+      --line:#dbe3ef;
+      --blue:#2563eb;
+      --green:#16a34a;
+      --red:#dc2626;
+      --amber:#d97706;
+      --radius:18px;
+    }
+    body{
+      margin:0;
+      padding:20px;
+      font-family:"Segoe UI",Arial,sans-serif;
+      background:linear-gradient(180deg,#f8fbff 0%,#eef3f8 100%);
+      color:var(--ink);
+    }
+    .shell{max-width:1200px;margin:0 auto}
+    .topbar{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      flex-wrap:wrap;
+      margin-bottom:18px;
+    }
+    .title-wrap h1{margin:0;font-size:2rem}
+    .title-wrap p{margin:6px 0 0;color:var(--muted)}
+    .btn{
+      border:none;
+      border-radius:14px;
+      padding:11px 16px;
+      cursor:pointer;
+      font:inherit;
+      font-weight:700;
+      transition:transform .16s ease, box-shadow .16s ease, opacity .16s ease;
+    }
+    .btn:hover{transform:translateY(-1px)}
+    .btn:disabled{opacity:.55;cursor:not-allowed;transform:none}
+    .btn-back{background:#e2e8f0;color:#0f172a;text-decoration:none;display:inline-flex;align-items:center}
+    .btn-primary{background:var(--blue);color:#fff;box-shadow:0 10px 20px rgba(37,99,235,.18)}
+    .btn-danger{background:var(--red);color:#fff;box-shadow:0 10px 20px rgba(220,38,38,.18)}
+    .btn-soft{background:#eef2ff;color:#3730a3}
+    .btn-green{background:var(--green);color:#fff;box-shadow:0 10px 20px rgba(22,163,74,.18)}
+    .card{
+      background:var(--card);
+      border:1px solid var(--line);
+      border-radius:var(--radius);
+      padding:18px;
+      box-shadow:0 10px 28px rgba(15,23,42,.06);
+    }
+    .notice{
+      margin-bottom:18px;
+      background:linear-gradient(180deg,#fff7ed 0%,#fffbeb 100%);
+      border:1px solid #fed7aa;
+      border-radius:16px;
+      padding:14px 16px;
+      color:#9a3412;
+    }
+    .notice strong{display:block;margin-bottom:6px}
+    .stats-grid{
+      display:grid;
+      grid-template-columns:repeat(4,minmax(0,1fr));
+      gap:14px;
+      margin-bottom:18px;
+    }
+    .stat-card{display:flex;flex-direction:column;gap:10px}
+    .stat-top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+    .stat-label{font-size:.88rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+    .stat-value{font-size:1.65rem;font-weight:800}
+    .stat-sub{color:var(--muted);font-size:.95rem}
+    .chip-row{display:flex;gap:8px;flex-wrap:wrap}
+    .chip{
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      padding:6px 10px;
+      border-radius:999px;
+      background:#f8fafc;
+      border:1px solid var(--line);
+      color:#334155;
+      font-size:.85rem;
+      font-weight:700;
+    }
+    .filters-card{margin-bottom:18px}
+    .filters-grid{
+      display:grid;
+      grid-template-columns:1.3fr 1fr 1fr 1fr 1fr;
+      gap:12px;
+      align-items:end;
+    }
+    .field{display:flex;flex-direction:column;gap:6px}
+    .field label{font-size:.88rem;font-weight:700;color:#475569}
+    .field input{
+      border:1px solid var(--line);
+      border-radius:12px;
+      padding:11px 12px;
+      font:inherit;
+      background:#fff;
+    }
+    .type-boxes{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      padding:12px;
+      border:1px solid var(--line);
+      border-radius:14px;
+      background:#f8fafc;
+      min-height:48px;
+      align-items:center;
+    }
+    .type-boxes label{
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      font-weight:700;
+      color:#334155;
+    }
+    .filter-actions{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      margin-top:14px;
+    }
+    .section-title{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      flex-wrap:wrap;
+      margin-bottom:12px;
+    }
+    .section-title h2{
+      margin:0;
+      font-size:1.2rem;
+    }
+    .section-title p{
+      margin:4px 0 0;
+      color:var(--muted);
+      font-size:.92rem;
+    }
+    .message{
+      display:none;
+      margin-bottom:14px;
+      padding:12px 14px;
+      border-radius:14px;
+      font-weight:700;
+    }
+    .message.show{display:block}
+    .message.info{background:#eff6ff;border:1px solid #bfdbfe;color:#1d4ed8}
+    .message.error{background:#fef2f2;border:1px solid #fecaca;color:#b91c1c}
+    .message.success{background:#f0fdf4;border:1px solid #bbf7d0;color:#166534}
+    .recent-grid{
+      display:grid;
+      grid-template-columns:repeat(3,minmax(0,1fr));
+      gap:14px;
+      margin-bottom:18px;
+    }
+    .recent-card h3{margin:0 0 10px;font-size:1rem}
+    .recent-list{display:flex;flex-direction:column;gap:10px}
+    .recent-item{
+      padding:10px 12px;
+      border-radius:14px;
+      background:#f8fafc;
+      border:1px solid var(--line);
+    }
+    .recent-item strong{display:block;font-size:.95rem}
+    .recent-meta{color:var(--muted);font-size:.84rem;margin-top:4px}
+    .preview-meta{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      margin-bottom:12px;
+    }
+    .table-wrap{
+      border:1px solid var(--line);
+      border-radius:16px;
+      overflow:auto;
+      background:#fff;
+    }
+    table{width:100%;border-collapse:collapse;min-width:860px}
+    th,td{
+      padding:11px 12px;
+      border-bottom:1px solid #edf2f7;
+      text-align:left;
+      vertical-align:top;
+    }
+    th{
+      background:#f8fafc;
+      color:#475569;
+      font-size:.88rem;
+      text-transform:uppercase;
+      letter-spacing:.04em;
+    }
+    tbody tr:hover td{background:#fbfdff}
+    .type-pill{
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      padding:5px 10px;
+      border-radius:999px;
+      font-size:.82rem;
+      font-weight:800;
+    }
+    .type-image{background:#dbeafe;color:#1d4ed8}
+    .type-audio{background:#dcfce7;color:#166534}
+    .type-video{background:#fee2e2;color:#b91c1c}
+    .small{font-size:.85rem;color:var(--muted)}
+    .danger-zone{margin-top:18px;border-color:#fecaca;background:linear-gradient(180deg,#fff5f5 0%,#fef2f2 100%)}
+    .danger-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+
+    html.ss-theme-night body{background:linear-gradient(180deg,#0f172a 0%,#111827 100%);color:#e2e8f0}
+    html.ss-theme-night .card{background:#1e293b;border-color:rgba(255,255,255,.08);box-shadow:0 14px 34px rgba(0,0,0,.28)}
+    html.ss-theme-night .title-wrap p,
+    html.ss-theme-night .stat-label,
+    html.ss-theme-night .stat-sub,
+    html.ss-theme-night .recent-meta,
+    html.ss-theme-night .small,
+    html.ss-theme-night .section-title p{color:#94a3b8}
+    html.ss-theme-night .btn-back{background:#334155;color:#f8fafc}
+    html.ss-theme-night .chip,
+    html.ss-theme-night .recent-item,
+    html.ss-theme-night .type-boxes,
+    html.ss-theme-night th{background:#111827;border-color:rgba(255,255,255,.08);color:#cbd5e1}
+    html.ss-theme-night tbody tr:hover td{background:rgba(255,255,255,.03)}
+    html.ss-theme-night td{border-bottom-color:rgba(255,255,255,.06)}
+    html.ss-theme-night .field label{color:#cbd5e1}
+    html.ss-theme-night .field input{background:#0f172a;border-color:rgba(255,255,255,.12);color:#e2e8f0}
+    html.ss-theme-night .notice{background:linear-gradient(180deg,#3f2a12 0%,#2b1f12 100%);border-color:#92400e;color:#fdba74}
+    html.ss-theme-night .danger-zone{background:linear-gradient(180deg,#3b1115 0%,#2a1114 100%);border-color:#7f1d1d}
+
+    @media (max-width: 980px){
+      .stats-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+      .filters-grid{grid-template-columns:1fr 1fr}
+      .recent-grid{grid-template-columns:1fr}
+    }
+    @media (max-width: 640px){
+      body{padding:14px}
+      .stats-grid{grid-template-columns:1fr}
+      .filters-grid{grid-template-columns:1fr}
+      .topbar{align-items:flex-start}
+      .title-wrap h1{font-size:1.6rem}
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div class="topbar">
+      <div class="title-wrap">
+        <h1>Prep Media Cleaner</h1>
+        <p>Clean prep photos, videos, and voice notes without touching written notes.</p>
+      </div>
+      <a href="/tools" class="btn btn-back">← Back to Tools</a>
+    </div>
+
+    <div class="notice">
+      <strong>Storage cleanup only</strong>
+      This cleaner permanently removes prep pictures, videos, and audio files from `bol.db` + disk. Written notes stay untouched.
+    </div>
+
+    <div id="pageMessage" class="message info"></div>
+
+    <div class="stats-grid">
+      <div class="card stat-card">
+        <div class="stat-top">
+          <div>
+            <div class="stat-label">All Prep Media</div>
+            <div class="stat-value" id="stat-all-size">0 B</div>
+            <div class="stat-sub"><span id="stat-all-count">0</span> files total</div>
+          </div>
+          <button class="btn btn-danger" data-clean-all="all">Clean All</button>
+        </div>
+      </div>
+      <div class="card stat-card">
+        <div class="stat-top">
+          <div>
+            <div class="stat-label">Pictures</div>
+            <div class="stat-value" id="stat-image-size">0 B</div>
+            <div class="stat-sub"><span id="stat-image-count">0</span> files</div>
+          </div>
+          <button class="btn btn-soft" data-clean-all="image">Clean All Pictures</button>
+        </div>
+      </div>
+      <div class="card stat-card">
+        <div class="stat-top">
+          <div>
+            <div class="stat-label">Audio</div>
+            <div class="stat-value" id="stat-audio-size">0 B</div>
+            <div class="stat-sub"><span id="stat-audio-count">0</span> files</div>
+          </div>
+          <button class="btn btn-soft" data-clean-all="audio">Clean All Audio</button>
+        </div>
+      </div>
+      <div class="card stat-card">
+        <div class="stat-top">
+          <div>
+            <div class="stat-label">Video</div>
+            <div class="stat-value" id="stat-video-size">0 B</div>
+            <div class="stat-sub"><span id="stat-video-count">0</span> files</div>
+          </div>
+          <button class="btn btn-soft" data-clean-all="video">Clean All Video</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="recent-grid">
+      <div class="card recent-card">
+        <h3>Recent Pictures</h3>
+        <div id="recent-image" class="recent-list"><div class="small">Loading…</div></div>
+      </div>
+      <div class="card recent-card">
+        <h3>Recent Audio</h3>
+        <div id="recent-audio" class="recent-list"><div class="small">Loading…</div></div>
+      </div>
+      <div class="card recent-card">
+        <h3>Recent Video</h3>
+        <div id="recent-video" class="recent-list"><div class="small">Loading…</div></div>
+      </div>
+    </div>
+
+    <div class="card filters-card">
+      <div class="section-title">
+        <div>
+          <h2>Filter Cleanup Scope</h2>
+          <p>Use UPC / unit, LOT, date range, file type, or any combination. Preview before deleting.</p>
+        </div>
+      </div>
+
+      <div class="filters-grid">
+        <div class="field" style="grid-column:span 1">
+          <label>Media Types</label>
+          <div class="type-boxes">
+            <label><input type="checkbox" name="mediaType" value="image" checked> Pictures</label>
+            <label><input type="checkbox" name="mediaType" value="audio" checked> Audio</label>
+            <label><input type="checkbox" name="mediaType" value="video" checked> Video</label>
+          </div>
+        </div>
+        <div class="field">
+          <label for="upcFilter">UPC / Unit</label>
+          <input id="upcFilter" type="text" placeholder="Base UPC or suffixed UPC">
+          <div class="small">Base UPC matches that barcode family. Suffixed UPC matches one exact unit.</div>
+        </div>
+        <div class="field">
+          <label for="lotFilter">LOT</label>
+          <input id="lotFilter" type="text" list="lotSuggestions" placeholder="LOT number">
+          <datalist id="lotSuggestions"></datalist>
+          <div class="small">LOT cleanup only removes rows with one clear LOT match.</div>
+        </div>
+        <div class="field">
+          <label for="dateFrom">Date From</label>
+          <input id="dateFrom" type="date">
+        </div>
+        <div class="field">
+          <label for="dateTo">Date To</label>
+          <input id="dateTo" type="date">
+        </div>
+      </div>
+
+      <div class="filter-actions">
+        <button id="previewBtn" class="btn btn-primary">Preview Matching Media</button>
+        <button id="deleteMatchingBtn" class="btn btn-danger">Delete Matching Media</button>
+        <button id="clearFiltersBtn" class="btn btn-soft">Clear Filters</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="section-title">
+        <div>
+          <h2>Matching Media Preview</h2>
+          <p>Preview what will be removed for the current filter set.</p>
+        </div>
+      </div>
+      <div id="previewSummary" class="preview-meta">
+        <span class="chip">No preview loaded yet</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Type</th>
+              <th>UPC</th>
+              <th>LOT</th>
+              <th>Status</th>
+              <th>Created</th>
+              <th>Size</th>
+              <th>File</th>
+            </tr>
+          </thead>
+          <tbody id="previewTableBody">
+            <tr><td colspan="7" class="small" style="padding:16px">Run a preview to see matching prep media.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card danger-zone">
+      <div class="section-title">
+        <div>
+          <h2>Danger Zone</h2>
+          <p>These buttons permanently delete prep media files. Written notes stay in place.</p>
+        </div>
+      </div>
+      <div class="danger-actions">
+        <button class="btn btn-danger" data-clean-all="all">Clean All Prep Media</button>
+        <button class="btn btn-danger" data-clean-all="image">Clean Every Picture</button>
+        <button class="btn btn-danger" data-clean-all="audio">Clean Every Audio Note</button>
+        <button class="btn btn-danger" data-clean-all="video">Clean Every Video</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function esc(value){
+      return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function formatBytes(size){
+      const n = Number(size || 0);
+      if(!Number.isFinite(n) || n <= 0) return '0 B';
+      const units = ['B','KB','MB','GB','TB'];
+      let value = n;
+      let idx = 0;
+      while(value >= 1024 && idx < units.length - 1){
+        value /= 1024;
+        idx += 1;
+      }
+      return idx === 0 ? `${Math.round(value)} ${units[idx]}` : `${value.toFixed(2)} ${units[idx]}`;
+    }
+
+    function formatDate(value){
+      const raw = String(value || '').trim();
+      if(!raw) return '—';
+      const dt = new Date(raw);
+      if(Number.isNaN(dt.getTime())) return raw;
+      return dt.toLocaleString('en-US', {
+        timeZone: 'America/New_York',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true
+      });
+    }
+
+    function mediaTypeIcon(type){
+      if(type === 'image') return '📷';
+      if(type === 'audio') return '🎙️';
+      if(type === 'video') return '🎥';
+      return '•';
+    }
+
+    function mediaTypeLabel(type){
+      if(type === 'image') return 'Picture';
+      if(type === 'audio') return 'Audio';
+      if(type === 'video') return 'Video';
+      return type || 'Media';
+    }
+
+    function getSelectedMediaTypes(){
+      const vals = Array.from(document.querySelectorAll('input[name="mediaType"]:checked'))
+        .map(el => el.value)
+        .filter(Boolean);
+      return vals.length ? vals : ['image','audio','video'];
+    }
+
+    function currentFilters(){
+      return {
+        media_types: getSelectedMediaTypes(),
+        upc: document.getElementById('upcFilter').value.trim(),
+        lot: document.getElementById('lotFilter').value.trim(),
+        date_from: document.getElementById('dateFrom').value.trim(),
+        date_to: document.getElementById('dateTo').value.trim()
+      };
+    }
+
+    function setBusyState(isBusy){
+      document.querySelectorAll('button').forEach(btn => btn.disabled = !!isBusy);
+    }
+
+    function showMessage(text, kind='info'){
+      const box = document.getElementById('pageMessage');
+      box.textContent = text || '';
+      box.className = `message show ${kind}`;
+    }
+
+    function clearMessage(){
+      const box = document.getElementById('pageMessage');
+      box.textContent = '';
+      box.className = 'message info';
+    }
+
+    function updateStatCard(prefix, payload){
+      document.getElementById(`stat-${prefix}-size`).textContent = payload && payload.size_label ? payload.size_label : '0 B';
+      document.getElementById(`stat-${prefix}-count`).textContent = payload && typeof payload.count !== 'undefined' ? payload.count : 0;
+    }
+
+    function renderRecentList(type, items){
+      const host = document.getElementById(`recent-${type}`);
+      if(!host) return;
+      if(!Array.isArray(items) || !items.length){
+        host.innerHTML = '<div class="small">No files found.</div>';
+        return;
+      }
+      host.innerHTML = items.map(item => (
+        `<div class="recent-item">` +
+          `<strong>${esc(item.upc || 'Unknown UPC')}</strong>` +
+          `<div class="recent-meta">${esc(item.lot_label || 'No LOT')} • ${esc(formatDate(item.created_at))}</div>` +
+          `<div class="recent-meta">${esc(item.size_label || formatBytes(item.size_bytes))}</div>` +
+        `</div>`
+      )).join('');
+    }
+
+    function renderLotSuggestions(lots){
+      const host = document.getElementById('lotSuggestions');
+      if(!host) return;
+      host.innerHTML = Array.isArray(lots)
+        ? lots.map(lot => `<option value="${esc(lot)}"></option>`).join('')
+        : '';
+    }
+
+    function renderPreviewSummary(data){
+      const host = document.getElementById('previewSummary');
+      const summary = data && data.summary ? data.summary : null;
+      if(!summary){
+        host.innerHTML = '<span class="chip">No preview loaded yet</span>';
+        return;
+      }
+      const chips = [];
+      chips.push(`<span class="chip">Matches: ${Number(data.total_matches || 0)}</span>`);
+      chips.push(`<span class="chip">Showing: ${Number(data.displayed_matches || 0)}</span>`);
+      chips.push(`<span class="chip">Total Size: ${esc(summary.all && summary.all.size_label || '0 B')}</span>`);
+      chips.push(`<span class="chip">Pictures: ${Number(summary.image && summary.image.count || 0)} / ${esc(summary.image && summary.image.size_label || '0 B')}</span>`);
+      chips.push(`<span class="chip">Audio: ${Number(summary.audio && summary.audio.count || 0)} / ${esc(summary.audio && summary.audio.size_label || '0 B')}</span>`);
+      chips.push(`<span class="chip">Video: ${Number(summary.video && summary.video.count || 0)} / ${esc(summary.video && summary.video.size_label || '0 B')}</span>`);
+      if(Number(data.skipped_ambiguous_lot || 0) > 0){
+        chips.push(`<span class="chip">Skipped ambiguous LOT matches: ${Number(data.skipped_ambiguous_lot || 0)}</span>`);
+      }
+      host.innerHTML = chips.join('');
+    }
+
+    function renderPreviewTable(rows){
+      const body = document.getElementById('previewTableBody');
+      if(!Array.isArray(rows) || !rows.length){
+        body.innerHTML = '<tr><td colspan="7" class="small" style="padding:16px">No prep media matched these filters.</td></tr>';
+        return;
+      }
+      body.innerHTML = rows.map(row => {
+        const type = String(row.media_type || '').toLowerCase();
+        const fileName = String(row.relative_path || '').split('/').pop() || row.relative_path || '';
+        const lotLabel = Array.isArray(row.lots) && row.lots.length
+          ? row.lots.join(', ')
+          : '—';
+        const rowStatus = row.row_status ? row.row_status : '—';
+        return (
+          `<tr>` +
+            `<td><span class="type-pill type-${esc(type)}">${mediaTypeIcon(type)} ${esc(mediaTypeLabel(type))}</span></td>` +
+            `<td>${esc(row.upc || '')}</td>` +
+            `<td>${esc(lotLabel)}</td>` +
+            `<td>${esc(rowStatus)}</td>` +
+            `<td>${esc(formatDate(row.created_at))}</td>` +
+            `<td>${esc(row.size_label || formatBytes(row.size_bytes))}</td>` +
+            `<td><div>${esc(fileName)}</div><div class="small">${row.exists ? 'On disk' : 'Missing file / DB row only'}</div></td>` +
+          `</tr>`
+        );
+      }).join('');
+    }
+
+    async function fetchOverview(){
+      const res = await fetch('/api/prep-media-cleaner/overview', { cache: 'no-store' });
+      const data = await res.json();
+      if(!res.ok || !data.success){
+        throw new Error((data && data.error) || `HTTP ${res.status}`);
+      }
+      updateStatCard('all', data.summary.all);
+      updateStatCard('image', data.summary.image);
+      updateStatCard('audio', data.summary.audio);
+      updateStatCard('video', data.summary.video);
+      renderRecentList('image', data.recent_by_type && data.recent_by_type.image);
+      renderRecentList('audio', data.recent_by_type && data.recent_by_type.audio);
+      renderRecentList('video', data.recent_by_type && data.recent_by_type.video);
+      renderLotSuggestions(data.lot_options || []);
+    }
+
+    async function previewMatching(){
+      clearMessage();
+      setBusyState(true);
+      try{
+        const filters = currentFilters();
+        const params = new URLSearchParams();
+        params.set('media_types', filters.media_types.join(','));
+        if(filters.upc) params.set('upc', filters.upc);
+        if(filters.lot) params.set('lot', filters.lot);
+        if(filters.date_from) params.set('date_from', filters.date_from);
+        if(filters.date_to) params.set('date_to', filters.date_to);
+        params.set('limit', '250');
+        const res = await fetch('/api/prep-media-cleaner/query?' + params.toString(), { cache: 'no-store' });
+        const data = await res.json();
+        if(!res.ok || !data.success){
+          throw new Error((data && data.error) || `HTTP ${res.status}`);
+        }
+        renderPreviewSummary(data);
+        renderPreviewTable(data.rows || []);
+        if(Number(data.total_matches || 0) === 0){
+          showMessage('No prep media matched the current filters.', 'info');
+        } else {
+          showMessage(`Preview loaded for ${data.total_matches} matching prep media file(s).`, 'success');
+        }
+      }catch(err){
+        renderPreviewSummary(null);
+        renderPreviewTable([]);
+        showMessage(`Preview failed: ${err.message || err}`, 'error');
+      }finally{
+        setBusyState(false);
+      }
+    }
+
+    async function deleteWithFilters(filters, label){
+      clearMessage();
+      const typeText = (filters.media_types || []).map(mediaTypeLabel).join(', ');
+      const scopeBits = [];
+      if(filters.upc) scopeBits.push(`UPC ${filters.upc}`);
+      if(filters.lot) scopeBits.push(`LOT ${filters.lot}`);
+      if(filters.date_from || filters.date_to) scopeBits.push(`date range ${filters.date_from || '...'} to ${filters.date_to || '...'}`);
+      const scopeText = scopeBits.length ? ` for ${scopeBits.join(' / ')}` : '';
+      if(!confirm(`Permanently delete ${label || typeText}${scopeText}?\n\nThis removes prep media files from disk and bol.db. Written notes stay.`)){
+        return;
+      }
+
+      setBusyState(true);
+      try{
+        const res = await fetch('/api/prep-media-cleaner/delete', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify(filters)
+        });
+        const data = await res.json();
+        if(!res.ok || !data.success){
+          throw new Error((data && data.error) || `HTTP ${res.status}`);
+        }
+        const msg = `Deleted ${data.deleted_count} file(s), freed ${data.deleted_size_label}.`;
+        showMessage(msg, 'success');
+        await fetchOverview();
+        await previewMatching();
+      }catch(err){
+        showMessage(`Cleanup failed: ${err.message || err}`, 'error');
+      }finally{
+        setBusyState(false);
+      }
+    }
+
+    function clearFilters(){
+      document.getElementById('upcFilter').value = '';
+      document.getElementById('lotFilter').value = '';
+      document.getElementById('dateFrom').value = '';
+      document.getElementById('dateTo').value = '';
+      document.querySelectorAll('input[name="mediaType"]').forEach(el => { el.checked = true; });
+      clearMessage();
+      renderPreviewSummary(null);
+      renderPreviewTable([]);
+    }
+
+    document.getElementById('previewBtn').addEventListener('click', previewMatching);
+    document.getElementById('deleteMatchingBtn').addEventListener('click', () => deleteWithFilters(currentFilters(), 'the matching prep media'));
+    document.getElementById('clearFiltersBtn').addEventListener('click', clearFilters);
+
+    document.querySelectorAll('[data-clean-all]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const mediaType = btn.getAttribute('data-clean-all');
+        const filters = {
+          media_types: mediaType === 'all' ? ['image','audio','video'] : [mediaType],
+          upc: '',
+          lot: '',
+          date_from: '',
+          date_to: ''
+        };
+        const label = mediaType === 'all'
+          ? 'all prep media'
+          : `all ${mediaType === 'image' ? 'pictures' : mediaType === 'audio' ? 'audio notes' : 'videos'}`;
+        deleteWithFilters(filters, label);
+      });
+    });
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      setBusyState(true);
+      try{
+        await fetchOverview();
+      }catch(err){
+        showMessage(`Failed to load prep media overview: ${err.message || err}`, 'error');
+      }finally{
+        setBusyState(false);
+      }
+    });
+  </script>
+</body>
+</html>
