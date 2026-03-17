@@ -40,6 +40,7 @@
     }
 
     * { box-sizing: border-box; }
+    html{ scrollbar-gutter: stable; }
     body{
       margin:0;
       color: var(--ink);
@@ -382,6 +383,30 @@
       background: rgba(0, 0, 0, 0.25);
     }
     html.ss-theme-night .noteItem{
+      background: rgba(15, 23, 42, 0.65);
+    }
+    .voiceNoteList{
+      margin-top: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .voiceNoteItem{
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid rgba(251, 191, 36, 0.25);
+      background: var(--bg0);
+    }
+    .voiceNoteItem audio{
+      width: 100%;
+      margin-top: 6px;
+    }
+    .voiceNoteItem .voiceNoteMeta{
+      font-size: 0.82rem;
+      color: var(--muted);
+      margin-bottom: 4px;
+    }
+    html.ss-theme-night .voiceNoteItem{
       background: rgba(15, 23, 42, 0.65);
     }
 
@@ -1499,7 +1524,6 @@
           <h1 class="pageTitle">Listing Agent</h1>
           <span class="pill">Experimental</span>
         </div>
-        <p class="subtitle">Pick a UPC from your DB, preview marketplace templates, and draft listings for eBay/Amazon.</p>
       </div>
     </div>
   </div>
@@ -1511,40 +1535,31 @@
             <div class="cardHeader">
               <div class="cardHeaderLeft">
                 <button class="collapseBtn" onclick="toggleCard('cardListing')" title="Collapse/Expand"><i class="fas fa-chevron-down"></i></button>
-                <h2><i class="fas fa-barcode" style="color:var(--blue)"></i>Listing</h2>
+                <h2><i class="fas fa-list-check" style="color:var(--blue)"></i>Queue</h2>
               </div>
               <div class="cardHeaderRight">
-                <button class="btn btnGhost" id="btnClear"><i class="fas fa-eraser"></i>Clear</button>
+                <select id="queueModeSelect" class="queueModeSelect mode-my" title="Queue source filter">
+                  <option value="my">My Added</option>
+                  <option value="auto">Auto Added</option>
+                </select>
+                <button class="btn btnGhost btnMini" id="btnQueueReload" type="button"><i class="fas fa-rotate"></i></button>
+                <button class="btn btnGhost btnMini" id="btnClear" title="Clear active item"><i class="fas fa-eraser"></i></button>
               </div>
             </div>
           <div class="cardBody">
-            <div class="field">
-              <label for="upcSearch">Scan / Search</label>
-              <input id="upcSearch" type="text" placeholder="Scan UPC + Enter or type to search..." autocomplete="off" />
-              <div id="searchQueueAction" class="searchQueueAction" style="display:none;">
-                <div id="searchQueueActionText" class="hint"></div>
-                <button class="btn btnGhost btnMini" id="btnSearchQueueAction" type="button" style="display:none;"></button>
-              </div>
+            <!-- upcSearch kept in DOM (hidden) for JS compatibility -->
+            <input id="upcSearch" type="text" autocomplete="off" style="display:none;" />
+            <div id="searchQueueAction" style="display:none;">
+              <div id="searchQueueActionText"></div>
+              <button id="btnSearchQueueAction" type="button" style="display:none;"></button>
             </div>
 
-            <div class="field" style="margin-top:12px;">
-              <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
-                <label style="margin:0;">Queue</label>
-                <div class="queueTools">
-                  <select id="queueModeSelect" class="queueModeSelect mode-my" title="Queue source filter">
-                    <option value="my">My Added</option>
-                    <option value="auto">Auto Added</option>
-                  </select>
-                  <button class="btn btnGhost btnMini" id="btnQueueReload" type="button"><i class="fas fa-rotate"></i>Refresh</button>
-                </div>
-              </div>
-              <div id="queueList" class="queueList" style="margin-top:10px;"></div>
-              <div id="queueEmpty" class="hint" style="display:none;margin-top:10px;">Queue is empty. Use "+ Listing Agent" in List Manager or scan a UPC.</div>
-            </div>
+            <div id="queueList" class="queueList"></div>
+            <div id="queueEmpty" class="hint" style="display:none;margin-top:10px;">Queue is empty. Use "+ Listing Agent" in List Manager.</div>
           </div>
         </div>
 
-        <div class="card" id="cardStatusLog">
+        <div class="card collapsed" id="cardStatusLog">
           <div class="cardHeader">
             <div class="cardHeaderLeft">
               <button class="collapseBtn" onclick="toggleCard('cardStatusLog')" title="Collapse/Expand"><i class="fas fa-chevron-down"></i></button>
@@ -1577,7 +1592,7 @@
           <div class="cardHeader">
             <div class="cardHeaderLeft">
               <button class="collapseBtn" onclick="toggleCard('cardNote')" title="Collapse/Expand"><i class="fas fa-chevron-down"></i></button>
-              <h2><i class="fas fa-note-sticky" style="color:var(--yellow)"></i>NOTE</h2>
+              <h2><i class="fas fa-note-sticky" style="color:var(--yellow)"></i>NOTES & MEDIA</h2>
               <span class="badge badgeOrange" id="noteBadge" style="margin-left:8px;"><i class="fas fa-clipboard-check" style="margin-right:6px;"></i>Listing Manager</span>
             </div>
           </div>
@@ -1628,7 +1643,7 @@
                 </div>
 
                 <div id="images" class="imageCards"></div>
-                <div id="imageStoreHint" class="hint">Showing eBay images to send (catalog + uploaded, max 12). Drag cards to reorder; first card is the thumbnail.</div>
+                <div id="imageStoreHint" class="hint"></div>
 
                 <div class="btnRow" style="margin-top:12px;justify-content:flex-end;">
                   <button class="btn btnPrimary" type="button" onclick="toggleCard('cardItemPreview')"><i class="fas fa-check"></i>Complete</button>
@@ -2074,12 +2089,18 @@
     }
 
     // Restore collapse states on page load
+    // Cards listed here are collapsed by default unless the user has explicitly opened them.
+    const _defaultCollapsed = {'cardStatusLog': true};
     function restoreCollapseStates(){
-      const collapsed = JSON.parse(localStorage.getItem('listingAgentCollapsed') || '{}');
-      Object.entries(collapsed).forEach(([cardId, isCollapsed]) => {
+      const saved = JSON.parse(localStorage.getItem('listingAgentCollapsed') || '{}');
+      const merged = Object.assign({}, _defaultCollapsed, saved);
+      Object.entries(merged).forEach(([cardId, isCollapsed]) => {
         const card = $(cardId);
-        if(card && isCollapsed){
+        if(!card) return;
+        if(isCollapsed){
           card.classList.add('collapsed');
+        } else {
+          card.classList.remove('collapsed');
         }
       });
     }
@@ -2966,6 +2987,7 @@
       if(!card || !body) return;
 
       const notes = (state.item && state.item.prep && Array.isArray(state.item.prep.notes)) ? state.item.prep.notes : [];
+      const voiceNotes = (state.item && state.item.prep && Array.isArray(state.item.prep.voice_notes)) ? state.item.prep.voice_notes : [];
       const filtered = notes
         .map(n => ({
           upc: (n && n.upc) ? n.upc : '',
@@ -2974,7 +2996,7 @@
         }))
         .filter(n => (n.note || '').toString().trim().length > 0);
 
-      if(!state.item || filtered.length === 0){
+      if(!state.item || (filtered.length === 0 && voiceNotes.length === 0)){
         card.style.display = 'none';
         body.innerHTML = '';
         if(list){
@@ -2986,33 +3008,61 @@
 
       card.style.display = 'block';
 
-      const top = filtered[0];
-      const when = top.created_at ? fmtNoteTime(top.created_at) : '';
-      const upc = formatUpc12((top.upc || state.activeUpc || '').toString());
-
-      const hero = escapeHtml((top.note || '').toString()).replaceAll('\n', '<br>');
-      body.innerHTML = `
-        <div class="noteHero">${hero}</div>
-        <div class="noteMeta">
-          <span class="badge badgeOrange"><i class="fas fa-barcode" style="margin-right:6px;"></i>${escapeHtml(upc)}</span>
-          ${when ? `<span class="badge"><i class="fas fa-clock" style="margin-right:6px;"></i>${escapeHtml(when)}</span>` : ''}
-        </div>
-      `;
-
-      if(list){
-        const rest = filtered.slice(1, 5);
-        if(rest.length){
-          list.style.display = 'grid';
-          list.innerHTML = rest.map(n => {
-            const w = n.created_at ? fmtNoteTime(n.created_at) : '';
-            const head = w ? `<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;"><span class="badge"><i class="fas fa-clock" style="margin-right:6px;"></i>${escapeHtml(w)}</span></div>` : '';
-            const txt = escapeHtml((n.note || '').toString());
-            return `<div class="noteItem">${head}${txt}</div>`;
-          }).join('');
-        } else {
-          list.style.display = 'none';
-          list.innerHTML = '';
+      // Text notes
+      if(filtered.length > 0){
+        const top = filtered[0];
+        const when = top.created_at ? fmtNoteTime(top.created_at) : '';
+        const upc = formatUpc12((top.upc || state.activeUpc || '').toString());
+        const hero = escapeHtml((top.note || '').toString()).replaceAll('\n', '<br>');
+        body.innerHTML = `
+          <div class="noteHero">${hero}</div>
+          <div class="noteMeta">
+            <span class="badge badgeOrange"><i class="fas fa-barcode" style="margin-right:6px;"></i>${escapeHtml(upc)}</span>
+            ${when ? `<span class="badge"><i class="fas fa-clock" style="margin-right:6px;"></i>${escapeHtml(when)}</span>` : ''}
+          </div>
+        `;
+        if(list){
+          const rest = filtered.slice(1, 5);
+          if(rest.length){
+            list.style.display = 'grid';
+            list.innerHTML = rest.map(n => {
+              const w = n.created_at ? fmtNoteTime(n.created_at) : '';
+              const head = w ? `<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;"><span class="badge"><i class="fas fa-clock" style="margin-right:6px;"></i>${escapeHtml(w)}</span></div>` : '';
+              const txt = escapeHtml((n.note || '').toString());
+              return `<div class="noteItem">${head}${txt}</div>`;
+            }).join('');
+          } else {
+            list.style.display = 'none';
+            list.innerHTML = '';
+          }
         }
+      } else {
+        body.innerHTML = '';
+        if(list){ list.style.display = 'none'; list.innerHTML = ''; }
+      }
+
+      // Voice notes
+      let voiceEl = $('voiceNoteList');
+      if(!voiceEl){
+        voiceEl = document.createElement('div');
+        voiceEl.id = 'voiceNoteList';
+        voiceEl.className = 'voiceNoteList';
+        $('cardNote').querySelector('.cardBody').appendChild(voiceEl);
+      }
+      if(voiceNotes.length > 0){
+        voiceEl.style.display = 'flex';
+        voiceEl.innerHTML = `<div style="font-size:0.82rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:2px;"><i class="fas fa-microphone" style="margin-right:5px;color:var(--yellow);"></i>Voice Notes</div>` +
+          voiceNotes.slice(0, 5).map((vn, idx) => {
+            const when = vn.created_at ? fmtNoteTime(vn.created_at) : '';
+            const src = escapeHtml(vn.url || '');
+            return `<div class="voiceNoteItem">
+              <div class="voiceNoteMeta"><i class="fas fa-volume-up" style="margin-right:5px;"></i>Voice note ${idx + 1}${when ? ` &mdash; ${escapeHtml(when)}` : ''}</div>
+              <audio controls preload="metadata" src="${src}"></audio>
+            </div>`;
+          }).join('');
+      } else {
+        voiceEl.style.display = 'none';
+        voiceEl.innerHTML = '';
       }
     }
 
@@ -3205,11 +3255,7 @@
     function renderImageStoreHint(){
       const el = $('imageStoreHint');
       if(!el) return;
-      if(_activeStoreKey() === 'amazon'){
-        el.textContent = 'Amazon preview uses selected catalog image first, then your local thumbnail.';
-      } else {
-        el.textContent = 'Showing eBay images to send (max 12). If EPS/catalog and uploaded images are mixed, uploaded/self-hosted are preferred. First card is the thumbnail.';
-      }
+      el.textContent = '';
     }
 
     function rebuildImagesForActiveStore(){

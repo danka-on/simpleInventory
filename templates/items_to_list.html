@@ -143,6 +143,13 @@
     }
     .note-icon-btn:hover{background:rgba(15,23,42,0.06)}
     .note-audio-flag{font-size:0.88rem;line-height:1}
+    .notes-media-cell{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      gap:8px;
+      flex-wrap:wrap;
+    }
     .media-trigger{
       background:#eff6ff;
       color:#1d4ed8;
@@ -164,6 +171,13 @@
     .notes-section{margin-bottom:14px}
     .notes-section:last-child{margin-bottom:0}
     .notes-section-title{font-size:0.92rem;font-weight:700;margin-bottom:8px;color:#475569;text-transform:uppercase;letter-spacing:0.04em}
+    .notes-media-actions{
+      display:flex;
+      justify-content:flex-end;
+      gap:8px;
+      flex-wrap:wrap;
+      margin-bottom:14px;
+    }
     .voice-note-card{
       padding:10px;
       margin-bottom:8px;
@@ -693,12 +707,13 @@
   <div id="imgModal" class="modal"><div class="card"><div style="text-align:right"><button id="closeImg">Close</button></div><div id="imgContent"></div></div></div>
 
   <!-- Notes modal: shows all notes for an item -->
-  <div id="notesModal" class="modal"><div class="card" style="max-width:600px; width:95%;">
+  <div id="notesModal" class="modal"><div class="card" style="max-width:860px; width:95%;">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-      <h3 style="margin:0">📝 Notes & Voice</h3>
+      <h3 id="notesModalTitle" style="margin:0">Notes and Media</h3>
       <button id="closeNotes" class="btn-sm">Close</button>
     </div>
-    <div id="notesModalContent" style="max-height:400px;overflow-y:auto"></div>
+    <div id="notesModalMeta" class="small-muted" style="margin-bottom:10px"></div>
+    <div id="notesModalContent" style="max-height:70vh;overflow-y:auto"></div>
   </div></div>
 
   <div id="warehouseModal" class="modal"><div class="card" style="max-width:680px; width:95%;">
@@ -773,6 +788,58 @@ function renderLargeMediaHtml(item){
   return `<div class="mixed-media-badge">${label}</div><img src="${src}" alt="${label}"><div class="small-muted">${esc(metaBits.join(' | '))}</div>`;
 }
 
+function inferNotesMediaFocusFromEvent(e){
+  const target = e && e.target;
+  if(target && target.closest){
+    if(target.closest('.media-trigger-part.video')) return 'video';
+    if(target.closest('.media-trigger-part')) return 'media';
+    if(target.closest('.note-audio-flag')) return 'voice';
+  }
+  return 'notes';
+}
+
+function _notesMediaPreferredSection(focus, availability){
+  const wants = String(focus || '').trim().toLowerCase();
+  const hasNotes = !!availability.hasNotes;
+  const hasVoice = !!availability.hasVoice;
+  const hasMedia = !!availability.hasMedia;
+  const hasVideo = !!availability.hasVideo;
+
+  if(wants === 'video'){
+    if(hasVideo) return 'media';
+    if(hasMedia) return 'media';
+    if(hasVoice) return 'voice';
+    if(hasNotes) return 'notes';
+    return '';
+  }
+  if(wants === 'media' || wants === 'photo'){
+    if(hasMedia) return 'media';
+    if(hasVoice) return 'voice';
+    if(hasNotes) return 'notes';
+    return '';
+  }
+  if(wants === 'voice'){
+    if(hasVoice) return 'voice';
+    if(hasNotes) return 'notes';
+    if(hasMedia) return 'media';
+    return '';
+  }
+  if(hasNotes) return 'notes';
+  if(hasVoice) return 'voice';
+  if(hasMedia) return 'media';
+  return '';
+}
+
+function _notesMediaBuildMeta(upc, notesCount, audioCount, photoCount, videoCount){
+  const bits = [];
+  if(upc) bits.push(`UPC: ${upc}`);
+  if(notesCount > 0) bits.push(`${notesCount} text note${notesCount===1?'':'s'}`);
+  if(audioCount > 0) bits.push(`${audioCount} voice note${audioCount===1?'':'s'}`);
+  if(photoCount > 0) bits.push(`${photoCount} photo${photoCount===1?'':'s'}`);
+  if(videoCount > 0) bits.push(`${videoCount} video${videoCount===1?'':'s'}`);
+  return bits.join(' | ');
+}
+
 const GEAR_SETTINGS_KEY = 'items_to_list_gear_settings_v1';
 const FILTER_UI_SETTINGS_KEY = 'items_to_list_filter_ui_v1';
 const GEAR_DEFAULTS = Object.freeze({
@@ -822,7 +889,8 @@ function _clearGlobalColumnSortCache(){
 function _listagentQueueKey(rawValue){
   const raw = String(rawValue || '').trim();
   if(!raw) return '';
-  return raw.includes('-') ? raw.split('-')[0].trim() : raw;
+  // Preserve suffix (e.g. "123456789012-1") so listing agent SKU auto-fills with it.
+  return raw;
 }
 
 function _listagentQueueUiState(queueItem){
@@ -835,10 +903,29 @@ function _listagentQueueUiState(queueItem){
     };
   }
   const status = String(queueItem.status || '').trim().toLowerCase();
+  const hasListedState = !!(
+    queueItem.listed_at ||
+    queueItem.listed_platform ||
+    queueItem.listed_ebay_at ||
+    queueItem.listed_amazon_at ||
+    queueItem.listed_listing_id ||
+    queueItem.listed_offer_id ||
+    queueItem.listed_sku ||
+    queueItem.listed_asin ||
+    queueItem.listed_url
+  );
+  if(hasListedState){
+    return {
+      label: 'LISTED ✓',
+      title: 'Listed through Listing Agent',
+      disabled: true,
+      active: true
+    };
+  }
   if(status === 'done'){
     return {
-      label: 'Done',
-      title: 'Already completed in Listing Agent',
+      label: 'LISTED ✓',
+      title: 'Listed through Listing Agent',
       disabled: true,
       active: true
     };
@@ -1804,7 +1891,7 @@ function onOpenAutoListings(e){
 function render(results){
   let html = '<table><thead><tr>';
   if (selectMode) html += '<th>Select</th>';
-  html += `<th>Info</th><th>Status</th><th>Notes</th><th>Media</th><th>Defect</th><th class="th-sortable" data-sort-key="quantity" title="Sort by quantity" role="button" tabindex="0">PREP <span class="sort-ind">${_sortIndicator('quantity')}</span></th><th class="th-sortable" data-sort-key="warehouse_available" title="Sort by warehouse quantity" role="button" tabindex="0">Warehouse <span class="sort-ind">${_sortIndicator('warehouse_available')}</span></th><th>Title</th><th>UPC</th><th>Marketplaces</th><th>Last Edited</th><th>+ Listing Agent</th></tr></thead><tbody>`;
+  html += `<th>Info</th><th>Status</th><th>Notes and Media</th><th>Defect</th><th class="th-sortable" data-sort-key="quantity" title="Sort by quantity" role="button" tabindex="0">PREP <span class="sort-ind">${_sortIndicator('quantity')}</span></th><th class="th-sortable" data-sort-key="warehouse_available" title="Sort by warehouse quantity" role="button" tabindex="0">Warehouse <span class="sort-ind">${_sortIndicator('warehouse_available')}</span></th><th>Title</th><th>UPC</th><th>Marketplaces</th><th>Last Edited</th><th>+ Listing Agent</th></tr></thead><tbody>`;
   let rowIndex = 0;
   const viewResults = _sortedRenderResults(results);
   for (const r of viewResults) {
@@ -1942,11 +2029,14 @@ function render(results){
     if(hasVoiceNote) noteTitleParts.push(`${audioCount} voice note${audioCount===1?'':'s'}`);
     const noteCell = hasNote
       ? `<td style="text-align:center;font-size:1.05rem">`+
-          `<button type="button" class="note-icon note-icon-btn" data-upc="${apiUpc}" data-status="${esc(status)}" title="${esc(noteTitleParts.join(' | ') || 'Open notes')}">`+
+          `<button type="button" class="note-icon note-icon-btn" data-upc="${apiUpc}" data-lot="${esc(r.lot_number||'')}" data-status="${esc(status)}" title="${esc(noteTitleParts.join(' | ') || 'Open notes')}">`+
             `<span>📝</span>`+
             `${hasVoiceNote ? '<span class="note-audio-flag">🔊</span>' : ''}`+
           `</button>`+
         `</td>`
+      : `<td style="text-align:center"></td>`;
+    const notesMediaCell = (hasNote || hasAnyMedia)
+      ? `<td style="text-align:center"><div class="notes-media-cell">${hasNote ? noteCell.replace(/^<td[^>]*>|<\/td>$/g, '') : ''}${picsBtn || ''}</div></td>`
       : `<td style="text-align:center"></td>`;
     html += `<tr>`;
     if (selectMode) {
@@ -1957,8 +2047,7 @@ function render(results){
       `<td><div style="display:flex;flex-direction:column;gap:4px;align-items:flex-start">`+
             `<div>${pill}</div>`+
           `</div></td>`+
-            noteCell+
-            `<td style="text-align:center">${picsBtn || ''}</td>`+
+            notesMediaCell+
             `<td>${esc(defectDisplay)}</td>`+
              qtyCell+
              whCell+
@@ -2003,10 +2092,8 @@ function render(results){
   });
   document.querySelectorAll('.btn-copy').forEach(el=> el.addEventListener('click', onCopyUpc));
   document.querySelectorAll('.btn-listagent-queue').forEach(el=> el.addEventListener('click', onAddToListingAgentQueue));
-  // Wire pics-count handlers (now spans instead of buttons)
-  document.querySelectorAll('.pics-count').forEach(el=> el.addEventListener('click', onOpenPics));
-  // Wire note icon handlers
-  document.querySelectorAll('.note-icon').forEach(el=> el.addEventListener('click', onOpenNotes));
+  document.querySelectorAll('.pics-count').forEach(el=> el.addEventListener('click', onOpenNotesMedia));
+  document.querySelectorAll('.note-icon').forEach(el=> el.addEventListener('click', onOpenNotesMedia));
 }
 
 function onOpenImg(e){
@@ -2219,48 +2306,62 @@ function onOpenDiag(e){
   window.location.href = url;
 }
 
-async function onOpenPics(e){
-  e.preventDefault();
-  const upc = e.currentTarget.dataset.upc || e.currentTarget.getAttribute('data-upc');
-  if(!upc) return;
-  const lot = e.currentTarget.dataset.lot || '';
-  const rowStatus = (e.currentTarget.dataset.status || '').trim();
-  const modal = document.getElementById('picsModal');
-  const area = document.getElementById('picsGrid');
-  const large = document.getElementById('picsLarge');
-  const editLink = document.getElementById('picsEditLink');
-  const dlAll = document.getElementById('picsDownloadAll');
-  const titleEl = document.getElementById('picsModalTitle');
-  if(titleEl) titleEl.textContent = 'Media';
-  area.innerHTML = '<div class="small-muted">Loading...</div>';
-  large.innerHTML = '<div class="small-muted">Loading...</div>';
+async function openNotesMediaModal({ upc, lot = '', rowStatus = '', focus = 'notes' } = {}){
+  const upcValue = String(upc || '').trim();
+  if(!upcValue) return;
+  const modal = document.getElementById('notesModal');
+  const titleEl = document.getElementById('notesModalTitle');
+  const metaEl = document.getElementById('notesModalMeta');
+  const content = document.getElementById('notesModalContent');
+  if(!modal || !content) return;
+
+  if(titleEl) titleEl.textContent = 'Notes and Media';
+  if(metaEl) metaEl.textContent = 'Loading...';
+  content.innerHTML = '<div class="small-muted">Loading notes, voice notes, photos, and videos...</div>';
+  modal.style.display = 'flex';
+
   const ret = buildCurrentItemsToListUrl();
-  let diagUrl = '/item-prep/diagnostic?upc='+encodeURIComponent(upc)+'&from=items&return='+encodeURIComponent(ret);
+  let diagUrl = '/item-prep/diagnostic?upc='+encodeURIComponent(upcValue)+'&from=items&return='+encodeURIComponent(ret);
   if(lot) diagUrl += '&lot='+encodeURIComponent(lot);
   if(rowStatus) diagUrl += '&row_status='+encodeURIComponent(rowStatus);
-  editLink.href = diagUrl;
-  dlAll.href = '/api/items_prep/diagnostic/'+encodeURIComponent(upc)+'/photos.zip' + (rowStatus ? ('?row_status=' + encodeURIComponent(rowStatus)) : '');
-  dlAll.style.display = 'none';
-  try{
-    const photoParams = new URLSearchParams();
-    photoParams.set('exact_scope', '1');
-    if(lot) photoParams.set('lot', lot);
-    if(rowStatus) photoParams.set('row_status', rowStatus);
-    const mediaParams = new URLSearchParams();
-    if(rowStatus) mediaParams.set('row_status', rowStatus);
-    mediaParams.set('media_type', 'video');
 
-    const [photoRes, videoRes] = await Promise.all([
-      fetch('/api/items_prep/diagnostic/'+encodeURIComponent(upc)+'?'+photoParams.toString()),
-      fetch('/api/items_prep/media/'+encodeURIComponent(upc)+'?'+mediaParams.toString())
+  try{
+    const params = new URLSearchParams();
+    if(lot) params.set('lot', lot);
+    if(rowStatus) params.set('row_status', rowStatus);
+
+    const notesQs = params.toString();
+    const photoParams = new URLSearchParams(params.toString());
+    photoParams.set('exact_scope', '1');
+
+    const audioParams = new URLSearchParams(params.toString());
+    audioParams.set('media_type', 'audio');
+
+    const videoParams = new URLSearchParams(params.toString());
+    videoParams.set('media_type', 'video');
+
+    const [notesRes, audioRes, photoRes, videoRes] = await Promise.all([
+      fetch('/api/items_prep/notes/'+encodeURIComponent(upcValue)+(notesQs ? ('?'+notesQs) : '')),
+      fetch('/api/items_prep/media/'+encodeURIComponent(upcValue)+'?'+audioParams.toString()),
+      fetch('/api/items_prep/diagnostic/'+encodeURIComponent(upcValue)+'?'+photoParams.toString()),
+      fetch('/api/items_prep/media/'+encodeURIComponent(upcValue)+'?'+videoParams.toString())
     ]);
 
+    const notesJson = notesRes.ok ? await notesRes.json() : null;
+    const audioJson = audioRes.ok ? await audioRes.json() : null;
     const photoJson = photoRes.ok ? await photoRes.json() : null;
     const videoJson = videoRes.ok ? await videoRes.json() : null;
+
+    const notes = Array.isArray(notesJson && notesJson.notes) ? notesJson.notes : [];
+    const audioItems = Array.isArray(audioJson && audioJson.items) ? audioJson.items : [];
     const imgs = Array.isArray(photoJson && photoJson.images) ? photoJson.images : [];
     const videos = Array.isArray(videoJson && videoJson.items) ? videoJson.items : [];
-    const mediaItems = [];
 
+    if(metaEl){
+      metaEl.textContent = _notesMediaBuildMeta(upcValue, notes.length, audioItems.length, imgs.length, videos.length) || 'No notes or media found.';
+    }
+
+    const mediaItems = [];
     imgs.forEach((im, idx) => {
       const src = resolveStaticAssetUrl(im && im.image_path);
       if(!src) return;
@@ -2282,85 +2383,33 @@ async function onOpenPics(e){
       });
     });
 
-    if(titleEl){
-      const titleBits = [];
-      if(imgs.length) titleBits.push(`${imgs.length} photo${imgs.length===1?'':'s'}`);
-      if(videos.length) titleBits.push(`${videos.length} video${videos.length===1?'':'s'}`);
-      titleEl.textContent = titleBits.length ? `Media • ${titleBits.join(' • ')}` : 'Media';
-    }
-    if(imgs.length){
-      dlAll.style.display = 'inline-flex';
-    }
-    if(mediaItems.length===0){
-      area.innerHTML = '<div class="small-muted">No photos or videos</div>';
-      large.innerHTML = '<div class="small-muted">No media found for this item.</div>';
-      modal.style.display='flex';
-      return;
-    }
-    area.innerHTML = '';
-    let activeThumb = null;
-    const setActiveMedia = (item, thumbEl) => {
-      large.innerHTML = renderLargeMediaHtml(item);
-      if(activeThumb) activeThumb.classList.remove('active');
-      if(thumbEl){
-        thumbEl.classList.add('active');
-        activeThumb = thumbEl;
-      }
-    };
-    mediaItems.forEach((item, idx)=>{
-      const wrap = document.createElement('button');
-      wrap.type = 'button';
-      wrap.className = 'mixed-media-thumb';
-      wrap.title = item.media_type === 'video' ? 'Open video' : 'Open photo';
-      if(item.media_type === 'video'){
-        wrap.innerHTML = `<video src="${esc(item.src)}" muted playsinline preload="metadata"></video><div class="mixed-media-badge">VIDEO</div>`;
-      } else {
-        wrap.innerHTML = `<img src="${esc(item.src)}" alt="Photo"><div class="mixed-media-badge">PHOTO</div>`;
-      }
-      wrap.addEventListener('click', ()=> setActiveMedia(item, wrap));
-      area.appendChild(wrap);
-      if(idx===0){
-        setActiveMedia(item, wrap);
-      }
-    });
-    modal.style.display = 'flex';
-  }catch(e){
-    console.error('Error loading media:', e);
-    area.innerHTML = '<div class="small-muted">Error loading media</div>';
-    large.innerHTML = '<div class="small-muted">Error loading media</div>';
-    modal.style.display='flex';
-  }
-}
+    const sectionBlocks = [];
+    sectionBlocks.push(
+      `<div class="notes-media-actions">`+
+        `<a class="btn btn-sm" href="${esc(diagUrl)}" style="background:#e74c3c;color:#fff">Edit Diagnostic</a>`+
+        `${imgs.length ? `<a class="btn btn-sm" href="/api/items_prep/diagnostic/${encodeURIComponent(upcValue)}/photos.zip${rowStatus ? ('?row_status=' + encodeURIComponent(rowStatus)) : ''}" style="background:#3498db;color:#fff">Download Photos</a>` : ''}`+
+      `</div>`
+    );
 
-async function onOpenNotes(e){
-  e.preventDefault();
-  const upc = e.currentTarget.dataset.upc;
-  const rowStatus = (e.currentTarget.dataset.status || '').trim();
-  if(!upc) return;
-  const modal = document.getElementById('notesModal');
-  const content = document.getElementById('notesModalContent');
-  content.innerHTML = '<div class="small-muted">Loading...</div>';
-  modal.style.display = 'flex';
-  try{
-    const params = new URLSearchParams();
-    if(rowStatus) params.set('row_status', rowStatus);
-    const notesQs = params.toString();
-    const audioParams = new URLSearchParams(params.toString());
-    audioParams.set('media_type', 'audio');
-    const [notesRes, audioRes] = await Promise.all([
-      fetch('/api/items_prep/notes/'+encodeURIComponent(upc)+(notesQs ? ('?'+notesQs) : '')),
-      fetch('/api/items_prep/media/'+encodeURIComponent(upc)+'?'+audioParams.toString())
-    ]);
-    const notesJson = notesRes.ok ? await notesRes.json() : null;
-    const audioJson = audioRes.ok ? await audioRes.json() : null;
-    const notes = Array.isArray(notesJson && notesJson.notes) ? notesJson.notes : [];
-    const audioItems = Array.isArray(audioJson && audioJson.items) ? audioJson.items : [];
+    if(notes.length){
+      sectionBlocks.push(
+        `<div class="notes-section" id="notesMediaSection-notes">`+
+          `<div class="notes-section-title">Text Notes</div>`+
+          notes.map(n=>{
+            const date = formatEasternDateTime(n && n.created_at);
+            return `<div class="text-note-card">`+
+              `<div class="small-muted" style="margin-bottom:4px">${esc(date)}</div>`+
+              `<div>${esc(n && n.note)}</div>`+
+            `</div>`;
+          }).join('')+
+        `</div>`
+      );
+    }
 
-    const sections = [];
     if(audioItems.length){
-      sections.push(
-        `<div class="notes-section">`+
-          `<div class="notes-section-title">Voice Note${audioItems.length===1?'':'s'}</div>`+
+      sectionBlocks.push(
+        `<div class="notes-section" id="notesMediaSection-voice">`+
+          `<div class="notes-section-title">Voice Notes</div>`+
           audioItems.map((item, idx)=>{
             const src = resolveStaticAssetUrl(item && item.file_path);
             const date = formatEasternDateTime(item && item.created_at);
@@ -2375,29 +2424,106 @@ async function onOpenNotes(e){
         `</div>`
       );
     }
-    if(notes.length){
-      sections.push(
-        `<div class="notes-section">`+
-          `<div class="notes-section-title">Text Notes</div>`+
-          notes.map(n=>{
-            const date = formatEasternDateTime(n && n.created_at);
-            return `<div class="text-note-card">`+
-              `<div class="small-muted" style="margin-bottom:4px">${esc(date)}</div>`+
-              `<div>${esc(n && n.note)}</div>`+
-            `</div>`;
-          }).join('')+
+
+    if(mediaItems.length){
+      sectionBlocks.push(
+        `<div class="notes-section" id="notesMediaSection-media">`+
+          `<div class="notes-section-title">Photos and Videos</div>`+
+          `<div id="notesMediaLarge" class="mixed-media-stage"></div>`+
+          `<div id="notesMediaGrid" class="mixed-media-grid"></div>`+
         `</div>`
       );
     }
-    if(sections.length === 0){
-      content.innerHTML = '<div class="small-muted">No notes or voice note found.</div>';
+
+    if(sectionBlocks.length === 1){
+      content.innerHTML = '<div class="small-muted">No notes, voice notes, photos, or videos found.</div>';
       return;
     }
-    content.innerHTML = sections.join('');
+
+    content.innerHTML = sectionBlocks.join('');
+
+    if(mediaItems.length){
+      const stage = document.getElementById('notesMediaLarge');
+      const grid = document.getElementById('notesMediaGrid');
+      let activeThumb = null;
+      let activeItem = null;
+      const setActiveMedia = (item, thumbEl) => {
+        activeItem = item;
+        stage.innerHTML = renderLargeMediaHtml(item);
+        if(activeThumb) activeThumb.classList.remove('active');
+        if(thumbEl){
+          thumbEl.classList.add('active');
+          activeThumb = thumbEl;
+          thumbEl.scrollIntoView({ block: 'nearest', inline: 'center' });
+        }
+      };
+
+      mediaItems.forEach((item, idx) => {
+        const wrap = document.createElement('button');
+        wrap.type = 'button';
+        wrap.className = 'mixed-media-thumb';
+        wrap.title = item.media_type === 'video' ? 'Open video' : 'Open photo';
+        wrap.dataset.mediaType = item.media_type;
+        if(item.media_type === 'video'){
+          wrap.innerHTML = `<video src="${esc(item.src)}" muted playsinline preload="metadata"></video><div class="mixed-media-badge">VIDEO</div>`;
+        } else {
+          wrap.innerHTML = `<img src="${esc(item.src)}" alt="Photo"><div class="mixed-media-badge">PHOTO</div>`;
+        }
+        wrap.addEventListener('click', ()=> setActiveMedia(item, wrap));
+        grid.appendChild(wrap);
+        if(idx === 0){
+          setActiveMedia(item, wrap);
+        }
+      });
+
+      if(focus === 'video'){
+        const preferredThumb = Array.from(grid.querySelectorAll('.mixed-media-thumb')).find(el => el.dataset.mediaType === 'video');
+        if(preferredThumb){
+          preferredThumb.click();
+        }
+      } else if(focus === 'media'){
+        const preferredThumb = Array.from(grid.querySelectorAll('.mixed-media-thumb')).find(el => el.dataset.mediaType === 'photo') || grid.querySelector('.mixed-media-thumb');
+        if(preferredThumb && (!activeItem || preferredThumb !== activeThumb)){
+          preferredThumb.click();
+        }
+      }
+    }
+
+    const targetSectionName = _notesMediaPreferredSection(focus, {
+      hasNotes: notes.length > 0,
+      hasVoice: audioItems.length > 0,
+      hasMedia: mediaItems.length > 0,
+      hasVideo: videos.length > 0
+    });
+    if(targetSectionName){
+      const sectionEl = document.getElementById(`notesMediaSection-${targetSectionName}`);
+      if(sectionEl){
+        requestAnimationFrame(() => {
+          sectionEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+      }
+    } else {
+      content.scrollTop = 0;
+    }
   }catch(err){
-    console.error('Error loading notes:', err);
-    content.innerHTML = '<div class="small-muted">Error loading notes or voice note</div>';
+    console.error('Error loading combined notes/media:', err);
+    if(metaEl) metaEl.textContent = '';
+    content.innerHTML = '<div class="small-muted">Error loading notes or media</div>';
   }
+}
+
+async function onOpenNotesMedia(e){
+  e.preventDefault();
+  const el = e.currentTarget;
+  const upc = el.dataset.upc || el.getAttribute('data-upc');
+  const lot = el.dataset.lot || '';
+  const rowStatus = (el.dataset.status || '').trim();
+  const focus = inferNotesMediaFocusFromEvent(e);
+  return openNotesMediaModal({ upc, lot, rowStatus, focus });
+}
+
+async function onOpenNotes(e){
+  return onOpenNotesMedia(e);
 }
 
 async function onMarketplaceToggle(e){

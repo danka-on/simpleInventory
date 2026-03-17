@@ -1,5 +1,6 @@
 import sqlite3
 import datetime
+import re
 try:
     import pandas as pd
 except Exception:
@@ -22,6 +23,231 @@ def connect_db(db_name):
         raise
     finally:
         conn.close()
+
+def _normalize_marketplace_upc(value):
+    s = str(value or '').strip()
+    if not s:
+        return ''
+    if '-' in s:
+        base, suffix = s.split('-', 1)
+    else:
+        base, suffix = s, ''
+    base = (base or '').strip()
+    suffix = (suffix or '').strip()
+    if base.isdigit():
+        stripped = base.lstrip('0')
+        base = stripped if stripped else '0'
+    return f'{base}-{suffix}' if suffix else base
+
+def _marketplace_upc_variants(value):
+    raw = str(value or '').strip()
+    if not raw:
+        return []
+    out = []
+
+    def add(v):
+        vv = str(v or '').strip()
+        if vv and vv not in out:
+            out.append(vv)
+
+    add(raw)
+    if '-' in raw:
+        base, suffix = raw.split('-', 1)
+    else:
+        base, suffix = raw, ''
+    base = (base or '').strip()
+    suffix = (suffix or '').strip()
+
+    normalized = _normalize_marketplace_upc(raw)
+    add(normalized)
+
+    if base.isdigit():
+        stripped = base.lstrip('0') or '0'
+        padded = base.zfill(12) if len(base) <= 12 else base
+        add(f'{stripped}-{suffix}' if suffix else stripped)
+        add(f'{padded}-{suffix}' if suffix else padded)
+
+    return out
+
+def _extract_upc_candidates_from_sku(sku):
+    s = str(sku or '').strip()
+    if not s:
+        return []
+    out = []
+
+    def add(v):
+        vv = str(v or '').strip()
+        if vv and vv not in out:
+            out.append(vv)
+
+    if re.fullmatch(r'\d+(?:-\d+)?', s):
+        add(s)
+
+    sep_match = re.fullmatch(r'(\d{1,18})[-_ ]+(\d+)', s)
+    if sep_match:
+        add(f'{sep_match.group(1)}-{sep_match.group(2)}')
+
+    suffix_match = re.fullmatch(r'(\d{1,18})[-_ ]*(?:s|suffix)[-_ ]*(\d+)', s, flags=re.IGNORECASE)
+    if suffix_match:
+        add(f'{suffix_match.group(1)}-{suffix_match.group(2)}')
+
+    return out
+
+def _lookup_first_value(db_name, query, params):
+    try:
+        with connect_db(db_name) as conn:
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            cur.execute(query, params)
+            row = cur.fetchone()
+            if not row:
+                return None
+            try:
+                return row[0]
+            except Exception:
+                try:
+                    return next(iter(dict(row).values()))
+                except Exception:
+                    return None
+    except Exception:
+        return None
+
+def _upc_exists_in_local_sources(candidate):
+    variants = _marketplace_upc_variants(candidate)
+    if not variants:
+        return False
+
+    variant_keys = [str(v).strip().lower() for v in variants if str(v).strip()]
+    placeholders = ','.join('?' for _ in variant_keys)
+    checks = [
+        ('listagent.db', f"SELECT upc FROM listing_queue WHERE LOWER(TRIM(COALESCE(upc, ''))) IN ({placeholders}) ORDER BY id DESC LIMIT 1"),
+        ('listinglog.db', f"SELECT upc FROM listing_log WHERE LOWER(TRIM(COALESCE(upc, ''))) IN ({placeholders}) ORDER BY id DESC LIMIT 1"),
+        ('ebayStore.db', f"SELECT UPC FROM INVENTORY WHERE LOWER(TRIM(COALESCE(UPC, ''))) IN ({placeholders}) ORDER BY ID DESC LIMIT 1"),
+        ('amazonStore.db', f"SELECT UPC FROM ITEMS WHERE LOWER(TRIM(COALESCE(UPC, ''))) IN ({placeholders}) ORDER BY rowid DESC LIMIT 1"),
+        ('bol.db', f"SELECT upc FROM bol_items WHERE LOWER(TRIM(COALESCE(upc, ''))) IN ({placeholders}) ORDER BY id DESC LIMIT 1"),
+        ('rawbol.db', f"SELECT upc FROM raw_bol_items WHERE LOWER(TRIM(COALESCE(upc, ''))) IN ({placeholders}) ORDER BY rowid DESC LIMIT 1"),
+        ('searchRack.db', f"SELECT BARCODE FROM SEARCHRACK WHERE LOWER(TRIM(COALESCE(BARCODE, ''))) IN ({placeholders}) ORDER BY ID DESC LIMIT 1"),
+    ]
+    for db_name, query in checks:
+        value = _lookup_first_value(db_name, query, tuple(variant_keys))
+        if value:
+            return True
+    return False
+
+def resolve_barcode_from_marketplace_sku(sku, *, platform=None, item_id=None, fallback_barcode=None):
+    sku_val = str(sku or '').strip()
+    fallback = str(fallback_barcode or '').strip()
+    item_id_val = str(item_id or '').strip()
+    if not sku_val and not item_id_val:
+        return fallback
+
+    candidate_upcs = _extract_upc_candidates_from_sku(sku_val) if sku_val else []
+    fallback_key = _normalize_marketplace_upc(fallback)
+    for candidate in candidate_upcs:
+        candidate_key = _normalize_marketplace_upc(candidate)
+        if not fallback_key and '-' in candidate_key:
+            return candidate
+        if fallback_key and candidate_key:
+            fallback_base = fallback_key.split('-', 1)[0]
+            candidate_base = candidate_key.split('-', 1)[0]
+            if candidate_key == fallback_key or candidate_base == fallback_base:
+                return candidate
+
+    search_plan = []
+    platform_key = str(platform or '').strip().lower()
+    if platform_key == 'amazon':
+        if sku_val:
+            search_plan.extend([
+                ('listagent.db', "SELECT upc FROM listing_queue WHERE TRIM(COALESCE(listed_sku, '')) = ? COLLATE NOCASE ORDER BY COALESCE(listed_at, added_at) DESC, id DESC LIMIT 1", (sku_val,)),
+                ('listinglog.db', "SELECT upc FROM listing_log WHERE TRIM(COALESCE(sku, '')) = ? COLLATE NOCASE ORDER BY created_at DESC, id DESC LIMIT 1", (sku_val,)),
+                ('amazonStore.db', "SELECT UPC FROM ITEMS WHERE TRIM(COALESCE(SKU, '')) = ? COLLATE NOCASE ORDER BY LAST_UPDATED DESC LIMIT 1", (sku_val,)),
+            ])
+    elif platform_key == 'ebay':
+        if sku_val:
+            search_plan.extend([
+                ('listagent.db', "SELECT upc FROM listing_queue WHERE TRIM(COALESCE(listed_sku, '')) = ? COLLATE NOCASE ORDER BY COALESCE(listed_at, added_at) DESC, id DESC LIMIT 1", (sku_val,)),
+                ('listinglog.db', "SELECT upc FROM listing_log WHERE TRIM(COALESCE(sku, '')) = ? COLLATE NOCASE ORDER BY created_at DESC, id DESC LIMIT 1", (sku_val,)),
+                ('ebayStore.db', "SELECT UPC FROM INVENTORY WHERE TRIM(COALESCE(SKU, '')) = ? COLLATE NOCASE ORDER BY ID DESC LIMIT 1", (sku_val,)),
+            ])
+    else:
+        if sku_val:
+            search_plan.extend([
+                ('listagent.db', "SELECT upc FROM listing_queue WHERE TRIM(COALESCE(listed_sku, '')) = ? COLLATE NOCASE ORDER BY COALESCE(listed_at, added_at) DESC, id DESC LIMIT 1", (sku_val,)),
+                ('listinglog.db', "SELECT upc FROM listing_log WHERE TRIM(COALESCE(sku, '')) = ? COLLATE NOCASE ORDER BY created_at DESC, id DESC LIMIT 1", (sku_val,)),
+                ('ebayStore.db', "SELECT UPC FROM INVENTORY WHERE TRIM(COALESCE(SKU, '')) = ? COLLATE NOCASE ORDER BY ID DESC LIMIT 1", (sku_val,)),
+                ('amazonStore.db', "SELECT UPC FROM ITEMS WHERE TRIM(COALESCE(SKU, '')) = ? COLLATE NOCASE ORDER BY LAST_UPDATED DESC LIMIT 1", (sku_val,)),
+            ])
+
+    if item_id_val:
+        if platform_key == 'amazon':
+            search_plan.append(('listagent.db', "SELECT upc FROM listing_queue WHERE TRIM(COALESCE(listed_asin, '')) = ? COLLATE NOCASE ORDER BY COALESCE(listed_at, added_at) DESC, id DESC LIMIT 1", (item_id_val,)))
+            search_plan.append(('listinglog.db', "SELECT upc FROM listing_log WHERE TRIM(COALESCE(asin, '')) = ? COLLATE NOCASE ORDER BY created_at DESC, id DESC LIMIT 1", (item_id_val,)))
+        elif platform_key == 'ebay':
+            search_plan.append(('listagent.db', "SELECT upc FROM listing_queue WHERE (TRIM(COALESCE(listed_listing_id, '')) = ? COLLATE NOCASE OR TRIM(COALESCE(listed_offer_id, '')) = ? COLLATE NOCASE) ORDER BY COALESCE(listed_at, added_at) DESC, id DESC LIMIT 1", (item_id_val, item_id_val)))
+            search_plan.append(('listinglog.db', "SELECT upc FROM listing_log WHERE (TRIM(COALESCE(listing_id, '')) = ? COLLATE NOCASE OR TRIM(COALESCE(offer_id, '')) = ? COLLATE NOCASE) ORDER BY created_at DESC, id DESC LIMIT 1", (item_id_val, item_id_val)))
+
+    for db_name, query, params in search_plan:
+        mapped = _lookup_first_value(db_name, query, params)
+        if mapped:
+            return str(mapped).strip()
+
+    for candidate in candidate_upcs:
+        if _upc_exists_in_local_sources(candidate):
+            return candidate
+
+    return fallback
+
+def ensure_sold_orders_schema(cur, conn, default_store='ebay'):
+    default_store = str(default_store or 'ebay').strip() or 'ebay'
+    cur.execute('''CREATE TABLE IF NOT EXISTS orders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_id TEXT,
+        item_id TEXT,
+        sku TEXT,
+        title TEXT,
+        quantity INTEGER,
+        price REAL,
+        checkout_status TEXT,
+        shipping_name TEXT,
+        shipping_street1 TEXT,
+        shipping_street2 TEXT,
+        shipping_city TEXT,
+        shipping_state TEXT,
+        shipping_postal_code TEXT,
+        shipping_country TEXT,
+        paid_time TEXT,
+        shipped_time TEXT,
+        seller_fee REAL,
+        taxes REAL,
+        fees TEXT,
+        image TEXT,
+        isHandled TEXT,
+        isHandledDate TEXT,
+        location TEXT,
+        barcode TEXT,
+        rackupdated INTEGER DEFAULT 0,
+        store TEXT DEFAULT 'ebay',
+        shipping_cost REAL,
+        lot_number TEXT
+    )''')
+
+    try:
+        cur.execute('PRAGMA table_info(orders)')
+        cols = [r[1] for r in cur.fetchall()]
+        for col_name, col_def in [
+            ('barcode', 'TEXT'),
+            ('rackupdated', 'INTEGER DEFAULT 0'),
+            ('removal_cancelled', 'INTEGER DEFAULT 0'),
+            ('store', f'TEXT DEFAULT "{default_store}"'),
+            ('shipping_cost', 'REAL'),
+            ('lot_number', 'TEXT'),
+            ('sku', 'TEXT'),
+        ]:
+            if col_name not in cols:
+                cur.execute(f'ALTER TABLE orders ADD COLUMN {col_name} {col_def}')
+                conn.commit()
+    except sqlite3.Error:
+        pass
 
 def _log_rack_history(barcode, title, quantity_removed, searchrack_id, old_qty, new_qty, removal_type, position):
     """Helper to log add/remove events to rackhistory.db, avoiding duplicate CREATE TABLE blocks."""
@@ -342,51 +568,9 @@ def store_ebay_order(order):
     """Insert a sold order into sold.db (orders table), skipping duplicates by order_id+item_id."""
     with connect_db('sold.db') as conn:
         cur = conn.cursor()
-        cur.execute('''CREATE TABLE IF NOT EXISTS orders (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            order_id TEXT,
-            item_id TEXT,
-            title TEXT,
-            quantity INTEGER,
-            price REAL,
-            checkout_status TEXT,
-            shipping_name TEXT,
-            shipping_street1 TEXT,
-            shipping_street2 TEXT,
-            shipping_city TEXT,
-            shipping_state TEXT,
-            shipping_postal_code TEXT,
-            shipping_country TEXT,
-            paid_time TEXT,
-            shipped_time TEXT,
-            seller_fee REAL,
-            taxes REAL,
-            fees TEXT,
-            image TEXT,
-            isHandled TEXT,
-            isHandledDate TEXT,
-            location TEXT,
-            barcode TEXT,
-            rackupdated INTEGER DEFAULT 0,
-            store TEXT DEFAULT 'ebay'
-        )''')
+        ensure_sold_orders_schema(cur, conn, default_store='ebay')
 
-        # Ensure extra columns exist (for older databases)
-        try:
-            cur.execute('PRAGMA table_info(orders)')
-            cols = [r[1] for r in cur.fetchall()]
-            for col_name, col_def in [
-                ('barcode', 'TEXT'),
-                ('rackupdated', 'INTEGER DEFAULT 0'),
-                ('removal_cancelled', 'INTEGER DEFAULT 0'),
-                ('store', 'TEXT DEFAULT "ebay"'),
-                ('shipping_cost', 'REAL'),
-            ]:
-                if col_name not in cols:
-                    cur.execute(f'ALTER TABLE orders ADD COLUMN {col_name} {col_def}')
-                    conn.commit()
-        except sqlite3.Error:
-            pass
+        sku_val = str(order.get('sku') or '').strip() or None
 
         # Get barcode (UPC) from ebayStore.db using item_id
         barcode_val = order.get('barcode')
@@ -394,12 +578,24 @@ def store_ebay_order(order):
             try:
                 with connect_db('ebayStore.db') as ebay_conn:
                     ebay_cur = ebay_conn.cursor()
-                    ebay_cur.execute('SELECT UPC FROM INVENTORY WHERE ItemID = ?', (order.get('item_id'),))
+                    ebay_cur.execute('SELECT UPC, SKU FROM INVENTORY WHERE ItemID = ?', (order.get('item_id'),))
                     row = ebay_cur.fetchone()
-                    if row and row[0]:
-                        barcode_val = row[0]
+                    if row:
+                        if row[0]:
+                            barcode_val = row[0]
+                        if not sku_val and len(row) > 1 and row[1]:
+                            sku_val = str(row[1]).strip() or sku_val
             except Exception:
                 pass
+
+        resolved_barcode = resolve_barcode_from_marketplace_sku(
+            sku_val,
+            platform='ebay',
+            item_id=order.get('item_id'),
+            fallback_barcode=barcode_val
+        )
+        if resolved_barcode:
+            barcode_val = resolved_barcode
 
         # Enrich title, image, and lot_number
         title_val = order.get('title')
@@ -521,6 +717,7 @@ def store_ebay_order(order):
                 paid_time = COALESCE(?, paid_time),
                 shipped_time = COALESCE(?, shipped_time),
                 title = COALESCE(?, title),
+                sku = COALESCE(?, sku),
                 quantity = COALESCE(?, quantity),
                 price = COALESCE(?, price),
                 seller_fee = COALESCE(?, seller_fee),
@@ -543,6 +740,7 @@ def store_ebay_order(order):
                     order.get('paid_time'),
                     order.get('shipped_time'),
                     title_val,
+                    sku_val,
                     order.get('quantity'),
                     order.get('price'),
                     order.get('seller_fee'),
@@ -559,11 +757,12 @@ def store_ebay_order(order):
 
         # If not a duplicate, proceed with INSERT
         cur.execute('''INSERT INTO orders (
-            order_id, item_id, title, quantity, price, checkout_status, shipping_name, shipping_street1, shipping_street2, shipping_city, shipping_state, shipping_postal_code, shipping_country, paid_time, shipped_time, seller_fee, taxes, fees, image, isHandled, isHandledDate, location, barcode, store, shipping_cost, lot_number
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+            order_id, item_id, sku, title, quantity, price, checkout_status, shipping_name, shipping_street1, shipping_street2, shipping_city, shipping_state, shipping_postal_code, shipping_country, paid_time, shipped_time, seller_fee, taxes, fees, image, isHandled, isHandledDate, location, barcode, store, shipping_cost, lot_number
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
             (
                 order.get('order_id'),
                 order.get('item_id'),
+                sku_val,
                 title_val,
                 order.get('quantity'),
                 order.get('price'),

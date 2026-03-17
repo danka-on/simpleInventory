@@ -1,271 +1,566 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.ico') }}">
-    <title>Test Sold Orders - Sweet Shelves</title>
-    <style>
-        :root {
-            --primary: #0984e3;
-            --accent: #00b894;
-            --bg: #f9f9f9;
-            --card: #fff;
-            --border: #e0e0e0;
-            --radius: 14px;
-        }
-        body {
-            font-family: 'Segoe UI', Arial, sans-serif;
-            background: var(--bg);
-            margin: 0;
-            padding: 0;
-            min-height: 100vh;
-        }
-        .container {
-            max-width: 600px;
-            margin: 0 auto;
-            padding: 20px 16px 80px 16px;
-        }
-        h1 {
-            margin: 0 0 18px 0;
-            font-weight: 600;
-            color: #2c3e50;
-            text-align: center;
-        }
-        .form-card {
-            background: var(--card);
-            border-radius: var(--radius);
-            padding: 24px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.04);
-            border: 1px solid var(--border);
-            margin-top: 20px;
-        }
-        .form-group {
-            margin-bottom: 16px;
-        }
-        .form-group label {
-            display: block;
-            margin-bottom: 6px;
-            color: #555;
-            font-weight: 500;
-            font-size: 0.9rem;
-        }
-        .form-group input,
-        .form-group select {
-            width: 100%;
-            padding: 10px;
-            border: 1px solid #ddd;
-            border-radius: 8px;
-            font-size: 1rem;
-            box-sizing: border-box;
-        }
-        .form-group input:focus,
-        .form-group select:focus {
-            outline: none;
-            border-color: var(--primary);
-        }
-        .form-group small {
-            display: block;
-            margin-top: 4px;
-            color: #888;
-            font-size: 0.8rem;
-        }
-        .btn-submit {
-            background: var(--primary);
-            color: white;
-            border: none;
-            border-radius: 8px;
-            padding: 14px 24px;
-            font-size: 1rem;
-            font-weight: 500;
-            cursor: pointer;
-            width: 100%;
-            transition: background 0.2s;
-        }
-        .btn-submit:hover {
-            background: var(--accent);
-        }
-        .btn-submit:disabled {
-            background: #ccc;
-            cursor: not-allowed;
-        }
-        .message {
-            padding: 12px;
-            border-radius: 8px;
-            margin-bottom: 16px;
-            display: none;
-        }
-        .message.success {
-            background: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
-            display: block;
-        }
-        .message.error {
-            background: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
-            display: block;
-        }
-        @media (max-width: 480px) {
-            .container {
-                padding: 16px 12px 80px 12px;
-            }
-            .form-card {
-                padding: 18px;
-            }
-        }
-    </style>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.ico') }}">
+  <title>Test Sold Orders - Sweet Shelves</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+  <style>
+    :root {
+      --ebay-blue: #0064d2;
+      --ebay-yellow: #f5af02;
+      --amz-orange: #ff9900;
+      --amz-dark: #232f3e;
+      --accent: #00b894;
+      --bg: #f1f3f5;
+      --card: #fff;
+      --border: #dee2e6;
+      --radius: 14px;
+      --muted: #6c757d;
+      --danger: #e74c3c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      background: var(--bg);
+      margin: 0;
+      padding: 0;
+      min-height: 100vh;
+    }
+    .topbar {
+      background: #fff;
+      border-bottom: 1px solid var(--border);
+      padding: 12px 20px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .topbar h1 { margin: 0; font-size: 1.2rem; font-weight: 600; color: #212529; flex: 1; text-align: center; }
+    .back-btn {
+      background: var(--danger); color: #fff; border: none;
+      padding: 8px 14px; border-radius: 6px; cursor: pointer;
+      display: flex; align-items: center; gap: 6px; font-size: 0.9rem;
+      text-decoration: none;
+    }
+    .container {
+      max-width: 640px;
+      margin: 0 auto;
+      padding: 20px 16px 80px;
+    }
+
+    /* Store selector */
+    .store-tabs {
+      display: flex;
+      gap: 0;
+      margin-bottom: 20px;
+      border-radius: 12px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      background: #fff;
+    }
+    .store-tab {
+      flex: 1; padding: 14px 10px; border: none; cursor: pointer;
+      font-size: 1rem; font-weight: 600; display: flex; align-items: center;
+      justify-content: center; gap: 8px; transition: background .15s, color .15s;
+      background: #fff; color: var(--muted);
+    }
+    .store-tab + .store-tab { border-left: 1px solid var(--border); }
+    .store-tab.active.ebay {
+      background: var(--ebay-blue); color: #fff;
+    }
+    .store-tab.active.amazon {
+      background: var(--amz-dark); color: #fff;
+    }
+    .store-tab .tab-icon { font-size: 1.2rem; }
+
+    /* Cards */
+    .card {
+      background: var(--card);
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      padding: 20px;
+      margin-bottom: 14px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+    }
+    .card-title {
+      font-size: 0.78rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.07em; color: var(--muted); margin: 0 0 14px 0;
+    }
+    .card-title.ebay-accent { color: var(--ebay-blue); }
+    .card-title.amz-accent { color: var(--amz-orange); }
+
+    .form-row {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;
+    }
+    .form-row.full { grid-template-columns: 1fr; }
+    .form-row.triple { grid-template-columns: 1fr 1fr 1fr; }
+    .form-group { display: flex; flex-direction: column; gap: 4px; }
+    .form-group label {
+      font-size: 0.82rem; font-weight: 600; color: #495057;
+    }
+    .form-group label .badge-label {
+      font-size: 0.68rem; font-weight: 600; padding: 1px 6px; border-radius: 4px;
+      margin-left: 5px; vertical-align: middle;
+    }
+    .badge-ebay { background: #e8f0fd; color: var(--ebay-blue); }
+    .badge-amz { background: #fff3e0; color: #c75b00; }
+    .badge-both { background: #e8f5e9; color: #2e7d32; }
+    .form-group input, .form-group select {
+      padding: 9px 11px;
+      border: 1px solid #ced4da;
+      border-radius: 8px;
+      font-size: 0.95rem;
+      transition: border-color .15s;
+      color: #212529;
+      background: #fff;
+    }
+    .form-group input:focus, .form-group select:focus {
+      outline: none; border-color: #86b7fe;
+      box-shadow: 0 0 0 3px rgba(13,110,253,.1);
+    }
+    .form-group input.readonly-look {
+      background: #f8f9fa; color: var(--muted); cursor: default;
+    }
+    .form-group small { font-size: 0.76rem; color: var(--muted); }
+    .form-group small.note-amz { color: var(--amz-orange); }
+    .form-group small.note-ebay { color: var(--ebay-blue); }
+
+    .hint-banner {
+      padding: 10px 14px; border-radius: 9px; font-size: 0.82rem;
+      margin-bottom: 14px; display: flex; align-items: flex-start; gap: 8px;
+    }
+    .hint-banner.amz { background: #fff8e1; border: 1px solid #ffe082; color: #7c5200; }
+    .hint-banner.ebay { background: #e8f0fd; border: 1px solid #bad3f9; color: #1a4d9e; }
+
+    .id-row {
+      display: flex; align-items: center; gap: 6px;
+    }
+    .id-row input { flex: 1; }
+    .regen-btn {
+      background: #f1f3f5; border: 1px solid var(--border); border-radius: 7px;
+      padding: 8px 10px; cursor: pointer; color: var(--muted); font-size: 0.88rem;
+      flex-shrink: 0; transition: background .15s;
+    }
+    .regen-btn:hover { background: #e9ecef; color: #212529; }
+
+    .checkbox-row {
+      display: flex; align-items: center; gap: 10px; padding: 12px 14px;
+      background: #f8f9fa; border-radius: 9px; border: 1px solid var(--border);
+    }
+    .checkbox-row input[type=checkbox] { width: 17px; height: 17px; cursor: pointer; accent-color: var(--accent); }
+    .checkbox-row label { font-size: 0.9rem; font-weight: 500; color: #495057; cursor: pointer; margin: 0; }
+    .checkbox-row small { font-size: 0.76rem; color: var(--muted); margin-left: auto; }
+
+    .submit-btn {
+      width: 100%; padding: 14px; border: none; border-radius: 10px;
+      font-size: 1rem; font-weight: 600; cursor: pointer;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      transition: filter .15s, opacity .15s;
+    }
+    .submit-btn:disabled { opacity: .55; cursor: not-allowed; }
+    .submit-btn.ebay { background: var(--ebay-blue); color: #fff; }
+    .submit-btn.ebay:hover:not(:disabled) { filter: brightness(1.1); }
+    .submit-btn.amazon { background: var(--amz-orange); color: var(--amz-dark); }
+    .submit-btn.amazon:hover:not(:disabled) { filter: brightness(1.08); }
+
+    .message {
+      padding: 12px 16px; border-radius: 9px; margin-bottom: 14px;
+      display: none; font-size: 0.92rem;
+    }
+    .message.success { background: #d1f2eb; color: #0e6655; border: 1px solid #a2dfcf; display: block; }
+    .message.error { background: #fdecea; color: #7b2020; border: 1px solid #f5c6cb; display: block; }
+
+    /* section divider */
+    .section-divider {
+      font-size: 0.75rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.08em; color: var(--muted); margin: 16px 0 10px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .section-divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+
+    @media (max-width: 480px) {
+      .form-row { grid-template-columns: 1fr; }
+      .form-row.triple { grid-template-columns: 1fr 1fr; }
+    }
+  </style>
 </head>
 <body>
-    <div class="container">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
-            <a href="/tools" style="text-decoration:none;">
-                <button style="background:#e74c3c;color:#fff;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;display:flex;align-items:center;gap:8px;">
-                    <i class="fas fa-arrow-left"></i> Back
-                </button>
-            </a>
-            <h1 style="flex:1;text-align:center;margin:0;">Test Sold Orders</h1>
-            <div style="width:84px"></div>
+
+<div class="topbar">
+  <a href="/tools" class="back-btn"><i class="fas fa-arrow-left"></i> Back</a>
+  <h1><i class="fas fa-flask" style="margin-right:7px;color:#6c757d;"></i>Test Sold Order</h1>
+  <div style="width:84px"></div>
+</div>
+
+<div class="container">
+
+  <div id="message" class="message"></div>
+
+  <!-- Store selector -->
+  <div class="store-tabs">
+    <button class="store-tab ebay active" id="tabEbay" onclick="setStore('ebay')">
+      <span class="tab-icon"><i class="fab fa-ebay"></i></span>
+      eBay Order
+    </button>
+    <button class="store-tab amazon" id="tabAmazon" onclick="setStore('amazon')">
+      <span class="tab-icon"><i class="fab fa-amazon"></i></span>
+      Amazon Order
+    </button>
+  </div>
+
+  <form id="testOrderForm">
+    <input type="hidden" id="store" name="store" value="ebay">
+
+    <!-- Order Identity -->
+    <div class="card">
+      <div class="card-title ebay-accent" id="cardOrderTitle">eBay Order Identity</div>
+
+      <div class="form-row">
+        <div class="form-group" style="grid-column:1/-1">
+          <label for="order_id">
+            Order ID
+            <span class="badge-label badge-ebay" id="orderIdBadge">legacyOrderId</span>
+          </label>
+          <div class="id-row">
+            <input type="text" id="order_id" name="order_id" required>
+            <button type="button" class="regen-btn" onclick="regenIds()" title="Regenerate IDs">
+              <i class="fas fa-dice"></i>
+            </button>
+          </div>
+          <small id="orderIdHint">eBay legacy format: XX-XXXXX-XXXXX</small>
         </div>
+      </div>
 
-        <div id="message" class="message"></div>
-
-        <div class="form-card">
-            <form id="testOrderForm">
-                <div class="form-group">
-                    <label for="barcode">Barcode / UPC *</label>
-                    <input type="text" id="barcode" name="barcode" required>
-                    <small>Item barcode - must exist in searchRack.db for location lookup</small>
-                </div>
-
-                <div class="form-group">
-                    <label for="title">Title *</label>
-                    <input type="text" id="title" name="title" required>
-                    <small>Item description/title</small>
-                </div>
-
-                <div class="form-group">
-                    <label for="quantity">Quantity</label>
-                    <input type="number" id="quantity" name="quantity" value="1" min="1">
-                </div>
-
-                <div class="form-group">
-                    <label for="price">Price</label>
-                    <input type="number" id="price" name="price" value="10.00" step="0.01" min="0">
-                </div>
-
-                <div class="form-group">
-                    <label for="store">Store *</label>
-                    <select id="store" name="store" required>
-                        <option value="test">Test</option>
-                        <option value="amazon">Amazon</option>
-                        <option value="ebay">eBay</option>
-                        <option value="marketplace">Marketplace</option>
-                    </select>
-                    <small>Source marketplace (use "test" for testing)</small>
-                </div>
-
-                <div class="form-group">
-                    <label for="shipping_name">Shipping Name *</label>
-                    <input type="text" id="shipping_name" name="shipping_name" value="Test Customer" required>
-                </div>
-
-                <div class="form-group">
-                    <label for="shipping_street1">Street Address</label>
-                    <input type="text" id="shipping_street1" name="shipping_street1" value="123 Test St">
-                </div>
-
-                <div class="form-group">
-                    <label for="shipping_city">City</label>
-                    <input type="text" id="shipping_city" name="shipping_city" value="Test City">
-                </div>
-
-                <div class="form-group">
-                    <label for="shipping_state">State</label>
-                    <input type="text" id="shipping_state" name="shipping_state" value="CA">
-                </div>
-
-                <div class="form-group">
-                    <label for="shipping_postal_code">Postal Code</label>
-                    <input type="text" id="shipping_postal_code" name="shipping_postal_code" value="12345">
-                </div>
-
-                <div class="form-group" style="display:flex;align-items:center;gap:10px;">
-                    <input type="checkbox" id="set_shipped" name="set_shipped" style="width:auto;margin:0;">
-                    <label for="set_shipped" style="margin:0;cursor:pointer;">Set shipped time (enables automatic removal)</label>
-                </div>
-
-                <button type="submit" class="btn-submit">
-                    <i class="fas fa-plus-circle"></i> Create Test Order
-                </button>
-            </form>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="item_id">
+            Item ID
+            <span class="badge-label badge-ebay" id="itemIdBadge">lineItemId</span>
+          </label>
+          <input type="text" id="item_id" name="item_id">
+          <small id="itemIdHint">eBay line item identifier</small>
         </div>
+        <div class="form-group">
+          <label for="sku">
+            SKU
+            <span class="badge-label badge-both">both stores</span>
+          </label>
+          <input type="text" id="sku" name="sku" placeholder="e.g. SS-123456789012">
+          <small>Your seller SKU (used to resolve barcode)</small>
+        </div>
+      </div>
     </div>
 
-    <script>
-        const form = document.getElementById('testOrderForm');
-        const messageDiv = document.getElementById('message');
-        const submitBtn = form.querySelector('button[type="submit"]');
+    <!-- Item Details -->
+    <div class="card">
+      <div class="card-title">Item Details</div>
 
-        form.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            
-            // Disable submit button
-            submitBtn.disabled = true;
-            submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creating...';
-            
-            // Hide previous messages
-            messageDiv.style.display = 'none';
-            messageDiv.className = 'message';
-            
-            // Gather form data
-            const formData = new FormData(form);
-            const data = Object.fromEntries(formData.entries());
-            
-            // Convert checkbox to boolean
-            data.set_shipped = document.getElementById('set_shipped').checked;
-            
-            try {
-                const response = await fetch('/api/test-sold-order', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(data)
-                });
-                
-                // Check if response is OK (200-299)
-                if (!response.ok) {
-                    const result = await response.json().catch(() => ({ error: `Server error: ${response.status}` }));
-                    throw new Error(result.error || `HTTP ${response.status}`);
-                }
-                
-                const result = await response.json();
-                
-                if (result.success) {
-                    messageDiv.className = 'message success';
-                    messageDiv.textContent = `✓ Test order created successfully! Order ID: ${result.order_id}. Check your Ready to Ship window.`;
-                    messageDiv.style.display = 'block';
-                    
-                    // Reset form after 2 seconds
-                    setTimeout(() => {
-                        form.reset();
-                        messageDiv.style.display = 'none';
-                    }, 3000);
-                } else {
-                    throw new Error(result.error || 'Unknown error');
-                }
-            } catch (error) {
-                messageDiv.className = 'message error';
-                messageDiv.textContent = `✗ Error: ${error.message}`;
-                messageDiv.style.display = 'block';
-            } finally {
-                // Re-enable submit button
-                submitBtn.disabled = false;
-                submitBtn.innerHTML = '<i class="fas fa-plus-circle"></i> Create Test Order';
-            }
-        });
-    </script>
+      <div class="form-row full">
+        <div class="form-group">
+          <label for="title">Title *</label>
+          <input type="text" id="title" name="title" required placeholder="e.g. Apple iPhone 14 128GB Blue Unlocked">
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="barcode">Barcode / UPC *</label>
+          <input type="text" id="barcode" name="barcode" required placeholder="e.g. 194253094074">
+          <small>Must exist in inventory for location lookup</small>
+        </div>
+        <div class="form-group">
+          <label for="quantity">Quantity</label>
+          <input type="number" id="quantity" name="quantity" value="1" min="1">
+        </div>
+      </div>
+
+      <div class="form-row triple">
+        <div class="form-group">
+          <label for="price">
+            Price
+            <span class="badge-label badge-both">unit price</span>
+          </label>
+          <input type="number" id="price" name="price" value="10.00" step="0.01" min="0">
+        </div>
+        <div class="form-group">
+          <label for="seller_fee">Seller Fee</label>
+          <input type="number" id="seller_fee" name="seller_fee" value="1.35" step="0.01" min="0">
+          <small id="feeHint">~13.25% eBay final value</small>
+        </div>
+        <div class="form-group">
+          <label for="taxes">Taxes</label>
+          <input type="number" id="taxes" name="taxes" value="0.00" step="0.01" min="0">
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="shipping_cost">Shipping Cost</label>
+          <input type="number" id="shipping_cost" name="shipping_cost" value="0.00" step="0.01" min="0">
+          <small id="shippingCostHint">Label cost charged to seller</small>
+        </div>
+        <div class="form-group">
+          <label for="checkout_status">Payment Status</label>
+          <select id="checkout_status" name="checkout_status">
+            <option value="PAID" selected>PAID</option>
+            <option value="PENDING">PENDING</option>
+            <option value="Unshipped">Unshipped</option>
+            <option value="Shipped">Shipped</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- Shipping Address -->
+    <div class="card">
+      <div class="card-title">Shipping Address</div>
+
+      <div id="amazonBanner" class="hint-banner amz" style="display:none">
+        <i class="fab fa-amazon"></i>
+        <span>Amazon does not provide buyer name or street address — shipping_name defaults to <strong>Amazon Buyer</strong>, street is blank (as in real orders).</span>
+      </div>
+
+      <div class="form-row full" id="nameRow">
+        <div class="form-group">
+          <label for="shipping_name">Shipping Name</label>
+          <input type="text" id="shipping_name" name="shipping_name" value="John Smith">
+        </div>
+      </div>
+
+      <div class="form-row full" id="street1Row">
+        <div class="form-group">
+          <label for="shipping_street1">Street Address</label>
+          <input type="text" id="shipping_street1" name="shipping_street1" value="123 Main St">
+        </div>
+      </div>
+
+      <div class="form-row full" id="street2Row">
+        <div class="form-group">
+          <label for="shipping_street2">Street Address 2</label>
+          <input type="text" id="shipping_street2" name="shipping_street2" placeholder="Apt, Suite, etc.">
+        </div>
+      </div>
+
+      <div class="form-row triple">
+        <div class="form-group">
+          <label for="shipping_city">City</label>
+          <input type="text" id="shipping_city" name="shipping_city" value="Los Angeles">
+        </div>
+        <div class="form-group">
+          <label for="shipping_state">State</label>
+          <input type="text" id="shipping_state" name="shipping_state" value="CA" maxlength="2">
+        </div>
+        <div class="form-group">
+          <label for="shipping_postal_code">ZIP</label>
+          <input type="text" id="shipping_postal_code" name="shipping_postal_code" value="90001">
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="shipping_country">Country</label>
+          <input type="text" id="shipping_country" name="shipping_country" value="US" maxlength="2">
+        </div>
+      </div>
+    </div>
+
+    <!-- Options -->
+    <div class="card">
+      <div class="card-title">Options</div>
+      <div class="checkbox-row">
+        <input type="checkbox" id="set_shipped" name="set_shipped">
+        <label for="set_shipped">Mark as shipped (sets shipped_time)</label>
+        <small>enables auto-removal workflow</small>
+      </div>
+    </div>
+
+    <button type="submit" class="submit-btn ebay" id="submitBtn">
+      <i class="fab fa-ebay"></i> Create Test eBay Order
+    </button>
+  </form>
+
+</div>
+
+<script>
+  let currentStore = 'ebay';
+
+  // ─── Store toggle ───────────────────────────────────────────────
+  function setStore(store) {
+    currentStore = store;
+    document.getElementById('store').value = store;
+
+    const tabEbay = document.getElementById('tabEbay');
+    const tabAmz  = document.getElementById('tabAmazon');
+    tabEbay.classList.toggle('active', store === 'ebay');
+    tabAmz.classList.toggle('active',  store === 'amazon');
+
+    const cardOrderTitle = document.getElementById('cardOrderTitle');
+    const orderIdBadge   = document.getElementById('orderIdBadge');
+    const itemIdBadge    = document.getElementById('itemIdBadge');
+    const orderIdHint    = document.getElementById('orderIdHint');
+    const itemIdHint     = document.getElementById('itemIdHint');
+    const feeHint        = document.getElementById('feeHint');
+    const shippingHint   = document.getElementById('shippingCostHint');
+    const amazonBanner   = document.getElementById('amazonBanner');
+    const nameRow        = document.getElementById('nameRow');
+    const street1Row     = document.getElementById('street1Row');
+    const street2Row     = document.getElementById('street2Row');
+    const shipNameInput  = document.getElementById('shipping_name');
+    const shipStreet1    = document.getElementById('shipping_street1');
+    const submitBtn      = document.getElementById('submitBtn');
+
+    if (store === 'amazon') {
+      cardOrderTitle.textContent = 'Amazon Order Identity';
+      cardOrderTitle.className = 'card-title amz-accent';
+      orderIdBadge.textContent = 'AmazonOrderId';
+      orderIdBadge.className = 'badge-label badge-amz';
+      itemIdBadge.textContent = 'ASIN';
+      itemIdBadge.className = 'badge-label badge-amz';
+      orderIdHint.textContent = 'Amazon format: 3-7-7 digits (e.g. 114-XXXXXXX-XXXXXXX)';
+      itemIdHint.textContent = 'Amazon Standard ID (e.g. B0XXXXXXXX)';
+      feeHint.textContent = '~15% Amazon referral fee estimate';
+      shippingHint.textContent = 'Label cost from Financial Events API';
+      amazonBanner.style.display = 'flex';
+      nameRow.style.display = 'none';
+      street1Row.style.display = 'none';
+      street2Row.style.display = 'none';
+      shipNameInput.value = 'Amazon Buyer';
+      shipStreet1.value = '';
+      document.getElementById('shipping_street2').value = '';
+      submitBtn.className = 'submit-btn amazon';
+      submitBtn.innerHTML = '<i class="fab fa-amazon"></i> Create Test Amazon Order';
+      // Adjust fee default to 15%
+      const price = parseFloat(document.getElementById('price').value) || 10;
+      document.getElementById('seller_fee').value = (price * 0.15).toFixed(2);
+      // Update payment status options
+      const cs = document.getElementById('checkout_status');
+      cs.innerHTML = `
+        <option value="Shipped" selected>Shipped</option>
+        <option value="Unshipped">Unshipped</option>
+        <option value="Pending">Pending</option>
+        <option value="Canceled">Canceled</option>
+      `;
+    } else {
+      cardOrderTitle.textContent = 'eBay Order Identity';
+      cardOrderTitle.className = 'card-title ebay-accent';
+      orderIdBadge.textContent = 'legacyOrderId';
+      orderIdBadge.className = 'badge-label badge-ebay';
+      itemIdBadge.textContent = 'lineItemId';
+      itemIdBadge.className = 'badge-label badge-ebay';
+      orderIdHint.textContent = 'eBay legacy format: XX-XXXXX-XXXXX';
+      itemIdHint.textContent = 'eBay line item identifier';
+      feeHint.textContent = '~13.25% eBay final value fee';
+      shippingHint.textContent = 'deliveryCost from eBay fulfillment API';
+      amazonBanner.style.display = 'none';
+      nameRow.style.display = 'block';
+      street1Row.style.display = 'block';
+      street2Row.style.display = 'block';
+      if (shipNameInput.value === 'Amazon Buyer') shipNameInput.value = 'John Smith';
+      submitBtn.className = 'submit-btn ebay';
+      submitBtn.innerHTML = '<i class="fab fa-ebay"></i> Create Test eBay Order';
+      // Adjust fee default to 13.25%
+      const price = parseFloat(document.getElementById('price').value) || 10;
+      document.getElementById('seller_fee').value = (price * 0.1325).toFixed(2);
+      // Update payment status options
+      const cs = document.getElementById('checkout_status');
+      cs.innerHTML = `
+        <option value="PAID" selected>PAID</option>
+        <option value="PENDING">PENDING</option>
+        <option value="FULFILLED">FULFILLED</option>
+        <option value="IN_PROGRESS">IN_PROGRESS</option>
+      `;
+    }
+
+    regenIds();
+  }
+
+  // ─── ID generators ───────────────────────────────────────────────
+  function randDigits(n) {
+    return Array.from({length: n}, () => Math.floor(Math.random() * 10)).join('');
+  }
+  function randAlphaNum(n) {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ0123456789';
+    return Array.from({length: n}, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+  }
+
+  function genEbayOrderId() {
+    // legacyOrderId format: XX-XXXXX-XXXXX
+    return `${randDigits(2)}-${randDigits(5)}-${randDigits(5)}`;
+  }
+  function genEbayItemId() {
+    // lineItemId: large 12-digit number
+    return randDigits(12);
+  }
+  function genAmazonOrderId() {
+    // AmazonOrderId: 114-XXXXXXX-XXXXXXX
+    return `114-${randDigits(7)}-${randDigits(7)}`;
+  }
+  function genAsin() {
+    // ASIN: B0 + 8 uppercase alphanum chars
+    return 'B0' + randAlphaNum(8);
+  }
+
+  function regenIds() {
+    if (currentStore === 'ebay') {
+      document.getElementById('order_id').value = genEbayOrderId();
+      document.getElementById('item_id').value  = genEbayItemId();
+    } else {
+      document.getElementById('order_id').value = genAmazonOrderId();
+      document.getElementById('item_id').value  = genAsin();
+    }
+  }
+
+  // ─── Auto-recalc fee when price changes ─────────────────────────
+  document.getElementById('price').addEventListener('input', function() {
+    const p = parseFloat(this.value) || 0;
+    const rate = currentStore === 'amazon' ? 0.15 : 0.1325;
+    document.getElementById('seller_fee').value = (p * rate).toFixed(2);
+  });
+
+  // ─── Form submit ─────────────────────────────────────────────────
+  const form = document.getElementById('testOrderForm');
+  const messageDiv = document.getElementById('message');
+  const submitBtn  = document.getElementById('submitBtn');
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    submitBtn.disabled = true;
+    const origHtml = submitBtn.innerHTML;
+    submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creating…';
+    messageDiv.style.display = 'none';
+    messageDiv.className = 'message';
+
+    const formData = new FormData(form);
+    const data = Object.fromEntries(formData.entries());
+    data.set_shipped = document.getElementById('set_shipped').checked;
+
+    try {
+      const resp = await fetch('/api/test-sold-order', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+      });
+      const result = await resp.json().catch(() => ({error: `HTTP ${resp.status}`}));
+      if (!resp.ok || !result.success) throw new Error(result.error || `HTTP ${resp.status}`);
+
+      messageDiv.className = 'message success';
+      messageDiv.innerHTML = `<i class="fas fa-check-circle"></i> Order created! <strong>${result.order_id}</strong> — check your Ready to Ship window.`;
+      messageDiv.style.display = 'block';
+      regenIds();
+      setTimeout(() => { messageDiv.style.display = 'none'; }, 5000);
+    } catch (err) {
+      messageDiv.className = 'message error';
+      messageDiv.innerHTML = `<i class="fas fa-exclamation-circle"></i> ${err.message}`;
+      messageDiv.style.display = 'block';
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.innerHTML = origHtml;
+    }
+  });
+
+  // ─── Init ────────────────────────────────────────────────────────
+  regenIds();
+</script>
 </body>
 </html>

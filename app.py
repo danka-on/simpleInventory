@@ -28,7 +28,7 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent
 
 from inventory import find_item  # adjust this to match your actual import
-from DBmanager import ebayStoreDB, amazonStoreDB, store_ebay_order, createSearchRackDB, addToSearchRack
+from DBmanager import ebayStoreDB, amazonStoreDB, store_ebay_order, createSearchRackDB, addToSearchRack, resolve_barcode_from_marketplace_sku
 from DBmanager import enrich_searchrack_db
 
 # Disable print statements globally for performance boost
@@ -118,6 +118,7 @@ def create_database_indexes():
         ],
         'sold.db': [
             ('orders', 'barcode'),
+            ('orders', 'sku'),
             ('orders', 'order_id'),
             ('orders', 'store'),
             ('returns', 'upc'),
@@ -575,6 +576,10 @@ def _build_marketplace_removal_plan(barcode, quantity, allocations=None):
         rack_cur = rack_conn.cursor()
 
         matches = _searchrack_matches_for_barcode(rack_cur, barcode, include_zero=False)
+        if not matches:
+            base_barcode = _barcode_base_without_suffix(barcode)
+            if base_barcode and _normalize_upc_preserve_suffix_for_match(base_barcode) != _normalize_upc_preserve_suffix_for_match(barcode):
+                matches = _searchrack_matches_for_barcode(rack_cur, base_barcode, include_zero=False)
         location_groups = _group_searchrack_matches_by_location(matches)
         locations = [
             {
@@ -962,6 +967,46 @@ def _searchrack_total_qty_for_key(conn, upc_key):
     return total_qty
 
 
+def _sold_order_value(order, key, default=''):
+    if order is None:
+        return default
+    try:
+        if isinstance(order, dict):
+            return order.get(key, default)
+    except Exception:
+        pass
+    try:
+        return order[key]
+    except Exception:
+        return default
+
+
+def _effective_sold_order_barcode(order):
+    barcode = str(_sold_order_value(order, 'barcode', '') or '').strip()
+    sku = str(_sold_order_value(order, 'sku', '') or '').strip()
+    platform = str(_sold_order_value(order, 'store', '') or '').strip().lower()
+    item_id = str(_sold_order_value(order, 'item_id', '') or '').strip()
+    if not sku:
+        return barcode
+    try:
+        resolved = resolve_barcode_from_marketplace_sku(
+            sku,
+            platform=platform,
+            item_id=item_id,
+            fallback_barcode=barcode
+        )
+        return str(resolved or barcode).strip()
+    except Exception:
+        return barcode
+
+
+def _barcode_base_without_suffix(value):
+    upc = _normalize_upc_preserve_suffix_for_match(value)
+    if not upc:
+        return ''
+    return upc.split('-', 1)[0]
+
+
 def _ready_to_ship_warehouse_qty_for_barcode(barcode):
     rack_conn = None
     try:
@@ -969,6 +1014,10 @@ def _ready_to_ship_warehouse_qty_for_barcode(barcode):
         rack_conn.row_factory = sqlite3.Row
         rack_cur = rack_conn.cursor()
         matches = _searchrack_matches_for_barcode(rack_cur, barcode, include_zero=False)
+        if not matches:
+            base_barcode = _barcode_base_without_suffix(barcode)
+            if base_barcode and _normalize_upc_preserve_suffix_for_match(base_barcode) != _normalize_upc_preserve_suffix_for_match(barcode):
+                matches = _searchrack_matches_for_barcode(rack_cur, base_barcode, include_zero=False)
         return sum(max(0, _coerce_int(row.get('quantity'), 0)) for row in matches)
     except Exception:
         return 0
@@ -978,8 +1027,9 @@ def _ready_to_ship_warehouse_qty_for_barcode(barcode):
 
 
 def _ready_to_ship_rawbol_total_qty_for_barcode(barcode):
-    target_key = _sold_removal_barcode_key(barcode)
-    variants = sorted(v.lower() for v in _sold_removal_barcode_variants(barcode))
+    base_barcode = _barcode_base_without_suffix(barcode) or str(barcode or '').strip()
+    target_key = _sold_removal_barcode_key(base_barcode)
+    variants = sorted(v.lower() for v in _sold_removal_barcode_variants(base_barcode))
     invalid_upc_values = {'null', 'n/a', 'does not apply'}
     if not target_key or target_key in invalid_upc_values:
         return 0
@@ -6169,6 +6219,7 @@ def _listagent_mark_listed(upc, *, platform=None, listing_id=None, offer_id=None
     upc = _listagent_format_upc12(upc)
     if not upc:
         raise ValueError('upc is required')
+    sku = (sku or '').strip() or upc
     upc_variants = _listagent_upc_variants(upc)
     placeholders = ','.join('?' for _ in upc_variants)
 
@@ -7389,15 +7440,29 @@ def api_listingagent_upc_detail(upc):
             'sold_stats': None
         }
 
-        # searchRack inventory
+        # Build UPC lookup variants to handle:
+        # - suffixed UPCs (e.g. "123456789012-1" → base "123456789012")
+        # - leading-zero padding differences ("035886267162" vs "35886267162")
+        _upc_base = upc.split('-', 1)[0].strip() if '-' in upc else upc
+        _upc_base_stripped = _upc_base.lstrip('0') or _upc_base  # "35886267162"
+        _upc_base_padded = _upc_base.zfill(12) if _upc_base.isdigit() else _upc_base  # "035886267162"
+        # Unique ordered variants: exact, padded, stripped (all base, no suffix for store lookups)
+        def _upc_lookup_variants(*extras):
+            seen = []
+            for v in [upc, _upc_base, _upc_base_padded, _upc_base_stripped] + list(extras):
+                v = (v or '').strip()
+                if v and v not in seen:
+                    seen.append(v)
+            return seen
         with db_connection('searchRack.db') as conn:
             cur = conn.cursor()
             cur.execute('''
                 SELECT ID, TITLE, ITEM_POSITION, PICTUREPOSITION, QUANTITY, IMAGE, IMAGES, ITEMID, CREATED_AT
                 FROM SEARCHRACK
                 WHERE TRIM(BARCODE) = ? COLLATE NOCASE
+                   OR TRIM(BARCODE) = ? COLLATE NOCASE
                 ORDER BY CREATED_AT DESC
-            ''', (upc,))
+            ''', (upc, _upc_base))
             rows = cur.fetchall()
 
             total_qty = 0
@@ -7438,7 +7503,31 @@ def api_listingagent_upc_detail(upc):
                     item['title'] = r['TITLE']
                     break
 
-        # BOL info
+        # rawbol.db — primary source for title + thumbnail; always use base barcode.
+        _rawbol_variants = [_upc_base_padded, _upc_base_stripped, _upc_base]
+        _rawbol_variants = list(dict.fromkeys(v for v in _rawbol_variants if v))  # dedupe, preserve order
+        try:
+            with db_connection('rawbol.db') as conn:
+                cur = conn.cursor()
+                cur.execute('''
+                    SELECT item_description, image_url
+                    FROM raw_bol_items
+                    WHERE TRIM(upc) IN ({})
+                    ORDER BY import_date DESC, id DESC
+                    LIMIT 1
+                '''.format(','.join('?' for _ in _rawbol_variants)),
+                tuple(_rawbol_variants))
+                raw_row = cur.fetchone()
+                if raw_row:
+                    if not item['title'] and (raw_row['item_description'] or '').strip():
+                        item['title'] = raw_row['item_description'].strip()
+                    img = (raw_row['image_url'] or '').strip()
+                    if img and img not in item['images']:
+                        item['images'].insert(0, img)  # rawbol image first
+        except Exception:
+            pass
+
+        # BOL info (bol.db — processed BOL items with prep quantities)
         with db_connection('bol.db') as conn:
             cur = conn.cursor()
             cur.execute('''
@@ -7446,10 +7535,11 @@ def api_listingagent_upc_detail(upc):
                        good_qty, bad_qty, unchecked_qty, quantity,
                        listed_ebay, listed_ebay_date
                 FROM bol_items
-                WHERE TRIM(upc) = ? COLLATE NOCASE
+                WHERE TRIM(upc) IN ({})
                 ORDER BY import_date DESC
                 LIMIT 1
-            ''', (upc,))
+            '''.format(','.join('?' for _ in _upc_lookup_variants())),
+            tuple(_upc_lookup_variants()))
             bol_row = cur.fetchone()
             if bol_row:
                 item['bol'] = {
@@ -7470,15 +7560,17 @@ def api_listingagent_upc_detail(upc):
                     item['images'].append(item['bol']['image_url'])
 
         # ebayStore existing listings
+        _ev = _upc_lookup_variants()
         with db_connection('ebayStore.db') as conn:
             cur = conn.cursor()
             cur.execute('''
                 SELECT Title, ItemID, SKU, Price, Quantity, Image, URL, List_State, Sold_Date, List_Date
                 FROM INVENTORY
-                WHERE TRIM(UPC) = ? COLLATE NOCASE
+                WHERE TRIM(UPC) IN ({})
                 ORDER BY List_Date DESC
                 LIMIT 10
-            ''', (upc,))
+            '''.format(','.join('?' for _ in _ev)),
+            tuple(_ev))
             for r in cur.fetchall():
                 listing = {
                     'title': r['Title'] or '',
@@ -7498,15 +7590,17 @@ def api_listingagent_upc_detail(upc):
 
         # amazonStore existing listings
         try:
+            _av = _upc_lookup_variants()
             with db_connection('amazonStore.db') as conn:
                 cur = conn.cursor()
                 cur.execute('''
                     SELECT ASIN, SKU, TITLE, PRICE, QUANTITY, STATUS, IMAGE, UPC, CONDITION, FULFILLMENT_CHANNEL, LAST_UPDATED
                     FROM ITEMS
-                    WHERE TRIM(UPC) = ? COLLATE NOCASE
+                    WHERE TRIM(UPC) IN ({})
                     ORDER BY LAST_UPDATED DESC
                     LIMIT 10
-                ''', (upc,))
+                '''.format(','.join('?' for _ in _av)),
+                tuple(_av))
                 for r in cur.fetchall():
                     asin = (r['ASIN'] or '').strip()
                     listing = {
@@ -7532,7 +7626,7 @@ def api_listingagent_upc_detail(upc):
             pass
 
         # Listing Manager (Item Prep) photos + notes (bol.db items_prep_*) — useful for auto-filling listing images and showing notes.
-        item['prep'] = {'notes': [], 'images': []}
+        item['prep'] = {'notes': [], 'images': [], 'voice_notes': []}
         try:
             _ensure_items_prep_tables()
 
@@ -7542,6 +7636,7 @@ def api_listingagent_upc_detail(upc):
 
             prep_notes = []
             prep_images = []
+            prep_audio_rows = []
 
             if base_upc:
                 with db_connection('bol.db') as conn:
@@ -7588,6 +7683,21 @@ def api_listingagent_upc_detail(upc):
                     ''', (base_upc, like_upc))
                     prep_images = [dict(r) for r in cur.fetchall()]
 
+                    # Voice notes (audio) from items_prep_media
+                    try:
+                        cur.execute('''
+                            SELECT id, upc, COALESCE(row_status,'') AS row_status,
+                                   media_type, file_path, COALESCE(mime_type,'') AS mime_type, created_at
+                            FROM items_prep_media
+                            WHERE (upc = ? COLLATE NOCASE OR upc LIKE ? COLLATE NOCASE)
+                              AND COALESCE(media_type,'') = 'audio'
+                            ORDER BY created_at DESC, id DESC
+                            LIMIT 10
+                        ''', (base_upc, like_upc))
+                        prep_audio_rows = [dict(r) for r in cur.fetchall()]
+                    except Exception:
+                        prep_audio_rows = []
+
                 base_url = (request.url_root or '').rstrip('/')
                 prep_urls = []
                 for pr in prep_images:
@@ -7597,6 +7707,20 @@ def api_listingagent_upc_detail(upc):
                     url = f"{base_url}{url_for('static', filename=rel)}"
                     if url and url not in prep_urls:
                         prep_urls.append(url)
+
+                prep_voice_notes = []
+                for ar in prep_audio_rows:
+                    rel = (ar.get('file_path') or '').strip()
+                    if not rel:
+                        continue
+                    url = f"{base_url}{url_for('static', filename=rel)}"
+                    prep_voice_notes.append({
+                        'id': ar.get('id'),
+                        'upc': ar.get('upc', ''),
+                        'url': url,
+                        'mime_type': ar.get('mime_type', ''),
+                        'created_at': ar.get('created_at', '')
+                    })
 
                 if prep_urls:
                     # Prefer prep photos ahead of marketplace images, but keep existing order otherwise.
@@ -7608,10 +7732,10 @@ def api_listingagent_upc_detail(upc):
                             merged.append(u)
                     item['images'] = merged
 
-                item['prep'] = {'notes': prep_notes, 'images': prep_urls}
+                item['prep'] = {'notes': prep_notes, 'images': prep_urls, 'voice_notes': prep_voice_notes}
         except Exception:
             # Item prep tables may not exist in some envs; ignore.
-            item['prep'] = {'notes': [], 'images': []}
+            item['prep'] = {'notes': [], 'images': [], 'voice_notes': []}
 
         # Listing Agent uploaded photos (from listagent.db) — prefer these first.
         try:
@@ -14826,6 +14950,64 @@ def _items_prep_delete_media_rows(cur, upc, row_status=None, media_type=None):
         print('Failed deleting prep media rows:', e)
         return 0
 
+def _items_prep_delete_image_rows(cur, upc, row_status=None):
+    """Hard-delete prep photo rows and files for one scoped UPC."""
+    try:
+        conditions = ['upc = ? COLLATE NOCASE']
+        params = [upc]
+        if row_status is not None:
+            conditions.append("COALESCE(row_status, '') = ? COLLATE NOCASE")
+            params.append(_normalize_prep_row_status(row_status))
+        where_sql = ' AND '.join(conditions)
+        cur.execute(f'SELECT id, image_path, trash_path FROM items_prep_images WHERE {where_sql}', tuple(params))
+        rows = cur.fetchall()
+        for row in rows:
+            image_rel = row['image_path'] if isinstance(row, sqlite3.Row) else row[1]
+            trash_rel = row['trash_path'] if isinstance(row, sqlite3.Row) else row[2]
+            seen_paths = set()
+            for rel in (trash_rel, image_rel):
+                rel = str(rel or '').strip()
+                if not rel or rel in seen_paths:
+                    continue
+                seen_paths.add(rel)
+                abs_path = os.path.join(app.root_path, 'static', rel) if not os.path.isabs(rel) else rel
+                try:
+                    if os.path.isfile(abs_path):
+                        os.remove(abs_path)
+                except Exception as fe:
+                    print('Failed hard remove photo', abs_path, fe)
+        cur.execute(f'DELETE FROM items_prep_images WHERE {where_sql}', tuple(params))
+        return int(cur.rowcount or 0)
+    except Exception as e:
+        print('Failed deleting prep image rows:', e)
+        return 0
+
+def _items_prep_delete_note_rows(cur, upc, row_status=None):
+    """Hard-delete prep note rows for one scoped UPC."""
+    try:
+        conditions = ['upc = ? COLLATE NOCASE']
+        params = [upc]
+        if row_status is not None:
+            conditions.append("COALESCE(row_status, '') = ? COLLATE NOCASE")
+            params.append(_normalize_prep_row_status(row_status))
+        where_sql = ' AND '.join(conditions)
+        cur.execute(f'DELETE FROM items_prep_notes WHERE {where_sql}', tuple(params))
+        return int(cur.rowcount or 0)
+    except Exception as e:
+        print('Failed deleting prep note rows:', e)
+        return 0
+
+def _items_prep_delete_diagnostic_assets(cur, upc, row_status=None, delete_notes=True):
+    """Hard-delete exact diagnostic assets for one UPC so reused suffixes start clean."""
+    deleted = {
+        'images': _items_prep_delete_image_rows(cur, upc, row_status=row_status),
+        'notes': 0,
+        'media': _items_prep_delete_media_rows(cur, upc, row_status=row_status)
+    }
+    if delete_notes:
+        deleted['notes'] = _items_prep_delete_note_rows(cur, upc, row_status=row_status)
+    return deleted
+
 def _prep_media_cleaner_abs_path(raw_path):
     raw = str(raw_path or '').strip()
     if not raw:
@@ -18779,7 +18961,7 @@ def api_items_prep_cleanup_temp():
         if deleted:
             # Keep prep status in sync when a temporary BAD entry is abandoned.
             cur.execute('DELETE FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (upc,))
-            _items_prep_delete_media_rows(cur, upc)
+            _items_prep_delete_diagnostic_assets(cur, upc)
         conn.commit()
         return jsonify({'success': True, 'deleted': deleted})
     except Exception as e:
@@ -19066,7 +19248,8 @@ def api_items_prep_status_delete(upc):
             cur.execute('DELETE FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (upc,))
         
         # If this is a suffixed UPC (e.g., 110101-1), delete it from bol_items too
-        if '-' in upc and upc.split('-')[-1].isdigit():
+        is_unique_suffix = ('-' in upc and upc.rsplit('-', 1)[-1].isdigit()) or upc.startswith('777')
+        if is_unique_suffix:
             print(f'Deleting suffixed entry {upc} from bol_items')
             if lot_number:
                 cur.execute('DELETE FROM bol_items WHERE upc = ? COLLATE NOCASE AND lot_number = ? COLLATE NOCASE', (upc, lot_number))
@@ -19074,6 +19257,7 @@ def api_items_prep_status_delete(upc):
                     cur.execute('DELETE FROM bol_items WHERE upc = ? COLLATE NOCASE', (upc,))
             else:
                 cur.execute('DELETE FROM bol_items WHERE upc = ? COLLATE NOCASE', (upc,))
+            _items_prep_delete_diagnostic_assets(cur, upc)
         
         conn.commit()
         return jsonify({'success': True})
@@ -19184,12 +19368,7 @@ def _items_prep_undo_core(*, upc, status, qty=1, base_upc=None, lot_number=None,
                             OR (? <> '' AND COALESCE(lot_number, '') = '')
                           )
                     ''', (upc, row_lot, row_lot))
-                    cur.execute('DELETE FROM items_prep_images WHERE upc = ? COLLATE NOCASE', (upc,))
-                    try:
-                        cur.execute('DELETE FROM items_prep_notes WHERE upc = ? COLLATE NOCASE', (upc,))
-                    except Exception:
-                        pass
-                    _items_prep_delete_media_rows(cur, upc)
+                    _items_prep_delete_diagnostic_assets(cur, upc)
 
                     base_key = (base_upc or '').strip() or upc.split('-', 1)[0]
                     if row_lot:
@@ -19299,12 +19478,7 @@ def _items_prep_undo_core(*, upc, status, qty=1, base_upc=None, lot_number=None,
                 ''', (upc, row_lot, row_lot))
 
                 if temporary == 0:
-                    cur.execute('DELETE FROM items_prep_images WHERE upc = ? COLLATE NOCASE', (upc,))
-                    try:
-                        cur.execute('DELETE FROM items_prep_notes WHERE upc = ? COLLATE NOCASE', (upc,))
-                    except Exception:
-                        pass
-                    _items_prep_delete_media_rows(cur, upc)
+                    _items_prep_delete_diagnostic_assets(cur, upc)
 
                 if base_upc:
                     base_lot = _normalize_lot_number(row_lot or lot_number)
@@ -19370,12 +19544,7 @@ def _items_prep_undo_core(*, upc, status, qty=1, base_upc=None, lot_number=None,
                       )
                 ''', (upc, row_lot, row_lot))
                 if temporary == 0:
-                    cur.execute('DELETE FROM items_prep_images WHERE upc = ? COLLATE NOCASE', (upc,))
-                    try:
-                        cur.execute('DELETE FROM items_prep_notes WHERE upc = ? COLLATE NOCASE', (upc,))
-                    except Exception:
-                        pass
-                    _items_prep_delete_media_rows(cur, upc)
+                    _items_prep_delete_diagnostic_assets(cur, upc)
 
                 if base_upc:
                     base_lot = _normalize_lot_number(row_lot or lot_number)
@@ -19605,7 +19774,8 @@ def api_items_prep_diagnostic_get(upc):
         include_related_arg = request.args.get('include_related')
         include_related = True if include_related_arg is None else _coerce_bool(include_related_arg)
         exact_scope = _coerce_bool(request.args.get('exact_scope'))
-        if exact_scope:
+        is_suffixed_upc = ('-' in upc_n and upc_n.rsplit('-', 1)[-1].isdigit())
+        if exact_scope or is_suffixed_upc:
             include_related = False
         include_bol_image = _coerce_bool(request.args.get('include_bol_image'))
         try:
@@ -21387,12 +21557,7 @@ def api_items_prep_reset():
         # For base UPC with lot-specific reset, keep shared note/photo history intact.
         clear_shared_notes = (not lot_number) or is_suffixed
         if clear_shared_notes:
-            cur.execute('DELETE FROM items_prep_images WHERE upc = ? COLLATE NOCASE', (upc,))
-            try:
-                cur.execute('DELETE FROM items_prep_notes WHERE upc = ? COLLATE NOCASE', (upc,))
-            except Exception:
-                pass  # Table may not exist
-            _items_prep_delete_media_rows(cur, upc)
+            _items_prep_delete_diagnostic_assets(cur, upc)
 
         # 3) Restore quantity buckets in bol_items (id-scoped).
         cur.execute('PRAGMA table_info(bol_items)')
@@ -27564,12 +27729,7 @@ def api_bulk_delete_bol_items():
                         OR (? <> '' AND COALESCE(lot_number, '') = '')
                       )
                 ''', (upc, lot, lot))
-                cur.execute('DELETE FROM items_prep_images WHERE upc = ? COLLATE NOCASE', (upc,))
-                try:
-                    cur.execute('DELETE FROM items_prep_notes WHERE upc = ? COLLATE NOCASE', (upc,))
-                except Exception:
-                    pass
-                _items_prep_delete_media_rows(cur, upc)
+                _items_prep_delete_diagnostic_assets(cur, upc)
 
         # Reset base entries by row id and lot-specific raw quantity.
         if reset_rows:
@@ -27624,12 +27784,7 @@ def api_bulk_delete_bol_items():
                               )
                         ''', (upc, lot, lot))
 
-                    cur.execute('DELETE FROM items_prep_images WHERE upc = ? COLLATE NOCASE', (upc,))
-                    try:
-                        cur.execute('DELETE FROM items_prep_notes WHERE upc = ? COLLATE NOCASE', (upc,))
-                    except Exception:
-                        pass
-                    _items_prep_delete_media_rows(cur, upc)
+                    _items_prep_delete_diagnostic_assets(cur, upc)
 
                     cur.execute('PRAGMA table_info(bol_items)')
                     cols = [col[1].lower() for col in cur.fetchall()]
@@ -28086,6 +28241,7 @@ def api_cleanup_temporary_entry():
         if deleted:
             # Keep prep status in sync when a temporary BAD entry is abandoned.
             cur.execute('DELETE FROM items_prep_status WHERE upc = ? COLLATE NOCASE', (upc,))
+            _items_prep_delete_diagnostic_assets(cur, upc)
         conn.commit()
         
         print(f'[CLEANUP] Deleted {deleted} temporary entries for UPC: {upc}')
@@ -29246,10 +29402,16 @@ def get_ebay_orders(days=90):
 
                 legacy_item_id = str(line_item.get('legacyItemId') or '').strip()
                 item_id = legacy_item_id or str(line_item.get('lineItemId') or '').strip() or None
+                sku_val = (
+                    str(line_item.get('sku') or '').strip()
+                    or str(line_item.get('sellerInventoryReference') or '').strip()
+                    or None
+                )
 
                 store_ebay_order({
                     'order_id': order_id,
                     'item_id': item_id,
+                    'sku': sku_val,
                     'title': line_item.get('title'),
                     'quantity': quantity,
                     'price': unit_price,
@@ -29858,10 +30020,18 @@ def get_amazon_orders():
         ''', (days,))
         
         orders = cur.fetchall()
+        order_payload = []
+        for order in orders:
+            order_dict = dict(order)
+            effective_barcode = _effective_sold_order_barcode(order_dict)
+            if effective_barcode:
+                order_dict['stored_barcode'] = str(order_dict.get('barcode') or '').strip()
+                order_dict['barcode'] = effective_barcode
+            order_payload.append(order_dict)
         
         return jsonify({
             'success': True,
-            'orders': [dict(order) for order in orders]
+            'orders': order_payload
         })
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
@@ -29911,7 +30081,7 @@ def sold_orders():
                 str(order['store'] or '').strip().lower(),
                 str(order['order_id'] or '').strip(),
                 str(order['item_id'] or '').strip(),
-                _normalize_upc(order['barcode'] or ''),
+                _normalize_upc(_effective_sold_order_barcode(order) or ''),
                 str(order['title'] or '').strip().lower(),
                 qty_val,
                 round(price_val, 4),
@@ -29939,30 +30109,30 @@ def sold_orders():
         
         for order in orders:
             order_dict = dict(order)
+            effective_barcode = _effective_sold_order_barcode(order_dict)
+            if effective_barcode:
+                order_dict['stored_barcode'] = str(order_dict.get('barcode') or '').strip()
+                order_dict['barcode'] = effective_barcode
             
             # If location is empty and barcode exists, look it up in searchRack
             if (not order_dict.get('location') or order_dict.get('location', '').strip() == '') and order_dict.get('barcode'):
                 try:
-                    # Try original barcode first (searchRack stores without leading zeros)
-                    rack_cur.execute('SELECT ITEM_POSITION, PICTUREPOSITION, QUANTITY FROM SEARCHRACK WHERE BARCODE = ? COLLATE NOCASE', (order_dict['barcode'],))
-                    rack_rows = rack_cur.fetchall()
-                    
-                    # If not found, try padded version
-                    if not rack_rows and order_dict['barcode'] and order_dict['barcode'].isdigit():
-                        barcode_padded = order_dict['barcode'].zfill(12)
-                        rack_cur.execute('SELECT ITEM_POSITION, PICTUREPOSITION, QUANTITY FROM SEARCHRACK WHERE BARCODE = ? COLLATE NOCASE', (barcode_padded,))
-                        rack_rows = rack_cur.fetchall()
+                    rack_rows = _searchrack_matches_for_barcode(rack_cur, order_dict['barcode'], include_zero=False)
+                    if not rack_rows:
+                        base_barcode = _barcode_base_without_suffix(order_dict['barcode'])
+                        if base_barcode and _normalize_upc_preserve_suffix_for_match(base_barcode) != _normalize_upc_preserve_suffix_for_match(order_dict['barcode']):
+                            rack_rows = _searchrack_matches_for_barcode(rack_cur, base_barcode, include_zero=False)
                     
                     if rack_rows:
                         # Collect all locations for this barcode
                         locations = []
                         for rack_row in rack_rows:
-                            loc = rack_row['ITEM_POSITION'] or rack_row['PICTUREPOSITION']
+                            loc = rack_row.get('item_position') or rack_row.get('pictureposition')
                             if loc:
                                 locations.append({
                                     'code': loc,
-                                    'image': rack_row['PICTUREPOSITION'] if rack_row['PICTUREPOSITION'] and rack_row['PICTUREPOSITION'].strip() else loc,
-                                    'quantity': rack_row['QUANTITY'] if rack_row['QUANTITY'] else 1
+                                    'image': rack_row.get('pictureposition') if rack_row.get('pictureposition') and str(rack_row.get('pictureposition')).strip() else loc,
+                                    'quantity': rack_row.get('quantity') if rack_row.get('quantity') else 1
                                 })
                         
                         # Store as JSON array if multiple locations, or single string for backward compatibility
@@ -30036,6 +30206,10 @@ def get_order():
             
         # Convert sqlite3.Row to dict
         order_dict = dict(order)
+        effective_barcode = _effective_sold_order_barcode(order_dict)
+        if effective_barcode:
+            order_dict['stored_barcode'] = str(order_dict.get('barcode') or '').strip()
+            order_dict['barcode'] = effective_barcode
         return jsonify(order_dict)
     except Exception as e:
         return jsonify({'error': _safe_error(e)}), 500
@@ -30052,12 +30226,12 @@ def ready_to_ship_location_options(order_id):
         sold_cur = sold_conn.cursor()
         _ensure_order_removal_allocations_table(sold_cur)
 
-        sold_cur.execute('SELECT id, order_id, barcode, quantity, title FROM orders WHERE id = ?', (order_id,))
+        sold_cur.execute('SELECT id, order_id, item_id, sku, store, barcode, quantity, title FROM orders WHERE id = ?', (order_id,))
         order = sold_cur.fetchone()
         if not order:
             return jsonify({'success': False, 'error': 'Order not found'}), 404
 
-        barcode = str(order['barcode'] or '').strip()
+        barcode = _effective_sold_order_barcode(order)
         sold_qty = max(1, _coerce_int(order['quantity'], 1))
         existing_allocations = _load_order_removal_allocations(sold_cur, order_id)
 
@@ -30125,12 +30299,12 @@ def ready_to_ship_order_stats(order_id):
         sold_conn = sqlite3.connect('sold.db')
         sold_conn.row_factory = sqlite3.Row
         sold_cur = sold_conn.cursor()
-        sold_cur.execute('SELECT id, barcode, quantity, title FROM orders WHERE id = ?', (order_id,))
+        sold_cur.execute('SELECT id, item_id, sku, store, barcode, quantity, title FROM orders WHERE id = ?', (order_id,))
         order = sold_cur.fetchone()
         if not order:
             return jsonify({'success': False, 'error': 'Order not found'}), 404
 
-        barcode = str(order['barcode'] or '').strip()
+        barcode = _effective_sold_order_barcode(order)
         prep_stats = _ready_to_ship_items_to_list_stats_for_barcode(barcode)
         return jsonify({
             'success': True,
@@ -30170,12 +30344,12 @@ def mark_order_handled():
         cur = conn.cursor()
         _ensure_order_removal_allocations_table(cur)
 
-        cur.execute('SELECT id, barcode, quantity FROM orders WHERE id = ?', (order_id,))
+        cur.execute('SELECT id, item_id, sku, store, barcode, quantity FROM orders WHERE id = ?', (order_id,))
         order = cur.fetchone()
         if not order:
             return jsonify({'success': False, 'error': 'Order not found'}), 404
 
-        barcode = str(order['barcode'] or '').strip()
+        barcode = _effective_sold_order_barcode(order)
         sold_qty = max(1, _coerce_int(order['quantity'], 1))
 
         normalized_allocations = []
@@ -30672,7 +30846,7 @@ def remove_sold_now(order_id):
             sold_conn.close()
             return jsonify({'success': False, 'error': 'Already removed from inventory'}), 400
 
-        barcode = order['barcode']
+        barcode = _effective_sold_order_barcode(order)
         if not barcode:
             sold_conn.close()
             return jsonify({'success': False, 'error': 'No barcode on order'}), 400
@@ -30681,27 +30855,21 @@ def remove_sold_now(order_id):
 
         # Search searchRack for matching item
         searchrack_conn = sqlite3.connect('searchRack.db')
+        searchrack_conn.row_factory = sqlite3.Row
         searchrack_cur = searchrack_conn.cursor()
 
-        # Try exact match first, then stripped zeros
-        searchrack_cur.execute('SELECT ID, QUANTITY, ITEM_POSITION, TITLE FROM SEARCHRACK WHERE BARCODE = ? COLLATE NOCASE', (barcode,))
-        row = searchrack_cur.fetchone()
-
-        if not row and barcode.isdigit():
-            barcode_stripped = _strip_leading_zeros_numeric(barcode)
-            searchrack_cur.execute('SELECT ID, QUANTITY, ITEM_POSITION, TITLE FROM SEARCHRACK WHERE BARCODE = ? COLLATE NOCASE', (barcode_stripped,))
-            row = searchrack_cur.fetchone()
-
-        if not row and barcode.isdigit():
-            barcode_padded = barcode.zfill(12)
-            searchrack_cur.execute('SELECT ID, QUANTITY, ITEM_POSITION, TITLE FROM SEARCHRACK WHERE BARCODE = ? COLLATE NOCASE', (barcode_padded,))
-            row = searchrack_cur.fetchone()
+        matches = _searchrack_matches_for_barcode(searchrack_cur, barcode, include_zero=True)
+        if not matches:
+            base_barcode = _barcode_base_without_suffix(barcode)
+            if base_barcode and _normalize_upc_preserve_suffix_for_match(base_barcode) != _normalize_upc_preserve_suffix_for_match(barcode):
+                matches = _searchrack_matches_for_barcode(searchrack_cur, base_barcode, include_zero=True)
+        row = matches[0] if matches else None
 
         inventory_found = row is not None
-        item_id = row[0] if row else None
-        current_qty = row[1] if row else 0
-        item_location = row[2] if row else ''
-        item_title = row[3] if row else order['title']
+        item_id = row.get('id') if row else None
+        current_qty = row.get('quantity') if row else 0
+        item_location = row.get('item_position') if row else ''
+        item_title = row.get('title') if row else order['title']
 
         if inventory_found:
             new_qty = max(0, current_qty - sold_qty)
@@ -30756,7 +30924,7 @@ def find_inventory_for_sold(order_id):
         if not order:
             return jsonify({'success': False, 'error': 'Order not found'}), 404
 
-        barcode = order['barcode'] or ''
+        barcode = _effective_sold_order_barcode(order)
 
         if not barcode:
             return jsonify({
@@ -30771,46 +30939,17 @@ def find_inventory_for_sold(order_id):
         searchrack_conn.row_factory = sqlite3.Row
         searchrack_cur = searchrack_conn.cursor()
 
-        matches = []
-
-        # Try exact match
-        searchrack_cur.execute('''
-            SELECT ID, TITLE, BARCODE, ITEM_POSITION, PICTUREPOSITION, QUANTITY, IMAGE
-            FROM SEARCHRACK
-            WHERE BARCODE = ? COLLATE NOCASE AND QUANTITY > 0
-        ''', (barcode,))
-        matches.extend([dict(r) for r in searchrack_cur.fetchall()])
-
-        # Try stripped zeros
-        if barcode.isdigit():
-            barcode_stripped = _strip_leading_zeros_numeric(barcode)
-            if barcode_stripped != barcode:
-                searchrack_cur.execute('''
-                    SELECT ID, TITLE, BARCODE, ITEM_POSITION, PICTUREPOSITION, QUANTITY, IMAGE
-                    FROM SEARCHRACK
-                    WHERE BARCODE = ? COLLATE NOCASE AND QUANTITY > 0
-                ''', (barcode_stripped,))
-                for r in searchrack_cur.fetchall():
-                    if not any(m['ID'] == r['ID'] for m in matches):
-                        matches.append(dict(r))
-
-            # Try padded version
-            barcode_padded = barcode.zfill(12)
-            if barcode_padded != barcode:
-                searchrack_cur.execute('''
-                    SELECT ID, TITLE, BARCODE, ITEM_POSITION, PICTUREPOSITION, QUANTITY, IMAGE
-                    FROM SEARCHRACK
-                    WHERE BARCODE = ? COLLATE NOCASE AND QUANTITY > 0
-                ''', (barcode_padded,))
-                for r in searchrack_cur.fetchall():
-                    if not any(m['ID'] == r['ID'] for m in matches):
-                        matches.append(dict(r))
+        matches = _searchrack_matches_for_barcode(searchrack_cur, barcode, include_zero=False)
+        if not matches:
+            base_barcode = _barcode_base_without_suffix(barcode)
+            if base_barcode and _normalize_upc_preserve_suffix_for_match(base_barcode) != _normalize_upc_preserve_suffix_for_match(barcode):
+                matches = _searchrack_matches_for_barcode(searchrack_cur, base_barcode, include_zero=False)
 
         searchrack_conn.close()
 
         return jsonify({
             'success': True,
-            'order': dict(order),
+            'order': {**dict(order), 'barcode': barcode, 'stored_barcode': str(order['barcode'] or '').strip()},
             'matches': matches
         })
     except Exception as e:
@@ -34348,9 +34487,12 @@ def api_list_shelves():
                 code = path.stem
                 fname = path.name
                 try:
-                    mtime = path.stat().st_mtime
+                    stat_info = path.stat()
+                    mtime = stat_info.st_mtime
+                    cache_version = str(getattr(stat_info, 'st_mtime_ns', int(mtime * 1000000000)))
                 except Exception:
                     mtime = 0
+                    cache_version = str(int(time.time() * 1000000000))
                 url = url_for('shelf_image', code=code)
                 normalized_code = code.lower().strip()
                 count = counts_map.get(normalized_code, 0)
@@ -34361,6 +34503,7 @@ def api_list_shelves():
                     'filename': fname, 
                     'url': url, 
                     'lastModified': int(mtime), 
+                    'cacheVersion': cache_version,
                     'created_at': created_map.get(normalized_code), 
                     'count': int(count),
                     'group_id': group_id
@@ -38958,85 +39101,104 @@ def test_sold_orders_page():
 @app.route('/api/test-sold-order', methods=['POST'])
 def api_create_test_sold_order():
     """Create a test order in sold.db for testing purposes."""
+    conn = None
     try:
         data = request.get_json() or {}
-        
+
         # Validate required fields
-        required_fields = ['barcode', 'title', 'shipping_name']
-        for field in required_fields:
+        for field in ['barcode', 'title']:
             if not data.get(field):
                 return jsonify({'success': False, 'error': f'Missing required field: {field}'}), 400
-        
-        # Build order data
+
         barcode = _normalize_upc(data.get('barcode', '').strip())
-        title = data.get('title', '').strip()
-        
-        # Validate numeric fields
+        title   = data.get('title', '').strip()
+        store   = (data.get('store') or 'test').strip().lower()
+
         try:
-            quantity = int(data.get('quantity', 1))
-            if quantity < 1:
-                quantity = 1
+            quantity = max(1, int(data.get('quantity', 1)))
         except (ValueError, TypeError):
             quantity = 1
-        
-        try:
-            price = float(data.get('price', 10.0))
-            if price < 0:
-                price = 0.0
-        except (ValueError, TypeError):
-            price = 10.0
-        
-        store = data.get('store', 'test').strip()
-        shipping_name = data.get('shipping_name', '').strip()
-        shipping_street1 = data.get('shipping_street1', '').strip()
-        shipping_city = data.get('shipping_city', '').strip()
-        shipping_state = data.get('shipping_state', '').strip()
-        shipping_postal_code = data.get('shipping_postal_code', '').strip()
-        
-        # Check if shipped time should be set
-        set_shipped = data.get('set_shipped', False)
-        
-        # Generate test order_id
-        import random
-        import time
-        order_id = f"TEST-{int(time.time())}-{random.randint(1000, 9999)}"
-        
-        # Insert into sold.db
+
+        def _f(key, default=0.0):
+            try:
+                v = float(data.get(key, default))
+                return max(0.0, v)
+            except (ValueError, TypeError):
+                return float(default)
+
+        price         = _f('price', 10.0)
+        seller_fee    = _f('seller_fee', 0.0)
+        taxes         = _f('taxes', 0.0)
+        shipping_cost = _f('shipping_cost', 0.0)
+
+        # Use provided order_id/item_id if given, otherwise generate realistic ones
+        import random, time as _time
+        order_id = (data.get('order_id') or '').strip()
+        item_id  = (data.get('item_id') or '').strip()
+        if not order_id:
+            if store == 'amazon':
+                order_id = f"114-{random.randint(1000000,9999999)}-{random.randint(1000000,9999999)}"
+            elif store == 'ebay':
+                order_id = f"{random.randint(10,99)}-{random.randint(10000,99999)}-{random.randint(10000,99999)}"
+            else:
+                order_id = f"TEST-{int(_time.time())}-{random.randint(1000,9999)}"
+        if not item_id:
+            item_id = order_id
+
+        sku              = (data.get('sku') or '').strip()
+        checkout_status  = (data.get('checkout_status') or 'PAID').strip()
+        shipping_name    = (data.get('shipping_name') or ('Amazon Buyer' if store == 'amazon' else 'Test Customer')).strip()
+        shipping_street1 = (data.get('shipping_street1') or '').strip()
+        shipping_street2 = (data.get('shipping_street2') or '').strip()
+        shipping_city    = (data.get('shipping_city') or '').strip()
+        shipping_state   = (data.get('shipping_state') or '').strip()
+        shipping_postal  = (data.get('shipping_postal_code') or '').strip()
+        shipping_country = (data.get('shipping_country') or 'US').strip().upper() or 'US'
+        set_shipped      = bool(data.get('set_shipped'))
+
         import datetime
-        paid_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        shipped_time = paid_time if set_shipped else None
-        
+        paid_time     = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        shipped_time  = paid_time if set_shipped else None
+
         conn = sqlite3.connect('sold.db')
+        conn.row_factory = sqlite3.Row
         cur = conn.cursor()
-        
+
         cur.execute('''
             INSERT INTO orders (
-                order_id, item_id, title, quantity, price, 
-                shipping_name, shipping_street1, shipping_city, 
-                shipping_state, shipping_postal_code, shipping_country,
-                paid_time, shipped_time, barcode, store, isHandled, rackupdated
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', 0)
+                order_id, item_id, sku, title, quantity, price,
+                checkout_status,
+                shipping_name, shipping_street1, shipping_street2,
+                shipping_city, shipping_state, shipping_postal_code, shipping_country,
+                paid_time, shipped_time,
+                seller_fee, taxes, shipping_cost,
+                barcode, store, isHandled, rackupdated
+            ) VALUES (?,?,?,?,?,?, ?,  ?,?,?,?,?,?,?,  ?,?,  ?,?,?,  ?,?, '',0)
         ''', (
-            order_id, order_id, title, quantity, price,
-            shipping_name, shipping_street1, shipping_city,
-            shipping_state, shipping_postal_code, 'US',
-            paid_time, shipped_time, barcode, store
+            order_id, item_id, sku, title, quantity, price,
+            checkout_status,
+            shipping_name, shipping_street1, shipping_street2,
+            shipping_city, shipping_state, shipping_postal, shipping_country,
+            paid_time, shipped_time,
+            seller_fee, taxes, shipping_cost,
+            barcode, store
         ))
-        
+
         conn.commit()
         inserted_id = cur.lastrowid
-        
+
         return jsonify({
-            'success': True, 
+            'success': True,
             'order_id': order_id,
             'id': inserted_id,
             'message': 'Test order created successfully'
         })
-        
+
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 # ============================================================================
 # AUTO-SYNC BACKGROUND THREAD

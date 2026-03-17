@@ -1833,7 +1833,7 @@
       
       try{
         const diagParams = new URLSearchParams();
-        diagParams.set('include_related', '1');
+        diagParams.set('exact_scope', '1');
         const lotParam = (params.get('lot') || '').trim();
         if(lotParam) diagParams.set('lot', lotParam);
         const r = await fetch(`/api/items_prep/diagnostic/${encodeURIComponent(upc)}?${diagParams.toString()}`);

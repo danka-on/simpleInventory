@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from sp_api.api import Orders, Reports, CatalogItems, ListingsItems, Finances, MerchantFulfillment
 from sp_api.base import Marketplaces
 from sp_api.base.exceptions import SellingApiException
-from DBmanager import connect_db
+from DBmanager import connect_db, ensure_sold_orders_schema, resolve_barcode_from_marketplace_sku
 
 # Define base directory for cross-platform compatibility
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -468,31 +468,7 @@ class AmazonManager:
         with connect_db('sold.db') as conn:
             cur = conn.cursor()
 
-            # Ensure table exists with necessary columns
-            cur.execute('''
-                CREATE TABLE IF NOT EXISTS orders (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    order_id TEXT UNIQUE,
-                    item_id TEXT,
-                    barcode TEXT,
-                    title TEXT,
-                    quantity INTEGER,
-                    price REAL,
-                    shipped_time TEXT,
-                    paid_time TEXT,
-                    image TEXT,
-                    rackupdated INTEGER DEFAULT 0,
-                    removal_cancelled INTEGER DEFAULT 0,
-                    store TEXT DEFAULT 'amazon'
-                )
-            ''')
-
-            # Add store column if it doesn't exist
-            try:
-                cur.execute('ALTER TABLE orders ADD COLUMN store TEXT DEFAULT "amazon"')
-                conn.commit()
-            except Exception:
-                pass
+            ensure_sold_orders_schema(cur, conn, default_store='amazon')
 
             synced_count = 0
             order_items_api_calls = 0
@@ -633,18 +609,29 @@ class AmazonManager:
                         if order_status == 'Shipped':
                             shipped_time = last_update_date
 
+                        resolved_barcode = resolve_barcode_from_marketplace_sku(
+                            sku,
+                            platform='amazon',
+                            item_id=asin,
+                            fallback_barcode=barcode
+                        )
+                        if resolved_barcode:
+                            barcode = resolved_barcode
+
                         # Check if order already exists
-                        cur.execute('SELECT id, barcode FROM orders WHERE order_id = ?', (amazon_order_id,))
+                        cur.execute('SELECT id, barcode, sku FROM orders WHERE order_id = ?', (amazon_order_id,))
                         existing = cur.fetchone()
 
                         if existing:
                             existing_barcode = existing[1]
+                            existing_sku = existing[2]
 
                             # Determine which barcode to use:
                             # - If we found a new valid barcode (UPC), use it
                             # - If no new barcode found but existing has one, keep existing
                             # - If existing is an ASIN and we have nothing better, keep existing
                             final_barcode = barcode if barcode else existing_barcode
+                            final_sku = sku if sku else existing_sku
 
                             # Update existing order
                             cur.execute('''
@@ -653,21 +640,21 @@ class AmazonManager:
                                     shipped_time = ?, paid_time = ?, image = ?, store = 'amazon',
                                     shipping_name = ?, shipping_city = ?, shipping_state = ?,
                                     shipping_postal_code = ?, shipping_country = ?,
-                                    shipping_cost = ?, seller_fee = ?, taxes = ?
+                                    shipping_cost = ?, seller_fee = ?, taxes = ?, sku = ?
                                 WHERE order_id = ?
                             ''', (final_barcode, title, quantity, price, shipped_time, purchase_date, image,
                                   shipping_name, shipping_city, shipping_state, shipping_postal, shipping_country,
-                                  shipping_cost, seller_fee, taxes,
+                                  shipping_cost, seller_fee, taxes, final_sku,
                                   amazon_order_id))
                         else:
                             # Insert new order
                             cur.execute('''
                                 INSERT INTO orders
-                                (order_id, item_id, barcode, title, quantity, price, shipped_time, paid_time, image, store,
+                                (order_id, item_id, sku, barcode, title, quantity, price, shipped_time, paid_time, image, store,
                                  shipping_name, shipping_city, shipping_state, shipping_postal_code, shipping_country,
                                  shipping_cost, seller_fee, taxes)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'amazon', ?, ?, ?, ?, ?, ?, ?, ?)
-                            ''', (amazon_order_id, asin, barcode, title, quantity, price, shipped_time, purchase_date, image,
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'amazon', ?, ?, ?, ?, ?, ?, ?, ?)
+                            ''', (amazon_order_id, asin, sku, barcode, title, quantity, price, shipped_time, purchase_date, image,
                                   shipping_name, shipping_city, shipping_state, shipping_postal, shipping_country,
                                   shipping_cost, seller_fee, taxes))
                             synced_count += 1

@@ -121,6 +121,19 @@ function resetSaveButtonUI() {
     saveBtn.disabled = true;
 }
 
+function getShelfImageUrl(shelf, extraVersion = '') {
+    if (!shelf || !shelf.url) return '';
+    const baseUrl = String(shelf.url);
+    const params = new URLSearchParams();
+    const cacheVersion = String((shelf.cacheVersion ?? shelf.lastModified ?? '') || '').trim();
+    if (cacheVersion) params.set('_v', cacheVersion);
+    const extra = String(extraVersion || '').trim();
+    if (extra) params.set('_t', extra);
+    const query = params.toString();
+    if (!query) return baseUrl;
+    return `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}${query}`;
+}
+
 async function parseJsonResponse(response) {
     const text = await response.text();
     if (!text) return {};
@@ -366,7 +379,7 @@ function renderShelves() {
            data-code="${shelf.code}"
            onclick="handleShelfClick(event,'${shelf.code}')">
             <span class="shelf-count" data-code="${shelf.code}" title="View items" onclick="onCountClick(event,'${shelf.code}')">${countVal}</span>
-            <img src="${shelf.url}" alt="${shelf.code}" loading="lazy">
+            <img src="${getShelfImageUrl(shelf)}" alt="${shelf.code}" loading="lazy">
             <div class="shelf-code">${shelf.code}</div>
         </div>
     `}).join('');
@@ -655,7 +668,7 @@ function enlargeShelf(code) {
         return;
     }
     
-    document.getElementById('modal-image').src = shelf.url;
+    document.getElementById('modal-image').src = getShelfImageUrl(shelf);
     document.getElementById('image-modal').classList.add('active');
 }
 
@@ -748,7 +761,7 @@ function editShelf() {
     
     // Load standard image (with baked-in rectangle)
     console.log('Loading standard image for editing');
-    img.src = shelf.url + '?_=' + Date.now();
+    img.src = getShelfImageUrl(shelf, Date.now());
 
     // Show add/edit view
     closeModal();

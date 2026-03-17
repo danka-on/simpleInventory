@@ -67,21 +67,16 @@ When user says "push", "p", "push to pi", or "commit changes", treat it as:
 ### Last successful checkpoint
 
 - Status: success confirmed by user
-- Date: 2026-03-17 09:29:17 -04:00
+- Date: 2026-03-17 10:04:13 -04:00
 - Branch: `pi-claude-refactor`
-- Git commit baseline for next incremental file discovery: `df2c093`
+- Git commit baseline for next incremental file discovery: `51b42e5`
 - Note: this deploy included working-tree changes beyond the committed baseline, so use the pushed-file list below to avoid resending already-deployed uncommitted files until the next git checkpoint.
 - Files pushed in this successful checkpoint:
   - `app.py`
-  - `static/barcode-entry-state.js`
-  - `templates/additem.html`
-  - `templates/barcode.html`
+  - `repair_lotless_special_items.py`
   - `templates/item_prep.html`
   - `templates/item_prep_diagnostic.html`
   - `templates/items_to_list.html`
-  - `templates/multibarcode.html`
-  - `templates/tools.html`
-  - `templates/prep_media_cleaner.html`
 
 ## Architecture
 
