@@ -961,6 +961,96 @@ def _searchrack_total_qty_for_key(conn, upc_key):
         total_qty += qty
     return total_qty
 
+
+def _ready_to_ship_warehouse_qty_for_barcode(barcode):
+    rack_conn = None
+    try:
+        rack_conn = sqlite3.connect('searchRack.db')
+        rack_conn.row_factory = sqlite3.Row
+        rack_cur = rack_conn.cursor()
+        matches = _searchrack_matches_for_barcode(rack_cur, barcode, include_zero=False)
+        return sum(max(0, _coerce_int(row.get('quantity'), 0)) for row in matches)
+    except Exception:
+        return 0
+    finally:
+        if rack_conn is not None:
+            rack_conn.close()
+
+
+def _ready_to_ship_rawbol_total_qty_for_barcode(barcode):
+    target_key = _sold_removal_barcode_key(barcode)
+    variants = sorted(v.lower() for v in _sold_removal_barcode_variants(barcode))
+    invalid_upc_values = {'null', 'n/a', 'does not apply'}
+    if not target_key or target_key in invalid_upc_values:
+        return 0
+
+    conn = None
+    total_qty = 0
+    try:
+        conn = sqlite3.connect('rawbol.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='raw_bol_items'")
+        has_raw_items = bool(cur.fetchone())
+        if has_raw_items:
+            cur.execute("PRAGMA table_info('raw_bol_items')")
+            cols = [r[1] for r in cur.fetchall()]
+            cols_lower = {c.lower(): c for c in cols}
+            upc_col = cols_lower.get('upc') or cols_lower.get('barcode')
+            qty_col = cols_lower.get('quantity') or cols_lower.get('qty')
+            if upc_col and qty_col:
+                base_sql = f'''
+                    SELECT {upc_col} AS upc, {qty_col} AS qty
+                    FROM raw_bol_items
+                    WHERE {upc_col} IS NOT NULL
+                      AND TRIM({upc_col}) != ''
+                '''
+                if variants:
+                    placeholders = ','.join('?' for _ in variants)
+                    cur.execute(base_sql + f" AND LOWER(TRIM({upc_col})) IN ({placeholders})", tuple(variants))
+                else:
+                    cur.execute(base_sql)
+                for row in cur.fetchall():
+                    raw_upc = str(row['upc'] or '').strip()
+                    if _sold_removal_barcode_key(raw_upc) != target_key:
+                        continue
+                    total_qty += max(0, _coerce_int(row['qty'], 0))
+                if total_qty > 0:
+                    return total_qty
+
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='rawbol'")
+        has_legacy = bool(cur.fetchone())
+        if has_legacy:
+            cur.execute("PRAGMA table_info('rawbol')")
+            cols = [r[1] for r in cur.fetchall()]
+            cols_lower = {c.lower(): c for c in cols}
+            upc_col = cols_lower.get('upc') or cols_lower.get('barcode')
+            qty_col = cols_lower.get('qty') or cols_lower.get('quantity')
+            if upc_col and qty_col:
+                base_sql = f'''
+                    SELECT {upc_col} AS upc, {qty_col} AS qty
+                    FROM rawbol
+                    WHERE {upc_col} IS NOT NULL
+                      AND TRIM({upc_col}) != ''
+                '''
+                if variants:
+                    placeholders = ','.join('?' for _ in variants)
+                    cur.execute(base_sql + f" AND LOWER(TRIM({upc_col})) IN ({placeholders})", tuple(variants))
+                else:
+                    cur.execute(base_sql)
+                for row in cur.fetchall():
+                    raw_upc = str(row['upc'] or '').strip()
+                    if _sold_removal_barcode_key(raw_upc) != target_key:
+                        continue
+                    total_qty += max(0, _coerce_int(row['qty'], 0))
+        return total_qty
+    except Exception:
+        return 0
+    finally:
+        if conn is not None:
+            conn.close()
+
 def _record_inventory_zero_transition(upc_key, prev_total_qty, current_total_qty, observed_at=None):
     """Persist >0 -> 0 transitions immediately on inventory writes."""
     invalid_upc_values = {'null', 'n/a', 'does not apply'}
@@ -29105,6 +29195,37 @@ def ready_to_ship_location_options(order_id):
         try:
             if rack_conn is not None:
                 rack_conn.close()
+        except Exception:
+            pass
+
+@app.route('/api/ready-to-ship/order-stats/<int:order_id>', methods=['GET'])
+def ready_to_ship_order_stats(order_id):
+    sold_conn = None
+    try:
+        sold_conn = sqlite3.connect('sold.db')
+        sold_conn.row_factory = sqlite3.Row
+        sold_cur = sold_conn.cursor()
+        sold_cur.execute('SELECT id, barcode, quantity, title FROM orders WHERE id = ?', (order_id,))
+        order = sold_cur.fetchone()
+        if not order:
+            return jsonify({'success': False, 'error': 'Order not found'}), 404
+
+        barcode = str(order['barcode'] or '').strip()
+        return jsonify({
+            'success': True,
+            'order_id': order_id,
+            'barcode': barcode,
+            'title': str(order['title'] or '').strip(),
+            'sold_quantity': max(1, _coerce_int(order['quantity'], 1)),
+            'warehouse_qty': _ready_to_ship_warehouse_qty_for_barcode(barcode),
+            'macy_total_qty': _ready_to_ship_rawbol_total_qty_for_barcode(barcode)
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e)}), 500
+    finally:
+        try:
+            if sold_conn is not None:
+                sold_conn.close()
         except Exception:
             pass
 

@@ -418,7 +418,7 @@
     <a href="/store-manager" class="btn" style="background:rgba(0,0,0,0.06);color:#555;text-decoration:none;display:inline-flex;align-items:center;gap:4px;font-size:0.9rem;justify-self:start">&#8592; Back</a>
     <h2 style="margin:0; justify-self:center; text-align:center" data-i18n="list_manager">Prepared Items</h2>
     <div style="justify-self:end; display:flex; gap:8px; flex-wrap:wrap;">
-      <a href="/listingagent?return=/items-to-list" class="btn" style="background:#f59e0b; color:#fff; text-decoration:none; display:flex; align-items:center; gap:6px">
+      <a id="listing-agent-link" href="/listingagent?return=%2Fitems-to-list" class="btn" style="background:#f59e0b; color:#fff; text-decoration:none; display:flex; align-items:center; gap:6px">
         <span style="font-size:1rem">🤖</span> <span data-i18n="listing_agent">Listing Agent</span>
       </a>
       <a href="/fb-listings" class="btn" style="background:#1877f2; color:#fff; text-decoration:none; display:flex; align-items:center; gap:6px">
@@ -1049,8 +1049,8 @@ function applyDirectSearchFromURL(params){
   updateGearResetButton();
 }
 
-function setFiltersFromURL(){
-  const p = new URLSearchParams(window.location.search);
+function setFiltersFromURL(params){
+  const p = (params instanceof URLSearchParams) ? params : new URLSearchParams(window.location.search);
   const lot = p.get('lot')||''; const q = p.get('q')||''; const sort = p.get('sort')||''; const status = p.get('status')||''; const defect = p.get('defect')||'';
   if(p.has('q')) document.getElementById('filter-q').value = q;
   if(p.has('lot')){
@@ -1132,6 +1132,102 @@ function setFiltersFromURL(){
   updateGearResetButton();
 }
 
+function _normalizeItemsToListPage(value, fallback = 1){
+  const parsed = parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function _normalizeItemsToListLimit(value, fallback = 25){
+  const parsed = parseInt(value, 10);
+  return [25, 50, 100].includes(parsed) ? parsed : fallback;
+}
+
+function _setListPagingAndSortFromURL(params){
+  const p = (params instanceof URLSearchParams) ? params : new URLSearchParams(window.location.search);
+  currentPage = _normalizeItemsToListPage(p.get('page'), 1);
+  currentLimit = _normalizeItemsToListLimit(p.get('limit') || p.get('per_page'), currentLimit || 25);
+  const perPageEl = document.getElementById('per-page-select');
+  if(perPageEl) perPageEl.value = String(currentLimit);
+
+  const sortKey = String(p.get('column_sort_key') || '').trim();
+  const sortDir = String(p.get('column_sort_dir') || '').trim().toLowerCase();
+  if(['quantity', 'warehouse_available'].includes(sortKey)){
+    columnSort.key = sortKey;
+    columnSort.dir = sortDir === 'asc' ? 'asc' : 'desc';
+  } else {
+    columnSort.key = '';
+    columnSort.dir = 'desc';
+  }
+}
+
+function buildCurrentItemsToListUrl(){
+  const context = _buildBolItemsQueryContext();
+  const params = new URLSearchParams(context.params.toString());
+  params.set('page', String(_normalizeItemsToListPage(currentPage, 1)));
+  params.set('limit', String(_normalizeItemsToListLimit(currentLimit, 25)));
+  if(columnSort && ['quantity', 'warehouse_available'].includes(String(columnSort.key || '').trim())){
+    params.set('column_sort_key', String(columnSort.key).trim());
+    params.set('column_sort_dir', columnSort.dir === 'asc' ? 'asc' : 'desc');
+  } else {
+    params.delete('column_sort_key');
+    params.delete('column_sort_dir');
+  }
+  if(isDirectSearchActivated()){
+    params.set('direct_search', '1');
+  } else {
+    params.delete('direct_search');
+  }
+  const query = params.toString();
+  return '/items-to-list' + (query ? ('?' + query) : '');
+}
+
+function updateListingAgentReturnLink(returnUrl){
+  const link = document.getElementById('listing-agent-link');
+  if(!link) return;
+  const exactReturn = returnUrl || buildCurrentItemsToListUrl();
+  link.href = '/listingagent?return=' + encodeURIComponent(exactReturn);
+}
+
+function syncItemsToListHistory(mode = 'replace'){
+  if(mode === 'skip') return;
+  const nextUrl = buildCurrentItemsToListUrl();
+  updateListingAgentReturnLink(nextUrl);
+  try{
+    const currentUrl = window.location.pathname + window.location.search;
+    if(mode === 'push'){
+      const currentState = Object.assign({}, window.history.state || {});
+      currentState.scrollY = window.scrollY;
+      window.history.replaceState(currentState, '', currentUrl);
+      if(currentUrl !== nextUrl){
+        window.history.pushState({ url: nextUrl, scrollY: window.scrollY }, '', nextUrl);
+      } else {
+        window.history.replaceState({ url: nextUrl, scrollY: window.scrollY }, '', nextUrl);
+      }
+      return;
+    }
+    window.history.replaceState({ url: nextUrl, scrollY: window.scrollY }, '', nextUrl);
+  }catch(e){
+    updateListingAgentReturnLink(nextUrl);
+  }
+}
+
+function restoreItemsToListStateFromURL(params){
+  const p = (params instanceof URLSearchParams) ? params : new URLSearchParams(window.location.search);
+  const directSearch = isDirectSearchActivated(p);
+
+  restoreFilterUiSettings();
+  if(directSearch){
+    applyDirectSearchFromURL(p);
+  } else {
+    restoreGearSettings();
+    setFiltersFromURL(p);
+  }
+  _setListPagingAndSortFromURL(p);
+  updateListingAgentReturnLink();
+  updateGearResetButton();
+  return directSearch;
+}
+
 // Format a timestamp into Eastern Time like: 2025-10-18 9:20am
 function formatLastEdited(raw){
   if(!raw) return '';
@@ -1208,7 +1304,7 @@ function toggleColumnSort(key){
     columnSort.dir = 'desc';
   }
   currentPage = 1;
-  loadItems();
+  loadItems(null, { historyMode: 'push' });
 }
 
 function _locationImageCandidates(location){
@@ -1733,9 +1829,9 @@ document.getElementById('autoListingsModal').addEventListener('click', (e)=>{
 });
 // Apply button removed; filters auto-refresh on change and Enter in search
 // Auto-refresh on dropdown changes
-document.getElementById('filter-lot').addEventListener('change', (e)=>{ onGearSettingChanged(); loadItems(e); });
-document.getElementById('sort-select').addEventListener('change', (e)=>{ onGearSettingChanged(); loadItems(e); });
-document.getElementById('refresh-btn').addEventListener('click', (e)=> loadItems(e, { forceRefetch: true }));
+document.getElementById('filter-lot').addEventListener('change', (e)=>{ onGearSettingChanged(); loadItems(e, { historyMode: 'push' }); });
+document.getElementById('sort-select').addEventListener('change', (e)=>{ onGearSettingChanged(); loadItems(e, { historyMode: 'push' }); });
+document.getElementById('refresh-btn').addEventListener('click', (e)=> loadItems(e, { forceRefetch: true, historyMode: 'replace' }));
 
 function updateStatusFilterHighlight(){
   const map = {
@@ -1758,29 +1854,29 @@ document.querySelectorAll('.status-checkbox').forEach(cb => {
   cb.addEventListener('change', ()=>{
     updateStatusFilterHighlight();
     onGearSettingChanged();
-    loadItems();
+    loadItems(null, { historyMode: 'push' });
   });
 });
 
 // defect filter should behave like other filters
-const defectEl = document.getElementById('filter-defect'); if(defectEl) defectEl.addEventListener('change', (e)=>{ onGearSettingChanged(); loadItems(e); });
+const defectEl = document.getElementById('filter-defect'); if(defectEl) defectEl.addEventListener('change', (e)=>{ onGearSettingChanged(); loadItems(e, { historyMode: 'push' }); });
 // radio buttons for listed filter
 const listedEl = document.getElementById('filter-listed-select');
-if(listedEl) listedEl.addEventListener('change', (e)=>{ onGearSettingChanged(); loadItems(e); });
+if(listedEl) listedEl.addEventListener('change', (e)=>{ onGearSettingChanged(); loadItems(e, { historyMode: 'push' }); });
 const autoListedEl = document.getElementById('filter-auto-listed-select');
-if(autoListedEl) autoListedEl.addEventListener('change', (e)=>{ onGearSettingChanged(); loadItems(e); });
+if(autoListedEl) autoListedEl.addEventListener('change', (e)=>{ onGearSettingChanged(); loadItems(e, { historyMode: 'push' }); });
 const autoListedAmazonEl = document.getElementById('filter-auto-listed-amazon');
-if(autoListedAmazonEl) autoListedAmazonEl.addEventListener('change', (e)=>{ onGearSettingChanged(); loadItems(e); });
+if(autoListedAmazonEl) autoListedAmazonEl.addEventListener('change', (e)=>{ onGearSettingChanged(); loadItems(e, { historyMode: 'push' }); });
 const autoListedEbayEl = document.getElementById('filter-auto-listed-ebay');
-if(autoListedEbayEl) autoListedEbayEl.addEventListener('change', (e)=>{ onGearSettingChanged(); loadItems(e); });
+if(autoListedEbayEl) autoListedEbayEl.addEventListener('change', (e)=>{ onGearSettingChanged(); loadItems(e, { historyMode: 'push' }); });
 const warehouseFilterEl = document.getElementById('filter-warehouse-select');
-if(warehouseFilterEl) warehouseFilterEl.addEventListener('change', (e)=>{ onGearSettingChanged(); loadItems(e); });
+if(warehouseFilterEl) warehouseFilterEl.addEventListener('change', (e)=>{ onGearSettingChanged(); loadItems(e, { historyMode: 'push' }); });
 const listedAmazonEl = document.getElementById('filter-listed-amazon');
-if(listedAmazonEl) listedAmazonEl.addEventListener('change', (e)=>{ onGearSettingChanged(); loadItems(e); });
+if(listedAmazonEl) listedAmazonEl.addEventListener('change', (e)=>{ onGearSettingChanged(); loadItems(e, { historyMode: 'push' }); });
 const listedEbayEl = document.getElementById('filter-listed-ebay');
-if(listedEbayEl) listedEbayEl.addEventListener('change', (e)=>{ onGearSettingChanged(); loadItems(e); });
+if(listedEbayEl) listedEbayEl.addEventListener('change', (e)=>{ onGearSettingChanged(); loadItems(e, { historyMode: 'push' }); });
 const listedFbEl = document.getElementById('filter-listed-fb');
-if(listedFbEl) listedFbEl.addEventListener('change', (e)=>{ onGearSettingChanged(); loadItems(e); });
+if(listedFbEl) listedFbEl.addEventListener('change', (e)=>{ onGearSettingChanged(); loadItems(e, { historyMode: 'push' }); });
 const resetGearBtn = document.getElementById('reset-gear-filters');
 if(resetGearBtn){
   resetGearBtn.addEventListener('click', (e)=>{
@@ -1788,7 +1884,7 @@ if(resetGearBtn){
     applyGearSettings(GEAR_DEFAULTS);
     saveGearSettings();
     updateGearResetButton();
-    loadItems();
+    loadItems(null, { historyMode: 'push' });
   });
 }
 
@@ -1902,12 +1998,7 @@ function onOpenDiag(e){
   const upc = e.currentTarget.dataset.upc; if(!upc) return;
   const lot = e.currentTarget.dataset.lot || '';
   const rowStatus = (e.currentTarget.dataset.status || '').trim();
-  // Build a compact return URL consisting of the active filter params so we can return to the same list state
-  const params = new URLSearchParams(window.location.search);
-  const returnParams = [];
-  ['lot','q','sort','status','defect','listed','not_listed','listed_stores','warehouse_filter']
-    .forEach(k=>{ const v = params.get(k); if(v) returnParams.push(`${k}=${encodeURIComponent(v)}`); });
-  const ret = '/items-to-list' + (returnParams.length? ('?'+returnParams.join('&')) : '');
+  const ret = buildCurrentItemsToListUrl();
   let url = '/item-prep/diagnostic/view?upc='+encodeURIComponent(upc)+'&from=items&return='+encodeURIComponent(ret);
   if(lot) url += '&lot='+encodeURIComponent(lot);
   if(rowStatus) url += '&row_status='+encodeURIComponent(rowStatus);
@@ -1927,12 +2018,7 @@ async function onOpenPics(e){
   const dlAll = document.getElementById('picsDownloadAll');
   area.innerHTML = '<div class="small-muted">Loading...</div>';
   large.innerHTML = '';
-  // Preserve return params so that Edit Diagnostic -> Back returns to Items-to-List
-  const params = new URLSearchParams(window.location.search);
-  const returnParams = [];
-  ['lot','q','sort','status','defect','listed','not_listed','listed_stores','warehouse_filter']
-    .forEach(k=>{ const v = params.get(k); if(v) returnParams.push(`${k}=${encodeURIComponent(v)}`); });
-  const ret = '/items-to-list' + (returnParams.length? ('?'+returnParams.join('&')) : '');
+  const ret = buildCurrentItemsToListUrl();
   let diagUrl = '/item-prep/diagnostic?upc='+encodeURIComponent(upc)+'&from=items&return='+encodeURIComponent(ret);
   if(lot) diagUrl += '&lot='+encodeURIComponent(lot);
   if(rowStatus) diagUrl += '&row_status='+encodeURIComponent(rowStatus);
@@ -2223,19 +2309,7 @@ async function loadLots(){
 // Load lots first so any persisted lot filter is resolved before the first query.
 async function initializeItemsToList(){
   const initParams = new URLSearchParams(window.location.search);
-  const directSearch = isDirectSearchActivated(initParams);
-
-  if(directSearch){
-    // Direct searches bypass persisted/gear filters and use the incoming query only.
-    restoreFilterUiSettings(); // keep UI preferences like per-page
-    applyDirectSearchFromURL(initParams);
-  } else {
-    restoreGearSettings();
-    restoreFilterUiSettings();
-    setFiltersFromURL();
-  }
-
-  updateGearResetButton();
+  const directSearch = restoreItemsToListStateFromURL(initParams);
   await flushPendingMarketplaceOps();
   await loadLots();
   if(directSearch){
@@ -2243,8 +2317,7 @@ async function initializeItemsToList(){
     if(lotEl) lotEl.value = '';
     pendingLotSelection = '';
   }
-  currentPage = 1;
-  await loadItems();
+  await loadItems(null, { historyMode: 'replace' });
   const qInput = document.getElementById('filter-q');
   if(qInput) qInput.focus();
 }
@@ -2257,9 +2330,9 @@ if (backBtn) {
   });
 }
 // Trigger load on Enter in search
-document.getElementById('filter-q').addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ e.preventDefault(); loadItems(); } });
+document.getElementById('filter-q').addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ e.preventDefault(); loadItems(e, { historyMode: 'push' }); } });
 // Search button click handler
-document.getElementById('search-btn').addEventListener('click', ()=>{ loadItems(); });
+document.getElementById('search-btn').addEventListener('click', (e)=>{ loadItems(e, { historyMode: 'push' }); });
 
 // Select mode and delete handlers
 
@@ -2366,7 +2439,7 @@ function renderPagination(total, page, limit) {
 
 function changePage(p) {
   currentPage = p;
-  loadItems();
+  loadItems(null, { historyMode: 'push' });
 }
 
 // Update loadItems to include page and limit
@@ -2376,6 +2449,7 @@ async function loadItems(e, opts = {}){
   saveFilterUiSettings();
 
   const forceRefetch = !!(opts && opts.forceRefetch);
+  const historyMode = (opts && opts.historyMode) || 'replace';
   const context = _buildBolItemsQueryContext();
   const baseParams = context.params;
   const cacheKey = context.cacheKey;
@@ -2454,6 +2528,7 @@ async function loadItems(e, opts = {}){
     await hydrateListingAgentQueueState(pageResults);
     render(pageResults);
     renderPagination(totalCount, page, limit);
+    syncItemsToListHistory(historyMode);
     if(overlay) overlay.style.display = 'none';
     return;
   }
@@ -2506,6 +2581,7 @@ async function loadItems(e, opts = {}){
   await hydrateListingAgentQueueState(results);
   render(results);
   renderPagination(filtered_count, page, limit);
+  syncItemsToListHistory(historyMode);
 
   if(overlay) overlay.style.display = 'none';
 }
@@ -2517,9 +2593,18 @@ if (perPageSel) {
     const val = parseInt(e.target.value, 10);
     currentLimit = (!isNaN(val) && val>0) ? val : 25;
     currentPage = 1; // reset to first page when page size changes
-    loadItems();
+    loadItems(e, { historyMode: 'push' });
   });
 }
+
+window.addEventListener('popstate', async (e) => {
+  restoreItemsToListStateFromURL(new URLSearchParams(window.location.search));
+  await loadItems(null, { historyMode: 'replace' });
+  const scrollY = e && e.state ? Number(e.state.scrollY) : NaN;
+  if(Number.isFinite(scrollY)){
+    window.requestAnimationFrame(() => window.scrollTo(0, scrollY));
+  }
+});
 
 </script>
   <div id="loading-overlay">
