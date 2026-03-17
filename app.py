@@ -1051,6 +1051,105 @@ def _ready_to_ship_rawbol_total_qty_for_barcode(barcode):
         if conn is not None:
             conn.close()
 
+
+def _ready_to_ship_items_to_list_stats_for_barcode(barcode):
+    upc = _normalize_upc_preserve_suffix_for_match(barcode)
+    base_upc = upc.split('-', 1)[0] if upc else ''
+    payload = {
+        'base_barcode': base_upc,
+        'prepped_qty': 0,
+        'items_to_list_url': _items_prep_items_to_list_url(base_upc) if base_upc else '/items-to-list'
+    }
+    if not base_upc:
+        return payload
+
+    like_related = _ready_to_ship_prep_related_like(base_upc)
+
+    try:
+        _ensure_items_prep_tables()
+        with db_connection('bol.db') as conn:
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            cur.execute("PRAGMA table_info('bol_items')")
+            cols = [r[1] for r in cur.fetchall()]
+            if not cols:
+                return payload
+
+            has_itemprepped = any(c.lower() == 'itemprepped' for c in cols)
+            has_original_qty = any(c.lower() == 'original_qty' for c in cols)
+            has_good_qty = any(c.lower() == 'good_qty' for c in cols)
+            has_bad_qty = any(c.lower() == 'bad_qty' for c in cols)
+            has_unchecked_qty = any(c.lower() == 'unchecked_qty' for c in cols)
+
+            prep_status_expr = "COALESCE(s_exact.status, s_fallback.status)"
+            prep_qty_expr = "COALESCE(s_exact.quantity, s_fallback.quantity)"
+            prep_join = (
+                " FROM bol_items b "
+                "LEFT JOIN items_prep_status s_exact "
+                "ON s_exact.upc = b.upc "
+                "AND COALESCE(s_exact.lot_number, '') = COALESCE(b.lot_number, '') "
+                "LEFT JOIN items_prep_status s_fallback "
+                "ON s_fallback.upc = b.upc "
+                "AND COALESCE(s_fallback.lot_number, '') = '' "
+                "AND s_exact.id IS NULL "
+            )
+
+            sql = (
+                'SELECT b.upc, COALESCE(b.lot_number, "") AS lot_number, COALESCE(b.quantity, 1) AS quantity, ' +
+                ('COALESCE(b.original_qty, NULL) AS original_qty, ' if has_original_qty else 'NULL AS original_qty, ') +
+                ('COALESCE(b.good_qty, NULL) AS good_qty, ' if has_good_qty else 'NULL AS good_qty, ') +
+                ('COALESCE(b.bad_qty, NULL) AS bad_qty, ' if has_bad_qty else 'NULL AS bad_qty, ') +
+                ('COALESCE(b.unchecked_qty, NULL) AS unchecked_qty, ' if has_unchecked_qty else 'NULL AS unchecked_qty, ') +
+                f'{prep_status_expr} AS prep_status, {prep_qty_expr} AS prep_quantity '
+                + prep_join +
+                '''WHERE b.id = (
+                        SELECT MAX(b2.id)
+                        FROM bol_items b2
+                        WHERE b2.upc = b.upc COLLATE NOCASE
+                          AND COALESCE(b2.lot_number, '') = COALESCE(b.lot_number, '')
+                    ) '''
+            )
+            if has_itemprepped:
+                sql += "AND (b.itemprepped IS NULL OR b.itemprepped = 0) "
+            sql += "AND (b.upc = ? COLLATE NOCASE OR b.upc LIKE ? ESCAPE '\\')"
+
+            cur.execute(sql, (base_upc, like_related))
+            total_qty = 0
+            for row in cur.fetchall():
+                row_dict = dict(row)
+                row_upc = _normalize_upc_preserve_suffix_for_match(row_dict.get('upc'))
+                if not row_upc:
+                    continue
+
+                good_bucket = max(0, _coerce_int(row_dict.get('good_qty'), 0))
+                bad_bucket = max(0, _coerce_int(row_dict.get('bad_qty'), 0))
+                status = _items_to_list_effective_status(
+                    row_upc,
+                    row_dict.get('prep_status'),
+                    good_qty=good_bucket,
+                    bad_qty=bad_bucket
+                )
+                if status not in ('good', 'bad', 'return'):
+                    continue
+
+                prep_qty = row_dict.get('prep_quantity')
+                if prep_qty is not None:
+                    display_qty = max(0, _coerce_int(prep_qty, _coerce_int(row_dict.get('quantity'), 1)))
+                elif status == 'good':
+                    display_qty = max(0, _coerce_int(row_dict.get('good_qty'), _coerce_int(row_dict.get('quantity'), 1)))
+                elif status == 'bad':
+                    display_qty = max(0, _coerce_int(row_dict.get('bad_qty'), _coerce_int(row_dict.get('quantity'), 1)))
+                else:
+                    display_qty = max(0, _coerce_int(row_dict.get('quantity'), 1))
+
+                total_qty += display_qty
+
+            payload['prepped_qty'] = max(0, total_qty)
+    except Exception:
+        pass
+
+    return payload
+
 def _record_inventory_zero_transition(upc_key, prev_total_qty, current_total_qty, observed_at=None):
     """Persist >0 -> 0 transitions immediately on inventory writes."""
     invalid_upc_values = {'null', 'n/a', 'does not apply'}
@@ -29211,14 +29310,18 @@ def ready_to_ship_order_stats(order_id):
             return jsonify({'success': False, 'error': 'Order not found'}), 404
 
         barcode = str(order['barcode'] or '').strip()
+        prep_stats = _ready_to_ship_items_to_list_stats_for_barcode(barcode)
         return jsonify({
             'success': True,
             'order_id': order_id,
             'barcode': barcode,
+            'base_barcode': prep_stats.get('base_barcode') or '',
             'title': str(order['title'] or '').strip(),
             'sold_quantity': max(1, _coerce_int(order['quantity'], 1)),
             'warehouse_qty': _ready_to_ship_warehouse_qty_for_barcode(barcode),
-            'macy_total_qty': _ready_to_ship_rawbol_total_qty_for_barcode(barcode)
+            'macy_total_qty': _ready_to_ship_rawbol_total_qty_for_barcode(barcode),
+            'prepped_qty': max(0, _coerce_int(prep_stats.get('prepped_qty'), 0)),
+            'items_to_list_url': str(prep_stats.get('items_to_list_url') or '')
         })
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e)}), 500

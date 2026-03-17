@@ -454,6 +454,41 @@
     .order-popup-card .popup-close-btn:hover {
       box-shadow: 0 6px 20px rgba(59,130,246,0.4) !important;
     }
+    .order-popup-card .rt-order-stats {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      align-items: center;
+      gap: 10px 22px;
+    }
+    .order-popup-card .rt-order-stat {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.96rem;
+      line-height: 1.35;
+    }
+    .order-popup-card .rt-order-stat-label {
+      color: #cbd5e1;
+      font-weight: 700;
+    }
+    .order-popup-card .rt-order-stat-value {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1rem;
+      font-weight: 900;
+      letter-spacing: 0.01em;
+      text-decoration: none;
+      border-bottom: 2px solid transparent;
+      line-height: 1.1;
+    }
+    .order-popup-card .rt-order-stat-value.is-link:hover {
+      border-bottom-color: currentColor;
+    }
+    .order-popup-card .rt-order-stat-value.tone-warehouse { color: #86efac; }
+    .order-popup-card .rt-order-stat-value.tone-macy { color: #fcd34d; }
+    .order-popup-card .rt-order-stat-value.tone-prepped { color: #93c5fd; }
     .order-popup-card .rt-prep-section {
       text-align: left;
       margin-top: 18px;
@@ -497,6 +532,11 @@
       border-radius: 14px;
       padding: 12px;
     }
+    .order-popup-card .rt-prep-entry.is-defect {
+      border-color: rgba(248,113,113,0.42);
+      background: linear-gradient(180deg, rgba(127,29,29,0.22), rgba(15,23,42,0.72));
+      box-shadow: inset 0 0 0 1px rgba(248,113,113,0.16);
+    }
     .order-popup-card .rt-prep-entry-head {
       display: flex;
       justify-content: space-between;
@@ -505,16 +545,84 @@
       margin-bottom: 10px;
       flex-wrap: wrap;
     }
+    .order-popup-card .rt-prep-entry-head-main {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      flex: 1 1 340px;
+      min-width: 0;
+    }
+    .order-popup-card .rt-prep-entry-head-copy {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      min-width: 0;
+    }
+    .order-popup-card .rt-prep-entry-index {
+      width: 30px;
+      height: 30px;
+      border-radius: 999px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex: 0 0 30px;
+      font-size: 0.82rem;
+      font-weight: 800;
+      background: rgba(59,130,246,0.16);
+      color: #bfdbfe;
+      border: 1px solid rgba(96,165,250,0.3);
+    }
+    .order-popup-card .rt-prep-entry.is-defect .rt-prep-entry-index {
+      background: rgba(239,68,68,0.18);
+      color: #fecaca;
+      border-color: rgba(248,113,113,0.34);
+    }
     .order-popup-card .rt-prep-entry-title {
       display: flex;
       flex-wrap: wrap;
       gap: 6px;
       align-items: center;
     }
+    .order-popup-card .rt-prep-entry-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+    .order-popup-card .rt-prep-items-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(96,165,250,0.28);
+      background: rgba(59,130,246,0.14);
+      color: #bfdbfe;
+      font-size: 0.78rem;
+      font-weight: 700;
+      text-decoration: none;
+    }
+    .order-popup-card .rt-prep-items-link:hover {
+      background: rgba(59,130,246,0.2);
+      border-color: rgba(147,197,253,0.38);
+    }
+    .order-popup-card .rt-prep-entry.is-defect .rt-prep-items-link {
+      border-color: rgba(248,113,113,0.34);
+      background: rgba(239,68,68,0.16);
+      color: #fecaca;
+    }
     .order-popup-card .rt-prep-chip.upc {
       background: rgba(255,255,255,0.08);
       color: #f8fafc;
       border: 1px solid rgba(255,255,255,0.08);
+    }
+    .order-popup-card a.rt-prep-chip.upc {
+      text-decoration: none;
+      cursor: pointer;
+    }
+    .order-popup-card a.rt-prep-chip.upc:hover {
+      border-color: rgba(147,197,253,0.34);
+      color: #ffffff;
     }
     .order-popup-card .rt-prep-chip.status-good {
       background: rgba(16,185,129,0.14);
@@ -1000,6 +1108,10 @@
     html.ss-theme-day .order-popup-card .popup-close-btn {
       background: linear-gradient(135deg, #3b82f6, #2563eb) !important;
     }
+    html.ss-theme-day .order-popup-card .rt-order-stat-label { color: #475569; }
+    html.ss-theme-day .order-popup-card .rt-order-stat-value.tone-warehouse { color: #15803d; }
+    html.ss-theme-day .order-popup-card .rt-order-stat-value.tone-macy { color: #b45309; }
+    html.ss-theme-day .order-popup-card .rt-order-stat-value.tone-prepped { color: #1d4ed8; }
     html.ss-theme-day .order-popup-card .rt-prep-section {
       border-top-color: #e5e7eb;
     }
@@ -1017,10 +1129,29 @@
       background: #f8fbff;
       border-color: #dbe5ef;
     }
+    html.ss-theme-day .order-popup-card .rt-prep-entry.is-defect {
+      background: linear-gradient(180deg, rgba(254,226,226,0.92), #fff7ed);
+      border-color: rgba(220,38,38,0.22);
+      box-shadow: inset 0 0 0 1px rgba(220,38,38,0.08);
+    }
+    html.ss-theme-day .order-popup-card .rt-prep-entry-index {
+      background: rgba(37,99,235,0.1);
+      color: #1d4ed8;
+      border-color: rgba(37,99,235,0.18);
+    }
+    html.ss-theme-day .order-popup-card .rt-prep-entry.is-defect .rt-prep-entry-index {
+      background: rgba(220,38,38,0.12);
+      color: #b91c1c;
+      border-color: rgba(220,38,38,0.18);
+    }
     html.ss-theme-day .order-popup-card .rt-prep-chip.upc {
       background: #ffffff;
       color: #111827;
       border-color: #dbe5ef;
+    }
+    html.ss-theme-day .order-popup-card a.rt-prep-chip.upc:hover {
+      border-color: #93c5fd;
+      color: #1d4ed8;
     }
     html.ss-theme-day .order-popup-card .rt-prep-chip.status-good {
       background: rgba(22,163,74,0.1);
@@ -1046,6 +1177,20 @@
       background: rgba(124,58,237,0.1);
       color: #6d28d9;
       border-color: rgba(124,58,237,0.18);
+    }
+    html.ss-theme-day .order-popup-card .rt-prep-items-link {
+      background: rgba(37,99,235,0.08);
+      color: #1d4ed8;
+      border-color: rgba(37,99,235,0.16);
+    }
+    html.ss-theme-day .order-popup-card .rt-prep-items-link:hover {
+      background: rgba(37,99,235,0.12);
+      border-color: rgba(37,99,235,0.24);
+    }
+    html.ss-theme-day .order-popup-card .rt-prep-entry.is-defect .rt-prep-items-link {
+      background: rgba(220,38,38,0.08);
+      color: #b91c1c;
+      border-color: rgba(220,38,38,0.16);
     }
     html.ss-theme-day .order-popup-card .rt-prep-defect { color: #b91c1c; }
     html.ss-theme-day .order-popup-card .rt-prep-note {
@@ -2578,6 +2723,44 @@ function openReadyToShipPrepImageModal(imageUrl, options) {
     document.body.appendChild(modal);
 }
 
+function prepBaseUpc(value) {
+    const raw = String(value || '').trim();
+    return raw ? raw.split('-')[0].trim() : '';
+}
+
+function buildItemsToListSearchUrl(rawUpc) {
+    const base = prepBaseUpc(rawUpc);
+    return base ? `/items-to-list?q=${encodeURIComponent(base)}&status=good,bad,return&direct_search=1` : '/items-to-list';
+}
+
+function buildReadyToShipStatPill(value, href, tone = 'prepped') {
+    const safeValue = esc(String(value));
+    const attrs = href ? ` href="${esc(href)}" target="_blank" rel="noopener"` : '';
+    const tag = href ? 'a' : 'span';
+    const linkClass = href ? ' is-link' : '';
+    const toneClass = `tone-${esc(String(tone || 'prepped'))}`;
+    return `<${tag}${attrs} class="rt-order-stat-value ${toneClass}${linkClass}">${safeValue}</${tag}>`;
+}
+
+function renderReadyToShipOrderStatsHtml({ warehouseHtml = '...', macyHtml = '...', preppedHtml = '...' } = {}) {
+    return `
+        <div class="rt-order-stats">
+            <div class="rt-order-stat">
+                <span class="rt-order-stat-label">In warehouse:</span>
+                ${warehouseHtml}
+            </div>
+            <div class="rt-order-stat">
+                <span class="rt-order-stat-label">prepped:</span>
+                ${preppedHtml}
+            </div>
+            <div class="rt-order-stat">
+                <span class="rt-order-stat-label">total from macy:</span>
+                ${macyHtml}
+            </div>
+        </div>
+    `;
+}
+
 function renderReadyToShipPrepContextHtml(context) {
     const summary = context && context.summary ? context.summary : {};
     const entries = Array.isArray(context && context.entries) ? context.entries : [];
@@ -2592,14 +2775,17 @@ function renderReadyToShipPrepContextHtml(context) {
     if (imageCount > 0) chips.push(`<span class="rt-prep-chip meta"><i class="fas fa-camera"></i> ${imageCount} photo${imageCount === 1 ? '' : 's'}</span>`);
     if (summary.latest_at) chips.push(`<span class="rt-prep-chip meta"><i class="fas fa-clock"></i> ${esc(fmtET(summary.latest_at))}</span>`);
 
-    const entryHtml = entries.map(entry => {
+    const entryHtml = entries.map((entry, index) => {
+        const baseUpc = prepBaseUpc(entry.scope_upc || context.base_barcode || '');
+        const itemsToListUrl = String(entry.items_to_list_url || context.items_to_list_url || buildItemsToListSearchUrl(baseUpc));
         const chipsLocal = [
-            `<span class="rt-prep-chip upc">${esc(formatUpcDisplay(entry.scope_upc || ''))}</span>`
+            `<a class="rt-prep-chip upc" href="${esc(itemsToListUrl)}" target="_blank" rel="noopener">${esc(formatUpcDisplay(entry.scope_upc || ''))}</a>`
         ];
         const statusLabel = String(entry.display_status || '').trim();
         if (statusLabel) {
             chipsLocal.push(`<span class="rt-prep-chip status-${esc(statusLabel)}">${esc(statusLabel.toUpperCase())}</span>`);
         }
+        const isDefect = !!String(entry.reason || '').trim() || statusLabel === 'bad' || statusLabel === 'return';
 
         const notes = Array.isArray(entry.notes) ? entry.notes : [];
         const images = Array.isArray(entry.images) ? entry.images : [];
@@ -2626,9 +2812,14 @@ function renderReadyToShipPrepContextHtml(context) {
         const hiddenImageCount = Math.max(0, parsePosInt(entry.image_count, 0) - images.length);
 
         return `
-            <div class="rt-prep-entry">
+            <div class="rt-prep-entry ${isDefect ? 'is-defect' : ''}">
                 <div class="rt-prep-entry-head">
-                    <div class="rt-prep-entry-title">${chipsLocal.join('')}</div>
+                    <div class="rt-prep-entry-head-main">
+                        <div class="rt-prep-entry-index">${index + 1}</div>
+                        <div class="rt-prep-entry-head-copy">
+                            <div class="rt-prep-entry-title">${chipsLocal.join('')}</div>
+                        </div>
+                    </div>
                     <div class="popup-muted">${entry.latest_at ? esc(fmtET(entry.latest_at)) : ''}</div>
                 </div>
                 ${entry.reason ? `<div class="rt-prep-defect">Defect: ${esc(entry.reason)}</div>` : ''}
@@ -2641,7 +2832,6 @@ function renderReadyToShipPrepContextHtml(context) {
     }).join('');
 
     return `
-        <div class="popup-muted" style="font-size:0.88rem;line-height:1.45;">Most relevant recent /items-to-list rows are shown first. Older related entries are kept below so prior prep notes and defects still stay visible.</div>
         ${chips.length ? `<div class="rt-prep-summary">${chips.join('')}</div>` : ''}
         <div class="rt-prep-entry-list">${entryHtml}</div>
     `;
@@ -2709,10 +2899,11 @@ async function loadReadyToShipPrepContext(order, host, forceVisible) {
 async function loadReadyToShipOrderStats(order, host) {
     if (!host || !order || !order.id) return;
 
-    host.innerHTML = `
-        <div><strong>In warehouse:</strong> ...</div>
-        <div><strong>total from macy:</strong> ...</div>
-    `;
+    host.innerHTML = renderReadyToShipOrderStatsHtml({
+        warehouseHtml: '...',
+        macyHtml: '...',
+        preppedHtml: '...'
+    });
 
     try {
         const response = await fetch(`/api/ready-to-ship/order-stats/${encodeURIComponent(order.id)}?_t=${Date.now()}`, {
@@ -2725,17 +2916,25 @@ async function loadReadyToShipOrderStats(order, host) {
 
         const warehouseQty = Math.max(0, parsePosInt(data.warehouse_qty, 0));
         const macyTotalQty = Math.max(0, parsePosInt(data.macy_total_qty, 0));
+        const preppedQty = Math.max(0, parsePosInt(data.prepped_qty, 0));
+        const baseBarcode = prepBaseUpc(data.base_barcode || data.barcode || order.barcode || '');
+        const searchKey = String(baseBarcode || data.barcode || order.barcode || '').trim();
+        const warehouseHref = searchKey ? `/searchrack?db=searchRack&q=${encodeURIComponent(searchKey)}` : '';
+        const macyHref = searchKey ? `/searchrack?db=bol&q=${encodeURIComponent(searchKey)}` : '';
+        const itemsToListUrl = String(data.items_to_list_url || buildItemsToListSearchUrl(baseBarcode));
 
-        host.innerHTML = `
-            <div><strong>In warehouse:</strong> ${warehouseQty}</div>
-            <div><strong>total from macy:</strong> ${macyTotalQty}</div>
-        `;
+        host.innerHTML = renderReadyToShipOrderStatsHtml({
+            warehouseHtml: buildReadyToShipStatPill(warehouseQty, warehouseHref, 'warehouse'),
+            macyHtml: buildReadyToShipStatPill(macyTotalQty, macyHref, 'macy'),
+            preppedHtml: buildReadyToShipStatPill(preppedQty, itemsToListUrl, 'prepped')
+        });
     } catch (err) {
         console.warn('Ready to ship order stats error:', err);
-        host.innerHTML = `
-            <div><strong>In warehouse:</strong> --</div>
-            <div><strong>total from macy:</strong> --</div>
-        `;
+        host.innerHTML = renderReadyToShipOrderStatsHtml({
+            warehouseHtml: '--',
+            macyHtml: '--',
+            preppedHtml: '--'
+        });
     }
 }
 
@@ -2894,12 +3093,22 @@ function showOrderPopup(order, options = {}) {
         content += renderReadyToShipOrderInfoHtml(buyer, address, price, paidTime);
     }
 
+    if (isTitleMode) {
+        content += `
+            <div data-order-stats style="
+                margin-top: 18px;
+                margin-bottom: 16px;
+            ">
+                ${renderReadyToShipOrderStatsHtml({ warehouseHtml: '...', macyHtml: '...', preppedHtml: '...' })}
+            </div>
+        `;
+    }
+
     if (isTitleMode && barcode) {
         const prepVisible = !!(focusPrep || (prepSummary && prepSummary.has_alerts));
         content += `
             <div class="rt-prep-section" style="${prepVisible ? '' : 'display:none;'}">
                 <div class="popup-group-title" style="font-size:1rem;font-weight:700;">Prep Notes / Defects</div>
-                <div class="popup-muted" style="margin-top:4px;">Shows the newest most relevant items-to-list entries first, then older related rows.</div>
                 <div data-prep-host style="margin-top:6px;">${prepVisible ? '<div class="rt-prep-loading">Loading prep notes and defects...</div>' : ''}</div>
             </div>
         `;
@@ -2912,17 +3121,6 @@ function showOrderPopup(order, options = {}) {
     }
 
     popup.innerHTML = content + `
-        ${isTitleMode ? `
-        <div data-order-stats style="
-            margin-top: 18px;
-            font-size: 0.92rem;
-            color: #94a3b8;
-            line-height: 1.55;
-        ">
-            <div><strong>In warehouse:</strong> ...</div>
-            <div><strong>total from macy:</strong> ...</div>
-        </div>
-        ` : ''}
         <button class="popup-close-btn" onclick="this.closest('#order-popup').remove()" style="
             margin-top: 16px;
             color: #fff;
