@@ -1,3 +1,5 @@
 ﻿[2026-02-06 15:48:24] Deployed to manager@superinventory.local (/opt/sweetshelves) via deploy-big-pack.ps1
 [2026-02-06 15:50:46] Deployed to manager@superinventory.local (/opt/sweetshelves) via deploy-big-pack.ps1
 [2026-02-06 15:52:58] Deployed to manager@superinventory.local (/opt/sweetshelves) via deploy-big-pack.ps1
+[2026-03-17 15:22:15] Deployed to manager@superinventory.local (/opt/sweetshelves) via deploy-to-pi.ps1
+[2026-03-17 16:11:34] Deployed to manager@superinventory.local (/opt/sweetshelves) via deploy-to-pi.ps1

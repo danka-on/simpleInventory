@@ -2113,13 +2113,27 @@ function updateShelfPreview(shelfCode) {
     const shelfDisplayUpperUrl = `/shelf-image/${encodeURIComponent(upperCode)}.png`;
     const shelfOriginalUrl = `/shelf-original/${encodeURIComponent(lowerCode)}.png`;
     const shelfOriginalUpperUrl = `/shelf-original/${encodeURIComponent(upperCode)}.png`;
+    // Bin-stripped fallbacks (e.g. gr1s1b2 → gr1s1) for photos named without bin suffix
+    const nobinCode = lowerCode.replace(/b\d+$/i, '');
+    const nobinUpperCode = upperCode.replace(/b\d+$/i, '');
+    const hasBin = nobinCode !== lowerCode;
+    const shelfDisplayNobinUrl = hasBin ? `/shelf-image/${encodeURIComponent(nobinCode)}.png` : '';
+    const shelfDisplayNobinUpperUrl = hasBin ? `/shelf-image/${encodeURIComponent(nobinUpperCode)}.png` : '';
+    const shelfOriginalNobinUrl = hasBin ? `/shelf-original/${encodeURIComponent(nobinCode)}.png` : '';
+    const shelfOriginalNobinUpperUrl = hasBin ? `/shelf-original/${encodeURIComponent(nobinUpperCode)}.png` : '';
+    const shelfBaseNobinUrl = (isGarageShelf && hasBin) ? `/shelf-base/${encodeURIComponent(nobinCode)}.png` : '';
+    const shelfBaseNobinUpperUrl = (isGarageShelf && hasBin) ? `/shelf-base/${encodeURIComponent(nobinUpperCode)}.png` : '';
+    const shelfOfficeBaseNobinUrl = (isOfficeShelf && hasBin) ? `/shelf-base/${encodeURIComponent(nobinCode)}.png` : '';
+    const shelfOfficeBaseNobinUpperUrl = (isOfficeShelf && hasBin) ? `/shelf-base/${encodeURIComponent(nobinUpperCode)}.png` : '';
     const mapKey = mapStem;
     const mapUrlChoices = [browsePreviewMapUrl(normalizedCode), browsePreviewLegacyMapUrl(normalizedCode)]
         .filter((value, index, list) => value && list.indexOf(value) === index);
     const mapUrl = mapUrlChoices[0] || '';
     const primaryShelfCandidates = isOfficeShelf
-        ? [shelfOfficeBaseUrl, shelfOfficeBaseUpperUrl, shelfOfficeBaseLegacyUrl, shelfOfficeBaseUpperLegacyUrl, shelfDisplayUrl, shelfDisplayUpperUrl, shelfOriginalUrl, shelfOriginalUpperUrl]
-        : [shelfBaseUrl, shelfBaseUpperUrl, shelfBaseLegacyUrl, shelfBaseUpperLegacyUrl, shelfDisplayUrl, shelfDisplayUpperUrl, shelfOriginalUrl, shelfOriginalUpperUrl];
+        ? [shelfOfficeBaseUrl, shelfOfficeBaseUpperUrl, shelfOfficeBaseLegacyUrl, shelfOfficeBaseUpperLegacyUrl, shelfOfficeBaseNobinUrl, shelfOfficeBaseNobinUpperUrl, shelfDisplayUrl, shelfDisplayUpperUrl, shelfDisplayNobinUrl, shelfDisplayNobinUpperUrl, shelfOriginalUrl, shelfOriginalUpperUrl, shelfOriginalNobinUrl, shelfOriginalNobinUpperUrl]
+        : isGarageShelf
+            ? [shelfBaseUrl, shelfBaseUpperUrl, shelfBaseLegacyUrl, shelfBaseUpperLegacyUrl, shelfBaseNobinUrl, shelfBaseNobinUpperUrl, shelfDisplayUrl, shelfDisplayUpperUrl, shelfDisplayNobinUrl, shelfDisplayNobinUpperUrl, shelfOriginalUrl, shelfOriginalUpperUrl, shelfOriginalNobinUrl, shelfOriginalNobinUpperUrl]
+            : [shelfDisplayUrl, shelfDisplayUpperUrl, shelfDisplayNobinUrl, shelfDisplayNobinUpperUrl, shelfOriginalUrl, shelfOriginalUpperUrl, shelfOriginalNobinUrl, shelfOriginalNobinUpperUrl];
     const shelfUrlChoices = primaryShelfCandidates.filter((value, index, list) => value && list.indexOf(value) === index);
     const primaryShelfUrl = shelfUrlChoices[0] || '';
 

@@ -2675,6 +2675,46 @@ window.addEventListener('storage', function(e) {
     }
 });
 
+// Method 3: Server-side polling — catches changes from OTHER devices/users.
+// Every 30 seconds, check if the order count changed. If it has, refresh the list.
+(function() {
+    let _lastKnownCount = null;
+    let _pollActive = true;
+
+    document.addEventListener('visibilitychange', function() {
+        _pollActive = !document.hidden;
+    });
+
+    async function _pollServerCount() {
+        if (!_pollActive || OrderManager.isLoading) return;
+        try {
+            const days = parseInt(document.getElementById('sold-orders-days')?.value) || loadedDays || 2;
+            const resp = await fetch(`/api/ready-to-ship/count?days=${days}&_t=${Date.now()}`, { cache: 'no-store' });
+            if (!resp.ok) return;
+            const data = await resp.json().catch(() => null);
+            if (!data || !data.success) return;
+            const count = parseInt(data.count, 10) || 0;
+            if (_lastKnownCount !== null && count !== _lastKnownCount) {
+                triggerSoldOrdersRefresh('poll');
+            }
+            _lastKnownCount = count;
+        } catch (e) { /* network blip — ignore */ }
+    }
+
+    // Seed initial count after a short delay so the initial load can set it first.
+    setTimeout(async () => {
+        try {
+            const days = parseInt(document.getElementById('sold-orders-days')?.value) || loadedDays || 2;
+            const resp = await fetch(`/api/ready-to-ship/count?days=${days}&_t=${Date.now()}`, { cache: 'no-store' });
+            if (resp.ok) {
+                const data = await resp.json().catch(() => null);
+                if (data && data.success) _lastKnownCount = parseInt(data.count, 10) || 0;
+            }
+        } catch (e) {}
+        setInterval(_pollServerCount, 30000);
+    }, 3000);
+})();
+
 // ============================================================================
 // ORDER DETAIL POPUP
 // ============================================================================

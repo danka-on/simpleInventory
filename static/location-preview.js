@@ -173,6 +173,11 @@
     const lower = compact.toLowerCase();
     const upper = compact.toUpperCase();
     const rawUpper = raw.toUpperCase();
+    // Bin-stripped variants (e.g. gr1s1b2 → gr1s1) for shelf photos named without bin suffix
+    const nobin = lower.replace(/b\d+$/i, '');
+    const nobinUpper = upper.replace(/b\d+$/i, '');
+    const nobinRaw = raw.replace(/b\d+$/i, '');
+    const hasBin = nobin !== lower;
     const candidates = [];
     const mapKey = deriveMapKey(raw);
     const normalizedMapKey = mapKey || lower;
@@ -185,6 +190,26 @@
       addCandidate(candidates, '/shelf-base/' + encodeURIComponent(raw) + '.png');
       addCandidate(candidates, '/shelf-base/' + encodeURIComponent(upper) + '.png');
       addCandidate(candidates, '/shelf-base/' + encodeURIComponent(rawUpper) + '.png');
+      if (hasBin) {
+        addCandidate(candidates, '/shelf-base/' + encodeURIComponent(nobin) + '.png');
+        addCandidate(candidates, '/shelf-base/' + encodeURIComponent(nobinUpper) + '.png');
+        addCandidate(candidates, '/shelf-base/' + encodeURIComponent(nobinRaw) + '.png');
+      }
+      // Also try standard shelf-image / shelf-original routes as fallback
+      addCandidate(candidates, '/shelf-image/' + encodeURIComponent(lower) + '.png');
+      addCandidate(candidates, '/shelf-image/' + encodeURIComponent(compact) + '.png');
+      addCandidate(candidates, '/shelf-image/' + encodeURIComponent(upper) + '.png');
+      if (hasBin) {
+        addCandidate(candidates, '/shelf-image/' + encodeURIComponent(nobin) + '.png');
+        addCandidate(candidates, '/shelf-image/' + encodeURIComponent(nobinUpper) + '.png');
+      }
+      addCandidate(candidates, '/shelf-original/' + encodeURIComponent(lower) + '.png');
+      addCandidate(candidates, '/shelf-original/' + encodeURIComponent(compact) + '.png');
+      addCandidate(candidates, '/shelf-original/' + encodeURIComponent(upper) + '.png');
+      if (hasBin) {
+        addCandidate(candidates, '/shelf-original/' + encodeURIComponent(nobin) + '.png');
+        addCandidate(candidates, '/shelf-original/' + encodeURIComponent(nobinUpper) + '.png');
+      }
     }
     if (isOfficeCode) {
       addCandidate(candidates, '/shelf-base/' + encodeURIComponent(lower) + '.png');
@@ -193,18 +218,33 @@
       addCandidate(candidates, '/shelf-base/' + encodeURIComponent(raw) + '.png');
       addCandidate(candidates, '/shelf-base/' + encodeURIComponent(upper) + '.png');
       addCandidate(candidates, '/shelf-base/' + encodeURIComponent(rawUpper) + '.png');
+      if (hasBin) {
+        addCandidate(candidates, '/shelf-base/' + encodeURIComponent(nobin) + '.png');
+        addCandidate(candidates, '/shelf-base/' + encodeURIComponent(nobinUpper) + '.png');
+        addCandidate(candidates, '/shelf-base/' + encodeURIComponent(nobinRaw) + '.png');
+      }
       addCandidate(candidates, '/shelf-image/' + encodeURIComponent(lower) + '.png');
       addCandidate(candidates, '/shelf-image/' + encodeURIComponent(compact) + '.png');
       addCandidate(candidates, '/shelf-image/' + encodeURIComponent(raw.toLowerCase()) + '.png');
       addCandidate(candidates, '/shelf-image/' + encodeURIComponent(raw) + '.png');
       addCandidate(candidates, '/shelf-image/' + encodeURIComponent(upper) + '.png');
       addCandidate(candidates, '/shelf-image/' + encodeURIComponent(rawUpper) + '.png');
+      if (hasBin) {
+        addCandidate(candidates, '/shelf-image/' + encodeURIComponent(nobin) + '.png');
+        addCandidate(candidates, '/shelf-image/' + encodeURIComponent(nobinUpper) + '.png');
+        addCandidate(candidates, '/shelf-image/' + encodeURIComponent(nobinRaw) + '.png');
+      }
       addCandidate(candidates, '/shelf-original/' + encodeURIComponent(lower) + '.png');
       addCandidate(candidates, '/shelf-original/' + encodeURIComponent(compact) + '.png');
       addCandidate(candidates, '/shelf-original/' + encodeURIComponent(raw.toLowerCase()) + '.png');
       addCandidate(candidates, '/shelf-original/' + encodeURIComponent(raw) + '.png');
       addCandidate(candidates, '/shelf-original/' + encodeURIComponent(upper) + '.png');
       addCandidate(candidates, '/shelf-original/' + encodeURIComponent(rawUpper) + '.png');
+      if (hasBin) {
+        addCandidate(candidates, '/shelf-original/' + encodeURIComponent(nobin) + '.png');
+        addCandidate(candidates, '/shelf-original/' + encodeURIComponent(nobinUpper) + '.png');
+        addCandidate(candidates, '/shelf-original/' + encodeURIComponent(nobinRaw) + '.png');
+      }
     } else {
       addCandidate(candidates, '/shelf-image/' + encodeURIComponent(lower) + '.png');
       addCandidate(candidates, '/shelf-image/' + encodeURIComponent(compact) + '.png');
@@ -212,12 +252,22 @@
       addCandidate(candidates, '/shelf-image/' + encodeURIComponent(raw) + '.png');
       addCandidate(candidates, '/shelf-image/' + encodeURIComponent(upper) + '.png');
       addCandidate(candidates, '/shelf-image/' + encodeURIComponent(rawUpper) + '.png');
+      if (hasBin) {
+        addCandidate(candidates, '/shelf-image/' + encodeURIComponent(nobin) + '.png');
+        addCandidate(candidates, '/shelf-image/' + encodeURIComponent(nobinUpper) + '.png');
+        addCandidate(candidates, '/shelf-image/' + encodeURIComponent(nobinRaw) + '.png');
+      }
       addCandidate(candidates, '/shelf-original/' + encodeURIComponent(lower) + '.png');
       addCandidate(candidates, '/shelf-original/' + encodeURIComponent(compact) + '.png');
       addCandidate(candidates, '/shelf-original/' + encodeURIComponent(raw.toLowerCase()) + '.png');
       addCandidate(candidates, '/shelf-original/' + encodeURIComponent(raw) + '.png');
       addCandidate(candidates, '/shelf-original/' + encodeURIComponent(upper) + '.png');
       addCandidate(candidates, '/shelf-original/' + encodeURIComponent(rawUpper) + '.png');
+      if (hasBin) {
+        addCandidate(candidates, '/shelf-original/' + encodeURIComponent(nobin) + '.png');
+        addCandidate(candidates, '/shelf-original/' + encodeURIComponent(nobinUpper) + '.png');
+        addCandidate(candidates, '/shelf-original/' + encodeURIComponent(nobinRaw) + '.png');
+      }
     }
     return withBust(candidates);
   }

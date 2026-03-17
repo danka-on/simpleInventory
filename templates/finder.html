@@ -61,10 +61,11 @@
     /* Image popup overlay */
     .img-overlay {
       display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-      background: rgba(0,0,0,0.7); z-index: 9998; align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.82); z-index: 9998; align-items: center; justify-content: center; flex-direction: column; gap: 14px; padding: 20px; box-sizing: border-box;
     }
     .img-overlay.show { display: flex; }
-    .img-overlay img { max-width: 90vw; max-height: 85vh; border-radius: 10px; box-shadow: 0 8px 30px rgba(0,0,0,0.4); }
+    .img-overlay img { max-width: 90vw; max-height: 72vh; border-radius: 10px; box-shadow: 0 8px 30px rgba(0,0,0,0.4); }
+    #imgPopupName { color: #fff; font-size: 1.05rem; font-weight: 600; text-align: center; max-width: 90vw; word-break: break-word; line-height: 1.4; }
 
     /* Position picker popup */
     .pick-overlay {
@@ -294,6 +295,7 @@
     <!-- Image popup -->
     <div class="img-overlay" id="imgOverlay" onclick="closeImgPopup()">
       <img id="imgPopupImg" src="" onclick="event.stopPropagation()">
+      <div id="imgPopupName" onclick="event.stopPropagation()"></div>
     </div>
 
     <!-- Position picker popup -->
@@ -519,10 +521,11 @@ function renderWarehouse(items) {
       ? `<button class="search-rack-btn" data-idx="${idx}" onclick="handleMatch(${item.id}, '${esc(item.barcode)}', '${loc}', this)">${t('match') || 'Match'}</button>`
       : `<button class="remove-btn" data-idx="${idx}" onclick="handleRemove(${item.id}, '${esc(item.barcode)}', this)">${t('remove')}</button>`;
 
+    const itemTitle = item.title || '';
     return `<div class="result-card" id="wh-card-${item.id}">
-      <img src="${esc(imgSrc)}" onerror="this.src='${missingImg}'" style="cursor:pointer" onclick="showImgPopup(this.src)">
+      <img src="${esc(imgSrc)}" onerror="this.src='${missingImg}'" style="cursor:pointer" onclick="showImgPopup(this.src,'${esc(itemTitle)}')">
       <div class="details">
-        <div class="title">${esc(item.title)}</div>
+        <div class="title" style="cursor:pointer" onclick="showImgPopup('${esc(imgSrc)}','${esc(itemTitle)}')">${esc(itemTitle)}</div>
         <div class="meta">
           <span>UPC: ${esc(formatUpcDisplay(item.barcode))}</span>
           <span class="qty-display" data-id="${item.id}">Qty: ${item.quantity || '?'}</span>
@@ -548,10 +551,11 @@ function renderRawbol(items) {
     const upcRaw = item.upc || '';
     const upc = esc(upcRaw);
 
+    const rawTitle = item.item_description || '';
     return `<div class="result-card">
-      <img src="${esc(imgSrc)}" onerror="this.src='${missingImg}'" style="cursor:pointer" onclick="showImgPopup(this.src)">
+      <img src="${esc(imgSrc)}" onerror="this.src='${missingImg}'" style="cursor:pointer" onclick="showImgPopup(this.src,'${esc(rawTitle)}')">
       <div class="details">
-        <div class="title">${esc(item.item_description)}</div>
+        <div class="title" style="cursor:pointer" onclick="showImgPopup('${esc(imgSrc)}','${esc(rawTitle)}')">${esc(rawTitle)}</div>
         <div class="meta">
           <span>UPC: ${esc(formatUpcDisplay(upcRaw))}</span>
           <span>LOT: ${esc(item.lot_number)}</span>
@@ -568,9 +572,14 @@ function searchWarehouse(upc) {
 }
 
 // Image popup
-function showImgPopup(src) {
-  if (!src || src.includes('data:image/svg')) return;
-  document.getElementById('imgPopupImg').src = src;
+function showImgPopup(src, name) {
+  const imgEl = document.getElementById('imgPopupImg');
+  const nameEl = document.getElementById('imgPopupName');
+  const isMissing = !src || src.includes('data:image/svg');
+  imgEl.src = isMissing ? '' : src;
+  imgEl.style.display = isMissing ? 'none' : '';
+  nameEl.textContent = name || '';
+  if(isMissing && !name) return;
   document.getElementById('imgOverlay').classList.add('show');
 }
 function closeImgPopup() {

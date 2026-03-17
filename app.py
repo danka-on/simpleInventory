@@ -297,9 +297,44 @@ def _ensure_removed_items_table(cur):
             old_quantity INTEGER,
             new_quantity INTEGER,
             removal_type TEXT,
-            item_position TEXT
+            item_position TEXT,
+            undone_at TEXT
         )
     ''')
+    # Migration: add undone_at column to existing tables that predate this field.
+    try:
+        cur.execute("ALTER TABLE removed_items ADD COLUMN undone_at TEXT")
+    except Exception:
+        pass
+
+def _mark_zero_qty_for_deletion_external(item_id):
+    """Module-level helper: schedule a SEARCHRACK row for deletion when its qty hits 0."""
+    import datetime as _dt
+    try:
+        with db_connection('searchRack.db') as _conn:
+            _cur = _conn.cursor()
+            _cur.execute("SELECT value FROM zero_qty_settings WHERE key = 'interval_minutes'")
+            settings = _cur.fetchone()
+            interval = int(settings[0]) if settings else 60
+            delete_at = (_dt.datetime.now() + _dt.timedelta(minutes=interval)).isoformat()
+            _cur.execute(
+                'SELECT id, deletion_cancelled FROM zero_qty_pending_deletion WHERE searchrack_id = ?',
+                (item_id,)
+            )
+            existing = _cur.fetchone()
+            if not existing:
+                _cur.execute(
+                    'INSERT INTO zero_qty_pending_deletion (searchrack_id, marked_at, delete_at, deletion_cancelled) VALUES (?, ?, ?, 0)',
+                    (item_id, _dt.datetime.now().isoformat(), delete_at)
+                )
+            elif existing[1] == 1:
+                _cur.execute(
+                    'UPDATE zero_qty_pending_deletion SET deletion_cancelled=0, marked_at=?, delete_at=? WHERE searchrack_id=?',
+                    (_dt.datetime.now().isoformat(), delete_at, item_id)
+                )
+            _conn.commit()
+    except Exception:
+        pass
 
 def _ensure_order_removal_allocations_table(cur):
     """Persist explicit ready-to-ship location choices for sold-order removals."""
@@ -344,6 +379,13 @@ def _sold_removal_barcode_variants(value):
             for width in (8, 11, 12, 13, 14):
                 if len(base) < width:
                     variants.add(f"{base.zfill(width)}-{suffix}")
+            # Include base-only variants: suffixed store SKUs (e.g. "035886267162-1")
+            # must still match inventory stored under the plain base barcode.
+            stripped_base = base.lstrip('0') or base
+            variants.add(stripped_base)
+            for width in (8, 11, 12, 13, 14):
+                if len(stripped_base) < width:
+                    variants.add(stripped_base.zfill(width))
     elif key and key.isdigit():
         for width in (8, 11, 12, 13, 14):
             if len(key) < width:
@@ -401,11 +443,21 @@ def _searchrack_matches_for_barcode(cur, barcode, schema=None, include_zero=Fals
         cur.execute(base_sql)
         rows = [dict(r) for r in cur.fetchall()]
 
+    # When the target barcode has a suffix (e.g. "35886267162-1"), also accept rows
+    # whose stored barcode is the plain base (e.g. "035886267162") — covers the case
+    # where eBay/Amazon SKUs are suffixed but inventory was scanned under the base UPC.
+    _target_base_key = target_key.split('-', 1)[0] if target_key and '-' in target_key else None
+
     matches = []
     for row in rows:
         raw_barcode = str(row.get(barcode_col) or '').strip()
-        if _sold_removal_barcode_key(raw_barcode) != target_key:
-            continue
+        row_key = _sold_removal_barcode_key(raw_barcode)
+        if row_key != target_key:
+            # Accept base-barcode row as fallback for suffixed target
+            if _target_base_key and row_key == _target_base_key:
+                pass  # allowed
+            else:
+                continue
 
         qty = max(0, _coerce_int(row.get(qty_col) if qty_col else None, 0))
         if not include_zero and qty <= 0:
@@ -1745,6 +1797,12 @@ def _shelf_original_path_candidates(code):
     for value in (raw, raw.lower(), raw.upper()):
         if value and value not in variants:
             variants.append(value)
+    # Also try bin-stripped variants (e.g. gr1s1b2 → gr1s1)
+    nobin = _re.sub(r'b\d+$', '', raw, flags=_re.IGNORECASE)
+    if nobin and nobin.lower() != raw.lower():
+        for value in (nobin, nobin.lower(), nobin.upper()):
+            if value and value not in variants:
+                variants.append(value)
     dirs = []
     preferred_area = _shelf_area_for_code(raw)
     for area in (preferred_area, 'office', 'garage', 'hallway', 'misc'):
@@ -1795,6 +1853,12 @@ def _shelf_display_path_candidates(code):
     for value in (raw, raw.lower(), raw.upper()):
         if value and value not in variants:
             variants.append(value)
+    # Also try bin-stripped variants (e.g. gr1s1b2 → gr1s1) so shelf photos without bin suffix are found
+    nobin = _re.sub(r'b\d+$', '', raw, flags=_re.IGNORECASE)
+    if nobin and nobin.lower() != raw.lower():
+        for value in (nobin, nobin.lower(), nobin.upper()):
+            if value and value not in variants:
+                variants.append(value)
     dirs = []
     for directory in (
         _preferred_shelf_display_dir(raw),
@@ -7425,6 +7489,7 @@ def api_listingagent_upc_detail(upc):
             'upc': upc,
             'title': '',
             'images': [],
+            'defect': '',
             'inventory': {
                 'total_quantity': 0,
                 'rows': [],
@@ -7456,13 +7521,25 @@ def api_listingagent_upc_detail(upc):
             return seen
         with db_connection('searchRack.db') as conn:
             cur = conn.cursor()
-            cur.execute('''
-                SELECT ID, TITLE, ITEM_POSITION, PICTUREPOSITION, QUANTITY, IMAGE, IMAGES, ITEMID, CREATED_AT
-                FROM SEARCHRACK
-                WHERE TRIM(BARCODE) = ? COLLATE NOCASE
-                   OR TRIM(BARCODE) = ? COLLATE NOCASE
-                ORDER BY CREATED_AT DESC
-            ''', (upc, _upc_base))
+            _inv_variants = _upc_lookup_variants()
+            _inv_placeholders = ','.join('?' for _ in _inv_variants)
+            if '-' in upc:
+                # Suffixed UPC: match exact variants only
+                cur.execute(f'''
+                    SELECT ID, TITLE, ITEM_POSITION, PICTUREPOSITION, QUANTITY, IMAGE, IMAGES, ITEMID, CREATED_AT
+                    FROM SEARCHRACK
+                    WHERE TRIM(BARCODE) COLLATE NOCASE IN ({_inv_placeholders})
+                    ORDER BY CREATED_AT DESC
+                ''', _inv_variants)
+            else:
+                # Base UPC: match padded/stripped variants, but exclude any suffixed rows
+                cur.execute(f'''
+                    SELECT ID, TITLE, ITEM_POSITION, PICTUREPOSITION, QUANTITY, IMAGE, IMAGES, ITEMID, CREATED_AT
+                    FROM SEARCHRACK
+                    WHERE TRIM(BARCODE) COLLATE NOCASE IN ({_inv_placeholders})
+                      AND TRIM(BARCODE) NOT LIKE '%-_%' COLLATE NOCASE
+                    ORDER BY CREATED_AT DESC
+                ''', _inv_variants)
             rows = cur.fetchall()
 
             total_qty = 0
@@ -7510,7 +7587,7 @@ def api_listingagent_upc_detail(upc):
             with db_connection('rawbol.db') as conn:
                 cur = conn.cursor()
                 cur.execute('''
-                    SELECT item_description, image_url
+                    SELECT item_description, image_url, prep_reason
                     FROM raw_bol_items
                     WHERE TRIM(upc) IN ({})
                     ORDER BY import_date DESC, id DESC
@@ -7524,6 +7601,7 @@ def api_listingagent_upc_detail(upc):
                     img = (raw_row['image_url'] or '').strip()
                     if img and img not in item['images']:
                         item['images'].insert(0, img)  # rawbol image first
+                    item['defect'] = (raw_row['prep_reason'] or '').strip()
         except Exception:
             pass
 
@@ -7630,9 +7708,33 @@ def api_listingagent_upc_detail(upc):
         try:
             _ensure_items_prep_tables()
 
-            base_upc = (upc.split('-', 1)[0] if '-' in upc else upc).strip()
+            _upc_is_suffixed = '-' in upc
+            base_upc = (upc.split('-', 1)[0] if _upc_is_suffixed else upc).strip()
             base_upc = _strip_leading_zeros_numeric(base_upc)
-            like_upc = f"{base_upc}-%" if base_upc else ''
+
+            # When the requested UPC has a suffix (e.g. "123456789012-1"), only pull
+            # notes/images/audio for that exact suffixed UPC — not all siblings.
+            # When there's no suffix, pull base UPC + all suffixed variants (broad view).
+            if _upc_is_suffixed:
+                # Build padding variants of the suffixed UPC itself
+                _suffix_part = upc.split('-', 1)[1]
+                _suffixed_padded = f"{_upc_base_padded}-{_suffix_part}"
+                _suffixed_stripped = f"{_upc_base_stripped}-{_suffix_part}"
+                _prep_exact_variants = list(dict.fromkeys(
+                    v for v in [upc, _suffixed_padded, _suffixed_stripped] if v
+                ))
+                _prep_placeholders = ','.join('?' for _ in _prep_exact_variants)
+                def _prep_where_clause():
+                    return f'upc COLLATE NOCASE IN ({_prep_placeholders})'
+                def _prep_params():
+                    return _prep_exact_variants
+            else:
+                # Base barcode: exact match only — do NOT pull suffixed siblings' notes/media.
+                # Each suffix is its own distinct product.
+                def _prep_where_clause():
+                    return 'upc = ? COLLATE NOCASE'
+                def _prep_params():
+                    return [base_upc]
 
             prep_notes = []
             prep_images = []
@@ -7643,26 +7745,26 @@ def api_listingagent_upc_detail(upc):
                     cur = conn.cursor()
 
                     # Notes (free-form) from Listing Manager / Item Prep
-                    cur.execute('''
+                    cur.execute(f'''
                         SELECT upc, id, note, created_at
                         FROM items_prep_notes
-                        WHERE upc = ? COLLATE NOCASE OR upc LIKE ? COLLATE NOCASE
+                        WHERE {_prep_where_clause()}
                         ORDER BY created_at DESC, id DESC
                         LIMIT 25
-                    ''', (base_upc, like_upc))
+                    ''', _prep_params())
                     prep_notes = [dict(r) for r in cur.fetchall()]
 
                     # Fallback: if no note bubbles exist, use the status.note (single field) if present.
                     if not prep_notes:
-                        cur.execute('''
+                        cur.execute(f'''
                             SELECT upc, note, updated_at
                             FROM items_prep_status
-                            WHERE (upc = ? COLLATE NOCASE OR upc LIKE ? COLLATE NOCASE)
+                            WHERE ({_prep_where_clause()})
                               AND note IS NOT NULL
                               AND TRIM(note) != ''
                             ORDER BY COALESCE(updated_at, '') DESC
                             LIMIT 1
-                        ''', (base_upc, like_upc))
+                        ''', _prep_params())
                         sn = cur.fetchone()
                         if sn and (sn['note'] or '').strip():
                             prep_notes = [{
@@ -7673,27 +7775,27 @@ def api_listingagent_upc_detail(upc):
                             }]
 
                     # Photos from Listing Manager / Item Prep
-                    cur.execute('''
+                    cur.execute(f'''
                         SELECT upc, id, image_path, created_at, rotation
                         FROM items_prep_images
-                        WHERE (upc = ? COLLATE NOCASE OR upc LIKE ? COLLATE NOCASE)
+                        WHERE ({_prep_where_clause()})
                           AND (deleted_at IS NULL OR TRIM(COALESCE(deleted_at,'')) = '')
                         ORDER BY created_at DESC, id DESC
                         LIMIT 30
-                    ''', (base_upc, like_upc))
+                    ''', _prep_params())
                     prep_images = [dict(r) for r in cur.fetchall()]
 
                     # Voice notes (audio) from items_prep_media
                     try:
-                        cur.execute('''
+                        cur.execute(f'''
                             SELECT id, upc, COALESCE(row_status,'') AS row_status,
                                    media_type, file_path, COALESCE(mime_type,'') AS mime_type, created_at
                             FROM items_prep_media
-                            WHERE (upc = ? COLLATE NOCASE OR upc LIKE ? COLLATE NOCASE)
+                            WHERE ({_prep_where_clause()})
                               AND COALESCE(media_type,'') = 'audio'
                             ORDER BY created_at DESC, id DESC
                             LIMIT 10
-                        ''', (base_upc, like_upc))
+                        ''', _prep_params())
                         prep_audio_rows = [dict(r) for r in cur.fetchall()]
                     except Exception:
                         prep_audio_rows = []
@@ -8562,7 +8664,7 @@ def api_listingagent_ebay_comps():
         marketplace_id = (request.args.get('marketplaceId') or settings.get('ebay_marketplace_id') or 'EBAY_US').strip()
         sort = (request.args.get('sort') or '').strip()
 
-        params = {'gtin': upc, 'limit': limit}
+        params = {'q': upc, 'limit': limit}
         if sort:
             params['sort'] = sort
 
@@ -9954,6 +10056,7 @@ def api_listingagent_amazon_catalog_search():
         limit = max(1, min(limit, 20))
         include_raw = (request.args.get('raw') or '').lower() == 'true'
         mode = (request.args.get('mode') or '').strip().lower()
+        title_hint = (request.args.get('title') or '').strip()  # optional item title for supplemental keyword search
         identifiers_type = (request.args.get('identifiersType') or '').strip().upper()
         q_no_space = q.replace(' ', '')
 
@@ -10034,6 +10137,28 @@ def api_listingagent_amazon_catalog_search():
                 if not resp_kw.errors:
                     payload = resp_kw.payload or {}
                     items = payload.get('items') or []
+            except Exception:
+                pass
+
+        # Supplement identifier results with a keyword search using the item title, to surface
+        # more ASIN variants. Deduplicate by ASIN; identifier results take priority.
+        if use_identifiers and title_hint and len(items) < limit:
+            try:
+                resp_title = ci.search_catalog_items(
+                    keywords=[title_hint],
+                    marketplaceIds=[marketplace_id],
+                    includedData=['summaries', 'images'],
+                    pageSize=limit
+                )
+                if not resp_title.errors:
+                    existing_asins = {(it.get('asin') or '').strip().upper() for it in items}
+                    for extra_it in (resp_title.payload or {}).get('items') or []:
+                        asin_up = (extra_it.get('asin') or '').strip().upper()
+                        if asin_up and asin_up not in existing_asins:
+                            items.append(extra_it)
+                            existing_asins.add(asin_up)
+                            if len(items) >= limit:
+                                break
             except Exception:
                 pass
 
@@ -10793,6 +10918,7 @@ def api_listingagent_amazon_put_offer():
         effective_sku_source = 'requested'
         asin = (data.get('asin') or '').strip()
         resolved_asin = asin
+        submitted_images = [u for u in (data.get('images') or []) if isinstance(u, str) and u.strip()]
 
         if not sku:
             return jsonify({'success': False, 'error': 'SKU is required'}), 400
@@ -10834,6 +10960,14 @@ def api_listingagent_amazon_put_offer():
             offer_audience=offer_audience,
             merchant_shipping_group=merchant_shipping_group
         )
+
+        # Best-effort: attach user-uploaded images when provided (non-new condition only).
+        # Amazon ignores extra attributes for LISTING_OFFER_ONLY; may apply for full listing types.
+        is_new_condition = condition_type.lower() in ('new_new', 'new')
+        if submitted_images and not is_new_condition:
+            attributes['item_image_locator'] = [
+                {'media_location': u.strip()} for u in submitted_images[:9] if u.strip()
+            ]
 
         body = {
             'productType': product_type,
@@ -15624,8 +15758,39 @@ def _process_automatic_inventory_removals():
                 import traceback
                 traceback.print_exc()
         
+        # ── Crash-recovery guard ──────────────────────────────────────────────
+        # If the process crashed after writing to rackhistory.db but before
+        # marking rackupdated=1 in sold.db, the order would loop forever and
+        # risk a double-removal on the next run.  Detect this by cross-checking
+        # the audit log: any order_id that already has a removal record but
+        # still shows rackupdated=0 is assumed complete — mark it now.
+        try:
+            with sqlite3.connect('rackhistory.db') as _rh_conn:
+                _rh_conn.row_factory = sqlite3.Row
+                _rh_cur = _rh_conn.cursor()
+                _ensure_removed_items_table(_rh_cur)
+                _rh_cur.execute('SELECT DISTINCT order_id FROM removed_items')
+                _already_in_audit = {r['order_id'] for r in _rh_cur.fetchall()}
+        except Exception:
+            _already_in_audit = set()
+
+        _recovered = 0
+        for _o in orders:
+            if _o['order_id'] in _already_in_audit:
+                sold_cur.execute(
+                    'UPDATE orders SET rackupdated = 1 WHERE id = ? AND rackupdated = 0',
+                    (_o['id'],)
+                )
+                _recovered += 1
+                print(f"  🔧 Crash-recovery: order {_o['order_id']} found in audit log — marking complete")
+        if _recovered:
+            sold_conn.commit()
+            orders = [o for o in orders if o['order_id'] not in _already_in_audit]
+            print(f"  🔧 Crash-recovered {_recovered} order(s); {len(orders)} remain to process")
+        # ─────────────────────────────────────────────────────────────────────
+
         processed_count = 0
-        
+
         for order in orders:
             try:
                 shipped_str = order['shipped_time']
@@ -15657,6 +15822,23 @@ def _process_automatic_inventory_removals():
                     schema=searchrack_schema,
                     include_zero=False
                 )
+                # For suffixed barcodes (e.g. "035886267162-1") that come from
+                # eBay/Amazon SKUs, inventory may be stored under the base barcode
+                # ("035886267162").  Fall back to base-only search when no suffix
+                # match is found so these orders can still be fulfilled.
+                _used_base_fallback = False
+                if not matches and '-' in str(barcode or ''):
+                    _base_only = str(barcode).split('-', 1)[0].strip()
+                    if _base_only:
+                        matches = _searchrack_matches_for_barcode(
+                            searchrack_cur,
+                            _base_only,
+                            schema=searchrack_schema,
+                            include_zero=False
+                        )
+                        if matches:
+                            _used_base_fallback = True
+                            print(f"  ℹ️  Order {order['order_id']}: suffixed barcode {barcode} not in inventory; matched base {_base_only}")
                 if not matches:
                     print(f"  ⏭️  Order {order['order_id']}: Item not in inventory yet (barcode: {barcode}) - will retry later")
                     continue
@@ -15672,8 +15854,25 @@ def _process_automatic_inventory_removals():
                         print(f"  ⏭️  Order {order['order_id']}: multiple locations found; awaiting explicit location selection")
                         continue
 
+                    # Check if the allocation is stale (older than the grace period).
+                    # A stale allocation whose location is now gone or under-stocked
+                    # would deadlock forever — clear it so the user is re-prompted.
+                    def _alloc_is_stale(allocs):
+                        for a in allocs:
+                            ts = (a.get('created_at') or '').strip()
+                            if not ts:
+                                return True
+                            try:
+                                alloc_age_hours = (now - datetime.fromisoformat(ts)).total_seconds() / 3600
+                                if alloc_age_hours > grace_period_hours:
+                                    return True
+                            except Exception:
+                                return True
+                        return False
+
                     using_saved_allocations = True
                     group_by_key = {g['location_key']: g for g in location_groups}
+                    _alloc_validation_failed = False
 
                     for alloc in saved_allocations:
                         alloc_qty = max(0, _coerce_int(alloc.get('quantity'), 0))
@@ -15683,16 +15882,28 @@ def _process_automatic_inventory_removals():
                         group = group_by_key.get(alloc_key)
                         if not group:
                             planned_steps = []
+                            _alloc_validation_failed = True
                             print(
                                 f"  ⏭️  Order {order['order_id']}: saved location {alloc.get('location_code')} not found in current inventory; waiting"
                             )
                             break
                         if alloc_qty > max(0, _coerce_int(group.get('available_qty'), 0)):
                             planned_steps = []
+                            _alloc_validation_failed = True
                             print(
                                 f"  ⏭️  Order {order['order_id']}: saved qty for {group['location_code']} exceeds available inventory; waiting"
                             )
                             break
+
+                    # If validation failed AND allocation is stale, clear it so user
+                    # is re-prompted rather than having the order deadlock forever.
+                    if _alloc_validation_failed and _alloc_is_stale(saved_allocations):
+                        sold_cur.execute(
+                            'DELETE FROM order_removal_allocations WHERE order_row_id = ?',
+                            (order['id'],)
+                        )
+                        sold_conn.commit()
+                        print(f"  🗑️  Order {order['order_id']}: stale allocation cleared — user will be re-prompted")
 
                         remaining = alloc_qty
                         for row_match in group['rows']:
@@ -30329,32 +30540,80 @@ def ready_to_ship_order_stats(order_id):
 
 @app.route('/mark-order-handled', methods=['POST'])
 def mark_order_handled():
+    """Mark a sold order as handled and immediately decrement inventory.
+
+    Bypasses the background auto-removal thread so the inventory change is
+    instant.  An audit record (removal_type='manual_handled') is written to
+    rackhistory.db so the operation can be fully reversed by /mark-order-unhandled.
+
+    Double-removal guard: an atomic UPDATE…WHERE rackupdated=0 ensures that
+    concurrent requests from multiple users on the same page cannot both
+    succeed for the same order.
+    """
     data = request.get_json() or {}
     order_id = data.get('id')
     incoming_allocations = data.get('allocations')
-    
+
     if not order_id:
         return jsonify({'success': False, 'error': 'Missing order id'}), 400
 
     conn = None
     rack_conn = None
+    rh_conn = None
     try:
         conn = sqlite3.connect('sold.db')
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         _ensure_order_removal_allocations_table(cur)
 
-        cur.execute('SELECT id, item_id, sku, store, barcode, quantity FROM orders WHERE id = ?', (order_id,))
+        cur.execute(
+            'SELECT id, order_id, item_id, sku, store, barcode, quantity, title, rackupdated, isHandled '
+            'FROM orders WHERE id = ?',
+            (order_id,)
+        )
         order = cur.fetchone()
         if not order:
             return jsonify({'success': False, 'error': 'Order not found'}), 404
 
+        current_rack = int(order['rackupdated'] or 0)
+        if current_rack == 1:
+            return jsonify({
+                'success': False,
+                'error': 'Inventory for this order has already been removed.',
+                'already_handled': True
+            }), 409
+        if current_rack == -1:
+            return jsonify({
+                'success': False,
+                'error': 'This order is currently being processed — please wait a moment.',
+                'already_handled': True
+            }), 409
+
+        # Atomic claim: only succeeds if rackupdated is still 0.
+        # Any concurrent request will see rowcount=0 and get a 409.
+        cur.execute(
+            'UPDATE orders SET rackupdated = -1 WHERE id = ? AND rackupdated = 0',
+            (order_id,)
+        )
+        conn.commit()
+        if cur.rowcount == 0:
+            return jsonify({
+                'success': False,
+                'error': 'Another request is already processing this order.',
+                'already_handled': True
+            }), 409
+
         barcode = _effective_sold_order_barcode(order)
         sold_qty = max(1, _coerce_int(order['quantity'], 1))
+        order_ref = (order['order_id'] or '').strip()
+        title = (order['title'] or '').strip()
 
+        # Normalise incoming allocations
         normalized_allocations = []
         if incoming_allocations is not None:
             if not isinstance(incoming_allocations, list):
+                cur.execute('UPDATE orders SET rackupdated = 0 WHERE id = ?', (order_id,))
+                conn.commit()
                 return jsonify({'success': False, 'error': 'allocations must be an array'}), 400
             grouped = {}
             for alloc in incoming_allocations:
@@ -30367,40 +30626,43 @@ def mark_order_handled():
                 location_key = _sold_location_key(alloc.get('location_key') or location_code)
                 bucket = grouped.get(location_key)
                 if bucket is None:
-                    bucket = {
-                        'location_key': location_key,
-                        'location_code': location_code,
-                        'quantity': 0
-                    }
+                    bucket = {'location_key': location_key, 'location_code': location_code, 'quantity': 0}
                     grouped[location_key] = bucket
                 bucket['quantity'] += qty
             normalized_allocations = list(grouped.values())
+
+        # Build removal plan
+        planned_steps = []
+        rack_schema = None
 
         if barcode:
             rack_conn = sqlite3.connect('searchRack.db')
             rack_conn.row_factory = sqlite3.Row
             rack_cur = rack_conn.cursor()
-            matches = _searchrack_matches_for_barcode(rack_cur, barcode, include_zero=False)
+            rack_schema = _searchrack_removal_schema(rack_cur)
+            matches = _searchrack_matches_for_barcode(rack_cur, barcode, schema=rack_schema, include_zero=False)
             location_groups = _group_searchrack_matches_by_location(matches)
             group_map = {g['location_key']: g for g in location_groups}
             needs_choice = len(location_groups) > 1
 
+            def _release_and_return(resp, code):
+                cur.execute('UPDATE orders SET rackupdated = 0 WHERE id = ?', (order_id,))
+                conn.commit()
+                return jsonify(resp), code
+
             if needs_choice and not normalized_allocations:
-                return jsonify({
+                return _release_and_return({
                     'success': False,
                     'error': 'Location selection required for this order',
                     'location_selection_required': True,
                     'order_id': order_id,
                     'quantity': sold_qty,
                     'locations': [
-                        {
-                            'location_key': g['location_key'],
-                            'location_code': g['location_code'],
-                            'available_qty': max(0, _coerce_int(g['available_qty'], 0))
-                        }
+                        {'location_key': g['location_key'], 'location_code': g['location_code'],
+                         'available_qty': max(0, _coerce_int(g['available_qty'], 0))}
                         for g in location_groups
                     ]
-                }), 400
+                }, 400)
 
             if normalized_allocations:
                 alloc_total = 0
@@ -30409,85 +30671,268 @@ def mark_order_handled():
                     qty = max(0, _coerce_int(alloc['quantity'], 0))
                     group = group_map.get(loc_key)
                     if not group:
-                        return jsonify({
-                            'success': False,
-                            'error': f"Unknown location selected: {alloc['location_code']}"
-                        }), 400
-                    group_available = max(0, _coerce_int(group.get('available_qty'), 0))
-                    if qty > group_available:
-                        return jsonify({
-                            'success': False,
-                            'error': f"Selected quantity exceeds available for {alloc['location_code']}"
-                        }), 400
+                        return _release_and_return(
+                            {'success': False, 'error': f"Unknown location: {alloc['location_code']}"}, 400)
+                    if qty > max(0, _coerce_int(group.get('available_qty'), 0)):
+                        return _release_and_return(
+                            {'success': False, 'error': f"Qty exceeds available for {alloc['location_code']}"}, 400)
                     alloc_total += qty
+                    remaining = qty
+                    for row_match in group['rows']:
+                        if remaining <= 0:
+                            break
+                        available = max(0, _coerce_int(row_match.get('quantity'), 0))
+                        if available <= 0:
+                            continue
+                        take = min(available, remaining)
+                        planned_steps.append({
+                            'searchrack_id': int(row_match['id']),
+                            'location_code': group['location_code'],
+                            'quantity': take
+                        })
+                        remaining -= take
                 if alloc_total != sold_qty:
+                    return _release_and_return(
+                        {'success': False, 'error': f'Location quantities must total {sold_qty}'}, 400)
+            elif location_groups:
+                remaining = sold_qty
+                for row_match in location_groups[0]['rows']:
+                    if remaining <= 0:
+                        break
+                    available = max(0, _coerce_int(row_match.get('quantity'), 0))
+                    if available <= 0:
+                        continue
+                    take = min(available, remaining)
+                    planned_steps.append({
+                        'searchrack_id': int(row_match['id']),
+                        'location_code': location_groups[0]['location_code'],
+                        'quantity': take
+                    })
+                    remaining -= take
+
+        # Execute inventory removal immediately
+        now_iso = datetime.datetime.now().isoformat()
+        audit_records = []
+
+        if planned_steps and rack_schema:
+            id_col = rack_schema.get('id_col') or 'rowid'
+            qty_col = rack_schema.get('qty_col')
+            pos_col = rack_schema.get('pos_col') or "''"
+
+            # Re-read quantities right before updating (final race-condition check)
+            recheck = {}
+            for step in planned_steps:
+                sid = step['searchrack_id']
+                rack_cur.execute(
+                    f"SELECT {qty_col} AS qty, COALESCE({pos_col},'') AS pos "
+                    f"FROM SEARCHRACK WHERE {id_col} = ?", (sid,)
+                )
+                row_now = rack_cur.fetchone()
+                if not row_now:
+                    cur.execute('UPDATE orders SET rackupdated = 0 WHERE id = ?', (order_id,))
+                    conn.commit()
+                    return jsonify({'success': False, 'error': f'Inventory row {sid} no longer exists'}), 409
+                current_qty = max(0, _coerce_int(row_now['qty'], 0))
+                if current_qty < step['quantity']:
+                    cur.execute('UPDATE orders SET rackupdated = 0 WHERE id = ?', (order_id,))
+                    conn.commit()
                     return jsonify({
                         'success': False,
-                        'error': f'Selected location quantities must total {sold_qty}'
-                    }), 400
+                        'error': f"Insufficient inventory at {step['location_code']}: have {current_qty}, need {step['quantity']}"
+                    }), 409
+                recheck[sid] = {'qty': current_qty, 'pos': str(row_now['pos'] or step['location_code'] or '')}
 
-                _save_order_removal_allocations(cur, order_id, normalized_allocations)
-            else:
-                _save_order_removal_allocations(cur, order_id, [])
-        else:
-            _save_order_removal_allocations(cur, order_id, [])
+            for step in planned_steps:
+                sid = step['searchrack_id']
+                remove_qty = step['quantity']
+                old_qty = recheck[sid]['qty']
+                new_qty = max(0, old_qty - remove_qty)
+                rack_cur.execute(
+                    f'UPDATE SEARCHRACK SET {qty_col} = ? WHERE {id_col} = ?', (new_qty, sid)
+                )
+                audit_records.append({
+                    'searchrack_id': sid,
+                    'quantity_removed': remove_qty,
+                    'old_quantity': old_qty,
+                    'new_quantity': new_qty,
+                    'item_position': recheck[sid]['pos']
+                })
+                if new_qty == 0:
+                    _mark_zero_qty_for_deletion_external(sid)
+            rack_conn.commit()
 
-        # Set shipped_time if not already set (for test orders to trigger automatic removal)
+        # Write audit breadcrumbs to rackhistory.db
+        if audit_records:
+            rh_conn = sqlite3.connect('rackhistory.db')
+            rh_conn.row_factory = sqlite3.Row
+            rh_cur = rh_conn.cursor()
+            _ensure_removed_items_table(rh_cur)
+            for rec in audit_records:
+                rh_cur.execute('''
+                    INSERT INTO removed_items
+                    (order_id, barcode, title, quantity_removed, removed_at,
+                     searchrack_id, old_quantity, new_quantity, removal_type, item_position)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'manual_handled', ?)
+                ''', (
+                    order_ref, barcode, title,
+                    rec['quantity_removed'], now_iso,
+                    rec['searchrack_id'], rec['old_quantity'], rec['new_quantity'],
+                    rec['item_position']
+                ))
+            rh_conn.commit()
+
+        # Finalise order: handled + rackupdated=1 so auto-thread skips it
         cur.execute("""
-            UPDATE orders 
-            SET isHandled = '1', 
+            UPDATE orders
+            SET isHandled = '1',
                 isHandledDate = datetime('now'),
-                shipped_time = COALESCE(shipped_time, datetime('now'))
+                shipped_time = COALESCE(shipped_time, datetime('now')),
+                rackupdated = 1,
+                removal_cancelled = 0
             WHERE id = ?
         """, (order_id,))
+        cur.execute('DELETE FROM order_removal_allocations WHERE order_row_id = ?', (order_id,))
         conn.commit()
-        
-        # Clear the sold-orders cache since data changed
+
         cache.delete_memoized(sold_orders)
         cache.delete_memoized(ready_to_ship_count)
-        
-        return jsonify({'success': True})
+
+        return jsonify({'success': True, 'removed': len(audit_records) > 0})
+
     except Exception as e:
+        # Best-effort: release the in-progress sentinel so order isn't stuck
+        try:
+            if conn:
+                conn.execute(
+                    'UPDATE orders SET rackupdated = 0 WHERE id = ? AND rackupdated = -1',
+                    (order_id,)
+                )
+                conn.commit()
+        except Exception:
+            pass
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
     finally:
-        try:
-            if conn is not None:
-                conn.close()
-        except Exception:
-            pass
-        try:
-            if rack_conn is not None:
-                rack_conn.close()
-        except Exception:
-            pass
+        for _c in (rh_conn, rack_conn, conn):
+            try:
+                if _c is not None:
+                    _c.close()
+            except Exception:
+                pass
 
 @app.route('/mark-order-unhandled', methods=['POST'])
 def mark_order_unhandled():
+    """Undo a handled order: restore inventory exactly from the audit breadcrumbs.
+
+    Looks up removal_type='manual_handled' records in rackhistory.db where
+    undone_at IS NULL and adds back the exact quantity_removed to each
+    SEARCHRACK row.  Then stamps those records with undone_at so a second
+    undo cannot double-restore.  Sets rackupdated=0 and removal_cancelled=1
+    so the auto-removal thread won't silently re-remove while the order
+    is back in the ready-to-ship queue.
+    """
     data = request.get_json() or {}
     order_id = data.get('id')
-    
+
     if not order_id:
         return jsonify({'success': False, 'error': 'Missing order id'}), 400
 
     conn = None
+    rack_conn = None
+    rh_conn = None
     try:
         conn = sqlite3.connect('sold.db')
+        conn.row_factory = sqlite3.Row
         cur = conn.cursor()
+
+        cur.execute('SELECT id, order_id FROM orders WHERE id = ?', (order_id,))
+        order = cur.fetchone()
+        if not order:
+            return jsonify({'success': False, 'error': 'Order not found'}), 404
+
+        order_ref = (order['order_id'] or '').strip()
+        now_iso = datetime.datetime.now().isoformat()
+
+        # Look up the audit breadcrumbs for this order
+        rh_conn = sqlite3.connect('rackhistory.db')
+        rh_conn.row_factory = sqlite3.Row
+        rh_cur = rh_conn.cursor()
+        _ensure_removed_items_table(rh_cur)
+
+        rh_cur.execute('''
+            SELECT id, searchrack_id, quantity_removed
+            FROM removed_items
+            WHERE order_id = ?
+              AND removal_type = 'manual_handled'
+              AND (undone_at IS NULL OR undone_at = '')
+        ''', (order_ref,))
+        audit_rows = list(rh_cur.fetchall())
+
+        restored_count = 0
+        if audit_rows:
+            rack_conn = sqlite3.connect('searchRack.db')
+            rack_conn.row_factory = sqlite3.Row
+            rack_cur = rack_conn.cursor()
+            rack_schema = _searchrack_removal_schema(rack_cur)
+            id_col = rack_schema.get('id_col') or 'rowid'
+            qty_col = rack_schema.get('qty_col')
+
+            for row in audit_rows:
+                sid = row['searchrack_id']
+                qty_to_restore = max(0, _coerce_int(row['quantity_removed'], 0))
+                if qty_to_restore <= 0:
+                    continue
+
+                rack_cur.execute(
+                    f'SELECT {qty_col} AS qty FROM SEARCHRACK WHERE {id_col} = ?', (sid,)
+                )
+                current_row = rack_cur.fetchone()
+                if current_row is None:
+                    # Row was deleted (zero-qty cleanup) — mark undone but skip restore
+                    rh_cur.execute(
+                        'UPDATE removed_items SET undone_at = ? WHERE id = ?', (now_iso, row['id'])
+                    )
+                    continue
+
+                current_qty = max(0, _coerce_int(current_row['qty'], 0))
+                restored_qty = current_qty + qty_to_restore
+                rack_cur.execute(
+                    f'UPDATE SEARCHRACK SET {qty_col} = ? WHERE {id_col} = ?', (restored_qty, sid)
+                )
+                rh_cur.execute(
+                    'UPDATE removed_items SET undone_at = ? WHERE id = ?', (now_iso, row['id'])
+                )
+                restored_count += 1
+
+            rack_conn.commit()
+            rh_conn.commit()
+
+        # Return order to ready-to-ship queue.
+        # removal_cancelled=1 prevents the auto-thread from silently re-removing it.
         _ensure_order_removal_allocations_table(cur)
-        cur.execute("UPDATE orders SET isHandled = '', isHandledDate = NULL WHERE id = ?", (order_id,))
+        cur.execute("""
+            UPDATE orders
+            SET isHandled = '',
+                isHandledDate = NULL,
+                rackupdated = 0,
+                removal_cancelled = 1
+            WHERE id = ?
+        """, (order_id,))
         cur.execute('DELETE FROM order_removal_allocations WHERE order_row_id = ?', (order_id,))
         conn.commit()
-        
-        # Clear the sold-orders cache since data changed
+
         cache.delete_memoized(sold_orders)
         cache.delete_memoized(ready_to_ship_count)
-        
-        return jsonify({'success': True})
+
+        return jsonify({'success': True, 'restored': restored_count})
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
     finally:
-        if conn is not None:
-            conn.close()
+        for _c in (rh_conn, rack_conn, conn):
+            try:
+                if _c is not None:
+                    _c.close()
+            except Exception:
+                pass
 
 @app.route('/api/sold/pending-removals', methods=['GET'])
 def get_pending_removals():

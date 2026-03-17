@@ -47,6 +47,7 @@
       font-family: 'Inter', 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
       background: var(--bg0);
       min-height: 100vh;
+      scrollbar-gutter: stable;
     }
 
     .wrap{
@@ -149,6 +150,8 @@
       margin-top: 18px;
       animation: rise .35s ease both;
       align-items: start;
+      /* Prevent grid reflow when right-column scrollbar appears/disappears */
+      overflow-x: hidden;
     }
     @keyframes rise{
       from{ opacity: 0; transform: translateY(8px); }
@@ -442,6 +445,40 @@
     input:focus, select:focus, textarea:focus{ box-shadow: var(--focus); border-color: var(--green); background: rgba(16, 185, 129, 0.05); }
     input::placeholder, textarea::placeholder { color: var(--muted-dim); }
     select option { background: var(--bg1); color: var(--ink); }
+    /* Next-field navigator target */
+    @keyframes nextFieldPulse{
+      0%,100%{ box-shadow: 0 0 0 3px rgba(16,185,129,0.55), 0 0 0 6px rgba(16,185,129,0.18); }
+      50%{ box-shadow: 0 0 0 4px rgba(16,185,129,0.80), 0 0 0 10px rgba(16,185,129,0.08); }
+    }
+    .fieldNextTarget{
+      border-color: var(--green) !important;
+      animation: nextFieldPulse 1.4s ease-in-out infinite !important;
+      outline: none !important;
+    }
+    .btnNext{
+      display: inline-flex; align-items: center; gap: 7px;
+      padding: 7px 14px; border-radius: 9px; border: none; cursor: pointer;
+      background: var(--green); color: #fff;
+      font-size: 0.88rem; font-weight: 700; letter-spacing: 0.02em;
+      transition: filter .15s, opacity .15s;
+      flex-shrink: 0;
+    }
+    .btnNext:hover{ filter: brightness(1.10); }
+    .btnNext:disabled{ opacity: .45; cursor: not-allowed; filter: none; }
+    .btnNext .nextBadge{
+      background: rgba(0,0,0,0.22); color: #fff;
+      border-radius: 20px; padding: 1px 7px;
+      font-size: 0.78rem; font-weight: 800;
+      min-width: 20px; text-align: center;
+    }
+    .btnNext.allDone{
+      background: rgba(16,185,129,0.15);
+      color: var(--green);
+      border: 1px solid rgba(16,185,129,0.35);
+    }
+    .btnNext.allDone .nextBadge{ display: none; }
+    html.ss-theme-day .btnNext.allDone{ color: #059669; background: rgba(16,185,129,0.12); }
+
     .fieldInvalid{
       border-color: rgba(239, 68, 68, 0.70) !important;
       background: rgba(239, 68, 68, 0.10) !important;
@@ -634,6 +671,7 @@
     }
     .badgeBlue{ background: rgba(96, 165, 250, 0.15); border-color: rgba(96, 165, 250, 0.25); color: var(--blue-light); }
     .badgeGreen{ background: rgba(16, 185, 129, 0.15); border-color: rgba(16, 185, 129, 0.25); color: var(--green); }
+    .badgeRed{ background: rgba(244, 63, 94, 0.15); border-color: rgba(244, 63, 94, 0.25); color: #fb7185; }
     .badgeOrange{ background: rgba(255, 153, 0, 0.15); border-color: rgba(255, 153, 0, 0.25); color: #fbbf24; }
 
     .hint{
@@ -1355,6 +1393,18 @@
       opacity: 0.45;
       transform: scale(0.98);
     }
+    .imageCard.imageWontSend .imageCardTop img{
+      opacity: 0.45;
+    }
+    .imageCard.imageWontSend .imageCardTop::after{
+      content: '';
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background:
+        linear-gradient(to bottom right, transparent calc(50% - 1.5px), rgba(239,68,68,0.75) calc(50% - 1.5px), rgba(239,68,68,0.75) calc(50% + 1.5px), transparent calc(50% + 1.5px)),
+        linear-gradient(to top right,    transparent calc(50% - 1.5px), rgba(239,68,68,0.75) calc(50% - 1.5px), rgba(239,68,68,0.75) calc(50% + 1.5px), transparent calc(50% + 1.5px));
+    }
     .imageCardDragOver{
       border-color: rgba(96, 165, 250, 0.65);
       box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.22);
@@ -1510,6 +1560,20 @@
       color: #9f1239;
       border-color: rgba(244, 63, 94, 0.34);
     }
+    html.ss-theme-day .storeStatus.amazonFound .statusBadge{
+      background: rgba(255, 153, 0, 0.18);
+      color: #92400e;
+      border-color: rgba(255, 153, 0, 0.35);
+    }
+    html.ss-theme-day .storeStatus.amazonFound .statusBadge.state-active{
+      color: #1e40af;
+      background: rgba(37, 99, 235, 0.14);
+      border-color: rgba(37, 99, 235, 0.32);
+    }
+    .fieldQtyHighlight{
+      outline: 2px solid #f59e0b !important;
+      background: rgba(245, 158, 11, 0.12) !important;
+    }
   </style>
 </head>
 <body>
@@ -1525,6 +1589,10 @@
           <span class="pill">Experimental</span>
         </div>
       </div>
+      <button class="btnNext" id="btnNextField" type="button" title="Jump to next required field (Alt+N)" disabled>
+        Next <i class="fas fa-arrow-right" style="font-size:0.78rem;"></i>
+        <span class="nextBadge" id="nextFieldBadge">0</span>
+      </button>
     </div>
   </div>
 
@@ -1535,7 +1603,6 @@
             <div class="cardHeader">
               <div class="cardHeaderLeft">
                 <button class="collapseBtn" onclick="toggleCard('cardListing')" title="Collapse/Expand"><i class="fas fa-chevron-down"></i></button>
-                <h2><i class="fas fa-list-check" style="color:var(--blue)"></i>Queue</h2>
               </div>
               <div class="cardHeaderRight">
                 <select id="queueModeSelect" class="queueModeSelect mode-my" title="Queue source filter">
@@ -1549,11 +1616,6 @@
           <div class="cardBody">
             <!-- upcSearch kept in DOM (hidden) for JS compatibility -->
             <input id="upcSearch" type="text" autocomplete="off" style="display:none;" />
-            <div id="searchQueueAction" style="display:none;">
-              <div id="searchQueueActionText"></div>
-              <button id="btnSearchQueueAction" type="button" style="display:none;"></button>
-            </div>
-
             <div id="queueList" class="queueList"></div>
             <div id="queueEmpty" class="hint" style="display:none;margin-top:10px;">Queue is empty. Use "+ Listing Agent" in List Manager.</div>
           </div>
@@ -1583,9 +1645,7 @@
             <button class="tabBtn" id="tabAmazon" type="button"><span class="tabIconWrap"><i class="fab fa-amazon"></i></span>Amazon</button>
           </div>
           <div style="flex:1;"></div>
-          <div class="btnRow" style="margin:0;">
-            <button class="btn btnGhost" id="btnRefreshTemplates" type="button"><i class="fas fa-rotate"></i>Refresh</button>
-          </div>
+          <button class="btn btnGhost" id="btnRefreshTemplates" type="button"><i class="fas fa-rotate"></i></button>
         </div>
 
         <div class="card noteCard" id="cardNote" style="display:none;">
@@ -1622,6 +1682,7 @@
                     <h3 id="previewTitle" style="margin:0;font-size:1.05rem;line-height:1.15;letter-spacing:-0.01em;color:var(--ink-bright);"></h3>
                   </div>
                   <div id="previewMeta" class="previewMeta"></div>
+                  <div id="previewPositions" style="margin-top:8px;"></div>
                   <div class="previewStoreRow">
                     <div id="previewEbay"></div>
                     <div id="previewAmazon"></div>
@@ -1665,7 +1726,7 @@
               <div class="field">
                 <label>eBay (Live Marketplace)</label>
                 <div class="hint">Shows other active listings for this UPC (click one to use it as your draft template).</div>
-                <div id="ebayCompsBox" class="miniBox">
+                <div id="ebayCompsBox" class="miniBox" style="max-height:220px;overflow-y:auto;">
                   <div class="muted">Select a UPC to load comps.</div>
                 </div>
               </div>
@@ -1754,7 +1815,6 @@
                 <div id="ebayAspectsBox" class="miniBox" style="margin-top:10px;">
                   <div class="muted">Core item specifics are shown by default. Select a category to load category-specific specifics.</div>
                 </div>
-                <div class="hint">These map to eBay taxonomy “aspects” and are category-specific. Missing required specifics can cause publish errors.</div>
               </div>
 
               <div class="field">
@@ -1790,7 +1850,6 @@
                   <button class="btn" id="btnGenDesc"><i class="fas fa-wand-magic-sparkles"></i>Generate</button>
                   <button class="btn btnGhost" id="btnClearDesc"><i class="fas fa-trash"></i>Clear</button>
                 </div>
-                <div class="hint">This is WYSIWYG. We store HTML behind the scenes for eBay.</div>
               </div>
 
               <div class="card" id="cardSettings" style="margin-top:14px;background:var(--bg0);">
@@ -1800,13 +1859,12 @@
                     <h2><i class="fas fa-sliders" style="color:var(--blue)"></i>Settings (Defaults)</h2>
                   </div>
                   <div class="cardHeaderRight">
-                    <button class="btn" id="btnLoadLocations"><i class="fas fa-map-pin"></i>Load Location Keys</button>
                     <button class="btn btnPrimary" id="btnSaveDefaults"><i class="fas fa-save"></i>Save Defaults</button>
                   </div>
                 </div>
                 <div class="cardBody">
                   <div class="row2">
-                    <div class="field">
+                    <div class="field" style="display:none;">
                       <label for="merchantLocationKey">Merchant Location Key</label>
                       <input id="merchantLocationKey" type="text" placeholder="e.g. warehouse" list="locationKeys" />
                       <datalist id="locationKeys"></datalist>
@@ -1841,7 +1899,7 @@
                         <option value="">(load policies)</option>
                       </select>
                     </div>
-                    <div class="field">
+                    <div class="field" style="display:none;">
                       <label for="marketplaceId">Marketplace</label>
                       <select id="marketplaceId">
                         <option value="EBAY_US" selected>EBAY_US</option>
@@ -1860,7 +1918,7 @@
                         <option value="USD" selected>USD</option>
                       </select>
                     </div>
-                    <div class="field">
+                    <div class="field" style="display:none;">
                       <label for="offerId">Offer ID (Optional)</label>
                       <input id="offerId" type="text" placeholder="Filled after Draft; or paste one to publish" />
                     </div>
@@ -1869,8 +1927,7 @@
               </div>
 
               <div class="btnRow" style="margin-top:12px;">
-                <button class="btn btnPrimary" id="btnDraft"><i class="fas fa-file-circle-plus"></i>Create Draft Offer</button>
-                <button class="btn btnDanger" id="btnPublish"><i class="fas fa-rocket"></i>Publish to eBay</button>
+                <button class="btn btnDanger" id="btnPublish"><i class="fas fa-rocket"></i>Create Listing</button>
               </div>
               <div id="ebayListedBar" class="listedBar" style="display:none;">Listed</div>
 
@@ -1898,7 +1955,7 @@
                 </div>
                 <div class="hint" id="amazonCatalogSelectHint" style="margin-top:8px;">Select a UPC or search to see available catalog listings.</div>
 
-                <div id="amazonTemplatesBox" class="miniBox" style="margin-top:10px;">
+                <div id="amazonTemplatesBox" class="miniBox" style="margin-top:10px;max-height:220px;overflow-y:auto;">
                   <div class="muted">Select a UPC to load catalog matches.</div>
                 </div>
                 <div id="amazonCatalogDetail" style="display:none;"></div>
@@ -1929,12 +1986,11 @@
                 </div>
               </div>
 
+              <div style="display:none;">
+                <input id="amazonAsin" type="text" placeholder="B0..." />
+              </div>
+              <div id="amazonRestrictionHint" class="hint" style="margin-top:0;margin-bottom:6px;"></div>
               <div class="row2">
-                <div class="field">
-                  <label for="amazonAsin">ASIN</label>
-                  <input id="amazonAsin" type="text" placeholder="B0..." />
-                  <div id="amazonRestrictionHint" class="hint" style="margin-top:6px;"></div>
-                </div>
                 <div class="field">
                   <label for="amazonConditionType">Condition</label>
                   <select id="amazonConditionType">
@@ -1960,7 +2016,7 @@
                 </div>
               </div>
 
-              <div class="row2">
+              <div class="row2" style="display:none;">
                 <div class="field">
                   <label for="amazonProductType">Product Type</label>
                   <input id="amazonProductType" type="text" placeholder="PRODUCT" />
@@ -1971,7 +2027,7 @@
                 </div>
               </div>
 
-              <div class="row2">
+              <div class="row2" style="display:none;">
                 <div class="field">
                   <label for="amazonMarketplaceId">Marketplace ID</label>
                   <input id="amazonMarketplaceId" type="text" placeholder="ATVPDKIKX0DER" />
@@ -1982,7 +2038,7 @@
                 </div>
               </div>
 
-              <div class="row2">
+              <div class="row2" style="display:none;">
                 <div class="field">
                   <label for="amazonMerchantShippingGroup">Shipping Template ID (optional)</label>
                   <input id="amazonMerchantShippingGroup" type="text" placeholder="legacy-template-id" />
@@ -1995,7 +2051,7 @@
               </div>
 
               <div class="btnRow" style="margin-top:12px;">
-                <button class="btn btnDanger" id="btnAmazonPut"><i class="fas fa-upload"></i>Put Offer</button>
+                <button class="btn btnDanger" id="btnAmazonPut"><i class="fas fa-upload"></i>Create Listing</button>
               </div>
               <div id="amazonListedBar" class="listedBar" style="display:none;">Listed</div>
               <div class="hint">Amazon listing fields vary by product type. This is a best-effort offer builder.</div>
@@ -2253,10 +2309,9 @@
     function _setStoreListedUi(store, listed){
       const isListed = !!listed;
       if(store === 'ebay'){
-        const draftBtn = $('btnDraft');
         const publishBtn = $('btnPublish');
         const bar = $('ebayListedBar');
-        const row = draftBtn?.closest('.btnRow') || publishBtn?.closest('.btnRow');
+        const row = publishBtn?.closest('.btnRow');
         if(row) row.style.display = isListed ? 'none' : 'flex';
         if(bar) bar.style.display = isListed ? 'block' : 'none';
         return;
@@ -2933,16 +2988,105 @@
       }catch(e){}
 
       const qty = Number(item.inventory?.total_quantity || 0);
-      const positions = (item.inventory?.positions || []).slice(0, 5).join(', ');
-      const lot = (item.bol?.lot_number || '').toString().trim();
+      const allPositions = (item.inventory?.positions || []);
+      const inventoryRows = (item.inventory?.rows || []);
+
+      const prepQty = (item.bol?.good_qty != null) ? Number(item.bol.good_qty) : null;
 
       const meta = [];
-      meta.push(`<span class=\"badge badgeGreen\">Qty: ${qty || 0}</span>`);
-      if(lot) meta.push(`<span class=\"badge badgeBlue\">LOT ${escapeHtml(lot)}</span>`);
-      if(positions) meta.push(`<span class=\"badge\">Pos: ${escapeHtml(positions)}${(item.inventory?.positions || []).length > 5 ? '...' : ''}</span>`);
+      if(prepQty !== null){
+        meta.push(`<span class=\"badge badgeGreen\" title="Prep quantity from items-to-list">Prep: ${prepQty}</span>`);
+      }
+      if(allPositions.length){
+        meta.push(`<button type="button" id="btnTogglePositions" class="badge" style="cursor:pointer;border:none;background:var(--bg2);color:var(--ink);padding:3px 8px;border-radius:999px;font-size:0.72rem;font-weight:600;" title="Click to view warehouse locations"><i class="fas fa-warehouse" style="margin-right:4px;font-size:0.65rem;"></i>Warehouse: ${qty || 0}</button>`);
+      } else {
+        meta.push(`<span class=\"badge\" title="Warehouse quantity"><i class="fas fa-warehouse" style="margin-right:4px;font-size:0.65rem;"></i>Warehouse: ${qty || 0}</span>`);
+      }
+      const defectRaw = (item.defect || '').trim();
+      if(defectRaw){
+        defectRaw.split('|').map(d => d.trim()).filter(Boolean).forEach(d => {
+          meta.push(`<span class=\"badge badgeRed\" title="Defect">${escapeHtml(d)}</span>`);
+        });
+      }
       $('previewMeta').innerHTML = meta.join(' ');
 
-      const ebayListings = (item.ebay_store?.listings || []);
+      // Position expand panel
+      const posPanel = $('previewPositions');
+      posPanel.innerHTML = '';
+      if(allPositions.length){
+        let panelOpen = false;
+        const toggleBtn = document.getElementById('btnTogglePositions');
+        const panel = document.createElement('div');
+        panel.style.cssText = 'display:none;margin-top:10px;';
+
+        // Build per-position cards using same logic as ready-to-ship
+        function _lagMapKey(code){
+          const compact = (code||'').replace(/\s+/g,'').toLowerCase();
+          const base = compact.replace(/b\d+$/i,'');
+          if(!base) return '';
+          if(/^ofloor\d+$/i.test(base)) return base;
+          const m = base.match(/^(.*)s\d+$/i);
+          return m ? m[1] : base;
+        }
+        function _lagMapUrl(code){
+          const k = _lagMapKey(code);
+          if(!k) return '';
+          if(/^(or|omr|ofloor)/i.test(k)) return `/static/shelves/office/maps/officemap_${encodeURIComponent(k)}.png`;
+          if(/^(gr|gmid|gfloor|misc)/i.test(k)) return `/static/shelves/garage/maps/garagemap_${encodeURIComponent(k)}.png`;
+          return '';
+        }
+        function _lagShelfUrl(code){
+          return `/shelf-image/${encodeURIComponent(code.toLowerCase())}.png`;
+        }
+
+        // Merge rows by position for quantity display
+        const posByKey = new Map();
+        for(const row of inventoryRows){
+          const p = (row.position||'').trim();
+          if(!p) continue;
+          const pk = row.picturePosition || p;
+          if(!posByKey.has(p)) posByKey.set(p, {code: p, previewKey: pk, qty: 0});
+          posByKey.get(p).qty += Number(row.quantity||1);
+        }
+        // Fall back to positions list if rows empty
+        if(!posByKey.size) for(const p of allPositions) posByKey.set(p, {code: p, previewKey: p, qty: null});
+
+        const posEntries = [...posByKey.values()];
+        let html = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px;">`;
+        for(const loc of posEntries){
+          const shelfSrc = _lagShelfUrl(loc.code);
+          const mapSrc = _lagMapUrl(loc.code);
+          const qtyLabel = loc.qty !== null ? ` · Qty ${loc.qty}` : '';
+          const safeCode = escapeHtml(loc.code);
+          const safePk = escapeHtml(loc.previewKey);
+          html += `<div style="border:1px solid var(--border);border-radius:10px;overflow:hidden;background:var(--card);">
+            <div style="padding:6px 10px;font-size:0.72rem;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--border);">${safeCode}${qtyLabel}</div>
+            <div style="display:grid;grid-template-columns:${mapSrc?'1fr 1fr':'1fr'};gap:0;">
+              <button type="button" title="Shelf photo — click to expand" onclick="if(window.SSLocationPreview)SSLocationPreview.openForLocation('${safeCode}','${safePk}','Location: ${safeCode}',0)" style="border:none;background:none;padding:6px;cursor:zoom-in;display:block;">
+                <img src="${escapeHtml(shelfSrc)}" alt="${safeCode}" style="width:100%;max-height:130px;object-fit:contain;border-radius:6px;" onerror="this.closest('button').style.display='none'">
+              </button>
+              ${mapSrc ? `<button type="button" title="Position map — click to expand" onclick="if(window.SSLocationPreview)SSLocationPreview.openForLocation('${safeCode}','${safePk}','Location: ${safeCode}',1)" style="border:none;background:none;padding:6px;cursor:zoom-in;display:block;border-left:1px solid var(--border);">
+                <img src="${escapeHtml(mapSrc)}" alt="${safeCode} map" style="width:100%;max-height:130px;object-fit:contain;border-radius:6px;" onerror="this.closest('button').style.display='none'">
+              </button>` : ''}
+            </div>
+          </div>`;
+        }
+        html += `</div>`;
+        panel.innerHTML = html;
+        posPanel.appendChild(panel);
+
+        if(toggleBtn){
+          toggleBtn.onclick = () => {
+            panelOpen = !panelOpen;
+            panel.style.display = panelOpen ? '' : 'none';
+            toggleBtn.style.background = panelOpen ? 'var(--blue)' : 'var(--bg2)';
+            toggleBtn.style.color = panelOpen ? '#fff' : 'var(--ink)';
+          };
+        }
+      }
+
+      const _ebayEndedStates = new Set(['unsold','ended','completed','expired','cancelled']);
+      const ebayListings = (item.ebay_store?.listings || []).filter(l => !_ebayEndedStates.has((l.state||'').toLowerCase()));
       if(ebayListings.length){
         const top = ebayListings[0];
         const url = top.url || '';
@@ -2967,8 +3111,10 @@
         const asin = (top.asin || '').toString().trim();
         const url = (top.product_url || (asin ? `https://www.amazon.com/dp/${asin}` : '')).toString();
         const status = (top.status || 'active').toString();
+        const amazonStateSlug = status.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-+|-+$)/g, '');
+        const amazonStateClass = amazonStateSlug ? ` state-${amazonStateSlug}` : '';
         $('previewAmazon').innerHTML =
-          `<div class="storeStatus amazonFound"><i class="fab fa-amazon" style="font-size:1.1rem;"></i><span>Listed on Amazon</span><span class="statusBadge">${escapeHtml(status)}</span>${asin ? `<span class="statusBadge">${escapeHtml(asin)}</span>` : ''}${url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noreferrer"><i class="fas fa-external-link-alt"></i> View</a>` : ''}</div>` +
+          `<div class="storeStatus amazonFound"><i class="fab fa-amazon" style="font-size:1.1rem;"></i><span>Listed on Amazon</span><span class="statusBadge${amazonStateClass}">${escapeHtml(status)}</span>${asin ? `<span class="statusBadge">${escapeHtml(asin)}</span>` : ''}${url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noreferrer"><i class="fas fa-external-link-alt"></i> View</a>` : ''}</div>` +
           (amazonRestrictedMsg ? `<div class="hint hintDanger" style="margin-top:6px;">${escapeHtml(amazonRestrictedMsg)}</div>` : '');
       } else {
         $('previewAmazon').innerHTML =
@@ -3226,13 +3372,31 @@
       return list.slice(0, 12);
     }
 
+    function _isUserUploadedImage(url){
+      const u = (url || '').toString().trim();
+      if(!u) return false;
+      if(u.startsWith('/')) return true;
+      try{
+        return new URL(u).origin === window.location.origin;
+      }catch(e){ return false; }
+    }
+
+    function _isAmazonNewCondition(){
+      return ($('amazonConditionType')?.value || '').toString().trim() === 'new_new';
+    }
+
     function _effectiveImagesForStore(store, images){
       const key = store === 'amazon' ? 'amazon' : 'ebay';
+      // Allow: user-uploaded images + explicitly catalog-chosen images.
+      // Exclude: external URL thumbnails from BOL/rawbol that weren't explicitly chosen.
+      const catalogUrls = new Set(state.storeTemplateImages?.[key] || []);
+      const filtered = (Array.isArray(images) ? images : []).filter(u =>
+        _isUserUploadedImage(u) || catalogUrls.has(u)
+      );
       if(key === 'amazon'){
-        // Current Amazon Put Offer flow does not submit images.
-        return [];
+        return filtered;
       }
-      return _effectiveEbayImages(images);
+      return _effectiveEbayImages(filtered);
     }
 
     function _previewImagesForStore(store){
@@ -4105,8 +4269,6 @@
           if(c?.image) addImageUrl(c.image);
           log('Selected eBay comp template (applied title/price/image).');
 
-          const card = $('cardStoreCatalog');
-          if(card && !card.classList.contains('collapsed')) toggleCard('cardStoreCatalog');
         };
         if(url){
           row.ondblclick = () => window.open(url, '_blank', 'noopener,noreferrer');
@@ -4199,8 +4361,6 @@
           renderAmazonTemplates(); // update selection highlight
           log(`Selected Amazon catalog ASIN ${asin} for listing.`);
 
-          const card = $('cardAmazonCatalog');
-          if(card && !card.classList.contains('collapsed')) toggleCard('cardAmazonCatalog');
         };
 
         const openLink = row.querySelector('a');
@@ -4454,7 +4614,7 @@
     }
 
     async function loadTemplatesForUPC(upc){
-      const clean = formatUpc12((upc ?? '').toString().trim());
+      const clean = formatUpc12(_splitUpcSuffix((upc ?? '').toString().trim()).base || (upc ?? '').toString().trim());
       if(!clean) return;
       const reqId = ++state.templateReqId;
 
@@ -4483,7 +4643,8 @@
       // Amazon catalog matches (ASIN templates)
       (async () => {
         try{
-          const res = await apiGet(`/api/listingagent/amazon/catalog_search?upc=${encodeURIComponent(clean)}&limit=10&mode=upc`);
+          const _itemTitle = (state.item?.title || '').toString().trim();
+          const res = await apiGet(`/api/listingagent/amazon/catalog_search?upc=${encodeURIComponent(clean)}&limit=10&mode=upc${_itemTitle ? '&title='+encodeURIComponent(_itemTitle) : ''}`);
           if(reqId !== state.templateReqId) return;
           state.amazonCatalog = res.results || [];
           renderAmazonTemplates();
@@ -4556,6 +4717,15 @@
         return;
       }
       const isEbayMode = _activeStoreKey() === 'ebay';
+      const isAmazonMode = !isEbayMode;
+      const wontSend = isAmazonMode && _isAmazonNewCondition();
+      if(wontSend){
+        const hint = document.createElement('div');
+        hint.className = 'hint hintDanger';
+        hint.style.marginBottom = '10px';
+        hint.innerHTML = '<i class="fas fa-ban" style="margin-right:6px;"></i>Condition is <strong>New</strong> — Amazon uses catalog images only. These photos will <strong>not</strong> be submitted.';
+        wrap.appendChild(hint);
+      }
       const visible = Array.isArray(state.images) ? state.images.filter(Boolean) : [];
       const labels = buildImageLabels(visible);
 
@@ -4563,7 +4733,8 @@
         const label = labels[url] || `img${idx + 1}`;
         const isThumb = isEbayMode && idx === 0;
         const card = document.createElement('div');
-        card.className = `imageCard${isThumb ? ' imageCardThumb' : ''}`;
+        const isCatalog = !_isUserUploadedImage(url);
+        card.className = `imageCard${isThumb ? ' imageCardThumb' : ''}${wontSend && !isCatalog ? ' imageWontSend' : ''}`;
         card.dataset.url = url;
         card.innerHTML = `
           <div class="imageCardTop">
@@ -4978,8 +5149,7 @@
       if(!panel){
         return;
       }
-      const isAmazonView = _activeStoreKey() === 'amazon';
-      if(!clean || isProbablyMobile() || isAmazonView){
+      if(!clean || isProbablyMobile()){
         panel.style.display = 'none';
         if(top) top.classList.remove('withQr');
         state.mobileUploadUrl = '';
@@ -5142,12 +5312,14 @@
     function autofillForm(){
       const item = state.item;
       if(!item) return;
-      $('upc').value = formatUpc12(item.upc || '');
+      const _itemUpcBase = formatUpc12(_splitUpcSuffix(item.upc || '').base || item.upc || '');
+      $('upc').value = _itemUpcBase;
       if(!$('sku').value.trim()) $('sku').value = formatUpc12(item.upc || '');
       if(!$('title').value.trim()) $('title').value = (item.title || item.bol?.description || '').toString().trim();
 
       const qty = Number(item.inventory?.total_quantity || 0);
       $('quantity').value = qty > 0 ? qty : 1;
+      if(qty > 1){ $('quantity').classList.add('fieldQtyHighlight'); } else { $('quantity').classList.remove('fieldQtyHighlight'); }
 
       const stats = item.sold_stats;
       const hint = $('suggestedPriceHint');
@@ -5170,12 +5342,12 @@
       }
 
       // Amazon autofill
-      $('amazonUpc').value = formatUpc12(item.upc || '');
+      $('amazonUpc').value = _itemUpcBase;
       const amazonListings = (item.amazon_store?.listings || []);
       $('amazonFoundBadge').style.display = amazonListings.length ? 'inline-flex' : 'none';
 
       if(!$('amazonSku').value.trim()){
-        $('amazonSku').value = (amazonListings[0]?.sku || item.upc || '').toString();
+        $('amazonSku').value = (item.upc || amazonListings[0]?.sku || '').toString();
       }
       if(!$('amazonAsin').value.trim() && amazonListings[0]?.asin){
         $('amazonAsin').value = (amazonListings[0].asin || '').toString();
@@ -5186,6 +5358,7 @@
         if(!Number.isNaN(p)) $('amazonPrice').value = p.toFixed(2);
       }
       $('amazonQuantity').value = qty > 0 ? qty : 1;
+      if(qty > 1){ $('amazonQuantity').classList.add('fieldQtyHighlight'); } else { $('amazonQuantity').classList.remove('fieldQtyHighlight'); }
 
       const aHint = $('amazonSuggestedPriceHint');
       if(stats && stats.count > 0 && stats.avg_price){
@@ -5213,6 +5386,10 @@
       const t = ($('title')?.value || item.title || item.bol?.description || '').toString().trim();
       try{ applyCommonSpecificsFromAvailableData({title: t}); }catch(e){}
       if(t) suggestCategories(t, {auto: true});
+
+      // Refresh next-field navigator after autofill; delay slightly so category
+      // suggestion and aspects have a chance to render before we count.
+      setTimeout(() => { _resetNextField(); _updateNextFieldBtn(); }, 600);
     }
 
     function defaultDescription(){
@@ -5268,6 +5445,7 @@
         currency: $('amazonCurrency').value.trim(),
         merchantShippingGroup: $('amazonMerchantShippingGroup').value.trim(),
         fulfillmentChannelCode: 'DEFAULT',
+        images: _isAmazonNewCondition() ? [] : (Array.isArray(state.images) ? state.images.filter(_isUserUploadedImage) : []),
       };
     }
 
@@ -5315,6 +5493,131 @@
       return (v === null || v === undefined || String(v).trim() === '');
     }
 
+    // ─── Next-field navigator ─────────────────────────────────────────────────
+    // Returns an ordered array of DOM elements that still need user input for
+    // the active store.  Only fields the user must touch are included — everything
+    // auto-filled (UPC, SKU, title, description, qty) is intentionally excluded
+    // UNLESS it is genuinely empty (e.g. title missing from rawbol).
+    // IDs of "always present" fields that have defaults (not counted as empty in badge)
+    const _CYCLE_ONLY_IDS = new Set(['condition', 'amazonConditionType']);
+
+    function _getUnfilledRequired(){
+      if(!state.item) return [];
+      const els = [];
+      const push = (id) => { const el = $(id); if(el) els.push(el); };
+      const pushIfEmpty = (id) => { const el = $(id); if(el && !(el.value || '').trim()) els.push(el); };
+
+      if(state.activeStore === 'amazon'){
+        // Amazon order: condition (review) → price → SKU → description
+        push('amazonConditionType'); // always — has default, review deliberately
+        const ap = ($('amazonPrice')?.value ?? '').trim();
+        if(ap === '' || Number.isNaN(Number(ap))) push('amazonPrice');
+        const ask = ($('amazonSku')?.value || '').trim();
+        if(!ask) push('amazonSku');
+        const descTxt = (typeof getDescHtml === 'function' ? getDescHtml() : '').replace(/<[^>]+>/g,'').trim();
+        if(!descTxt) push('listingDescEditor');
+      } else {
+        // eBay order: title → condition → price → brand → description → category → required aspects → policies
+        pushIfEmpty('title');
+
+        push('condition'); // always — has default, review deliberately
+
+        const pr = ($('price')?.value ?? '').trim();
+        if(pr === '' || Number.isNaN(Number(pr))) push('price');
+
+        // Brand aspect (if empty)
+        const brandEl = $('ebayAspectsBox')?.querySelector('[data-ebay-aspect="Brand"]');
+        if(brandEl && !(brandEl.value || '').trim()) els.push(brandEl);
+
+        // Description (if empty)
+        const descTxt = (typeof getDescHtml === 'function' ? getDescHtml() : '').replace(/<[^>]+>/g,'').trim();
+        if(!descTxt) push('listingDescEditor');
+
+        const cat = ($('categoryId')?.value || '').trim();
+        if(!cat) push('categoryId');
+
+        // Required aspects (dynamically rendered, excluding brand already added)
+        const box = $('ebayAspectsBox');
+        if(box){
+          box.querySelectorAll('[data-ebay-aspect][data-aspectRequired="1"]').forEach((el) => {
+            if(!(el.value || '').trim() && el !== brandEl) els.push(el);
+          });
+        }
+
+        // Policies — only if not yet set
+        if(!($('fulfillmentPolicyId')?.value || '').trim()) push('fulfillmentPolicyId');
+        if(!($('paymentPolicyId')?.value || '').trim()) push('paymentPolicyId');
+        if(!($('returnPolicyId')?.value || '').trim()) push('returnPolicyId');
+      }
+      return els;
+    }
+
+    // Count truly empty fields (excludes always-present select fields that have defaults)
+    function _emptyRequiredCount(fields){
+      return fields.filter(el => {
+        if(_CYCLE_ONLY_IDS.has(el.id)) return false;
+        if(el.id === 'listingDescEditor'){
+          return !(typeof getDescHtml === 'function' ? getDescHtml() : '').replace(/<[^>]+>/g,'').trim();
+        }
+        return !(el.value || '').trim();
+      }).length;
+    }
+
+    let _nextFieldIdx = 0;
+
+    function _updateNextFieldBtn(){
+      const btn = $('btnNextField');
+      const badge = $('nextFieldBadge');
+      if(!btn) return;
+      const fields = _getUnfilledRequired();
+      const emptyCount = _emptyRequiredCount(fields);
+      // Remove ring from previously targeted element
+      document.querySelectorAll('.fieldNextTarget').forEach(el => el.classList.remove('fieldNextTarget'));
+      if(!state.item || emptyCount === 0){
+        badge.textContent = '✓';
+        btn.disabled = !state.item;
+        btn.classList.toggle('allDone', !!state.item);
+        btn.innerHTML = state.item
+          ? '<i class="fas fa-check" style="font-size:0.78rem;"></i> Ready'
+          : 'Next <i class="fas fa-arrow-right" style="font-size:0.78rem;"></i><span class="nextBadge" id="nextFieldBadge">0</span>';
+        // re-grab badge ref after innerHTML replace
+        return;
+      }
+      btn.classList.remove('allDone');
+      btn.disabled = false;
+      // Ensure button HTML is in the right state (may have been replaced above)
+      if(!$('nextFieldBadge')){
+        btn.innerHTML = 'Next <i class="fas fa-arrow-right" style="font-size:0.78rem;"></i><span class="nextBadge" id="nextFieldBadge">' + emptyCount + '</span>';
+      } else {
+        $('nextFieldBadge').textContent = emptyCount;
+      }
+      // Clamp index
+      if(_nextFieldIdx >= fields.length) _nextFieldIdx = 0;
+      // Ring the current target
+      fields[_nextFieldIdx]?.classList.add('fieldNextTarget');
+    }
+
+    function _jumpNextField(){
+      const fields = _getUnfilledRequired();
+      if(!fields.length){ _updateNextFieldBtn(); return; }
+      if(_nextFieldIdx >= fields.length) _nextFieldIdx = 0;
+      const el = fields[_nextFieldIdx];
+      _nextFieldIdx = (_nextFieldIdx + 1) % fields.length;
+      // Expand card if collapsed
+      _expandCardForElement(el);
+      el.scrollIntoView({behavior: 'smooth', block: 'center'});
+      setTimeout(() => {
+        try{ el.focus(); }catch(e){}
+        _updateNextFieldBtn();
+      }, 120);
+    }
+
+    // Reset index + refresh badge whenever a new item is loaded or store changes
+    function _resetNextField(){
+      _nextFieldIdx = 0;
+      _updateNextFieldBtn();
+    }
+
     function validateEbayPayload(payload, mode){
       clearFieldHighlights();
       const missing = [];
@@ -5328,9 +5631,8 @@
       };
 
       if(mode === 'publish'){
-        if(!payload.upc && !payload.offerId){
+        if(!payload.upc){
           add('upc', 'UPC');
-          add('offerId', 'Offer ID');
         }
       }
 
@@ -5447,10 +5749,9 @@
     }
 
     function setBusy(busy){
-      $('btnDraft').disabled = busy;
       $('btnPublish').disabled = busy;
       $('btnSaveDefaults').disabled = busy;
-      $('btnLoadLocations').disabled = busy;
+      if($('btnLoadLocations')) $('btnLoadLocations').disabled = busy;
       if($('btnLoadPolicies')) $('btnLoadPolicies').disabled = busy;
       if($('btnSavePolicyDefaults')) $('btnSavePolicyDefaults').disabled = busy;
 
@@ -6044,7 +6345,7 @@
       $('amazonAsin').addEventListener('change', () => checkAmazonRestrictionForCurrentAsin({force:true, silent:true}));
       $('amazonAsin').addEventListener('blur', () => checkAmazonRestrictionForCurrentAsin({force:true, silent:true}));
     }
-    if($('amazonConditionType')) $('amazonConditionType').addEventListener('change', () => runAmazonRestrictionCheck());
+    if($('amazonConditionType')) $('amazonConditionType').addEventListener('change', () => { runAmazonRestrictionCheck(); rebuildImagesForActiveStore(); renderImages(); });
     if($('amazonMarketplaceId')) $('amazonMarketplaceId').addEventListener('change', () => runAmazonRestrictionCheck());
     // Photo upload (desktop file picker / mobile camera)
     configurePhotoInput();
@@ -6069,9 +6370,9 @@
     $('btnSaveDefaults').onclick = saveDefaults;
     if($('btnSavePolicyDefaults')) $('btnSavePolicyDefaults').onclick = savePolicyDefaults;
     $('btnSaveAmazonDefaults').onclick = saveAmazonDefaults;
-    $('btnDraft').onclick = createDraft;
     $('btnPublish').onclick = publish;
-    $('btnLoadLocations').onclick = loadLocationKeys;
+    $('btnNextField').onclick = _jumpNextField;
+    if($('btnLoadLocations')) $('btnLoadLocations').onclick = loadLocationKeys;
     if($('btnLoadPolicies')) $('btnLoadPolicies').onclick = () => loadEbayBusinessPolicies({silent:false});
     if($('btnAmazonPut')) $('btnAmazonPut').onclick = amazonPutOffer;
     $('btnRefreshTemplates').onclick = () => {
@@ -6139,10 +6440,49 @@
       updateListingActionState();
       const upcForPreviewTools = ((state.item?.upc || state.activeUpc || '') + '').trim();
       setupMobileUploadForUPC(upcForPreviewTools);
+      _resetNextField();
     }
 
     if($('tabEbay')) $('tabEbay').onclick = (e) => { e.preventDefault(); setStore('ebay'); };
     if($('tabAmazon')) $('tabAmazon').onclick = (e) => { e.preventDefault(); setStore('amazon'); };
+
+    // Live count: update the Next badge whenever any key field changes value.
+    // We debounce slightly so rapid typing doesn't thrash.
+    (function(){
+      let _t;
+      function _scheduleUpdate(){ clearTimeout(_t); _t = setTimeout(_updateNextFieldBtn, 200); }
+      const watchIds = ['price','title','categoryId','fulfillmentPolicyId','paymentPolicyId','returnPolicyId',
+                        'amazonAsin','amazonPrice','amazonSku'];
+      watchIds.forEach(id => {
+        const el = $(id);
+        if(!el) return;
+        el.addEventListener('input', _scheduleUpdate);
+        el.addEventListener('change', _scheduleUpdate);
+      });
+      // Also watch aspect fields (dynamically rendered); use event delegation on the box.
+      const aspectBox = $('ebayAspectsBox');
+      if(aspectBox){
+        aspectBox.addEventListener('input', _scheduleUpdate);
+        aspectBox.addEventListener('change', _scheduleUpdate);
+      }
+      // When a required-field gets focus via tab/click, update the index so
+      // the badge always reflects the real remaining count.
+      document.addEventListener('focusin', (e) => {
+        const el = e.target;
+        if(!el) return;
+        const fields = _getUnfilledRequired();
+        const i = fields.indexOf(el);
+        if(i >= 0){ _nextFieldIdx = i; _updateNextFieldBtn(); }
+      });
+    })();
+
+    // Alt+N → jump to next required field
+    document.addEventListener('keydown', (e) => {
+      if(e.altKey && (e.key === 'n' || e.key === 'N')){
+        e.preventDefault();
+        _jumpNextField();
+      }
+    });
 
     // Category suggestions (eBay taxonomy)
     if($('categoryId')){
@@ -6278,9 +6618,16 @@
     resetTemplatesUI();
     resetCategorySuggestions();
     loadSettings();
-    loadQueue();
+    loadQueue().then(() => {
+      // Auto-open first non-done item in the queue if nothing is already active.
+      if(!state.activeUpc && state.queue && state.queue.length){
+        const first = state.queue.find(x => !x._done);
+        if(first && first.upc) selectUPC(first.upc);
+      }
+    });
     showRecents();
     restoreCollapseStates();
+    _updateNextFieldBtn();   // init Next button state (disabled until item loaded)
     log('Ready.');
   </script>
 
@@ -6306,5 +6653,6 @@
   </div>
 
   <script src="/static/i18n.js"></script>
+  <script src="/static/location-preview.js"></script>
 </body>
 </html>

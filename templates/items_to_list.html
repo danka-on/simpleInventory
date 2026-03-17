@@ -915,16 +915,27 @@ function _listagentQueueUiState(queueItem){
     queueItem.listed_url
   );
   if(hasListedState){
-    return {
-      label: 'LISTED ✓',
-      title: 'Listed through Listing Agent',
-      disabled: true,
-      active: true
-    };
+    const hasEbay = !!(queueItem.listed_ebay_at || (queueItem.listed_platform || '').toString().toLowerCase().includes('ebay'));
+    const hasAmazon = !!(queueItem.listed_amazon_at || (queueItem.listed_platform || '').toString().toLowerCase().includes('amazon'));
+    let label, title;
+    if(hasEbay && hasAmazon){
+      label = 'Listed (eBay/Amazon) ✓';
+      title = 'Listed on eBay and Amazon via Listing Agent';
+    } else if(hasEbay){
+      label = 'Listed (eBay) ✓';
+      title = 'Listed on eBay via Listing Agent';
+    } else if(hasAmazon){
+      label = 'Listed (Amazon) ✓';
+      title = 'Listed on Amazon via Listing Agent';
+    } else {
+      label = 'Listed ✓';
+      title = 'Listed through Listing Agent';
+    }
+    return { label, title, disabled: true, active: true };
   }
   if(status === 'done'){
     return {
-      label: 'LISTED ✓',
+      label: 'Listed ✓',
       title: 'Listed through Listing Agent',
       disabled: true,
       active: true
