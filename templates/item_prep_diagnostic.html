@@ -60,18 +60,18 @@
     height:54px;
     padding:0;
     border-radius:18px;
-    border:1px solid rgba(148,163,184,0.35);
-    background:linear-gradient(180deg,#ffffff 0%,#eef4f8 100%);
-    color:#0f172a;
+    border:1px solid #2563eb;
+    background:linear-gradient(180deg,#60a5fa 0%,#2563eb 55%,#1d4ed8 100%);
+    color:#eff6ff;
     cursor:pointer;
     user-select:none;
     touch-action:none;
-    box-shadow:0 12px 24px rgba(15,23,42,0.12), inset 0 1px 0 rgba(255,255,255,0.92);
+    box-shadow:0 16px 30px rgba(37,99,235,0.24), inset 0 1px 0 rgba(255,255,255,0.2);
     transition:transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease, background 0.18s ease, color 0.18s ease;
   }
   .voice-note-btn:hover{
     transform:translateY(-1px);
-    box-shadow:0 16px 30px rgba(15,23,42,0.15), inset 0 1px 0 rgba(255,255,255,0.95);
+    box-shadow:0 20px 34px rgba(37,99,235,0.3), inset 0 1px 0 rgba(255,255,255,0.24);
   }
   .voice-note-btn:active{transform:translateY(0)}
   .voice-note-btn.recording{
@@ -107,7 +107,7 @@
     width:9px;
     height:9px;
     border-radius:999px;
-    background:#cbd5e1;
+    background:#dbeafe;
     box-shadow:0 0 0 0 rgba(148,163,184,0);
     transition:background 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
   }
@@ -138,6 +138,9 @@
   .saved-video-card{position:relative;width:180px;padding:8px;border-radius:12px;background:#f8fafc;border:1px solid #dbe3ea}
   .saved-video-card video{width:100%;border-radius:10px;background:#0f172a}
   .saved-video-card .del-x{top:6px;right:6px}
+  .media-status{margin-top:10px;font-size:0.92rem;color:#64748b;font-weight:500}
+  .media-status.busy{color:#1d4ed8}
+  .media-status.error{color:#b91c1c}
   @keyframes diag-rec-pulse{
     0%{box-shadow:0 0 0 0 rgba(220,38,38,0.35)}
     70%{box-shadow:0 0 0 12px rgba(220,38,38,0)}
@@ -196,10 +199,10 @@
     html.ss-theme-night .btn-complete{background:#22c55e;box-shadow:0 8px 18px rgba(34,197,94,0.22)}
     html.ss-theme-night .set-position-btn{background:#2563eb}
     html.ss-theme-night .set-position-btn:hover{background:#1d4ed8}
-    html.ss-theme-night .voice-note-btn{background:linear-gradient(180deg,#263244 0%,#172131 100%);border-color:rgba(148,163,184,0.4);color:#f8fafc;box-shadow:0 16px 30px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.05)}
+    html.ss-theme-night .voice-note-btn{background:linear-gradient(180deg,#2563eb 0%,#1d4ed8 55%,#1e3a8a 100%);border-color:#60a5fa;color:#eff6ff;box-shadow:0 20px 34px rgba(30,64,175,0.34), inset 0 1px 0 rgba(255,255,255,0.08)}
     html.ss-theme-night .voice-note-btn.recording{background:linear-gradient(180deg,#7f1d1d 0%,#450a0a 100%);border-color:#f87171;color:#fee2e2;box-shadow:0 22px 38px rgba(127,29,29,0.42), inset 0 1px 0 rgba(255,255,255,0.06)}
     html.ss-theme-night .voice-note-btn.ready{background:linear-gradient(180deg,#1d4ed8 0%,#1e3a8a 100%);border-color:#60a5fa;color:#eff6ff;box-shadow:0 20px 34px rgba(30,64,175,0.34), inset 0 1px 0 rgba(255,255,255,0.06)}
-    html.ss-theme-night .voice-note-recording-dot{background:#64748b}
+    html.ss-theme-night .voice-note-recording-dot{background:#bfdbfe}
     html.ss-theme-night .voice-note-btn.ready .voice-note-recording-dot{background:#bfdbfe;box-shadow:0 0 0 5px rgba(191,219,254,0.14)}
     html.ss-theme-night .voice-note-btn.recording .voice-note-recording-dot{background:#fecaca}
     html.ss-theme-night .voice-note-hint{color:#94a3b8}
@@ -210,6 +213,9 @@
     html.ss-theme-night .media-preview-card,
     html.ss-theme-night .saved-video-card{background:#111827;border-color:#334155}
     html.ss-theme-night .media-preview-label{color:#cbd5e1}
+    html.ss-theme-night .media-status{color:#94a3b8}
+    html.ss-theme-night .media-status.busy{color:#93c5fd}
+    html.ss-theme-night .media-status.error{color:#fca5a5}
     html.ss-theme-night .status-bubble{background:#111827;border-color:#334155;color:#e2e8f0}
     html.ss-theme-night .status-bubble.active{background:#10b981;border-color:#10b981}
     html.ss-theme-night .status-bubble.good.active{background:#22c55e;border-color:#22c55e}
@@ -430,6 +436,7 @@
       <input type="file" id="captureVideoInput" accept="video/*" capture="environment" style="display:none">
       <div id="preview" class="media-preview"></div>
       <div id="savedVideoList" class="saved-video-list"></div>
+      <div id="captureStatus" class="media-status">Videos are compressed before saving for faster uploads and smaller files.</div>
       <button type="button" id="startCameraBtn" style="display:none" aria-hidden="true"></button>
       <button type="button" id="stopCameraBtn" style="display:none" aria-hidden="true"></button>
       <div id="cameraControls" style="display:none" aria-hidden="true">
@@ -523,6 +530,7 @@
     const capturePhotoInput = document.getElementById('capturePhotoInput');
     const captureVideoInput = document.getElementById('captureVideoInput');
     const savedVideoList = document.getElementById('savedVideoList');
+    const captureStatus = document.getElementById('captureStatus');
     const recordNoteBtn = document.getElementById('recordNoteBtn');
     const recordNoteHint = document.getElementById('recordNoteHint');
     const voiceNotePlayerWrap = document.getElementById('voiceNotePlayerWrap');
@@ -547,6 +555,7 @@
     let diagVoiceSavedItem = null;
     let diagVoicePointerId = null;
     let diagVoiceMimeType = '';
+    const captureStatusDefaultText = 'Videos are compressed before saving for faster uploads and smaller files.';
 
     function parseReasonSelection(rawValue){
       const text = String(rawValue || '').trim();
@@ -582,6 +591,273 @@
       if(!recordNoteHint) return;
       recordNoteHint.textContent = String(text || '');
       recordNoteHint.style.color = isError ? '#b91c1c' : '';
+    }
+
+    function setCaptureStatus(text, options={}){
+      if(!captureStatus) return;
+      const message = String(text || captureStatusDefaultText);
+      const isError = !!options.error;
+      const isBusy = !!options.busy && !isError;
+      captureStatus.textContent = message;
+      captureStatus.classList.toggle('error', isError);
+      captureStatus.classList.toggle('busy', isBusy);
+    }
+
+    function formatMediaBytes(size){
+      const bytes = Number(size || 0);
+      if(!Number.isFinite(bytes) || bytes <= 0) return '0 B';
+      if(bytes < 1024) return `${bytes} B`;
+      const kb = bytes / 1024;
+      if(kb < 1024) return `${kb.toFixed(kb >= 100 ? 0 : 1)} KB`;
+      const mb = kb / 1024;
+      if(mb < 1024) return `${mb.toFixed(mb >= 100 ? 0 : 1)} MB`;
+      const gb = mb / 1024;
+      return `${gb.toFixed(gb >= 100 ? 0 : 1)} GB`;
+    }
+
+    function preferredCompressedVideoMimeType(){
+      const candidates = [
+        'video/webm;codecs=vp9,opus',
+        'video/webm;codecs=vp8,opus',
+        'video/webm',
+        'video/mp4;codecs=h264,aac',
+        'video/mp4'
+      ];
+      if(!window.MediaRecorder || typeof MediaRecorder.isTypeSupported !== 'function'){
+        return '';
+      }
+      for(const candidate of candidates){
+        try{
+          if(MediaRecorder.isTypeSupported(candidate)) return candidate;
+        }catch(_){}
+      }
+      return '';
+    }
+
+    function compressedVideoExtensionForMime(mimeType){
+      const mime = String(mimeType || '').toLowerCase();
+      if(mime.includes('mp4') || mime.includes('h264')) return '.mp4';
+      return '.webm';
+    }
+
+    function buildCompressedVideoName(originalName, ext){
+      const base = String(originalName || 'diag_video')
+        .replace(/\.[^/.]+$/, '')
+        .replace(/[^a-z0-9_\-]+/gi, '_')
+        .replace(/^_+|_+$/g, '') || 'diag_video';
+      return `${base}_compressed${ext}`;
+    }
+
+    function evenVideoDimension(value){
+      const rounded = Math.max(2, Math.round(Number(value) || 0));
+      return rounded % 2 === 0 ? rounded : rounded - 1;
+    }
+
+    function waitForVideoEvent(videoEl, eventName){
+      return new Promise((resolve, reject)=>{
+        const handleReady = ()=> cleanup(() => resolve());
+        const handleError = ()=> cleanup(() => reject(new Error(`Video ${eventName} failed`)));
+        const cleanup = (cb)=>{
+          videoEl.removeEventListener(eventName, handleReady);
+          videoEl.removeEventListener('error', handleError);
+          cb();
+        };
+        videoEl.addEventListener(eventName, handleReady, {once:true});
+        videoEl.addEventListener('error', handleError, {once:true});
+      });
+    }
+
+    async function compressCapturedVideo(file){
+      const originalSize = Number(file && file.size) || 0;
+      const fallback = (reason)=>({
+        file,
+        compressed: false,
+        originalSize,
+        finalSize: originalSize,
+        reason
+      });
+      if(!file || !(window.MediaRecorder && typeof document !== 'undefined')){
+        return fallback('unsupported');
+      }
+      if(typeof HTMLCanvasElement === 'undefined' || !HTMLCanvasElement.prototype.captureStream){
+        return fallback('unsupported');
+      }
+      const mimeType = preferredCompressedVideoMimeType();
+      if(!mimeType){
+        return fallback('unsupported');
+      }
+
+      let objectUrl = '';
+      let playbackStream = null;
+      let composedStream = null;
+      let canvasStream = null;
+      let recorder = null;
+      let rafId = 0;
+      let hiddenVideo = null;
+
+      try{
+        objectUrl = URL.createObjectURL(file);
+        hiddenVideo = document.createElement('video');
+        hiddenVideo.preload = 'metadata';
+        hiddenVideo.muted = true;
+        hiddenVideo.playsInline = true;
+        hiddenVideo.src = objectUrl;
+        hiddenVideo.style.position = 'fixed';
+        hiddenVideo.style.left = '-99999px';
+        hiddenVideo.style.top = '-99999px';
+        hiddenVideo.style.width = '1px';
+        hiddenVideo.style.height = '1px';
+        hiddenVideo.style.opacity = '0';
+        document.body.appendChild(hiddenVideo);
+
+        await waitForVideoEvent(hiddenVideo, 'loadedmetadata');
+
+        const sourceWidth = Math.max(2, hiddenVideo.videoWidth || 1280);
+        const sourceHeight = Math.max(2, hiddenVideo.videoHeight || 720);
+        const maxLongEdge = 960;
+        const scale = Math.min(1, maxLongEdge / Math.max(sourceWidth, sourceHeight));
+        const targetWidth = evenVideoDimension(sourceWidth * scale);
+        const targetHeight = evenVideoDimension(sourceHeight * scale);
+        const targetFps = 20;
+        const targetVideoBitsPerSecond = 850000;
+
+        const videoCanvas = document.createElement('canvas');
+        videoCanvas.width = targetWidth;
+        videoCanvas.height = targetHeight;
+        const ctx = videoCanvas.getContext('2d', {alpha:false, desynchronized:true});
+        if(!ctx){
+          return fallback('no_canvas_context');
+        }
+
+        canvasStream = videoCanvas.captureStream(targetFps);
+        composedStream = new MediaStream();
+        canvasStream.getVideoTracks().forEach(track => composedStream.addTrack(track));
+
+        const captureFn = typeof hiddenVideo.captureStream === 'function'
+          ? hiddenVideo.captureStream.bind(hiddenVideo)
+          : (typeof hiddenVideo.mozCaptureStream === 'function' ? hiddenVideo.mozCaptureStream.bind(hiddenVideo) : null);
+        if(captureFn){
+          try{
+            playbackStream = captureFn();
+            if(playbackStream && typeof playbackStream.getAudioTracks === 'function'){
+              playbackStream.getAudioTracks().forEach(track => composedStream.addTrack(track));
+            }
+          }catch(_){}
+        }
+
+        const recorderOptions = {
+          mimeType,
+          videoBitsPerSecond: targetVideoBitsPerSecond
+        };
+        if(composedStream.getAudioTracks().length){
+          recorderOptions.audioBitsPerSecond = 48000;
+        }
+        recorder = new MediaRecorder(composedStream, recorderOptions);
+        const chunks = [];
+        const stopPromise = new Promise((resolve, reject)=>{
+          recorder.addEventListener('dataavailable', (event)=>{
+            if(event.data && event.data.size > 0){
+              chunks.push(event.data);
+            }
+          });
+          recorder.addEventListener('stop', resolve, {once:true});
+          recorder.addEventListener('error', (event)=> reject((event && event.error) || new Error('Video compression failed')), {once:true});
+        });
+
+        const drawFrame = ()=>{
+          if(hiddenVideo && hiddenVideo.readyState >= 2){
+            ctx.drawImage(hiddenVideo, 0, 0, targetWidth, targetHeight);
+          }
+          if(hiddenVideo && !hiddenVideo.paused && !hiddenVideo.ended){
+            rafId = window.requestAnimationFrame(drawFrame);
+          }
+        };
+
+        recorder.start(250);
+        const playResult = hiddenVideo.play();
+        if(playResult && typeof playResult.then === 'function'){
+          await playResult;
+        }
+        drawFrame();
+        await waitForVideoEvent(hiddenVideo, 'ended');
+        if(rafId){
+          window.cancelAnimationFrame(rafId);
+          rafId = 0;
+        }
+        if(hiddenVideo.readyState >= 2){
+          ctx.drawImage(hiddenVideo, 0, 0, targetWidth, targetHeight);
+        }
+        await new Promise(resolve => window.setTimeout(resolve, 140));
+        if(recorder.state !== 'inactive'){
+          recorder.stop();
+        }
+        await stopPromise;
+
+        const finalMimeType = (recorder && recorder.mimeType) || mimeType;
+        const compressedBlob = new Blob(chunks, {type: finalMimeType});
+        if(!compressedBlob.size){
+          return fallback('empty_output');
+        }
+        if(compressedBlob.size >= (originalSize * 0.96)){
+          return fallback('not_smaller');
+        }
+
+        const ext = compressedVideoExtensionForMime(finalMimeType);
+        const compressedFile = new File(
+          [compressedBlob],
+          buildCompressedVideoName(file.name, ext),
+          {type: finalMimeType, lastModified: Date.now()}
+        );
+        return {
+          file: compressedFile,
+          compressed: true,
+          originalSize,
+          finalSize: compressedFile.size,
+          reason: 'compressed'
+        };
+      }catch(err){
+        console.warn('Video compression skipped:', err);
+        return fallback('failed');
+      } finally {
+        try{
+          if(rafId){
+            window.cancelAnimationFrame(rafId);
+          }
+        }catch(_){}
+        try{
+          if(recorder && recorder.state !== 'inactive'){
+            recorder.stop();
+          }
+        }catch(_){}
+        try{
+          if(canvasStream){
+            canvasStream.getTracks().forEach(track => track.stop());
+          }
+        }catch(_){}
+        try{
+          if(playbackStream){
+            playbackStream.getTracks().forEach(track => track.stop());
+          }
+        }catch(_){}
+        try{
+          if(composedStream){
+            composedStream.getTracks().forEach(track => track.stop());
+          }
+        }catch(_){}
+        if(hiddenVideo){
+          try{
+            hiddenVideo.pause();
+            hiddenVideo.removeAttribute('src');
+            hiddenVideo.load();
+          }catch(_){}
+          try{
+            hiddenVideo.remove();
+          }catch(_){}
+        }
+        if(objectUrl){
+          try{ URL.revokeObjectURL(objectUrl); }catch(_){}
+        }
+      }
     }
 
     function preferredDiagVoiceMimeType(){
@@ -687,7 +963,7 @@
         });
         const label = document.createElement('div');
         label.className = 'media-preview-label';
-        label.textContent = 'Pending Video';
+        label.textContent = `${entry.compressed ? 'Compressed Video' : 'Video'} - ${formatMediaBytes(entry.finalSize || (entry.file && entry.file.size) || 0)}`;
         card.appendChild(video);
         card.appendChild(del);
         card.appendChild(label);
@@ -724,6 +1000,9 @@
         card.appendChild(del);
         savedVideoList.appendChild(card);
       });
+      if(!pendingVideos.length && captureStatus && !captureStatus.classList.contains('busy') && !captureStatus.classList.contains('error')){
+        setCaptureStatus(captureStatusDefaultText);
+      }
     }
 
     async function loadDiagnosticMedia(){
@@ -950,11 +1229,56 @@
 
     if(takeVideoBtn && captureVideoInput){
       takeVideoBtn.addEventListener('click', ()=> captureVideoInput.click());
-      captureVideoInput.addEventListener('change', ()=>{
+      captureVideoInput.addEventListener('change', async ()=>{
         const files = Array.from(captureVideoInput.files || []);
-        files.forEach(file => pendingVideos.push({id: uid(), file}));
         captureVideoInput.value = '';
-        renderSavedVideos();
+        if(!files.length){
+          setCaptureStatus(captureStatusDefaultText);
+          return;
+        }
+        const originalDisabled = !!takeVideoBtn.disabled;
+        takeVideoBtn.disabled = true;
+        takeVideoBtn.style.opacity = '0.65';
+        takeVideoBtn.style.cursor = 'wait';
+        setCaptureStatus(files.length === 1 ? 'Compressing video for faster saving...' : `Compressing ${files.length} videos for faster saving...`, {busy:true});
+        let compressedCount = 0;
+        let totalOriginal = 0;
+        let totalFinal = 0;
+        let fallbackReason = '';
+        try{
+          for(const file of files){
+            const result = await compressCapturedVideo(file);
+            totalOriginal += result.originalSize || 0;
+            totalFinal += result.finalSize || (result.file && result.file.size) || 0;
+            if(result.compressed) compressedCount += 1;
+            if(!fallbackReason && !result.compressed && result.reason){
+              fallbackReason = result.reason;
+            }
+            pendingVideos.push({
+              id: uid(),
+              file: result.file,
+              compressed: !!result.compressed,
+              originalSize: result.originalSize || 0,
+              finalSize: result.finalSize || ((result.file && result.file.size) || 0)
+            });
+          }
+          renderSavedVideos();
+          const savedBytes = Math.max(0, totalOriginal - totalFinal);
+          if(compressedCount){
+            const lead = files.length === 1 ? 'Video ready.' : `${files.length} videos ready.`;
+            setCaptureStatus(`${lead} Saved about ${formatMediaBytes(savedBytes)} and kept upload size near ${formatMediaBytes(totalFinal)}.`, {busy:false});
+          } else if(fallbackReason === 'unsupported'){
+            setCaptureStatus('Video ready. This browser kept the original file because compression is not supported here.');
+          } else if(fallbackReason === 'not_smaller'){
+            setCaptureStatus('Video ready. The original file was already close to the target size, so it was kept as-is.');
+          } else {
+            setCaptureStatus('Video ready. Compression was skipped, so the original file will be saved.');
+          }
+        } finally {
+          takeVideoBtn.disabled = originalDisabled;
+          takeVideoBtn.style.opacity = '';
+          takeVideoBtn.style.cursor = '';
+        }
       });
     }
 

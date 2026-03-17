@@ -17977,6 +17977,8 @@ def api_items_prep_status():
             status_lot = requested_lot_norm
         else:
             status_lot = _resolve_bol_lot_for_upc(cur, upc, requested_lot)
+            if not status_lot and upc != base_upc and status == 'bad':
+                status_lot = _resolve_bol_lot_for_upc(cur, base_upc, requested_lot)
         status_update_lot = _resolve_prep_status_lot(cur, upc, status_lot)
         existing_row = _select_prep_status_row(cur, upc, status_lot, columns='upc')
         if existing_row:
@@ -18236,25 +18238,49 @@ def api_items_prep_create_bad_entry():
         
         base_upc = upc.split('-')[0] if '-' in upc else upc
         requested_lot_input = _normalize_lot_number(_preferred_lot_from_request(data))
-        requested_lot = ''
-        allow_no_lot = True
-        force_requested_lot = False
+        requested_lot = requested_lot_input
+        allow_no_lot = _coerce_bool(data.get('allow_no_lot'))
+        force_requested_lot = _coerce_bool(
+            data.get('force_requested_lot') if data.get('force_requested_lot') is not None else data.get('override_lot')
+        )
         allow_overage_exception = _coerce_bool(
             data.get('allow_overage_exception') if data.get('allow_overage_exception') is not None else data.get('force_exception')
         )
         exception_overage_applied = False
+        if allow_no_lot:
+            requested_lot = ''
+            force_requested_lot = False
         
         conn = sqlite3.connect('bol.db', isolation_level='IMMEDIATE')
         cur = conn.cursor()
         _ensure_items_prep_tables()
-        requested_lot_norm = ''
+        requested_lot_norm = _normalize_lot_number(requested_lot)
         lot_info = {
-            'requested_lot': '',
+            'requested_lot': requested_lot_norm,
             'assigned_lot': '',
             'auto_assigned': False,
             'auto_assign_reason': ''
         }
         selected_lot = ''
+        if not allow_no_lot:
+            lot_mismatch, suggested_lot = _check_requested_lot_mismatch(cur, base_upc, requested_lot_norm)
+            if lot_mismatch and not force_requested_lot:
+                return jsonify(_lot_mismatch_payload(
+                    upc=base_upc,
+                    requested_lot=requested_lot_norm,
+                    suggested_lot=suggested_lot
+                )), 409
+            if force_requested_lot and requested_lot_norm:
+                selected_lot = requested_lot_norm
+                lot_info = {
+                    'requested_lot': requested_lot_norm,
+                    'assigned_lot': selected_lot,
+                    'auto_assigned': False,
+                    'auto_assign_reason': ''
+                }
+            else:
+                lot_info = _resolve_action_lot_assignment(cur, base_upc, requested_lot_norm)
+                selected_lot = _normalize_lot_number(lot_info.get('assigned_lot'))
         
         # Find next available suffix for bad items
         # Check BOTH bol_items AND prep tables to avoid reusing deleted suffixes with orphaned data
@@ -18324,14 +18350,23 @@ def api_items_prep_create_bad_entry():
             return jsonify({'success': False, 'error': f'Base UPC {base_upc} not found in bol_items'}), 404
 
         resolved_base_lot = _normalize_lot_number(base_item[3])
-        if allow_no_lot:
-            selected_lot = ''
-        elif force_requested_lot and requested_lot_norm:
-            selected_lot = requested_lot_norm
-        else:
+        if not selected_lot and not allow_no_lot:
             selected_lot = resolved_base_lot
-        requested_lot_norm = _normalize_lot_number(lot_info.get('requested_lot'))
-        auto_assigned = bool(selected_lot and (not requested_lot_norm or selected_lot.lower() != requested_lot_norm.lower()))
+            if selected_lot:
+                lot_info = {
+                    'requested_lot': requested_lot_norm,
+                    'assigned_lot': selected_lot,
+                    'auto_assigned': bool(selected_lot and (not requested_lot_norm or selected_lot.lower() != requested_lot_norm.lower())),
+                    'auto_assign_reason': (
+                        'requested_lot_unavailable_used_latest'
+                        if requested_lot_norm and selected_lot.lower() != requested_lot_norm.lower()
+                        else ('no_lot_requested_used_latest' if selected_lot and not requested_lot_norm else '')
+                    )
+                }
+        requested_lot_norm = _normalize_lot_number(lot_info.get('requested_lot') or requested_lot_norm)
+        auto_assigned = bool(lot_info.get('auto_assigned')) or bool(
+            selected_lot and (not requested_lot_norm or selected_lot.lower() != requested_lot_norm.lower())
+        )
         forced_lot_override = bool(force_requested_lot and selected_lot)
         auto_assign_reason = lot_info.get('auto_assign_reason') or (
             'requested_lot_unavailable_used_latest' if requested_lot_norm and auto_assigned else (

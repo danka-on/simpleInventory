@@ -245,6 +245,34 @@
       outline:3px solid #2563eb;
       outline-offset:2px;
     }
+    .upc-wrap{
+      display:flex;
+      gap:8px;
+      align-items:center;
+      flex-wrap:wrap;
+    }
+    .upc-text{
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      flex-wrap:wrap;
+      font-weight:600;
+    }
+    .upc-main{word-break:break-all}
+    .upc-suffix{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      padding:3px 9px;
+      border-radius:999px;
+      background:#dbeafe;
+      border:1px solid #93c5fd;
+      color:#1d4ed8;
+      font-size:0.82rem;
+      font-weight:800;
+      letter-spacing:0.03em;
+      line-height:1.1;
+    }
     .btn-sm{padding:6px 10px;font-size:0.9rem}
     .btn-copy{background:rgba(32,201,151,0.3) !important;color:#00875a !important;border:1px solid rgba(32,201,151,0.5) !important}
     .btn-copied{background:rgba(46,204,113,0.85) !important;color:#fff !important;font-weight:600 !important}
@@ -296,6 +324,7 @@
     html.ss-theme-night .mixed-media-stage{background:rgba(15,23,42,0.55)}
     html.ss-theme-night .mixed-media-thumb{background:rgba(15,23,42,0.45);border-color:rgba(148,163,184,0.3)}
     html.ss-theme-night .mixed-media-badge{background:rgba(2,6,23,0.88)}
+    html.ss-theme-night .upc-suffix{background:rgba(30,64,175,0.28);border-color:rgba(96,165,250,0.52);color:#bfdbfe}
     html.ss-theme-night .warehouse-loc-btn{background:rgba(30,64,175,0.25);border-color:#3b82f6;color:#bfdbfe}
     html.ss-theme-night .warehouse-loc-btn:hover{background:rgba(37,99,235,0.35)}
     html.ss-theme-night .warehouse-loc-btn.active{background:#3b82f6;border-color:#60a5fa;color:#0f172a}
@@ -1788,10 +1817,16 @@ function render(results){
     const upcPadded = (upcRaw.length > 0 && upcRaw.length <= 11 && /^\d+$/.test(upcRaw)) 
       ? upcRaw.padStart(12, '0') 
       : upcRaw;
-    const upc = esc(upcPadded);
+    const upcDisplayRaw = String(upcPadded || '');
+    const upcSuffixMatch = upcDisplayRaw.match(/^(.*?)(-\d+)$/);
+    const upcMainRaw = upcSuffixMatch ? upcSuffixMatch[1] : upcDisplayRaw;
+    const upcSuffixRaw = upcSuffixMatch ? upcSuffixMatch[2] : '';
+    const upcDisplayHtml = upcSuffixRaw
+      ? `<span class="upc-main">${esc(upcMainRaw)}</span><span class="upc-suffix">${esc(upcSuffixRaw)}</span>`
+      : `<span class="upc-main">${esc(upcMainRaw)}</span>`;
     const apiUpc = esc((upcRaw || '').toString());
     // Extract base UPC without suffix for copy button (with padding)
-    const baseUpc = upc.includes('-') ? upc.split('-')[0] : upc;
+    const baseUpc = esc(upcMainRaw);
     // Listing Agent queue should use the raw base UPC (no padding) so /api/listingagent/upc/<upc> matches DB rows.
     const queueUpc = _listagentQueueKey(upcRaw);
     const queueTitleEnc = encodeURIComponent((r.title || '').toString());
@@ -1928,7 +1963,7 @@ function render(results){
              qtyCell+
              whCell+
              `<td><div class="title-cell"><img class="thumb" src="${thumb}" onerror="this.src='${missingThumb(48,48,'No Img')}'"><a href="#" class="img-link" data-img="${img}" data-title="${title}">${title}</a></div></td>`+
-             `<td><div style=\"display:flex;gap:6px;align-items:center\"><span>${upc}</span><button type=\"button\" class=\"btn btn-sm btn-copy\" data-upc=\"${baseUpc}\" title=\"Copy UPC\">Copy</button></div></td>`+
+             `<td><div class="upc-wrap"><span class="upc-text">${upcDisplayHtml}</span><button type=\"button\" class=\"btn btn-sm btn-copy\" data-upc=\"${baseUpc}\" title=\"Copy UPC\">Copy</button></div></td>`+
              `<td>${actionBtn}</td>`+
              `<td class="last-edited-cell" data-raw="${last_edited}">${formatLastEdited(last_edited)}</td>`+
              `<td style="text-align:center;white-space:nowrap">${queueBtn}</td>`+

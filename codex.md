@@ -52,6 +52,7 @@ This workflow:
 
 When user says "push", "p", "let's push", or "push to pi":
 - provide only the direct `scp` commands for the relevant files (no auto-execution),
+- when multiple template files are being pushed, combine them into a single `scp` line to `/opt/sweetshelves/templates/`,
 - always include the reset command: `ssh manager@superinventory.local "sudo systemctl restart sweetshelves.service"`,
 - exclude all `.db` files,
 - wait for user confirmation (`success` or `s`) before updating this memory checkpoint.
@@ -66,13 +67,21 @@ When user says "push", "p", "push to pi", or "commit changes", treat it as:
 ### Last successful checkpoint
 
 - Status: success confirmed by user
-- Date: 2026-03-16 20:06:55 -04:00
+- Date: 2026-03-17 09:29:17 -04:00
 - Branch: `pi-claude-refactor`
-- Git commit baseline for next incremental file discovery: `d147f7e`
+- Git commit baseline for next incremental file discovery: `df2c093`
+- Note: this deploy included working-tree changes beyond the committed baseline, so use the pushed-file list below to avoid resending already-deployed uncommitted files until the next git checkpoint.
 - Files pushed in this successful checkpoint:
   - `app.py`
+  - `static/barcode-entry-state.js`
+  - `templates/additem.html`
+  - `templates/barcode.html`
+  - `templates/item_prep.html`
+  - `templates/item_prep_diagnostic.html`
   - `templates/items_to_list.html`
-  - `templates/ready_to_ship.html`
+  - `templates/multibarcode.html`
+  - `templates/tools.html`
+  - `templates/prep_media_cleaner.html`
 
 ## Architecture
 
