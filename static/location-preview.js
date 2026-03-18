@@ -345,11 +345,12 @@
       const pictureSrc = await loadFirstAvailable(pictureCandidates(picturePath)).catch(function () { return null; });
       if (pictureSrc) {
         items.push({ label: 'Location image', src: pictureSrc });
+        return items;
       }
-      return items;
+      // Picture not found — fall through to shelf/map lookup using the location code
     }
 
-    const effectiveCode = code || picturePath;
+    const effectiveCode = code;
     if (!effectiveCode) return items;
 
     const shelfSrc = await loadFirstAvailable(shelfCandidates(effectiveCode)).catch(function () { return null; });
@@ -453,7 +454,7 @@
     const key = trimValue(previewKey);
     if (key && looksLikePicturePath(key)) {
       return open({
-        code: '',
+        code: code,
         picturePath: key,
         title: trimValue(title) || ('Location: ' + (code || key)),
         startExpandedIndex: startExpandedIndex

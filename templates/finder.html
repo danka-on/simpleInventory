@@ -245,7 +245,7 @@
     }
     html.ss-theme-night .confirm-box .btn-no:hover { background: #475569; }
   </style>
-  <script src="/static/location-preview.js?v=20260313b"></script>
+  <script src="/static/location-preview.js?v=20260317a"></script>
   <script src="/static/i18n.js"></script>
 </head>
 <body>
@@ -363,7 +363,7 @@ if (orderTitle) {
   if (orderImage) {
     orderImgEl.src = orderImage;
     orderImgEl.style.display = 'block';
-    orderImgEl.onclick = () => showImgPopup(orderImage);
+    orderImgEl.onclick = () => showImgPopup(orderImage, orderTitle);
   } else if (orderBarcode) {
     // Try to fetch image from rawbol.db using barcode
     fetch('/api/lookup-image-by-barcode?barcode=' + encodeURIComponent(orderBarcode))
@@ -372,7 +372,7 @@ if (orderTitle) {
         if (data.success && data.image_url) {
           orderImgEl.src = data.image_url;
           orderImgEl.style.display = 'block';
-          orderImgEl.onclick = () => showImgPopup(data.image_url);
+          orderImgEl.onclick = () => showImgPopup(data.image_url, orderTitle);
         } else {
           orderImgEl.style.display = 'none';
         }
@@ -523,9 +523,9 @@ function renderWarehouse(items) {
 
     const itemTitle = item.title || '';
     return `<div class="result-card" id="wh-card-${item.id}">
-      <img src="${esc(imgSrc)}" onerror="this.src='${missingImg}'" style="cursor:pointer" onclick="showImgPopup(this.src,'${esc(itemTitle)}')">
+      <img src="${esc(imgSrc)}" onerror="this.src='${missingImg}'" class="clickable-thumb" data-title="${esc(itemTitle)}" style="cursor:pointer">
       <div class="details">
-        <div class="title" style="cursor:pointer" onclick="showImgPopup('${esc(imgSrc)}','${esc(itemTitle)}')">${esc(itemTitle)}</div>
+        <div class="title clickable-title" data-img="${esc(imgSrc)}" data-title="${esc(itemTitle)}" style="cursor:pointer">${esc(itemTitle)}</div>
         <div class="meta">
           <span>UPC: ${esc(formatUpcDisplay(item.barcode))}</span>
           <span class="qty-display" data-id="${item.id}">Qty: ${item.quantity || '?'}</span>
@@ -553,9 +553,9 @@ function renderRawbol(items) {
 
     const rawTitle = item.item_description || '';
     return `<div class="result-card">
-      <img src="${esc(imgSrc)}" onerror="this.src='${missingImg}'" style="cursor:pointer" onclick="showImgPopup(this.src,'${esc(rawTitle)}')">
+      <img src="${esc(imgSrc)}" onerror="this.src='${missingImg}'" class="clickable-thumb" data-title="${esc(rawTitle)}" style="cursor:pointer">
       <div class="details">
-        <div class="title" style="cursor:pointer" onclick="showImgPopup('${esc(imgSrc)}','${esc(rawTitle)}')">${esc(rawTitle)}</div>
+        <div class="title clickable-title" data-img="${esc(imgSrc)}" data-title="${esc(rawTitle)}" style="cursor:pointer">${esc(rawTitle)}</div>
         <div class="meta">
           <span>UPC: ${esc(formatUpcDisplay(upcRaw))}</span>
           <span>LOT: ${esc(item.lot_number)}</span>
@@ -571,15 +571,24 @@ function searchWarehouse(upc) {
   doSearch();
 }
 
+// Delegated click handler for thumbnail images and truncated titles
+document.addEventListener('click', (e) => {
+  const thumb = e.target.closest('.clickable-thumb');
+  if (thumb) { showImgPopup(thumb.src, thumb.dataset.title || ''); return; }
+  const titleDiv = e.target.closest('.clickable-title');
+  if (titleDiv) { showImgPopup(titleDiv.dataset.img || '', titleDiv.dataset.title || ''); }
+});
+
 // Image popup
 function showImgPopup(src, name) {
   const imgEl = document.getElementById('imgPopupImg');
   const nameEl = document.getElementById('imgPopupName');
-  const isMissing = !src || src.includes('data:image/svg');
+  const isMissing = !src || src.includes('data:image/svg') || src === missingImg;
   imgEl.src = isMissing ? '' : src;
-  imgEl.style.display = isMissing ? 'none' : '';
+  imgEl.style.display = isMissing ? 'none' : 'block';
   nameEl.textContent = name || '';
-  if(isMissing && !name) return;
+  // Always show popup if there's either an image or a name
+  if (isMissing && !name) return;
   document.getElementById('imgOverlay').classList.add('show');
 }
 function closeImgPopup() {

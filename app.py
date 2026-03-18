@@ -1154,6 +1154,37 @@ def _ready_to_ship_rawbol_total_qty_for_barcode(barcode):
             conn.close()
 
 
+def _ready_to_ship_sold_count_for_barcode(barcode):
+    base_barcode = _barcode_base_without_suffix(barcode) or str(barcode or '').strip()
+    target_key = _sold_removal_barcode_key(base_barcode)
+    variants = sorted(v.lower() for v in _sold_removal_barcode_variants(base_barcode))
+    invalid_upc_values = {'null', 'n/a', 'does not apply'}
+    if not target_key or target_key in invalid_upc_values:
+        return 0
+    conn = None
+    try:
+        conn = sqlite3.connect('sold.db')
+        cur = conn.cursor()
+        if variants:
+            placeholders = ','.join('?' for _ in variants)
+            cur.execute(
+                f"SELECT COALESCE(SUM(COALESCE(quantity,1)),0) FROM orders WHERE LOWER(TRIM(barcode)) IN ({placeholders})",
+                tuple(variants)
+            )
+        else:
+            cur.execute(
+                "SELECT COALESCE(SUM(COALESCE(quantity,1)),0) FROM orders WHERE LOWER(TRIM(barcode)) = ?",
+                (base_barcode.lower(),)
+            )
+        row = cur.fetchone()
+        return max(0, _coerce_int(row[0], 0)) if row else 0
+    except Exception:
+        return 0
+    finally:
+        if conn is not None:
+            conn.close()
+
+
 def _ready_to_ship_items_to_list_stats_for_barcode(barcode):
     upc = _normalize_upc_preserve_suffix_for_match(barcode)
     base_upc = upc.split('-', 1)[0] if upc else ''
@@ -6648,6 +6679,11 @@ def api_listingagent_queue_remove():
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e, 'listingagent:queue_remove')}), 500
 
+@app.route('/listing-log')
+def page_listing_log():
+    """Dedicated Listing Log page."""
+    return render_template('listing_log.html')
+
 @app.route('/api/listinglog/recent', methods=['GET'])
 def api_listinglog_recent():
     """Recent listing events (listinglog.db)."""
@@ -7880,6 +7916,13 @@ def api_listingagent_upc_detail(upc):
                     'last_sold': r['last_sold'] or ''
                 }
 
+        # Prep qty from items-to-list (matches what /items-to-list page shows)
+        try:
+            prep_stats = _ready_to_ship_items_to_list_stats_for_barcode(upc)
+            item['prep_qty'] = prep_stats.get('prepped_qty', 0)
+        except Exception:
+            item['prep_qty'] = None
+
         return jsonify({'success': True, 'item': item})
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e, 'listingagent:upc_detail')}), 500
@@ -8846,7 +8889,7 @@ def _listingagent_get_ebay_category_aspects(category_id: str, marketplace_id: st
     category_id = (category_id or '').strip()
     marketplace_id = (marketplace_id or 'EBAY_US').strip() or 'EBAY_US'
     values_limit = int(values_limit or 140)
-    values_limit = max(0, min(values_limit, 250))
+    values_limit = max(0, min(values_limit, 5000))
 
     cache_key = (marketplace_id, category_id, values_limit)
     now = time.time()
@@ -8980,6 +9023,118 @@ def api_listingagent_ebay_category_aspects():
         return jsonify(payload), e.status_code
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e, 'listingagent:ebay_category_aspects')}), 500
+
+def _ebay_catalog_aspects_to_dict(aspects_raw):
+    """Normalise eBay catalog aspects to {name: first_value} dict regardless of API shape."""
+    out = {}
+    if not aspects_raw:
+        return out
+    if isinstance(aspects_raw, dict):
+        for k, v in aspects_raw.items():
+            if isinstance(v, list):
+                out[k] = v[0] if v else ''
+            else:
+                out[k] = str(v)
+    elif isinstance(aspects_raw, list):
+        # Some Catalog API responses use [{localizedAspectName, value}] format
+        for item in aspects_raw:
+            if isinstance(item, dict):
+                name = item.get('localizedAspectName') or item.get('name') or ''
+                val = item.get('value') or ''
+                if name:
+                    out[name] = str(val)
+    return out
+
+@app.route('/api/listingagent/ebay/catalog_search', methods=['GET'])
+def api_listingagent_ebay_catalog_search():
+    """Search eBay active listings by UPC/GTIN or title and aggregate aspects (Browse API)."""
+    try:
+        upc = (request.args.get('upc') or request.args.get('gtin') or '').strip()
+        q = (request.args.get('q') or request.args.get('query') or '').strip()
+        limit = _listingagent_parse_int(request.args.get('limit'), 10) or 10
+        limit = max(1, min(limit, 20))
+
+        if not upc and not q:
+            raise _ListingAgentUserError('upc or q is required', status_code=400)
+
+        settings = _listingagent_get_settings()
+        marketplace_id = (request.args.get('marketplaceId') or settings.get('ebay_marketplace_id') or 'EBAY_US').strip()
+
+        def _browse_search(search_params):
+            return _ebay_buy_api_request(
+                'GET',
+                '/buy/browse/v1/item_summary/search',
+                # EXTENDED adds localizedAspects to each item summary
+                params={**search_params, 'fieldgroups': 'EXTENDED'},
+                marketplace_id=marketplace_id,
+            )
+
+        # Text search — same approach as comps, always works.
+        search_q = upc or q
+        resp = _browse_search({'q': search_q, 'limit': min(limit, 20)})
+        if resp.status_code >= 400:
+            raise _ListingAgentUserError(_ebay_extract_error(resp), status_code=resp.status_code)
+        data = resp.json() if resp.text else {}
+        items = data.get('itemSummaries') or []
+
+        if not items:
+            return jsonify({'success': True, 'results': [], 'total': 0})
+
+        # Aggregate localizedAspects across all results — most common value wins per aspect name.
+        # Item summaries include localizedAspects when the seller filled them in.
+        aspect_votes = {}  # {norm_name: {value: count, '_display': name}}
+        for item in items:
+            for a in (item.get('localizedAspects') or []):
+                name = (a.get('name') or '').strip()
+                value = (a.get('value') or '').strip()
+                if not name or not value:
+                    continue
+                norm = name.lower()
+                if norm not in aspect_votes:
+                    aspect_votes[norm] = {'_display': name}
+                aspect_votes[norm][value] = aspect_votes[norm].get(value, 0) + 1
+
+        aspects = {}
+        for norm, votes in aspect_votes.items():
+            display = votes.pop('_display', norm)
+            counts = {v: c for v, c in votes.items() if v != '_display'}
+            if counts:
+                aspects[display] = max(counts, key=lambda v: counts[v])
+
+        first = items[0]
+        title = str(first.get('title') or search_q).strip()
+        image = str((first.get('image') or {}).get('imageUrl') or '').strip()
+        brand = aspects.get('Brand') or aspects.get('brand') or ''
+
+        # Collect prices for range display
+        prices = []
+        for it in items:
+            try:
+                v = float((it.get('price') or {}).get('value') or 0)
+                if v > 0:
+                    prices.append(v)
+            except Exception:
+                pass
+        price_min = min(prices) if prices else None
+        price_max = max(prices) if prices else None
+
+        return jsonify({'success': True, 'results': [{
+            'epid': '',
+            'title': title,
+            'image': image,
+            'brand': brand,
+            'aspects': aspects,
+            'price_min': price_min,
+            'price_max': price_max,
+            'price_count': len(prices),
+        }], 'total': len(items)})
+    except _ListingAgentUserError as e:
+        payload = {'success': False, 'error': str(e)}
+        payload.update(e.extra or {})
+        return jsonify(payload), e.status_code
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'listingagent:ebay_catalog_search')}), 500
+
 
 def _listingagent_ebay_create_draft_offer(data, *, dry_run=False):
     upc = (data.get('upc') or '').strip()
@@ -9169,6 +9324,145 @@ def _listingagent_ebay_create_draft_offer(data, *, dry_run=False):
         'originalCondition': original_condition,
         'availableLocationKeys': all_location_keys[:50]
     }
+
+_EBAY_STORE_POLICIES_HTML = """
+<div style="font-family: Arial, Helvetica, sans-serif; font-size: 14px; line-height: 1.6; color: #222; max-width: 900px; margin: 0 auto;">
+  <div style="border: 1px solid #ddd; padding: 24px; background: #fff;">
+    <h2 style="margin: 0 0 20px; font-size: 24px; color: #111; border-bottom: 2px solid #111; padding-bottom: 10px;">Store Policies</h2>
+    <h3 style="margin: 24px 0 10px; font-size: 18px; color: #111;">Payment Policy</h3>
+    <p style="margin: 0 0 14px;">Payment is required within <strong>7 days</strong> of purchase or auction end. We follow <strong>eBay's Non-Paying Bidder Policies</strong>. By placing a bid or completing a purchase, the buyer agrees to all terms and policies listed on this page.</p>
+    <p style="margin: 0 0 14px;">We ship <strong>only to the PayPal payment address provided at checkout</strong>. No exceptions.</p>
+    <h3 style="margin: 24px 0 10px; font-size: 18px; color: #111;">Sales Terms</h3>
+    <p style="margin: 0 0 14px;">Due to the nature of our merchandise, <strong>all sales are considered final</strong> unless an item is found to be <strong>materially not as described</strong>.</p>
+    <h3 style="margin: 24px 0 10px; font-size: 18px; color: #111;">Shipping Policy</h3>
+    <p style="margin: 0 0 14px;">Because many of our listings begin at very low starting prices, we <strong>do not offer combined shipping</strong>.</p>
+    <h3 style="margin: 24px 0 10px; font-size: 18px; color: #111;">Return and Refund Policy</h3>
+    <p style="margin: 0 0 14px;">We offer a <strong>30-day return policy</strong> only in cases where an item has been <strong>incorrectly described</strong> in the listing.</p>
+    <p style="margin: 0 0 8px;"><strong>To qualify for a return:</strong></p>
+    <ul style="margin: 0 0 14px 20px; padding: 0;">
+      <li>The item must be returned in its <strong>original condition</strong></li>
+      <li>All <strong>original packaging</strong> must be included, such as boxes, cartons, tags, and inserts</li>
+      <li>The item must <strong>not</strong> have been cleaned, washed, or laundered</li>
+      <li>The return must be <strong>securely packaged</strong> for shipment</li>
+    </ul>
+    <p style="margin: 0 0 14px;">Returns must be initiated within <strong>30 days of delivery</strong>.</p>
+    <h3 style="margin: 24px 0 10px; font-size: 18px; color: #111;">Refund Terms</h3>
+    <p style="margin: 0 0 14px;">For approved returns, we will provide a <strong>prepaid return shipping label</strong>. Once the item is received and inspected, the refund will be processed within <strong>5 business days</strong>.</p>
+    <p style="margin: 0 0 8px;">If the returned item is found to be <strong>as described in the original listing</strong>, the refund may be reduced by:</p>
+    <ul style="margin: 0 0 14px 20px; padding: 0;">
+      <li>the original shipping cost</li>
+      <li>the return shipping cost</li>
+      <li>a <strong>20% restocking fee</strong></li>
+    </ul>
+    <p style="margin: 0 0 14px;">We may, at our sole discretion, accept returns that fall outside of our standard return policy. In such cases, a restocking fee may still apply.</p>
+    <h3 style="margin: 24px 0 10px; font-size: 18px; color: #111;">Special Return Conditions</h3>
+    <ul style="margin: 0 0 14px 20px; padding: 0;">
+      <li><strong>Buyer's remorse returns:</strong> buyer is responsible for return shipping and a <strong>20% restocking fee</strong></li>
+      <li><strong>Damaged or defective items:</strong> must be reported within <strong>48 hours of delivery</strong></li>
+      <li><strong>Undeliverable packages or incorrect shipping addresses:</strong> subject to return shipping charges plus a <strong>20% restocking fee</strong></li>
+    </ul>
+    <h3 style="margin: 24px 0 10px; font-size: 18px; color: #111;">Display / Color Disclaimer</h3>
+    <p style="margin: 0 0 14px;">We are not responsible for differences in color, tone, or appearance caused by individual monitor or screen settings.</p>
+    <h3 style="margin: 24px 0 10px; font-size: 18px; color: #111;">Feedback and Customer Service</h3>
+    <p style="margin: 0 0 14px;">We are committed to providing excellent service and earning <strong>5-star feedback</strong> from our customers.</p>
+    <p style="margin: 0 0 14px;">If you are satisfied with your purchase, we would appreciate your positive feedback. If you experience any issue with your order, please contact us before leaving neutral or negative feedback. We will make every reasonable effort to resolve the matter promptly and professionally.</p>
+    <p style="margin: 0 0 14px;">Once your order has shipped, tracking information will be provided.</p>
+    <h3 style="margin: 24px 0 10px; font-size: 18px; color: #111;">Business Hours</h3>
+    <p style="margin: 0 0 14px;">Please note that we are <strong>closed on weekends</strong>. Messages received outside business days will be answered as soon as possible during the week.</p>
+    <h3 style="margin: 24px 0 10px; font-size: 18px; color: #111;">Item Condition Notice</h3>
+    <p style="margin: 0 0 14px;">Many of our items are <strong>new major department store shelf pulls</strong>. As a result, they may show minor signs of handling from in-store display or customer inspection.</p>
+    <p style="margin: 0 0 14px;">Any significant flaws, including stains, tears, or other defects, are disclosed in the listing and photographed to the best of our ability.</p>
+    <p style="margin: 0 0 14px;">We provide detailed descriptions and multiple photos for every item. Buyers are encouraged to review <strong>all listing photos and the full description carefully</strong> before purchasing.</p>
+    <p style="margin: 0 0 14px;">All items are inspected prior to listing for presentation and accuracy.</p>
+    <h3 style="margin: 24px 0 10px; font-size: 18px; color: #111;">Authenticity Guarantee</h3>
+    <p style="margin: 0 0 14px;">The authenticity of our merchandise is <strong>100% guaranteed</strong>.</p>
+    <p style="margin: 0 0 14px;">Our high-end and designer brand items are carefully inspected, and we make every effort to describe them accurately and honestly.</p>
+    <h3 style="margin: 24px 0 10px; font-size: 18px; color: #111;">Product Sourcing</h3>
+    <p style="margin: 0;">Our inventory is acquired through <strong>closeout purchases from major department stores across the United States</strong>.</p>
+  </div>
+</div>
+"""
+
+@app.route('/api/listingagent/ebay/generate_description', methods=['POST'])
+def api_listingagent_ebay_generate_description():
+    """Generate an AI-powered listing description using Claude API (Anthropic) if configured, else template."""
+    try:
+        data = request.get_json(force=True) or {}
+        title = (data.get('title') or '').strip()
+        category_id = (data.get('category_id') or data.get('categoryId') or '').strip()
+        aspects = data.get('aspects') or {}
+        upc = (data.get('upc') or '').strip()
+
+        if not title:
+            raise _ListingAgentUserError('title is required', status_code=400)
+
+        anthropic_key = os.getenv('ANTHROPIC_API_KEY', '').strip()
+        if not anthropic_key:
+            raise _ListingAgentUserError('ANTHROPIC_API_KEY not found in environment — check .env on the Pi', status_code=503)
+
+        if anthropic_key:
+            # Build a concise prompt from available product data
+            aspect_lines = '\n'.join(f'- {k}: {v}' for k, v in aspects.items() if k and v) if aspects else ''
+            prompt = (
+                f"Write a compelling eBay listing description for the following product. "
+                f"Use plain HTML (h2, p, ul/li only). Be concise, highlight key features and condition. "
+                f"Do not include price. Do not mention eBay by name.\n\n"
+                f"Title: {title}\n"
+                + (f"Category ID: {category_id}\n" if category_id else "")
+                + (f"UPC: {upc}\n" if upc else "")
+                + (f"Item specifics:\n{aspect_lines}\n" if aspect_lines else "")
+            )
+            resp = requests.post(
+                'https://api.anthropic.com/v1/messages',
+                headers={
+                    'x-api-key': anthropic_key,
+                    'anthropic-version': '2023-06-01',
+                    'content-type': 'application/json',
+                },
+                json={
+                    'model': 'claude-haiku-4-5-20251001',
+                    'max_tokens': 1024,
+                    'messages': [{'role': 'user', 'content': prompt}],
+                },
+                timeout=30,
+            )
+            if resp.status_code >= 400:
+                try:
+                    err_body = resp.json()
+                    err_msg = (err_body.get('error') or {}).get('message') or resp.text[:300]
+                except Exception:
+                    err_msg = resp.text[:300]
+                raise _ListingAgentUserError(f'Anthropic API error ({resp.status_code}): {err_msg}', status_code=502)
+            result = resp.json()
+            description = (result.get('content') or [{}])[0].get('text', '').strip()
+            if not description:
+                raise _ListingAgentUserError(f'Anthropic API returned empty response. Raw: {str(result)[:200]}', status_code=502)
+            # Strip markdown code fences Claude sometimes adds
+            import re as _re
+            description = _re.sub(r'^```[^\n]*\n?', '', description).rstrip('`').strip()
+            return jsonify({'success': True, 'description': description + _EBAY_STORE_POLICIES_HTML, 'source': 'claude'})
+
+        # Fallback: structured template description
+        aspect_html = ''
+        if aspects:
+            rows = ''.join(f'<li><strong>{k}:</strong> {v}</li>' for k, v in aspects.items() if k and v)
+            if rows:
+                aspect_html = f'<ul>{rows}</ul>'
+        description = (
+            f'<h2>{title}</h2>'
+            f'<p>You are purchasing a <strong>{title}</strong>. '
+            f'This item ships fast and is carefully packaged.</p>'
+            + (f'<h3>Item Details</h3>{aspect_html}' if aspect_html else '')
+            + (f'<p><strong>UPC:</strong> {upc}</p>' if upc else '')
+            + '<p>Please message us with any questions before purchasing. Thank you!</p>'
+        )
+        return jsonify({'success': True, 'description': description + _EBAY_STORE_POLICIES_HTML, 'source': 'template'})
+
+    except _ListingAgentUserError as e:
+        # Always return 200 so Cloudflare tunnel doesn't swallow the response body
+        return jsonify({'success': False, 'error': str(e)})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'listingagent:ebay_generate_description')})
 
 @app.route('/api/listingagent/ebay/draft', methods=['POST'])
 def api_listingagent_ebay_draft():
@@ -9455,7 +9749,7 @@ def api_listingagent_ebay_publish():
         except Exception:
             pass
   
-        return jsonify({'success': True, 'listingId': listing_id, 'raw': pub_data})
+        return jsonify({'success': True, 'listingId': listing_id, 'offerId': offer_id, 'raw': pub_data})
     except _ListingAgentUserError as e:
         payload = {'success': False, 'error': str(e)}
         payload.update(e.extra or {})
@@ -10162,6 +10456,23 @@ def api_listingagent_amazon_catalog_search():
             except Exception:
                 pass
 
+        # Pre-fetch prices from amazonStore.db for any matching ASINs
+        asin_prices = {}
+        try:
+            raw_asins = [(it.get('asin') or '').strip() for it in items[:limit] if (it.get('asin') or '').strip()]
+            if raw_asins:
+                placeholders = ','.join('?' * len(raw_asins))
+                with db_connection('amazonStore.db') as aconn:
+                    acur = aconn.cursor()
+                    acur.execute(f'SELECT ASIN, PRICE FROM ITEMS WHERE ASIN IN ({placeholders})', raw_asins)
+                    for row in acur.fetchall():
+                        try:
+                            asin_prices[str(row[0] or '').strip().upper()] = float(row[1]) if row[1] is not None else None
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
         results = []
         for it in items[:limit]:
             asin = (it.get('asin') or '').strip()
@@ -10181,11 +10492,13 @@ def api_listingagent_amazon_catalog_search():
                     if image_url:
                         break
 
+            store_price = asin_prices.get(asin.upper())
             results.append({
                 'asin': asin,
                 'title': title or '',
                 'brand': brand or '',
-                'image': image_url or ''
+                'image': image_url or '',
+                'store_price': store_price,
             })
 
         out = {'success': True, 'results': results}
@@ -15567,7 +15880,7 @@ def _purge_zero_qty_items():
                         VALUES (?, ?, ?, 0)
                     ''', (item_id, now.isoformat(), delete_at.isoformat()))
                     marked_count += 1
-                    print(f"  ✓ Marked item {item_id} ({barcode}): {title[:50]} for deletion")
+                    print(f"  ✓ Marked item {item_id} ({barcode}): {(title or '')[:50]} for deletion")
             
             if marked_count > 0:
                 print(f"✅ Marked {marked_count} new zero-quantity items for deletion")
@@ -30526,6 +30839,7 @@ def ready_to_ship_order_stats(order_id):
             'sold_quantity': max(1, _coerce_int(order['quantity'], 1)),
             'warehouse_qty': _ready_to_ship_warehouse_qty_for_barcode(barcode),
             'macy_total_qty': _ready_to_ship_rawbol_total_qty_for_barcode(barcode),
+            'sold_count': _ready_to_ship_sold_count_for_barcode(barcode),
             'prepped_qty': max(0, _coerce_int(prep_stats.get('prepped_qty'), 0)),
             'items_to_list_url': str(prep_stats.get('items_to_list_url') or '')
         })
@@ -34714,7 +35028,10 @@ def api_update_shelf():
             if target_orig_path is not None:
                 target_orig_path.parent.mkdir(parents=True, exist_ok=True)
                 orig_file.save(str(target_orig_path))
-                _sync_original_to_preview_base(target_code)
+                # Only sync original→base when no cropped display was saved; otherwise
+                # the display (potentially cropped) is already the base.
+                if not saved_display_file:
+                    _sync_original_to_preview_base(target_code)
                 saved_original_file = True
 
         # If renaming requested and file exists, rename on disk
@@ -35277,6 +35594,7 @@ def api_upload_shelf():
             _sync_preview_base_image(shelf_code, target_display_path)
         
         # Save original image if provided
+        saved_display_file = should_save_display and target_display_path is not None
         if 'original_image' in request.files:
             orig_file = request.files['original_image']
             if orig_file.filename:
@@ -35284,8 +35602,11 @@ def api_upload_shelf():
                 if orig_path is not None:
                     orig_path.parent.mkdir(parents=True, exist_ok=True)
                     orig_file.save(str(orig_path))
-                    _sync_original_to_preview_base(shelf_code)
-        
+                    # Only sync original→base when no cropped display was saved; otherwise
+                    # the display (potentially cropped) is already the base.
+                    if not saved_display_file:
+                        _sync_original_to_preview_base(shelf_code)
+
         # Create or update shelf entry in database
         ensure_shelf_groups_table()
         with db_connection('searchRack.db', row_factory=False) as conn:

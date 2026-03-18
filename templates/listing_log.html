@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Listing Log</title>
+  <style>
+    :root{
+      --primary:#0984e3;--green:#00b894;--red:#e74c3c;--yellow:#f59e0b;
+      --bg:#f7f7f8;--card:#fff;--border:#e0e0e0;--ink:#0f172a;--muted:#64748b;
+      --radius:10px;
+    }
+    *{box-sizing:border-box;}
+    body{font-family:'Segoe UI',Arial,sans-serif;background:var(--bg);margin:0;padding:16px;color:var(--ink);}
+    .top{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:10px;margin-bottom:16px;}
+    .back-btn{display:inline-flex;align-items:center;gap:6px;text-decoration:none;color:var(--muted);font-size:0.9rem;font-weight:600;padding:6px 10px;border-radius:var(--radius);border:1px solid var(--border);background:var(--card);}
+    .back-btn:hover{color:var(--ink);}
+    h1{margin:0;font-size:1.3rem;text-align:center;}
+
+    /* Filters bar */
+    .filters{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:14px;}
+    .filters input,.filters select{padding:7px 10px;border:1px solid var(--border);border-radius:var(--radius);font-size:0.88rem;font-family:inherit;background:var(--card);color:var(--ink);}
+    .filters input{min-width:160px;}
+    .btn{display:inline-flex;align-items:center;gap:6px;padding:7px 13px;border:none;border-radius:var(--radius);font-size:0.88rem;font-weight:600;font-family:inherit;cursor:pointer;}
+    .btn-primary{background:var(--primary);color:#fff;}
+    .btn-primary:hover{filter:brightness(1.1);}
+    .btn-ghost{background:var(--card);color:var(--ink);border:1px solid var(--border);}
+    .btn-ghost:hover{background:#f0f0f0;}
+
+    /* Stats bar */
+    .stats{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:14px;}
+    .stat-pill{background:var(--card);border:1px solid var(--border);border-radius:999px;padding:4px 14px;font-size:0.83rem;font-weight:600;color:var(--muted);}
+    .stat-pill span{color:var(--ink);}
+
+    /* Table */
+    .table-wrap{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);overflow-x:auto;}
+    table{width:100%;border-collapse:collapse;font-size:0.84rem;}
+    thead tr{border-bottom:2px solid var(--border);background:#f9f9f9;}
+    th{padding:9px 11px;text-align:left;white-space:nowrap;font-weight:700;color:var(--muted);font-size:0.78rem;text-transform:uppercase;letter-spacing:.4px;}
+    th.sortable{cursor:pointer;user-select:none;}
+    th.sortable:hover{color:var(--ink);}
+    tbody tr{border-bottom:1px solid var(--border);transition:background .1s;}
+    tbody tr:hover{background:#f5f5f5;}
+    tbody tr.row-err{background:rgba(231,76,60,0.04);}
+    tbody tr.row-err:hover{background:rgba(231,76,60,0.09);}
+    td{padding:7px 11px;vertical-align:top;}
+    td.mono{font-family:monospace;font-size:0.80rem;}
+    td.muted{color:var(--muted);}
+
+    .badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:0.76rem;font-weight:700;}
+    .badge-ebay{background:#e8f5ff;color:#0a66c2;}
+    .badge-amazon{background:#fff6e8;color:#b45309;}
+    .badge-ok{background:#e8f5ee;color:#15803d;}
+    .badge-err{background:#fde8e8;color:#b91c1c;cursor:pointer;}
+
+    .empty{text-align:center;padding:40px 16px;color:var(--muted);}
+    .loading{text-align:center;padding:30px;color:var(--muted);}
+
+    /* Error detail tooltip via title attribute — also a popover */
+    .url-link{color:var(--primary);text-decoration:none;font-size:0.78rem;}
+    .url-link:hover{text-decoration:underline;}
+
+    /* Night mode */
+    html.ss-theme-night body{background:#0f172a;color:#e2e8f0;}
+    html.ss-theme-night .top h1{color:#e2e8f0;}
+    html.ss-theme-night .back-btn,.btn-ghost{background:#1e293b;border-color:#334155;color:#e2e8f0;}
+    html.ss-theme-night .back-btn:hover,.btn-ghost:hover{background:#263347;}
+    html.ss-theme-night .filters input,.filters select{background:#1e293b;border-color:#334155;color:#e2e8f0;}
+    html.ss-theme-night .stat-pill{background:#1e293b;border-color:#334155;}
+    html.ss-theme-night .table-wrap{background:#1e293b;border-color:#334155;}
+    html.ss-theme-night thead tr{background:#162032;}
+    html.ss-theme-night tbody tr:hover{background:#263347;}
+    html.ss-theme-night tbody tr.row-err{background:rgba(231,76,60,0.08);}
+    html.ss-theme-night tbody tr.row-err:hover{background:rgba(231,76,60,0.14);}
+  </style>
+</head>
+<body>
+  <div class="top">
+    <div>
+      <a class="back-btn" id="backBtn" href="/listingagent">&#8592; Listing Agent</a>
+    </div>
+    <h1>&#128196; Listing Log</h1>
+    <div></div>
+  </div>
+
+  <div class="filters">
+    <input type="text" id="filterUPC" placeholder="Filter by UPC…" />
+    <select id="filterPlatform">
+      <option value="">All platforms</option>
+      <option value="ebay">eBay</option>
+      <option value="amazon">Amazon</option>
+    </select>
+    <select id="filterStatus">
+      <option value="">All statuses</option>
+      <option value="ok">Success only</option>
+      <option value="err">Errors only</option>
+    </select>
+    <input type="text" id="filterSearch" placeholder="Search title / ID / SKU…" />
+    <button class="btn btn-primary" onclick="load()">&#128260; Refresh</button>
+    <select id="limitSelect">
+      <option value="100">Last 100</option>
+      <option value="250">Last 250</option>
+      <option value="500">Last 500</option>
+      <option value="1000">Last 1000</option>
+    </select>
+  </div>
+
+  <div class="stats" id="statsBar"></div>
+
+  <div class="table-wrap">
+    <div class="loading" id="loadingMsg">Loading…</div>
+    <div class="empty" id="emptyMsg" style="display:none;">No entries found.</div>
+    <table id="logTable" style="display:none;">
+      <thead>
+        <tr>
+          <th class="sortable" data-col="created_at">Date &#9660;</th>
+          <th>Platform</th>
+          <th class="sortable" data-col="upc">UPC</th>
+          <th>Title</th>
+          <th>Listing ID / SKU</th>
+          <th class="sortable" data-col="price">Price</th>
+          <th>Action</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="logBody"></tbody>
+    </table>
+  </div>
+
+  <script src="/static/i18n.js"></script>
+  <script>
+    let _allRows = [];
+    let _sortCol = 'created_at';
+    let _sortAsc = false;
+
+    // Back button — go to return param or listing agent
+    (function(){
+      try{
+        const p = new URLSearchParams(window.location.search);
+        const ret = p.get('return');
+        if(ret && ret.startsWith('/')) document.getElementById('backBtn').href = ret;
+      }catch(e){}
+    })();
+
+    async function load(){
+      const upc = document.getElementById('filterUPC').value.trim();
+      const platform = document.getElementById('filterPlatform').value;
+      const limit = document.getElementById('limitSelect').value || '100';
+      document.getElementById('loadingMsg').style.display = '';
+      document.getElementById('emptyMsg').style.display = 'none';
+      document.getElementById('logTable').style.display = 'none';
+      document.getElementById('statsBar').innerHTML = '';
+      try{
+        let url = `/api/listinglog/recent?limit=${limit}`;
+        if(upc) url += '&upc=' + encodeURIComponent(upc);
+        if(platform) url += '&platform=' + encodeURIComponent(platform);
+        const res = await fetch(url);
+        const data = await res.json();
+        _allRows = data.items || [];
+        document.getElementById('loadingMsg').style.display = 'none';
+        render();
+      }catch(err){
+        document.getElementById('loadingMsg').textContent = 'Error: ' + (err.message || err);
+      }
+    }
+
+    function render(){
+      const statusFilter = document.getElementById('filterStatus').value;
+      const search = document.getElementById('filterSearch').value.trim().toLowerCase();
+
+      let rows = _allRows.filter(it => {
+        if(statusFilter === 'ok' && !it.success) return false;
+        if(statusFilter === 'err' && it.success) return false;
+        if(search){
+          const hay = [it.title, it.listing_id, it.offer_id, it.sku, it.asin, it.upc].join(' ').toLowerCase();
+          if(!hay.includes(search)) return false;
+        }
+        return true;
+      });
+
+      // Sort
+      rows.sort((a, b) => {
+        let va = a[_sortCol], vb = b[_sortCol];
+        if(_sortCol === 'price'){ va = parseFloat(va) || 0; vb = parseFloat(vb) || 0; }
+        if(va == null) va = '';
+        if(vb == null) vb = '';
+        const cmp = va < vb ? -1 : va > vb ? 1 : (b.id - a.id);
+        return _sortAsc ? cmp : -cmp;
+      });
+
+      // Stats
+      const total = rows.length;
+      const ok = rows.filter(r => r.success).length;
+      const err = total - ok;
+      const platforms = {};
+      rows.forEach(r => { const p = (r.platform||'?').toUpperCase(); platforms[p] = (platforms[p]||0)+1; });
+      const statsHtml = [
+        `<div class="stat-pill">Total <span>${total}</span></div>`,
+        `<div class="stat-pill">&#10003; OK <span>${ok}</span></div>`,
+        err ? `<div class="stat-pill">&#10007; Errors <span>${err}</span></div>` : '',
+        ...Object.entries(platforms).map(([p,n]) => `<div class="stat-pill">${p} <span>${n}</span></div>`)
+      ].join('');
+      document.getElementById('statsBar').innerHTML = statsHtml;
+
+      if(!rows.length){
+        document.getElementById('emptyMsg').style.display = '';
+        document.getElementById('logTable').style.display = 'none';
+        return;
+      }
+      document.getElementById('emptyMsg').style.display = 'none';
+      document.getElementById('logTable').style.display = 'table';
+
+      document.getElementById('logBody').innerHTML = rows.map(it => {
+        const dt = (it.created_at||'').replace('T',' ').substring(0,16) || '—';
+        const platform = (it.platform||'—').toLowerCase();
+        const platformBadge = platform === 'ebay'
+          ? '<span class="badge badge-ebay">eBay</span>'
+          : platform === 'amazon'
+            ? '<span class="badge badge-amazon">AMZ</span>'
+            : `<span class="badge">${platform}</span>`;
+        const upc = it.upc || '—';
+        const title = it.title
+          ? `<span title="${esc(it.title)}">${esc(it.title.length > 50 ? it.title.substring(0,50)+'…' : it.title)}</span>`
+          : '<span style="color:var(--muted)">—</span>';
+
+        const idParts = [];
+        if(it.listing_id) idParts.push(it.listing_id);
+        if(it.offer_id && it.offer_id !== it.listing_id) idParts.push('offer:'+it.offer_id);
+        if(it.sku) idParts.push('SKU:'+it.sku);
+        if(!idParts.length && it.asin) idParts.push('ASIN:'+it.asin);
+        const idStr = idParts.join('<br>') || '—';
+        const urlLink = it.url ? `<br><a class="url-link" href="${esc(it.url)}" target="_blank" rel="noopener">View listing &#8599;</a>` : '';
+
+        const price = it.price != null ? '$'+parseFloat(it.price).toFixed(2) : '—';
+        const action = it.action || '—';
+
+        const statusBadge = it.success
+          ? '<span class="badge badge-ok">&#10003; OK</span>'
+          : `<span class="badge badge-err" title="${esc(it.error||'Unknown error')}">&#10007; Err</span>`;
+
+        const rowClass = it.success ? '' : 'row-err';
+        return `<tr class="${rowClass}">
+          <td class="muted" style="white-space:nowrap;">${dt}</td>
+          <td>${platformBadge}</td>
+          <td class="mono">${esc(upc)}</td>
+          <td>${title}</td>
+          <td class="mono">${idStr}${urlLink}</td>
+          <td style="text-align:right;">${price}</td>
+          <td class="muted" style="white-space:nowrap;">${esc(action)}</td>
+          <td>${statusBadge}</td>
+        </tr>`;
+      }).join('');
+    }
+
+    function esc(s){ return (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+    // Sort headers
+    document.querySelectorAll('th.sortable').forEach(th => {
+      th.addEventListener('click', () => {
+        const col = th.dataset.col;
+        if(_sortCol === col){ _sortAsc = !_sortAsc; }
+        else{ _sortCol = col; _sortAsc = col === 'price'; }
+        document.querySelectorAll('th.sortable').forEach(t => t.textContent = t.textContent.replace(/ [▲▼]$/,''));
+        th.textContent = th.textContent + (_sortAsc ? ' ▲' : ' ▼');
+        render();
+      });
+    });
+
+    // Live filter
+    ['filterStatus','filterSearch'].forEach(id => {
+      document.getElementById(id).addEventListener('input', render);
+    });
+
+    load();
+  </script>
+</body>
+</html>

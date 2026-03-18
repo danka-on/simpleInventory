@@ -488,6 +488,7 @@
     }
     .order-popup-card .rt-order-stat-value.tone-warehouse { color: #86efac; }
     .order-popup-card .rt-order-stat-value.tone-macy { color: #fcd34d; }
+    .order-popup-card .rt-order-stat-value.tone-sold { color: #f9a8d4; }
     .order-popup-card .rt-order-stat-value.tone-prepped { color: #93c5fd; }
     .order-popup-card .rt-prep-section {
       text-align: left;
@@ -1111,6 +1112,7 @@
     html.ss-theme-day .order-popup-card .rt-order-stat-label { color: #475569; }
     html.ss-theme-day .order-popup-card .rt-order-stat-value.tone-warehouse { color: #15803d; }
     html.ss-theme-day .order-popup-card .rt-order-stat-value.tone-macy { color: #b45309; }
+    html.ss-theme-day .order-popup-card .rt-order-stat-value.tone-sold { color: #be185d; }
     html.ss-theme-day .order-popup-card .rt-order-stat-value.tone-prepped { color: #1d4ed8; }
     html.ss-theme-day .order-popup-card .rt-prep-section {
       border-top-color: #e5e7eb;
@@ -2782,7 +2784,7 @@ function buildReadyToShipStatPill(value, href, tone = 'prepped') {
     return `<${tag}${attrs} class="rt-order-stat-value ${toneClass}${linkClass}">${safeValue}</${tag}>`;
 }
 
-function renderReadyToShipOrderStatsHtml({ warehouseHtml = '...', macyHtml = '...', preppedHtml = '...' } = {}) {
+function renderReadyToShipOrderStatsHtml({ warehouseHtml = '...', macyHtml = '...', soldHtml = '...', preppedHtml = '...' } = {}) {
     return `
         <div class="rt-order-stats">
             <div class="rt-order-stat">
@@ -2796,6 +2798,10 @@ function renderReadyToShipOrderStatsHtml({ warehouseHtml = '...', macyHtml = '..
             <div class="rt-order-stat">
                 <span class="rt-order-stat-label">total from macy:</span>
                 ${macyHtml}
+            </div>
+            <div class="rt-order-stat">
+                <span class="rt-order-stat-label">sold:</span>
+                ${soldHtml}
             </div>
         </div>
     `;
@@ -2942,6 +2948,7 @@ async function loadReadyToShipOrderStats(order, host) {
     host.innerHTML = renderReadyToShipOrderStatsHtml({
         warehouseHtml: '...',
         macyHtml: '...',
+        soldHtml: '...',
         preppedHtml: '...'
     });
 
@@ -2956,16 +2963,19 @@ async function loadReadyToShipOrderStats(order, host) {
 
         const warehouseQty = Math.max(0, parsePosInt(data.warehouse_qty, 0));
         const macyTotalQty = Math.max(0, parsePosInt(data.macy_total_qty, 0));
+        const soldCount = Math.max(0, parsePosInt(data.sold_count, 0));
         const preppedQty = Math.max(0, parsePosInt(data.prepped_qty, 0));
         const baseBarcode = prepBaseUpc(data.base_barcode || data.barcode || order.barcode || '');
         const searchKey = String(baseBarcode || data.barcode || order.barcode || '').trim();
         const warehouseHref = searchKey ? `/searchrack?db=searchRack&q=${encodeURIComponent(searchKey)}` : '';
         const macyHref = searchKey ? `/searchrack?db=bol&q=${encodeURIComponent(searchKey)}` : '';
+        const soldHref = searchKey ? `/searchrack?db=sold&q=${encodeURIComponent(searchKey)}` : '';
         const itemsToListUrl = String(data.items_to_list_url || buildItemsToListSearchUrl(baseBarcode));
 
         host.innerHTML = renderReadyToShipOrderStatsHtml({
             warehouseHtml: buildReadyToShipStatPill(warehouseQty, warehouseHref, 'warehouse'),
             macyHtml: buildReadyToShipStatPill(macyTotalQty, macyHref, 'macy'),
+            soldHtml: buildReadyToShipStatPill(soldCount, soldHref, 'sold'),
             preppedHtml: buildReadyToShipStatPill(preppedQty, itemsToListUrl, 'prepped')
         });
     } catch (err) {
@@ -2973,6 +2983,7 @@ async function loadReadyToShipOrderStats(order, host) {
         host.innerHTML = renderReadyToShipOrderStatsHtml({
             warehouseHtml: '--',
             macyHtml: '--',
+            soldHtml: '--',
             preppedHtml: '--'
         });
     }
@@ -3139,7 +3150,7 @@ function showOrderPopup(order, options = {}) {
                 margin-top: 18px;
                 margin-bottom: 16px;
             ">
-                ${renderReadyToShipOrderStatsHtml({ warehouseHtml: '...', macyHtml: '...', preppedHtml: '...' })}
+                ${renderReadyToShipOrderStatsHtml({ warehouseHtml: '...', macyHtml: '...', soldHtml: '...', preppedHtml: '...' })}
             </div>
         `;
     }
@@ -3238,7 +3249,7 @@ window.openLocationMediaPreview = openLocationMediaPreview;
     setTimeout(checkTokenStatus, 10 * 60 * 1000);
 })();
 </script>
-<script src="/static/location-preview.js?v=20260313b"></script>
+<script src="/static/location-preview.js?v=20260317a"></script>
 <script src="/static/i18n.js"></script>
 </body>
 </html>

@@ -1811,9 +1811,48 @@ function saveShelf() {
         loadData();
     };
 
+    // Build a cropped blob if the user drew a rectangle; otherwise use full canvas.
+    const getCroppedBlob = () => new Promise(resolve => {
+        try {
+            const hasRect = state.rectW !== 0 && state.rectH !== 0 && state.currentImage;
+            if (!hasRect) {
+                state.canvas.toBlob(b => resolve(b), 'image/png');
+                return;
+            }
+            const rw = Math.abs(state.rectW);
+            const rh = Math.abs(state.rectH);
+            const rx = state.rectW >= 0 ? state.rectX : state.rectX + state.rectW;
+            const ry = state.rectH >= 0 ? state.rectY : state.rectY + state.rectH;
+            const cx = rx + rw / 2;
+            const cy = ry + rh / 2;
+            // Scale canvas display coords → source image coords
+            const scaleX = (state.currentImage.naturalWidth || state.currentImage.width) / state.canvas.width;
+            const scaleY = (state.currentImage.naturalHeight || state.currentImage.height) / state.canvas.height;
+            const cropW = Math.max(1, Math.round(rw * scaleX));
+            const cropH = Math.max(1, Math.round(rh * scaleY));
+            const imgCX = cx * scaleX;
+            const imgCY = cy * scaleY;
+            const imgW = state.currentImage.naturalWidth || state.currentImage.width;
+            const imgH = state.currentImage.naturalHeight || state.currentImage.height;
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = cropW;
+            tempCanvas.height = cropH;
+            const tCtx = tempCanvas.getContext('2d');
+            tCtx.save();
+            tCtx.translate(cropW / 2, cropH / 2);
+            tCtx.rotate(-state.rectRotation);
+            tCtx.drawImage(state.currentImage, -imgCX, -imgCY, imgW, imgH);
+            tCtx.restore();
+            tempCanvas.toBlob(b => resolve(b || null), 'image/png');
+        } catch (e) {
+            console.error('Crop error, falling back to full canvas:', e);
+            state.canvas.toBlob(b => resolve(b), 'image/png');
+        }
+    });
+
     try {
-        // Convert canvas to blob
-        state.canvas.toBlob(async blob => {
+        // Convert canvas to blob (cropped to rect if one was drawn)
+        getCroppedBlob().then(async blob => {
             try {
                 if (saveToken !== state.saveRequestToken) return;
 
@@ -1884,7 +1923,7 @@ function saveShelf() {
                 showError('Error saving shelf: ' + err.message);
                 finishSave(true);
             }
-        }, 'image/png');
+        });
     } catch (e) {
         console.error('Error in save process:', e);
         showError('Error preparing save: ' + e.message);
