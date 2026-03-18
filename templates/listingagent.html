@@ -1862,7 +1862,7 @@
               <div class="field" style="margin:0;">
                 <label style="font-weight:700;">From Your Store</label>
                 <div class="hint">Active listings for this UPC — click one to use as a draft template.</div>
-                <div id="ebayCompsBox" class="miniBox" style="margin-top:8px;max-height:220px;overflow-y:auto;">
+                <div id="ebayCompsBox" class="miniBox" tabindex="-1" style="margin-top:8px;max-height:220px;overflow-y:auto;outline:none;">
                   <div class="muted">Select a UPC to load comps.</div>
                 </div>
               </div>
@@ -3226,7 +3226,8 @@
 
       const meta = [];
       if(prepQty !== null){
-        meta.push(`<span class=\"badge badgeGreen\" title="Prep quantity from items-to-list">Prep: ${prepQty}</span>`);
+        const prepUrl = '/items-to-list?q=' + encodeURIComponent(state.activeUpc || item.upc || '') + '&status=good,bad,return&direct_search=1';
+        meta.push(`<a href="${escapeHtml(prepUrl)}" target="_blank" rel="noopener" class="badge badgeGreen" style="text-decoration:none;cursor:pointer;" title="Go to Items to List for this item">Prep: ${prepQty}</a>`);
       }
       if(allPositions.length){
         meta.push(`<button type="button" id="btnTogglePositions" class="badge" style="cursor:pointer;border:none;background:var(--bg2);color:var(--ink);padding:3px 8px;border-radius:999px;font-size:0.72rem;font-weight:600;" title="Click to view warehouse locations"><i class="fas fa-warehouse" style="margin-right:4px;font-size:0.65rem;"></i>Warehouse: ${qty || 0}</button>`);
@@ -3241,16 +3242,9 @@
       }
       $('previewMeta').innerHTML = meta.join(' ');
 
-      // Position expand panel
-      const posPanel = $('previewPositions');
-      posPanel.innerHTML = '';
+      // Warehouse locations modal
+      $('previewPositions').innerHTML = '';
       if(allPositions.length){
-        let panelOpen = false;
-        const toggleBtn = document.getElementById('btnTogglePositions');
-        const panel = document.createElement('div');
-        panel.style.cssText = 'display:none;margin-top:10px;';
-
-        // Build per-position cards using same logic as ready-to-ship
         function _lagMapKey(code){
           const compact = (code||'').replace(/\s+/g,'').toLowerCase();
           const base = compact.replace(/b\d+$/i,'');
@@ -3279,39 +3273,54 @@
           if(!posByKey.has(p)) posByKey.set(p, {code: p, previewKey: pk, qty: 0});
           posByKey.get(p).qty += Number(row.quantity||1);
         }
-        // Fall back to positions list if rows empty
         if(!posByKey.size) for(const p of allPositions) posByKey.set(p, {code: p, previewKey: p, qty: null});
-
         const posEntries = [...posByKey.values()];
-        let html = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px;">`;
-        for(const loc of posEntries){
-          const shelfSrc = _lagShelfUrl(loc.code);
-          const mapSrc = _lagMapUrl(loc.code);
-          const qtyLabel = loc.qty !== null ? ` · Qty ${loc.qty}` : '';
-          const safeCode = escapeHtml(loc.code);
-          const safePk = escapeHtml(loc.previewKey);
-          html += `<div style="border:1px solid var(--border);border-radius:10px;overflow:hidden;background:var(--card);">
-            <div style="padding:6px 10px;font-size:0.72rem;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--border);">${safeCode}${qtyLabel}</div>
-            <div style="display:grid;grid-template-columns:${mapSrc?'1fr 1fr':'1fr'};gap:0;">
-              <button type="button" title="Shelf photo — click to expand" onclick="if(window.SSLocationPreview)SSLocationPreview.openForLocation('${safeCode}','${safePk}','Location: ${safeCode}',0)" style="border:none;background:none;padding:6px;cursor:zoom-in;display:block;">
-                <img src="${escapeHtml(shelfSrc)}" alt="${safeCode}" style="width:100%;max-height:130px;object-fit:contain;border-radius:6px;" onerror="this.closest('button').style.display='none'">
-              </button>
-              ${mapSrc ? `<button type="button" title="Position map — click to expand" onclick="if(window.SSLocationPreview)SSLocationPreview.openForLocation('${safeCode}','${safePk}','Location: ${safeCode}',1)" style="border:none;background:none;padding:6px;cursor:zoom-in;display:block;border-left:1px solid var(--border);">
-                <img src="${escapeHtml(mapSrc)}" alt="${safeCode} map" style="width:100%;max-height:130px;object-fit:contain;border-radius:6px;" onerror="this.closest('button').style.display='none'">
-              </button>` : ''}
-            </div>
-          </div>`;
-        }
-        html += `</div>`;
-        panel.innerHTML = html;
-        posPanel.appendChild(panel);
 
+        const toggleBtn = document.getElementById('btnTogglePositions');
         if(toggleBtn){
           toggleBtn.onclick = () => {
-            panelOpen = !panelOpen;
-            panel.style.display = panelOpen ? '' : 'none';
-            toggleBtn.style.background = panelOpen ? 'var(--blue)' : 'var(--bg2)';
-            toggleBtn.style.color = panelOpen ? '#fff' : 'var(--ink)';
+            // Remove any existing warehouse modal
+            const old = document.getElementById('warehouseLocModal');
+            if(old){ old.remove(); return; }
+
+            const modal = document.createElement('div');
+            modal.id = 'warehouseLocModal';
+            modal.style.cssText = 'position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:18px;background:rgba(2,6,23,0.72);backdrop-filter:blur(2px);z-index:20000;';
+
+            const box = document.createElement('div');
+            box.style.cssText = 'background:var(--card);border-radius:14px;max-width:700px;width:100%;max-height:85vh;overflow-y:auto;padding:18px;position:relative;';
+
+            const hdr = document.createElement('div');
+            hdr.style.cssText = 'display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;';
+            hdr.innerHTML = `<span style="font-size:0.95rem;font-weight:700;"><i class="fas fa-warehouse" style="margin-right:6px;color:var(--muted);"></i>Warehouse Locations</span><button type="button" onclick="document.getElementById('warehouseLocModal').remove()" style="border:none;background:none;font-size:1.4rem;line-height:1;cursor:pointer;color:var(--muted);padding:0 4px;">&times;</button>`;
+            box.appendChild(hdr);
+
+            const grid = document.createElement('div');
+            grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;';
+            for(const loc of posEntries){
+              const shelfSrc = _lagShelfUrl(loc.code);
+              const mapSrc = _lagMapUrl(loc.code);
+              const qtyLabel = loc.qty !== null ? ` · Qty ${loc.qty}` : '';
+              const safeCode = escapeHtml(loc.code);
+              const safePk = escapeHtml(loc.previewKey);
+              const card = document.createElement('div');
+              card.style.cssText = 'border:1px solid var(--border);border-radius:10px;overflow:hidden;background:var(--bg);';
+              card.innerHTML = `
+                <div style="padding:6px 10px;font-size:0.72rem;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--border);">${safeCode}${escapeHtml(qtyLabel)}</div>
+                <div style="display:grid;grid-template-columns:${mapSrc?'1fr 1fr':'1fr'};gap:0;">
+                  <button type="button" title="Shelf photo — click to expand" onclick="if(window.SSLocationPreview)SSLocationPreview.openForLocation('${safeCode}','${safePk}','Location: ${safeCode}',0)" style="border:none;background:none;padding:6px;cursor:zoom-in;display:block;">
+                    <img src="${escapeHtml(shelfSrc)}" alt="${safeCode}" style="width:100%;max-height:160px;object-fit:contain;border-radius:6px;" onerror="this.closest('button').style.display='none'">
+                  </button>
+                  ${mapSrc ? `<button type="button" title="Position map — click to expand" onclick="if(window.SSLocationPreview)SSLocationPreview.openForLocation('${safeCode}','${safePk}','Location: ${safeCode}',1)" style="border:none;background:none;padding:6px;cursor:zoom-in;display:block;border-left:1px solid var(--border);">
+                    <img src="${escapeHtml(mapSrc)}" alt="${safeCode} map" style="width:100%;max-height:160px;object-fit:contain;border-radius:6px;" onerror="this.closest('button').style.display='none'">
+                  </button>` : ''}
+                </div>`;
+              grid.appendChild(card);
+            }
+            box.appendChild(grid);
+            modal.appendChild(box);
+            modal.addEventListener('click', e => { if(e.target === modal) modal.remove(); });
+            document.body.appendChild(modal);
           };
         }
       }
@@ -4106,6 +4115,52 @@
       }
     }
 
+    // Comprehensive brand list used as fallback/supplement for brand datalists.
+    // Merged with whatever eBay's aspect API returns so all letters A-Z are searchable.
+    const _BRAND_LIST = [
+      'Abercrombie & Fitch','Acer','Adidas','Adobe','AEG','Aeropostale','Airbus','AKG','Alienware',
+      'Alpine','Amazon','AMD','American Eagle','American Girl','Amiga','Anker','AOC','Apple',
+      'Arctic','Armani','Asus','AT&T','Atari','Audeze','Audio-Technica','Audi','Avery',
+      'Baldwin','Bang & Olufsen','Barbie','Barnes & Noble','Batman','Bauer','Beats','Belkin','BenQ',
+      'Black & Decker','Blackberry','Blink','Blythe','Bosch','Boss','Braun','Brother','Breville',
+      'Brookstone','Buffalo',"Burt's Bees",
+      'Calvin Klein','Canon','Casio','Cat','Champion','Chanel','Chrome','Cisco','CloSYS',
+      'Coach','Coleman','Columbia','Compaq','Converse','Corsair','Craftsman','Creative',
+      'Cuisinart','Cutter & Buck',
+      'Daisy','DAIWA','DALL-E','Dashlane','Daikin','Dansko','Datalogic','Dazzle','DeWalt',
+      'Dior','Disney','Dockers','Dolby','Domo','Dove','Dremel','Dyson',
+      'Eagle','Eastpak','Ecco','Edimax','Elo','Emerson','ENERMAX','Epson','Ericsson','ESET',
+      'Esprit','Eureka','Evernote',
+      'Fender','Fila','Fitbit','Ford','Fossil','Fujifilm','Fujitsu',
+      'Garmin','GE','Gibson','Gillette','Giorgio Armani','Google','GoPro','Graco','Gucci',
+      'H&M','Hallmark','Hamilton Beach','Harman Kardon','Hasbro','HID','Hikvision',
+      'Hoover','HP','HTC','Hugo Boss','Huawei','Huf',
+      'IBM','iHome','iLive','InFocus','Insignia','Intel','iRobot',
+      'JBL','JLab','Jabra','Jack & Jones','Jansport','JVC',
+      'Kaeser','Kellogg','Kenmore','Keurig','Kidde','Kingston','Klipsch','KitchenAid','Kodak','Koss',
+      'LG','Lego','Lenovo',"Levi's",'Linksys','Logitech','Lululemon',
+      'Mack','Makita','Marshall','Marvel','Mattel','Maytag','Microsoft','Milwaukee','Minecraft',
+      'Minolta','Moen','Motorola','MSI','MTD',
+      'NEC','Nest','Netgear','New Balance','Nike','Nintendo','Nikon','Nokia','North Face',
+      'Nvidia',
+      'OGIO','OLAY','Old Navy','Olympus','Omron','ONKYO','Oracle','Oster','OtterBox',
+      'Packard Bell','Panasonic','Patagonia','Pelican','Philips','Pioneer','Plantronics',
+      'Plantronics','Polk Audio','Polo Ralph Lauren','PopSockets','Prada','ProCase','PROLINK',
+      'Qualcomm','Quiksilver',
+      'Razer','REEBOK','Remington','Ricoh','Ring','Roku','Rolex','Roland','Rowenta',
+      'Samsung','Sandisk','Sanyo','Schwinn','Sennheiser','Sharp','Shure','Siemens',
+      'Sigma','Skullcandy','SMSL','Sony','Sonos','Spyder','Star Wars','Steelseries',
+      'Subaru','Sylvania',
+      'TCL','TECO','Thermos','Timberland','Tommy Hilfiger','Toro','Toshiba','TRENDnet',
+      'Turtle Beach','Type-S',
+      'Under Armour','Ugg','Uniden','Uniqlo',
+      'Vans','VCOM','Verbatim','Verizon','Viewsonic','Vizio','Volcom',
+      'Walmart','Wayfair','Wella','Western Digital','Whirlpool','Wilson','Windex',
+      'Xbox','Xerox',
+      'Yamaha','Yeti',
+      'Zebra','Zenith','Zoom'
+    ].sort();
+
     function getDefaultEbayAspectsMeta(){
       // Core specifics commonly present across many eBay categories.
       return [
@@ -4289,12 +4344,15 @@
             inp.dataset.ebayAspect = name;
             inp.dataset.maxValues = String(maxValues || 1);
             inp.dataset.aspectRequired = a.required ? '1' : '0';
-            if(values.length){
+            if(values.length || isBrandLike){
               inp.setAttribute('list', dlId);
               const dl = document.createElement('datalist');
               dl.id = dlId;
-              // Brand-like fields get all values (may be thousands); others capped to keep DOM lean.
-              const dlValues = isBrandLike ? values : values.slice(0, 300);
+              // Brand-like: merge eBay values with built-in list so all A-Z brands are searchable.
+              // Others: cap to keep DOM lean.
+              const dlValues = isBrandLike
+                ? [...new Set([...values, ..._BRAND_LIST])]
+                : values.slice(0, 300);
               dlValues.forEach(v => {
                 const opt = document.createElement('option');
                 opt.value = v;
@@ -5937,7 +5995,7 @@
     // auto-filled (UPC, SKU, title, description, qty) is intentionally excluded
     // UNLESS it is genuinely empty (e.g. title missing from rawbol).
     // IDs of "always present" fields that have defaults (not counted as empty in badge)
-    const _CYCLE_ONLY_IDS = new Set(['condition', 'amazonConditionType']);
+    const _CYCLE_ONLY_IDS = new Set(['condition', 'amazonConditionType', 'listingDescEditor', 'ebayCompsBox', 'ebayCatalogQ', 'fulfillmentPolicyId']);
 
     function _getUnfilledRequired(){
       if(!state.item) return [];
@@ -5952,40 +6010,15 @@
         if(ap === '' || Number.isNaN(Number(ap))) push('amazonPrice');
         const ask = ($('amazonSku')?.value || '').trim();
         if(!ask) push('amazonSku');
-        const descTxt = (typeof getDescHtml === 'function' ? getDescHtml() : '').replace(/<[^>]+>/g,'').trim();
-        if(!descTxt) push('listingDescEditor');
+        push('listingDescEditor'); // always — review even when filled
       } else {
-        // eBay order: title → condition → price → brand → description → category → required aspects → policies
-        pushIfEmpty('title');
-
-        push('condition'); // always — has default, review deliberately
-
-        const pr = ($('price')?.value ?? '').trim();
-        if(pr === '' || Number.isNaN(Number(pr))) push('price');
-
-        // Brand aspect (if empty)
-        const brandEl = $('ebayAspectsBox')?.querySelector('[data-ebay-aspect="Brand"]');
-        if(brandEl && !(brandEl.value || '').trim()) els.push(brandEl);
-
-        // Description (if empty)
-        const descTxt = (typeof getDescHtml === 'function' ? getDescHtml() : '').replace(/<[^>]+>/g,'').trim();
-        if(!descTxt) push('listingDescEditor');
-
-        const cat = ($('categoryId')?.value || '').trim();
-        if(!cat) push('categoryId');
-
-        // Required aspects (dynamically rendered, excluding brand already added)
-        const box = $('ebayAspectsBox');
-        if(box){
-          box.querySelectorAll('[data-ebay-aspect][data-aspectRequired="1"]').forEach((el) => {
-            if(!(el.value || '').trim() && el !== brandEl) els.push(el);
-          });
-        }
-
-        // Policies — only if not yet set
-        if(!($('fulfillmentPolicyId')?.value || '').trim()) push('fulfillmentPolicyId');
-        if(!($('paymentPolicyId')?.value || '').trim()) push('paymentPolicyId');
-        if(!($('returnPolicyId')?.value || '').trim()) push('returnPolicyId');
+        // eBay order: comps → eBay market → condition → price → description → fulfillment policy
+        push('ebayCompsBox');    // scroll to "From Your Store" catalog — always review
+        push('ebayCatalogQ');    // scroll to "From eBay Market" search — always review
+        push('condition');       // always — has default, review deliberately
+        push('price');           // always — review even when filled
+        push('listingDescEditor'); // always — review even when filled
+        push('fulfillmentPolicyId'); // always — review even when filled
       }
       return els;
     }
@@ -6041,26 +6074,12 @@
       return !!(el.value || '').trim();
     }
 
-    function _jumpNextField(){
+    function _stepField(delta){
       const fields = _getUnfilledRequired();
       if(!fields.length){ _updateNextFieldBtn(); return; }
       if(_nextFieldIdx >= fields.length) _nextFieldIdx = 0;
-      // Determine if any genuinely empty (non-cycle-only, actually unfilled) fields exist
-      const hasRealEmpty = fields.some(el => !_CYCLE_ONLY_IDS.has(el.id) && !_isFieldFilled(el));
-      let target = null;
-      for(let i = 0; i < fields.length; i++){
-        const idx = (_nextFieldIdx + i) % fields.length;
-        const el = fields[idx];
-        // Skip any field that is already filled when there are still genuinely empty ones
-        const isFilled = _isFieldFilled(el);
-        const skip = isFilled && hasRealEmpty;
-        if(!skip){
-          target = el;
-          _nextFieldIdx = (idx + 1) % fields.length;
-          break;
-        }
-      }
-      if(!target){ _updateNextFieldBtn(); return; }
+      const target = fields[_nextFieldIdx];
+      _nextFieldIdx = ((_nextFieldIdx + delta) % fields.length + fields.length) % fields.length;
       // Expand card if collapsed
       _expandCardForElement(target);
       target.scrollIntoView({behavior: 'smooth', block: 'center'});
@@ -6069,6 +6088,9 @@
         _updateNextFieldBtn();
       }, 120);
     }
+
+    function _jumpNextField(){ _stepField(1); }
+    function _jumpPrevField(){ _stepField(-1); }
 
     // Reset index + refresh badge whenever a new item is loaded or store changes
     function _resetNextField(){
@@ -6982,13 +7004,15 @@
         _jumpNextField();
         return;
       }
-      if(e.key === 'ArrowRight' && !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey){
+      if((e.key === 'ArrowRight' || e.key === 'ArrowLeft') && !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey){
         const tag = (document.activeElement?.tagName || '').toLowerCase();
         const editable = document.activeElement?.isContentEditable;
-        // Only fire when not typing in an input/textarea/select/contenteditable
-        if(tag === 'input' || tag === 'textarea' || tag === 'select' || editable) return;
+        if(e.repeat) return;
+        const activeIsCycleField = document.activeElement && _getUnfilledRequired().includes(document.activeElement);
+        // Block arrow keys in text inputs UNLESS the focused element is itself a cycle field
+        if(!activeIsCycleField && (tag === 'input' || tag === 'textarea' || tag === 'select' || editable)) return;
         e.preventDefault();
-        _jumpNextField();
+        if(e.key === 'ArrowRight') _jumpNextField(); else _jumpPrevField();
       }
     });
 
