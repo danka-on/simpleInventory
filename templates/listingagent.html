@@ -1210,6 +1210,53 @@
     }
 
     /* Queue list styles */
+    .queueListShell{
+      position: relative;
+      max-height: 523px;
+      overflow-y: auto;
+      overflow-x: hidden;
+      padding-right: 6px;
+      scrollbar-gutter: stable;
+    }
+    .queueListShell.hasOverflow::after{
+      content: '';
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      display: block;
+      height: 28px;
+      pointer-events: none;
+      background: linear-gradient(to bottom, rgba(0,0,0,0), var(--card) 85%);
+    }
+    .queueScrollHint{
+      position: absolute;
+      right: 10px;
+      bottom: 10px;
+      display: none;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(59, 130, 246, 0.35);
+      background: rgba(17, 24, 39, 0.88);
+      color: #bfdbfe;
+      font-size: 0.72rem;
+      font-weight: 800;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      box-shadow: 0 10px 24px rgba(0,0,0,0.18);
+      z-index: 2;
+      pointer-events: none;
+    }
+    html.ss-theme-day .queueScrollHint{
+      background: rgba(255,255,255,0.92);
+      color: #1d4ed8;
+      border-color: rgba(37, 99, 235, 0.24);
+    }
+    .queueListShell.hasOverflow .queueScrollHint{
+      display: inline-flex;
+    }
     .queueList{
       display: flex;
       flex-direction: column;
@@ -1796,7 +1843,10 @@
           <div class="cardBody">
             <!-- upcSearch kept in DOM (hidden) for JS compatibility -->
             <input id="upcSearch" type="text" autocomplete="off" style="display:none;" />
-            <div id="queueList" class="queueList"></div>
+            <div class="queueListShell" id="queueListShell">
+              <div class="queueScrollHint" id="queueScrollHint"><i class="fas fa-chevron-down"></i> Scroll for more</div>
+              <div id="queueList" class="queueList"></div>
+            </div>
             <div id="queueEmpty" class="hint" style="display:none;margin-top:10px;">Queue is empty. Use "+ Listing Agent" in List Manager.</div>
           </div>
         </div>
@@ -3110,8 +3160,27 @@
 
         box.appendChild(row);
       });
+      updateQueueScrollState();
       updateSearchQueueAction();
       updateListingActionState();
+    }
+
+    function updateQueueScrollState(){
+      const shell = $('queueListShell');
+      const hint = $('queueScrollHint');
+      if(!shell || !hint) return;
+      const hasOverflow = shell.scrollHeight > shell.clientHeight + 2;
+      shell.classList.toggle('hasOverflow', hasOverflow);
+      if(!hasOverflow){
+        hint.style.display = 'none';
+        return;
+      }
+      hint.style.display = 'inline-flex';
+      const atBottom = shell.scrollTop + shell.clientHeight >= shell.scrollHeight - 4;
+      hint.style.opacity = atBottom ? '0.72' : '1';
+      hint.innerHTML = atBottom
+        ? '<i class="fas fa-chevron-up"></i> Scroll for more'
+        : '<i class="fas fa-chevron-down"></i> Scroll for more';
     }
 
     async function removeFromQueue(upc){
@@ -6668,49 +6737,83 @@
     }
 
     // ─── Next-field navigator ─────────────────────────────────────────────────
-    // Returns an ordered array of DOM elements that still need user input for
-    // the active store.  Only fields the user must touch are included — everything
-    // auto-filled (UPC, SKU, title, description, qty) is intentionally excluded
-    // UNLESS it is genuinely empty (e.g. title missing from rawbol).
-    // IDs of "always present" fields that have defaults (not counted as empty in badge)
-    const _CYCLE_ONLY_IDS = new Set(['condition', 'amazonConditionType', 'listingDescEditor', 'ebayCatalogQ', 'fulfillmentPolicyId']);
-
-    function _getUnfilledRequired(){
+    // Fixed order for the guided cycle.
+    // The navigator should move one step at a time through these fields, regardless
+    // of whether a field is already filled.
+    function _getCycleFields(){
       if(!state.item) return [];
-      const els = [];
-      const push = (id) => { const el = $(id); if(el) els.push(el); };
-      const pushIfEmpty = (id) => { const el = $(id); if(el && !(el.value || '').trim()) els.push(el); };
+      const ids = [];
+      const add = (id) => { const el = $(id); if(el) ids.push(el); };
 
-    if(state.activeStore === 'amazon'){
-      // Amazon order: condition (review) → price → SKU → description
-      push('amazonConditionType'); // always — has default, review deliberately
-      if(!_isAmazonNewCondition()) pushIfEmpty('amazonConditionNote');
-      const ap = ($('amazonPrice')?.value ?? '').trim();
-      if(ap === '' || Number.isNaN(Number(ap))) push('amazonPrice');
-      const ask = ($('amazonSku')?.value || '').trim();
-      if(!ask) push('amazonSku');
-      push('listingDescEditor'); // always — review even when filled
-    } else {
-      // eBay order: eBay market → condition → price → description → fulfillment policy
-      push('ebayCatalogQ');    // scroll to "From eBay Market" search — always review
-      push('condition');       // always — has default, review deliberately
-      if(!_isEbayNewCondition()) pushIfEmpty('conditionDescription');
-      push('price');           // always — review even when filled
-      push('listingDescEditor'); // always — review even when filled
-      push('fulfillmentPolicyId'); // always — review even when filled
-    }
-      return els;
+      if(state.activeStore === 'amazon'){
+        add('amazonConditionType');
+        if(!_isAmazonNewCondition()) add('amazonConditionNote');
+        add('amazonPrice');
+        add('amazonSku');
+        add('listingDescEditor');
+      } else {
+        add('ebayCatalogQ');
+        add('title');
+        add('condition');
+        if(!_isEbayNewCondition()) add('conditionDescription');
+        add('price');
+        add('listingDescEditor');
+        add('fulfillmentPolicyId');
+      }
+      return ids;
     }
 
-    // Count truly empty fields (excludes always-present select fields that have defaults)
-    function _emptyRequiredCount(fields){
-      return fields.filter(el => {
-        if(_CYCLE_ONLY_IDS.has(el.id)) return false;
-        if(el.id === 'listingDescEditor'){
-          return !(typeof getDescHtml === 'function' ? getDescHtml() : '').replace(/<[^>]+>/g,'').trim();
+    function _getEbayCompletionMissing(payload){
+      const missing = [];
+      const mset = new Set();
+      const add = (fieldId, label) => {
+        if(!mset.has(fieldId)){
+          mset.add(fieldId);
+          missing.push(label);
         }
-        return !(el.value || '').trim();
-      }).length;
+      };
+      if(_isBlank(payload.upc)) add('upc', 'UPC');
+      if(_isBlank(payload.sku)) add('sku', 'SKU');
+      if(_isBlank(payload.title)) add('title', 'Title');
+      if(_isBlank(payload.listingDescription)) add('listingDescEditor', 'Listing Description');
+      if(_isBlank(payload.categoryId)) add('categoryId', 'Category');
+      if(_isBlank(payload.fulfillmentPolicyId)) add('fulfillmentPolicyId', 'Fulfillment Policy');
+      if(_isBlank(payload.paymentPolicyId)) add('paymentPolicyId', 'Payment Policy');
+      if(_isBlank(payload.returnPolicyId)) add('returnPolicyId', 'Return Policy');
+      if(!_isEbayNewCondition() && _isBlank(payload.conditionDescription)) add('conditionDescription', 'Condition Description');
+      if(payload.price === null || Number.isNaN(payload.price)) add('price', 'Price');
+      if(!Number.isFinite(payload.quantity) || Number(payload.quantity) < 1) add('quantity', 'Quantity');
+
+      const box = $('ebayAspectsBox');
+      if(box){
+        box.querySelectorAll('[data-ebay-aspect]').forEach((el) => {
+          const req = String(el.dataset.aspectRequired || '') === '1';
+          if(!req) return;
+          const val = (el.value || '').toString().trim();
+          if(!val){
+            const label = (el.dataset.ebayAspect || 'Item Specific').toString();
+            add(`__aspect__${label}`, `Item Specific: ${label}`);
+          }
+        });
+      }
+      return missing;
+    }
+
+    function _getAmazonCompletionMissing(payload){
+      const missing = [];
+      const add = (fieldId, label) => {
+        missing.push(label);
+      };
+      if(_isBlank(payload.upc) && _isBlank(payload.asin)) add('amazonUpc', 'ASIN or UPC');
+      if(_isBlank(payload.sku)) add('amazonSku', 'Amazon SKU');
+      if(payload.price === null || Number.isNaN(payload.price)) add('amazonPrice', 'Amazon Price');
+      if(!_isAmazonNewCondition() && _isBlank(payload.conditionNote)) add('amazonConditionNote', 'Amazon Condition Note');
+      return missing;
+    }
+
+    function _getCompletionMissing(){
+      if(state.activeStore === 'amazon') return _getAmazonCompletionMissing(collectAmazonPayload());
+      return _getEbayCompletionMissing(collectPayload());
     }
 
     let _nextFieldIdx = 0;
@@ -6719,27 +6822,32 @@
       const btn = $('btnNextField');
       const badge = $('nextFieldBadge');
       if(!btn) return;
-      const fields = _getUnfilledRequired();
-      const emptyCount = _emptyRequiredCount(fields);
+      const fields = _getCycleFields();
+      const missing = _getCompletionMissing();
+      const canComplete = !!state.item && missing.length === 0;
       // Remove ring from previously targeted element
       document.querySelectorAll('.fieldNextTarget').forEach(el => el.classList.remove('fieldNextTarget'));
-      if(!state.item || emptyCount === 0){
+      if(!state.item || canComplete){
         badge.textContent = '✓';
         btn.disabled = !state.item;
         btn.classList.toggle('allDone', !!state.item);
         btn.innerHTML = state.item
-          ? '<i class="fas fa-check" style="font-size:0.78rem;"></i> Ready'
+          ? '<i class="fas fa-rocket" style="font-size:0.78rem;"></i> Complete Listing'
           : 'Next <i class="fas fa-arrow-right" style="font-size:0.78rem;"></i><span class="nextBadge" id="nextFieldBadge">0</span>';
+        btn.title = state.item
+          ? 'Complete the active marketplace listing'
+          : 'Jump to next required field (→ Arrow)';
         // re-grab badge ref after innerHTML replace
         return;
       }
       btn.classList.remove('allDone');
       btn.disabled = false;
+      btn.title = 'Jump to next required field (→ Arrow)';
       // Ensure button HTML is in the right state (may have been replaced above)
       if(!$('nextFieldBadge')){
-        btn.innerHTML = 'Next <i class="fas fa-arrow-right" style="font-size:0.78rem;"></i><span class="nextBadge" id="nextFieldBadge">' + emptyCount + '</span>';
+        btn.innerHTML = 'Next <i class="fas fa-arrow-right" style="font-size:0.78rem;"></i><span class="nextBadge" id="nextFieldBadge">' + Math.max(1, missing.length) + '</span>';
       } else {
-        $('nextFieldBadge').textContent = emptyCount;
+        $('nextFieldBadge').textContent = Math.max(1, missing.length);
       }
       // Clamp index
       if(_nextFieldIdx >= fields.length) _nextFieldIdx = 0;
@@ -6753,12 +6861,27 @@
       return !!(el.value || '').trim();
     }
 
+    function _getFieldIndex(fields, el){
+      if(!el) return -1;
+      return fields.indexOf(el);
+    }
+
     function _stepField(delta){
-      const fields = _getUnfilledRequired();
+      const fields = _getCycleFields();
       if(!fields.length){ _updateNextFieldBtn(); return; }
-      if(_nextFieldIdx >= fields.length) _nextFieldIdx = 0;
-      const target = fields[_nextFieldIdx];
-      _nextFieldIdx = ((_nextFieldIdx + delta) % fields.length + fields.length) % fields.length;
+      const current = document.activeElement;
+      const currentIdx = _getFieldIndex(fields, current);
+      const baseIdx = currentIdx >= 0 ? currentIdx : (_nextFieldIdx >= 0 ? _nextFieldIdx : 0);
+      const len = fields.length;
+      const dir = delta >= 0 ? 1 : -1;
+      const nextIdx = ((baseIdx + dir) % len + len) % len;
+      const target = fields[nextIdx];
+      if(!target){
+        _nextFieldIdx = 0;
+        _updateNextFieldBtn();
+        return;
+      }
+      _nextFieldIdx = nextIdx;
       // Expand card if collapsed
       _expandCardForElement(target);
       target.scrollIntoView({behavior: 'smooth', block: 'center'});
@@ -6770,6 +6893,17 @@
 
     function _jumpNextField(){ _stepField(1); }
     function _jumpPrevField(){ _stepField(-1); }
+
+    async function _nextButtonAction(){
+      const missing = _getCompletionMissing();
+      if(state.item && missing.length === 0){
+        if(state.activeStore === 'amazon'){
+          return amazonPutOffer();
+        }
+        return publish();
+      }
+      return _jumpNextField();
+    }
 
     // Reset index + refresh badge whenever a new item is loaded or store changes
     function _resetNextField(){
@@ -7446,6 +7580,10 @@
       runSearch();
     });
     if($('btnSearchQueueAction')) $('btnSearchQueueAction').addEventListener('click', onSearchQueueAction);
+    if($('queueListShell')){
+      $('queueListShell').addEventListener('scroll', updateQueueScrollState, {passive: true});
+      window.addEventListener('resize', updateQueueScrollState, {passive: true});
+    }
     $('upcSearch').addEventListener('keydown', async (e) => {
       if(e.key === 'Enter'){
         e.preventDefault();
@@ -7629,7 +7767,7 @@
     if($('btnSavePolicyDefaults')) $('btnSavePolicyDefaults').onclick = savePolicyDefaults;
     if($('btnSaveAmazonDefaults')) $('btnSaveAmazonDefaults').onclick = saveAmazonDefaults;
     $('btnPublish').onclick = publish;
-    $('btnNextField').onclick = _jumpNextField;
+    $('btnNextField').onclick = _nextButtonAction;
     if($('btnLoadLocations')) $('btnLoadLocations').onclick = loadLocationKeys;
     if($('btnLoadPolicies')) $('btnLoadPolicies').onclick = () => loadEbayBusinessPolicies({silent:false});
     if($('btnAmazonPut')) $('btnAmazonPut').onclick = amazonPutOffer;
@@ -7733,7 +7871,7 @@
       document.addEventListener('focusin', (e) => {
         const el = e.target;
         if(!el) return;
-        const fields = _getUnfilledRequired();
+        const fields = _getCycleFields();
         const i = fields.indexOf(el);
         if(i >= 0){ _nextFieldIdx = i; _updateNextFieldBtn(); }
       });
@@ -7765,7 +7903,7 @@
         const tag = (document.activeElement?.tagName || '').toLowerCase();
         const editable = document.activeElement?.isContentEditable;
         if(e.repeat) return;
-        const activeIsCycleField = document.activeElement && _getUnfilledRequired().includes(document.activeElement);
+        const activeIsCycleField = document.activeElement && _getCycleFields().includes(document.activeElement);
         // Block arrow keys in text inputs UNLESS the focused element is itself a cycle field
         if(!activeIsCycleField && (tag === 'input' || tag === 'textarea' || tag === 'select' || editable)) return;
         e.preventDefault();
