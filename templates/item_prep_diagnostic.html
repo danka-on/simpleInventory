@@ -355,6 +355,12 @@
     </div>
   </div>
 
+  <div class="card" id="existingCard" style="display:none">
+    <h3 style="margin:0 0 8px 0">Existing Diagnostic</h3>
+    <div id="existingMeta" class="muted"></div>
+    <div id="existingGrid" class="grid" style="margin-top:10px"></div>
+  </div>
+
   <div class="card">
     <!-- UPC at top -->
     <div class="row">
@@ -463,21 +469,6 @@
       </div>
     </form>
     <div id="msg" style="margin-top:10px"></div>
-  </div>
-
-  <div class="card" id="existingCard" style="display:none">
-    <h3 style="margin:0 0 8px 0">Existing Diagnostic</h3>
-    <div id="existingMeta" class="muted"></div>
-    <div id="existingGrid" class="grid" style="margin-top:10px"></div>
-  </div>
-
-  <div class="card" id="liveListingsCard" style="display:none">
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
-      <h3 style="margin:0">Live Marketplace Listings</h3>
-      <button type="button" id="refreshLiveListingsBtn" class="btn" style="background:#16a34a;color:#fff;padding:6px 12px">Refresh</button>
-    </div>
-    <div id="liveListingsSummary" class="muted"></div>
-    <div id="liveListingsBody" style="margin-top:8px"></div>
   </div>
 
   <div id="imgModal" class="modal"><img id="modalImg" src="" alt=""></div>
@@ -1826,16 +1817,20 @@
       const from = params.get('from');
       const isForcedFlowEntry = (from === 'bad' || from === 'return');
       
-      // Load notes
+      // Load status first so activeRowStatus() is correct when notes are fetched
+      await loadExistingStatus();
       await loadNotes();
       await loadDiagnosticMedia();
-      await loadLiveListings();
-      
       try{
         const diagParams = new URLSearchParams();
         diagParams.set('exact_scope', '1');
         const lotParam = (params.get('lot') || '').trim();
         if(lotParam) diagParams.set('lot', lotParam);
+        // For bad/return (suffix) flows photos are scoped by UPC not row_status; use empty.
+        // For good base items, use URL param or resolved status so photos match items-to-list scope.
+        const rsParam = (params.get('row_status') || '').trim() ||
+          (isForcedDiagnosticFlow ? '' : activeRowStatus());
+        if(rsParam) diagParams.set('row_status', rsParam);
         const r = await fetch(`/api/items_prep/diagnostic/${encodeURIComponent(upc)}?${diagParams.toString()}`);
         const j = await r.json();
   const st = j && j.status ? j.status : null;
@@ -2209,12 +2204,6 @@
 
     // Load location on page load
     window.addEventListener('DOMContentLoaded', loadLocation);
-    window.addEventListener('DOMContentLoaded', loadExistingStatus);
-    (function(){
-      const refreshLiveBtn = document.getElementById('refreshLiveListingsBtn');
-      if(!refreshLiveBtn) return;
-      refreshLiveBtn.addEventListener('click', loadLiveListings);
-    })();
 
     // Reset button functionality
     document.getElementById('resetBtn').addEventListener('click', async ()=>{

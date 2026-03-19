@@ -7,7 +7,7 @@ from flask_caching import Cache
 from flask_compress import Compress
 from werkzeug.exceptions import RequestEntityTooLarge
 from PIL import Image, ImageDraw, ImageFont, ImageOps
-import io, time, subprocess, os, requests, json, threading, sqlite3, sys, datetime, base64, gzip, hashlib, random
+import io, time, subprocess, os, requests, json, threading, sqlite3, sys, datetime, base64, gzip, hashlib, random, re
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import pytz
 import xml.etree.ElementTree as ET
@@ -5404,6 +5404,15 @@ def _listagent_init_tables(cur):
     ''')
     cur.execute('CREATE INDEX IF NOT EXISTS idx_listing_photos_upc_created_at ON listing_photos(upc, created_at, id)')
 
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS listing_agent_working_drafts (
+            upc TEXT PRIMARY KEY,
+            draft_json TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    ''')
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_listing_agent_working_drafts_updated_at ON listing_agent_working_drafts(updated_at)')
+
 def _listagent_row_to_dict(row):
     if not row:
         return None
@@ -6246,7 +6255,14 @@ def _listagent_get_queue(*, limit=50, added_mode=''):
         '''
         params.append(limit)
         cur.execute(sql, tuple(params))
-        return [_listagent_row_to_dict(r) for r in cur.fetchall()]
+        rows = [_listagent_row_to_dict(r) for r in cur.fetchall()]
+    draft_flags = _listagent_get_working_draft_statuses([r.get('upc') for r in rows if r])
+    for row in rows:
+        if not row:
+            continue
+        upc = _listagent_format_upc12(row.get('upc'))
+        row['has_working_draft'] = bool(draft_flags.get(upc))
+    return rows
 
 def _listagent_get_queue_statuses(upcs, *, added_mode=''):
     mode = _listagent_normalize_added_mode(added_mode, default='')
@@ -6296,10 +6312,12 @@ def _listagent_get_queue_statuses(upcs, *, added_mode=''):
         rows = cur.fetchall()
 
     out = {}
+    draft_flags = _listagent_get_working_draft_statuses([_listagent_format_upc12(_listagent_row_to_dict(row).get('upc')) for row in rows])
     for row in rows:
         item = _listagent_row_to_dict(row)
         if not item:
             continue
+        item['has_working_draft'] = bool(draft_flags.get(_listagent_format_upc12(item.get('upc'))))
         matched_requested = []
         for variant in _listagent_upc_variants(item.get('upc') or ''):
             matched_requested.extend(variant_to_requested.get(variant, []))
@@ -6461,6 +6479,224 @@ def _listagent_get_photos(upc, *, limit=30):
         ''', (*tuple(upc_variants), limit))
         return [_listagent_row_to_dict(r) for r in cur.fetchall()]
 
+def _listagent_photo_path_exists(image_path):
+    image_path = (image_path or '').strip()
+    if not image_path:
+        return False
+    with db_connection('listagent.db') as conn:
+        cur = conn.cursor()
+        _listagent_init_tables(cur)
+        cur.execute('SELECT 1 FROM listing_photos WHERE image_path = ? LIMIT 1', (image_path,))
+        return cur.fetchone() is not None
+
+def _listagent_get_working_draft(upc):
+    upc = _listagent_format_upc12(upc)
+    if not upc:
+        return None
+    with db_connection('listagent.db') as conn:
+        cur = conn.cursor()
+        _listagent_init_tables(cur)
+        cur.execute('''
+            SELECT upc, draft_json, updated_at
+            FROM listing_agent_working_drafts
+            WHERE upc = ? COLLATE NOCASE
+            LIMIT 1
+        ''', (upc,))
+        row = cur.fetchone()
+        if not row:
+            return None
+        draft = None
+        try:
+            draft = json.loads(row['draft_json'] if isinstance(row, sqlite3.Row) else row[1])
+        except Exception:
+            draft = None
+        if not isinstance(draft, dict):
+            return None
+        draft['upc'] = row['upc'] if isinstance(row, sqlite3.Row) else row[0]
+        draft['updated_at'] = row['updated_at'] if isinstance(row, sqlite3.Row) else row[2]
+        return draft
+
+def _listagent_upsert_working_draft(upc, draft):
+    upc = _listagent_format_upc12(upc)
+    if not upc:
+        raise ValueError('upc is required')
+    payload = draft if isinstance(draft, dict) else {}
+    now = _listagent_now_iso()
+    with db_connection('listagent.db') as conn:
+        cur = conn.cursor()
+        _listagent_init_tables(cur)
+        cur.execute('''
+            INSERT INTO listing_agent_working_drafts (upc, draft_json, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(upc) DO UPDATE SET
+                draft_json = excluded.draft_json,
+                updated_at = excluded.updated_at
+        ''', (upc, json.dumps(payload, ensure_ascii=False), now))
+
+def _listagent_delete_working_draft(upc):
+    upc = _listagent_format_upc12(upc)
+    if not upc:
+        return False
+    with db_connection('listagent.db') as conn:
+        cur = conn.cursor()
+        _listagent_init_tables(cur)
+        cur.execute('DELETE FROM listing_agent_working_drafts WHERE upc = ? COLLATE NOCASE', (upc,))
+        return cur.rowcount > 0
+
+def _listagent_get_working_draft_statuses(upcs):
+    requested = []
+    seen = set()
+    all_variants = []
+    variant_to_requested = {}
+    for raw in upcs or []:
+        key = _listagent_format_upc12(raw)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        requested.append(key)
+        for variant in _listagent_upc_variants(key):
+            if variant not in variant_to_requested:
+                variant_to_requested[variant] = []
+            if key not in variant_to_requested[variant]:
+                variant_to_requested[variant].append(key)
+            if variant not in all_variants:
+                all_variants.append(variant)
+    if not requested or not all_variants:
+        return {}
+    placeholders = ','.join('?' for _ in all_variants)
+    with db_connection('listagent.db') as conn:
+        cur = conn.cursor()
+        _listagent_init_tables(cur)
+        cur.execute(f'''
+            SELECT upc
+            FROM listing_agent_working_drafts
+            WHERE upc IN ({placeholders})
+        ''', tuple(all_variants))
+        rows = cur.fetchall()
+    found = set()
+    for row in rows:
+        try:
+            found.add(_listagent_format_upc12(row['upc'] if isinstance(row, sqlite3.Row) else row[0]))
+        except Exception:
+            continue
+    out = {}
+    for row_upc in requested:
+        if row_upc in found:
+            out[row_upc] = True
+            continue
+        for variant in _listagent_upc_variants(row_upc):
+            if variant in found:
+                out[row_upc] = True
+                break
+    return out
+
+def _listagent_localize_image_urls(upc, images, *, request_base_url=''):
+    """
+    Normalize image URLs for marketplace submission.
+
+    - Keeps already-local/static URLs as-is.
+    - Downloads remote URLs into static/listingagent_uploads and returns the
+      public local URL so marketplace APIs can consume them.
+    """
+    from urllib.parse import urlparse
+    from werkzeug.utils import secure_filename
+    import mimetypes
+
+    out = []
+    seen = set()
+    raw_list = images if isinstance(images, (list, tuple)) else [images]
+    base = (request_base_url or (request.url_root or '')).rstrip('/')
+    safe_upc = secure_filename(_listagent_format_upc12(upc) or _normalize_upc(upc) or 'upc') or 'upc'
+    save_dir = os.path.join(app.root_path, 'static', 'listingagent_uploads')
+    os.makedirs(save_dir, exist_ok=True)
+
+    for raw in raw_list:
+        url = (raw or '').strip() if isinstance(raw, str) else ''
+        if not url:
+          continue
+
+        normalized = url
+        parsed = None
+        try:
+            parsed = urlparse(url)
+        except Exception:
+            parsed = None
+
+        is_http = bool(parsed and parsed.scheme in ('http', 'https'))
+        if not is_http:
+            if url.startswith('/') and base:
+                normalized = f"{base}{url}"
+            elif url.startswith('//') and base:
+                normalized = f"{parsed.scheme if parsed and parsed.scheme else 'https'}:{url}"
+            if normalized not in seen:
+                seen.add(normalized)
+                out.append(normalized)
+            continue
+
+        host = (parsed.hostname or '').lower() if parsed else ''
+        path = (parsed.path or '').lower() if parsed else ''
+        local_host = ''
+        try:
+            local_host = (urlparse(base).hostname or '').lower()
+        except Exception:
+            local_host = ''
+
+        if local_host and host == local_host and '/static/' in path:
+            if normalized not in seen:
+                seen.add(normalized)
+                out.append(normalized)
+            continue
+
+        source_key = f"{safe_upc}|{url}"
+        digest = hashlib.sha256(source_key.encode('utf-8')).hexdigest()[:18]
+        ext = ''
+        try:
+            ext = os.path.splitext(parsed.path or '')[1].lower()
+        except Exception:
+            ext = ''
+        if ext not in ('.jpg', '.jpeg', '.png', '.webp', '.gif', '.heic', '.heif'):
+            ext = ''
+
+        abs_filename = f"{safe_upc}_{digest}{ext or '.jpg'}"
+        rel = f"listingagent_uploads/{abs_filename}"
+        abs_path = os.path.join(save_dir, abs_filename)
+        if not os.path.exists(abs_path):
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (ListingAgent/1.0)',
+                'Accept': 'image/*,*/*;q=0.8',
+            }
+            resp = requests.get(url, timeout=18, headers=headers)
+            resp.raise_for_status()
+            content_type = (resp.headers.get('content-type') or '').split(';', 1)[0].strip().lower()
+            if not content_type.startswith('image/'):
+                raise ValueError(f'URL did not return an image: {url}')
+            with open(abs_path, 'wb') as fh:
+                fh.write(resp.content)
+            try:
+                if os.path.getsize(abs_path) <= 0:
+                    raise ValueError('downloaded file is empty')
+            except Exception:
+                raise
+        if not _listagent_photo_path_exists(rel):
+            size_bytes = None
+            try:
+                size_bytes = os.path.getsize(abs_path)
+            except Exception:
+                size_bytes = None
+            _listagent_add_photo(
+                upc,
+                image_path=rel,
+                original_filename=os.path.basename(parsed.path or url) or abs_filename,
+                size_bytes=size_bytes
+            )
+
+        local_url = f"{base}{url_for('static', filename=rel)}" if base else url_for('static', filename=rel)
+        if local_url not in seen:
+            seen.add(local_url)
+            out.append(local_url)
+
+    return out
+
 def _listagent_search_live_listings(q, *, limit=60):
     q = (q or '').strip()
     limit = int(limit or 60)
@@ -6564,6 +6800,49 @@ def api_listingagent_save_settings():
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e, 'listingagent:save_settings')}), 500
+
+@app.route('/api/listingagent/working_draft', methods=['GET'])
+def api_listingagent_get_working_draft():
+    """Get the saved working draft for a UPC."""
+    try:
+        upc = (request.args.get('upc') or '').strip()
+        if not upc:
+            return jsonify({'success': False, 'error': 'upc is required'}), 400
+        draft = _listagent_get_working_draft(upc)
+        return jsonify({'success': True, 'draft': draft})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'listingagent:get_working_draft')}), 500
+
+@app.route('/api/listingagent/working_draft', methods=['POST'])
+def api_listingagent_save_working_draft():
+    """Persist a working draft snapshot for a UPC."""
+    try:
+        data = request.json or {}
+        upc = (data.get('upc') or '').strip()
+        if not upc:
+            return jsonify({'success': False, 'error': 'upc is required'}), 400
+        draft = data.get('draft')
+        if draft is None:
+            draft = {k: v for k, v in data.items() if k != 'upc'}
+        if not isinstance(draft, dict):
+            return jsonify({'success': False, 'error': 'draft must be an object'}), 400
+        _listagent_upsert_working_draft(upc, draft)
+        return jsonify({'success': True, 'draft': _listagent_get_working_draft(upc)})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'listingagent:save_working_draft')}), 500
+
+@app.route('/api/listingagent/working_draft', methods=['DELETE'])
+def api_listingagent_delete_working_draft():
+    """Delete a saved working draft for a UPC."""
+    try:
+        data = request.json or {}
+        upc = (data.get('upc') or request.args.get('upc') or '').strip()
+        if not upc:
+            return jsonify({'success': False, 'error': 'upc is required'}), 400
+        removed = _listagent_delete_working_draft(upc)
+        return jsonify({'success': True, 'removed': removed})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'listingagent:delete_working_draft')}), 500
 
 @app.route('/api/listingagent/queue', methods=['GET'])
 def api_listingagent_queue():
@@ -8276,7 +8555,7 @@ def _listingagent_is_likely_ebay_image_mix_error(error_text: str) -> bool:
         'invalid'
     ))
 
-def _build_ebay_inventory_item_payload(upc, title, description, images, quantity, condition, *, aspects=None):
+def _build_ebay_inventory_item_payload(upc, title, description, images, quantity, condition, *, aspects=None, epid='', condition_description=''):
     images = _listingagent_dedupe_image_urls(images)
 
     # Remove Amazon-hosted images for eBay listings when other candidates exist.
@@ -8307,6 +8586,12 @@ def _build_ebay_inventory_item_payload(upc, title, description, images, quantity
     }
     if images:
         payload['product']['imageUrls'] = images
+    epid = str(epid or '').strip()
+    if epid:
+        payload['product']['epid'] = epid
+    condition_description = str(condition_description or '').strip()
+    if condition_description:
+        payload['conditionDescription'] = condition_description
     if aspects and isinstance(aspects, dict):
         clean = {}
         for k, v in aspects.items():
@@ -9025,40 +9310,581 @@ def api_listingagent_ebay_category_aspects():
         return jsonify({'success': False, 'error': _safe_error(e, 'listingagent:ebay_category_aspects')}), 500
 
 def _ebay_catalog_aspects_to_dict(aspects_raw):
-    """Normalise eBay catalog aspects to {name: first_value} dict regardless of API shape."""
+    """Normalise eBay catalog aspects to {name: first_value} across Catalog/Browse shapes."""
     out = {}
     if not aspects_raw:
         return out
+
+    def _first_text(value):
+        if value is None:
+            return ''
+        if isinstance(value, (list, tuple)):
+            for item in value:
+                text = _first_text(item)
+                if text:
+                    return text
+            return ''
+        if isinstance(value, dict):
+            for key in (
+                'localizedAspectValue',
+                'localized_aspect_value',
+                'localizedValue',
+                'localized_value',
+                'value',
+                'name',
+            ):
+                text = str(value.get(key) or '').strip()
+                if text:
+                    return text
+            return ''
+        return str(value).strip()
+
     if isinstance(aspects_raw, dict):
         for k, v in aspects_raw.items():
-            if isinstance(v, list):
-                out[k] = v[0] if v else ''
-            else:
-                out[k] = str(v)
-    elif isinstance(aspects_raw, list):
-        # Some Catalog API responses use [{localizedAspectName, value}] format
+            name = str(k or '').strip()
+            val = _first_text(v)
+            if name and val:
+                out[name] = val
+        return out
+
+    if isinstance(aspects_raw, list):
         for item in aspects_raw:
-            if isinstance(item, dict):
-                name = item.get('localizedAspectName') or item.get('name') or ''
-                val = item.get('value') or ''
-                if name:
-                    out[name] = str(val)
+            if not isinstance(item, dict):
+                continue
+            name = (
+                item.get('localizedAspectName')
+                or item.get('localized_aspect_name')
+                or item.get('localizedName')
+                or item.get('localized_name')
+                or item.get('name')
+                or ''
+            ).strip()
+            val = _first_text(
+                item.get('localizedValues')
+                or item.get('localized_values')
+                or item.get('values')
+                or item.get('aspectValues')
+                or item.get('aspect_values')
+                or item.get('value')
+            )
+            if name and val:
+                out[name] = val
     return out
+
+
+def _listingagent_ebay_user_request(method, path, *, params=None, payload=None, timeout=30, marketplace_id=''):
+    """Call eBay APIs with the seller user token (Authorization Code flow)."""
+    token = get_access_token()
+    headers_local = {
+        'Authorization': f'Bearer {token}',
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'Accept-Language': 'en-US',
+    }
+    if marketplace_id:
+        headers_local['X-EBAY-C-MARKETPLACE-ID'] = marketplace_id
+    url = f"https://api.ebay.com{path}"
+    return requests.request(method, url, headers=headers_local, params=params, json=payload, timeout=timeout)
+
+
+def _listingagent_ebay_browse_category_fields(item):
+    category_id = str(item.get('categoryId') or item.get('category_id') or '').strip()
+    category_path = str(item.get('categoryPath') or item.get('category_path') or '').strip()
+    category_id_path = str(item.get('categoryIdPath') or item.get('category_id_path') or '').strip()
+    leaf_ids = item.get('leafCategoryIds') or item.get('leaf_category_ids') or []
+
+    if not category_id and category_id_path:
+        parts = [p.strip() for p in category_id_path.split('|') if p and str(p).strip()]
+        if parts:
+            category_id = parts[-1]
+    if not category_id and isinstance(leaf_ids, list) and leaf_ids:
+        category_id = str(leaf_ids[0] or '').strip()
+
+    if not category_path:
+        categories = item.get('categories') or []
+        if isinstance(categories, list) and categories:
+            first = categories[0] if isinstance(categories[0], dict) else {}
+            first_name = str(first.get('categoryName') or first.get('category_name') or '').strip()
+            if first_name:
+                category_path = first_name
+
+    if category_path and '|' in category_path:
+        category_path = ' > '.join(part.strip() for part in category_path.split('|') if part and part.strip())
+
+    category_name = ''
+    if category_path:
+        parts = [p.strip() for p in category_path.split('>') if p and p.strip()]
+        if parts:
+            category_name = parts[-1]
+
+    return {
+        'categoryId': category_id,
+        'categoryName': category_name,
+        'categoryPath': category_path,
+    }
+
+
+def _listingagent_ebay_browse_aspects_to_dict(item):
+    junk_values = {
+        'unbranded', 'does not apply', 'n/a', 'na', 'unknown',
+        'not applicable', 'see description', 'other', 'generic'
+    }
+    aspects = _ebay_catalog_aspects_to_dict(
+        item.get('localizedAspects')
+        or item.get('localized_aspects')
+        or item.get('aspects')
+    )
+    preferred_fields = {
+        'Brand': item.get('brand'),
+        'Color': item.get('color'),
+        'MPN': item.get('mpn'),
+        'Model': item.get('model'),
+        'Size': item.get('size'),
+        'Material': item.get('material'),
+        'Pattern': item.get('pattern'),
+        'Style': item.get('style'),
+        'Department': item.get('department'),
+        'Type': item.get('type'),
+    }
+    fallback_fields = {
+        'UPC': item.get('gtin') or item.get('upc'),
+        'EAN': item.get('ean'),
+        'ISBN': item.get('isbn'),
+    }
+    for name, value in preferred_fields.items():
+        text = str(value or '').strip()
+        if text and text.lower() not in junk_values:
+            aspects[name] = text
+    for name, value in fallback_fields.items():
+        text = str(value or '').strip()
+        if text and text.lower() not in junk_values and not aspects.get(name):
+            aspects[name] = text
+    out = {}
+    for name, value in aspects.items():
+        safe_name = str(name or '').strip()
+        safe_value = str(value or '').strip()
+        if not safe_name or not safe_value or safe_value.lower() in junk_values:
+            continue
+        out[safe_name] = safe_value
+    return out
+
+
+def _listingagent_normalize_ebay_catalog_summary(summary):
+    """Shape Catalog API product summaries into the UI payload used by listing-agent."""
+    if not isinstance(summary, dict):
+        return None
+
+    title = str(summary.get('title') or summary.get('name') or '').strip()
+    epid = str(summary.get('epid') or summary.get('ePID') or '').strip()
+
+    image_obj = summary.get('image') or {}
+    image = ''
+    if isinstance(image_obj, dict):
+        image = str(image_obj.get('imageUrl') or image_obj.get('image_url') or '').strip()
+    if not image:
+        image = str(summary.get('imageUrl') or summary.get('image_url') or '').strip()
+
+    aspects = _ebay_catalog_aspects_to_dict(
+        summary.get('aspects')
+        or summary.get('localizedAspects')
+        or summary.get('localized_aspects')
+    )
+    brand = (
+        str(summary.get('brand') or '').strip()
+        or str(summary.get('manufacturer') or '').strip()
+        or aspects.get('Brand')
+        or aspects.get('brand')
+        or ''
+    )
+
+    category_id = str(summary.get('categoryId') or summary.get('category_id') or '').strip()
+    category_name = str(summary.get('categoryName') or summary.get('category_name') or '').strip()
+    category_path = str(summary.get('categoryPath') or summary.get('category_path') or '').strip()
+
+    categories = summary.get('categories') or []
+    if not category_id and isinstance(categories, list):
+        for cat in categories:
+            if not isinstance(cat, dict):
+                continue
+            category_id = str(cat.get('categoryId') or cat.get('category_id') or '').strip()
+            category_name = str(cat.get('categoryName') or cat.get('category_name') or '').strip()
+            category_path = str(cat.get('categoryPath') or cat.get('category_path') or '').strip()
+            if category_id or category_name or category_path:
+                break
+
+    if not category_path and category_name:
+        category_path = category_name
+
+    gtins = []
+    for key in ('gtins', 'gtin'):
+        raw = summary.get(key)
+        if isinstance(raw, (list, tuple)):
+            gtins.extend(str(x or '').strip() for x in raw)
+        elif raw:
+            gtins.append(str(raw).strip())
+    gtins = [g for g in gtins if g]
+
+    return {
+        'epid': epid,
+        'title': title,
+        'image': image,
+        'brand': brand,
+        'aspects': aspects,
+        'categoryId': category_id,
+        'categoryName': category_name,
+        'categoryPath': category_path,
+        'gtins': gtins,
+        'price_min': None,
+        'price_max': None,
+        'price_count': 0,
+        'source': 'catalog',
+    }
+
+
+def _listingagent_ebay_candidate_key(candidate):
+    if not isinstance(candidate, dict):
+        return ''
+    epid = str(candidate.get('epid') or '').strip().lower()
+    if epid:
+        return f"epid:{epid}"
+    gtins = [str(x or '').strip().lower() for x in (candidate.get('gtins') or []) if str(x or '').strip()]
+    if gtins:
+        return f"gtin:{'|'.join(gtins)}"
+    title = str(candidate.get('title') or '').strip().lower()
+    source = str(candidate.get('source') or '').strip().lower()
+    if title:
+        return f"{source}:{title}"
+    return ''
+
+
+def _listingagent_merge_ebay_candidates(existing, incoming, *, limit=10):
+    results = list(existing or [])
+    seen = {_listingagent_ebay_candidate_key(item) for item in results if _listingagent_ebay_candidate_key(item)}
+    for item in incoming or []:
+        key = _listingagent_ebay_candidate_key(item)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        results.append(item)
+        if len(results) >= limit:
+            break
+    return results
+
+
+def _listingagent_browse_items_to_candidates(items, *, limit=10):
+    grouped = {}
+    junk_values = {
+        'unbranded', 'does not apply', 'n/a', 'na', 'unknown',
+        'not applicable', 'see description', 'other', 'generic'
+    }
+
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        title = str(item.get('title') or '').strip()
+        if not title:
+            continue
+        epid = str(item.get('epid') or '').strip()
+        key = (epid or title).strip().lower()
+        if not key:
+            continue
+        group = grouped.get(key)
+        if group is None:
+            image_obj = item.get('image') or {}
+            image = str((image_obj.get('imageUrl') or image_obj.get('image_url') or '')).strip() if isinstance(image_obj, dict) else ''
+            category_fields = _listingagent_ebay_browse_category_fields(item)
+            group = {
+                'itemId': str(item.get('itemId') or item.get('item_id') or '').strip(),
+                'legacyItemId': str(item.get('legacyItemId') or item.get('legacy_item_id') or '').strip(),
+                'itemWebUrl': str(item.get('itemWebUrl') or item.get('item_web_url') or '').strip(),
+                'epid': epid,
+                'title': title,
+                'image': image,
+                'brand': '',
+                'aspects': {},
+                'categoryId': category_fields.get('categoryId') or '',
+                'categoryName': category_fields.get('categoryName') or '',
+                'categoryPath': category_fields.get('categoryPath') or '',
+                'gtins': [],
+                'price_min': None,
+                'price_max': None,
+                'price_count': 0,
+                'source': 'browse',
+                '_prices': [],
+                '_aspect_votes': {},
+            }
+            grouped[key] = group
+
+        if not group.get('image'):
+            image_obj = item.get('image') or {}
+            if isinstance(image_obj, dict):
+                group['image'] = str(image_obj.get('imageUrl') or image_obj.get('image_url') or '').strip()
+
+        if not group.get('itemId'):
+            group['itemId'] = str(item.get('itemId') or item.get('item_id') or '').strip()
+        if not group.get('legacyItemId'):
+            group['legacyItemId'] = str(item.get('legacyItemId') or item.get('legacy_item_id') or '').strip()
+        if not group.get('itemWebUrl'):
+            group['itemWebUrl'] = str(item.get('itemWebUrl') or item.get('item_web_url') or '').strip()
+
+        category_fields = _listingagent_ebay_browse_category_fields(item)
+        if not group.get('categoryId') and category_fields.get('categoryId'):
+            group['categoryId'] = category_fields.get('categoryId') or ''
+        if not group.get('categoryName') and category_fields.get('categoryName'):
+            group['categoryName'] = category_fields.get('categoryName') or ''
+        if not group.get('categoryPath') and category_fields.get('categoryPath'):
+            group['categoryPath'] = category_fields.get('categoryPath') or ''
+
+        try:
+            price_val = float((item.get('price') or {}).get('value') or 0)
+            if price_val > 0:
+                group['_prices'].append(price_val)
+        except Exception:
+            pass
+
+        for name, value in _listingagent_ebay_browse_aspects_to_dict(item).items():
+            if not name or not value or value.lower() in junk_values:
+                continue
+            norm = name.lower()
+            votes = group['_aspect_votes'].setdefault(norm, {'_display': name})
+            votes[value] = votes.get(value, 0) + 1
+
+    results = []
+    for group in grouped.values():
+        aspects = {}
+        for norm, votes in group.pop('_aspect_votes', {}).items():
+            display = votes.pop('_display', norm)
+            if votes:
+                aspects[display] = max(votes, key=lambda v: votes[v])
+        group['aspects'] = aspects
+        group['brand'] = group.get('brand') or aspects.get('Brand') or aspects.get('brand') or ''
+        prices = sorted(group.pop('_prices', []))
+        if prices:
+            group['price_min'] = prices[0]
+            group['price_max'] = prices[-1]
+            group['price_count'] = len(prices)
+        results.append(group)
+
+    results.sort(key=lambda r: (
+        0 if r.get('epid') else 1,
+        -(r.get('price_count') or 0),
+        -(len(r.get('aspects') or {})),
+        str(r.get('title') or '').lower()
+    ))
+    return results[:limit]
+
+
+def _listingagent_search_ebay_browse_candidates(*, marketplace_id, queries, limit=12):
+    results = []
+    seen_queries = set()
+    for raw_query in queries or []:
+        query = str(raw_query or '').strip()
+        key = query.lower()
+        if not query or key in seen_queries:
+            continue
+        seen_queries.add(key)
+        resp = _ebay_buy_api_request(
+            'GET',
+            '/buy/browse/v1/item_summary/search',
+            params={'q': query, 'limit': min(max(limit * 3, 18), 60), 'fieldgroups': 'EXTENDED'},
+            marketplace_id=marketplace_id,
+        )
+        if resp.status_code >= 400:
+            continue
+        payload = resp.json() if resp.text else {}
+        items = payload.get('itemSummaries') or []
+        if not items:
+            continue
+        browse_candidates = _listingagent_browse_items_to_candidates(items, limit=limit)
+        results = _listingagent_merge_ebay_candidates(results, browse_candidates, limit=limit)
+        if len(results) >= limit:
+            break
+    return results
+
+
+def _listingagent_ebay_title_tokens(text):
+    return [tok for tok in re.findall(r'[a-z0-9]+', str(text or '').lower()) if tok]
+
+
+def _listingagent_detect_color_tokens(text):
+    token_set = set(_listingagent_ebay_title_tokens(text))
+    known_colors = {
+        'black', 'white', 'red', 'blue', 'green', 'yellow', 'orange', 'pink', 'purple',
+        'brown', 'beige', 'tan', 'gray', 'grey', 'gold', 'silver', 'ivory', 'navy',
+        'teal', 'maroon', 'burgundy'
+    }
+    return token_set & known_colors
+
+
+def _listingagent_score_ebay_candidate(candidate, *, upc='', preferred_title=''):
+    score = 0.0
+    safe_upc = str(upc or '').strip()
+    gtins = [str(x or '').strip() for x in (candidate.get('gtins') or []) if str(x or '').strip()]
+    if safe_upc and safe_upc in gtins:
+        score += 150.0
+
+    title = str(candidate.get('title') or '').strip().lower()
+    preferred = str(preferred_title or '').strip().lower()
+    title_tokens = set(_listingagent_ebay_title_tokens(title))
+    preferred_tokens = set(_listingagent_ebay_title_tokens(preferred))
+    overlap = title_tokens & preferred_tokens
+    score += len(overlap) * 6.0
+
+    preferred_numbers = {tok for tok in preferred_tokens if tok.isdigit()}
+    candidate_numbers = {tok for tok in title_tokens if tok.isdigit()}
+    if preferred_numbers and candidate_numbers:
+        score += len(preferred_numbers & candidate_numbers) * 10.0
+
+    preferred_colors = _listingagent_detect_color_tokens(preferred)
+    candidate_colors = _listingagent_detect_color_tokens(title)
+    if preferred_colors and candidate_colors:
+        if preferred_colors & candidate_colors:
+            score += 12.0
+        else:
+            score -= 8.0
+
+    category_path = str(candidate.get('categoryPath') or '').lower()
+    if 'tablecloth' in category_path and ('tablecloth' in preferred or 'oblong' in preferred):
+        score += 6.0
+
+    score += float(len(candidate.get('aspects') or {}))
+    score += min(float(candidate.get('price_count') or 0), 5.0)
+    return score
+
+
+def _listingagent_pick_best_ebay_candidate(candidates, *, upc='', preferred_title=''):
+    ranked = []
+    for idx, candidate in enumerate(candidates or []):
+        ranked.append((
+            _listingagent_score_ebay_candidate(candidate, upc=upc, preferred_title=preferred_title),
+            -idx,
+            candidate,
+        ))
+    if not ranked:
+        return None
+    ranked.sort(reverse=True)
+    return ranked[0][2]
+
+
+def _listingagent_get_ebay_browse_item_detail(item_id, marketplace_id):
+    item_id = str(item_id or '').strip()
+    if not item_id:
+        return None
+    from urllib.parse import quote
+
+    resp = _listingagent_ebay_user_request(
+        'GET',
+        f"/buy/browse/v1/item/{quote(item_id, safe='')}",
+        marketplace_id=marketplace_id,
+    )
+    if resp.status_code >= 400:
+        raise _ListingAgentUserError(_ebay_extract_error(resp), status_code=resp.status_code)
+
+    detail = resp.json() if resp.text else {}
+    if not isinstance(detail, dict) or not detail:
+        return None
+
+    category_fields = _listingagent_ebay_browse_category_fields(detail)
+    aspects = _listingagent_ebay_browse_aspects_to_dict(detail)
+    image_obj = detail.get('image') or {}
+    image = ''
+    if isinstance(image_obj, dict):
+        image = str(image_obj.get('imageUrl') or image_obj.get('image_url') or '').strip()
+
+    gtins = []
+    for key in ('gtin', 'upc', 'ean', 'isbn'):
+        value = detail.get(key)
+        if isinstance(value, (list, tuple)):
+            gtins.extend(str(v or '').strip() for v in value if str(v or '').strip())
+        else:
+            text = str(value or '').strip()
+            if text:
+                gtins.append(text)
+
+    price_min = price_max = None
+    price_count = 0
+    try:
+        price_val = float((detail.get('price') or {}).get('value') or 0)
+        if price_val > 0:
+            price_min = price_max = price_val
+            price_count = 1
+    except Exception:
+        pass
+
+    return {
+        'itemId': str(detail.get('itemId') or '').strip(),
+        'legacyItemId': str(detail.get('legacyItemId') or detail.get('legacy_item_id') or '').strip(),
+        'itemWebUrl': str(detail.get('itemWebUrl') or detail.get('item_web_url') or '').strip(),
+        'epid': str(detail.get('epid') or detail.get('ePID') or '').strip(),
+        'title': str(detail.get('title') or '').strip(),
+        'image': image,
+        'brand': str(detail.get('brand') or aspects.get('Brand') or aspects.get('brand') or '').strip(),
+        'aspects': aspects,
+        'categoryId': category_fields.get('categoryId') or '',
+        'categoryName': category_fields.get('categoryName') or '',
+        'categoryPath': category_fields.get('categoryPath') or '',
+        'gtins': [g for g in gtins if g],
+        'price_min': price_min,
+        'price_max': price_max,
+        'price_count': price_count,
+        'source': 'browse_detail',
+    }
 
 @app.route('/api/listingagent/ebay/catalog_search', methods=['GET'])
 def api_listingagent_ebay_catalog_search():
-    """Search eBay active listings by UPC/GTIN or title and aggregate aspects (Browse API)."""
+    """Search eBay catalog broadly, then append Browse-derived alternatives."""
     try:
         upc = (request.args.get('upc') or request.args.get('gtin') or '').strip()
         q = (request.args.get('q') or request.args.get('query') or '').strip()
+        title = (request.args.get('title') or '').strip()
         limit = _listingagent_parse_int(request.args.get('limit'), 10) or 10
         limit = max(1, min(limit, 20))
 
-        if not upc and not q:
+        if not upc and not q and not title:
             raise _ListingAgentUserError('upc or q is required', status_code=400)
 
         settings = _listingagent_get_settings()
         marketplace_id = (request.args.get('marketplaceId') or settings.get('ebay_marketplace_id') or 'EBAY_US').strip()
+
+        results = []
+        catalog_searches = []
+        seen_catalog_queries = set()
+
+        if upc:
+            catalog_searches.append({'gtin': upc, 'fieldgroups': 'PRODUCT', 'limit': min(limit, 20)})
+
+        for text in (q, title):
+            text = str(text or '').strip()
+            key = text.lower()
+            if not text or key in seen_catalog_queries:
+                continue
+            seen_catalog_queries.add(key)
+            catalog_searches.append({'q': text, 'fieldgroups': 'PRODUCT', 'limit': min(max(limit, 8), 20)})
+
+        for params in catalog_searches:
+            try:
+                resp_catalog = _ebay_buy_api_request(
+                    'GET',
+                    '/commerce/catalog/v1_beta/product_summary/search',
+                    params=params,
+                    marketplace_id=marketplace_id,
+                    scope='https://api.ebay.com/oauth/api_scope/commerce.catalog.readonly',
+                )
+            except Exception:
+                resp_catalog = None
+            if resp_catalog is None or resp_catalog.status_code >= 400:
+                continue
+            payload_catalog = resp_catalog.json() if resp_catalog.text else {}
+            summaries = payload_catalog.get('productSummaries') or payload_catalog.get('products') or []
+            normalized = []
+            if isinstance(summaries, list):
+                for summary in summaries:
+                    item = _listingagent_normalize_ebay_catalog_summary(summary)
+                    if item:
+                        normalized.append(item)
+            results = _listingagent_merge_ebay_candidates(results, normalized, limit=limit)
+            if len(results) >= limit:
+                break
 
         def _browse_search(search_params):
             return _ebay_buy_api_request(
@@ -9069,70 +9895,39 @@ def api_listingagent_ebay_catalog_search():
                 marketplace_id=marketplace_id,
             )
 
-        # Text search — same approach as comps, always works.
-        search_q = upc or q
-        resp = _browse_search({'q': search_q, 'limit': min(limit, 20)})
-        if resp.status_code >= 400:
-            raise _ListingAgentUserError(_ebay_extract_error(resp), status_code=resp.status_code)
-        data = resp.json() if resp.text else {}
-        items = data.get('itemSummaries') or []
+        browse_queries = []
+        seen_browse = set()
+        for text in (q, title, upc):
+            text = str(text or '').strip()
+            key = text.lower()
+            if not text or key in seen_browse:
+                continue
+            seen_browse.add(key)
+            browse_queries.append(text)
 
-        if not items:
-            return jsonify({'success': True, 'results': [], 'total': 0})
+        browse_added = False
+        for search_q in browse_queries:
+            if len(results) >= limit:
+                break
+            resp = _browse_search({'q': search_q, 'limit': min(max(limit * 3, 18), 60)})
+            if resp.status_code >= 400:
+                if not results:
+                    raise _ListingAgentUserError(_ebay_extract_error(resp), status_code=resp.status_code)
+                continue
+            data = resp.json() if resp.text else {}
+            items = data.get('itemSummaries') or []
+            if not items:
+                continue
+            browse_candidates = _listingagent_browse_items_to_candidates(items, limit=limit)
+            before = len(results)
+            results = _listingagent_merge_ebay_candidates(results, browse_candidates, limit=limit)
+            if len(results) > before:
+                browse_added = True
 
-        # Aggregate localizedAspects across all results — most common value wins per aspect name.
-        # Item summaries include localizedAspects when the seller filled them in.
-        aspect_votes = {}  # {norm_name: {value: count, '_display': name}}
-        for item in items:
-            for a in (item.get('localizedAspects') or []):
-                name = (a.get('name') or '').strip()
-                value = (a.get('value') or '').strip()
-                if not name or not value:
-                    continue
-                norm = name.lower()
-                if norm not in aspect_votes:
-                    aspect_votes[norm] = {'_display': name}
-                aspect_votes[norm][value] = aspect_votes[norm].get(value, 0) + 1
-
-        # Values that are low-quality placeholders — don't return them so Amazon/product
-        # catalog can fill a better value instead.
-        _JUNK_ASPECT_VALUES = {'unbranded', 'does not apply', 'n/a', 'na', 'unknown',
-                               'not applicable', 'see description', 'other', 'generic'}
-
-        aspects = {}
-        for norm, votes in aspect_votes.items():
-            display = votes.pop('_display', norm)
-            counts = {v: c for v, c in votes.items() if v != '_display' and v.lower() not in _JUNK_ASPECT_VALUES}
-            if counts:
-                aspects[display] = max(counts, key=lambda v: counts[v])
-
-        first = items[0]
-        title = str(first.get('title') or search_q).strip()
-        image = str((first.get('image') or {}).get('imageUrl') or '').strip()
-        brand = aspects.get('Brand') or aspects.get('brand') or ''
-
-        # Collect prices for range display
-        prices = []
-        for it in items:
-            try:
-                v = float((it.get('price') or {}).get('value') or 0)
-                if v > 0:
-                    prices.append(v)
-            except Exception:
-                pass
-        price_min = min(prices) if prices else None
-        price_max = max(prices) if prices else None
-
-        return jsonify({'success': True, 'results': [{
-            'epid': '',
-            'title': title,
-            'image': image,
-            'brand': brand,
-            'aspects': aspects,
-            'price_min': price_min,
-            'price_max': price_max,
-            'price_count': len(prices),
-        }], 'total': len(items)})
+        source = 'mixed' if browse_added and any((r.get('source') == 'catalog') for r in results) else (
+            'browse' if browse_added else 'catalog'
+        )
+        return jsonify({'success': True, 'results': results, 'total': len(results), 'source': source})
     except _ListingAgentUserError as e:
         payload = {'success': False, 'error': str(e)}
         payload.update(e.extra or {})
@@ -9143,52 +9938,81 @@ def api_listingagent_ebay_catalog_search():
 
 @app.route('/api/listingagent/ebay/product_specifics', methods=['GET'])
 def api_listingagent_ebay_product_specifics():
-    """Get product-level specifics from eBay Commerce Catalog API by UPC/GTIN.
-    More reliable than Browse API aggregation — returns structured product attributes.
-    Falls back gracefully if scope not available or product not found."""
+    """Best-effort eBay specifics using live Browse candidates plus item detail."""
     try:
         upc = (request.args.get('upc') or request.args.get('gtin') or '').strip()
-        if not upc:
+        title = (request.args.get('title') or request.args.get('q') or '').strip()
+        if not upc and not title:
             return jsonify({'success': True, 'found': False, 'aspects': {}})
 
         marketplace_id = (request.args.get('marketplaceId') or
                           _listingagent_get_settings().get('ebay_marketplace_id') or 'EBAY_US').strip()
 
-        resp = _ebay_buy_api_request(
-            'GET',
-            '/commerce/catalog/v1_beta/product_summary/search',
-            params={'gtin': upc, 'fieldgroups': 'PRODUCT', 'limit': 1},
+        queries = []
+        if title:
+            queries.append(title)
+        if upc:
+            queries.append(upc)
+        candidates = _listingagent_search_ebay_browse_candidates(
             marketplace_id=marketplace_id,
-            scope='https://api.ebay.com/oauth/api_scope/commerce.catalog.readonly',
+            queries=queries,
+            limit=8,
         )
-
-        if resp.status_code >= 400:
-            return jsonify({'success': True, 'found': False, 'aspects': {},
-                            'note': f'catalog unavailable ({resp.status_code})'})
-
-        data = resp.json() if resp.text else {}
-        summaries = data.get('productSummaries') or []
-        if not summaries:
+        best = _listingagent_pick_best_ebay_candidate(candidates, upc=upc, preferred_title=title or upc)
+        if not best:
             return jsonify({'success': True, 'found': False, 'aspects': {}})
 
-        first = summaries[0]
-        aspects_raw = first.get('aspects') or {}
+        detail = None
+        try:
+            detail = _listingagent_get_ebay_browse_item_detail(best.get('itemId') or '', marketplace_id)
+        except Exception:
+            detail = None
+        first = detail or best or {}
         aspects = {}
-        for name, values in aspects_raw.items():
-            val = (values[0] if isinstance(values, list) and values else str(values or '')).strip()
-            if val and val.lower() not in {'unbranded', 'does not apply', 'n/a', 'na', 'unknown'}:
-                aspects[str(name)] = val
+        for name, val in (first.get('aspects') or {}).items():
+            value = str(val or '').strip()
+            if value and value.lower() not in {'unbranded', 'does not apply', 'n/a', 'na', 'unknown'}:
+                aspects[str(name)] = value
 
         return jsonify({
             'success': True,
-            'found': bool(aspects),
+            'found': bool(aspects or first.get('itemId') or first.get('epid') or first.get('title')),
+            'itemId': str(first.get('itemId') or ''),
+            'legacyItemId': str(first.get('legacyItemId') or ''),
             'epid': str(first.get('epid') or ''),
             'title': str(first.get('title') or ''),
+            'image': str(first.get('image') or ''),
+            'brand': str(first.get('brand') or ''),
+            'categoryId': str(first.get('categoryId') or ''),
+            'categoryName': str(first.get('categoryName') or ''),
+            'categoryPath': str(first.get('categoryPath') or ''),
             'aspects': aspects,
         })
     except Exception as e:
         return jsonify({'success': True, 'found': False, 'aspects': {},
                         'note': _safe_error(e, 'listingagent:ebay_product_specifics')})
+
+
+@app.route('/api/listingagent/ebay/catalog_item', methods=['GET'])
+def api_listingagent_ebay_catalog_item():
+    """Fetch full Browse item detail for a selected eBay candidate row."""
+    try:
+        item_id = (request.args.get('itemId') or request.args.get('item_id') or '').strip()
+        if not item_id:
+            raise _ListingAgentUserError('itemId is required', status_code=400)
+
+        marketplace_id = (request.args.get('marketplaceId') or
+                          _listingagent_get_settings().get('ebay_marketplace_id') or 'EBAY_US').strip()
+        detail = _listingagent_get_ebay_browse_item_detail(item_id, marketplace_id)
+        if not detail:
+            return jsonify({'success': False, 'error': 'No detail returned for selected eBay item.'}), 404
+        return jsonify({'success': True, 'result': detail})
+    except _ListingAgentUserError as e:
+        payload = {'success': False, 'error': str(e)}
+        payload.update(e.extra or {})
+        return jsonify(payload), e.status_code
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'listingagent:ebay_catalog_item')}), 500
 
 
 def _listingagent_ebay_create_draft_offer(data, *, dry_run=False):
@@ -9218,14 +10042,17 @@ def _listingagent_ebay_create_draft_offer(data, *, dry_run=False):
     return_policy_id = (data.get('returnPolicyId') or settings.get('ebay_return_policy_id') or '').strip()
 
     listing_description = (data.get('listingDescription') or '').strip()
+    condition_description = (data.get('conditionDescription') or data.get('condition_description') or '').strip()
 
     images = data.get('images') or []
     if isinstance(images, str):
         images = [images]
+    images = _listagent_localize_image_urls(upc, images)
 
     aspects = data.get('aspects') or {}
     if not isinstance(aspects, dict):
         aspects = {}
+    catalog_epid = (data.get('catalogEpid') or data.get('epid') or '').strip()
 
     merchant_location_key, location_autofixed, all_location_keys = _listingagent_resolve_ebay_location_key(merchant_location_key_input)
     if location_autofixed:
@@ -9235,7 +10062,17 @@ def _listingagent_ebay_create_draft_offer(data, *, dry_run=False):
         except Exception:
             pass
 
-    inventory_item_payload = _build_ebay_inventory_item_payload(upc, title, description, images, quantity, condition, aspects=aspects)
+    inventory_item_payload = _build_ebay_inventory_item_payload(
+        upc,
+        title,
+        description,
+        images,
+        quantity,
+        condition,
+        aspects=aspects,
+        epid=catalog_epid,
+        condition_description=condition_description
+    )
     offer_payload = _build_ebay_offer_payload(
         sku, marketplace_id, currency, price, quantity, category_id, listing_description,
         merchant_location_key, fulfillment_policy_id, payment_policy_id, return_policy_id,
@@ -9518,6 +10355,86 @@ def api_listingagent_ebay_generate_description():
         return jsonify({'success': False, 'error': str(e)})
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e, 'listingagent:ebay_generate_description')})
+
+@app.route('/api/listingagent/ebay/generate_title', methods=['POST'])
+def api_listingagent_ebay_generate_title():
+    """Generate an AI-powered listing title using Claude API (Anthropic) if configured, else template."""
+    try:
+        data = request.get_json(force=True) or {}
+        title = (data.get('title') or '').strip()
+        category_id = (data.get('category_id') or data.get('categoryId') or '').strip()
+        aspects = data.get('aspects') or {}
+        upc = (data.get('upc') or '').strip()
+
+        if not title:
+            raise _ListingAgentUserError('title is required', status_code=400)
+
+        anthropic_key = os.getenv('ANTHROPIC_API_KEY', '').strip()
+        if not anthropic_key:
+            raise _ListingAgentUserError('ANTHROPIC_API_KEY not found in environment — check .env on the Pi', status_code=503)
+
+        if anthropic_key:
+            aspect_lines = '\n'.join(f'- {k}: {v}' for k, v in aspects.items() if k and v) if aspects else ''
+            prompt = (
+                "Write a concise eBay listing title for the following product.\n"
+                "Rules:\n"
+                "- Return only the title text.\n"
+                "- Keep it under 80 characters if possible.\n"
+                "- Do not use quotes, bullets, or explanations.\n"
+                "- Include the most useful search terms first.\n"
+                "- Prefer brand, model, size, and key identifiers.\n\n"
+                f"Base title: {title}\n"
+                + (f"Category ID: {category_id}\n" if category_id else "")
+                + (f"UPC: {upc}\n" if upc else "")
+                + (f"Item specifics:\n{aspect_lines}\n" if aspect_lines else "")
+            )
+            resp = requests.post(
+                'https://api.anthropic.com/v1/messages',
+                headers={
+                    'x-api-key': anthropic_key,
+                    'anthropic-version': '2023-06-01',
+                    'content-type': 'application/json',
+                },
+                json={
+                    'model': 'claude-haiku-4-5-20251001',
+                    'max_tokens': 128,
+                    'messages': [{'role': 'user', 'content': prompt}],
+                },
+                timeout=30,
+            )
+            if resp.status_code >= 400:
+                try:
+                    err_body = resp.json()
+                    err_msg = (err_body.get('error') or {}).get('message') or resp.text[:300]
+                except Exception:
+                    err_msg = resp.text[:300]
+                raise _ListingAgentUserError(f'Anthropic API error ({resp.status_code}): {err_msg}', status_code=502)
+            result = resp.json()
+            out_text = (result.get('content') or [{}])[0].get('text', '').strip()
+            if not out_text:
+                raise _ListingAgentUserError(f'Anthropic API returned empty response. Raw: {str(result)[:200]}', status_code=502)
+            import re as _re
+            out_text = _re.sub(r'^```[^\n]*\n?', '', out_text).rstrip('`').strip()
+            out_text = ' '.join(out_text.split())
+            out_text = out_text[:80].strip()
+            return jsonify({'success': True, 'title': out_text, 'source': 'claude'})
+
+        # Fallback: trim the existing title and add a compact keyword order.
+        fallback = ' '.join((title or upc or '').split())
+        if aspects:
+            brand = str(aspects.get('Brand') or aspects.get('brand') or '').strip()
+            model = str(aspects.get('Model') or aspects.get('model') or '').strip()
+            color = str(aspects.get('Color') or aspects.get('color') or '').strip()
+            size = str(aspects.get('Size') or aspects.get('size') or '').strip()
+            parts = [brand, model, color, size, fallback]
+            fallback = ' '.join(p for p in parts if p)
+        fallback = fallback[:80].strip()
+        return jsonify({'success': True, 'title': fallback, 'source': 'template'})
+
+    except _ListingAgentUserError as e:
+        return jsonify({'success': False, 'error': str(e)})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'listingagent:ebay_generate_title')})
 
 @app.route('/api/listingagent/ebay/draft', methods=['POST'])
 def api_listingagent_ebay_draft():
@@ -11153,7 +12070,8 @@ def _build_amazon_offer_attributes(
     include_offer_audience=True,
     force_include_upc_when_asin=False,
     force_exclude_asin_identifier=False,
-    price_model='purchasable_offer'
+    price_model='purchasable_offer',
+    condition_note=''
 ):
     attrs = {}
     asin_clean = (asin or '').strip().upper()
@@ -11190,6 +12108,13 @@ def _build_amazon_offer_attributes(
         if marketplace_id and include_marketplace_fields:
             entry['marketplace_id'] = marketplace_id
         attrs['condition_type'] = [entry]
+
+    condition_note = str(condition_note or '').strip()
+    if condition_note:
+        note_entry = {'value': condition_note}
+        if marketplace_id and include_marketplace_fields:
+            note_entry['marketplace_id'] = marketplace_id
+        attrs['condition_note'] = [note_entry]
 
     if fulfillment_channel_code:
         entry = {
@@ -11287,6 +12212,7 @@ def api_listingagent_amazon_put_offer():
         asin = (data.get('asin') or '').strip()
         resolved_asin = asin
         submitted_images = [u for u in (data.get('images') or []) if isinstance(u, str) and u.strip()]
+        submitted_images = _listagent_localize_image_urls(upc or requested_sku or asin or 'amazon', submitted_images)
 
         if not sku:
             return jsonify({'success': False, 'error': 'SKU is required'}), 400
@@ -11299,6 +12225,7 @@ def api_listingagent_amazon_put_offer():
             return jsonify({'success': False, 'error': 'Price is required'}), 400
 
         condition_type = (data.get('conditionType') or settings.get('amazon_condition_type') or 'used_good').strip()
+        condition_note = (data.get('conditionNote') or data.get('condition_note') or '').strip()
         fulfillment_channel_code = (data.get('fulfillmentChannelCode') or settings.get('amazon_fulfillment_channel_code') or 'DEFAULT').strip()
         currency = (data.get('currency') or settings.get('amazon_currency') or 'USD').strip()
         product_type = (data.get('productType') or settings.get('amazon_product_type') or 'PRODUCT').strip()
@@ -11320,6 +12247,7 @@ def api_listingagent_amazon_put_offer():
             upc=upc,
             asin=resolved_asin,
             condition_type=condition_type,
+            condition_note=condition_note,
             fulfillment_channel_code=fulfillment_channel_code,
             quantity=quantity,
             currency=currency,
@@ -11394,7 +12322,8 @@ def api_listingagent_amazon_put_offer():
             include_identifiers=include_identifiers_primary,
             marketplace_id=mp_id,
             offer_audience=offer_audience,
-            merchant_shipping_group=merchant_shipping_group
+            merchant_shipping_group=merchant_shipping_group,
+            condition_note=condition_note
         )
         body = {
             'productType': resolved_product_type,
@@ -17706,6 +18635,7 @@ def api_items_prep_status():
         reason = (data.get('reason') or '').strip()
         note = (data.get('note') or '').strip()
         has_media_note = _coerce_bool(data.get('has_media_note'))
+        force_good_suffix = _coerce_bool(data.get('force_good_suffix'))
         exception_note = (data.get('exception_note') or '').strip()
         raw_qty = data.get('qty', 1)
         try:
@@ -17812,7 +18742,7 @@ def api_items_prep_status():
 
             # Special-case GOOD with typed note or voice note: create a dedicated suffixed GOOD entry.
             # This preserves per-unit notes/photos/media without collapsing into base UPC state.
-            has_special_good_note = bool(note or has_media_note)
+            has_special_good_note = bool(force_good_suffix)  # Only create suffix when explicitly requested via "New Unique Entry"
             temp_note_suffix_row = None
             if has_special_good_note and upc != base_upc:
                 # Lookup can return a temporary suffixed duplicate for already-prepped UPCs.
@@ -19522,6 +20452,57 @@ def api_items_prep_create_return_entry():
         except Exception:
             pass
 
+@app.route('/api/items_prep/good_entries/<base_upc>', methods=['GET'])
+def api_items_prep_good_entries(base_upc):
+    """Return all good-status prep entries for a base UPC (including suffixes), each with its first image."""
+    try:
+        upc_n = _normalize_upc_preserve_suffix_for_match(_normalize_upc(base_upc))
+        base = upc_n.split('-', 1)[0] if '-' in upc_n else upc_n
+        if not base:
+            return jsonify({'success': False, 'error': 'Missing base UPC'}), 400
+        _ensure_items_prep_tables()
+        with db_connection('bol.db') as conn:
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            safe_base = base.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+            cur.execute(
+                "SELECT upc, status, note, updated_at, lot_number, quantity "
+                "FROM items_prep_status "
+                "WHERE (upc = ? COLLATE NOCASE OR upc LIKE ? ESCAPE '\\') "
+                "AND status = 'good' "
+                "ORDER BY updated_at DESC, id DESC",
+                (base, f"{safe_base}-%")
+            )
+            rows = [dict(r) for r in cur.fetchall()]
+            entries = []
+            for row in rows:
+                upc_entry = row['upc']
+                # Base UPC entries scope images by row_status='good'; suffixed by UPC alone (row_status='')
+                img_scope_status = '' if '-' in upc_entry else 'good'
+                cur.execute(
+                    "SELECT image_path FROM items_prep_images "
+                    "WHERE upc = ? COLLATE NOCASE "
+                    "AND COALESCE(row_status, '') = ? COLLATE NOCASE "
+                    "AND (deleted_at IS NULL OR TRIM(COALESCE(deleted_at,'')) = '') "
+                    "ORDER BY created_at DESC, id DESC LIMIT 1",
+                    (upc_entry, img_scope_status)
+                )
+                img_row = cur.fetchone()
+                image_url = f"/static/{img_row['image_path']}" if img_row and img_row['image_path'] else ''
+                entries.append({
+                    'upc': upc_entry,
+                    'note': row.get('note') or '',
+                    'updated_at': row.get('updated_at') or '',
+                    'lot_number': row.get('lot_number') or '',
+                    'quantity': int(row.get('quantity') or 1),
+                    'image_url': image_url,
+                    'is_suffix': '-' in upc_entry
+                })
+        return jsonify({'success': True, 'entries': entries})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e)}), 500
+
+
 @app.route('/api/items_prep/cleanup_temp', methods=['POST'])
 def api_items_prep_cleanup_temp():
     """Delete temporary entries when user skips. JSON: { upc }"""
@@ -21135,6 +22116,11 @@ def api_items_prep_delete_photo(photo_id):
             exp = (_dt.datetime.now(_dt.UTC) + _dt.timedelta(days=_trash_retention_days())).isoformat()
             cur.execute('UPDATE items_prep_images SET deleted_at=?, expires_at=?, trash_path=? WHERE id=?', (del_at, exp, new_rel or rel, photo_id))
             conn.commit()
+            try:
+                cache_key = f"view//api/bol_lookup?upc={r['upc']}"
+                cache.delete(cache_key)
+            except Exception:
+                pass
             return jsonify({'success': True, 'deleted': 1, 'hard': False, 'retention_days': _trash_retention_days()})
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
@@ -40741,4 +41727,3 @@ if __name__ == "__main__":
     # Keep main thread alive
     while True:
         time.sleep(1)
-

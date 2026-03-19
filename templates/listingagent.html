@@ -1275,6 +1275,18 @@
       border-color: var(--green);
       background: rgba(16, 185, 129, 0.08);
     }
+    .queueItem.working{
+      border-color: rgba(245, 158, 11, 0.55);
+      background: rgba(245, 158, 11, 0.12);
+    }
+    .queueItem.working:hover{
+      background: rgba(245, 158, 11, 0.16);
+      border-color: rgba(245, 158, 11, 0.68);
+    }
+    .queueItem.working.active{
+      border-color: rgba(245, 158, 11, 0.9);
+      background: rgba(245, 158, 11, 0.18);
+    }
     .queueItem.bad{
       border-color: rgba(239, 68, 68, 0.55);
       background: rgba(239, 68, 68, 0.10);
@@ -1331,6 +1343,19 @@
       gap: 6px;
       flex-shrink: 0;
       margin-right: 2px;
+    }
+    .queueStatusIcon{
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 18px;
+      height: 18px;
+      border-radius: 6px;
+      border: 1px solid rgba(245, 158, 11, 0.35);
+      background: rgba(245, 158, 11, 0.18);
+      color: #fbbf24;
+      font-size: 0.74rem;
+      flex-shrink: 0;
     }
     .queuePlatforms .qp{
       width: 18px;
@@ -1516,6 +1541,13 @@
       opacity: 0.45;
       transform: scale(0.98);
     }
+    .imageCardInactive{
+      opacity: 0.38;
+      filter: grayscale(0.9);
+    }
+    .imageCardInactive:hover{
+      opacity: 0.52;
+    }
     .imageCard.imageWontSend .imageCardTop img{
       opacity: 0.45;
     }
@@ -1585,6 +1617,25 @@
       align-items: center;
       justify-content: space-between;
       gap: 6px;
+    }
+    .imageCardUseToggle{
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.72rem;
+      font-weight: 800;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      user-select: none;
+      cursor: pointer;
+      flex: 0 0 auto;
+    }
+    .imageCardUseToggle input{
+      width: 16px;
+      height: 16px;
+      accent-color: var(--green);
+      margin: 0;
     }
     .imageCardDragText{
       font-size: 0.72rem;
@@ -1735,7 +1786,7 @@
               </div>
               <div class="cardHeaderRight">
                 <select id="queueModeSelect" class="queueModeSelect mode-my" title="Queue source filter">
-                  <option value="my">My Added</option>
+                  <option value="my">Working List</option>
                   <option value="auto">Auto Added</option>
                 </select>
                 <button class="btn btnGhost btnMini" id="btnQueueReload" type="button"><i class="fas fa-rotate"></i></button>
@@ -1836,6 +1887,7 @@
                   <label style="display:block;margin-bottom:6px;">Images</label>
                   <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end;">
                     <input id="photoInput" type="file" accept="image/*" multiple style="display:none;" />
+                    <button class="btn btnGhost btnMini" id="btnUploadPhotos" type="button"><i class="fas fa-upload"></i>Upload from PC</button>
                     <div id="mobileUploadStatus" class="hint" style="margin:0;"></div>
                   </div>
                 </div>
@@ -1853,21 +1905,10 @@
             <div class="cardHeader">
               <div class="cardHeaderLeft">
                 <button class="collapseBtn" onclick="toggleCard('cardStoreCatalog')" title="Collapse/Expand"><i class="fas fa-chevron-down"></i></button>
-                <h2><i class="fas fa-layer-group" style="color:var(--blue)"></i>Catalog &amp; Comps</h2>
+                <h2><i class="fas fa-layer-group" style="color:var(--blue)"></i>Catalog</h2>
               </div>
             </div>
             <div class="cardBody" style="display:flex;flex-direction:column;gap:16px;">
-
-              <!-- ── From Your Store (comps) ── -->
-              <div class="field" style="margin:0;">
-                <label style="font-weight:700;">From Your Store</label>
-                <div class="hint">Active listings for this UPC — click one to use as a draft template.</div>
-                <div id="ebayCompsBox" class="miniBox" tabindex="-1" style="margin-top:8px;max-height:220px;overflow-y:auto;outline:none;">
-                  <div class="muted">Select a UPC to load comps.</div>
-                </div>
-              </div>
-
-              <div style="height:1px;background:var(--border);"></div>
 
               <!-- ── From eBay Market (catalog / item specifics) ── -->
               <div class="field" style="margin:0;">
@@ -1912,6 +1953,9 @@
                 <label for="title">Title</label>
                 <input id="title" type="text" placeholder="eBay title" />
                 <div class="hint">Best results: brand, model, size, and key features.</div>
+                <div class="btnRow" style="margin-top:8px;justify-content:flex-start;">
+                  <button class="btn btnGhost" id="btnAiTitle" title="Generate title using eBay AI"><i class="fas fa-robot"></i>Use AI Title</button>
+                </div>
               </div>
 
               <div class="row2">
@@ -1935,6 +1979,12 @@
                   <label for="quantity">Quantity</label>
                   <input id="quantity" type="number" min="1" step="1" value="1" />
                 </div>
+              </div>
+
+              <div class="field" id="conditionDescriptionWrap">
+                <label for="conditionDescription">Condition Description</label>
+                <textarea id="conditionDescription" rows="3" placeholder="Describe wear, defects, missing pieces, or other condition details."></textarea>
+                <div class="hint">Required for non-new eBay items. Keep it factual and focused on condition.</div>
               </div>
 
               <div class="row2">
@@ -2150,6 +2200,12 @@
                 </div>
               </div>
 
+              <div class="field" id="amazonConditionNoteWrap">
+                <label for="amazonConditionNote">Condition Note</label>
+                <textarea id="amazonConditionNote" rows="3" placeholder="Describe wear, defects, missing pieces, or other condition details."></textarea>
+                <div class="hint">Required for non-new Amazon items. Keep it factual and focused on condition.</div>
+              </div>
+
               <div class="row2">
                 <div class="field">
                   <label for="amazonPrice">Price (USD)</label>
@@ -2223,6 +2279,8 @@
       imageOrder: {ebay: [], amazon: []},
       images: [],
       removedImages: new Set(),
+      activeImages: new Set(),
+      inactiveImages: new Set(),
       queue: [],
       queueMode: 'my',
       activeUpc: '',
@@ -2231,7 +2289,13 @@
       templateReqId: 0,
       ebayComps: [],
       ebayCatalog: [],
-      ebayCatalogSelectedEpid: '',
+      ebayCatalogSelectedKey: '',
+      ebayCatalogSelectedItemId: '',
+      ebayCatalogSelectedProductEpid: '',
+      ebayCatalogSelectedTitle: '',
+      ebayCatalogSelectedCategoryId: '',
+      ebayCatalogSelectedCategoryPath: '',
+      ebayCatalogSelectedAspects: {},
       selectedCompItemId: '',
       amazonCatalog: [],
       amazonCatalogDetail: null,
@@ -2242,6 +2306,8 @@
       ebayAspectsReqId: 0,
       ebayAspectsCategoryId: '',
       ebayAspectsMeta: [],
+      ebayAspectSnapshot: {},
+      ebayAspectManualEdits: new Set(),
       manualRequiredAspects: [],
       priceManuallySet: false,
       amazonPriceManuallySet: false,
@@ -2265,6 +2331,9 @@
       amazonRestrictionLastLogKey: '',
       issueModalWired: false,
       dragImageUrl: '',
+      workingDrafts: {},
+      workingDraftSaveTimer: null,
+      workingDraftDirty: false,
       sessionListedForCurrent: {ebay: false, amazon: false},
     };
 
@@ -2608,7 +2677,231 @@
     }
 
     function queueModeLabel(mode){
-      return normalizeQueueMode(mode, 'my') === 'auto' ? 'Auto Added' : 'My Added';
+      return normalizeQueueMode(mode, 'my') === 'auto' ? 'Auto Added' : 'Working List';
+    }
+
+    const _LEGACY_WORKING_DRAFT_STORAGE_KEY = 'listingagent_working_drafts';
+    const _WORKING_DRAFT_FIELD_IDS = [
+      'title',
+      'sku',
+      'condition',
+      'conditionDescription',
+      'quantity',
+      'price',
+      'categoryId',
+      'listingDescription',
+      'merchantLocationKey',
+      'fulfillmentPolicyId',
+      'paymentPolicyId',
+      'returnPolicyId',
+      'marketplaceId',
+      'listingDuration',
+      'offerId',
+      'amazonSku',
+      'amazonAsin',
+      'amazonConditionType',
+      'amazonConditionNote',
+      'amazonPrice',
+      'amazonQuantity',
+      'amazonProductType',
+      'amazonRequirements',
+      'amazonMarketplaceId',
+      'amazonCurrency',
+      'amazonMerchantShippingGroup'
+    ];
+
+    function _scheduleWorkingDraftSave(){
+      if(!state.activeUpc) return;
+      state.workingDraftDirty = true;
+      if(state.workingDraftSaveTimer){
+        clearTimeout(state.workingDraftSaveTimer);
+      }
+      state.workingDraftSaveTimer = setTimeout(() => {
+        state.workingDraftSaveTimer = null;
+        saveWorkingDraftForActiveItem();
+      }, 180);
+    }
+
+    function _loadLegacyWorkingDrafts(){
+      try{
+        const raw = localStorage.getItem(_LEGACY_WORKING_DRAFT_STORAGE_KEY);
+        const parsed = raw ? JSON.parse(raw) : {};
+        return (parsed && typeof parsed === 'object') ? parsed : {};
+      }catch(e){
+        return {};
+      }
+    }
+
+    async function _migrateLegacyWorkingDraftsIfNeeded(){
+      const legacy = _loadLegacyWorkingDrafts();
+      const keys = Object.keys(legacy || {});
+      if(!keys.length) return;
+      let allOk = true;
+      for(const key of keys){
+        const draft = legacy[key];
+        if(!draft || typeof draft !== 'object') continue;
+        try{
+          await apiPost('/api/listingagent/working_draft', {upc: key, draft});
+          state.workingDrafts = {...(state.workingDrafts || {}), [_workingDraftKey(key)]: draft};
+        }catch(e){
+          allOk = false;
+        }
+      }
+      if(allOk){
+        try{ localStorage.removeItem(_LEGACY_WORKING_DRAFT_STORAGE_KEY); }catch(e){}
+      }
+    }
+
+    function _workingDraftKey(upc){
+      return formatUpc12((upc ?? '').toString().trim()) || (upc ?? '').toString().trim();
+    }
+
+    function _hasWorkingDraft(upc){
+      const key = _workingDraftKey(upc);
+      if(!key) return false;
+      if(state.workingDraftDirty && _workingDraftKey(state.activeUpc || '') === key) return true;
+      const queueHit = Array.isArray(state.queue) ? state.queue.find(it => _upcEquals((it?.upc || '').toString().trim(), key)) : null;
+      if(queueHit && queueHit.has_working_draft) return true;
+      const drafts = state.workingDrafts || {};
+      return !!drafts[key];
+    }
+
+    async function _fetchWorkingDraft(upc){
+      const key = _workingDraftKey(upc);
+      if(!key) return null;
+      const cached = state.workingDrafts || {};
+      if(cached[key]) return cached[key];
+      try{
+        const res = await apiGet(`/api/listingagent/working_draft?upc=${encodeURIComponent(key)}`);
+        const draft = res?.draft && typeof res.draft === 'object' ? res.draft : null;
+        if(draft){
+          state.workingDrafts = {...cached, [key]: draft};
+          return draft;
+        }
+        const legacy = _loadLegacyWorkingDrafts();
+        if(legacy[key] && typeof legacy[key] === 'object'){
+          const draftLegacy = legacy[key];
+          state.workingDrafts = {...cached, [key]: draftLegacy};
+          return draftLegacy;
+        }
+      }catch(e){
+        const legacy = _loadLegacyWorkingDrafts();
+        const draft = legacy[key];
+        if(draft && typeof draft === 'object'){
+          state.workingDrafts = {...cached, [key]: draft};
+          return draft;
+        }
+      }
+      return null;
+    }
+
+    function _captureWorkingDraft(){
+      const data = { ts: new Date().toISOString(), store: _activeStoreKey(), fields: {}, aspects: {} };
+      for(const id of _WORKING_DRAFT_FIELD_IDS){
+        const el = $(id);
+        if(!el) continue;
+        data.fields[id] = (el.value ?? '').toString();
+      }
+      try{
+        data.aspects = collectEbayAspects();
+      }catch(e){
+        data.aspects = {};
+      }
+      data.images = Array.isArray(state.images) ? state.images.slice() : [];
+      data.activeImages = state.activeImages instanceof Set ? [...state.activeImages] : [];
+      data.inactiveImages = state.inactiveImages instanceof Set ? [...state.inactiveImages] : [];
+      data.imageOrder = {
+        ebay: Array.isArray(state.imageOrder?.ebay) ? [...state.imageOrder.ebay] : [],
+        amazon: Array.isArray(state.imageOrder?.amazon) ? [...state.imageOrder.amazon] : [],
+      };
+      return data;
+    }
+
+    function _applyWorkingDraft(draft){
+      const data = draft && typeof draft === 'object' ? draft : null;
+      if(!data) return false;
+      const fields = data.fields && typeof data.fields === 'object' ? data.fields : {};
+      const hadCategoryId = (($('categoryId')?.value || '').toString().trim()) !== '';
+      const nextCategoryId = (fields.categoryId || '').toString().trim();
+      for(const [id, val] of Object.entries(fields)){
+        const el = $(id);
+        if(!el) continue;
+        try{
+          el.value = val ?? '';
+        }catch(e){}
+      }
+      state.activeImages = new Set(Array.isArray(data.activeImages) ? data.activeImages : []);
+      state.inactiveImages = new Set(Array.isArray(data.inactiveImages) ? data.inactiveImages : []);
+      if(data.imageOrder && typeof data.imageOrder === 'object'){
+        state.imageOrder = {
+          ...state.imageOrder,
+          ebay: Array.isArray(data.imageOrder.ebay) ? [...data.imageOrder.ebay] : state.imageOrder.ebay,
+          amazon: Array.isArray(data.imageOrder.amazon) ? [...data.imageOrder.amazon] : state.imageOrder.amazon,
+        };
+      }
+      try{
+        if(data.aspects && typeof data.aspects === 'object'){
+          for(const [name, value] of Object.entries(data.aspects)){
+            if(!name) continue;
+            _setEbayAspectValue(name, value, {onlyIfBlank:false, respectManualEdits:false});
+          }
+        }
+      }catch(e){}
+      updateConditionNoteVisibility();
+      if(nextCategoryId){
+        try{
+          const catEl = $('categoryId');
+          if(catEl){
+            catEl.dispatchEvent(new Event('change', {bubbles:true}));
+          } else {
+            renderCategorySuggestions();
+          }
+        }catch(e){}
+      } else if(hadCategoryId){
+        try{ renderCategorySuggestions(); }catch(e){}
+      }
+      rebuildImagesForActiveStore();
+      renderPreview();
+      try{ _applySelectedEbayCatalogAspects({ifEmpty: true}); }catch(e){}
+      state.workingDraftDirty = false;
+      try{ _resetNextField(); }catch(e){}
+      return true;
+    }
+
+    async function saveWorkingDraftForActiveItem(){
+      const upc = _workingDraftKey(state.activeUpc || $('upc')?.value || $('amazonUpc')?.value || '');
+      if(!upc) return false;
+      const draft = _captureWorkingDraft();
+      try{
+        const res = await apiPost('/api/listingagent/working_draft', {upc, draft});
+        const saved = res?.draft && typeof res.draft === 'object' ? res.draft : draft;
+        state.workingDrafts = {...(state.workingDrafts || {}), [upc]: saved};
+      }catch(e){
+        const drafts = state.workingDrafts || {};
+        drafts[upc] = draft;
+        state.workingDrafts = drafts;
+      }
+      state.workingDraftDirty = false;
+      renderQueue();
+      return true;
+    }
+
+    async function clearWorkingDraftForActiveItem(){
+      const upc = _workingDraftKey(state.activeUpc || $('upc')?.value || $('amazonUpc')?.value || '');
+      if(!upc) return false;
+      const drafts = state.workingDrafts || {};
+      if(drafts[upc]) delete drafts[upc];
+      state.workingDrafts = drafts;
+      try{
+        await fetch('/api/listingagent/working_draft', {
+          method: 'DELETE',
+          headers: {'Accept': 'application/json', 'Content-Type': 'application/json'},
+          body: JSON.stringify({upc})
+        });
+      }catch(e){}
+      state.workingDraftDirty = false;
+      renderQueue();
+      return true;
     }
 
     function queueItemMode(item){
@@ -2632,7 +2925,7 @@
       if(empty){
         empty.textContent = mode === 'auto'
           ? 'Auto queue is empty. New auto-added items from List Manager will appear here.'
-          : 'Queue is empty. Use "+ Listing Agent" in List Manager or scan a UPC.';
+          : 'Working list is empty. Use "+ Listing Agent" in List Manager or scan a UPC.';
       }
     }
 
@@ -2754,13 +3047,14 @@
         const hasAmazon = !!((it.listed_amazon_at || '').toString().trim());
         const isDone = it._done || (it.status || '').toString().trim().toLowerCase() === 'done' || (hasEbay && hasAmazon);
         const isActive = state.activeUpc && _upcEquals(state.activeUpc, upc);
+        const isWorking = _hasWorkingDraft(upc);
         const title = (it.title || it.item_description || upc).toString().trim();
         const source = (it.source || '').toString().trim();
         const itemStatus = (it.item_status || '').toString().trim().toLowerCase();
         const isBad = (source === 'list_manager' && itemStatus === 'bad');
 
         const row = document.createElement('div');
-        row.className = 'queueItem' + (isDone ? ' done' : '') + (isActive ? ' active' : '') + (isBad ? ' bad' : '');
+        row.className = 'queueItem' + (isDone ? ' done' : '') + (isActive ? ' active' : '') + (isWorking ? ' working' : '') + (isBad ? ' bad' : '');
         row.onclick = (e) => { if(e.target.closest('.queueRemove')) return; selectUPC(upc); };
 
         // Number
@@ -2775,6 +3069,14 @@
         titleEl.textContent = isBad ? `(bad) ${title}` : title;
         titleEl.title = isBad ? `(bad) ${title}` : title;
         row.appendChild(titleEl);
+
+        if(isWorking){
+          const status = document.createElement('span');
+          status.className = 'queueStatusIcon';
+          status.title = 'Working draft saved';
+          status.innerHTML = '<i class="fas fa-pen-fancy"></i>';
+          row.appendChild(status);
+        }
 
         // Platform completion indicators (tiny, non-intrusive)
         if(hasEbay || hasAmazon){
@@ -3053,6 +3355,7 @@
       const current = $('upc').value.trim();
       if(!current || current === newUpc) return;
       state.manualRequiredAspects = [];
+      state.ebayAspectManualEdits = new Set();
 
       // eBay per-item fields (keep policy defaults)
       $('offerBadge').style.display = 'none';
@@ -3081,9 +3384,13 @@
       state.amazonCatalog = [];
       state.amazonCatalogDetail = null;
       state.ebayCatalog = [];
-      state.ebayCatalogSelectedEpid = '';
+      state.ebayCatalogSelectedKey = '';
+      state.ebayCatalogSelectedItemId = '';
+      state.ebayCatalogSelectedProductEpid = '';
+      state.ebayCatalogSelectedTitle = '';
+      state.ebayCatalogSelectedCategoryId = '';
+      state.ebayCatalogSelectedCategoryPath = '';
       state.selectedCompItemId = '';
-      $('ebayCompsBox').innerHTML = '<div class=\"hint\">Select a UPC to load comps.</div>';
       if($('ebayCatalogBox')) $('ebayCatalogBox').innerHTML = '<div class=\"muted\">Select a UPC to load catalog matches.</div>';
       if($('ebayCatalogQ')) $('ebayCatalogQ').value = '';
       if($('ebayCatalogHint')) $('ebayCatalogHint').textContent = 'Select a UPC to auto-search eBay catalog.';
@@ -3100,9 +3407,20 @@
       const raw = (upc ?? '').toString().trim();
       const clean = normalizeUpc(raw) || raw;
       if(!clean) return;
+      if(state.workingDraftSaveTimer){
+        clearTimeout(state.workingDraftSaveTimer);
+        state.workingDraftSaveTimer = null;
+      }
+      if(state.activeUpc && state.workingDraftDirty){
+        await saveWorkingDraftForActiveItem();
+      }
       resetFormsForNewUPC(clean);
       state.manualRequiredAspects = [];
+      state.ebayAspectSnapshot = {};
+      state.ebayAspectManualEdits = new Set();
       state.removedImages = new Set();
+      state.activeImages = new Set();
+      state.inactiveImages = new Set();
       state.imageOrder = {ebay: [], amazon: []};
       state.dragImageUrl = '';
       resetAmazonRestrictionHint({clearState:true});
@@ -3137,10 +3455,22 @@
         state.storeTemplateImages = {ebay: [], amazon: []};
         state.imageOrder = {ebay: [], amazon: []};
         state.dragImageUrl = '';
+        state.activeImages = new Set();
+        state.inactiveImages = new Set();
         rebuildImagesForActiveStore();
+        updateConditionNoteVisibility();
         renderPreview();
         setupMobileUploadForUPC(state.item.upc || clean);
         autofillForm();
+        const draft = await _fetchWorkingDraft(clean);
+        if(draft){
+          const applyDraft = () => {
+            if(_workingDraftKey(state.activeUpc || clean) !== _workingDraftKey(clean)) return;
+            _applyWorkingDraft(draft);
+          };
+          setTimeout(applyDraft, 250);
+          setTimeout(applyDraft, 1100);
+        }
         loadTemplatesForUPC(clean);
         log(`Loaded ${formatUpc12(state.item.upc || clean)}`);
 
@@ -3364,8 +3694,6 @@
 
       renderImages();
       updateListingActionState();
-      // Refresh "From Your Store" box immediately — data is already in state.item
-      try{ renderEbayComps(); }catch(e){}
     }
 
     function renderNoteCard(){
@@ -3458,11 +3786,15 @@
       state.templateReqId += 1; // invalidate in-flight requests
       state.ebayComps = [];
       state.ebayCatalog = [];
-      state.ebayCatalogSelectedEpid = '';
+      state.ebayCatalogSelectedKey = '';
+      state.ebayCatalogSelectedItemId = '';
+      state.ebayCatalogSelectedProductEpid = '';
+      state.ebayCatalogSelectedTitle = '';
+      state.ebayCatalogSelectedCategoryId = '';
+      state.ebayCatalogSelectedCategoryPath = '';
       state.selectedCompItemId = '';
       state.amazonCatalog = [];
       state.amazonCatalogDetail = null;
-      $('ebayCompsBox').innerHTML = '<div class="muted">Select a UPC to load comps.</div>';
       if($('ebayCatalogBox')) $('ebayCatalogBox').innerHTML = '<div class="muted">Select a UPC to load catalog matches.</div>';
       if($('ebayCatalogQ')) $('ebayCatalogQ').value = '';
       if($('ebayCatalogHint')) $('ebayCatalogHint').textContent = 'Select a UPC to auto-search eBay catalog.';
@@ -3499,6 +3831,41 @@
         out.push(u);
       }
       return out;
+    }
+
+    function _imageKey(url){
+      return (url ?? '').toString().trim();
+    }
+
+    function _imageDefaultEnabled(url){
+      return inferImageSource(url) !== 'macy';
+    }
+
+    function _isImageEnabled(url){
+      const key = _imageKey(url);
+      if(!key) return false;
+      if(state.activeImages instanceof Set && state.activeImages.has(key)) return true;
+      if(state.inactiveImages instanceof Set && state.inactiveImages.has(key)) return false;
+      return _imageDefaultEnabled(key);
+    }
+
+    function _setImageEnabled(url, enabled){
+      const key = _imageKey(url);
+      if(!key) return false;
+      if(!(state.activeImages instanceof Set)){
+        state.activeImages = new Set();
+      }
+      if(!(state.inactiveImages instanceof Set)){
+        state.inactiveImages = new Set();
+      }
+      if(enabled){
+        state.activeImages.add(key);
+        state.inactiveImages.delete(key);
+      } else {
+        state.activeImages.delete(key);
+        state.inactiveImages.add(key);
+      }
+      return true;
     }
 
     function _mergeImageLists(...lists){
@@ -3567,6 +3934,7 @@
       _setStoreImageOrder(key, visible);
       rebuildImagesForActiveStore();
       renderPreview();
+      _scheduleWorkingDraftSave();
       if(logChange) log('Reordered eBay images. First card is thumbnail.');
     }
 
@@ -3633,18 +4001,22 @@
       return ($('amazonConditionType')?.value || '').toString().trim() === 'new_new';
     }
 
+    function _isEbayNewCondition(){
+      const cond = ($('condition')?.value || '').toString().trim().toUpperCase();
+      return cond === 'NEW';
+    }
+
+    function updateConditionNoteVisibility(){
+      const ebayWrap = $('conditionDescriptionWrap');
+      const amazonWrap = $('amazonConditionNoteWrap');
+      const ebayVisible = !_isEbayNewCondition();
+      const amazonVisible = !_isAmazonNewCondition();
+      if(ebayWrap) ebayWrap.style.display = ebayVisible ? 'block' : 'none';
+      if(amazonWrap) amazonWrap.style.display = amazonVisible ? 'block' : 'none';
+    }
+
     function _effectiveImagesForStore(store, images){
-      const key = store === 'amazon' ? 'amazon' : 'ebay';
-      // Allow: user-uploaded images + explicitly catalog-chosen images.
-      // Exclude: external URL thumbnails from BOL/rawbol that weren't explicitly chosen.
-      const catalogUrls = new Set(state.storeTemplateImages?.[key] || []);
-      const filtered = (Array.isArray(images) ? images : []).filter(u =>
-        _isUserUploadedImage(u) || catalogUrls.has(u)
-      );
-      if(key === 'amazon'){
-        return filtered;
-      }
-      return _effectiveEbayImages(filtered);
+      return _normalizeImageList(images);
     }
 
     function _previewImagesForStore(store){
@@ -3653,15 +4025,8 @@
       const baseImgs = Array.isArray(state.baseImages) ? state.baseImages : [];
       const merged = _mergeImageLists(storeImgs, baseImgs);
       const ordered = _applyStoreImageOrder(key, merged);
-      if(key === 'amazon'){
-        // Amazon preview is visual-only: selected catalog image first, then local/base image fallback.
-        return ordered;
-      }
-      // Keep preview exactly aligned with what will be sent to eBay.
-      if(Array.isArray(state.images) && state.images.length){
-        return _effectiveEbayImages(state.images);
-      }
-      return _effectiveEbayImages(ordered);
+      const selected = ordered.filter(u => _isImageEnabled(u));
+      return _effectiveImagesForStore(key, selected.length ? selected : ordered);
     }
 
     function renderImageStoreHint(){
@@ -3678,6 +4043,7 @@
       const ordered = _applyStoreImageOrder(key, merged);
       state.images = _effectiveImagesForStore(key, ordered);
       renderImageStoreHint();
+      renderPreview();
       return state.images;
     }
 
@@ -3699,6 +4065,7 @@
       if(state.removedImages && state.removedImages.has(clean)){
         state.removedImages.delete(clean);
       }
+      _setImageEnabled(clean, true);
       const key = _activeStoreKey();
       if(scope === 'base'){
         state.baseImages = _mergeImageLists([clean], state.baseImages);
@@ -3719,6 +4086,8 @@
       const clean = (url ?? '').toString().trim();
       if(!clean) return;
       if(state.removedImages) state.removedImages.add(clean);
+      if(state.activeImages) state.activeImages.delete(clean);
+      if(state.inactiveImages) state.inactiveImages.delete(clean);
       state.baseImages = (Array.isArray(state.baseImages) ? state.baseImages : []).filter(u => u !== clean);
       state.storeTemplateImages = {
         ebay: (state.storeTemplateImages?.ebay || []).filter(u => u !== clean),
@@ -3729,6 +4098,8 @@
         amazon: (state.imageOrder?.amazon || []).filter(u => u !== clean),
       };
       rebuildImagesForActiveStore();
+      renderPreview();
+      _scheduleWorkingDraftSave();
     }
 
     function setFieldValue(id, value, label){
@@ -3988,6 +4359,7 @@
       state.categorySuggestions = [];
       state.recommendedCategory = null;
       state.categoryManuallySet = false;
+      state.ebayAspectManualEdits = new Set();
 
       const sel = categorySelect();
       if(sel){
@@ -4059,8 +4431,6 @@
         if(btnUse) btnUse.style.display = 'none';
       }
 
-      // After the category is set, load item specifics (aspects) for it.
-      try{ loadEbayAspectsForCurrentCategory(); }catch(e){}
     }
 
     async function suggestCategories(query, {auto=false} = {}){
@@ -4083,15 +4453,6 @@
         state.recommendedCategory = res.recommended || null;
 
         renderCategorySuggestions();
-
-        // Prefer recommended by default (unless user already chose manually).
-        if(auto && !state.categoryManuallySet && state.recommendedCategory?.categoryId){
-          const sel = categorySelect();
-          if(sel){
-            sel.value = state.recommendedCategory.categoryId;
-          }
-          renderCategorySuggestions();
-        }
       } catch(e){
         if(reqId !== state.categoryReqId) return;
         state.categorySuggestions = [];
@@ -4105,6 +4466,7 @@
     function clearEbayAspectsUI(msg){
       state.ebayAspectsMeta = [];
       state.ebayAspectsCategoryId = '';
+      state.ebayAspectSnapshot = {};
       renderEbayAspects();
       if(msg){
         const box = $('ebayAspectsBox');
@@ -4202,6 +4564,71 @@
       return out;
     }
 
+    function _markEbayAspectManualEdit(name){
+      const norm = _normAspectName(name);
+      if(!norm) return;
+      if(!(state.ebayAspectManualEdits instanceof Set)) state.ebayAspectManualEdits = new Set();
+      state.ebayAspectManualEdits.add(norm);
+    }
+
+    function _ebayAspectWasEditedManually(name){
+      const norm = _normAspectName(name);
+      if(!norm) return false;
+      return !!(state.ebayAspectManualEdits instanceof Set && state.ebayAspectManualEdits.has(norm));
+    }
+
+    function _applyValueToEbayAspectInput(inputEl, rawValue){
+      if(!inputEl) return false;
+      const value = (rawValue ?? '').toString().trim();
+      if(!value) return false;
+      if((inputEl.tagName || '').toUpperCase() === 'SELECT'){
+        const existing = Array.from(inputEl.options || []).find(o => ((o.value || '').toString().trim().toLowerCase() === value.toLowerCase()));
+        if(existing){
+          inputEl.value = existing.value;
+        } else {
+          const opt = document.createElement('option');
+          opt.value = value;
+          opt.textContent = value;
+          opt.dataset.catalogInjected = '1';
+          inputEl.appendChild(opt);
+          inputEl.value = value;
+        }
+        return true;
+      }
+      inputEl.value = value;
+      return true;
+    }
+
+    function _ensureEbayAspectInput(name){
+      let el = _findEbayAspectInputByName(name);
+      if(el) return el;
+      const current = Array.isArray(state.manualRequiredAspects) ? state.manualRequiredAspects : [];
+      if(!current.some(n => _normAspectName(n) === _normAspectName(name))){
+        current.push(name);
+        state.manualRequiredAspects = current;
+        try{ renderEbayAspects(); }catch(e){}
+      }
+      return _findEbayAspectInputByName(name);
+    }
+
+    function _setEbayAspectValue(name, value, {onlyIfBlank=false, respectManualEdits=false} = {}){
+      const v = (value ?? '').toString().trim();
+      if(!v) return false;
+      if(respectManualEdits && _ebayAspectWasEditedManually(name)) return false;
+
+      const el = _ensureEbayAspectInput(name);
+      if(!el) return false;
+
+      const current = (el.value || '').toString().trim();
+      if(onlyIfBlank && current) return false;
+
+      const changed = current.toLowerCase() !== v.toLowerCase();
+      _applyValueToEbayAspectInput(el, v);
+      _rememberEbayAspectSnapshot({[name]: v});
+      el.classList.remove('fieldInvalid');
+      return changed;
+    }
+
     function _captureEbayAspectInputs(){
       const box = $('ebayAspectsBox');
       const prev = {};
@@ -4212,6 +4639,23 @@
         prev[name] = (el.value || '').toString();
       });
       return prev;
+    }
+
+    function _rememberEbayAspectSnapshot(extra=null){
+      const current = _captureEbayAspectInputs();
+      const merged = {
+        ...((state.ebayAspectSnapshot && typeof state.ebayAspectSnapshot === 'object') ? state.ebayAspectSnapshot : {}),
+        ...current
+      };
+      if(extra && typeof extra === 'object'){
+        for(const [name, value] of Object.entries(extra)){
+          const key = (name || '').toString().trim();
+          if(!key) continue;
+          merged[key] = (value ?? '').toString();
+        }
+      }
+      state.ebayAspectSnapshot = merged;
+      return merged;
     }
 
     function renderEbayAspects(){
@@ -4233,7 +4677,10 @@
       const defaultMeta = getDefaultEbayAspectsMeta()
         .filter(a => !namesWithManual.has(_normAspectName(a?.name || '')));
       const meta = [...manualMeta, ...baseMeta, ...defaultMeta];
-      const prev = _captureEbayAspectInputs();
+      const prev = {
+        ...((state.ebayAspectSnapshot && typeof state.ebayAspectSnapshot === 'object') ? state.ebayAspectSnapshot : {}),
+        ..._captureEbayAspectInputs()
+      };
       box.innerHTML = '';
 
       if(!meta.length){
@@ -4368,12 +4815,20 @@
           // Restore previous value if the user typed something.
           if(Object.prototype.hasOwnProperty.call(prev, name) && prev[name] !== undefined){
             try{
-              inputEl.value = prev[name];
+              _applyValueToEbayAspectInput(inputEl, prev[name]);
             }catch(e){}
           }
           // Clear missing-field highlight once user edits this aspect.
-          inputEl.addEventListener('input', () => inputEl.classList.remove('fieldInvalid'));
-          inputEl.addEventListener('change', () => inputEl.classList.remove('fieldInvalid'));
+          inputEl.addEventListener('input', () => {
+            inputEl.classList.remove('fieldInvalid');
+            _markEbayAspectManualEdit(name);
+            _rememberEbayAspectSnapshot({[name]: inputEl.value || ''});
+          });
+          inputEl.addEventListener('change', () => {
+            inputEl.classList.remove('fieldInvalid');
+            _markEbayAspectManualEdit(name);
+            _rememberEbayAspectSnapshot({[name]: inputEl.value || ''});
+          });
 
           // Provide a compact hint per aspect.
           const bits = [];
@@ -4431,15 +4886,12 @@
         box.appendChild(details);
       }
 
-      // Apply pending eBay catalog specifics if a product was selected before aspects rendered
-      if(state._pendingCatalogAspects){
-        const pending = state._pendingCatalogAspects;
-        state._pendingCatalogAspects = null;
-        try{ _applyEbayCatalogProduct(state.ebayCatalogSelectedEpid || '', '', '', pending, {ifEmpty:true}); }catch(e){}
-      }
+      // Re-apply the selected catalog specifics after the category-specific UI renders.
+      try{ _applySelectedEbayCatalogAspects({ifEmpty: true}); }catch(e){}
 
       // Apply brand/color/material from Amazon catalog + title extraction
       try{ applyCommonSpecificsFromAvailableData(); }catch(e){}
+      try{ _rememberEbayAspectSnapshot(); }catch(e){}
     }
 
     async function loadEbayAspectsForCurrentCategory({force=false} = {}){
@@ -4456,6 +4908,7 @@
 
       const reqId = ++state.ebayAspectsReqId;
       const box = $('ebayAspectsBox');
+      try{ _rememberEbayAspectSnapshot(); }catch(e){}
       if(box) box.innerHTML = '<div class="hint">Loading item specifics…</div>';
 
       const mp = ($('marketplaceId')?.value || state.settings?.ebay_marketplace_id || 'EBAY_US').toString().trim() || 'EBAY_US';
@@ -4478,6 +4931,7 @@
     function clearEbayAspectValues(){
       const box = $('ebayAspectsBox');
       if(!box) return;
+      state.ebayAspectSnapshot = {};
       box.querySelectorAll('[data-ebay-aspect]').forEach(el => {
         try{ el.value = ''; } catch(e){}
       });
@@ -4500,6 +4954,7 @@
 
     function renderEbayComps(){
       const box = $('ebayCompsBox');
+      if(!box) return;
       box.innerHTML = '';
 
       if(!state.item){
@@ -4589,6 +5044,154 @@
       }
     }
 
+    function _candidateTemplatePrice(result){
+      const min = Number(result?.price_min);
+      const max = Number(result?.price_max);
+      if(Number.isFinite(min) && min > 0) return min;
+      if(Number.isFinite(max) && max > 0) return max;
+      return null;
+    }
+
+    function _findRelatedCatalogTemplatePrice({epid='', title=''} = {}){
+      const safeEpid = (epid || '').toString().trim().toLowerCase();
+      const safeTitle = (title || '').toString().trim().toLowerCase();
+      const results = Array.isArray(state.ebayCatalog) ? state.ebayCatalog : [];
+      for(const row of results){
+        if(!row) continue;
+        const rowEpid = (row.epid || '').toString().trim().toLowerCase();
+        const rowTitle = (row.title || '').toString().trim().toLowerCase();
+        if((safeEpid && rowEpid && safeEpid === rowEpid) || (safeTitle && rowTitle && safeTitle === rowTitle)){
+          const price = _candidateTemplatePrice(row);
+          if(price !== null) return price;
+        }
+      }
+      return null;
+    }
+
+    function _pickEbayCatalogTemplatePrice(result){
+      const direct = _candidateTemplatePrice(result);
+      if(direct !== null) return direct;
+      return _findRelatedCatalogTemplatePrice({
+        epid: result?.epid || '',
+        title: result?.title || '',
+      });
+    }
+
+    function _ebayCatalogResultKey(result){
+      if(!result || typeof result !== 'object') return '';
+      const itemId = (result.itemId || result.item_id || '').toString().trim();
+      const epid = (result.epid || '').toString().trim();
+      const title = (result.title || '').toString().trim();
+      return itemId || epid || title;
+    }
+
+    function _rememberEbayCatalogSelection({itemId='', epid='', title='', categoryId='', categoryPath=''} = {}){
+      const safeItemId = (itemId || '').toString().trim();
+      const safeEpid = (epid || '').toString().trim();
+      const safeTitle = (title || '').toString().trim();
+      state.ebayCatalogSelectedKey = (safeItemId || safeEpid || safeTitle).trim();
+      state.ebayCatalogSelectedItemId = safeItemId;
+      state.ebayCatalogSelectedProductEpid = safeEpid;
+      state.ebayCatalogSelectedTitle = safeTitle;
+      state.ebayCatalogSelectedCategoryId = (categoryId || '').toString().trim();
+      state.ebayCatalogSelectedCategoryPath = (categoryPath || '').toString().trim();
+    }
+
+    function _clearEbayCatalogSelection(){
+      _rememberEbayCatalogSelection({});
+      state.ebayCatalogSelectedAspects = {};
+    }
+
+    function _applyEbayCatalogCategory(categoryId, categoryPath, {force=false} = {}){
+      const catId = (categoryId || '').toString().trim();
+      if(!catId) return;
+      if(!force && state.categoryManuallySet) return;
+      const sel = categorySelect();
+      if(!sel) return;
+
+      const existing = Array.from(sel.options || []).find(o => ((o.value || '').toString().trim() === catId));
+      if(!existing){
+        const opt = document.createElement('option');
+        opt.value = catId;
+        const label = (categoryPath || '').toString().trim();
+        opt.textContent = label ? `[catalog] ${label} (${catId})` : `Catalog: ${catId}`;
+        sel.appendChild(opt);
+      }
+      if((sel.value || '').toString().trim() !== catId){
+        sel.value = catId;
+      }
+      state.categoryManuallySet = false;
+      try{ renderCategorySuggestions(); }catch(e){}
+      try{ loadEbayAspectsForCurrentCategory({force: true}); }catch(e){}
+    }
+
+    async function _loadEbayCatalogDetail(result, {ifEmpty=false, silent=false} = {}){
+      const itemId = (result?.itemId || result?.item_id || '').toString().trim();
+      const selectionKey = _ebayCatalogResultKey(result);
+      if(!itemId || !selectionKey) return false;
+      try{
+        const mp = ($('marketplaceId')?.value || state.settings?.ebay_marketplace_id || 'EBAY_US').toString().trim() || 'EBAY_US';
+        const res = await apiGet(`/api/listingagent/ebay/catalog_item?itemId=${encodeURIComponent(itemId)}&marketplaceId=${encodeURIComponent(mp)}`);
+        if(selectionKey !== (state.ebayCatalogSelectedKey || '').toString().trim()) return false;
+        const detail = (res && res.result && typeof res.result === 'object') ? res.result : null;
+        if(!detail) return false;
+        const merged = {
+          ...(result || {}),
+          ...detail,
+          aspects: Object.keys(detail.aspects || {}).length ? (detail.aspects || {}) : (result?.aspects || {}),
+        };
+        state.ebayCatalog = (Array.isArray(state.ebayCatalog) ? state.ebayCatalog : []).map(row => {
+          return _ebayCatalogResultKey(row) === selectionKey ? {...row, ...merged} : row;
+        });
+        const suggestedPrice = _pickEbayCatalogTemplatePrice(merged);
+        _applyEbayCatalogProduct(
+          merged.epid || '',
+          merged.title || '',
+          merged.image || '',
+          merged.aspects || {},
+          {
+            itemId: merged.itemId || itemId,
+            ifEmpty,
+            categoryId: merged.categoryId || '',
+            categoryPath: merged.categoryPath || '',
+            priceValue: suggestedPrice,
+          }
+        );
+        renderEbayCatalog();
+        return true;
+      }catch(e){
+        if(!silent){
+          log(`eBay catalog detail unavailable: ${e.message}`);
+        }
+        return false;
+      }
+    }
+
+    async function _selectEbayCatalogResult(result, {ifEmpty=false} = {}){
+      if(!result || typeof result !== 'object') return false;
+      const itemId = (result.itemId || result.item_id || '').toString().trim();
+      const epid = (result.epid || '').toString().trim();
+      const title = (result.title || '').toString().trim();
+      const imgUrl = (result.image || '').toString().trim();
+      const aspects = result.aspects || {};
+      const categoryId = (result.categoryId || '').toString().trim();
+      const categoryPath = (result.categoryPath || '').toString().trim();
+      const suggestedPrice = _pickEbayCatalogTemplatePrice(result);
+      _rememberEbayCatalogSelection({itemId, epid, title, categoryId, categoryPath});
+      _applyEbayCatalogProduct(
+        epid,
+        title,
+        imgUrl,
+        aspects,
+        {itemId, ifEmpty, categoryId, categoryPath, priceValue: suggestedPrice}
+      );
+      renderEbayCatalog();
+      if(itemId){
+        await _loadEbayCatalogDetail(result, {ifEmpty, silent: !!ifEmpty});
+      }
+      return true;
+    }
+
     function renderEbayCatalog(){
       const hint = $('ebayCatalogHint');
       const box = $('ebayCatalogBox');
@@ -4597,37 +5200,41 @@
 
       const results = Array.isArray(state.ebayCatalog) ? state.ebayCatalog : [];
       if(!results.length){
+        const hasSelectedCatalog =
+          !!(state.ebayCatalogSelectedKey || '').toString().trim() ||
+          !!Object.keys(state.ebayCatalogSelectedAspects || {}).length;
+        if(!hasSelectedCatalog){
+          _clearEbayCatalogSelection();
+        }
         box.innerHTML = state.item
-          ? '<div class="hint">No eBay catalog match for this UPC. Try searching by title.</div>'
+          ? `<div class="hint">${hasSelectedCatalog ? 'No additional eBay browse matches right now. Keeping the selected catalog specifics.' : 'No eBay catalog match for this UPC. Try searching by title.'}</div>`
           : '<div class="muted">Search to load eBay catalog matches.</div>';
-        if(hint) hint.textContent = state.item ? 'No matches. Try searching by title.' : 'Search to see eBay catalog matches.';
+        if(hint) hint.textContent = state.item
+          ? (hasSelectedCatalog ? 'Using saved catalog specifics.' : 'No matches. Try searching by title.')
+          : 'Search to see eBay catalog matches.';
         return;
       }
 
       if(hint) hint.textContent = `${results.length} eBay catalog match${results.length > 1 ? 'es' : ''} found — select one to fill item specifics.`;
 
-      // Auto-select first result if nothing is selected yet
-      const firstEpid = (results[0]?.epid || '').toString().trim();
-      const firstKey = firstEpid || results[0]?.title || '';
-      if(!state.ebayCatalogSelectedEpid && results.length){
-        state.ebayCatalogSelectedEpid = firstKey;
-        try{ _applyEbayCatalogProduct(firstEpid, results[0].title||'', results[0].image||'', results[0].aspects||{}, {ifEmpty:true}); }catch(e){}
-      }
-
       const list = document.createElement('div');
       list.style.cssText = 'display:grid;gap:8px;';
 
       for(const r of results){
+        const itemId = (r.itemId || r.item_id || '').toString().trim();
         const epid = (r.epid || '').toString().trim();
         const title = (r.title || '(no title)').toString().trim();
         const brand = (r.brand || '').toString().trim();
         const imgUrl = (r.image || '').toString().trim();
         const aspects = r.aspects || {};
+        const categoryId = (r.categoryId || '').toString().trim();
+        const categoryPath = (r.categoryPath || '').toString().trim();
+        const source = (r.source || '').toString().trim().toLowerCase();
         const priceMin = r.price_min != null ? parseFloat(r.price_min) : null;
         const priceMax = r.price_max != null ? parseFloat(r.price_max) : null;
         const priceCount = r.price_count || 0;
-        const rowKey = epid || title;
-        const isSelected = rowKey && rowKey === state.ebayCatalogSelectedEpid;
+        const rowKey = _ebayCatalogResultKey(r);
+        const isSelected = rowKey && rowKey === state.ebayCatalogSelectedKey;
 
         const row = document.createElement('div');
         row.className = 'compRow' + (isSelected ? ' compRowSelected' : '');
@@ -4651,7 +5258,9 @@
           <h3 class="compTitle">${escapeHtml(title)}</h3>
           <div class="compMeta">
             ${epid ? `<span class="badge badgeBlue">EPID ${escapeHtml(epid)}</span>` : ''}
+            ${source ? `<span class="badge">${escapeHtml(source)}</span>` : ''}
             ${brand ? `<span class="badge">${escapeHtml(brand)}</span>` : ''}
+            ${categoryPath ? `<span class="badge">${escapeHtml(categoryPath)}</span>` : ''}
             ${aspectCount ? `<span class="badge badgeGreen">${aspectCount} specifics</span>` : ''}
             ${priceMin != null ? `<span class="badge badgeBlue">${priceMin === priceMax || priceMax == null ? fmtUsd(priceMin) : fmtUsd(priceMin)+' – '+fmtUsd(priceMax)}${priceCount > 1 ? ` <span style="opacity:.7;font-size:.85em;">(${priceCount} listings)</span>` : ''}</span>` : ''}
           </div>
@@ -4660,10 +5269,8 @@
         row.appendChild(thumb);
         row.appendChild(main);
 
-        row.onclick = () => {
-          state.ebayCatalogSelectedEpid = rowKey;
-          _applyEbayCatalogProduct(epid, title, imgUrl, aspects);
-          renderEbayCatalog(); // refresh selection highlight
+        row.onclick = async () => {
+          await _selectEbayCatalogResult(r, {ifEmpty: false});
         };
 
         list.appendChild(row);
@@ -4672,13 +5279,35 @@
       box.appendChild(list);
     }
 
-    function _applyEbayCatalogProduct(epid, title, imgUrl, aspects, {ifEmpty=false}={}){
-      // Apply title if current field is empty
+    function _applyEbayCatalogProduct(epid, title, imgUrl, aspects, {itemId='', ifEmpty=false, categoryId='', categoryPath='', priceValue=null}={}){
+      _rememberEbayCatalogSelection({itemId, epid, title, categoryId, categoryPath});
+      state.ebayCatalogSelectedAspects = {...(aspects || {})};
+
+      // Apply title if current field is empty, or replace it when the user explicitly chose a catalog match.
       const titleEl = $('title');
-      if(titleEl && !(titleEl.value || '').trim() && title) titleEl.value = title;
+      if(titleEl && title){
+        if(!ifEmpty || !(titleEl.value || '').trim()){
+          titleEl.value = title;
+        }
+      }
 
       // Apply image if none set
       if(imgUrl) try{ setStoreTemplateImages('ebay', [imgUrl]); }catch(e){}
+
+      const priceEl = $('price');
+      const suggestedPrice = Number(priceValue);
+      if(priceEl && Number.isFinite(suggestedPrice) && suggestedPrice > 0){
+        const canApply = !ifEmpty || !state.priceManuallySet || !(priceEl.value || '').toString().trim();
+        if(canApply){
+          priceEl.value = suggestedPrice.toFixed(2);
+          state.priceManuallySet = false;
+        }
+      }
+
+      // Treat selected catalog product as "use all suggested specifics", including category when safe.
+      if(categoryId){
+        try{ _applyEbayCatalogCategory(categoryId, categoryPath, {force: !ifEmpty}); }catch(e){}
+      }
 
       // Fill aspects. ifEmpty=true → only fill blank fields (auto-fill). ifEmpty=false → override (user clicked).
       const box = $('ebayAspectsBox');
@@ -4686,24 +5315,10 @@
         for(const [name, value] of Object.entries(aspects || {})){
           if(!name || !value) continue;
           try{
-            const targetNorm = _normAspectName(name);
-            let el = null;
-            box.querySelectorAll('[data-ebay-aspect]').forEach(e => {
-              if(el) return;
-              const n = _normAspectName((e.dataset.ebayAspect || '').toString());
-              if(n === targetNorm || n.includes(targetNorm) || targetNorm.includes(n)) el = e;
+            _setEbayAspectValue(name, value, {
+              onlyIfBlank: false,
+              respectManualEdits: !!ifEmpty,
             });
-            if(el){
-              if(ifEmpty && (el.value || '').toString().trim()) continue;
-              if(el.tagName === 'SELECT'){
-                const opt = Array.from(el.options).find(o => o.value.toLowerCase() === value.toLowerCase());
-                if(opt) el.value = opt.value;
-              } else {
-                el.value = value;
-              }
-            } else {
-              _setEbayAspectIfEmpty(name, value);
-            }
           }catch(e){}
         }
       } else {
@@ -4713,15 +5328,51 @@
       if(count) log(`eBay ${ifEmpty?'auto-filled':'applied'} ${count} specifics from ${epid||'catalog'}.`);
     }
 
+    function _applySelectedEbayCatalogAspects({ifEmpty=true} = {}){
+      const key = (state.ebayCatalogSelectedKey || '').toString().trim();
+      const fallbackAspects = state.ebayCatalogSelectedAspects || state._pendingCatalogAspects || {};
+      if(!key){
+        if(!fallbackAspects || !Object.keys(fallbackAspects).length) return false;
+      }
+      const results = Array.isArray(state.ebayCatalog) ? state.ebayCatalog : [];
+      const selected = results.find(r => {
+        const rowKey = _ebayCatalogResultKey(r);
+        return rowKey === key;
+      });
+      const aspects = (selected && selected.aspects && Object.keys(selected.aspects).length)
+        ? selected.aspects
+        : fallbackAspects;
+      if(!aspects || !Object.keys(aspects).length) return false;
+      const box = $('ebayAspectsBox');
+      if(!box){
+        state._pendingCatalogAspects = aspects;
+        return false;
+      }
+      let changed = false;
+      for(const [name, value] of Object.entries(aspects)){
+        if(!name || !value) continue;
+        try{
+          changed = _setEbayAspectValue(name, value, {
+            onlyIfBlank: false,
+            respectManualEdits: !!ifEmpty,
+          }) || changed;
+        }catch(e){}
+      }
+      return changed;
+    }
+
     async function ebayCatalogSearch(){
       const typed = ($('ebayCatalogQ')?.value || '').trim();
       const upc = formatUpc12((($('upc')?.value || '').trim()));
       const q = typed || upc;
       if(!q){ log('Pick a UPC first (eBay catalog).'); return; }
+      _clearEbayCatalogSelection();
       if($('ebayCatalogHint')) $('ebayCatalogHint').textContent = 'Searching eBay catalog...';
       if($('ebayCatalogBox')) $('ebayCatalogBox').innerHTML = '<div class="hint">Searching eBay catalog…</div>';
       try{
-        const res = await apiGet(`/api/listingagent/ebay/catalog_search?${/^\d+$/.test(q.replace(/\s/g,'')) ? 'upc' : 'q'}=${encodeURIComponent(q)}&limit=10`);
+        const itemTitle = ($('title')?.value || state.item?.title || state.item?.bol?.description || '').toString().trim();
+        const titleParam = itemTitle ? `&title=${encodeURIComponent(itemTitle)}` : '';
+        const res = await apiGet(`/api/listingagent/ebay/catalog_search?${/^\d+$/.test(q.replace(/\s/g,'')) ? 'upc' : 'q'}=${encodeURIComponent(q)}&limit=10${titleParam}`);
         state.ebayCatalog = res.results || [];
         renderEbayCatalog();
       }catch(e){
@@ -4905,24 +5556,7 @@
     }
 
     function _setEbayAspectIfEmpty(name, value){
-      const v = (value ?? '').toString().trim();
-      if(!v) return false;
-
-      let el = _findEbayAspectInputByName(name);
-      if(!el){
-        const current = Array.isArray(state.manualRequiredAspects) ? state.manualRequiredAspects : [];
-        if(!current.some(n => _normAspectName(n) === _normAspectName(name))){
-          current.push(name);
-          state.manualRequiredAspects = current;
-          try{ renderEbayAspects(); }catch(e){}
-        }
-        el = _findEbayAspectInputByName(name);
-      }
-      if(!el) return false;
-      if((el.value || '').toString().trim()) return false;
-      el.value = v;
-      el.classList.remove('fieldInvalid');
-      return true;
+      return _setEbayAspectValue(name, value, {onlyIfBlank: true, respectManualEdits: true});
     }
 
     function applyCommonSpecificsFromAmazon(detail, seed = {}){
@@ -5091,24 +5725,11 @@
       state.ebayComps = [];
       state.amazonCatalog = [];
       state.amazonCatalogDetail = null;
+      _clearEbayCatalogSelection();
       $('amazonCatalogDetail').innerHTML = '';
-      $('ebayCompsBox').innerHTML = '<div class=\"hint\">Loading eBay comps...</div>';
       if($('amazonCatalogSelectHint')) $('amazonCatalogSelectHint').textContent = 'Loading Amazon catalog matches...';
       if($('amazonCatalogQ') && !$('amazonCatalogQ').value.trim()) $('amazonCatalogQ').value = clean;
       if($('amazonTemplatesBox')) $('amazonTemplatesBox').innerHTML = '<div class=\"hint\">Loading Amazon catalog matches...</div>';
-
-      // eBay comps (live marketplace)
-      (async () => {
-        try{
-          const res = await apiGet(`/api/listingagent/ebay/comps?upc=${encodeURIComponent(clean)}&limit=12`);
-          if(reqId !== state.templateReqId) return;
-          state.ebayComps = res.results || [];
-          renderEbayComps();
-        } catch(e){
-          if(reqId !== state.templateReqId) return;
-          // Comps unavailable — leave store listings intact, just no median hint
-        }
-      })();
 
       // Amazon catalog matches (ASIN templates)
       (async () => {
@@ -5128,10 +5749,23 @@
       // Runs first; Browse API aggregation runs in parallel and fills any gaps.
       (async () => {
         try{
-          const res = await apiGet(`/api/listingagent/ebay/product_specifics?upc=${encodeURIComponent(clean)}`);
+          const itemTitle = (state.item?.title || state.item?.bol?.description || '').toString().trim();
+          const titleParam = itemTitle ? `&title=${encodeURIComponent(itemTitle)}` : '';
+          const res = await apiGet(`/api/listingagent/ebay/product_specifics?upc=${encodeURIComponent(clean)}${titleParam}`);
           if(reqId !== state.templateReqId) return;
-          if(res.found && res.aspects && Object.keys(res.aspects).length){
-            _applyEbayCatalogProduct(res.epid || '', res.title || '', '', res.aspects, {ifEmpty: true});
+          if(res.found){
+            _applyEbayCatalogProduct(
+              res.epid || '',
+              res.title || '',
+              res.image || '',
+              res.aspects || {},
+              {
+                itemId: res.itemId || '',
+                ifEmpty: true,
+                categoryId: res.categoryId || '',
+                categoryPath: res.categoryPath || '',
+              }
+            );
           }
         } catch(e){ /* silent — Browse API + Amazon fills gaps */ }
       })();
@@ -5142,7 +5776,9 @@
         if($('ebayCatalogHint')) $('ebayCatalogHint').textContent = 'Searching eBay catalog...';
         if($('ebayCatalogBox')) $('ebayCatalogBox').innerHTML = '<div class="hint">Searching eBay catalog…</div>';
         try{
-          const res = await apiGet(`/api/listingagent/ebay/catalog_search?upc=${encodeURIComponent(clean)}&limit=10`);
+          const itemTitle = (state.item?.title || state.item?.bol?.description || '').toString().trim();
+          const titleParam = itemTitle ? `&title=${encodeURIComponent(itemTitle)}` : '';
+          const res = await apiGet(`/api/listingagent/ebay/catalog_search?upc=${encodeURIComponent(clean)}&limit=10${titleParam}`);
           if(reqId !== state.templateReqId) return;
           state.ebayCatalog = res.results || [];
           renderEbayCatalog();
@@ -5180,6 +5816,12 @@
 
       // Marketplace images (best-effort inference)
       if(
+        host.includes('macys.com') ||
+        host.includes('bloomingdales.com') ||
+        lower.includes('macys.com') ||
+        lower.includes('bloomingdales.com')
+      ) return 'macy';
+      if(
         host.includes('media-amazon.com') ||
         host.includes('ssl-images-amazon') ||
         host.includes('images-na.ssl-images-amazon') ||
@@ -5193,11 +5835,11 @@
 
     function buildImageLabels(urls){
       const list = Array.isArray(urls) ? urls : [];
-      const counters = {upload: 0, prep: 0, ebay: 0, amz: 0, img: 0};
+      const counters = {upload: 0, prep: 0, ebay: 0, amz: 0, macy: 0, img: 0};
       const labels = {};
       for(const u of list){
         const srcRaw = inferImageSource(u);
-        const src = (srcRaw === 'upload' || srcRaw === 'prep' || srcRaw === 'ebay' || srcRaw === 'amz') ? srcRaw : 'img';
+        const src = (srcRaw === 'upload' || srcRaw === 'prep' || srcRaw === 'ebay' || srcRaw === 'amz' || srcRaw === 'macy') ? srcRaw : 'img';
         counters[src] = (counters[src] || 0) + 1;
         labels[u] = `${src}${counters[src]}`;
       }
@@ -5219,6 +5861,7 @@
       const isAmazonMode = !isEbayMode;
       const wontSend = isAmazonMode && _isAmazonNewCondition();
       const visible = Array.isArray(state.images) ? state.images.filter(Boolean) : [];
+      const selected = visible.filter(u => _isImageEnabled(u));
       const hasUserPhotos = visible.some(url => _isUserUploadedImage(url));
       if(wontSend && hasUserPhotos){
         const hint = document.createElement('div');
@@ -5227,14 +5870,23 @@
         hint.innerHTML = '<i class="fas fa-ban" style="margin-right:6px;"></i>Condition is <strong>New</strong> — Amazon uses catalog images only. These photos will <strong>not</strong> be submitted.';
         wrap.appendChild(hint);
       }
+      const hasSelectedRemote = selected.some(url => !_isUserUploadedImage(url));
+      if(hasSelectedRemote){
+        const hint = document.createElement('div');
+        hint.className = 'hint';
+        hint.style.marginBottom = '10px';
+        hint.innerHTML = '<i class="fas fa-circle-info" style="margin-right:6px;"></i>Some checked images are remote URLs. They can stay in preview, but the store may still require a local file to accept them.';
+        wrap.appendChild(hint);
+      }
       const labels = buildImageLabels(visible);
 
       visible.forEach((url, idx) => {
         const label = labels[url] || `img${idx + 1}`;
         const isThumb = isEbayMode && idx === 0;
+        const enabled = _isImageEnabled(url);
         const card = document.createElement('div');
         const isCatalog = !_isUserUploadedImage(url);
-        card.className = `imageCard${isThumb ? ' imageCardThumb' : ''}${wontSend && !isCatalog ? ' imageWontSend' : ''}`;
+        card.className = `imageCard${isThumb ? ' imageCardThumb' : ''}${wontSend && !isCatalog ? ' imageWontSend' : ''}${enabled ? '' : ' imageCardInactive'}`;
         card.dataset.url = url;
         card.innerHTML = `
           <div class="imageCardTop">
@@ -5244,6 +5896,10 @@
           <div class="imageCardMeta">
             <div class="imageCardLabel" title="${escapeHtml(label)}">${escapeHtml(label)}</div>
             <div class="imageCardActions">
+              <label class="imageCardUseToggle" title="Toggle whether this image is included in the listing">
+                <input type="checkbox" data-act="use" ${enabled ? 'checked' : ''} />
+                <span>Use</span>
+              </label>
               ${isEbayMode ? '<div class="imageCardDragText"><i class="fas fa-grip-lines"></i> Drag to reorder</div>' : '<div></div>'}
               <button type="button" class="imageCardRemove" data-act="remove" title="Remove image" aria-label="Remove image">&times;</button>
             </div>
@@ -5266,6 +5922,17 @@
             e.preventDefault();
             e.stopPropagation();
             removeImageUrl(url);
+            renderPreview();
+          };
+        }
+
+        const useToggle = card.querySelector('input[data-act="use"]');
+        if(useToggle){
+          useToggle.onchange = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            _setImageEnabled(url, !!useToggle.checked);
+            renderImages();
             renderPreview();
           };
         }
@@ -5504,6 +6171,11 @@
       showIssueModal(title, message);
     }
 
+    function showOperationFailureModal(operation, err){
+      const msg = `${operation} failed: ${(err && err.message) ? err.message : (err || 'Unknown error')}`;
+      showIssueModal(`${operation} Failed`, msg);
+    }
+
     function isProbablyMobile(){
       try{
         if(window.matchMedia && window.matchMedia('(pointer: coarse)').matches) return true;
@@ -5564,8 +6236,10 @@
         if(newUrls.length){
           state.baseImages = _mergeImageLists(newUrls, state.baseImages);
           _promoteStoreImages('ebay', newUrls);
+          _promoteStoreImages('amazon', newUrls);
           rebuildImagesForActiveStore();
           renderPreview();
+          _scheduleWorkingDraftSave();
           if(!silent) log(`Added ${newUrls.length} uploaded photo${newUrls.length===1?'':'s'}.`);
         }
       }catch(e){
@@ -5621,14 +6295,17 @@
         if(newUrls.length){
           state.baseImages = _mergeImageLists(newUrls, state.baseImages);
           _promoteStoreImages('ebay', newUrls);
+          _promoteStoreImages('amazon', newUrls);
           rebuildImagesForActiveStore();
           renderPreview();
+          _scheduleWorkingDraftSave();
         }
 
         if($('mobileUploadStatus')){
           $('mobileUploadStatus').textContent = urls.length ? `Uploaded: ${urls.length}` : '';
         }
         const n = (data.saved_count ?? urls.length) || urls.length;
+        _scheduleWorkingDraftSave();
         log(`Uploaded ${n} photo${n===1?'':'s'}.`);
       }catch(e){
         if($('mobileUploadStatus')) $('mobileUploadStatus').textContent = '';
@@ -5707,13 +6384,6 @@
       if(s.ebay_category_id && $('categoryId') && $('categoryId').value.trim()){
         setCategoryHint(`Saved default: <span class=\"badge\">${escapeHtml($('categoryId').value.trim())}</span>`);
       }
-      // Ensure item specifics are loaded when a saved category is applied.
-      try{
-        if($('categoryId') && $('categoryId').value.trim()){
-          loadEbayAspectsForCurrentCategory();
-        }
-      }catch(e){}
-
       // Amazon defaults
       setIfEmpty('amazonMarketplaceId', 'amazon_marketplace_id');
       setIfEmpty('amazonCurrency', 'amazon_currency');
@@ -5907,15 +6577,17 @@
     function collectPayload(){
       syncDescFromEditor();
       const title = $('title').value.trim();
+      const selected = _effectiveEbayImages((Array.isArray(state.images) ? state.images : []).filter(u => _isImageEnabled(u)));
       return {
         upc: $('upc').value.trim(),
         sku: $('sku').value.trim(),
         title,
         description: title,
         condition: $('condition').value,
+        conditionDescription: $('conditionDescription').value.trim(),
         quantity: Number($('quantity').value || 1),
         price: $('price').value === '' ? null : Number($('price').value),
-        images: _effectiveEbayImages(state.images),
+        images: selected,
         aspects: collectEbayAspects(),
         categoryId: $('categoryId').value.trim(),
         listingDescription: getDescHtml().trim(),
@@ -5927,15 +6599,18 @@
         currency: 'USD',
         listingDuration: $('listingDuration').value.trim(),
         offerId: $('offerId').value.trim(),
+        catalogEpid: (state.ebayCatalogSelectedProductEpid || '').toString().trim(),
       };
     }
 
     function collectAmazonPayload(){
+      const selected = (Array.isArray(state.images) ? state.images : []).filter(u => _isImageEnabled(u) && _isUserUploadedImage(u));
       return {
         upc: $('amazonUpc').value.trim(),
         sku: $('amazonSku').value.trim(),
         asin: $('amazonAsin').value.trim(),
         conditionType: $('amazonConditionType').value,
+        conditionNote: $('amazonConditionNote').value.trim(),
         quantity: Number($('amazonQuantity').value || 1),
         price: $('amazonPrice').value === '' ? null : Number($('amazonPrice').value),
         productType: $('amazonProductType').value.trim(),
@@ -5944,7 +6619,7 @@
         currency: $('amazonCurrency').value.trim(),
         merchantShippingGroup: $('amazonMerchantShippingGroup').value.trim(),
         fulfillmentChannelCode: 'DEFAULT',
-        images: _isAmazonNewCondition() ? [] : (Array.isArray(state.images) ? state.images.filter(_isUserUploadedImage) : []),
+        images: _isAmazonNewCondition() ? [] : selected,
       };
     }
 
@@ -5998,7 +6673,7 @@
     // auto-filled (UPC, SKU, title, description, qty) is intentionally excluded
     // UNLESS it is genuinely empty (e.g. title missing from rawbol).
     // IDs of "always present" fields that have defaults (not counted as empty in badge)
-    const _CYCLE_ONLY_IDS = new Set(['condition', 'amazonConditionType', 'listingDescEditor', 'ebayCompsBox', 'ebayCatalogQ', 'fulfillmentPolicyId']);
+    const _CYCLE_ONLY_IDS = new Set(['condition', 'amazonConditionType', 'listingDescEditor', 'ebayCatalogQ', 'fulfillmentPolicyId']);
 
     function _getUnfilledRequired(){
       if(!state.item) return [];
@@ -6006,23 +6681,24 @@
       const push = (id) => { const el = $(id); if(el) els.push(el); };
       const pushIfEmpty = (id) => { const el = $(id); if(el && !(el.value || '').trim()) els.push(el); };
 
-      if(state.activeStore === 'amazon'){
-        // Amazon order: condition (review) → price → SKU → description
-        push('amazonConditionType'); // always — has default, review deliberately
-        const ap = ($('amazonPrice')?.value ?? '').trim();
-        if(ap === '' || Number.isNaN(Number(ap))) push('amazonPrice');
-        const ask = ($('amazonSku')?.value || '').trim();
-        if(!ask) push('amazonSku');
-        push('listingDescEditor'); // always — review even when filled
-      } else {
-        // eBay order: comps → eBay market → condition → price → description → fulfillment policy
-        push('ebayCompsBox');    // scroll to "From Your Store" catalog — always review
-        push('ebayCatalogQ');    // scroll to "From eBay Market" search — always review
-        push('condition');       // always — has default, review deliberately
-        push('price');           // always — review even when filled
-        push('listingDescEditor'); // always — review even when filled
-        push('fulfillmentPolicyId'); // always — review even when filled
-      }
+    if(state.activeStore === 'amazon'){
+      // Amazon order: condition (review) → price → SKU → description
+      push('amazonConditionType'); // always — has default, review deliberately
+      if(!_isAmazonNewCondition()) pushIfEmpty('amazonConditionNote');
+      const ap = ($('amazonPrice')?.value ?? '').trim();
+      if(ap === '' || Number.isNaN(Number(ap))) push('amazonPrice');
+      const ask = ($('amazonSku')?.value || '').trim();
+      if(!ask) push('amazonSku');
+      push('listingDescEditor'); // always — review even when filled
+    } else {
+      // eBay order: eBay market → condition → price → description → fulfillment policy
+      push('ebayCatalogQ');    // scroll to "From eBay Market" search — always review
+      push('condition');       // always — has default, review deliberately
+      if(!_isEbayNewCondition()) pushIfEmpty('conditionDescription');
+      push('price');           // always — review even when filled
+      push('listingDescEditor'); // always — review even when filled
+      push('fulfillmentPolicyId'); // always — review even when filled
+    }
       return els;
     }
 
@@ -6128,6 +6804,7 @@
         if(_isBlank(payload.fulfillmentPolicyId)) add('fulfillmentPolicyId', 'Fulfillment Policy');
         if(_isBlank(payload.paymentPolicyId)) add('paymentPolicyId', 'Payment Policy');
         if(_isBlank(payload.returnPolicyId)) add('returnPolicyId', 'Return Policy');
+        if(!_isEbayNewCondition() && _isBlank(payload.conditionDescription)) add('conditionDescription', 'Condition Description');
 
         if(payload.price === null || Number.isNaN(payload.price)) add('price', 'Price');
         if(!Number.isFinite(payload.quantity) || Number(payload.quantity) < 1) add('quantity', 'Quantity');
@@ -6163,6 +6840,7 @@
       };
       if(_isBlank(payload.sku)) add('amazonSku', 'Amazon SKU');
       if(payload.price === null || Number.isNaN(payload.price)) add('amazonPrice', 'Amazon Price');
+      if(!_isAmazonNewCondition() && _isBlank(payload.conditionNote)) add('amazonConditionNote', 'Amazon Condition Note');
       return { ok: missing.length === 0, missing };
     }
 
@@ -6269,7 +6947,7 @@
       } catch(e){
         highlightMissingEbayAspectFromError(e);
         log(`Draft failed: ${e.message}`);
-        maybeShowRejectedIssue(e.message, 'Draft Rejected');
+        showOperationFailureModal('Draft', e);
       } finally {
         setBusy(false);
       }
@@ -6300,7 +6978,7 @@
       } catch(e){
         highlightMissingEbayAspectFromError(e);
         log(`Publish failed: ${e.message}`);
-        maybeShowRejectedIssue(e.message, 'Publish Rejected');
+        showOperationFailureModal('Publish', e);
       } finally {
         setBusy(false);
       }
@@ -6669,7 +7347,7 @@
         }
       } catch(e){
         log(`Amazon Put Offer failed: ${e.message}`);
-        maybeShowRejectedIssue(e.message, 'Amazon Offer Rejected');
+        showOperationFailureModal('Amazon Put Offer', e);
         if(AMAZON_VERBOSE_DEBUG){
           const api = e?.api || {};
           const ctx = api?.context || {};
@@ -6705,7 +7383,13 @@
 
     function clearAll(){
       clearFieldHighlights();
+      if(state.workingDraftSaveTimer){
+        clearTimeout(state.workingDraftSaveTimer);
+        state.workingDraftSaveTimer = null;
+      }
+      state.workingDraftDirty = false;
       state.manualRequiredAspects = [];
+      state.ebayAspectSnapshot = {};
       stopMobilePhotoPoll();
       state.item = null;
       state.baseImages = [];
@@ -6713,6 +7397,8 @@
       state.imageOrder = {ebay: [], amazon: []};
       state.images = [];
       state.dragImageUrl = '';
+      state.activeImages = new Set();
+      state.inactiveImages = new Set();
       resetAmazonRestrictionHint({clearState:true});
       state.sessionListedForCurrent = {ebay: false, amazon: false};
       state.activeUpc = '';
@@ -6739,12 +7425,15 @@
       $('amazonUpc').value = '';
       $('amazonSku').value = '';
       $('amazonAsin').value = '';
+      $('conditionDescription').value = '';
+      $('amazonConditionNote').value = '';
       $('amazonPrice').value = '';
       $('amazonQuantity').value = 1;
       $('amazonSuggestedPriceHint').style.display = 'none';
       $('amazonFoundBadge').style.display = 'none';
       state.amazonPriceManuallySet = false;
 
+      updateConditionNoteVisibility();
       resetTemplatesUI();
       resetCategorySuggestions();
       renderPreview();
@@ -6834,10 +7523,25 @@
       $('amazonAsin').addEventListener('change', () => checkAmazonRestrictionForCurrentAsin({force:true, silent:true}));
       $('amazonAsin').addEventListener('blur', () => checkAmazonRestrictionForCurrentAsin({force:true, silent:true}));
     }
-    if($('amazonConditionType')) $('amazonConditionType').addEventListener('change', () => { runAmazonRestrictionCheck(); rebuildImagesForActiveStore(); renderImages(); });
+    if($('condition')) $('condition').addEventListener('change', () => {
+      updateConditionNoteVisibility();
+      _resetNextField();
+    });
+    if($('amazonConditionType')) $('amazonConditionType').addEventListener('change', () => {
+      runAmazonRestrictionCheck();
+      updateConditionNoteVisibility();
+      rebuildImagesForActiveStore();
+      renderImages();
+      _resetNextField();
+    });
     if($('amazonMarketplaceId')) $('amazonMarketplaceId').addEventListener('change', () => runAmazonRestrictionCheck());
     // Photo upload (desktop file picker / mobile camera)
     configurePhotoInput();
+    if($('btnUploadPhotos')) $('btnUploadPhotos').onclick = () => {
+      const inp = $('photoInput');
+      if(!inp) return;
+      try{ inp.click(); }catch(e){}
+    };
     if($('photoInput')) $('photoInput').addEventListener('change', async (e) => {
       const inp = e.target;
       await uploadPhotos(inp.files);
@@ -6881,6 +7585,40 @@
       }catch(e){
         log(`AI description failed: ${e.message}`);
         alert(`eBay AI description failed: ${e.message}`);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = orig;
+      }
+    };
+    if($('btnAiTitle')) $('btnAiTitle').onclick = async () => {
+      if(!$('title')) return;
+      if($('title').value.trim() && !confirm('Overwrite current title with AI version?')) return;
+      const btn = $('btnAiTitle');
+      const orig = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating...';
+      try{
+        const title = ($('title')?.value || state.item?.title || state.item?.bol?.description || '').toString().trim();
+        const categoryId = (categorySelect()?.value || '').toString().trim();
+        const upc = ($('upc')?.value || state.activeUpc || '').toString().trim();
+        const aspects = {};
+        const aspectsBox = $('ebayAspectsBox');
+        if(aspectsBox){
+          aspectsBox.querySelectorAll('[data-ebay-aspect]').forEach(el => {
+            const name = (el.dataset.ebayAspect || '').trim();
+            const val = (el.value || '').trim();
+            if(name && val) aspects[name] = val;
+          });
+        }
+        const res = await apiPost('/api/listingagent/ebay/generate_title', {title, category_id: categoryId, upc, aspects});
+        if(!res.success) throw new Error(res.error || 'Unknown error');
+        $('title').value = (res.title || '').trim();
+        state.priceManuallySet = state.priceManuallySet;
+        log(`AI title applied (${res.source || 'ai'}).`);
+        try{ if($('title')) $('title').dispatchEvent(new Event('input', {bubbles:true})); }catch(e){}
+      }catch(e){
+        log(`AI title failed: ${e.message}`);
+        alert(`eBay AI title failed: ${e.message}`);
       } finally {
         btn.disabled = false;
         btn.innerHTML = orig;
@@ -6937,6 +7675,8 @@
         mainEl.classList.add(store === 'ebay' ? 'ebayTheme' : 'amazonTheme');
       }
 
+      updateConditionNoteVisibility();
+
       try{ localStorage.setItem('listingagent_store', store); } catch(e){}
       try{ _updateTopbarStoreBadge(); } catch(e){}
 
@@ -6975,7 +7715,7 @@
       let _t;
       function _scheduleUpdate(){ clearTimeout(_t); _t = setTimeout(_updateNextFieldBtn, 200); }
       const watchIds = ['price','title','categoryId','fulfillmentPolicyId','paymentPolicyId','returnPolicyId',
-                        'amazonAsin','amazonPrice','amazonSku'];
+                        'amazonAsin','amazonPrice','amazonSku','conditionDescription','amazonConditionNote','condition','amazonConditionType'];
       watchIds.forEach(id => {
         const el = $(id);
         if(!el) return;
@@ -6997,6 +7737,20 @@
         const i = fields.indexOf(el);
         if(i >= 0){ _nextFieldIdx = i; _updateNextFieldBtn(); }
       });
+      const mainContent = $('mainContent');
+      if(mainContent){
+        const maybeSave = (e) => {
+          const el = e && e.target ? e.target : null;
+          if(!el || !state.activeUpc) return;
+          if(state.workingDraftSaveTimer){
+            clearTimeout(state.workingDraftSaveTimer);
+          }
+          state.workingDraftDirty = true;
+          _scheduleWorkingDraftSave();
+        };
+        mainContent.addEventListener('input', maybeSave, true);
+        mainContent.addEventListener('change', maybeSave, true);
+      }
     })();
 
     // Right Arrow (no modifier) → jump to next required field
@@ -7077,7 +7831,7 @@
 
     // Clear red validation highlights as fields are corrected.
     ['upc','offerId','sku','title','quantity','price','categoryId','fulfillmentPolicyId','paymentPolicyId','returnPolicyId',
-     'listingDescEditor','amazonSku','amazonPrice'].forEach((id) => {
+     'listingDescEditor','amazonSku','amazonPrice','conditionDescription','amazonConditionNote'].forEach((id) => {
       const el = $(id);
       if(!el) return;
       const evt = (id === 'listingDescEditor') ? 'input' : 'input';
@@ -7148,6 +7902,7 @@
     try{ initialQueueMode = (localStorage.getItem('listingagent_queue_mode') || 'my').toString(); } catch(e){}
     state.queueMode = normalizeQueueMode(initialQueueMode, 'my');
     applyQueueModeUi();
+    _migrateLegacyWorkingDraftsIfNeeded();
  
     renderPreview();
     resetTemplatesUI();

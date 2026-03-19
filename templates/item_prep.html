@@ -377,25 +377,56 @@
     </div>
 
     <div id="result" class="hidden" style="margin-top:12px">
-      <div class="item">
-        <div style="position:relative;display:inline-block">
-          <img id="thumb" class="thumb" src="" alt="thumb">
-          <button id="addThumbBtn" class="btn" style="display:none;position:absolute;top:0;left:0;right:0;bottom:0;background:#00b894;color:#fff;padding:12px;font-size:0.85rem;border:none;cursor:pointer;border-radius:12px;z-index:2;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px">
-            <span style="font-size:1.8rem">📷</span>
-            <span style="font-weight:600;letter-spacing:0.5px" data-i18n="take_photo">TAKE PHOTO</span>
-          </button>
-          <div id="thumbLoadingOverlay" class="loading-overlay" style="display:none">
-            <div class="spinner"></div>
-          </div>
-        </div>
-        <div>
-          <div class="title" id="title"></div>
-          <div class="muted"><span id="upcTxt"></span></div>
-        </div>
-      </div>
       <input type="file" id="tempThumbInput" accept="image/*" capture="environment" style="display:none">
       <input type="file" id="quickVoiceFallbackInput" accept="audio/*" capture style="display:none">
-      <div class="note-wrap">
+      <input type="file" id="pendingPhotoInput" accept="image/*" capture="environment" multiple style="display:none">
+      <input type="file" id="pendingVideoInput" accept="video/*" capture="environment" style="display:none">
+
+      <!-- Item header: thumb + title + prep badge -->
+      <div style="display:flex;gap:12px;align-items:flex-start">
+        <div style="flex-shrink:0">
+          <!-- Thumb with +photo/+video overlay buttons -->
+          <div style="position:relative;display:inline-block">
+            <img id="thumb" class="thumb" src="" alt="thumb">
+            <button id="addThumbBtn" class="btn" style="display:none;position:absolute;top:0;left:0;right:0;bottom:0;background:#00b894;color:#fff;padding:12px;font-size:0.85rem;border:none;cursor:pointer;border-radius:12px;z-index:2;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px">
+              <span style="font-size:1.8rem">📷</span>
+              <span style="font-weight:600;letter-spacing:0.5px" data-i18n="take_photo">TAKE PHOTO</span>
+            </button>
+            <div id="thumbLoadingOverlay" class="loading-overlay" style="display:none"><div class="spinner"></div></div>
+            <!-- + Photo / + Video mini buttons on thumb -->
+            <label for="pendingPhotoInput" title="Add photo" style="position:absolute;bottom:3px;left:3px;width:24px;height:24px;background:rgba(0,0,0,0.6);color:#fff;border-radius:50%;cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:center;z-index:3;line-height:1">📷</label>
+            <label for="pendingVideoInput" title="Add video" style="position:absolute;bottom:3px;right:3px;width:24px;height:24px;background:rgba(0,0,0,0.6);color:#fff;border-radius:50%;cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:center;z-index:3;line-height:1">🎥</label>
+          </div>
+          <!-- Existing good images: compact row below thumb -->
+          <div id="existingGoodImages" style="display:flex;gap:4px;flex-wrap:wrap;margin-top:5px;max-width:80px"></div>
+        </div>
+        <div style="flex:1;min-width:0">
+          <div class="title" id="title"></div>
+          <div class="muted" style="margin-top:2px"><span id="upcTxt"></span></div>
+          <!-- Prep count badge -->
+          <div id="prepSummary" style="margin-top:8px"></div>
+        </div>
+      </div>
+
+      <!-- Good entries picker — shown when prior good preps exist -->
+      <div id="goodEntriesPicker" style="display:none;margin-top:10px;position:relative">
+        <button type="button" id="goodEntriesToggle" onclick="toggleGoodEntriesDropdown()" style="width:100%;display:flex;align-items:center;justify-content:space-between;background:#f0f9f0;border:1.5px solid #27ae60;border-radius:10px;padding:8px 12px;cursor:pointer;font-size:0.9rem;color:#1a6e34;font-weight:600">
+          <span id="goodEntriesToggleLabel">Existing preps</span>
+          <span id="goodEntriesChevron" style="font-size:0.75rem;transition:transform .2s">▾</span>
+        </button>
+        <div id="goodEntriesList" style="display:none;position:absolute;left:0;right:0;z-index:50;background:#fff;border:1.5px solid #27ae60;border-top:none;border-radius:0 0 10px 10px;box-shadow:0 4px 12px rgba(0,0,0,0.12);max-height:260px;overflow-y:auto"></div>
+      </div>
+
+      <!-- Existing good audio/video media -->
+      <div id="existingGoodMedia" style="margin-top:8px"></div>
+
+      <!-- Pending new media previews -->
+      <div id="pendingMediaSection" style="display:none;margin-top:8px">
+        <div id="pendingMediaPreviews" style="display:flex;gap:6px;flex-wrap:wrap"></div>
+      </div>
+
+      <!-- Note + voice -->
+      <div class="note-wrap" style="margin-top:10px">
         <div class="note-row">
           <button type="button" class="voice-note-btn" id="quickVoiceNoteBtn" aria-label="Hold to record voice note" title="Hold to record voice note">
             <span class="voice-note-icon-wrap" aria-hidden="true">
@@ -417,8 +448,8 @@
           <button type="button" id="quickVoiceNoteClearBtn" class="voice-note-clear">Clear</button>
         </div>
       </div>
+
       <img id="hero" class="hero" src="" alt="item image" onerror="this.style.display='none'" style="margin-top:10px">
-      <div id="prepSummary" class="muted" style="margin-top:8px"></div>
       <div id="qtyDisplay" class="qty-display hidden">
         <div class="qty-label" data-i18n="quantity">Quantity</div>
         <div class="qty-controls">
@@ -427,8 +458,13 @@
           <button class="qty-btn plus" id="qtyPlusBtn">&#43;</button>
         </div>
       </div>
+      <!-- "New Unique Entry" banner — shown when goodForceNewSuffix is active -->
+      <div id="newSuffixBanner" style="display:none;background:#fff3cd;border:1px solid #ffc107;border-radius:10px;padding:8px 12px;margin-bottom:8px;font-size:0.9rem;color:#856404">
+        New unique entry mode — note/media will be saved to a fresh suffix. <button type="button" id="cancelNewSuffixBtn" style="background:none;border:none;color:#856404;text-decoration:underline;cursor:pointer;padding:0;font-size:0.9rem">Cancel</button>
+      </div>
       <div class="big-actions" id="actions">
         <button class="btn btn-primary" id="goodBtn" data-i18n="good">Good</button>
+        <button class="btn" id="newUniqueEntryBtn" style="background:#27ae60;color:#fff;width:100%;margin-top:4px;font-size:0.88rem;padding:10px 0;display:none">New Good</button>
         <button class="btn" id="returnBtn" style="background:#8b4513;color:#fff;width:100%;margin-top:8px" data-i18n="return_item">Return</button>
         <button class="btn btn-danger" id="badBtn" data-i18n="bad_diagnostic">Bad → Diagnostic</button>
       </div>
@@ -984,12 +1020,351 @@
       return '/items-to-list?' + p.toString();
     }
 
+    // --- Pending pre-action media (photos/video captured before GOOD/BAD/RETURN) ---
+    let pendingPhotos = [];
+    let pendingVideos = [];
+    let goodForceNewSuffix = false;
+
+    function setGoodForceNewSuffix(val){
+      goodForceNewSuffix = !!val;
+      const banner = document.getElementById('newSuffixBanner');
+      if(banner) banner.style.display = val ? '' : 'none';
+    }
+
+    function clearPendingMedia(){
+      pendingPhotos = [];
+      pendingVideos = [];
+      setGoodForceNewSuffix(false);
+      const previews = document.getElementById('pendingMediaPreviews');
+      if(previews) previews.innerHTML = '';
+      const section = document.getElementById('pendingMediaSection');
+      if(section) section.style.display = 'none';
+    }
+
+    function addPendingPreview(file, type){
+      const previews = document.getElementById('pendingMediaPreviews');
+      if(!previews) return;
+      const section = document.getElementById('pendingMediaSection');
+      if(section) section.style.display = '';
+      const wrap = document.createElement('div');
+      wrap.style.cssText = 'position:relative;display:inline-block';
+      const captureIdx = (type === 'photo' ? pendingPhotos : pendingVideos).length - 1;
+      if(type === 'photo'){
+        const img = document.createElement('img');
+        img.style.cssText = 'width:72px;height:72px;object-fit:cover;border-radius:8px;border:2px solid #3498db';
+        img.src = URL.createObjectURL(file);
+        wrap.appendChild(img);
+      } else {
+        const vid = document.createElement('video');
+        vid.style.cssText = 'width:72px;height:72px;object-fit:cover;border-radius:8px;border:2px solid #8e44ad';
+        vid.src = URL.createObjectURL(file);
+        vid.muted = true;
+        wrap.appendChild(vid);
+      }
+      const rm = document.createElement('button');
+      rm.innerHTML = '&times;';
+      rm.style.cssText = 'position:absolute;top:-5px;right:-5px;width:20px;height:20px;border-radius:50%;background:#e74c3c;color:#fff;border:none;cursor:pointer;font-size:13px;line-height:1;padding:0;display:flex;align-items:center;justify-content:center;font-weight:700';
+      const arr = type === 'photo' ? pendingPhotos : pendingVideos;
+      rm.onclick = ()=>{
+        arr.splice(captureIdx, 1);
+        previews.removeChild(wrap);
+        if(!pendingPhotos.length && !pendingVideos.length && section) section.style.display = 'none';
+      };
+      wrap.appendChild(rm);
+      previews.appendChild(wrap);
+    }
+
+    function preferredCompressedVideoMimeType(){
+      const candidates = [
+        'video/webm;codecs=vp9,opus',
+        'video/webm;codecs=vp8,opus',
+        'video/webm',
+        'video/mp4;codecs=h264,aac',
+        'video/mp4'
+      ];
+      if(!window.MediaRecorder || typeof MediaRecorder.isTypeSupported !== 'function') return '';
+      for(const candidate of candidates){
+        try{ if(MediaRecorder.isTypeSupported(candidate)) return candidate; }catch(_){}
+      }
+      return '';
+    }
+
+    function compressedVideoExtensionForMime(mimeType){
+      const mime = String(mimeType||'').toLowerCase();
+      if(mime.includes('mp4')||mime.includes('h264')) return '.mp4';
+      return '.webm';
+    }
+
+    function evenVideoDimension(value){
+      const rounded = Math.max(2, Math.round(Number(value)||0));
+      return rounded % 2 === 0 ? rounded : rounded - 1;
+    }
+
+    function waitForVideoEvent(videoEl, eventName){
+      return new Promise((resolve, reject)=>{
+        const cleanup = (cb)=>{ videoEl.removeEventListener(eventName, handleReady); videoEl.removeEventListener('error', handleError); cb(); };
+        const handleReady = ()=> cleanup(()=>resolve());
+        const handleError = ()=> cleanup(()=>reject(new Error(`Video ${eventName} failed`)));
+        videoEl.addEventListener(eventName, handleReady, {once:true});
+        videoEl.addEventListener('error', handleError, {once:true});
+      });
+    }
+
+    async function compressPendingVideo(file){
+      const originalSize = Number(file&&file.size)||0;
+      const fallback = ()=>file;
+      if(!file||(typeof HTMLCanvasElement==='undefined')||!HTMLCanvasElement.prototype.captureStream) return fallback();
+      const mimeType = preferredCompressedVideoMimeType();
+      if(!mimeType) return fallback();
+      let objectUrl='', playbackStream=null, composedStream=null, canvasStream=null, recorder=null, rafId=0, hiddenVideo=null;
+      try{
+        objectUrl = URL.createObjectURL(file);
+        hiddenVideo = document.createElement('video');
+        hiddenVideo.preload='metadata'; hiddenVideo.muted=true; hiddenVideo.playsInline=true; hiddenVideo.src=objectUrl;
+        Object.assign(hiddenVideo.style,{position:'fixed',left:'-99999px',top:'-99999px',width:'1px',height:'1px',opacity:'0'});
+        document.body.appendChild(hiddenVideo);
+        await waitForVideoEvent(hiddenVideo, 'loadedmetadata');
+        const sw=Math.max(2,hiddenVideo.videoWidth||1280), sh=Math.max(2,hiddenVideo.videoHeight||720);
+        const scale=Math.min(1,960/Math.max(sw,sh));
+        const tw=evenVideoDimension(sw*scale), th=evenVideoDimension(sh*scale);
+        const canvas=document.createElement('canvas'); canvas.width=tw; canvas.height=th;
+        const ctx=canvas.getContext('2d',{alpha:false,desynchronized:true});
+        if(!ctx) return fallback();
+        canvasStream=canvas.captureStream(20);
+        composedStream=new MediaStream();
+        canvasStream.getVideoTracks().forEach(t=>composedStream.addTrack(t));
+        const captureFn=typeof hiddenVideo.captureStream==='function'?hiddenVideo.captureStream.bind(hiddenVideo):(typeof hiddenVideo.mozCaptureStream==='function'?hiddenVideo.mozCaptureStream.bind(hiddenVideo):null);
+        if(captureFn){ try{ playbackStream=captureFn(); if(playbackStream) playbackStream.getAudioTracks().forEach(t=>composedStream.addTrack(t)); }catch(_){} }
+        const recOpts={mimeType,videoBitsPerSecond:850000};
+        if(composedStream.getAudioTracks().length) recOpts.audioBitsPerSecond=48000;
+        recorder=new MediaRecorder(composedStream,recOpts);
+        const chunks=[];
+        const stopPromise=new Promise((resolve,reject)=>{
+          recorder.addEventListener('dataavailable',e=>{ if(e.data&&e.data.size>0) chunks.push(e.data); });
+          recorder.addEventListener('stop',resolve,{once:true});
+          recorder.addEventListener('error',e=>reject((e&&e.error)||new Error('compression failed')),{once:true});
+        });
+        const drawFrame=()=>{ if(hiddenVideo&&hiddenVideo.readyState>=2) ctx.drawImage(hiddenVideo,0,0,tw,th); if(hiddenVideo&&!hiddenVideo.paused&&!hiddenVideo.ended) rafId=requestAnimationFrame(drawFrame); };
+        recorder.start(250);
+        const pr=hiddenVideo.play(); if(pr&&typeof pr.then==='function') await pr;
+        drawFrame();
+        await waitForVideoEvent(hiddenVideo,'ended');
+        if(rafId){ cancelAnimationFrame(rafId); rafId=0; }
+        if(hiddenVideo.readyState>=2) ctx.drawImage(hiddenVideo,0,0,tw,th);
+        await new Promise(r=>setTimeout(r,140));
+        if(recorder.state!=='inactive') recorder.stop();
+        await stopPromise;
+        const finalMime=(recorder&&recorder.mimeType)||mimeType;
+        const blob=new Blob(chunks,{type:finalMime});
+        if(!blob.size||blob.size>=(originalSize*0.96)) return fallback();
+        const ext=compressedVideoExtensionForMime(finalMime);
+        const base=String(file.name||'prep_video').replace(/\.[^/.]+$/,'').replace(/[^a-z0-9_\-]+/gi,'_').replace(/^_+|_+$/g,'')||'prep_video';
+        return new File([blob],`${base}_compressed${ext}`,{type:finalMime,lastModified:Date.now()});
+      }catch(err){
+        console.warn('Video compression skipped:',err);
+        return fallback();
+      }finally{
+        try{ if(rafId) cancelAnimationFrame(rafId); }catch(_){}
+        try{ if(recorder&&recorder.state!=='inactive') recorder.stop(); }catch(_){}
+        try{ if(canvasStream) canvasStream.getTracks().forEach(t=>t.stop()); }catch(_){}
+        try{ if(playbackStream) playbackStream.getTracks().forEach(t=>t.stop()); }catch(_){}
+        try{ if(composedStream) composedStream.getTracks().forEach(t=>t.stop()); }catch(_){}
+        if(hiddenVideo){ try{ hiddenVideo.pause(); hiddenVideo.removeAttribute('src'); hiddenVideo.load(); }catch(_){} try{ hiddenVideo.remove(); }catch(_){} }
+        if(objectUrl){ try{ URL.revokeObjectURL(objectUrl); }catch(_){} }
+      }
+    }
+
+    async function uploadPendingMedia(upc, rowStatus){
+      const uploads = [];
+      for(const file of pendingPhotos){
+        const fd = new FormData();
+        fd.append('photo', file, file.name || ('prep_photo_'+Date.now()+'.jpg'));
+        if(rowStatus) fd.append('row_status', rowStatus);
+        uploads.push(fetch('/api/items_prep/diagnostic/'+encodeURIComponent(upc)+'/photos',{method:'POST',body:fd}).catch(e=>console.error('Photo upload err:',e)));
+      }
+      for(const file of pendingVideos){
+        const compressed = await compressPendingVideo(file);
+        const fd = new FormData();
+        fd.append('media', compressed, compressed.name || ('prep_video_'+Date.now()+'.mp4'));
+        fd.append('media_type','video');
+        if(rowStatus) fd.append('row_status', rowStatus);
+        uploads.push(fetch('/api/items_prep/media/'+encodeURIComponent(upc),{method:'POST',body:fd}).catch(e=>console.error('Video upload err:',e)));
+      }
+      if(uploads.length) await Promise.all(uploads);
+    }
+
+    async function loadExistingGoodData(upc){
+      const imagesEl = document.getElementById('existingGoodImages');
+      const mediaEl = document.getElementById('existingGoodMedia');
+      if(!imagesEl) return;
+      imagesEl.innerHTML = ''; mediaEl.innerHTML = '';
+      try{
+        const enc = encodeURIComponent(upc);
+        const [notesJ, imgJ, mediaJ] = await Promise.all([
+          fetch(`/api/items_prep/notes/${enc}`).then(r=>r.json()).catch(()=>({})),
+          fetch(`/api/items_prep/diagnostic/${enc}`).then(r=>r.json()).catch(()=>({})),
+          fetch(`/api/items_prep/media/${enc}`).then(r=>r.json()).catch(()=>({}))
+        ]);
+        const notes = notesJ.notes || [];
+        const images = imgJ.images || [];
+        const media = mediaJ.items || [];
+
+        // Preload most recent note into the note input
+        if(notes.length){
+          const noteInput = document.getElementById('quickPrepNote');
+          if(noteInput && !noteInput.value.trim()) noteInput.value = notes[0].note;
+        }
+
+        // Compact image thumbnails below the main thumb (36x36)
+        images.forEach(img => {
+          const src = img.image_path ? `/static/${img.image_path}` : '';
+          if(!src) return;
+          const t = document.createElement('img');
+          t.src = src;
+          t.style.cssText = 'width:36px;height:36px;object-fit:cover;border-radius:6px;border:1.5px solid #27ae60;cursor:pointer;flex-shrink:0';
+          t.onclick = ()=>{ window.open(src,'_blank'); };
+          t.onerror = ()=>{ t.style.display='none'; };
+          imagesEl.appendChild(t);
+        });
+
+        // Audio/video below note area
+        media.forEach(m => {
+          if(!m.file_path) return;
+          const src = `/static/${m.file_path}`;
+          if(m.media_type === 'audio'){
+            const a = document.createElement('audio');
+            a.src = src; a.controls = true; a.preload = 'metadata';
+            a.style.cssText = 'width:100%;height:34px;margin-bottom:3px;display:block';
+            mediaEl.appendChild(a);
+          } else if(m.media_type === 'video'){
+            const v = document.createElement('video');
+            v.src = src; v.controls = true; v.preload = 'metadata';
+            v.style.cssText = 'width:100%;max-height:160px;border-radius:8px;margin-bottom:3px;display:block';
+            mediaEl.appendChild(v);
+          }
+        });
+        // Show "New Good" button only when base UPC already has notes, images, or media
+        const hasContent = notes.length > 0 || images.length > 0 || media.length > 0;
+        const newUniqueBtn = document.getElementById('newUniqueEntryBtn');
+        if(newUniqueBtn) newUniqueBtn.style.display = hasContent ? '' : 'none';
+        return hasContent;
+      }catch(e){ console.error('loadExistingGoodData error:', e); return false; }
+    }
+
+    function closeGoodEntriesDropdown(){
+      const list = document.getElementById('goodEntriesList');
+      const chevron = document.getElementById('goodEntriesChevron');
+      if(list) list.style.display = 'none';
+      if(chevron) chevron.style.transform = '';
+    }
+
+    function toggleGoodEntriesDropdown(){
+      const list = document.getElementById('goodEntriesList');
+      const chevron = document.getElementById('goodEntriesChevron');
+      if(!list) return;
+      const open = list.style.display !== 'none';
+      list.style.display = open ? 'none' : '';
+      if(chevron) chevron.style.transform = open ? '' : 'rotate(180deg)';
+    }
+
+    document.addEventListener('click', (e)=>{
+      const picker = document.getElementById('goodEntriesPicker');
+      if(picker && !picker.contains(e.target)){
+        closeGoodEntriesDropdown();
+      }
+    });
+
+    async function loadGoodEntriesPicker(baseUpc){
+      const picker = document.getElementById('goodEntriesPicker');
+      const list = document.getElementById('goodEntriesList');
+      const label = document.getElementById('goodEntriesToggleLabel');
+      const chevron = document.getElementById('goodEntriesChevron');
+      if(!picker || !list) return;
+      list.innerHTML = '';
+      list.style.display = 'none';
+      if(chevron) chevron.style.transform = '';
+      picker.style.display = 'none';
+      try{
+        const j = await fetch('/api/items_prep/good_entries/'+encodeURIComponent(baseUpc)).then(r=>r.json()).catch(()=>({}));
+        const entries = j.entries || [];
+        if(!entries.length) return;
+        if(label) label.textContent = `${entries.length} existing prep${entries.length===1?'':'s'} — tap to edit`;
+
+        entries.forEach(entry => {
+          const row = document.createElement('div');
+          row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:8px 12px;cursor:pointer;border-bottom:1px solid #e8f5e9;transition:background .12s';
+          row.onmouseenter = ()=>{ row.style.background='#f0f9f0'; };
+          row.onmouseleave = ()=>{ row.style.background=''; };
+
+          // Thumbnail
+          const imgWrap = document.createElement('div');
+          imgWrap.style.cssText = 'width:44px;height:44px;border-radius:7px;overflow:hidden;background:#e8e8e8;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:18px';
+          if(entry.image_url){
+            const img = document.createElement('img');
+            img.src = entry.image_url;
+            img.style.cssText = 'width:100%;height:100%;object-fit:cover';
+            img.onerror = ()=>{ img.remove(); imgWrap.textContent='📦'; };
+            imgWrap.appendChild(img);
+          } else {
+            imgWrap.textContent = '📦';
+          }
+          row.appendChild(imgWrap);
+
+          // Text column
+          const textCol = document.createElement('div');
+          textCol.style.cssText = 'flex:1;min-width:0';
+
+          // UPC with suffix highlighted
+          const upcEl = document.createElement('div');
+          upcEl.style.cssText = 'font-size:0.82rem;font-weight:600;color:#333;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+          if(entry.is_suffix){
+            const parts = entry.upc.split('-');
+            upcEl.innerHTML = `<span style="color:#555">${esc(parts[0])}</span><span style="color:#27ae60">-${esc(parts.slice(1).join('-'))}</span>`;
+          } else {
+            upcEl.textContent = entry.upc;
+          }
+          textCol.appendChild(upcEl);
+
+          // Note + date row
+          const metaEl = document.createElement('div');
+          metaEl.style.cssText = 'font-size:0.72rem;color:#888;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px';
+          const datePart = entry.updated_at ? entry.updated_at.replace('T',' ').slice(0,16) : '';
+          metaEl.textContent = [entry.note, datePart].filter(Boolean).join(' · ');
+          textCol.appendChild(metaEl);
+
+          row.appendChild(textCol);
+
+          // Arrow
+          const arrow = document.createElement('div');
+          arrow.style.cssText = 'color:#27ae60;font-size:1rem;flex-shrink:0';
+          arrow.textContent = '›';
+          row.appendChild(arrow);
+
+          row.onclick = ()=>{
+            const ret = encodeURIComponent('/item-prep?forceFocus=1');
+            window.location.href = '/item-prep/diagnostic?upc='+encodeURIComponent(entry.upc)+'&return='+ret;
+          };
+          list.appendChild(row);
+        });
+
+        // Remove bottom border from last row
+        if(list.lastChild) list.lastChild.style.borderBottom = 'none';
+        picker.style.display = '';
+      }catch(e){ console.error('loadGoodEntriesPicker error:', e); }
+    }
+    // ---
+
     function clearCurrentResultCard(){
       const prepSummary = document.getElementById('prepSummary');
       if(prepSummary) prepSummary.textContent = '';
       const quickNoteEl = document.getElementById('quickPrepNote');
       if(quickNoteEl) quickNoteEl.value = '';
       clearQuickVoiceNote();
+      clearPendingMedia();
+      const existingGoodSec = document.getElementById('existingGoodData');
+      if(existingGoodSec) existingGoodSec.style.display = 'none';
+      const picker = document.getElementById('goodEntriesPicker');
+      if(picker){ picker.style.display='none'; const l=document.getElementById('goodEntriesList'); if(l) l.innerHTML=''; }
       clearScanValidationMsg();
       closeSetQtyModal();
       document.getElementById('manualUpc').value = '';
@@ -1153,17 +1528,32 @@
       const prepSummary = document.getElementById('prepSummary');
       if(prepSummary){
         const lotNote = (currentLookupInfo && currentLookupInfo.lot_decision_note)
-          ? ('<span class="bad">' + esc(currentLookupInfo.lot_decision_note) + '</span>')
+          ? (`<div style="font-size:0.8rem;color:#e67e22;margin-top:4px">${esc(currentLookupInfo.lot_decision_note)}</div>`)
           : '';
-        if(currentLookupInfo.overage_candidate){
-          prepSummary.innerHTML = '<span class="bad">BOL unchecked quantity is already exhausted. Processing will continue and be flagged automatically.</span>' + (lotNote ? '<br>' + lotNote : '');
-        } else {
-          prepSummary.innerHTML = lotNote || '';
-        }
+        const goodQty = Number(it.good_qty || 0);
+        const itlUrl = (currentLookupInfo && currentLookupInfo.items_to_list_url) || '/items-to-list';
+        const prepBadge = goodQty > 0
+          ? `<a href="${esc(itlUrl)}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:5px;background:#2980b9;color:#fff;border-radius:8px;padding:5px 12px;font-size:1rem;font-weight:700;text-decoration:none">✓ Prep: ${goodQty}</a>`
+          : '';
+        prepSummary.innerHTML = prepBadge + lotNote;
       }
       clearQuickPrepNote();
       clearQuickVoiceNote();
+      clearPendingMedia();
+      const hasGoodQty = Number(it.good_qty||0) > 0;
+      // "New Good" button visibility is controlled by loadExistingGoodData (needs content)
+      const newUniqueBtn = document.getElementById('newUniqueEntryBtn');
+      if(newUniqueBtn) newUniqueBtn.style.display = 'none';
       resEl.classList.remove('hidden'); actions.classList.remove('hidden');
+      // Preload previously saved good notes/images/media + show entries picker
+      const baseForLoad = currentBaseUpc() || (it.upc || '');
+      if(hasGoodQty){
+        loadExistingGoodData(baseForLoad).catch(()=>{});
+        loadGoodEntriesPicker(baseForLoad).catch(()=>{});
+      } else {
+        const picker = document.getElementById('goodEntriesPicker');
+        if(picker) picker.style.display = 'none';
+      }
       statusMsg.textContent='';
       // Hide No Barcode button when item is displayed
       document.getElementById('noBarcodeBtn').classList.add('hidden');
@@ -1300,14 +1690,16 @@
       return !!res && res.choice === 'continue';
     }
 
-    async function savePrepNote(upc, note){
+    async function savePrepNote(upc, note, rowStatus){
       const upcN = String(upc || '').trim();
       const noteN = String(note || '').trim();
       if(!upcN || !noteN) return {success:false, error:'Missing upc or note'};
+      const payload = {upc: upcN, note: noteN};
+      if(rowStatus) payload.row_status = rowStatus;
       const r = await fetch('/api/items_prep/notes', {
         method: 'POST',
         headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({upc: upcN, note: noteN})
+        body: JSON.stringify(payload)
       });
       return r.json().catch(() => ({success:false, error:'Failed to save note'}));
     }
@@ -1404,6 +1796,45 @@
       };
     }
     
+    // Pending photo/video capture handlers
+    document.getElementById('pendingPhotoInput').onchange = function(){
+      Array.from(this.files||[]).forEach(f=>{ pendingPhotos.push(f); addPendingPreview(f,'photo'); });
+      this.value = '';
+    };
+    document.getElementById('pendingVideoInput').onchange = function(){
+      const f = this.files[0]; if(!f) return;
+      pendingVideos.push(f); addPendingPreview(f,'video');
+      this.value = '';
+    };
+
+    document.getElementById('newUniqueEntryBtn').onclick = ()=>{
+      // Clear existing good data display
+      const imagesEl = document.getElementById('existingGoodImages');
+      if(imagesEl) imagesEl.innerHTML = '';
+      const mediaEl = document.getElementById('existingGoodMedia');
+      if(mediaEl) mediaEl.innerHTML = '';
+      // Clear note/voice/pending media
+      clearQuickPrepNote();
+      clearQuickVoiceNote();
+      clearPendingMedia();
+      setGoodForceNewSuffix(true); // re-set after clearPendingMedia resets it
+      // Show suffix indicator on UPC display
+      const upcEl = document.getElementById('upcTxt');
+      if(upcEl && currentUpc){
+        const baseUpc = currentUpc.replace(/-[^-]+$/, '');
+        upcEl.textContent = baseUpc + ' + new suffix';
+        upcEl.style.color = '#27ae60';
+      }
+    };
+    document.getElementById('cancelNewSuffixBtn').onclick = ()=>{
+      setGoodForceNewSuffix(false);
+      // Restore UPC display
+      const upcEl = document.getElementById('upcTxt');
+      if(upcEl && currentUpc){ upcEl.textContent = currentUpc; upcEl.style.color = ''; }
+      // Reload existing good data
+      if(currentUpc) loadExistingGoodData(currentUpc.replace(/-[^-]+$/, '') || currentUpc);
+    };
+
     document.getElementById('qtyPlusBtn').onclick = ()=>{ updateQtyDisplay(1); };
     document.getElementById('qtyMinusBtn').onclick = ()=>{ updateQtyDisplay(-1); };
     const setNoteBtn = document.getElementById('setNoteBtn');
@@ -1539,6 +1970,7 @@
         const goodExtraPayload = {};
         if(quickNote) goodExtraPayload.note = quickNote;
         if(hasVoiceNote) goodExtraPayload.has_media_note = true;
+        if(goodForceNewSuffix) goodExtraPayload.force_good_suffix = true;
         let result = await setStatus(
           currentUpc,
           'good',
@@ -1554,7 +1986,7 @@
           const resultBaseUpc = result.base_upc || (String(resultUpc || '').includes('-') ? String(resultUpc).split('-')[0] : String(resultUpc || currentUpc || ''));
           if(quickNote){
             try{
-              const noteResp = await savePrepNote(resultUpc, quickNote);
+              const noteResp = await savePrepNote(resultUpc, quickNote, goodForceNewSuffix ? '' : 'good');
               if(noteResp && noteResp.success){
                 clearQuickPrepNote();
               }else{
@@ -1576,11 +2008,16 @@
               voiceSaveError = ' (voice note not saved)';
             }
           }
+          // Upload pending photos/videos to the result UPC (base for normal good, suffix for new-unique-entry)
+          if(pendingPhotos.length || pendingVideos.length){
+            try{ await uploadPendingMedia(resultUpc, 'good'); }catch(e){ console.error('Pending media upload error:',e); }
+            clearPendingMedia();
+          }
           // Store for undo with action type
           lastEntry = {
-            upc: resultUpc, 
+            upc: resultUpc,
             base_upc: resultBaseUpc || null,
-            status: 'good', 
+            status: 'good',
             qty: currentQty,
             action: result.action, // 'incremented' or 'created'
             previousQty: result.action === 'incremented' ? (result.quantity - currentQty) : 0,
@@ -1653,6 +2090,12 @@
           sessionStorage.setItem('lastEntry', JSON.stringify(lastEntry));
           updateQtyDisplay(-1);
 
+          // Upload pending media to the suffixed UPC before navigating
+          if(pendingPhotos.length || pendingVideos.length){
+            try{ await uploadPendingMedia(data.suffixed_upc, 'return'); }catch(e){ console.error('Return pending media err:',e); }
+            clearPendingMedia();
+          }
+
           setTimeout(() => {
             const lotParam = data.lot_number || getActionLotNumber() || '';
             const lotQuery = lotParam ? ('&lot=' + encodeURIComponent(lotParam)) : '';
@@ -1722,7 +2165,13 @@
           sessionStorage.setItem('lastEntry', JSON.stringify(lastEntry));
           
           updateQtyDisplay(-1); // Show -1 animation
-          
+
+          // Upload pending media to the suffixed UPC before navigating
+          if(pendingPhotos.length || pendingVideos.length){
+            try{ await uploadPendingMedia(data.suffixed_upc, 'bad'); }catch(e){ console.error('Bad pending media err:',e); }
+            clearPendingMedia();
+          }
+
           setTimeout(() => {
             const lotParam = data.lot_number || getActionLotNumber() || '';
             const lotQuery = lotParam ? ('&lot=' + encodeURIComponent(lotParam)) : '';
