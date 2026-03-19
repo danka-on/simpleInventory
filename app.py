@@ -9094,10 +9094,15 @@ def api_listingagent_ebay_catalog_search():
                     aspect_votes[norm] = {'_display': name}
                 aspect_votes[norm][value] = aspect_votes[norm].get(value, 0) + 1
 
+        # Values that are low-quality placeholders — don't return them so Amazon/product
+        # catalog can fill a better value instead.
+        _JUNK_ASPECT_VALUES = {'unbranded', 'does not apply', 'n/a', 'na', 'unknown',
+                               'not applicable', 'see description', 'other', 'generic'}
+
         aspects = {}
         for norm, votes in aspect_votes.items():
             display = votes.pop('_display', norm)
-            counts = {v: c for v, c in votes.items() if v != '_display'}
+            counts = {v: c for v, c in votes.items() if v != '_display' and v.lower() not in _JUNK_ASPECT_VALUES}
             if counts:
                 aspects[display] = max(counts, key=lambda v: counts[v])
 
@@ -9134,6 +9139,56 @@ def api_listingagent_ebay_catalog_search():
         return jsonify(payload), e.status_code
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e, 'listingagent:ebay_catalog_search')}), 500
+
+
+@app.route('/api/listingagent/ebay/product_specifics', methods=['GET'])
+def api_listingagent_ebay_product_specifics():
+    """Get product-level specifics from eBay Commerce Catalog API by UPC/GTIN.
+    More reliable than Browse API aggregation — returns structured product attributes.
+    Falls back gracefully if scope not available or product not found."""
+    try:
+        upc = (request.args.get('upc') or request.args.get('gtin') or '').strip()
+        if not upc:
+            return jsonify({'success': True, 'found': False, 'aspects': {}})
+
+        marketplace_id = (request.args.get('marketplaceId') or
+                          _listingagent_get_settings().get('ebay_marketplace_id') or 'EBAY_US').strip()
+
+        resp = _ebay_buy_api_request(
+            'GET',
+            '/commerce/catalog/v1_beta/product_summary/search',
+            params={'gtin': upc, 'fieldgroups': 'PRODUCT', 'limit': 1},
+            marketplace_id=marketplace_id,
+            scope='https://api.ebay.com/oauth/api_scope/commerce.catalog.readonly',
+        )
+
+        if resp.status_code >= 400:
+            return jsonify({'success': True, 'found': False, 'aspects': {},
+                            'note': f'catalog unavailable ({resp.status_code})'})
+
+        data = resp.json() if resp.text else {}
+        summaries = data.get('productSummaries') or []
+        if not summaries:
+            return jsonify({'success': True, 'found': False, 'aspects': {}})
+
+        first = summaries[0]
+        aspects_raw = first.get('aspects') or {}
+        aspects = {}
+        for name, values in aspects_raw.items():
+            val = (values[0] if isinstance(values, list) and values else str(values or '')).strip()
+            if val and val.lower() not in {'unbranded', 'does not apply', 'n/a', 'na', 'unknown'}:
+                aspects[str(name)] = val
+
+        return jsonify({
+            'success': True,
+            'found': bool(aspects),
+            'epid': str(first.get('epid') or ''),
+            'title': str(first.get('title') or ''),
+            'aspects': aspects,
+        })
+    except Exception as e:
+        return jsonify({'success': True, 'found': False, 'aspects': {},
+                        'note': _safe_error(e, 'listingagent:ebay_product_specifics')})
 
 
 def _listingagent_ebay_create_draft_offer(data, *, dry_run=False):

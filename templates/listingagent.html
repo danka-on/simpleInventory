@@ -3364,6 +3364,8 @@
 
       renderImages();
       updateListingActionState();
+      // Refresh "From Your Store" box immediately — data is already in state.item
+      try{ renderEbayComps(); }catch(e){}
     }
 
     function renderNoteCard(){
@@ -4433,7 +4435,7 @@
       if(state._pendingCatalogAspects){
         const pending = state._pendingCatalogAspects;
         state._pendingCatalogAspects = null;
-        try{ _applyEbayCatalogProduct(state.ebayCatalogSelectedEpid || '', '', '', pending); }catch(e){}
+        try{ _applyEbayCatalogProduct(state.ebayCatalogSelectedEpid || '', '', '', pending, {ifEmpty:true}); }catch(e){}
       }
 
       // Apply brand/color/material from Amazon catalog + title extraction
@@ -4505,47 +4507,50 @@
         return;
       }
 
-      const comps = state.ebayComps || [];
-      if(!comps.length){
-        box.innerHTML = '<div class="hint">No live eBay comps found for this UPC.</div>';
-        return;
-      }
+      // "From Your Store" — user's own active eBay listings for this UPC
+      const _ebayEndedStates = new Set(['unsold','ended','completed','expired','cancelled']);
+      const storeListings = (state.item?.ebay_store?.listings || [])
+        .filter(l => !_ebayEndedStates.has((l.state||'').toLowerCase()));
 
+      // Median price hint from marketplace comps (loaded async in background)
+      const comps = state.ebayComps || [];
       const prices = comps.map(c => _toNumber(c?.price?.value)).filter(v => v !== null).sort((a,b) => a-b);
       if(prices.length){
         const mid = Math.floor(prices.length / 2);
         const median = prices.length % 2 ? prices[mid] : (prices[mid - 1] + prices[mid]) / 2;
         const hint = document.createElement('div');
         hint.className = 'hint';
-        hint.style.margin = '0';
-        hint.innerHTML = `Median list price: <strong>${escapeHtml(fmtUsd(median))}</strong> <button class=\"btn btnGhost btnMini\" id=\"btnUseEbayMedian\" style=\"margin-left:8px;\">Use</button>`;
+        hint.style.margin = '0 0 8px 0';
+        hint.innerHTML = `Market median: <strong>${escapeHtml(fmtUsd(median))}</strong> <button class=\"btn btnGhost btnMini\" id=\"btnUseEbayMedian\" style=\"margin-left:8px;\">Use</button>`;
         box.appendChild(hint);
         setTimeout(() => {
           const btn = $('btnUseEbayMedian');
-          if(btn) btn.onclick = (e) => { e.preventDefault(); $('price').value = median.toFixed(2); state.priceManuallySet = false; log('Applied eBay median comp price.'); };
+          if(btn) btn.onclick = (e) => { e.preventDefault(); $('price').value = median.toFixed(2); state.priceManuallySet = false; log('Applied market median price.'); };
         }, 0);
-
-        // If we don't have sold history and the user hasn't typed a price yet, use comps median.
         const hasSoldAvg = !!(state.item?.sold_stats?.count && state.item?.sold_stats?.avg_price);
         if(!hasSoldAvg && !state.priceManuallySet && $('price').value === '' && Number.isFinite(median)){
           $('price').value = median.toFixed(2);
-          log(`Auto-set eBay price from live comps median: $${median.toFixed(2)}`);
+          log(`Auto-set eBay price from market median: $${median.toFixed(2)}`);
         }
       }
 
+      if(!storeListings.length){
+        box.innerHTML += '<div class="hint">No active listings in your store for this UPC.</div>';
+        return;
+      }
+
       let firstRow = null;
-      for(const c of comps){
-        const compKey = c?.itemId || c?.title || '';
+      for(const listing of storeListings){
+        const compKey = listing.item_id || listing.title || '';
         const isSelected = compKey && compKey === state.selectedCompItemId;
         const row = document.createElement('div');
         row.className = 'compRow' + (isSelected ? ' compRowSelected' : '');
 
         const thumb = document.createElement('div');
         thumb.className = 'compThumb';
-        if(c.image){
+        if(listing.image){
           const img = document.createElement('img');
-          img.src = c.image;
-          img.alt = '';
+          img.src = listing.image; img.alt = '';
           img.onerror = () => { img.remove(); thumb.innerHTML = '<i class=\"fas fa-image\" style=\"color:var(--muted-dim)\"></i>'; };
           thumb.appendChild(img);
         } else {
@@ -4554,41 +4559,30 @@
 
         const main = document.createElement('div');
         main.className = 'compMain';
-
-        const price = fmtUsd(c?.price?.value);
-        const ship = fmtUsd(c?.shipping?.value);
-        const cond = (c?.condition || '').toString();
-        const seller = (c?.seller || '').toString();
-        const url = (c?.itemWebUrl || '').toString();
-
         main.innerHTML = `
-          <h3 class=\"compTitle\">${escapeHtml(c?.title || '(no title)')}</h3>
+          <h3 class=\"compTitle\">${escapeHtml(listing.title || '(no title)')}</h3>
           <div class=\"compMeta\">
-            ${price ? `<span class=\"badge badgeGreen\">${escapeHtml(price)}</span>` : ''}
-            ${ship ? `<span class=\"badge\">Ship ${escapeHtml(ship)}</span>` : ''}
-            ${cond ? `<span class=\"badge\">${escapeHtml(cond)}</span>` : ''}
-            ${seller ? `<span class=\"badge badgeBlue\">@${escapeHtml(seller)}</span>` : ''}
-            ${url ? `<a class=\"badge\" href=\"${escapeHtml(url)}\" target=\"_blank\" rel=\"noreferrer\" style=\"text-decoration:none;\">open</a>` : ''}
+            ${listing.price ? `<span class=\"badge badgeGreen\">${escapeHtml(fmtUsd(listing.price))}</span>` : ''}
+            ${listing.state ? `<span class=\"badge\">${escapeHtml(listing.state)}</span>` : ''}
+            ${listing.url ? `<a class=\"badge\" href=\"${escapeHtml(listing.url)}\" target=\"_blank\" rel=\"noreferrer\" style=\"text-decoration:none;\">View</a>` : ''}
           </div>
         `;
 
         row.appendChild(thumb);
         row.appendChild(main);
 
-        row.onclick = () => {
-          _applyComp(c, box);
-          row.classList.add('compRowSelected');
-        };
-        if(url) row.ondblclick = () => window.open(url, '_blank', 'noopener,noreferrer');
-
+        // Adapt to _applyComp's expected format
+        const asComp = { title: listing.title, price: { value: listing.price }, image: listing.image, itemWebUrl: listing.url, itemId: listing.item_id };
+        row.onclick = () => { _applyComp(asComp, box); row.classList.add('compRowSelected'); };
+        if(listing.url) row.ondblclick = () => window.open(listing.url, '_blank', 'noopener,noreferrer');
         const openLink = row.querySelector('a');
         if(openLink) openLink.onclick = (e) => e.stopPropagation();
 
         box.appendChild(row);
-        if(!firstRow) firstRow = { row, c };
+        if(!firstRow) firstRow = { row, c: asComp };
       }
 
-      // Auto-select first comp if nothing selected yet
+      // Auto-select first listing if nothing selected yet
       if(!state.selectedCompItemId && firstRow){
         firstRow.row.classList.add('compRowSelected');
         _applyComp(firstRow.c, box);
@@ -4617,7 +4611,7 @@
       const firstKey = firstEpid || results[0]?.title || '';
       if(!state.ebayCatalogSelectedEpid && results.length){
         state.ebayCatalogSelectedEpid = firstKey;
-        try{ _applyEbayCatalogProduct(firstEpid, results[0].title||'', results[0].image||'', results[0].aspects||{}); }catch(e){}
+        try{ _applyEbayCatalogProduct(firstEpid, results[0].title||'', results[0].image||'', results[0].aspects||{}, {ifEmpty:true}); }catch(e){}
       }
 
       const list = document.createElement('div');
@@ -4678,7 +4672,7 @@
       box.appendChild(list);
     }
 
-    function _applyEbayCatalogProduct(epid, title, imgUrl, aspects){
+    function _applyEbayCatalogProduct(epid, title, imgUrl, aspects, {ifEmpty=false}={}){
       // Apply title if current field is empty
       const titleEl = $('title');
       if(titleEl && !(titleEl.value || '').trim() && title) titleEl.value = title;
@@ -4686,13 +4680,12 @@
       // Apply image if none set
       if(imgUrl) try{ setStoreTemplateImages('ebay', [imgUrl]); }catch(e){}
 
-      // Fill all aspects (set even if already has value — user explicitly chose this product)
+      // Fill aspects. ifEmpty=true → only fill blank fields (auto-fill). ifEmpty=false → override (user clicked).
       const box = $('ebayAspectsBox');
       if(box){
         for(const [name, value] of Object.entries(aspects || {})){
           if(!name || !value) continue;
           try{
-            // Find the input for this aspect
             const targetNorm = _normAspectName(name);
             let el = null;
             box.querySelectorAll('[data-ebay-aspect]').forEach(e => {
@@ -4701,7 +4694,7 @@
               if(n === targetNorm || n.includes(targetNorm) || targetNorm.includes(n)) el = e;
             });
             if(el){
-              // For selects, only set if the value is a valid option
+              if(ifEmpty && (el.value || '').toString().trim()) continue;
               if(el.tagName === 'SELECT'){
                 const opt = Array.from(el.options).find(o => o.value.toLowerCase() === value.toLowerCase());
                 if(opt) el.value = opt.value;
@@ -4709,17 +4702,15 @@
                 el.value = value;
               }
             } else {
-              // Aspect not in rendered fields — add to manual required so it appears
               _setEbayAspectIfEmpty(name, value);
             }
           }catch(e){}
         }
       } else {
-        // Aspects not rendered yet — store for later application
         state._pendingCatalogAspects = aspects;
       }
-      log(`eBay catalog product ${epid} applied: ${Object.keys(aspects||{}).length} specifics.`);
-
+      const count = Object.keys(aspects||{}).length;
+      if(count) log(`eBay ${ifEmpty?'auto-filled':'applied'} ${count} specifics from ${epid||'catalog'}.`);
     }
 
     async function ebayCatalogSearch(){
@@ -5115,7 +5106,7 @@
           renderEbayComps();
         } catch(e){
           if(reqId !== state.templateReqId) return;
-          $('ebayCompsBox').innerHTML = `<div class=\"hint\">eBay comps unavailable: ${escapeHtml(e.message)}</div>`;
+          // Comps unavailable — leave store listings intact, just no median hint
         }
       })();
 
@@ -5133,7 +5124,19 @@
         }
       })();
 
-      // eBay product catalog (auto-fills all item specifics)
+      // eBay Product Catalog API — structured product specifics (Brand, Model, Color, etc.)
+      // Runs first; Browse API aggregation runs in parallel and fills any gaps.
+      (async () => {
+        try{
+          const res = await apiGet(`/api/listingagent/ebay/product_specifics?upc=${encodeURIComponent(clean)}`);
+          if(reqId !== state.templateReqId) return;
+          if(res.found && res.aspects && Object.keys(res.aspects).length){
+            _applyEbayCatalogProduct(res.epid || '', res.title || '', '', res.aspects, {ifEmpty: true});
+          }
+        } catch(e){ /* silent — Browse API + Amazon fills gaps */ }
+      })();
+
+      // eBay Browse API catalog (live listing aspects + price comps; fills any gaps left by product catalog)
       (async () => {
         if($('ebayCatalogQ') && !$('ebayCatalogQ').value.trim()) $('ebayCatalogQ').value = clean;
         if($('ebayCatalogHint')) $('ebayCatalogHint').textContent = 'Searching eBay catalog...';
