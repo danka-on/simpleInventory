@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from sp_api.api import Orders, Reports, CatalogItems, ListingsItems, Finances, MerchantFulfillment
 from sp_api.base import Marketplaces
 from sp_api.base.exceptions import SellingApiException
-from DBmanager import connect_db, ensure_sold_orders_schema, resolve_barcode_from_marketplace_sku
+from DBmanager import connect_db, ensure_sold_orders_schema, resolve_barcode_from_marketplace_sku, resolve_listing_trace_from_marketplace_sale
 
 # Define base directory for cross-platform compatibility
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -618,6 +618,25 @@ class AmazonManager:
                         if resolved_barcode:
                             barcode = resolved_barcode
 
+                        trace_row = resolve_listing_trace_from_marketplace_sale(
+                            platform='amazon',
+                            item_id=asin,
+                            sku=sku
+                        ) or {}
+                        source_upc = str(trace_row.get('upc') or '').strip() or None
+                        source_base_upc = None
+                        if source_upc:
+                            source_base_upc = source_upc.split('-', 1)[0].strip() or source_upc
+
+                        final_trace_barcode = source_upc or barcode
+                        listing_trace_id = trace_row.get('id')
+                        listing_trace_created_at = str(trace_row.get('created_at') or '').strip() or None
+                        listing_trace_source = str(trace_row.get('source') or '').strip() or None
+                        listing_listing_id = str(trace_row.get('listing_id') or '').strip() or None
+                        listing_offer_id = str(trace_row.get('offer_id') or '').strip() or None
+                        listing_sku = str(trace_row.get('sku') or '').strip() or None
+                        listing_asin = str(trace_row.get('asin') or '').strip() or None
+
                         # Check if order already exists
                         cur.execute('SELECT id, barcode, sku FROM orders WHERE order_id = ?', (amazon_order_id,))
                         existing = cur.fetchone()
@@ -630,7 +649,7 @@ class AmazonManager:
                             # - If we found a new valid barcode (UPC), use it
                             # - If no new barcode found but existing has one, keep existing
                             # - If existing is an ASIN and we have nothing better, keep existing
-                            final_barcode = barcode if barcode else existing_barcode
+                            final_barcode = final_trace_barcode if final_trace_barcode else existing_barcode
                             final_sku = sku if sku else existing_sku
 
                             # Update existing order
@@ -640,11 +659,22 @@ class AmazonManager:
                                     shipped_time = ?, paid_time = ?, image = ?, store = 'amazon',
                                     shipping_name = ?, shipping_city = ?, shipping_state = ?,
                                     shipping_postal_code = ?, shipping_country = ?,
-                                    shipping_cost = ?, seller_fee = ?, taxes = ?, sku = ?
+                                    shipping_cost = ?, seller_fee = ?, taxes = ?, sku = ?,
+                                    source_upc = COALESCE(?, source_upc),
+                                    source_base_upc = COALESCE(?, source_base_upc),
+                                    listing_trace_id = COALESCE(?, listing_trace_id),
+                                    listing_trace_created_at = COALESCE(?, listing_trace_created_at),
+                                    listing_trace_source = COALESCE(?, listing_trace_source),
+                                    listing_listing_id = COALESCE(?, listing_listing_id),
+                                    listing_offer_id = COALESCE(?, listing_offer_id),
+                                    listing_sku = COALESCE(?, listing_sku),
+                                    listing_asin = COALESCE(?, listing_asin)
                                 WHERE order_id = ?
                             ''', (final_barcode, title, quantity, price, shipped_time, purchase_date, image,
                                   shipping_name, shipping_city, shipping_state, shipping_postal, shipping_country,
                                   shipping_cost, seller_fee, taxes, final_sku,
+                                  source_upc, source_base_upc, listing_trace_id, listing_trace_created_at,
+                                  listing_trace_source, listing_listing_id, listing_offer_id, listing_sku, listing_asin,
                                   amazon_order_id))
                         else:
                             # Insert new order
@@ -652,11 +682,15 @@ class AmazonManager:
                                 INSERT INTO orders
                                 (order_id, item_id, sku, barcode, title, quantity, price, shipped_time, paid_time, image, store,
                                  shipping_name, shipping_city, shipping_state, shipping_postal_code, shipping_country,
-                                 shipping_cost, seller_fee, taxes)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'amazon', ?, ?, ?, ?, ?, ?, ?, ?)
-                            ''', (amazon_order_id, asin, sku, barcode, title, quantity, price, shipped_time, purchase_date, image,
+                                 shipping_cost, seller_fee, taxes, source_upc, source_base_upc, listing_trace_id,
+                                 listing_trace_created_at, listing_trace_source, listing_listing_id, listing_offer_id,
+                                 listing_sku, listing_asin)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'amazon', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            ''', (amazon_order_id, asin, sku, final_trace_barcode, title, quantity, price, shipped_time, purchase_date, image,
                                   shipping_name, shipping_city, shipping_state, shipping_postal, shipping_country,
-                                  shipping_cost, seller_fee, taxes))
+                                  shipping_cost, seller_fee, taxes, source_upc, source_base_upc, listing_trace_id,
+                                  listing_trace_created_at, listing_trace_source, listing_listing_id, listing_offer_id,
+                                  listing_sku, listing_asin))
                             synced_count += 1
 
                     conn.commit()

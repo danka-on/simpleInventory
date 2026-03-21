@@ -1034,6 +1034,9 @@ def _sold_order_value(order, key, default=''):
 
 
 def _effective_sold_order_barcode(order):
+    source_upc = str(_sold_order_value(order, 'source_upc', '') or '').strip()
+    if source_upc:
+        return source_upc
     barcode = str(_sold_order_value(order, 'barcode', '') or '').strip()
     sku = str(_sold_order_value(order, 'sku', '') or '').strip()
     platform = str(_sold_order_value(order, 'store', '') or '').strip().lower()
@@ -11347,6 +11350,58 @@ def api_listingagent_ebay_publish():
         if dry_run:
             return jsonify({'success': True, 'dry_run': True, 'offerId': offer_id, 'inventoryItem': inventory_payload, 'offer': offer_payload, 'wouldPublish': True})
 
+        def _finish_ebay_publish_success(*, listing_id=None, pub_data=None, extra=None):
+            upc = (data.get('upc') or '').strip()
+            target_lot = _normalize_lot_number(data.get('lot_number') or data.get('lot'))
+            target_item_id = data.get('id')
+            if target_item_id is None:
+                target_item_id = data.get('item_id')
+            if target_item_id is None:
+                target_item_id = data.get('bol_id')
+            if upc or target_item_id is not None:
+                try:
+                    _listing_center_mark_bol_listed(
+                        'ebay',
+                        upc=upc,
+                        lot_number=target_lot,
+                        item_id=target_item_id
+                    )
+                except Exception:
+                    pass
+
+            try:
+                if upc:
+                    sku_local = (data.get('sku') or upc).strip() or None
+                    try:
+                        settings_local = _listingagent_get_settings()
+                        marketplace_id_local = (data.get('marketplaceId') or settings_local.get('ebay_marketplace_id') or 'EBAY_US').strip() or 'EBAY_US'
+                    except Exception:
+                        marketplace_id_local = (data.get('marketplaceId') or 'EBAY_US').strip() or 'EBAY_US'
+                    title_local = (data.get('title') or '').strip() or None
+                    qty_local = _listingagent_parse_int(data.get('quantity'), None)
+                    price_local = _listingagent_parse_float(data.get('price'), None)
+                    listing_url_local = f"https://www.ebay.com/itm/{listing_id}" if str(listing_id or '').strip() else None
+                    _listagent_mark_listed(
+                        upc,
+                        platform='ebay',
+                        listing_id=listing_id,
+                        offer_id=offer_id,
+                        sku=sku_local,
+                        marketplace_id=marketplace_id_local,
+                        title=title_local,
+                        price=price_local,
+                        quantity=qty_local,
+                        url=listing_url_local,
+                        source='listingagent'
+                    )
+            except Exception:
+                pass
+
+            payload = {'success': True, 'listingId': listing_id, 'offerId': offer_id, 'raw': pub_data or {}}
+            if isinstance(extra, dict):
+                payload.update(extra)
+            return jsonify(payload)
+
         resp_pub = _ebay_api_request('POST', f'/sell/inventory/v1/offer/{offer_id}/publish')
         if resp_pub.status_code >= 400:
             err_pub = _ebay_extract_error(resp_pub)
@@ -11394,13 +11449,14 @@ def api_listingagent_ebay_publish():
                                     if resp_pub_retry.status_code < 400:
                                         pub_data = resp_pub_retry.json() if resp_pub_retry.text else {}
                                         listing_id = pub_data.get('listingId')
-                                        return jsonify({
-                                            'success': True,
-                                            'listingId': listing_id,
-                                            'raw': pub_data,
-                                            'imageSourceAutoFixed': True,
-                                            'imageCount': len(fallback_images)
-                                        })
+                                        return _finish_ebay_publish_success(
+                                            listing_id=listing_id,
+                                            pub_data=pub_data,
+                                            extra={
+                                                'imageSourceAutoFixed': True,
+                                                'imageCount': len(fallback_images)
+                                            }
+                                        )
                                     err_pub = _ebay_extract_error(resp_pub_retry)
                                     low = err_pub.lower()
                                 else:
@@ -11434,14 +11490,15 @@ def api_listingagent_ebay_publish():
                         if resp_pub_retry.status_code < 400:
                             pub_data = resp_pub_retry.json() if resp_pub_retry.text else {}
                             listing_id = pub_data.get('listingId')
-                            return jsonify({
-                                'success': True,
-                                'listingId': listing_id,
-                                'raw': pub_data,
-                                'conditionAutoFixed': True,
-                                'resolvedCondition': (inv_payload.get('condition') or '').strip(),
-                                'conditionTried': tried_conditions
-                            })
+                            return _finish_ebay_publish_success(
+                                listing_id=listing_id,
+                                pub_data=pub_data,
+                                extra={
+                                    'conditionAutoFixed': True,
+                                    'resolvedCondition': (inv_payload.get('condition') or '').strip(),
+                                    'conditionTried': tried_conditions
+                                }
+                            )
                         err_pub = _ebay_extract_error(resp_pub_retry)
                         low = err_pub.lower()
 
@@ -11468,14 +11525,15 @@ def api_listingagent_ebay_publish():
                                 if resp_pub_retry2.status_code < 400:
                                     pub_data = resp_pub_retry2.json() if resp_pub_retry2.text else {}
                                     listing_id = pub_data.get('listingId')
-                                    return jsonify({
-                                        'success': True,
-                                        'listingId': listing_id,
-                                        'raw': pub_data,
-                                        'conditionAutoFixed': True,
-                                        'resolvedCondition': cond,
-                                        'conditionTried': tried_conditions
-                                    })
+                                    return _finish_ebay_publish_success(
+                                        listing_id=listing_id,
+                                        pub_data=pub_data,
+                                        extra={
+                                            'conditionAutoFixed': True,
+                                            'resolvedCondition': cond,
+                                            'conditionTried': tried_conditions
+                                        }
+                                    )
                                 err_pub = _ebay_extract_error(resp_pub_retry2)
                                 low = err_pub.lower()
                                 if ('invalid item condition information' not in low) and ('condition id is invalid' not in low):
@@ -11492,59 +11550,15 @@ def api_listingagent_ebay_publish():
                         listing_id = offer_state.get('listingId') or offer_state.get('listing_id')
                 except Exception:
                     pass
-                return jsonify({'success': True, 'listingId': listing_id, 'raw': {'alreadyPublished': True, 'offerId': offer_id}})
+                return _finish_ebay_publish_success(
+                    listing_id=listing_id,
+                    pub_data={'alreadyPublished': True, 'offerId': offer_id}
+                )
             return jsonify({'success': False, 'error': err_pub, 'missingAspect': _extract_missing_ebay_aspect(err_pub)}), 400
 
         pub_data = resp_pub.json() if resp_pub.text else {}
         listing_id = pub_data.get('listingId')
-
-        # Mark BOL as listed on eBay so /items-to-list marketplace checkboxes stay in sync.
-        upc = (data.get('upc') or '').strip()
-        target_lot = _normalize_lot_number(data.get('lot_number') or data.get('lot'))
-        target_item_id = data.get('id')
-        if target_item_id is None:
-            target_item_id = data.get('item_id')
-        if target_item_id is None:
-            target_item_id = data.get('bol_id')
-        if upc or target_item_id is not None:
-            try:
-                _listing_center_mark_bol_listed(
-                    'ebay',
-                    upc=upc,
-                    lot_number=target_lot,
-                    item_id=target_item_id
-                )
-            except Exception:
-                pass
- 
-        # Record listing completion in listagent.db (if UPC is available)
-        try:
-            if upc:
-                sku_local = (data.get('sku') or upc).strip() or None
-                try:
-                    settings_local = _listingagent_get_settings()
-                    marketplace_id_local = (data.get('marketplaceId') or settings_local.get('ebay_marketplace_id') or 'EBAY_US').strip() or 'EBAY_US'
-                except Exception:
-                    marketplace_id_local = (data.get('marketplaceId') or 'EBAY_US').strip() or 'EBAY_US'
-                title_local = (data.get('title') or '').strip() or None
-                qty_local = _listingagent_parse_int(data.get('quantity'), None)
-                price_local = _listingagent_parse_float(data.get('price'), None)
-                _listagent_mark_listed(
-                    upc,
-                    platform='ebay',
-                    listing_id=listing_id,
-                    offer_id=offer_id,
-                    sku=sku_local,
-                    marketplace_id=marketplace_id_local,
-                    title=title_local,
-                    price=price_local,
-                    quantity=qty_local,
-                    source='listingagent'
-                )
-        except Exception:
-            pass
-  
-        return jsonify({'success': True, 'listingId': listing_id, 'offerId': offer_id, 'raw': pub_data})
+        return _finish_ebay_publish_success(listing_id=listing_id, pub_data=pub_data)
     except _ListingAgentUserError as e:
         payload = {'success': False, 'error': str(e)}
         payload.update(e.extra or {})
@@ -17824,7 +17838,7 @@ def _process_automatic_inventory_removals():
         
         # Get orders eligible for automatic removal - MUST include shipped_time
         sold_cur.execute('''
-            SELECT id, order_id, barcode, quantity, title, shipped_time
+            SELECT id, order_id, barcode, source_upc, quantity, title, shipped_time
             FROM orders 
             WHERE rackupdated = 0 
             AND shipped_time IS NOT NULL 
@@ -17933,7 +17947,7 @@ def _process_automatic_inventory_removals():
                 if hours_since_shipped < grace_period_hours:
                     continue
                 
-                barcode = order['barcode']
+                barcode = _effective_sold_order_barcode(order)
                 sold_qty = max(1, _coerce_int(order['quantity'], 1))
 
                 matches = _searchrack_matches_for_barcode(
@@ -29548,6 +29562,7 @@ def api_bol_items():
         warehouse_available_by_base = {}
         warehouse_locations_by_base = {}
         warehouse_location_qty_by_base = {}
+        warehouse_exact_by_upc = {}  # qty keyed by exact normalized UPC (suffix preserved)
 
         def _warehouse_base_upc(value):
             upc_norm = _normalize_upc(value)
@@ -29602,6 +29617,9 @@ def api_bol_items():
                                 except Exception:
                                     qty_val = 0
                                 warehouse_available_by_base[sr_base] = warehouse_available_by_base.get(sr_base, 0) + qty_val
+                                sr_exact = _normalize_upc_preserve_suffix_for_match(str(sr_row['BARCODE'] or '').strip())
+                                if sr_exact:
+                                    warehouse_exact_by_upc[sr_exact] = warehouse_exact_by_upc.get(sr_exact, 0) + qty_val
 
                                 location_label = ((sr_row['LOC'] or '').strip() or (sr_row['PIC'] or '').strip())
                                 if location_label:
@@ -29665,6 +29683,7 @@ def api_bol_items():
             warehouse_available_by_base = {}
             warehouse_locations_by_base = {}
             warehouse_location_qty_by_base = {}
+            warehouse_exact_by_upc = {}
         
         # Build a status map keyed by (upc, lot_number) with fallback to lotless legacy rows.
         status_map = {}
@@ -29892,6 +29911,8 @@ def api_bol_items():
             upc_raw = r.get('upc') or ''
             warehouse_base_upc = _warehouse_base_upc(r.get('upc'))
             warehouse_available = max(0, int(warehouse_available_by_base.get(warehouse_base_upc, 0) or 0))
+            upc_exact_key = _normalize_upc_preserve_suffix_for_match(upc_raw)
+            warehouse_exact = max(0, int(warehouse_exact_by_upc.get(upc_exact_key, 0) or 0))
             warehouse_locations = warehouse_locations_by_base.get(warehouse_base_upc, []) or []
             warehouse_loc_qty_map = warehouse_location_qty_by_base.get(warehouse_base_upc, {}) or {}
             warehouse_location_details = []
@@ -29976,6 +29997,7 @@ def api_bol_items():
                 'quantity': display_qty,
                 'warehouse_base_upc': warehouse_base_upc,
                 'warehouse_available': warehouse_available,
+                'warehouse_exact': warehouse_exact,
                 'warehouse_locations': warehouse_locations,
                 'warehouse_location_details': warehouse_location_details,
                 'note': 'yes' if has_notes else '',
@@ -32636,7 +32658,7 @@ def ready_to_ship_location_options(order_id):
         sold_cur = sold_conn.cursor()
         _ensure_order_removal_allocations_table(sold_cur)
 
-        sold_cur.execute('SELECT id, order_id, item_id, sku, store, barcode, quantity, title FROM orders WHERE id = ?', (order_id,))
+        sold_cur.execute('SELECT id, order_id, item_id, sku, store, barcode, source_upc, quantity, title FROM orders WHERE id = ?', (order_id,))
         order = sold_cur.fetchone()
         if not order:
             return jsonify({'success': False, 'error': 'Order not found'}), 404
@@ -32709,7 +32731,7 @@ def ready_to_ship_order_stats(order_id):
         sold_conn = sqlite3.connect('sold.db')
         sold_conn.row_factory = sqlite3.Row
         sold_cur = sold_conn.cursor()
-        sold_cur.execute('SELECT id, item_id, sku, store, barcode, quantity, title FROM orders WHERE id = ?', (order_id,))
+        sold_cur.execute('SELECT id, item_id, sku, store, barcode, source_upc, quantity, title FROM orders WHERE id = ?', (order_id,))
         order = sold_cur.fetchone()
         if not order:
             return jsonify({'success': False, 'error': 'Order not found'}), 404
@@ -32767,7 +32789,7 @@ def mark_order_handled():
         _ensure_order_removal_allocations_table(cur)
 
         cur.execute(
-            'SELECT id, order_id, item_id, sku, store, barcode, quantity, title, rackupdated, isHandled '
+            'SELECT id, order_id, item_id, sku, store, barcode, source_upc, quantity, title, rackupdated, isHandled '
             'FROM orders WHERE id = ?',
             (order_id,)
         )
@@ -32994,8 +33016,15 @@ def mark_order_handled():
         cur.execute('DELETE FROM order_removal_allocations WHERE order_row_id = ?', (order_id,))
         conn.commit()
 
-        cache.delete_memoized(sold_orders)
-        cache.delete_memoized(ready_to_ship_count)
+        for _days in (1, 2, 3, 5, 7, 14, 30):
+            try:
+                cache.delete(f'view//sold-orders?days={_days}')
+            except Exception:
+                pass
+            try:
+                cache.delete(f'view//api/ready-to-ship/count?days={_days}')
+            except Exception:
+                pass
 
         return jsonify({'success': True, 'removed': len(audit_records) > 0})
 
@@ -33120,8 +33149,15 @@ def mark_order_unhandled():
         cur.execute('DELETE FROM order_removal_allocations WHERE order_row_id = ?', (order_id,))
         conn.commit()
 
-        cache.delete_memoized(sold_orders)
-        cache.delete_memoized(ready_to_ship_count)
+        for _days in (1, 2, 3, 5, 7, 14, 30):
+            try:
+                cache.delete(f'view//sold-orders?days={_days}')
+            except Exception:
+                pass
+            try:
+                cache.delete(f'view//api/ready-to-ship/count?days={_days}')
+            except Exception:
+                pass
 
         return jsonify({'success': True, 'restored': restored_count})
     except Exception as e:
@@ -33297,7 +33333,7 @@ def repair_missing_removals():
 
         # Find all orders with rackupdated=1 and a barcode
         sold_cur.execute('''
-            SELECT id, order_id, barcode, quantity, title, shipped_time
+            SELECT id, order_id, barcode, source_upc, quantity, title, shipped_time
             FROM orders
             WHERE rackupdated = 1
             AND barcode IS NOT NULL AND barcode != ''
@@ -33307,7 +33343,7 @@ def repair_missing_removals():
 
         for order in orders:
             results['total_checked'] += 1
-            barcode = order['barcode']
+            barcode = _effective_sold_order_barcode(order)
             order_id = order['order_id']
             sold_qty = order['quantity'] or 1
 

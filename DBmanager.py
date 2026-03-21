@@ -112,6 +112,130 @@ def _lookup_first_value(db_name, query, params):
     except Exception:
         return None
 
+def _is_meaningful_marketplace_text(value):
+    s = str(value or '').strip()
+    if not s:
+        return False
+    return s.lower() not in {'none', 'null', 'n/a', 'na', 'does not apply'}
+
+def _row_to_plain_dict(row):
+    if row is None:
+        return {}
+    if isinstance(row, dict):
+        return dict(row)
+    try:
+        return dict(row)
+    except Exception:
+        return {}
+
+def _fetch_listing_trace_candidates(query, params):
+    try:
+        with connect_db('listinglog.db') as conn:
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            cur.execute(query, params)
+            return [_row_to_plain_dict(row) for row in cur.fetchall()]
+    except Exception:
+        return []
+
+def _choose_exact_listing_trace_row(rows):
+    if not rows:
+        return None
+
+    meaningful_rows = []
+    upc_keys = set()
+    for row in rows:
+        row_dict = _row_to_plain_dict(row)
+        upc_val = str(row_dict.get('upc') or '').strip()
+        upc_key = _normalize_marketplace_upc(upc_val)
+        if not upc_key:
+            continue
+        meaningful_rows.append(row_dict)
+        upc_keys.add(upc_key)
+
+    if not meaningful_rows or len(upc_keys) != 1:
+        return None
+
+    def _sort_key(row):
+        created_at = str(row.get('created_at') or '').strip()
+        try:
+            rid = int(row.get('id') or 0)
+        except Exception:
+            rid = 0
+        return (created_at, rid)
+
+    meaningful_rows.sort(key=_sort_key, reverse=True)
+    return meaningful_rows[0]
+
+def resolve_listing_trace_from_marketplace_sale(*, platform=None, item_id=None, sku=None):
+    """
+    Resolve the exact listing-agent publish trace for a marketplace sale.
+
+    This is intentionally strict so we only store exact suffixed-item traces.
+    """
+    platform_key = str(platform or '').strip().lower()
+    item_id_val = str(item_id or '').strip()
+    sku_val = str(sku or '').strip()
+
+    if platform_key == 'ebay':
+        if _is_meaningful_marketplace_text(item_id_val):
+            rows = _fetch_listing_trace_candidates(
+                '''
+                SELECT *
+                FROM listing_log
+                WHERE LOWER(TRIM(COALESCE(platform, ''))) = 'ebay'
+                  AND LOWER(TRIM(COALESCE(source, ''))) = 'listingagent'
+                  AND (
+                        TRIM(COALESCE(listing_id, '')) = ? COLLATE NOCASE
+                     OR TRIM(COALESCE(offer_id, '')) = ? COLLATE NOCASE
+                  )
+                ORDER BY created_at DESC, id DESC
+                ''',
+                (item_id_val, item_id_val)
+            )
+            chosen = _choose_exact_listing_trace_row(rows)
+            if chosen:
+                return chosen
+
+        if _is_meaningful_marketplace_text(sku_val):
+            rows = _fetch_listing_trace_candidates(
+                '''
+                SELECT *
+                FROM listing_log
+                WHERE LOWER(TRIM(COALESCE(platform, ''))) = 'ebay'
+                  AND LOWER(TRIM(COALESCE(source, ''))) = 'listingagent'
+                  AND TRIM(COALESCE(sku, '')) = ? COLLATE NOCASE
+                ORDER BY created_at DESC, id DESC
+                ''',
+                (sku_val,)
+            )
+            chosen = _choose_exact_listing_trace_row(rows)
+            if chosen:
+                return chosen
+
+        return None
+
+    if platform_key == 'amazon':
+        if _is_meaningful_marketplace_text(sku_val):
+            rows = _fetch_listing_trace_candidates(
+                '''
+                SELECT *
+                FROM listing_log
+                WHERE LOWER(TRIM(COALESCE(platform, ''))) = 'amazon'
+                  AND LOWER(TRIM(COALESCE(source, ''))) = 'listingagent'
+                  AND TRIM(COALESCE(sku, '')) = ? COLLATE NOCASE
+                ORDER BY created_at DESC, id DESC
+                ''',
+                (sku_val,)
+            )
+            chosen = _choose_exact_listing_trace_row(rows)
+            if chosen:
+                return chosen
+
+        return None
+
+    return None
+
 def _upc_exists_in_local_sources(candidate):
     variants = _marketplace_upc_variants(candidate)
     if not variants:
@@ -242,6 +366,15 @@ def ensure_sold_orders_schema(cur, conn, default_store='ebay'):
             ('shipping_cost', 'REAL'),
             ('lot_number', 'TEXT'),
             ('sku', 'TEXT'),
+            ('source_upc', 'TEXT'),
+            ('source_base_upc', 'TEXT'),
+            ('listing_trace_id', 'INTEGER'),
+            ('listing_trace_created_at', 'TEXT'),
+            ('listing_trace_source', 'TEXT'),
+            ('listing_listing_id', 'TEXT'),
+            ('listing_offer_id', 'TEXT'),
+            ('listing_sku', 'TEXT'),
+            ('listing_asin', 'TEXT'),
         ]:
             if col_name not in cols:
                 cur.execute(f'ALTER TABLE orders ADD COLUMN {col_name} {col_def}')
@@ -669,6 +802,25 @@ def store_ebay_order(order):
             except Exception:
                 pass
 
+        trace_row = resolve_listing_trace_from_marketplace_sale(
+            platform='ebay',
+            item_id=order.get('item_id'),
+            sku=sku_val
+        ) or {}
+        source_upc_val = str(trace_row.get('upc') or '').strip() or None
+        source_base_upc_val = None
+        if source_upc_val:
+            source_base_upc_val = source_upc_val.split('-', 1)[0].strip() or source_upc_val
+
+        order_barcode_val = source_upc_val or barcode_val
+        listing_trace_id_val = trace_row.get('id')
+        listing_trace_created_at_val = str(trace_row.get('created_at') or '').strip() or None
+        listing_trace_source_val = str(trace_row.get('source') or '').strip() or None
+        listing_listing_id_val = str(trace_row.get('listing_id') or '').strip() or None
+        listing_offer_id_val = str(trace_row.get('offer_id') or '').strip() or None
+        listing_sku_val = str(trace_row.get('sku') or '').strip() or None
+        listing_asin_val = str(trace_row.get('asin') or '').strip() or None
+
         # Check for duplicate row before insert.
         # Some edge-case eBay payloads may omit item_id; use a stricter fallback key
         # so repeat sync passes do not insert clones.
@@ -726,7 +878,16 @@ def store_ebay_order(order):
                 barcode = COALESCE(?, barcode),
                 location = COALESCE(?, location),
                 shipping_cost = COALESCE(?, shipping_cost),
-                lot_number = COALESCE(?, lot_number)
+                lot_number = COALESCE(?, lot_number),
+                source_upc = COALESCE(?, source_upc),
+                source_base_upc = COALESCE(?, source_base_upc),
+                listing_trace_id = COALESCE(?, listing_trace_id),
+                listing_trace_created_at = COALESCE(?, listing_trace_created_at),
+                listing_trace_source = COALESCE(?, listing_trace_source),
+                listing_listing_id = COALESCE(?, listing_listing_id),
+                listing_offer_id = COALESCE(?, listing_offer_id),
+                listing_sku = COALESCE(?, listing_sku),
+                listing_asin = COALESCE(?, listing_asin)
                 WHERE id = ?''',
                 (
                     order.get('checkout_status'),
@@ -746,10 +907,19 @@ def store_ebay_order(order):
                     order.get('seller_fee'),
                     order.get('taxes'),
                     image_val,
-                    barcode_val,
+                    order_barcode_val,
                     location_val,
                     order.get('shipping_cost'),
                     lot_number_val,
+                    source_upc_val,
+                    source_base_upc_val,
+                    listing_trace_id_val,
+                    listing_trace_created_at_val,
+                    listing_trace_source_val,
+                    listing_listing_id_val,
+                    listing_offer_id_val,
+                    listing_sku_val,
+                    listing_asin_val,
                     existing[0]
                 )
             )
@@ -757,8 +927,8 @@ def store_ebay_order(order):
 
         # If not a duplicate, proceed with INSERT
         cur.execute('''INSERT INTO orders (
-            order_id, item_id, sku, title, quantity, price, checkout_status, shipping_name, shipping_street1, shipping_street2, shipping_city, shipping_state, shipping_postal_code, shipping_country, paid_time, shipped_time, seller_fee, taxes, fees, image, isHandled, isHandledDate, location, barcode, store, shipping_cost, lot_number
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+            order_id, item_id, sku, title, quantity, price, checkout_status, shipping_name, shipping_street1, shipping_street2, shipping_city, shipping_state, shipping_postal_code, shipping_country, paid_time, shipped_time, seller_fee, taxes, fees, image, isHandled, isHandledDate, location, barcode, store, shipping_cost, lot_number, source_upc, source_base_upc, listing_trace_id, listing_trace_created_at, listing_trace_source, listing_listing_id, listing_offer_id, listing_sku, listing_asin
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
             (
                 order.get('order_id'),
                 order.get('item_id'),
@@ -783,10 +953,19 @@ def store_ebay_order(order):
                 order.get('isHandled'),
                 order.get('isHandledDate'),
                 location_val,
-                barcode_val,
+                order_barcode_val,
                 'ebay',
                 order.get('shipping_cost'),
-                lot_number_val
+                lot_number_val,
+                source_upc_val,
+                source_base_upc_val,
+                listing_trace_id_val,
+                listing_trace_created_at_val,
+                listing_trace_source_val,
+                listing_listing_id_val,
+                listing_offer_id_val,
+                listing_sku_val,
+                listing_asin_val
             )
         )
 

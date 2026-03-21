@@ -292,6 +292,13 @@
     .rt-table tbody tr:hover {
       background: rgba(255,255,255,0.04);
     }
+    .rt-table tbody tr.rt-row-traced {
+      background: linear-gradient(90deg, rgba(245, 158, 11, 0.18), rgba(250, 204, 21, 0.08));
+      box-shadow: inset 4px 0 0 rgba(250, 204, 21, 0.9);
+    }
+    .rt-table tbody tr.rt-row-traced:hover {
+      background: linear-gradient(90deg, rgba(245, 158, 11, 0.24), rgba(250, 204, 21, 0.12));
+    }
 
     /* Sold table cell styling */
     .sold-td-small {
@@ -309,6 +316,17 @@
       transition: color 0.15s ease;
     }
     .sold-td-small a:hover { color: #bfdbfe; text-decoration: underline; }
+    .rt-qty-multi {
+      display: inline-block;
+      color: #ef4444;
+      font-weight: 900;
+      background: rgba(239, 68, 68, 0.12);
+      border: 1px solid rgba(239, 68, 68, 0.22);
+      border-radius: 8px;
+      padding: 2px 8px;
+      line-height: 1.1;
+      min-width: 28px;
+    }
     .rt-title-wrap {
       display: flex;
       align-items: flex-start;
@@ -333,6 +351,20 @@
       display: flex;
       align-items: center;
       flex-wrap: wrap;
+    }
+    .rt-trace-badge {
+      border: 1px solid rgba(250, 204, 21, 0.38);
+      background: rgba(250, 204, 21, 0.16);
+      color: #fde68a;
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 0.72rem;
+      font-weight: 800;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      line-height: 1;
+      letter-spacing: 0.01em;
     }
     .rt-prep-flag {
       border: 1px solid rgba(251, 191, 36, 0.35);
@@ -1075,8 +1107,20 @@
     html.ss-theme-day .rt-table thead th { background: #f8fafc; color: #6b7280; border-color: #e5e7eb; }
     html.ss-theme-day .rt-table tbody td { border-color: #e5e7eb; }
     html.ss-theme-day .rt-table tbody tr:hover { background: rgba(59,130,246,0.04); }
+    html.ss-theme-day .rt-table tbody tr.rt-row-traced {
+      background: linear-gradient(90deg, rgba(245, 158, 11, 0.16), rgba(250, 204, 21, 0.08));
+      box-shadow: inset 4px 0 0 rgba(217, 119, 6, 0.9);
+    }
+    html.ss-theme-day .rt-table tbody tr.rt-row-traced:hover {
+      background: linear-gradient(90deg, rgba(245, 158, 11, 0.22), rgba(250, 204, 21, 0.1));
+    }
     html.ss-theme-day .sold-td-small a { color: #2563eb; }
     html.ss-theme-day .sold-td-small a:hover { color: #1d4ed8; }
+    html.ss-theme-day .rt-trace-badge {
+      color: #92400e;
+      background: rgba(251, 191, 36, 0.18);
+      border-color: rgba(217, 119, 6, 0.28);
+    }
     html.ss-theme-day .rt-prep-flag {
       background: rgba(245,158,11,0.12);
       border-color: rgba(217,119,6,0.22);
@@ -1100,6 +1144,11 @@
     html.ss-theme-day .order-popup-card .popup-group-title { color: #111827 !important; }
     html.ss-theme-day .order-popup-card .popup-link { color: #2563eb !important; }
     html.ss-theme-day .order-popup-card .popup-qty { color: #6b7280 !important; }
+    html.ss-theme-day .rt-qty-multi {
+      color: #dc2626;
+      background: rgba(239, 68, 68, 0.08);
+      border-color: rgba(239, 68, 68, 0.18);
+    }
     html.ss-theme-day .order-popup-card .popup-loc-banner { color: #d97706 !important; }
     html.ss-theme-day .order-popup-card .popup-image,
     html.ss-theme-day .order-popup-card .popup-loc-image {
@@ -1585,8 +1634,9 @@ function tdLocation(order) {
 
 function tdQuantity(order) {
     const qty = order.quantity || '1';
-    const highlight = parseInt(qty) > 1 ? ' style="color:#f87171;font-weight:bold;background:rgba(239,68,68,0.1);border-radius:6px;padding:2px 8px;"' : '';
-    return `<td style="text-align:center;"${highlight}>${qty}</td>`;
+    const qtyNum = parseInt(qty, 10);
+    const qtyHtml = qtyNum > 1 ? `<span class="rt-qty-multi">${qty}</span>` : qty;
+    return `<td style="text-align:center;">${qtyHtml}</td>`;
 }
 
 // Create a single order row
@@ -2209,9 +2259,12 @@ async function handleOrderStatusChange(orderId, isUndo) {
             }
         }
 
-        // Optimistic update only after mandatory location selection is complete
-        OrderManager.updateOrderStatus(orderId, !originalState);
+        // Optimistic visual only — do NOT write localStorage until server confirms
+        // In-memory state update (no localStorage yet)
+        const orderInMem = OrderManager.orders.get(String(orderId));
+        if (orderInMem) orderInMem.isHandled = !originalState;
         optimisticApplied = true;
+        tr.style.transition = 'transform 0.25s ease, opacity 0.25s ease';
         tr.style.transform = 'translateX(100%)';
         tr.style.opacity = '0';
 
@@ -2230,11 +2283,18 @@ async function handleOrderStatusChange(orderId, isUndo) {
             throw new Error(data.error || 'Failed to update order');
         }
 
-        // Success - wait for animation, then move to other table
-        setTimeout(() => {
+        // Server confirmed — now persist to localStorage and broadcast to other tabs
+        OrderManager.saveToLocalStorage();
+        try {
+            const bc = new BroadcastChannel('rts_order_update');
+            bc.postMessage({ orderId: String(orderId), isHandled: !originalState });
+            bc.close();
+        } catch (e) { /* BroadcastChannel not supported in all envs */ }
+
+        // Success - wait for animation then move row to other table
+        let slideTimer = setTimeout(() => {
             tr.remove();
 
-            // Get fresh order data and render to new table
             const updatedOrder = OrderManager.getOrder(orderId);
             const newRow = createOrderRow(updatedOrder, updatedOrder.isHandled);
 
@@ -2242,17 +2302,14 @@ async function handleOrderStatusChange(orderId, isUndo) {
                 ? document.querySelector('#completed-orders-table tbody')
                 : document.querySelector('#sold-orders-table tbody');
 
-            // Remove "no orders" message if it exists
+            // Remove "no orders" message if present
             const noOrdersMsg = targetTable.querySelector('td[colspan="5"]');
-            if (noOrdersMsg) {
-                noOrdersMsg.closest('tr').remove();
-            }
+            if (noOrdersMsg) noOrdersMsg.closest('tr').remove();
 
-            // Add with fade-in animation
+            // Fade-in from left
             newRow.style.opacity = '0';
             newRow.style.transform = 'translateX(-20px)';
             targetTable.insertBefore(newRow, targetTable.firstChild);
-
             requestAnimationFrame(() => {
                 newRow.style.transition = 'all 0.3s ease';
                 newRow.style.opacity = '1';
@@ -2262,32 +2319,35 @@ async function handleOrderStatusChange(orderId, isUndo) {
             updatePendingCount();
             attachPopups();
 
-            // Check if source table is now empty
             const sourceTable = updatedOrder.isHandled
                 ? document.querySelector('#sold-orders-table tbody')
                 : document.querySelector('#completed-orders-table tbody');
-
             if (sourceTable.children.length === 0) {
-                const emptyMsg = updatedOrder.isHandled
-                    ? 'No pending orders'
-                    : 'No completed orders yet';
-                sourceTable.innerHTML = `<tr><td colspan="5" class="rt-empty">${emptyMsg}</td></tr>`;
+                sourceTable.innerHTML = `<tr><td colspan="5" class="rt-empty">${updatedOrder.isHandled ? 'No pending orders' : 'No completed orders yet'}</td></tr>`;
             }
-        }, 300);
+        }, 260);
+
+        // Store timer reference so error path can cancel it
+        tr._slideTimer = slideTimer;
 
     } catch (error) {
         console.error('Error updating order status:', error);
 
+        // Cancel the slide-out animation timer if it hasn't fired yet
+        if (tr._slideTimer) { clearTimeout(tr._slideTimer); tr._slideTimer = null; }
+
+        // Revert in-memory state (localStorage was never written on this path)
         if (optimisticApplied) {
-            OrderManager.updateOrderStatus(orderId, originalState);
+            const orderInMem = OrderManager.orders.get(String(orderId));
+            if (orderInMem) orderInMem.isHandled = originalState;
         }
 
-        // Restore button and row
+        // Restore row appearance
+        tr.style.transition = 'transform 0.2s ease, opacity 0.2s ease';
         tr.style.transform = '';
         tr.style.opacity = '1';
         restoreBtn();
 
-        // Show error toast
         showToast('Failed to update order: ' + error.message, 'error');
     }
 }
@@ -2669,6 +2729,15 @@ try {
 } catch (e) {
     console.log('BroadcastChannel not supported');
 }
+
+// Method 1b: rts_order_update — instant same-device cross-tab sync from handleOrderStatusChange
+try {
+    const bcRts = new BroadcastChannel('rts_order_update');
+    bcRts.onmessage = function(e) {
+        if (!e.data || typeof e.data.orderId === 'undefined') return;
+        triggerSoldOrdersRefresh('rts_order_update');
+    };
+} catch (e) {}
 
 // Method 2: localStorage event (fallback)
 window.addEventListener('storage', function(e) {
@@ -3123,6 +3192,8 @@ function showOrderPopup(order, options = {}) {
     const price = order && order.price ? `$${parseFloat(order.price).toFixed(2)}` : '';
     const paidTime = order && order.paid_time ? fmtET(order.paid_time) : '';
     const barcode = order && order.barcode ? order.barcode : '';
+    const storedBarcode = order && order.stored_barcode ? order.stored_barcode : '';
+    const listingRef = order ? (order.listing_listing_id || order.listing_asin || '') : '';
     const loc = order ? (order.locations || order.location) : null;
     const prepSummary = order && order.prep_alert_summary ? order.prep_alert_summary : null;
 
@@ -3137,7 +3208,15 @@ function showOrderPopup(order, options = {}) {
     }
 
     if (isTitleMode && barcode) {
-        content += `<div class="popup-muted" style="font-size: 0.9rem; margin-bottom: 12px;"><strong>Barcode:</strong> ${esc(formatUpcDisplay(barcode))}</div>`;
+        content += `<div class="popup-muted" style="font-size: 0.9rem; margin-bottom: 8px;"><strong>Listing Item:</strong> ${esc(formatUpcDisplay(barcode))}</div>`;
+    }
+
+    if (isTitleMode && storedBarcode && storedBarcode !== barcode) {
+        content += `<div class="popup-muted" style="font-size: 0.88rem; margin-bottom: 8px;"><strong>Original Store Barcode:</strong> ${esc(formatUpcDisplay(storedBarcode))}</div>`;
+    }
+
+    if (isTitleMode && listingRef) {
+        content += `<div class="popup-muted" style="font-size: 0.88rem; margin-bottom: 12px;"><strong>Marketplace Ref:</strong> ${esc(listingRef)}</div>`;
     }
 
     if (isInfoMode) {

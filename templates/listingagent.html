@@ -1939,9 +1939,22 @@
       outline: 2px solid #f59e0b !important;
       background: rgba(245, 158, 11, 0.12) !important;
     }
+    #loading-overlay{
+      position:fixed;top:0;left:0;width:100%;height:100%;
+      background:rgba(15,23,42,0.55);
+      z-index:20000;display:none;justify-content:center;align-items:center;
+    }
+    #loading-overlay .spinner{
+      border:8px solid rgba(255,255,255,0.15);
+      border-top:8px solid #3498db;
+      border-radius:50%;width:60px;height:60px;
+      animation:la-spin 1s linear infinite;
+    }
+    @keyframes la-spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
   </style>
 </head>
 <body>
+  <div id="loading-overlay"><div class="spinner"></div></div>
   <div class="topbar">
     <div class="topbarInner">
       <a class="backBtn" id="listingagent-back-btn" href="/store-manager">
@@ -2670,6 +2683,19 @@
         return d.toLocaleString([], {year:'numeric', month:'short', day:'2-digit', hour:'2-digit', minute:'2-digit'});
       }catch(e){
         return s;
+      }
+    }
+
+    function _startLoading(){
+      state._loadCount = (state._loadCount || 0) + 1;
+      const ov = document.getElementById('loading-overlay');
+      if(ov) ov.style.display = 'flex';
+    }
+    function _stopLoading(){
+      state._loadCount = Math.max(0, (state._loadCount || 0) - 1);
+      if(state._loadCount === 0){
+        const ov = document.getElementById('loading-overlay');
+        if(ov) ov.style.display = 'none';
       }
     }
 
@@ -3697,6 +3723,7 @@
       const raw = (upc ?? '').toString().trim();
       const clean = normalizeUpc(raw) || raw;
       if(!clean) return;
+      _startLoading();
       if(state.workingDraftSaveTimer){
         clearTimeout(state.workingDraftSaveTimer);
         state.workingDraftSaveTimer = null;
@@ -3774,6 +3801,8 @@
         // offerId is restored if user clicks the Edit button
       } catch(e){
         log(`Load error: ${e.message}`);
+      } finally {
+        _stopLoading();
       }
     }
 
@@ -4927,6 +4956,7 @@
 
       const reqId = ++state.categoryReqId;
       setCategoryHint('Loading category suggestions...');
+      _startLoading();
 
       const mp = ($('marketplaceId')?.value || state.settings?.ebay_marketplace_id || 'EBAY_US').toString().trim() || 'EBAY_US';
 
@@ -4944,6 +4974,8 @@
         state.recommendedCategory = null;
         setCategoryHint(`Category suggestions unavailable: ${escapeHtml(e.message)}`);
         renderCategorySuggestions();
+      } finally {
+        _stopLoading();
       }
     }
 
@@ -6217,6 +6249,7 @@
       if($('amazonTemplatesBox')) $('amazonTemplatesBox').innerHTML = '<div class=\"hint\">Loading Amazon catalog matches...</div>';
 
       // Amazon catalog matches (ASIN templates)
+      _startLoading();
       (async () => {
         try{
           const _itemTitle = (state.item?.title || '').toString().trim();
@@ -6227,11 +6260,12 @@
         } catch(e){
           if(reqId !== state.templateReqId) return;
           if($('amazonCatalogSelectHint')) $('amazonCatalogSelectHint').textContent = `Amazon catalog unavailable: ${e.message}`;
-        }
+        } finally { _stopLoading(); }
       })();
 
       // eBay Product Catalog API — structured product specifics (Brand, Model, Color, etc.)
       // Runs first; Browse API aggregation runs in parallel and fills any gaps.
+      _startLoading();
       (async () => {
         try{
           const itemTitle = (state.item?.title || state.item?.bol?.description || '').toString().trim();
@@ -6253,9 +6287,11 @@
             );
           }
         } catch(e){ /* silent — Browse API + Amazon fills gaps */ }
+        finally { _stopLoading(); }
       })();
 
       // eBay Browse API catalog (live listing aspects + price comps; fills any gaps left by product catalog)
+      _startLoading();
       (async () => {
         if($('ebayCatalogQ') && !$('ebayCatalogQ').value.trim()) $('ebayCatalogQ').value = clean;
         if($('ebayCatalogHint')) $('ebayCatalogHint').textContent = 'Searching eBay catalog...';
@@ -6271,7 +6307,7 @@
           if(reqId !== state.templateReqId) return;
           if($('ebayCatalogHint')) $('ebayCatalogHint').textContent = `eBay catalog unavailable: ${e.message}`;
           if($('ebayCatalogBox')) $('ebayCatalogBox').innerHTML = '';
-        }
+        } finally { _stopLoading(); }
       })();
     }
 
