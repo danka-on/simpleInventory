@@ -4,229 +4,645 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Facebook Marketplace Listings</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
   <style>
-    * { box-sizing: border-box; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --fb: #1877f2;
+      --fb-dark: #0d5bcc;
+      --fb-dim: rgba(24,119,242,0.1);
+      --green: #16a34a;
+      --green-dim: rgba(22,163,74,0.1);
+      --red: #dc2626;
+      --red-dim: rgba(220,38,38,0.09);
+      --radius: 12px;
+      --radiusSm: 8px;
+    }
+
+    /* ===== LIGHT MODE (default) ===== */
     body {
       font-family: "Segoe UI", Arial, sans-serif;
-      background: linear-gradient(135deg, #1877f2 0%, #0d47a1 100%);
+      background: #f0f2f5;
       min-height: 100vh;
-      margin: 0;
-      padding: 18px;
-      color: #333;
+      color: #1c2336;
+      font-size: 0.9rem;
     }
-    .top {
+
+    /* Topbar */
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: #fff;
+      border-bottom: 1px solid #e0e4ea;
+      box-shadow: 0 1px 10px rgba(0,0,0,0.07);
+      padding: 0 20px;
+      height: 54px;
       display: flex;
       align-items: center;
-      justify-content: space-between;
       gap: 12px;
-      margin-bottom: 14px;
-      flex-wrap: wrap;
     }
-    .top h2 {
-      margin: 0;
-      flex: 1;
-      text-align: center;
-      color: #fff;
-      text-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    .topbar::before {
+      content: '';
+      position: absolute;
+      left: 0; top: 0; bottom: 0;
+      width: 3px;
+      background: var(--fb);
     }
-    .btn {
-      padding: 12px 24px;
-      border-radius: 10px;
-      border: none;
-      cursor: pointer;
-      font-size: 1rem;
+
+    .backBtn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 12px;
+      border-radius: var(--radiusSm);
+      border: 1px solid #fca5a5;
+      background: #fee2e2;
+      color: #b91c1c;
+      font-size: 0.83rem;
       font-weight: 600;
-      transition: all 0.2s ease;
+      text-decoration: none;
+      transition: background .15s, border-color .15s;
+      flex-shrink: 0;
+    }
+    .backBtn:hover { background: #fecaca; }
+
+    .topbarTitle {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      font-size: 1rem;
+      font-weight: 700;
+      color: #1c2336;
+      min-width: 0;
+    }
+    .fbIcon {
+      width: 26px; height: 26px;
+      background: var(--fb);
+      border-radius: 6px;
+      display: flex; align-items: center; justify-content: center;
+      color: #fff;
+      font-size: 0.75rem;
+      flex-shrink: 0;
+    }
+
+    .topbarActions { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
+
+    /* Buttons */
+    .btn {
       display: inline-flex;
       align-items: center;
       justify-content: center;
       gap: 6px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+      padding: 7px 13px;
+      border-radius: var(--radiusSm);
+      border: 1px solid transparent;
+      cursor: pointer;
+      font-size: 0.83rem;
+      font-weight: 600;
+      transition: all .15s ease;
+      white-space: nowrap;
+      line-height: 1;
     }
-    .btn:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
-    .btn:active { transform: translateY(0); }
-    .btn-sm { padding: 10px 16px; font-size: 0.9rem; border-radius: 8px; }
-    .btn-primary { background: linear-gradient(135deg, #1877f2, #0d5bcc); color: #fff; }
-    .btn-danger { background: linear-gradient(135deg, #e74c3c, #c0392b); color: #fff; }
-    .filters {
+    .btn:hover { opacity: 0.88; transform: translateY(-1px); }
+    .btn:active { transform: none; }
+    .btn:disabled { opacity: 0.45; cursor: default; transform: none; }
+
+    /* Compat classes for JS-generated buttons */
+    .btn-sm {
+      padding: 5px 10px;
+      font-size: 0.8rem;
+      border-radius: var(--radiusSm);
+      background: #f3f4f6;
+      color: #374151;
+      border: 1px solid #d1d5db;
+      cursor: pointer;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      transition: background .15s;
+    }
+    .btn-sm:hover { background: #e5e7eb; }
+    .btn-sm:disabled { opacity: 0.45; cursor: default; }
+    .btn-primary { background: var(--fb); color: #fff; border-color: var(--fb-dark); }
+    .btn-danger { background: var(--red); color: #fff; }
+
+    .btnPrimary { background: var(--fb); color: #fff; border-color: var(--fb-dark); }
+    .btnSecondary {
+      background: #fff;
+      color: #374151;
+      border-color: #d1d5db;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.07);
+    }
+    .btnSecondary:hover { background: #f9fafb; }
+    .btnSuccess { background: var(--green); color: #fff; }
+    .btnDanger { background: var(--red); color: #fff; }
+
+    /* Filter bar */
+    .filterBar {
       display: flex;
       gap: 10px;
       align-items: center;
       flex-wrap: wrap;
-      margin-bottom: 16px;
-      background: rgba(255,255,255,0.95);
-      padding: 14px 16px;
-      border-radius: 12px;
-      box-shadow: 0 4px 16px rgba(0,0,0,0.1);
+      padding: 10px 20px;
+      background: #fff;
+      border-bottom: 1px solid #e0e4ea;
     }
+    .searchWrap {
+      position: relative;
+      flex: 1;
+      min-width: 180px;
+    }
+    .searchWrap i {
+      position: absolute;
+      left: 10px; top: 50%;
+      transform: translateY(-50%);
+      color: #9ca3af;
+      font-size: 0.8rem;
+      pointer-events: none;
+    }
+    .searchInput {
+      width: 100%;
+      padding: 7px 11px 7px 30px;
+      border: 1px solid #d1d5db;
+      border-radius: var(--radiusSm);
+      font-size: 0.88rem;
+      background: #f9fafb;
+      color: #1c2336;
+      transition: border-color .15s, box-shadow .15s;
+    }
+    .searchInput:focus {
+      outline: none;
+      border-color: var(--fb);
+      box-shadow: 0 0 0 3px rgba(24,119,242,0.14);
+      background: #fff;
+    }
+    .muted { color: #9ca3af; font-size: 0.83rem; }
+    .statusMsg { font-size: 0.82rem; color: #6b7280; min-width: 0; }
+
+    /* Page body */
+    .pageBody {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 18px 20px;
+    }
+
+    /* Card */
     .card {
       background: #fff;
-      border-radius: 16px;
-      padding: 20px;
-      box-shadow: 0 8px 32px rgba(0,0,0,0.15);
+      border-radius: var(--radius);
+      border: 1px solid #e2e6ea;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+      overflow: hidden;
     }
-    .muted { color: #666; font-size: 0.9rem; }
-    input[type="text"], input[type="number"] {
+    .cardHeader {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      border-bottom: 1px solid #e2e6ea;
+      background: #f8fafc;
+    }
+    .cardHeaderTitle {
+      font-size: 0.75rem;
+      font-weight: 800;
+      color: #6b7280;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+
+    /* Table */
+    #fb-listings-content { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; }
+    th {
+      padding: 9px 14px;
+      background: #f8fafc;
+      border-bottom: 2px solid #e5e7eb;
+      font-size: 0.72rem;
+      font-weight: 800;
+      color: #6b7280;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      text-align: left;
+      white-space: nowrap;
+    }
+    td {
       padding: 10px 14px;
-      border: 2px solid #e0e4e8;
-      border-radius: 8px;
+      border-bottom: 1px solid #f0f2f5;
+      vertical-align: middle;
+    }
+    tbody tr:hover { background: #f8fafc; }
+    tbody tr:last-child td { border-bottom: none; }
+    .row-zero { background: #fff5f5 !important; }
+    .row-zero:hover { background: #fee2e2 !important; }
+
+    .img-thumb {
+      width: 42px; height: 42px;
+      object-fit: cover;
+      border-radius: var(--radiusSm);
+      border: 1px solid #e0e4ea;
+      display: block;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 3px 9px;
+      border-radius: 20px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .badge.active { background: rgba(22,163,74,0.1); color: #15803d; border: 1px solid rgba(22,163,74,0.22); }
+    .badge.unlisted { background: rgba(107,114,128,0.09); color: #6b7280; border: 1px solid rgba(107,114,128,0.18); }
+
+    .wh-zero { color: var(--red); font-weight: 700; }
+    .wh-link { color: var(--red); font-weight: 700; text-decoration: none; border-bottom: 1px dashed var(--red); transition: opacity .15s; }
+    .wh-link:hover { opacity: 0.72; }
+    .warehouse-qty { font-weight: 600; }
+
+    .fb-qty-input {
+      width: 62px;
+      text-align: center;
+      padding: 5px 7px;
+      border: 1px solid #d1d5db;
+      border-radius: var(--radiusSm);
+      font-size: 0.85rem;
+      background: #f9fafb;
+      color: #1c2336;
+      transition: border-color .15s;
+    }
+    .fb-qty-input:focus { outline: none; border-color: var(--fb); box-shadow: 0 0 0 2px rgba(24,119,242,0.13); }
+
+    .note-icon {
+      cursor: pointer;
       font-size: 1rem;
-      transition: border-color 0.2s, box-shadow 0.2s;
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 28px; height: 28px;
+      border-radius: var(--radiusSm);
+      background: rgba(22,163,74,0.09);
+      transition: background .15s;
+    }
+    .note-icon:hover { background: rgba(22,163,74,0.18); }
+    .note-add { transition: background .15s; }
+    .note-add:hover { opacity: 0.82; }
+
+    .actions { display: flex; gap: 6px; justify-content: center; align-items: center; }
+    .small-muted { color: #9ca3af; font-size: 0.82rem; padding: 8px 0; }
+
+    /* ===== MODAL ===== */
+    .modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.55);
+      backdrop-filter: blur(2px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      z-index: 9999;
+    }
+    .modal .card {
+      background: #fff;
+      border-radius: var(--radius);
+      border: 1px solid #e0e4ea;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.18);
+      max-width: 95%;
+      max-height: 90vh;
+      overflow: auto;
+      width: 960px;
+    }
+    .modal-narrow { width: 560px !important; }
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 14px 18px;
+      border-bottom: 1px solid #e2e6ea;
+      position: sticky;
+      top: 0;
+      background: #fff;
+      z-index: 1;
+    }
+    .modal-header h3 {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: #1c2336;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 0;
+    }
+    .modal-body { padding: 16px 18px; }
+    .modal-row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+    .modal-row input { flex: 1; min-width: 160px; }
+
+    input[type="text"], input[type="number"] {
+      padding: 7px 11px;
+      border: 1px solid #d1d5db;
+      border-radius: var(--radiusSm);
+      font-size: 0.88rem;
+      background: #f9fafb;
+      color: #1c2336;
+      transition: border-color .15s, box-shadow .15s;
     }
     input[type="text"]:focus, input[type="number"]:focus {
-      border-color: #1877f2;
-      box-shadow: 0 0 0 3px rgba(24,119,242,0.2);
       outline: none;
+      border-color: var(--fb);
+      box-shadow: 0 0 0 3px rgba(24,119,242,0.14);
+      background: #fff;
     }
-    table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
-    th, td { padding: 12px 14px; border-bottom: 1px solid #e0e4e8; }
-    th { background: linear-gradient(135deg, #f5f7fa, #e8ecf1); text-align: left; font-weight: 600; color: #2c3e50; }
-    tbody tr:hover { background: #f8f9fa; }
-    .badge { padding: 4px 10px; border-radius: 6px; font-size: 0.8rem; color: #fff; display: inline-block; font-weight: 600; }
-    .badge.active { background: linear-gradient(135deg, #27ae60, #1e8449); }
-    .badge.unlisted { background: linear-gradient(135deg, #95a5a6, #7f8c8d); }
-    .actions { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
-    .img-thumb { width: 44px; height: 44px; object-fit: cover; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-    .row-zero { background: #fff5f5; }
-    .wh-zero { color: #e74c3c; font-weight: 700; }
-    .wh-link { color: #e74c3c; font-weight: 700; text-decoration: underline; }
-    .modal { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: none; align-items: center; justify-content: center; padding: 16px; z-index: 9999; }
-    .modal .card { background:#fff; padding:20px; border-radius:16px; max-width:95%; max-height:90vh; width:1000px; overflow:auto; }
-    .modal-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; padding-bottom: 12px; border-bottom: 1px solid #e0e4e8; }
-    .modal-row { display:flex; gap:10px; align-items:center; flex-wrap: wrap; margin-bottom:12px; }
-    .modal-row input { flex:1; min-width: 160px; }
-    .modal-results { max-height: 300px; overflow:auto; border-radius: 8px; }
-
-    /* Tablet */
-    @media (max-width: 900px) {
-      .top { flex-direction: column; gap: 10px; }
-      .top h2 { order: 0; width: 100%; font-size: 1.3rem; }
-      .top > a { order: 1; }
-      .top > div { order: 2; width: 100%; justify-content: center; }
-      table { font-size: 0.85rem; }
-      th, td { padding: 10px 8px; }
+    select {
+      padding: 7px 11px;
+      border: 1px solid #d1d5db;
+      border-radius: var(--radiusSm);
+      font-size: 0.85rem;
+      background: #f9fafb;
+      color: #1c2336;
+    }
+    .modal-results {
+      max-height: 300px;
+      overflow: auto;
+      border-radius: var(--radiusSm);
+      border: 1px solid #e2e6ea;
+      margin-top: 8px;
     }
 
-    /* Mobile */
-    @media (max-width: 640px) {
-      body { padding: 12px; }
-      .top h2 { font-size: 1.1rem; }
-      .btn { padding: 10px 16px; font-size: 0.9rem; }
-      .btn-sm { padding: 8px 12px; font-size: 0.85rem; }
-      .filters { padding: 12px; gap: 8px; flex-direction: column; align-items: stretch; }
-      .filters input { width: 100%; }
-      .filters > * { width: 100%; }
-      .card { padding: 14px; border-radius: 12px; }
-      table { font-size: 0.8rem; display: block; overflow-x: auto; }
-      th, td { padding: 8px 6px; white-space: nowrap; }
-      .img-thumb { width: 36px; height: 36px; }
-      .modal .card { padding: 14px; width: 100%; }
+    /* Note cards (JS-rendered, override inline bg via important) */
+    html.ss-theme-night #notesModalContent > div {
+      background: rgba(15,24,41,0.8) !important;
+      border-left-color: #22c55e !important;
+    }
+    html.ss-theme-night #notesModalContent > div > div:first-child {
+      color: #64748b !important;
+    }
+    html.ss-theme-night #notesModalContent > div > div:last-child > div:first-child {
+      color: #cbd5e1 !important;
     }
 
-    /* Small mobile */
-    @media (max-width: 480px) {
-      body { padding: 8px; }
-      .top h2 { font-size: 1rem; }
-      .btn { padding: 8px 12px; font-size: 0.85rem; }
-      th, td { padding: 6px 4px; font-size: 0.75rem; }
-      .badge { padding: 2px 6px; font-size: 0.7rem; }
-    }
+    /* ===== NIGHT MODE ===== */
+    html.ss-theme-night body { background: #0b1120; color: #e2e8f0; }
 
-    /* Night mode overrides */
-    html.ss-theme-night body { background: linear-gradient(135deg, #0f172a, #1e293b); color: var(--ink, #e2e8f0); }
-    html.ss-theme-night .card { background: var(--card, #1e293b); border: 1px solid rgba(255,255,255,0.08); box-shadow: 0 8px 32px rgba(0,0,0,0.35); }
-    html.ss-theme-night .filters { background: rgba(30,41,59,0.95); box-shadow: 0 4px 16px rgba(0,0,0,0.3); }
-    html.ss-theme-night .muted { color: var(--muted, #94a3b8); }
-    html.ss-theme-night input[type="text"], html.ss-theme-night input[type="number"] { background: var(--bg0, #0f172a); color: var(--ink, #e2e8f0); border-color: rgba(255,255,255,0.12); }
-    html.ss-theme-night input[type="text"]:focus, html.ss-theme-night input[type="number"]:focus { border-color: #60a5fa; box-shadow: 0 0 0 3px rgba(96,165,250,0.2); }
-    html.ss-theme-night select { background: var(--bg0, #0f172a); color: var(--ink, #e2e8f0); border-color: rgba(255,255,255,0.12); }
-    html.ss-theme-night table { color: var(--ink, #e2e8f0); }
-    html.ss-theme-night th { background: #0f172a; color: var(--ink, #e2e8f0); border-color: rgba(255,255,255,0.08); }
-    html.ss-theme-night td { border-color: rgba(255,255,255,0.08); }
+    html.ss-theme-night .topbar {
+      background: #101827;
+      border-bottom-color: rgba(255,255,255,0.07);
+      box-shadow: 0 2px 16px rgba(0,0,0,0.4);
+    }
+    html.ss-theme-night .topbarTitle { color: #e2e8f0; }
+    html.ss-theme-night .backBtn {
+      background: rgba(239,68,68,0.14);
+      border-color: rgba(239,68,68,0.38);
+      color: #fca5a5;
+    }
+    html.ss-theme-night .backBtn:hover { background: rgba(239,68,68,0.22); }
+
+    html.ss-theme-night .filterBar {
+      background: #101827;
+      border-bottom-color: rgba(255,255,255,0.07);
+    }
+    html.ss-theme-night .searchInput {
+      background: #0b1120;
+      color: #e2e8f0;
+      border-color: rgba(255,255,255,0.1);
+    }
+    html.ss-theme-night .searchInput:focus {
+      border-color: #3b82f6;
+      box-shadow: 0 0 0 3px rgba(59,130,246,0.18);
+      background: #0f1829;
+    }
+    html.ss-theme-night .statusMsg { color: #64748b; }
+    html.ss-theme-night .muted { color: #64748b; }
+
+    html.ss-theme-night .card {
+      background: #172032;
+      border-color: rgba(255,255,255,0.07);
+      box-shadow: 0 4px 20px rgba(0,0,0,0.35);
+    }
+    html.ss-theme-night .cardHeader {
+      background: #101827;
+      border-bottom-color: rgba(255,255,255,0.07);
+    }
+    html.ss-theme-night .cardHeaderTitle { color: #64748b; }
+
+    html.ss-theme-night table { color: #e2e8f0; }
+    html.ss-theme-night th {
+      background: #101827;
+      border-bottom-color: rgba(255,255,255,0.1);
+      color: #64748b;
+    }
+    html.ss-theme-night td { border-bottom-color: rgba(255,255,255,0.05); }
     html.ss-theme-night tbody tr:hover { background: rgba(255,255,255,0.04); }
-    html.ss-theme-night .row-zero { background: rgba(239,68,68,0.08); }
-    html.ss-theme-night .modal .card { background: var(--card, #1e293b); color: var(--ink, #e2e8f0); border-color: rgba(255,255,255,0.1); }
-    html.ss-theme-night .modal-header { border-bottom-color: rgba(255,255,255,0.08); }
+    html.ss-theme-night .row-zero { background: rgba(239,68,68,0.08) !important; }
+    html.ss-theme-night .row-zero:hover { background: rgba(239,68,68,0.13) !important; }
+    html.ss-theme-night .img-thumb { border-color: rgba(255,255,255,0.1); }
+
+    html.ss-theme-night .fb-qty-input {
+      background: #0f1829;
+      color: #e2e8f0;
+      border-color: rgba(255,255,255,0.12);
+    }
+    html.ss-theme-night .fb-qty-input:focus { border-color: #3b82f6; }
+
+    html.ss-theme-night .badge.active { background: rgba(22,163,74,0.18); color: #4ade80; border-color: rgba(22,163,74,0.28); }
+    html.ss-theme-night .badge.unlisted { background: rgba(107,114,128,0.15); color: #94a3b8; border-color: rgba(107,114,128,0.22); }
+
+    html.ss-theme-night .note-icon { background: rgba(22,163,74,0.12); }
+    html.ss-theme-night .note-icon:hover { background: rgba(22,163,74,0.22); }
+
+    html.ss-theme-night .small-muted { color: #64748b; }
+
+    html.ss-theme-night .modal { background: rgba(0,0,0,0.72); }
+    html.ss-theme-night .modal .card {
+      background: #172032;
+      border-color: rgba(255,255,255,0.1);
+      box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    }
+    html.ss-theme-night .modal-header {
+      background: #172032;
+      border-bottom-color: rgba(255,255,255,0.08);
+    }
+    html.ss-theme-night .modal-header h3 { color: #e2e8f0; }
+    html.ss-theme-night input[type="text"], html.ss-theme-night input[type="number"] {
+      background: #0f1829;
+      color: #e2e8f0;
+      border-color: rgba(255,255,255,0.12);
+    }
+    html.ss-theme-night input[type="text"]:focus, html.ss-theme-night input[type="number"]:focus {
+      border-color: #3b82f6;
+      box-shadow: 0 0 0 3px rgba(59,130,246,0.18);
+      background: #0b1120;
+    }
+    html.ss-theme-night select {
+      background: #0f1829;
+      color: #e2e8f0;
+      border-color: rgba(255,255,255,0.12);
+    }
+    html.ss-theme-night .modal-results { border-color: rgba(255,255,255,0.08); }
+    html.ss-theme-night .btn-sm {
+      background: #1e2b42;
+      color: #cbd5e1;
+      border-color: rgba(255,255,255,0.12);
+    }
+    html.ss-theme-night .btn-sm:hover { background: #263347; }
+    html.ss-theme-night .btnSecondary { background: #1e2b42; color: #cbd5e1; border-color: rgba(255,255,255,0.12); }
+    html.ss-theme-night .btnSecondary:hover { background: #263347; }
+
+    /* Responsive */
+    @media (max-width: 900px) {
+      .topbar { padding: 0 14px; }
+      .filterBar { padding: 10px 14px; }
+      .pageBody { padding: 14px; }
+    }
+    @media (max-width: 640px) {
+      .topbarTitle span { font-size: 0.88rem; }
+      .filterBar { flex-wrap: wrap; }
+      th, td { padding: 8px 10px; }
+      .img-thumb { width: 34px; height: 34px; }
+    }
+    @media (max-width: 480px) {
+      th, td { padding: 6px 8px; font-size: 0.8rem; }
+      .badge { padding: 2px 6px; font-size: 0.7rem; }
+      .topbar { height: 48px; }
+    }
   </style>
 </head>
 <body>
-  <div class="top">
-    <a href="/items-to-list" class="btn btn-danger" data-i18n="back" id="fb-back-btn">← Back</a>
-    <h2 data-i18n="fb_listings_title">Facebook Marketplace Listings</h2>
-    <div style="display:flex;gap:8px;justify-content:flex-end;margin-right:70px">
-      <button class="btn btn-primary btn-sm" id="fb-listings-sync" title="Sync Sold">↻ Sync</button>
-      <button class="btn btn-primary btn-sm" id="fb-listings-log-open" data-i18n="fb_listings_log_open">📋 Log</button>
+
+  <!-- Topbar -->
+  <header class="topbar">
+    <a href="/items-to-list" class="backBtn" id="fb-back-btn">
+      <i class="fas fa-chevron-left"></i>Back
+    </a>
+    <div class="topbarTitle">
+      <div class="fbIcon"><i class="fab fa-facebook-f"></i></div>
+      <span data-i18n="fb_listings_title">Facebook Marketplace</span>
     </div>
+    <div class="topbarActions">
+      <button class="btn btnSecondary" id="fb-listings-sync" title="Sync Sold">
+        <i class="fas fa-rotate"></i><span>Sync</span>
+      </button>
+      <button class="btn btnSecondary" id="fb-listings-log-open" data-i18n="fb_listings_log_open">
+        <i class="fas fa-clock-rotate-left"></i><span>Log</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Filter bar -->
+  <div class="filterBar">
+    <div class="searchWrap">
+      <i class="fas fa-magnifying-glass"></i>
+      <input id="fb-listings-search" type="text" class="searchInput"
+        data-i18n="fb_listings_search_placeholder" placeholder="Search UPC or title...">
+    </div>
+    <button class="btn btnSuccess" id="fb-listings-add-open" data-i18n="fb_listings_add_item">
+      <i class="fas fa-plus"></i>Add Item
+    </button>
+    <span id="fb-listings-add-msg" class="statusMsg"></span>
   </div>
 
-  <div class="filters">
-    <input id="fb-listings-search" type="text" data-i18n="fb_listings_search_placeholder" placeholder="Search UPC or Title" style="flex:1;min-width:200px">
-    <button class="btn btn-sm" id="fb-listings-add-open" data-i18n="fb_listings_add_item" style="background:#27ae60;color:#fff">+ Add Item</button>
-    <span id="fb-listings-add-msg" class="muted" style="min-width:200px"></span>
-  </div>
-
-  <div id="fb-listings-content" class="card">
-    <div class="muted" data-i18n="loading">Loading...</div>
-  </div>
-
-  <div id="fb-add-modal" class="modal" aria-hidden="true">
+  <!-- Main content -->
+  <div class="pageBody">
     <div class="card">
-      <div class="modal-header">
-        <strong data-i18n="fb_listings_add_item">+ Add Item</strong>
-        <button class="btn btn-sm" id="fb-add-close" data-i18n="close">Close</button>
+      <div class="cardHeader">
+        <span class="cardHeaderTitle">
+          <i class="fab fa-facebook-f" style="color:var(--fb)"></i>Listings
+        </span>
       </div>
-      <div class="modal-row">
-        <input id="fb-add-scan" type="text" data-i18n="fb_listings_scan_barcode" placeholder="Scan barcode">
-        <button class="btn btn-sm" id="fb-add-scan-btn" data-i18n="fb_listings_add">Add Listing</button>
+      <div id="fb-listings-content">
+        <div class="muted" style="padding:20px" data-i18n="loading">Loading...</div>
       </div>
-      <div class="modal-row">
-        <input id="fb-add-name" type="text" data-i18n="fb_listings_search_name" placeholder="Search by name">
-        <button class="btn btn-sm" id="fb-add-name-btn" data-i18n="fb_listings_search">Search</button>
-      </div>
-      <div id="fb-add-results" class="modal-results"></div>
     </div>
   </div>
 
+  <!-- Add Item Modal -->
+  <div id="fb-add-modal" class="modal" aria-hidden="true">
+    <div class="card modal-narrow">
+      <div class="modal-header">
+        <h3><i class="fas fa-plus" style="color:var(--green)"></i><span data-i18n="fb_listings_add_item">Add Item</span></h3>
+        <button class="btn btnSecondary" id="fb-add-close" data-i18n="close">Close</button>
+      </div>
+      <div class="modal-body">
+        <div class="modal-row">
+          <input id="fb-add-scan" type="text" data-i18n="fb_listings_scan_barcode" placeholder="Scan barcode">
+          <button class="btn btnSuccess" id="fb-add-scan-btn" data-i18n="fb_listings_add">
+            <i class="fas fa-barcode"></i>Add
+          </button>
+        </div>
+        <div class="modal-row">
+          <input id="fb-add-name" type="text" data-i18n="fb_listings_search_name" placeholder="Search by name">
+          <button class="btn btnPrimary" id="fb-add-name-btn" data-i18n="fb_listings_search">
+            <i class="fas fa-magnifying-glass"></i>Search
+          </button>
+        </div>
+        <div id="fb-add-results" class="modal-results"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Notes Modal -->
   <div id="notesModal" class="modal" aria-hidden="true">
-    <div class="card" style="max-width:600px; width:95%;">
+    <div class="card modal-narrow">
       <div class="modal-header">
-        <h3 style="margin:0">📝 Notes</h3>
-        <button class="btn btn-sm" id="closeNotes" data-i18n="close">Close</button>
+        <h3><i class="fas fa-note-sticky" style="color:var(--green)"></i>Notes</h3>
+        <button class="btn btnSecondary" id="closeNotes" data-i18n="close">Close</button>
       </div>
-      <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
-        <input id="fb-note-input" type="text" placeholder="Add a note..." style="flex:1;padding:8px;border:1px solid #ddd;border-radius:6px">
-        <button class="btn btn-sm" id="fb-note-add-btn" data-i18n="add">Add</button>
+      <div class="modal-body">
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px">
+          <input id="fb-note-input" type="text" placeholder="Add a note..." style="flex:1">
+          <button class="btn btnSuccess" id="fb-note-add-btn" data-i18n="add">
+            <i class="fas fa-plus"></i>Add
+          </button>
+        </div>
+        <div id="notesModalContent" style="max-height:380px;overflow-y:auto"></div>
       </div>
-      <div id="notesModalContent" style="max-height:400px;overflow-y:auto"></div>
     </div>
   </div>
 
+  <!-- Log Modal -->
   <div id="fb-log-modal" class="modal" aria-hidden="true">
     <div class="card">
       <div class="modal-header">
-        <h3 style="margin:0" data-i18n="fb_listings_log_title">Changes Log</h3>
-        <div style="display:flex;gap:8px;">
-          <button class="btn btn-sm" id="fb-log-refresh" data-i18n="refresh">Refresh</button>
-          <button class="btn btn-sm" id="fb-log-close" data-i18n="close">Close</button>
+        <h3><i class="fas fa-clock-rotate-left" style="color:var(--fb)"></i><span data-i18n="fb_listings_log_title">Changes Log</span></h3>
+        <div style="display:flex;gap:8px">
+          <button class="btn btnSecondary" id="fb-log-refresh" data-i18n="refresh">
+            <i class="fas fa-rotate"></i>Refresh
+          </button>
+          <button class="btn btnSecondary" id="fb-log-close" data-i18n="close">Close</button>
         </div>
       </div>
-      <div class="modal-row" style="margin-bottom:12px;flex-wrap:wrap;">
-        <input type="text" id="fb-log-search" data-i18n="fb_listings_log_search_placeholder" placeholder="Search by UPC, title, note..." style="flex:1;min-width:200px;">
-        <select id="fb-log-sort" style="padding:8px;border-radius:6px;border:1px solid #ddd;">
-          <option value="desc" data-i18n="fb_listings_log_sort_newest">Date (newest first)</option>
-          <option value="asc" data-i18n="fb_listings_log_sort_oldest">Date (oldest first)</option>
-        </select>
-        <select id="fb-log-action" style="padding:8px;border-radius:6px;border:1px solid #ddd;">
-          <option value="" data-i18n="fb_listings_log_action_all">All Actions</option>
-          <option value="auto_sold">Auto sold sync</option>
-          <option value="auto_sold_missing">Auto sold (not listed)</option>
-          <option value="manual_add">Manual add</option>
-          <option value="manual_qty_change">Manual qty change</option>
-          <option value="manual_unlist">Manual unlist</option>
-        </select>
-        <button class="btn btn-primary" id="fb-log-search-btn" data-i18n="search">Search</button>
+      <div class="modal-body" style="padding-bottom:8px">
+        <div class="modal-row">
+          <input type="text" id="fb-log-search" data-i18n="fb_listings_log_search_placeholder" placeholder="Search by UPC, title, note..." style="flex:1;min-width:200px">
+          <select id="fb-log-sort">
+            <option value="desc" data-i18n="fb_listings_log_sort_newest">Newest first</option>
+            <option value="asc" data-i18n="fb_listings_log_sort_oldest">Oldest first</option>
+          </select>
+          <select id="fb-log-action">
+            <option value="" data-i18n="fb_listings_log_action_all">All Actions</option>
+            <option value="auto_sold">Auto sold sync</option>
+            <option value="auto_sold_missing">Auto sold (not listed)</option>
+            <option value="manual_add">Manual add</option>
+            <option value="manual_qty_change">Manual qty change</option>
+            <option value="manual_unlist">Manual unlist</option>
+          </select>
+          <button class="btn btnPrimary" id="fb-log-search-btn" data-i18n="search">
+            <i class="fas fa-magnifying-glass"></i>Search
+          </button>
+        </div>
       </div>
-      <div id="fb-log-content" style="overflow:auto;max-height:calc(90vh - 220px);"></div>
+      <div id="fb-log-content" style="overflow:auto;max-height:calc(90vh - 220px);padding:0 18px 18px"></div>
     </div>
   </div>
 
@@ -273,7 +689,7 @@ function renderFbListings(listings) {
     : `Showing ${listings.length} of ${fbListingsData.length} listing(s)`;
 
   const warehouseLabel = t('fb_listings_warehouse_stock') || 'Warehouse Stock';
-  let html = `<div class="muted" style="margin-bottom:10px">${showingText}</div>`;
+  let html = `<div class="muted" style="margin-bottom:10px;padding:12px 14px 0">${showingText}</div>`;
   html += '<table>';
   html += `<thead><tr><th>Image</th><th style="text-align:center">Notes</th><th>UPC</th><th>Title</th><th style="text-align:center">Qty</th><th style="text-align:center">${esc(warehouseLabel)}</th><th>Listed</th><th style="text-align:center">Status</th><th style="text-align:center">Actions</th></tr></thead>`;
   html += '<tbody>';
@@ -301,16 +717,16 @@ function renderFbListings(listings) {
     html += `<tr class="${isZero ? 'row-zero' : ''}">
       <td><img src="${esc(imgSrc)}" class="img-thumb" onerror="this.src='${missingImg}'"></td>
       <td style="text-align:center">${hasNotes ? `<span class="note-icon" data-upc="${esc(item.upc || '')}" style="cursor:pointer;font-size:1.2rem" title="Click to view notes">📝</span>` : `<span class="note-add" data-upc="${esc(item.upc || '')}" style="cursor:pointer;font-weight:700;font-size:1.2rem;color:#fff;background:#00b894;border-radius:6px;padding:4px 10px;display:inline-flex;align-items:center;justify-content:center" title="Add note">+</span>`}</td>
-      <td style="font-family:monospace">${esc(item.upc || '')}</td>
+      <td style="font-family:monospace;font-size:0.82rem">${esc(item.upc || '')}</td>
       <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(item.title || '')}">${esc(item.title || '-')}</td>
       <td style="text-align:center">
         <div style="display:flex;gap:6px;align-items:center;justify-content:center">
-          <input type="number" min="1" class="fb-qty-input" value="${qtyVal}" data-original="${qtyVal}" style="width:70px;text-align:center">
+          <input type="number" min="1" class="fb-qty-input" value="${qtyVal}" data-original="${qtyVal}">
           <button class="btn btn-sm fb-qty-save" data-upc="${esc(item.upc || '')}" style="background:#27ae60;color:#fff;display:none;width:30px;height:30px;align-items:center;justify-content:center" title="Save Qty">✓</button>
         </div>
       </td>
       <td style="text-align:center" class="${isZero ? 'wh-zero' : ''}">${warehouseCell}</td>
-      <td style="font-size:0.8rem;color:#666">${item.listed_at ? new Date(item.listed_at).toLocaleDateString() : '-'}</td>
+      <td style="font-size:0.78rem;color:#999">${item.listed_at ? new Date(item.listed_at).toLocaleDateString() : '-'}</td>
       <td style="text-align:center">${statusBadge}</td>
       <td style="text-align:center">
         <div class="actions">
@@ -343,21 +759,21 @@ async function loadFbListings() {
   const content = document.getElementById('fb-listings-content');
   if (!content) return;
   const t = (window.i18n && window.i18n.t) ? window.i18n.t : (key => key);
-  content.innerHTML = `<div class="muted">${esc(t('loading'))}</div>`;
+  content.innerHTML = `<div class="muted" style="padding:20px">${esc(t('loading'))}</div>`;
 
   try {
     const resp = await fetch('/api/fb/listings');
     const data = await resp.json();
 
     if (!data.success) {
-      content.innerHTML = `<div style="color:#e74c3c;padding:10px">Error: ${data.error || 'Unknown'}</div>`;
+      content.innerHTML = `<div style="color:#e74c3c;padding:14px">Error: ${data.error || 'Unknown'}</div>`;
       return;
     }
 
     fbListingsData = Array.isArray(data.listings) ? data.listings : [];
     renderFbListings(filterFbListings());
   } catch (e) {
-    content.innerHTML = `<div style="color:#e74c3c;padding:10px">Error loading: ${e.message}</div>`;
+    content.innerHTML = `<div style="color:#e74c3c;padding:14px">Error loading: ${e.message}</div>`;
   }
 }
 
@@ -366,7 +782,7 @@ function renderFbLog(logs) {
   if (!container) return;
   const t = (window.i18n && window.i18n.t) ? window.i18n.t : (key => key);
   if (!logs || logs.length === 0) {
-    container.innerHTML = `<div class="muted">${esc(t('fb_listings_log_empty'))}</div>`;
+    container.innerHTML = `<div class="muted" style="padding:14px 0">${esc(t('fb_listings_log_empty'))}</div>`;
     return;
   }
   let html = '<table>';
@@ -394,9 +810,9 @@ function renderFbLog(logs) {
     const undoDisabled = row.undone ? 'disabled' : '';
     const undoLabel = row.undone ? t('fb_listings_log_undone') : t('undo');
     html += `<tr style="${row.undone ? 'opacity:0.6' : ''}">
-      <td style="white-space:nowrap">${esc(row.created_at || '')}</td>
+      <td style="white-space:nowrap;font-size:0.78rem;color:#999">${esc(row.created_at || '')}</td>
       <td>${esc(actionLabel)}</td>
-      <td style="font-family:monospace">${esc(row.upc || '')}</td>
+      <td style="font-family:monospace;font-size:0.82rem">${esc(row.upc || '')}</td>
       <td style="text-align:center">${qtyHtml}</td>
       <td><span style="color:${statusColor};font-weight:600">${statusText}</span></td>
       <td style="text-align:center">
@@ -460,18 +876,18 @@ async function loadFbLog() {
   const container = document.getElementById('fb-log-content');
   if (!container) return;
   const t = (window.i18n && window.i18n.t) ? window.i18n.t : (key => key);
-  container.innerHTML = `<div class="muted">${esc(t('loading'))}</div>`;
+  container.innerHTML = `<div class="muted" style="padding:14px 0">${esc(t('loading'))}</div>`;
   try {
     const resp = await fetch('/api/fb/listings/log?limit=200');
     const data = await resp.json();
     if (!data.success) {
-      container.innerHTML = `<div class="muted">${esc(data.error || t('fb_listings_log_error'))}</div>`;
+      container.innerHTML = `<div class="muted" style="padding:14px 0">${esc(data.error || t('fb_listings_log_error'))}</div>`;
       return;
     }
     fbLogData = Array.isArray(data.logs) ? data.logs : [];
     applyFbLogFilters();
   } catch (e) {
-    container.innerHTML = `<div class="muted">${esc(e.message || t('fb_listings_log_error'))}</div>`;
+    container.innerHTML = `<div class="muted" style="padding:14px 0">${esc(e.message || t('fb_listings_log_error'))}</div>`;
   }
 }
 
@@ -505,7 +921,7 @@ function setFbAddMessage(text, isError) {
   const msg = document.getElementById('fb-listings-add-msg');
   if (!msg) return;
   msg.textContent = text || '';
-  msg.style.color = isError ? '#e74c3c' : '#2c3e50';
+  msg.style.color = isError ? '#e74c3c' : '';
   if (fbAddTimeout) clearTimeout(fbAddTimeout);
   if (text) {
     fbAddTimeout = setTimeout(() => {
@@ -619,7 +1035,7 @@ function renderFbAddSearchResults(results) {
   if (!container) return;
   const t = (window.i18n && window.i18n.t) ? window.i18n.t : (key => key);
   if (!results || results.length === 0) {
-    container.innerHTML = `<div class="muted">${esc(t('fb_listings_search_empty'))}</div>`;
+    container.innerHTML = `<div class="muted" style="padding:12px">${esc(t('fb_listings_search_empty'))}</div>`;
     return;
   }
   let html = '<table>';
@@ -630,7 +1046,7 @@ function renderFbAddSearchResults(results) {
     const thumb = img ? esc(img) : 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><rect width="100%" height="100%" fill="#f0f0f0"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#bbb" font-size="8">No img</text></svg>');
     html += `<tr>
       <td><img src="${thumb}" class="img-thumb" onerror="this.src='${thumb}'"></td>
-      <td style="font-family:monospace">${esc(r.upc || '')}</td>
+      <td style="font-family:monospace;font-size:0.82rem">${esc(r.upc || '')}</td>
       <td>${esc(r.item_description || '')}</td>
       <td style="text-align:center">
         <button class="btn btn-sm fb-add-from-search" data-upc="${esc(r.upc || '')}" style="background:#27ae60;color:#fff">+</button>

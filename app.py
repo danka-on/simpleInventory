@@ -6686,6 +6686,33 @@ def _listagent_upc_variants(value):
 
     return out
 
+def _items_to_list_upc_search_variants(value):
+    """
+    Return tolerant UPC search variants for /api/bol_items.
+
+    This keeps suffixes intact while also matching the common normalized forms
+    used by listing-agent, so a user can search for a suffixed item regardless
+    of whether the stored row is padded, stripped, or typed with leading zeros.
+    """
+    raw = (value or '').strip()
+    if not raw:
+        return []
+
+    variants = []
+
+    def add(candidate):
+        candidate = (candidate or '').strip()
+        if candidate and candidate not in variants:
+            variants.append(candidate)
+
+    add(raw)
+    add(_normalize_upc_preserve_suffix_for_match(raw))
+    add(_listagent_format_upc12(raw))
+    for candidate in _listagent_upc_variants(raw):
+        add(candidate)
+
+    return variants
+
 def _listagent_add_to_queue(upc, *, title=None, source=None, item_status=None, added_mode=None):
     upc = _listagent_format_upc12(upc)
     if not upc:
@@ -29848,9 +29875,15 @@ def api_bol_items():
             where.append('b.import_date = ?')
             params.append(import_date)
         if q_stripped:
-            where.append('(b.upc LIKE ? COLLATE NOCASE OR b.item_description LIKE ? COLLATE NOCASE)')
+            q_variants = _items_to_list_upc_search_variants(q)
+            q_clauses = ['b.upc LIKE ? COLLATE NOCASE', 'b.item_description LIKE ? COLLATE NOCASE']
             like = f"%{q_stripped}%"
             params.extend([like, like])
+            if q_variants:
+                placeholders = ','.join('?' for _ in q_variants)
+                q_clauses.append(f"LOWER(TRIM(b.upc)) IN ({placeholders})")
+                params.extend([str(v).strip().lower() for v in q_variants])
+            where.append(f"({' OR '.join(q_clauses)})")
 
         # /items-to-list should only show rows that were actually prepped into a visible status.
         if status_filter_has_good_qty and status_filter_has_bad_qty:
@@ -36479,12 +36512,13 @@ def api_search_all():
         
         # Strip leading zeros for numeric barcode searches
         query_stripped = _strip_leading_zeros_numeric(query)
-        
+        query_upc = _normalize_upc_preserve_suffix_for_match(query)
+
         # Determine search type (UPC searches are cached)
-        is_upc_search = query.isdigit()
+        is_upc_search = bool(query_upc and re.fullmatch(r'\d+(?:-\d+)?', query_upc))
         
         # Check cache for UPC searches only
-        cache_key = f"search_all:v2:{query_stripped}"
+        cache_key = f"search_all:v3:{query_upc or query_stripped}"
         if is_upc_search and cache_key in _search_all_cache:
             cached_data, cached_time = _search_all_cache[cache_key]
             if time.time() - cached_time < _search_cache_timeout:
@@ -36548,6 +36582,9 @@ def api_search_all():
                 
                 # Build search query based on type
                 if is_upc_search:
+                    db_query_upc = query_upc
+                    if db_key == 'bol':
+                        db_query_upc = _barcode_base_without_suffix(query_upc) or query_upc
                     # Fast UPC search on indexed columns
                     upc_cols = [c for c in cols if c.lower() in ('upc', 'barcode', 'sku')]
                     if not upc_cols:
@@ -36556,7 +36593,7 @@ def api_search_all():
                     if upc_cols:
                         where_parts = [f"{col} LIKE ?" for col in upc_cols]
                         where_clause = " OR ".join(where_parts)
-                        params = [f"%{query_stripped}%"] * len(upc_cols)
+                        params = [f"%{db_query_upc}%"] * len(upc_cols)
                     else:
                         where_clause = "1=0"  # No UPC columns found
                         params = []

@@ -1220,16 +1220,25 @@
     });
 
     // ── View all ──────────────────────────────────────────────
+    function baseBarcodeOnly(query) {
+      const q = String(query || '').trim();
+      if (!q) return '';
+      const i = q.indexOf('-');
+      return i > 0 ? q.slice(0, i).trim() : q;
+    }
+
     function viewAll(dbKey, query) {
-      sessionStorage.setItem('searchQuery', query);
-      sessionStorage.setItem('unifiedSearchQuery', query);
+      const q = String(query || '').trim();
+      const navQuery = dbKey === 'bol' ? baseBarcodeOnly(q) : q;
+      sessionStorage.setItem('searchQuery', navQuery);
+      sessionStorage.setItem('unifiedSearchQuery', q);
       const map = {
-        shelves:   '/searchrack?db=searchRack&q=' + encodeURIComponent(query),
-        processed: '/items-to-list?q=' + encodeURIComponent(query) + '&direct_search=1',
-        bol:       '/searchrack?db=bol&q=' + encodeURIComponent(query),
-        sold:      '/searchrack?db=sold&q=' + encodeURIComponent(query),
-        amazon:    '/searchrack?db=amazonStore&q=' + encodeURIComponent(query),
-        ebay:      '/searchrack?db=ebayStore&q=' + encodeURIComponent(query),
+        shelves:   '/searchrack?db=searchRack&q=' + encodeURIComponent(navQuery),
+        processed: '/items-to-list?q=' + encodeURIComponent(navQuery) + '&direct_search=1',
+        bol:       '/searchrack?db=bol&q=' + encodeURIComponent(navQuery),
+        sold:      '/searchrack?db=sold&q=' + encodeURIComponent(navQuery),
+        amazon:    '/searchrack?db=amazonStore&q=' + encodeURIComponent(navQuery),
+        ebay:      '/searchrack?db=ebayStore&q=' + encodeURIComponent(navQuery),
       };
       window.location.href = map[dbKey] || '/tools';
     }
