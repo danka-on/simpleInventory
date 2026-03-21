@@ -1,0 +1,1244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Check Items</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <style>
+    :root{--bg:#07111f;--card:#101b2f;--ink:#e8f0fb;--muted:#8da2bf;--line:rgba(148,163,184,.22);--blue:#60a5fa;--blue2:#2563eb;--green:#22c55e;--green2:#16a34a;--red:#ef4444;--amber:#f59e0b;--purple:#8b5cf6}
+    *{box-sizing:border-box}html,body{margin:0;min-height:100%}
+    body{font-family:'Manrope',sans-serif;color:var(--ink);background:radial-gradient(circle at top left,rgba(96,165,250,.16),transparent 28%),radial-gradient(circle at top right,rgba(139,92,246,.14),transparent 26%),linear-gradient(180deg,#050b16 0%,var(--bg) 100%);min-height:100vh}
+    a{color:inherit}
+
+    /* Layout */
+    .page{max-width:680px;margin:0 auto;padding:14px 16px 100px}
+
+    /* Shared */
+    .card{border:1px solid var(--line);border-radius:22px;background:linear-gradient(180deg,rgba(16,27,47,.97),rgba(10,18,31,.97));box-shadow:0 18px 42px rgba(0,0,0,.28)}
+    .btn{appearance:none;border:none;border-radius:14px;padding:10px 14px;font-weight:800;font-size:.88rem;cursor:pointer;display:inline-flex;align-items:center;gap:7px;text-decoration:none;white-space:nowrap;color:#fff;font-family:inherit;transition:opacity .12s,filter .12s}
+    .btn:active{filter:brightness(.88)}.btn:disabled{opacity:.45;cursor:not-allowed}
+    .btn.ghost{background:rgba(255,255,255,.05);border:1px solid var(--line);color:var(--ink)}
+    .btn.blue{background:linear-gradient(135deg,var(--blue2),#1d4ed8)}
+    .btn.green{background:linear-gradient(135deg,var(--green2),#15803d)}
+    .btn.amber{background:linear-gradient(135deg,#d97706,#b45309)}
+    .pill{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:6px 11px;border:1px solid var(--line);background:rgba(255,255,255,.04);font-size:.78rem;font-weight:800;letter-spacing:.03em;text-transform:uppercase;color:#bfdbfe}
+    .badge{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:4px 9px;border:1px solid var(--line);background:rgba(255,255,255,.03);font-size:.7rem;font-weight:800;letter-spacing:.03em;text-transform:uppercase;color:var(--ink)}
+    .badge.red{border-color:rgba(239,68,68,.35);color:#fecaca}.badge.green{border-color:rgba(34,197,94,.35);color:#bbf7d0}.badge.blue{border-color:rgba(96,165,250,.35);color:#bfdbfe}.badge.amber{border-color:rgba(245,158,11,.35);color:#fde68a}.badge.purple{border-color:rgba(139,92,246,.35);color:#ddd6fe}
+    .input,.select,textarea{width:100%;border:1px solid var(--line);border-radius:14px;background:rgba(255,255,255,.04);color:var(--ink);padding:11px 14px;font-family:inherit;outline:none;font-size:.93rem;transition:border-color .15s}
+    .input:focus,.select:focus,textarea:focus{border-color:rgba(96,165,250,.5);background:rgba(96,165,250,.04)}
+    textarea{resize:vertical;line-height:1.55}
+    .small,.hint,.status{font-size:.84rem;color:var(--muted)}
+
+    /* Topbar */
+    .topbar{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:14px 18px;border:1px solid var(--line);border-radius:18px;background:linear-gradient(180deg,rgba(16,27,47,.97),rgba(10,18,31,.97));box-shadow:0 8px 24px rgba(0,0,0,.22);margin-bottom:14px}
+    .topbarLeft{display:flex;align-items:center;gap:10px}
+    .title{font-size:1.05rem;font-weight:800;letter-spacing:-.02em}
+    .toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+
+    /* Drawer overlay + panel */
+    .drawerOverlay{position:fixed;inset:0;background:rgba(2,6,23,.72);backdrop-filter:blur(3px);z-index:900;opacity:0;pointer-events:none;transition:opacity .2s}
+    .drawerOverlay.open{opacity:1;pointer-events:all}
+    .drawer{position:fixed;top:0;left:0;bottom:0;width:min(360px,93vw);background:linear-gradient(180deg,#0b1525,#07111f);border-right:1px solid var(--line);z-index:901;transform:translateX(-100%);transition:transform .22s cubic-bezier(.4,0,.2,1);display:flex;flex-direction:column;box-shadow:10px 0 50px rgba(0,0,0,.45)}
+    .drawer.open{transform:translateX(0)}
+    .drawerHead{padding:14px 16px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:10px}
+    .drawerHeadRow{display:flex;align-items:center;justify-content:space-between;gap:8px}
+    .drawerTitle{font-weight:800;font-size:.95rem}
+    .drawerBody{padding:10px;flex:1;overflow-y:auto}
+    .drawerFilters{display:flex;gap:8px}
+
+    /* Request list rows */
+    .list{display:flex;flex-direction:column;gap:7px}
+    .row{display:flex;gap:10px;padding:11px 12px;border-radius:16px;border:1px solid var(--line);background:rgba(255,255,255,.02);cursor:pointer;transition:border-color .12s,background .12s}
+    .row:hover{border-color:rgba(96,165,250,.4);background:rgba(96,165,250,.05)}
+    .row.active{border-color:rgba(96,165,250,.65);background:rgba(96,165,250,.09)}
+    .row.complete{opacity:.6}
+    .thumb{width:46px;height:46px;border-radius:12px;border:1px solid var(--line);background:rgba(255,255,255,.04);display:grid;place-items:center;color:var(--muted);flex:0 0 auto;overflow:hidden}
+    .thumb img{width:100%;height:100%;object-fit:cover;display:block}
+    .rowMain{min-width:0;flex:1}
+    .rowTitle{font-weight:700;font-size:.88rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .rowSub{font-size:.78rem;color:var(--muted);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .rowBadges{display:flex;gap:5px;flex-wrap:wrap;margin-top:5px}
+
+    /* Active item banner */
+    #activeBanner{display:none;padding:12px 16px;border:1px solid rgba(96,165,250,.25);border-radius:18px;background:rgba(96,165,250,.06);margin-bottom:12px;gap:12px;align-items:center}
+    #activeBanner.visible{display:flex}
+    .bannerThumb{width:44px;height:44px;border-radius:12px;border:1px solid var(--line);background:rgba(255,255,255,.04);display:grid;place-items:center;color:var(--muted);flex:0 0 auto;overflow:hidden}
+    .bannerThumb img{width:100%;height:100%;object-fit:cover;display:block}
+    .bannerInfo{min-width:0;flex:1}
+    .bannerTitle{font-weight:800;font-size:.92rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .bannerBadges{display:flex;gap:5px;flex-wrap:wrap;margin-top:4px}
+
+    /* Empty state */
+    #detailEmpty{text-align:center;padding:52px 20px;color:var(--muted)}
+    .emptyIcon{font-size:2rem;margin-bottom:10px;opacity:.45}
+
+    /* Form card sections */
+    .formCard{overflow:hidden;margin-bottom:12px}
+    .formSection{padding:18px 20px;border-bottom:1px solid rgba(148,163,184,.12)}
+    .formSection:last-child{border-bottom:none}
+    .sectionTitle{font-size:.76rem;font-weight:800;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);margin-bottom:14px;display:flex;align-items:center;gap:8px}
+    .sectionTitle i{font-size:.85rem}
+
+    /* Check Request tasks */
+    .requestNote{padding:11px 14px;border-radius:14px;background:rgba(96,165,250,.08);border:1px solid rgba(96,165,250,.2);font-size:.9rem;line-height:1.55;margin-bottom:14px}
+    .todoList{display:flex;flex-direction:column;gap:8px}
+    .todoRow{display:flex;align-items:flex-start;gap:12px;padding:11px 14px;border-radius:14px;border:1px solid rgba(148,163,184,.16);background:rgba(255,255,255,.02)}
+    .todoCheck{width:20px;height:20px;flex:0 0 auto;margin-top:2px;accent-color:#22c55e;cursor:pointer}
+    .todoMain{display:grid;gap:3px;min-width:0}
+    .todoTitle{font-weight:800;font-size:.9rem}
+    .todoMeta{font-size:.8rem;color:var(--muted)}
+    #reqStatus{font-size:.82rem;color:var(--muted);margin-top:10px;min-height:18px}
+
+    /* Checker note */
+    .noteInputRow{display:flex;gap:8px;align-items:flex-end}
+    .noteInputRow textarea{flex:1;min-height:72px}
+    .noteHistory{margin-top:14px;display:flex;flex-direction:column;gap:8px}
+    .note{border-left:4px solid var(--blue);background:rgba(96,165,250,.07);padding:10px 13px;border-radius:0 12px 12px 0;font-size:.88rem;line-height:1.5}
+    .note.checker{border-left-color:var(--purple);background:rgba(139,92,246,.07)}
+    .time{color:var(--muted);font-size:.74rem;margin-bottom:3px}
+
+    /* Upload section */
+    .dropZone{border:2px dashed rgba(96,165,250,.28);border-radius:18px;background:rgba(96,165,250,.04);padding:22px 16px;text-align:center;cursor:pointer;transition:border-color .14s,background .14s;margin-bottom:12px}
+    .dropZone:hover,.dropZone.dragover{border-color:rgba(96,165,250,.6);background:rgba(96,165,250,.1)}
+    .dropIcon{font-size:1.5rem;color:var(--blue);opacity:.7;margin-bottom:7px}
+    .dropLabel{font-size:.9rem;font-weight:700}
+    .dropHint{font-size:.78rem;color:var(--muted);margin-top:3px}
+    .uploadBtns{display:flex;gap:8px;flex-wrap:wrap}
+
+    /* Voice note */
+    .voiceRow{display:flex;gap:12px;align-items:center;margin-top:16px;padding-top:16px;border-top:1px solid rgba(148,163,184,.1)}
+    .voice-note-btn{width:50px;height:50px;border:none;border-radius:16px;background:linear-gradient(135deg,#1d4ed8,#2563eb);color:#fff;cursor:pointer;display:grid;place-items:center;position:relative;flex:0 0 auto;font-family:inherit}
+    .voice-note-btn.recording{background:linear-gradient(135deg,#dc2626,#ef4444)}
+    .voice-note-btn.ready{background:linear-gradient(135deg,#15803d,#22c55e)}
+    .voice-note-icon{width:22px;height:22px;display:block}
+    .voice-note-dot{position:absolute;top:8px;right:8px;width:10px;height:10px;border-radius:999px;background:#fff;opacity:0}
+    .voice-note-btn.recording .voice-note-dot{opacity:1;animation:blink .7s infinite}
+    @keyframes blink{0%,100%{opacity:1}50%{opacity:.25}}
+    @keyframes reqShake{0%,100%{transform:translateX(0)}18%{transform:translateX(-7px)}36%{transform:translateX(7px)}54%{transform:translateX(-4px)}72%{transform:translateX(4px)}90%{transform:translateX(-2px)}}
+    .todoRow.reqError{border-color:rgba(239,68,68,.75)!important;background:rgba(239,68,68,.12)!important;animation:reqShake .4s ease}
+    .input.reqError{border-color:rgba(239,68,68,.75)!important;background:rgba(239,68,68,.08)!important;animation:reqShake .4s ease}
+    #reqStatus.reqErrorMsg{color:#fca5a5;font-weight:700}
+    .voice-note-status{font-size:.8rem;color:var(--muted)}
+    .voice-note-status.error{color:#fecaca}
+    .voice-note-preview{display:none;align-items:center;gap:8px;margin-top:10px;padding:12px 14px;border:1px solid rgba(148,163,184,.18);background:rgba(255,255,255,.03);border-radius:16px}
+    .voice-note-preview.active{display:flex}
+    .voice-note-preview audio{flex:1;min-width:0;height:36px}
+    .voice-note-card{padding:10px;background:rgba(255,255,255,.03);border-radius:12px;border:1px solid rgba(148,163,184,.18);margin-bottom:6px}
+    .voice-note-card:last-child{margin-bottom:0}
+    .voice-note-card audio{width:100%;margin-top:8px}
+
+    /* Media grid */
+    .media,.imageCards{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px;margin-top:12px}
+    .mcard,.imageCard{position:relative;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:rgba(255,255,255,.02)}
+    .imageCard button{width:100%;border:none;background:none;padding:0;display:block;cursor:zoom-in}
+    .mcard img,.mcard video,.imageCard img{width:100%;height:96px;object-fit:cover;display:block}
+    .mcard audio{width:100%;display:block}
+    .mmeta,.imageCardMeta{padding:5px 8px;font-size:.7rem;color:var(--muted);border-top:1px solid rgba(148,163,184,.1)}
+    .mediaNewBadge{position:absolute;left:6px;top:6px;z-index:2;display:inline-flex;align-items:center;gap:4px;padding:3px 7px;border-radius:999px;background:rgba(34,197,94,.9);color:#fff;font-size:.62rem;font-weight:900;letter-spacing:.07em;text-transform:uppercase}
+    .mcard.newMedia{border-color:rgba(34,197,94,.4)}
+
+    /* Complete section */
+    .completeSection{padding:16px 20px 20px}
+    .completeBtn{width:100%;padding:16px;font-size:1rem;justify-content:center;border-radius:16px;letter-spacing:.02em;font-size:1.02rem}
+    .completeBtn.sent{background:linear-gradient(135deg,#065f46,#047857) !important}
+
+    /* Accordions */
+    .accordion{border:1px solid var(--line);border-radius:18px;background:linear-gradient(180deg,rgba(16,27,47,.94),rgba(10,18,31,.94));margin-bottom:10px;overflow:hidden}
+    .accordion summary{padding:13px 18px;font-weight:800;font-size:.88rem;cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between;gap:10px;user-select:none}
+    .accordion summary::-webkit-details-marker{display:none}
+    .sumLeft{display:flex;align-items:center;gap:9px}
+    .chevron{transition:transform .2s;color:var(--muted);font-size:.78rem}
+    .accordion[open] summary .chevron{transform:rotate(90deg)}
+    .accordionBody{padding:16px;border-top:1px solid rgba(148,163,184,.12)}
+
+    /* Item details inside accordion */
+    .previewRow{display:flex;gap:14px;align-items:flex-start;margin-bottom:14px}
+    .previewImg{width:90px;height:90px;flex:0 0 auto;border-radius:16px;border:1px solid var(--line);background:rgba(255,255,255,.04);overflow:hidden;display:grid;place-items:center;color:var(--muted)}
+    .previewImg img{width:100%;height:100%;object-fit:cover;display:none}
+    .previewTitle{font-size:1rem;font-weight:800;line-height:1.2;letter-spacing:-.02em;margin:0 0 8px 0}
+    .previewMeta{display:flex;flex-wrap:wrap;gap:6px}
+    .panel{border:1px solid var(--line);border-radius:14px;padding:12px 14px;background:rgba(255,255,255,.02);margin-top:12px}
+    .panel h3{margin:0 0 8px 0;font-size:.74rem;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+    .notes{display:flex;flex-direction:column;gap:8px}
+
+    /* Completion overlay */
+    .completeOverlay{position:fixed;inset:0;z-index:30000;display:flex;align-items:center;justify-content:center;padding:20px;background:rgba(3,8,18,.88);backdrop-filter:blur(5px);opacity:0;pointer-events:none;transition:opacity .28s}
+    .completeOverlay.show{opacity:1;pointer-events:all}
+    .completeCard{text-align:center;padding:40px 38px;border-radius:28px;border:1px solid rgba(34,197,94,.28);background:linear-gradient(180deg,rgba(34,197,94,.1),rgba(8,16,30,.98));box-shadow:0 0 0 1px rgba(34,197,94,.08) inset,0 36px 90px rgba(0,0,0,.65);transform:scale(.86);transition:transform .32s cubic-bezier(.34,1.56,.64,1);max-width:340px;width:100%}
+    .completeOverlay.show .completeCard{transform:scale(1)}
+    .completeBigCheck{font-size:3.8rem;color:var(--green);margin-bottom:18px;display:block;animation:checkPop .5s .08s cubic-bezier(.34,1.56,.64,1) both}
+    @keyframes checkPop{from{transform:scale(.3) rotate(-20deg);opacity:0}to{transform:scale(1) rotate(0);opacity:1}}
+    .completeCardTitle{font-size:1.5rem;font-weight:800;letter-spacing:-.025em;color:#f0fdf4;margin-bottom:6px;line-height:1.15}
+    .completeCardSub{font-size:.9rem;color:#86efac;opacity:.9}
+    .completeCardItem{font-size:.82rem;color:#4ade80;margin-top:10px;opacity:.75;font-style:italic;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:280px;margin-left:auto;margin-right:auto}
+    /* Warehouse bubble near title */
+    .warehouseBubble{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:999px;border:1px solid rgba(245,158,11,.32);background:rgba(245,158,11,.08);color:#fde68a;font-size:.74rem;font-weight:800;cursor:pointer;text-decoration:none;letter-spacing:.03em;transition:border-color .12s,background .12s}
+    .warehouseBubble:hover{border-color:rgba(245,158,11,.55);background:rgba(245,158,11,.14)}
+    /* Mobile QR */
+    .mobileUploadPanel{border:1px dashed rgba(96,165,250,.32);border-radius:16px;background:rgba(37,99,235,.06);padding:12px;margin-top:12px}
+    .mobileQrLabel{font-size:.72rem;font-weight:800;letter-spacing:.07em;text-transform:uppercase;color:#bfdbfe;margin-bottom:8px}
+    .mobileQr{width:136px;height:136px;background:#fff;border-radius:14px;padding:10px;display:grid;place-items:center;margin:0 auto 8px}
+
+    /* Day theme */
+    html.ss-theme-day body{background:linear-gradient(180deg,#f8fbff,#eef4ff);color:#0f172a}
+    html.ss-theme-day .card,html.ss-theme-day .topbar,html.ss-theme-day .drawer,html.ss-theme-day .accordion{background:linear-gradient(180deg,#fff,#f8fbff);border-color:rgba(148,163,184,.24);box-shadow:0 8px 24px rgba(15,23,42,.07)}
+    html.ss-theme-day .input,html.ss-theme-day .select,html.ss-theme-day textarea,html.ss-theme-day .row,html.ss-theme-day .panel,html.ss-theme-day .previewImg,html.ss-theme-day .thumb,html.ss-theme-day .bannerThumb,html.ss-theme-day .mcard,html.ss-theme-day .imageCard{background:#fff;color:#0f172a;border-color:rgba(148,163,184,.22)}
+    html.ss-theme-day .btn.ghost{background:#fff;color:#0f172a;border-color:rgba(148,163,184,.28)}
+    html.ss-theme-day .badge{background:#fff;color:#334155;border-color:rgba(148,163,184,.28)}
+    html.ss-theme-day .note{background:rgba(239,246,255,.9)}html.ss-theme-day .note.checker{background:rgba(245,243,255,.9)}
+    html.ss-theme-day .requestNote{background:rgba(239,246,255,.9);border-color:rgba(59,130,246,.2)}
+    html.ss-theme-day #activeBanner{background:rgba(239,246,255,.8);border-color:rgba(96,165,250,.28)}
+    html.ss-theme-day .dropZone{background:rgba(239,246,255,.5);border-color:rgba(96,165,250,.3)}
+    html.ss-theme-day .voice-note-card{background:#f8fafc;border-color:#e2e8f0}
+    html.ss-theme-day .todoRow{background:#fff;border-color:rgba(148,163,184,.22)}
+    html.ss-theme-day .small,.hint{color:#64748b}
+
+    @media(max-width:580px){
+      .page{padding:10px 12px 100px}
+      .topbar{padding:12px 14px}
+      .formSection{padding:16px}
+      .completeSection{padding:14px 16px 18px}
+      .previewRow{gap:10px}
+      .previewImg{width:76px;height:76px}
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+
+    <!-- TOP BAR -->
+    <div class="topbar">
+      <div class="topbarLeft">
+        <div class="title"><i class="fas fa-clipboard-check" style="color:var(--blue);margin-right:7px;font-size:.88rem"></i>Check Items</div>
+      </div>
+      <div class="toolbar">
+        <button id="warehouseBtn" class="btn amber" type="button" style="display:none"><i class="fas fa-warehouse"></i>Warehouse</button>
+        <span id="openCount" class="pill">0 open</span>
+        <button id="toggleDrawerBtn" class="btn ghost" type="button"><i class="fas fa-list-check"></i>Requests</button>
+      </div>
+    </div>
+
+    <!-- DRAWER OVERLAY -->
+    <div id="drawerOverlay" class="drawerOverlay"></div>
+
+    <!-- REQUEST DRAWER -->
+    <div id="requestDrawer" class="drawer">
+      <div class="drawerHead">
+        <div class="drawerHeadRow">
+          <div class="drawerTitle"><i class="fas fa-clipboard-check" style="color:var(--blue);margin-right:7px"></i>Check Requests</div>
+          <div style="display:flex;gap:6px">
+            <button id="reload" class="btn ghost" type="button" style="padding:8px 10px"><i class="fas fa-rotate"></i></button>
+            <button id="closeDrawerBtn" class="btn ghost" type="button" style="padding:8px 10px"><i class="fas fa-xmark"></i></button>
+          </div>
+        </div>
+        <div class="drawerFilters">
+          <input id="searchBox" class="input" style="flex:1" placeholder="Search UPC or note..." />
+          <select id="filter" class="select" style="width:110px">
+            <option value="open">Open</option>
+            <option value="complete">Complete</option>
+            <option value="all">All</option>
+          </select>
+        </div>
+      </div>
+      <div class="drawerBody">
+        <div id="requestList" class="list"><div class="small">Loading...</div></div>
+      </div>
+    </div>
+
+    <!-- ACTIVE ITEM BANNER -->
+    <div id="activeBanner">
+      <div class="bannerThumb" id="bannerThumb"><i class="fas fa-barcode"></i></div>
+      <div class="bannerInfo">
+        <div class="bannerTitle" id="bannerTitle">—</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:4px">
+          <div class="bannerBadges" id="bannerBadges"></div>
+          <div id="bannerWarehouse" style="display:none"></div>
+        </div>
+      </div>
+      <button type="button" class="btn ghost" id="changeItemBtn" style="flex:0 0 auto;padding:8px 11px;font-size:.8rem"><i class="fas fa-right-left"></i>Change</button>
+    </div>
+
+    <!-- EMPTY STATE -->
+    <div id="detailEmpty">
+      <div class="emptyIcon"><i class="fas fa-clipboard-check"></i></div>
+      <div>Select a check request to get started.</div>
+      <button class="btn blue" type="button" id="openDrawerFromEmpty" style="margin-top:16px"><i class="fas fa-list-check"></i>Open Requests</button>
+    </div>
+
+    <!-- MAIN DETAIL AREA -->
+    <div id="detailWrap" style="display:none">
+
+      <!-- FORM CARD -->
+      <div class="formCard card">
+
+        <!-- 1. CHECK REQUEST -->
+        <div class="formSection">
+          <div class="sectionTitle"><i class="fas fa-clipboard-check" style="color:var(--blue)"></i>Check Request</div>
+          <div id="reqNoteWrap" style="display:none">
+            <div id="reqNoteText" class="requestNote"></div>
+          </div>
+          <div id="reqTodoList" class="todoList"></div>
+          <div id="reqQuantityInputWrap" style="display:none;margin-top:12px">
+            <label for="checkerQuantityValue" style="font-size:.78rem;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);display:block;margin-bottom:6px">Quantity found</label>
+            <input id="checkerQuantityValue" class="input" type="number" min="0" step="1" placeholder="Enter counted quantity">
+          </div>
+          <div id="reqStatus" class="status"></div>
+        </div>
+
+        <!-- 2. CHECKER NOTE -->
+        <div class="formSection">
+          <div class="sectionTitle"><i class="fas fa-pen" style="color:var(--purple)"></i>Checker Note</div>
+          <div class="noteInputRow">
+            <textarea id="checkerNoteInput" class="input" placeholder="What did you find? Any issues, observations, or details..." rows="3"></textarea>
+            <button id="addCheckerNoteBtn" class="btn blue" type="button" style="align-self:flex-end"><i class="fas fa-plus"></i>Add</button>
+          </div>
+          <div id="checkerNotes" class="noteHistory"></div>
+        </div>
+
+        <!-- 3. PHOTOS & MEDIA -->
+        <div class="formSection">
+          <div class="sectionTitle"><i class="fas fa-camera" style="color:var(--amber)"></i>Photos &amp; Media</div>
+
+          <div class="dropZone" id="dropZone" tabindex="0" role="button" aria-label="Drop photos here or click to upload">
+            <div class="dropIcon"><i class="fas fa-image"></i></div>
+            <div class="dropLabel">Drop photos here or tap to upload</div>
+            <div class="dropHint">Supports images, video, and audio</div>
+          </div>
+          <input id="photoUpload" type="file" accept="image/*" multiple style="display:none;" />
+          <input id="mediaUpload" type="file" accept="video/*,audio/*" multiple style="display:none;" />
+
+          <div class="uploadBtns">
+            <button id="uploadPhotoBtn" class="btn ghost" type="button"><i class="fas fa-image"></i>Photos</button>
+            <button id="uploadMediaBtn" class="btn ghost" type="button"><i class="fas fa-file-arrow-up"></i>Video / Audio</button>
+            <button id="showQrBtn" class="btn ghost" type="button" title="Upload from phone via QR code"><i class="fas fa-qrcode"></i>QR</button>
+          </div>
+          <div id="checkerUploadSummary" class="small" style="margin-top:8px"></div>
+          <div id="uploadStatus" class="small" style="margin-top:3px"></div>
+
+          <!-- Voice note -->
+          <div class="voiceRow">
+            <button type="button" class="voice-note-btn" id="checkerVoiceNoteBtn" aria-label="Hold to record voice note" title="Hold to record voice note">
+              <svg class="voice-note-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <rect x="8" y="3" width="8" height="13" rx="4" fill="currentColor"></rect>
+                <path d="M6 11.5C6 14.8137 8.68629 17.5 12 17.5C15.3137 17.5 18 14.8137 18 11.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+                <path d="M12 17.5V21" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+                <path d="M9 21H15" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+              </svg>
+              <span class="voice-note-dot" aria-hidden="true"></span>
+            </button>
+            <div>
+              <div style="font-weight:700;font-size:.88rem">Voice Note</div>
+              <div id="checkerVoiceNoteStatus" class="voice-note-status">Hold mic button to record</div>
+            </div>
+          </div>
+          <div id="checkerVoiceNotePreview" class="voice-note-preview">
+            <audio id="checkerVoiceNotePlayer" controls preload="metadata"></audio>
+            <button id="checkerVoiceNoteSaveBtn" class="btn green" type="button"><i class="fas fa-save"></i>Save</button>
+            <button id="checkerVoiceNoteClearBtn" class="btn ghost" type="button"><i class="fas fa-xmark"></i></button>
+          </div>
+          <input id="checkerVoiceFallback" type="file" accept="audio/*" style="display:none;">
+
+          <div id="checkerVoiceNotesWrap" style="display:none;margin-top:14px">
+            <div class="small" style="font-weight:800;text-transform:uppercase;letter-spacing:.05em;margin-bottom:7px">Saved voice notes</div>
+            <div id="checkerVoiceNotes" class="notes"></div>
+          </div>
+          <div id="checkerMedia" class="media"></div>
+        </div>
+
+        <!-- 4. COMPLETE -->
+        <div class="completeSection">
+          <button id="completeRequestBtn" class="btn green completeBtn" type="button"><i class="fas fa-circle-check"></i>Complete Check</button>
+        </div>
+
+      </div><!-- /formCard -->
+
+      <!-- ACCORDION: Item Details -->
+      <details class="accordion" id="itemDetailsAccordion">
+        <summary>
+          <span class="sumLeft"><i class="fas fa-box-open" style="color:var(--amber)"></i> Item Details</span>
+          <i class="fas fa-chevron-right chevron"></i>
+        </summary>
+        <div class="accordionBody">
+          <div class="previewRow">
+            <div class="previewImg"><img id="detailImg" alt=""></div>
+            <div style="flex:1;min-width:0">
+              <h3 id="detailTitle" class="previewTitle"></h3>
+              <div id="detailMeta" class="previewMeta"></div>
+              <div id="detailBadges" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px"></div>
+            </div>
+          </div>
+          <div class="panel">
+            <h3>Prep Notes</h3>
+            <div id="prepNotes" class="notes"></div>
+            <div id="prepVoiceNotesWrap" style="display:none;margin-top:10px">
+              <div class="small" style="font-weight:800;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Prep voice notes</div>
+              <div id="prepVoiceNotes" class="notes"></div>
+            </div>
+          </div>
+          <div id="mobileUploadPanel" class="mobileUploadPanel" style="display:none" aria-label="Mobile photo upload QR">
+            <div class="mobileQrLabel">Upload photo from phone</div>
+            <div id="mobileQr" class="mobileQr"></div>
+            <div class="hint">Scan QR to open this item on the phone uploader.</div>
+            <div style="margin-top:8px"><span id="mobileUploadStatus" class="small"></span></div>
+          </div>
+        </div>
+      </details>
+
+      <!-- ACCORDION: Item Images -->
+      <details class="accordion" id="imagesAccordion">
+        <summary>
+          <span class="sumLeft"><i class="fas fa-images" style="color:var(--purple)"></i> <span id="imagesAccordionLabel">Item Images</span></span>
+          <i class="fas fa-chevron-right chevron"></i>
+        </summary>
+        <div class="accordionBody">
+          <div class="hint" style="margin-bottom:10px">Shared item photos — uploads flow back into the item record.</div>
+          <div id="detailImages" class="imageCards"></div>
+        </div>
+      </details>
+
+    </div><!-- /detailWrap -->
+  </div><!-- /page -->
+
+  <!-- Completion animation overlay -->
+  <div id="completeOverlay" class="completeOverlay">
+    <div class="completeCard">
+      <span class="completeBigCheck"><i class="fas fa-circle-check"></i></span>
+      <div class="completeCardTitle">Sent to Listing Agent</div>
+      <div class="completeCardSub">Check marked complete</div>
+      <div id="completeCardItem" class="completeCardItem"></div>
+    </div>
+  </div>
+
+  <!-- QR Upload Modal -->
+  <div id="qrModal" style="display:none;position:fixed;inset:0;z-index:20000;align-items:center;justify-content:center;padding:20px;background:rgba(2,6,23,.78);backdrop-filter:blur(4px);">
+    <div style="background:linear-gradient(180deg,rgba(16,27,47,.99),rgba(10,18,31,.99));border:1px solid var(--line);border-radius:22px;padding:22px;max-width:320px;width:100%;box-shadow:0 24px 60px rgba(0,0,0,.5);text-align:center;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <div style="font-weight:800;font-size:.95rem;"><i class="fas fa-qrcode" style="color:var(--blue);margin-right:8px;"></i>Upload from Phone</div>
+        <button id="closeQrModal" class="btn ghost" type="button" style="padding:7px 10px;"><i class="fas fa-xmark"></i></button>
+      </div>
+      <div id="qrModalCode" style="width:200px;height:200px;background:#fff;border-radius:16px;padding:12px;margin:0 auto 14px;display:grid;place-items:center;"></div>
+      <div class="hint" style="margin-bottom:10px;">Scan to open the phone uploader for this item.</div>
+      <div id="qrModalUrl" class="small" style="word-break:break-all;opacity:.6;"></div>
+    </div>
+  </div>
+
+  <script>
+    const INITIAL_UPC = {{ (initial_upc or '')|tojson }};
+    const $ = (id) => document.getElementById(id);
+    const state = { requests: [], activeUpc: INITIAL_UPC || '', detail: null, filter: 'open', mobileUploadPoll: null, mobileUploadUrl: '', checkerQuantityValue: '', checkerTaskState: { quantity: false, photos: false, color: false, condition: false } };
+    let checkerVoiceRecorder = null;
+    let checkerVoiceStream = null;
+    let checkerVoiceChunks = [];
+    let checkerVoiceFile = null;
+    let checkerVoiceUrl = '';
+    let checkerVoicePointerId = null;
+    let checkerVoiceMimeType = '';
+
+    /* ── Drawer ── */
+    function openDrawer(){ $('requestDrawer').classList.add('open'); $('drawerOverlay').classList.add('open'); }
+    function closeDrawer(){ $('requestDrawer').classList.remove('open'); $('drawerOverlay').classList.remove('open'); }
+    $('toggleDrawerBtn').addEventListener('click', openDrawer);
+    $('closeDrawerBtn').addEventListener('click', closeDrawer);
+    $('drawerOverlay').addEventListener('click', closeDrawer);
+    $('openDrawerFromEmpty').addEventListener('click', openDrawer);
+    $('changeItemBtn').addEventListener('click', openDrawer);
+
+    /* ── API helpers ── */
+    async function apiGet(url){
+      const r = await fetch(url, {headers:{Accept:'application/json'}});
+      const j = await r.json().catch(() => ({}));
+      if(!r.ok || j.success === false) throw new Error(j.error || `Request failed (${r.status})`);
+      return j;
+    }
+    async function apiPost(url, payload){
+      const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json', Accept:'application/json'}, body:JSON.stringify(payload || {})});
+      const j = await r.json().catch(() => ({}));
+      if(!r.ok || j.success === false) throw new Error(j.error || `Request failed (${r.status})`);
+      return j;
+    }
+
+    function esc(v){ return String(v ?? '').replace(/[&<>"]/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[s])); }
+
+    function fmtTime(s){
+      try{
+        const d = new Date(s);
+        if(isNaN(d.getTime())) return s || '';
+        return new Intl.DateTimeFormat('en-US', {timeZone:'America/New_York', month:'2-digit', day:'2-digit', hour:'numeric', minute:'2-digit'}).format(d);
+      }catch(e){ return s || ''; }
+    }
+
+    function currentItem(){ return state.detail || null; }
+    function previewImages(item){ return Array.isArray(item?.images) ? item.images.filter(Boolean) : []; }
+
+    function phoneUrl(upc){
+      const u = String(upc || '').trim();
+      if(!u) return '';
+      return `${window.location.origin}/listingagent/mobile?upc=${encodeURIComponent(u)}&return=${encodeURIComponent(window.location.pathname + `?upc=${u}`)}`;
+    }
+
+    function isProbablyMobile(){
+      try{ if(window.matchMedia && window.matchMedia('(pointer: coarse)').matches) return true; }catch(e){}
+      try{ return /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent || ''); }catch(e){}
+      return false;
+    }
+
+    function reqBits(req){
+      const bits = [];
+      if(Number(req?.check_quantity || 0) > 0) bits.push('quantity');
+      if(req?.take_pictures) bits.push('photos');
+      if(req?.check_color) bits.push('color');
+      if(req?.check_condition) bits.push('condition');
+      if(String(req?.custom_note || '').trim()) bits.push('note');
+      return bits;
+    }
+
+    function reqBadge(req){
+      if(!req) return '<span class="badge">No request</span>';
+      const st = String(req?.status || 'open').toLowerCase();
+      const bits = reqBits(req);
+      return `<span class="badge ${st === 'complete' ? 'green' : 'red'}">${esc(st)}</span>${bits.length ? ` <span class="badge blue">${esc(bits.join(' • '))}</span>` : ''}`;
+    }
+
+    /* ── Active banner ── */
+    function renderActiveBanner(item){
+      const banner = $('activeBanner');
+      if(!banner) return;
+      if(!item){
+        banner.classList.remove('visible');
+        $('warehouseBtn').style.display = 'none';
+        return;
+      }
+      banner.classList.add('visible');
+      const imgs = previewImages(item);
+      const hero = imgs[0] || '';
+      const thumb = $('bannerThumb');
+      if(thumb) thumb.innerHTML = hero ? `<img src="${esc(hero)}" alt="">` : '<i class="fas fa-barcode"></i>';
+      if($('bannerTitle')) $('bannerTitle').textContent = item.title || item.bol?.description || item.upc || 'Untitled';
+      const badgesEl = $('bannerBadges');
+      if(badgesEl){
+        const req = item?.checker?.request || null;
+        const st = String(req?.status || 'open').toLowerCase();
+        badgesEl.innerHTML = [
+          `<span class="badge ${st === 'complete' ? 'green' : 'red'}">${esc(st)}</span>`,
+          ...reqBits(req).map(b => `<span class="badge blue">${esc(b)}</span>`)
+        ].join('');
+      }
+      // Warehouse bubble near title
+      const whEl = $('bannerWarehouse');
+      const positions = Array.isArray(item?.inventory?.positions) ? item.inventory.positions : [];
+      const totalQty = Number(item?.inventory?.total_quantity || 0);
+      if(whEl){
+        if(positions.length){
+          const locLabel = positions.length === 1 ? positions[0] : `${positions.length} locations`;
+          const qtyPart = totalQty > 0 ? ` · Qty ${totalQty}` : '';
+          whEl.innerHTML = `<button type="button" class="warehouseBubble" id="bannerWarehouseBtn"><i class="fas fa-warehouse"></i>${esc(locLabel)}${esc(qtyPart)}</button>`;
+          whEl.style.display = 'block';
+          whEl.querySelector('#bannerWarehouseBtn').addEventListener('click', () => { if(state.detail) warehouseModal(state.detail); });
+        } else {
+          whEl.innerHTML = '';
+          whEl.style.display = 'none';
+        }
+      }
+      const wb = $('warehouseBtn');
+      if(wb) wb.style.display = positions.length ? 'inline-flex' : 'none';
+    }
+
+    /* ── Request todo list ── */
+    function bindRequestTodoEvents(req){
+      const qtyBox = $('reqTodoQuantity');
+      const photoBox = $('reqTodoPhotos');
+      const colorBox = $('reqTodoColor');
+      const conditionBox = $('reqTodoCondition');
+      if(qtyBox){ qtyBox.checked = !!state.checkerTaskState.quantity; qtyBox.addEventListener('change', e => { state.checkerTaskState.quantity = !!e.target.checked; }); }
+      if(photoBox){ photoBox.checked = !!state.checkerTaskState.photos; photoBox.addEventListener('change', e => { state.checkerTaskState.photos = !!e.target.checked; }); }
+      if(colorBox){ colorBox.checked = !!state.checkerTaskState.color; colorBox.addEventListener('change', e => { state.checkerTaskState.color = !!e.target.checked; }); }
+      if(conditionBox){ conditionBox.checked = !!state.checkerTaskState.condition; conditionBox.addEventListener('change', e => { state.checkerTaskState.condition = !!e.target.checked; }); }
+    }
+
+    /* ── Render helpers ── */
+    function renderNotes(host, notes, kind){
+      if(!host) return;
+      const arr = Array.isArray(notes) ? notes : [];
+      if(!arr.length){ host.innerHTML = '<div class="small">No notes.</div>'; return; }
+      host.innerHTML = arr.map(n => `<div class="note ${kind === 'checker' ? 'checker' : ''}"><div class="time">${esc(fmtTime(n.created_at || ''))}</div><div>${esc(n.note || '')}</div></div>`).join('');
+    }
+
+    function renderMedia(host, items){
+      if(!host) return;
+      const arr = Array.isArray(items) ? items.filter(i => String(i?.media_type || '').toLowerCase() !== 'audio') : [];
+      if(!arr.length){ host.innerHTML = ''; return; }
+      host.innerHTML = arr.map(i => {
+        const t = String(i.media_type || '').toLowerCase();
+        const u = esc(i.url || '');
+        const isNew = String(i.note_type || '').toLowerCase() === 'checker';
+        const badge = isNew ? '<div class="mediaNewBadge">NEW</div>' : '';
+        if(t === 'video') return `<div class="mcard">${badge}<video controls preload="metadata" src="${u}"></video><div class="mmeta">${esc(i.original_filename || 'video')}</div></div>`;
+        return `<div class="mcard${isNew ? ' newMedia' : ''}">${badge}<img src="${u}" alt=""><div class="mmeta">${esc(i.original_filename || 'image')}</div></div>`;
+      }).join('');
+    }
+
+    function renderVoiceNoteCards(host, items, emptyText='No voice notes.'){
+      if(!host) return;
+      const arr = Array.isArray(items) ? items.filter(v => String(v?.url || '').trim()) : [];
+      if(!arr.length){ host.innerHTML = `<div class="small">${esc(emptyText)}</div>`; return; }
+      host.innerHTML = arr.map((v, idx) => {
+        const label = esc(v.original_filename || `voice note ${idx + 1}`);
+        const when = v.created_at ? `<span class="small">${esc(fmtTime(v.created_at || ''))}</span>` : '';
+        return `<div class="voice-note-card"><div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap"><strong>${label}</strong>${when}</div><audio controls preload="metadata" src="${esc(v.url || '')}"></audio></div>`;
+      }).join('');
+    }
+
+    function renderPrepVoiceNotes(items){
+      const wrap = $('prepVoiceNotesWrap');
+      const host = $('prepVoiceNotes');
+      if(!wrap || !host) return;
+      const arr = Array.isArray(items) ? items.filter(v => String(v?.url || '').trim()) : [];
+      if(!arr.length){ host.innerHTML = ''; wrap.style.display = 'none'; return; }
+      wrap.style.display = 'block';
+      renderVoiceNoteCards(host, arr, 'No prep voice notes.');
+    }
+
+    function renderCheckerVoiceNotes(items){
+      const wrap = $('checkerVoiceNotesWrap');
+      const host = $('checkerVoiceNotes');
+      if(!wrap || !host) return;
+      const arr = Array.isArray(items) ? items.filter(v => String(v?.media_type || '').toLowerCase() === 'audio' && String(v?.url || '').trim()) : [];
+      if(!arr.length){ host.innerHTML = ''; wrap.style.display = 'none'; return; }
+      wrap.style.display = 'block';
+      renderVoiceNoteCards(host, arr, 'No checker voice notes.');
+    }
+
+    function renderImageGallery(item){
+      const host = $('detailImages');
+      if(!host) return;
+      const imgs = previewImages(item);
+      const label = $('imagesAccordionLabel');
+      if(label) label.textContent = imgs.length ? `Item Images (${imgs.length})` : 'Item Images';
+      if(!imgs.length){ host.innerHTML = '<div class="small">No images yet.</div>'; return; }
+      host.innerHTML = imgs.map((url, idx) => `<div class="imageCard"><button type="button" data-full="${esc(url)}"><img src="${esc(url)}" alt="image ${idx + 1}"></button><div class="imageCardMeta">Image ${idx + 1}</div></div>`).join('');
+      host.querySelectorAll('button[data-full]').forEach(btn => {
+        btn.addEventListener('click', () => window.open(btn.dataset.full, '_blank', 'noopener'));
+      });
+    }
+
+    function renderList(){
+      const box = $('requestList');
+      const openCount = $('openCount');
+      if(!box) return;
+      const q = String($('searchBox')?.value || '').trim().toLowerCase();
+      let rows = state.requests.slice();
+      if(state.filter === 'open') rows = rows.filter(r => String(r.status || 'open').toLowerCase() !== 'complete');
+      if(state.filter === 'complete') rows = rows.filter(r => String(r.status || '').toLowerCase() === 'complete');
+      if(q) rows = rows.filter(r => String(r.upc || '').toLowerCase().includes(q) || String(r.title || '').toLowerCase().includes(q) || String(r.custom_note || '').toLowerCase().includes(q));
+      if(openCount) openCount.textContent = `${state.requests.filter(r => String(r.status || 'open').toLowerCase() !== 'complete').length} open`;
+      if(!rows.length){ box.innerHTML = '<div class="small">No matching requests.</div>'; return; }
+      box.innerHTML = rows.map(r => {
+        const status = String(r.status || 'open').toLowerCase();
+        const active = state.activeUpc && String(state.activeUpc).trim() === String(r.upc || '').trim();
+        const thumb = r.image ? `<img src="${esc(r.image)}" alt="">` : '<i class="fas fa-barcode"></i>';
+        const title = String(r.title || '').trim() || String(r.upc || '').trim() || 'Untitled item';
+        const sub = [String(r.upc || '').trim(), String(r.custom_note || '').trim()].filter(Boolean).join(' • ') || '';
+        return `<div class="row ${status === 'complete' ? 'complete' : ''} ${active ? 'active' : ''}" data-upc="${esc(r.upc)}">
+          <div class="thumb">${thumb}</div>
+          <div class="rowMain">
+            <div class="rowTitle">${esc(title)}</div>
+            ${sub ? `<div class="rowSub">${esc(sub)}</div>` : ''}
+            <div class="rowBadges">
+              <span class="badge ${status === 'complete' ? 'green' : 'red'}">${esc(status)}</span>
+              ${Number(r.check_quantity || 0) > 0 ? '<span class="badge amber">qty</span>' : ''}
+              ${r.take_pictures ? '<span class="badge blue">photos</span>' : ''}
+              ${r.check_color ? '<span class="badge blue">color</span>' : ''}
+              ${r.check_condition ? '<span class="badge blue">condition</span>' : ''}
+            </div>
+          </div>
+        </div>`;
+      }).join('');
+      box.querySelectorAll('.row').forEach(el => el.addEventListener('click', () => loadDetail(el.dataset.upc || '')));
+    }
+
+    /* ── Mobile QR ── */
+    function stopMobilePhotoPoll(){
+      if(state.mobileUploadPoll){ try{ clearInterval(state.mobileUploadPoll); }catch(e){} state.mobileUploadPoll = null; }
+    }
+
+    function renderMobileQr(url){
+      const box = $('mobileQr');
+      if(!box) return;
+      box.innerHTML = '';
+      if(!url){ box.innerHTML = '<div class="hint">Pick a UPC...</div>'; return; }
+      if(typeof window.QRCode === 'undefined'){ box.innerHTML = '<div class="hint">QR unavailable</div>'; return; }
+      try{ new QRCode(box, {text:url, width:136, height:136, colorDark:'#0f172a', colorLight:'#ffffff', correctLevel:QRCode.CorrectLevel.H}); }
+      catch(e){ box.innerHTML = '<div class="hint">QR error</div>'; }
+    }
+
+    function setupMobileUploadForUPC(upc){
+      const clean = String(upc || '').trim();
+      const panel = $('mobileUploadPanel');
+      stopMobilePhotoPoll();
+      if(!panel) return;
+      if(!clean || isProbablyMobile()){
+        panel.style.display = 'none';
+        state.mobileUploadUrl = '';
+        if($('mobileUploadStatus')) $('mobileUploadStatus').textContent = '';
+        return;
+      }
+      const url = phoneUrl(clean);
+      state.mobileUploadUrl = url;
+      panel.style.display = 'block';
+      renderMobileQr(url);
+      // Poll every 5s for new phone uploads — does NOT call renderDetail to avoid recursion
+      state.mobileUploadPoll = setInterval(() => {
+        if(document.visibilityState === 'hidden') return;
+        if((state.activeUpc || '').trim() !== clean) return;
+        refreshMobileUploadedPhotos({silent:true});
+      }, 5000);
+    }
+
+    async function refreshMobileUploadedPhotos({silent=false} = {}){
+      const upc = String(state.activeUpc || '').trim();
+      if(!upc) return;
+      try{
+        const data = await apiGet(`/api/listingagent/upc/${encodeURIComponent(upc)}`);
+        state.detail = data.item || null;
+        // Lightweight update — only refresh image sections, not full renderDetail
+        // (full renderDetail would call setupMobileUploadForUPC and restart the poll)
+        renderImageGallery(state.detail);
+        renderActiveBanner(state.detail);
+        const cnt = previewImages(state.detail).length;
+        const lbl = $('imagesAccordionLabel');
+        if(lbl) lbl.textContent = cnt ? `Item Images (${cnt})` : 'Item Images';
+        if(!silent && $('mobileUploadStatus')) $('mobileUploadStatus').textContent = `Images: ${cnt}`;
+      }catch(e){
+        if(!silent && $('mobileUploadStatus')) $('mobileUploadStatus').textContent = `Refresh failed: ${e.message}`;
+      }
+    }
+
+    /* ── Warehouse modal ── */
+    function warehouseModal(item){
+      const positions = Array.isArray(item?.inventory?.positions) ? item.inventory.positions : [];
+      const rows = Array.isArray(item?.inventory?.rows) ? item.inventory.rows : [];
+      if(!positions.length) return;
+      const byPos = new Map();
+      rows.forEach(row => {
+        const code = String(row.position || '').trim();
+        if(!code) return;
+        if(!byPos.has(code)) byPos.set(code, 0);
+        byPos.set(code, byPos.get(code) + Number(row.quantity || 1));
+      });
+      const modal = document.createElement('div');
+      modal.style.cssText = 'position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:18px;background:rgba(2,6,23,.75);backdrop-filter:blur(3px);z-index:20000;';
+      modal.innerHTML = `<div style="max-width:720px;width:100%;max-height:85vh;overflow:auto;border:1px solid var(--line);border-radius:22px;background:linear-gradient(180deg,rgba(16,27,47,.98),rgba(10,18,31,.98));padding:18px;box-shadow:0 24px 60px rgba(0,0,0,.5)"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:16px"><div style="font-size:1rem;font-weight:800"><i class="fas fa-warehouse" style="color:var(--amber);margin-right:8px"></i>Warehouse Locations</div><button type="button" id="closeWarehouseModal" class="btn ghost"><i class="fas fa-xmark"></i>Close</button></div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px">${positions.map(code => `<div style="border:1px solid var(--line);border-radius:14px;padding:12px;background:rgba(255,255,255,.03)"><div style="font-weight:800;font-size:.95rem">${esc(code)}</div><div class="small" style="margin-top:4px">${byPos.has(code) ? `Qty ${esc(byPos.get(code))}` : 'Location recorded'}</div></div>`).join('')}</div></div>`;
+      modal.addEventListener('click', e => { if(e.target === modal) modal.remove(); });
+      document.body.appendChild(modal);
+      modal.querySelector('#closeWarehouseModal').addEventListener('click', () => modal.remove());
+    }
+
+    $('warehouseBtn').addEventListener('click', () => { if(state.detail) warehouseModal(state.detail); });
+
+    /* ── Meta / request hydration ── */
+    function renderMeta(item){
+      const qty = Number(item?.inventory?.total_quantity || 0);
+      const prepQty = item?.prep_qty != null ? Number(item.prep_qty) : null;
+      const defectRaw = String(item?.defect || '').trim();
+      const upc = String(item?.upc || '').trim();
+      const unifiedUrl = `/unified-search?q=${encodeURIComponent(upc)}`;
+      const prepUrl = `/items-to-list?q=${encodeURIComponent(upc)}&direct_search=1`;
+      const meta = [`<a href="${esc(unifiedUrl)}" class="badge blue" style="text-decoration:none;">UPC ${esc(upc)}</a>`];
+      if(prepQty !== null){
+        const prepBadge = prepQty > 0
+          ? `<a href="${esc(prepUrl)}" class="badge green" style="text-decoration:none;">Prep ${esc(prepQty)}</a>`
+          : `<span class="badge green">Prep ${esc(prepQty)}</span>`;
+        meta.push(prepBadge);
+      }
+      meta.push(qty > 0
+        ? `<a href="${esc(prepUrl)}" class="badge" style="text-decoration:none;"><i class="fas fa-warehouse"></i> Warehouse ${esc(qty)}</a>`
+        : `<span class="badge"><i class="fas fa-warehouse"></i> Warehouse 0</span>`);
+      if(defectRaw) defectRaw.split('|').map(v => v.trim()).filter(Boolean).forEach(v => meta.push(`<span class="badge red">${esc(v)}</span>`));
+      $('detailMeta').innerHTML = meta.join(' ');
+      $('detailBadges').innerHTML = reqBadge(item?.checker?.request || null);
+    }
+
+    function hydrateRequest(item){
+      const req = item?.checker?.request || null;
+      const hasQty = Number(req?.check_quantity || 0) > 0;
+      const hasPics = !!req?.take_pictures;
+      const hasColor = !!req?.check_color;
+      const hasCondition = !!req?.check_condition;
+      const hasNote = String(req?.custom_note || '').trim().length > 0;
+      const todoHost = $('reqTodoList');
+      const quantityWrap = $('reqQuantityInputWrap');
+      const qtyInput = $('checkerQuantityValue');
+      const completeBtn = $('completeRequestBtn');
+      if(todoHost){
+        const todos = [];
+        if(hasQty) todos.push(`<label class="todoRow"><input id="reqTodoQuantity" class="todoCheck" type="checkbox"><div class="todoMain"><div class="todoTitle">Check quantity</div><div class="todoMeta">Requester asked for a count${Number(req?.check_quantity || 0) > 0 ? ` (${esc(req.check_quantity)})` : ''}.</div></div></label>`);
+        if(hasPics) todos.push(`<label class="todoRow"><input id="reqTodoPhotos" class="todoCheck" type="checkbox"><div class="todoMain"><div class="todoTitle">Take pictures</div><div class="todoMeta">Upload supporting photos above.</div></div></label>`);
+        if(hasColor) todos.push(`<label class="todoRow"><input id="reqTodoColor" class="todoCheck" type="checkbox"><div class="todoMain"><div class="todoTitle">Check color</div><div class="todoMeta">Verify item color and note any mismatch.</div></div></label>`);
+        if(hasCondition) todos.push(`<label class="todoRow"><input id="reqTodoCondition" class="todoCheck" type="checkbox"><div class="todoMain"><div class="todoTitle">Check condition</div><div class="todoMeta">Inspect condition and record anything notable.</div></div></label>`);
+        todoHost.innerHTML = todos.length ? todos.join('') : '<div class="small" style="padding:8px 4px">No specific tasks were requested.</div>';
+      }
+      if(quantityWrap) quantityWrap.style.display = hasQty ? 'block' : 'none';
+      if(qtyInput){
+        if(!hasQty){ qtyInput.value = ''; state.checkerQuantityValue = ''; }
+        else qtyInput.value = state.checkerQuantityValue || '';
+      }
+      if($('reqNoteWrap')) $('reqNoteWrap').style.display = hasNote ? 'block' : 'none';
+      if($('reqNoteText')) $('reqNoteText').textContent = hasNote ? req.custom_note : '';
+      if(completeBtn){
+        const isComplete = String(req?.status || 'open').toLowerCase() === 'complete';
+        completeBtn.disabled = isComplete;
+        completeBtn.innerHTML = isComplete
+          ? '<i class="fas fa-circle-check"></i>Check Complete'
+          : '<i class="fas fa-circle-check"></i>Complete Check';
+        completeBtn.classList.toggle('sent', isComplete);
+      }
+      bindRequestTodoEvents(req);
+      $('reqStatus').textContent = req
+        ? (req.status === 'complete' ? 'This check is already marked complete.' : 'Complete each task above, then press Complete Check.')
+        : 'No check request saved yet.';
+    }
+
+    /* ── Main render ── */
+    function renderDetail(detail){
+      const empty = $('detailEmpty');
+      const wrap = $('detailWrap');
+      if(!detail){
+        if(empty) empty.style.display = 'block';
+        if(wrap) wrap.style.display = 'none';
+        renderActiveBanner(null);
+        return;
+      }
+      const item = detail;
+      if(empty) empty.style.display = 'none';
+      if(wrap) wrap.style.display = 'block';
+      const imgs = previewImages(item);
+      const hero = imgs[0] || '';
+      $('detailTitle').textContent = item.title || item.bol?.description || item.upc || 'Untitled';
+      $('detailImg').src = hero || '';
+      $('detailImg').style.display = hero ? 'block' : 'none';
+      $('detailImg').style.cursor = hero ? 'zoom-in' : '';
+      $('detailImg').onclick = hero ? (() => window.open(hero, '_blank', 'noopener')) : null;
+      renderActiveBanner(item);
+      renderMeta(item);
+      renderImageGallery(item);
+      hydrateRequest(item);
+      renderNotes($('prepNotes'), item.prep?.notes || [], 'prep');
+      renderNotes($('checkerNotes'), item.checker?.notes || [], 'checker');
+      renderPrepVoiceNotes(item.prep?.voice_notes || []);
+      renderCheckerVoiceNotes(item.checker?.media || []);
+      renderMedia($('checkerMedia'), item.checker?.media || []);
+      const checkerPics = Array.isArray(item.checker?.media) ? item.checker.media.filter(m => String(m?.media_type || '').toLowerCase() === 'image').length : 0;
+      const checkerSummary = $('checkerUploadSummary');
+      if(checkerSummary) checkerSummary.textContent = checkerPics > 0 ? `${checkerPics} checker picture${checkerPics === 1 ? '' : 's'} uploaded.` : '';
+    }
+
+    async function refreshDetail(){
+      const upc = String(state.activeUpc || '').trim();
+      if(!upc) return;
+      const data = await apiGet(`/api/listingagent/upc/${encodeURIComponent(upc)}`);
+      state.detail = data.item || null;
+      renderDetail(state.detail);
+      renderList();
+    }
+
+    async function loadRequests(){
+      state.filter = String($('filter')?.value || 'open');
+      const data = await apiGet(`/api/listingagent/check_requests?status=${encodeURIComponent(state.filter)}&limit=200`);
+      state.requests = Array.isArray(data.items) ? data.items : [];
+      renderList();
+      if(state.activeUpc){
+        const hit = state.requests.find(r => String(r.upc || '').trim() === String(state.activeUpc).trim());
+        if(!hit && state.requests.length && state.filter === 'open') loadDetail(state.requests[0].upc);
+      } else if(state.requests.length && state.filter === 'open'){
+        loadDetail(state.requests[0].upc);
+      }
+    }
+
+    async function loadDetail(upc){
+      const clean = String(upc || '').trim();
+      if(!clean) return;
+      state.activeUpc = clean;
+      state.checkerQuantityValue = '';
+      state.checkerTaskState = { quantity: false, photos: false, color: false, condition: false };
+      renderList();
+      closeDrawer();
+      $('detailEmpty').style.display = 'block';
+      $('detailEmpty').innerHTML = '<div class="emptyIcon"><i class="fas fa-spinner fa-spin"></i></div><div>Loading...</div>';
+      $('detailWrap').style.display = 'none';
+      clearCheckerVoiceNote();
+      setupMobileUploadForUPC(clean);
+      try{
+        await refreshDetail();
+      }catch(e){
+        $('detailEmpty').style.display = 'block';
+        $('detailEmpty').innerHTML = `<div class="emptyIcon"><i class="fas fa-exclamation-circle"></i></div><div>Failed to load: ${esc(e.message)}</div>`;
+        $('detailWrap').style.display = 'none';
+      }
+    }
+
+    /* ── Complete request ── */
+    function showCompletionAnimation(itemTitle){
+      return new Promise(resolve => {
+        const overlay = $('completeOverlay');
+        const itemEl = $('completeCardItem');
+        if(itemEl) itemEl.textContent = itemTitle ? `"${itemTitle}"` : '';
+        overlay.classList.add('show');
+        setTimeout(() => {
+          overlay.classList.remove('show');
+          setTimeout(resolve, 300);
+        }, 1500);
+      });
+    }
+
+    async function completeRequest(){
+      const upc = String(state.activeUpc || '').trim();
+      if(!upc){ $('reqStatus').textContent = 'No item selected.'; return; }
+      const btn = $('completeRequestBtn');
+      const req = state.detail?.checker?.request || null;
+      if(!req){ $('reqStatus').textContent = 'No check request exists for this item — nothing to complete.'; return; }
+      const needsQty = Number(req?.check_quantity || 0) > 0;
+      const needsPhotos = !!req?.take_pictures;
+      const needsColor = !!req?.check_color;
+      const needsCondition = !!req?.check_condition;
+
+      // Highlight an element with a shake + red border, scroll it into view, auto-clear after 2s
+      function flagError(elId, msg, useRow=true){
+        const el = $(elId);
+        const target = useRow ? (el?.closest('.todoRow') || el) : el;
+        if(target){
+          target.classList.add('reqError');
+          target.scrollIntoView({behavior:'smooth', block:'center'});
+          if(!useRow && el) el.focus();
+          setTimeout(() => target.classList.remove('reqError'), 2000);
+        }
+        const st = $('reqStatus');
+        if(st){ st.textContent = msg; st.classList.add('reqErrorMsg'); setTimeout(()=>st.classList.remove('reqErrorMsg'),2000); }
+      }
+
+      if(needsQty && !state.checkerTaskState.quantity){
+        flagError('reqTodoQuantity', 'Check off the quantity task above.');
+        return;
+      }
+      if(needsQty && !String(state.checkerQuantityValue || '').trim()){
+        flagError('checkerQuantityValue', 'Enter the counted quantity.', false);
+        return;
+      }
+      if(needsPhotos && !state.checkerTaskState.photos){
+        flagError('reqTodoPhotos', 'Check off the photo task above.');
+        return;
+      }
+      if(needsColor && !state.checkerTaskState.color){
+        flagError('reqTodoColor', 'Check off the color task above.');
+        return;
+      }
+      if(needsCondition && !state.checkerTaskState.condition){
+        flagError('reqTodoCondition', 'Check off the condition task above.');
+        return;
+      }
+      // Disable button and show spinner while API call is in flight
+      if(btn){ btn.disabled = true; btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i>Sending...'; }
+      try{
+        const qtyVal = String(state.checkerQuantityValue || '').trim();
+        if(qtyVal){
+          await apiPost('/api/listingagent/check_notes', { upc, note: `Quantity checked: ${qtyVal}`, note_type:'checker' });
+        }
+        await apiPost('/api/listingagent/check_request/complete', {upc, complete:true, completed_by:'checker'});
+        // Grab title before state changes, then show animation
+        const itemTitle = state.detail?.title || state.detail?.bol?.description || upc || '';
+        await showCompletionAnimation(itemTitle);
+        // loadRequests auto-advances to next open request; no separate refreshDetail needed
+        await loadRequests();
+      }catch(e){
+        $('reqStatus').textContent = `Complete failed: ${e.message}`;
+        if(btn){ btn.disabled = false; btn.innerHTML = '<i class="fas fa-circle-check"></i>Complete Check'; }
+      }
+    }
+
+    /* ── Add note ── */
+    async function addNote(){
+      const upc = String(state.activeUpc || '').trim();
+      const note = String($('checkerNoteInput').value || '').trim();
+      if(!upc || !note) return;
+      const btn = $('addCheckerNoteBtn');
+      if(btn) btn.disabled = true;
+      try{
+        await apiPost('/api/listingagent/check_notes', {upc, note, note_type:'checker'});
+        $('checkerNoteInput').value = '';
+        await refreshDetail();
+      }catch(e){
+        $('reqStatus').textContent = `Note failed: ${e.message}`;
+      }finally{
+        if(btn) btn.disabled = false;
+      }
+    }
+
+    /* ── Photo upload ── */
+    async function uploadPhotos(files){
+      const upc = String(state.activeUpc || '').trim();
+      const list = Array.from(files || []).filter(f => f && f.size > 0);
+      if(!upc || !list.length) return;
+      $('uploadPhotoBtn').disabled = true;
+      $('uploadStatus').textContent = `Uploading ${list.length} photo${list.length === 1 ? '' : 's'}...`;
+      try{
+        const fd = new FormData();
+        fd.append('upc', upc);
+        fd.append('note_type', 'checker');
+        list.forEach(f => fd.append('photos[]', f, f.name || 'photo.jpg'));
+        const res = await fetch('/api/listingagent/check_media/upload', {method:'POST', headers:{Accept:'application/json'}, body:fd});
+        const data = await res.json().catch(() => ({}));
+        if(!res.ok || data.success === false) throw new Error(data.error || `Upload failed (${res.status})`);
+        $('uploadStatus').textContent = `Uploaded ${data.saved_count || list.length} photo${(data.saved_count || list.length) === 1 ? '' : 's'}.`;
+        await refreshDetail();
+      }catch(e){
+        $('uploadStatus').textContent = `Upload failed: ${e.message}`;
+      }finally{
+        $('uploadPhotoBtn').disabled = false;
+      }
+    }
+
+    async function uploadMedia(files){
+      const upc = String(state.activeUpc || '').trim();
+      const list = Array.from(files || []).filter(f => f && f.size > 0);
+      if(!upc || !list.length) return;
+      $('uploadMediaBtn').disabled = true;
+      $('uploadStatus').textContent = `Uploading ${list.length} file${list.length === 1 ? '' : 's'}...`;
+      try{
+        const fd = new FormData();
+        fd.append('upc', upc);
+        fd.append('note_type', 'checker');
+        list.forEach(f => fd.append('files[]', f, f.name || 'media.bin'));
+        const res = await fetch('/api/listingagent/check_media/upload', {method:'POST', headers:{Accept:'application/json'}, body:fd});
+        const data = await res.json().catch(() => ({}));
+        if(!res.ok || data.success === false) throw new Error(data.error || `Upload failed (${res.status})`);
+        $('uploadStatus').textContent = `Uploaded ${data.saved_count || list.length} file${(data.saved_count || list.length) === 1 ? '' : 's'}.`;
+        await refreshDetail();
+      }catch(e){
+        $('uploadStatus').textContent = `Upload failed: ${e.message}`;
+      }finally{
+        $('uploadMediaBtn').disabled = false;
+      }
+    }
+
+    /* ── Drop zone ── */
+    const dz = $('dropZone');
+    dz.addEventListener('click', () => $('photoUpload').click());
+    dz.addEventListener('keydown', e => { if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); $('photoUpload').click(); } });
+    dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('dragover'); });
+    dz.addEventListener('dragleave', () => dz.classList.remove('dragover'));
+    dz.addEventListener('drop', async e => {
+      e.preventDefault();
+      dz.classList.remove('dragover');
+      const files = Array.from(e.dataTransfer?.files || []).filter(f => f.size > 0);
+      if(!files.length) return;
+      const imgs = files.filter(f => f.type.startsWith('image/'));
+      const other = files.filter(f => !f.type.startsWith('image/'));
+      if(imgs.length) await uploadPhotos(imgs);
+      if(other.length) await uploadMedia(other);
+    });
+
+    /* ── Voice note ── */
+    function setVoiceStatus(text, isError=false){
+      $('checkerVoiceNoteStatus').textContent = String(text || '');
+      $('checkerVoiceNoteStatus').classList.toggle('error', !!isError);
+    }
+
+    function renderVoiceNotePreview(){
+      const preview = $('checkerVoiceNotePreview');
+      const player = $('checkerVoiceNotePlayer');
+      const btn = $('checkerVoiceNoteBtn');
+      if(checkerVoiceFile && checkerVoiceUrl){
+        player.src = checkerVoiceUrl;
+        preview.classList.add('active');
+        btn.classList.add('ready');
+      } else {
+        player.removeAttribute('src');
+        try{ player.load(); }catch(e){}
+        preview.classList.remove('active');
+        btn.classList.remove('ready');
+      }
+    }
+
+    function stopVoiceStream(){
+      try{ if(checkerVoiceStream) checkerVoiceStream.getTracks().forEach(track => track.stop()); }catch(e){}
+      checkerVoiceStream = null;
+    }
+
+    function clearCheckerVoiceNote(){
+      try{ if(checkerVoiceRecorder && checkerVoiceRecorder.state !== 'inactive') checkerVoiceRecorder.stop(); }catch(e){}
+      checkerVoiceRecorder = null;
+      stopVoiceStream();
+      if(checkerVoiceUrl){ try{ URL.revokeObjectURL(checkerVoiceUrl); }catch(e){} }
+      checkerVoiceUrl = '';
+      checkerVoiceFile = null;
+      checkerVoiceChunks = [];
+      checkerVoiceMimeType = '';
+      checkerVoicePointerId = null;
+      $('checkerVoiceNoteBtn')?.classList.remove('recording');
+      setVoiceStatus('Hold mic button to record');
+      renderVoiceNotePreview();
+    }
+
+    function preferredVoiceMimeType(){
+      const candidates = ['audio/webm;codecs=opus','audio/webm','audio/mp4','audio/ogg;codecs=opus'];
+      if(!window.MediaRecorder || typeof MediaRecorder.isTypeSupported !== 'function') return '';
+      for(const c of candidates){ try{ if(MediaRecorder.isTypeSupported(c)) return c; }catch(e){} }
+      return '';
+    }
+
+    function voiceExtensionForMime(mimeType){
+      const mime = String(mimeType || '').toLowerCase();
+      if(mime.includes('mp4') || mime.includes('aac') || mime.includes('m4a')) return '.m4a';
+      if(mime.includes('ogg')) return '.ogg';
+      return '.webm';
+    }
+
+    function setCheckerVoiceFile(file){
+      clearCheckerVoiceNote();
+      if(!file) return;
+      checkerVoiceFile = file;
+      checkerVoiceUrl = URL.createObjectURL(file);
+      setVoiceStatus('Voice note ready — save or clear.');
+      renderVoiceNotePreview();
+    }
+
+    async function startCheckerVoiceRecording(){
+      if(checkerVoiceRecorder) return true;
+      if(!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder)){
+        $('checkerVoiceFallback')?.click();
+        return false;
+      }
+      try{
+        checkerVoiceStream = await navigator.mediaDevices.getUserMedia({audio:true});
+        checkerVoiceChunks = [];
+        checkerVoiceMimeType = preferredVoiceMimeType();
+        checkerVoiceRecorder = checkerVoiceMimeType
+          ? new MediaRecorder(checkerVoiceStream, {mimeType: checkerVoiceMimeType})
+          : new MediaRecorder(checkerVoiceStream);
+        checkerVoiceRecorder.addEventListener('dataavailable', event => { if(event.data && event.data.size > 0) checkerVoiceChunks.push(event.data); });
+        checkerVoiceRecorder.addEventListener('stop', () => {
+          try{
+            const mimeType = checkerVoiceRecorder && checkerVoiceRecorder.mimeType ? checkerVoiceRecorder.mimeType : checkerVoiceMimeType || 'audio/webm';
+            const blob = new Blob(checkerVoiceChunks, {type:mimeType});
+            const ext = voiceExtensionForMime(mimeType);
+            const file = new File([blob], `checker_voice_${Date.now()}${ext}`, {type:mimeType});
+            checkerVoiceRecorder = null;
+            checkerVoiceChunks = [];
+            checkerVoiceMimeType = '';
+            stopVoiceStream();
+            setCheckerVoiceFile(file);
+          }catch(e){
+            checkerVoiceRecorder = null;
+            checkerVoiceChunks = [];
+            checkerVoiceMimeType = '';
+            stopVoiceStream();
+            setVoiceStatus('Voice note could not be saved.', true);
+          }
+        }, {once:true});
+        checkerVoiceRecorder.start();
+        $('checkerVoiceNoteBtn')?.classList.add('recording');
+        setVoiceStatus('Recording — release to save.');
+        return true;
+      }catch(e){
+        stopVoiceStream();
+        checkerVoiceRecorder = null;
+        checkerVoiceChunks = [];
+        checkerVoiceMimeType = '';
+        $('checkerVoiceFallback')?.click();
+        return false;
+      }
+    }
+
+    async function stopCheckerVoiceRecording(){
+      $('checkerVoiceNoteBtn')?.classList.remove('recording');
+      if(checkerVoiceRecorder && checkerVoiceRecorder.state !== 'inactive') checkerVoiceRecorder.stop();
+    }
+
+    async function saveCheckerVoiceNote(){
+      const upc = String(state.activeUpc || '').trim();
+      if(!upc || !checkerVoiceFile) return;
+      const fd = new FormData();
+      fd.append('upc', upc);
+      fd.append('media_type', 'audio');
+      fd.append('note_type', 'checker');
+      fd.append('files[]', checkerVoiceFile, checkerVoiceFile.name || `checker_voice_${Date.now()}.webm`);
+      try{
+        const res = await fetch('/api/listingagent/check_media/upload', {method:'POST', headers:{Accept:'application/json'}, body:fd});
+        const data = await res.json().catch(() => ({}));
+        if(!res.ok || data.success === false) throw new Error(data.error || `Upload failed (${res.status})`);
+        $('uploadStatus').textContent = 'Voice note saved.';
+        clearCheckerVoiceNote();
+        await refreshDetail();
+      }catch(e){
+        setVoiceStatus(`Voice note failed: ${e.message}`, true);
+      }
+    }
+
+    /* ── Event listeners ── */
+    $('reload').addEventListener('click', loadRequests);
+    $('filter').addEventListener('change', loadRequests);
+    $('searchBox').addEventListener('input', renderList);
+    $('checkerQuantityValue').addEventListener('input', e => { state.checkerQuantityValue = String(e.target.value || '').trim(); });
+    $('checkerNoteInput').addEventListener('keydown', e => { if(e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); addNote(); } });
+    $('addCheckerNoteBtn').addEventListener('click', addNote);
+    $('completeRequestBtn').addEventListener('click', completeRequest);
+    $('uploadPhotoBtn').addEventListener('click', () => $('photoUpload').click());
+    $('uploadMediaBtn').addEventListener('click', () => $('mediaUpload').click());
+    $('showQrBtn').addEventListener('click', () => {
+      const upc = String(state.activeUpc || '').trim();
+      if(!upc) return;
+      const modal = $('qrModal');
+      const codeBox = $('qrModalCode');
+      const urlEl = $('qrModalUrl');
+      const url = phoneUrl(upc);
+      modal.style.display = 'flex';
+      codeBox.innerHTML = '';
+      if(urlEl) urlEl.textContent = url;
+      if(typeof window.QRCode !== 'undefined' && url){
+        try{ new QRCode(codeBox, {text:url, width:176, height:176, colorDark:'#0f172a', colorLight:'#ffffff', correctLevel:QRCode.CorrectLevel.H}); }
+        catch(e){ codeBox.innerHTML = '<div class="hint">QR error</div>'; }
+      }
+    });
+    $('closeQrModal').addEventListener('click', () => { $('qrModal').style.display = 'none'; });
+    $('qrModal').addEventListener('click', e => { if(e.target === $('qrModal')) $('qrModal').style.display = 'none'; });
+    $('photoUpload').addEventListener('change', async e => { await uploadPhotos(e.target.files); e.target.value = ''; });
+    $('mediaUpload').addEventListener('change', async e => { await uploadMedia(e.target.files); e.target.value = ''; });
+    $('checkerVoiceNoteSaveBtn').addEventListener('click', saveCheckerVoiceNote);
+    $('checkerVoiceNoteClearBtn').addEventListener('click', clearCheckerVoiceNote);
+    $('checkerVoiceFallback').addEventListener('change', e => {
+      const file = e.target.files && e.target.files[0] ? e.target.files[0] : null;
+      if(file) setCheckerVoiceFile(file);
+      e.target.value = '';
+    });
+
+    const voiceBtn = $('checkerVoiceNoteBtn');
+    if(voiceBtn){
+      voiceBtn.addEventListener('pointerdown', async e => {
+        if(checkerVoiceRecorder) return;
+        checkerVoicePointerId = e.pointerId;
+        voiceBtn.setPointerCapture?.(e.pointerId);
+        await startCheckerVoiceRecording();
+      });
+    }
+    document.addEventListener('pointerup', async e => {
+      if(checkerVoicePointerId === null || e.pointerId !== checkerVoicePointerId) return;
+      checkerVoicePointerId = null;
+      await stopCheckerVoiceRecording();
+    });
+    document.addEventListener('pointercancel', async e => {
+      if(checkerVoicePointerId === null || e.pointerId !== checkerVoicePointerId) return;
+      checkerVoicePointerId = null;
+      await stopCheckerVoiceRecording();
+    });
+
+    /* ── Init ── */
+    loadRequests().then(() => {
+      if(INITIAL_UPC) loadDetail(INITIAL_UPC);
+    });
+  </script>
+</body>
+</html>

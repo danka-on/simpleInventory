@@ -56,6 +56,7 @@ When user says "push", "p", "let's push", or "push to pi":
 - always include the reset command: `ssh manager@superinventory.local "sudo systemctl restart sweetshelves.service"`,
 - exclude all `.db` files,
 - wait for user confirmation (`success` or `s`) before updating this memory checkpoint.
+- after each code change, include the relevant `scp` push command in the handoff so deployment is always easy to do next.
 
 ### Push/commit intent rule
 

@@ -1237,6 +1237,7 @@ function buildOriginalImageCandidates(code) {
     const compact = raw.replace(/\s+/g, '');
     const lower = compact.toLowerCase();
     const upper = compact.toUpperCase();
+    const binStripped = compact.replace(/b\d+$/i, '');
     const candidates = [];
     const add = (src) => {
         if (src && !candidates.includes(src)) candidates.push(src);
@@ -1245,9 +1246,19 @@ function buildOriginalImageCandidates(code) {
     add(`/shelf-original/${encodeURIComponent(lower)}.png`);
     add(`/shelf-original/${encodeURIComponent(upper)}.png`);
     add(`/shelf-original/${encodeURIComponent(raw)}.png`);
+    if (binStripped && binStripped !== compact) {
+        add(`/shelf-original/${encodeURIComponent(binStripped.toLowerCase())}.png`);
+        add(`/shelf-original/${encodeURIComponent(binStripped.toUpperCase())}.png`);
+        add(`/shelf-original/${encodeURIComponent(binStripped)}.png`);
+    }
     add(`/shelf-base/${encodeURIComponent(lower)}.png`);
     add(`/shelf-base/${encodeURIComponent(upper)}.png`);
     add(`/shelf-base/${encodeURIComponent(raw)}.png`);
+    if (binStripped && binStripped !== compact) {
+        add(`/shelf-base/${encodeURIComponent(binStripped.toLowerCase())}.png`);
+        add(`/shelf-base/${encodeURIComponent(binStripped.toUpperCase())}.png`);
+        add(`/shelf-base/${encodeURIComponent(binStripped)}.png`);
+    }
 
     return candidates;
 }

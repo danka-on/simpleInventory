@@ -2024,9 +2024,19 @@ function render(results){
       ? [whTitleBase, whLocCountLabel, 'Click to view locations'].filter(Boolean).join(' | ')
       : whTitleBase;
     const whLocationsEncoded = encodeURIComponent(JSON.stringify(whLocationDetails));
-    const whCell = whAvail > 0
-      ? `<td style="text-align:center" title="${esc(whTitle)}"><button type="button" class="warehouse-info-btn" data-base-upc="${esc(whBase)}" data-locations="${esc(whLocationsEncoded)}"><span style="${whStyle}">${whAvail}</span></button></td>`
-      : `<td style="text-align:center" title="${esc(whTitle)}"><span style="${whStyle}">${whAvail}</span></td>`;
+    const isSuffixedUpc = !!upcSuffixRaw;
+    let whCell;
+    if(isSuffixedUpc){
+      const searchHref = `/searchrack?q=${encodeURIComponent(upcRaw)}`;
+      const sStyle = whAvail > 0 ? 'color:#15803d;font-weight:700' : 'color:#b91c1c;font-weight:600';
+      const totalParen = whAvail > 0 ? `<span style="color:#888;font-size:0.82em"> (${whAvail})</span>` : '';
+      const sfxTitle = `This item: ${qty}${whAvail > 0 ? ` | Base total in warehouse: ${whAvail}` : ''} — click to search in warehouse`;
+      whCell = `<td style="text-align:center" title="${esc(sfxTitle)}"><a href="${esc(searchHref)}" style="text-decoration:none"><span style="${sStyle}">${qty}</span>${totalParen}</a></td>`;
+    } else {
+      whCell = whAvail > 0
+        ? `<td style="text-align:center" title="${esc(whTitle)}"><button type="button" class="warehouse-info-btn" data-base-upc="${esc(whBase)}" data-locations="${esc(whLocationsEncoded)}"><span style="${whStyle}">${whAvail}</span></button></td>`
+        : `<td style="text-align:center" title="${esc(whTitle)}"><span style="${whStyle}">${whAvail}</span></td>`;
+    }
     const defectTextRaw = String(r.defect || '').trim();
     const defectDisplay = defectTextRaw
       ? defectTextRaw.replace(/\s*\|\s*/g, ', ')

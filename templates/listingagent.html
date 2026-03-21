@@ -1556,6 +1556,150 @@
       color: var(--muted);
       font-size: 0.92rem;
     }
+    /* ── Checker card ── */
+    .checkItemCard{
+      margin-top:10px;
+      border-radius:16px;
+      border:1px solid rgba(148,163,184,.16);
+      background:rgba(255,255,255,.02);
+      overflow:hidden;
+      transition:border-color .18s;
+    }
+    .checkItemCard.ciPending{
+      border-color:rgba(251,191,36,.36);
+      background:linear-gradient(180deg,rgba(251,191,36,.04),transparent);
+    }
+    .checkItemCard.ciComplete{
+      border-color:rgba(16,185,129,.3);
+      background:linear-gradient(180deg,rgba(16,185,129,.05),transparent);
+    }
+    /* Header */
+    .ciHeader{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      padding:10px 12px;
+      flex-wrap:wrap;
+    }
+    .ciHeaderLeft{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      min-width:0;
+    }
+    .ciToggleBtn{
+      width:34px;height:34px;flex:0 0 auto;
+      display:grid;place-items:center;
+      border-radius:11px;
+      border:1px solid rgba(148,163,184,.2);
+      background:rgba(255,255,255,.04);
+      color:var(--muted);
+      cursor:pointer;font-size:.88rem;
+      transition:background .12s,border-color .12s,color .12s;
+    }
+    .ciToggleBtn:hover{background:rgba(255,255,255,.09);color:var(--ink);}
+    .checkItemCard.open .ciToggleBtn{border-color:rgba(96,165,250,.4);color:var(--blue-light);background:rgba(96,165,250,.08);}
+    .checkItemCard.ciComplete .ciToggleBtn{border-color:rgba(16,185,129,.35);color:var(--green);}
+    .ciTitleStack{display:flex;flex-direction:column;gap:1px;min-width:0;}
+    .ciTitle{font-size:.9rem;font-weight:800;letter-spacing:-.01em;color:var(--ink-bright);line-height:1.1;}
+    .ciSub{font-size:.74rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .ciHeaderRight{display:flex;align-items:center;gap:7px;flex-wrap:wrap;justify-content:flex-end;}
+    /* Body (form) */
+    .ciBody{
+      display:none;
+      flex-direction:column;
+      gap:11px;
+      padding:0 12px 14px;
+    }
+    .ciBody.open{display:flex;}
+    /* Task chips */
+    .ciTaskChips{display:flex;flex-wrap:wrap;gap:6px;}
+    .ciChip{
+      display:inline-flex;align-items:center;gap:6px;
+      padding:7px 13px;border-radius:999px;
+      border:1px solid rgba(148,163,184,.2);
+      background:rgba(255,255,255,.03);
+      color:var(--muted);font-size:.82rem;font-weight:700;
+      cursor:pointer;user-select:none;
+      transition:border-color .12s,background .12s,color .12s;
+    }
+    .ciChip input{display:none;}
+    .ciChip:hover{border-color:rgba(148,163,184,.42);background:rgba(255,255,255,.06);color:var(--ink);}
+    .ciChip:has(input:checked){
+      border-color:rgba(239,68,68,.55);
+      background:rgba(239,68,68,.1);
+      color:#fca5a5;
+    }
+    /* Note */
+    .ciNoteField textarea{
+      width:100%;border:1px solid rgba(148,163,184,.18);border-radius:13px;
+      background:rgba(255,255,255,.03);color:var(--ink);
+      padding:10px 13px;font-family:inherit;font-size:.9rem;line-height:1.5;
+      outline:none;resize:vertical;min-height:72px;
+      transition:border-color .14s,background .14s;
+    }
+    .ciNoteField textarea:focus{border-color:rgba(96,165,250,.4);background:rgba(96,165,250,.04);}
+    .ciNoteField textarea::placeholder{color:var(--muted-dim);}
+    /* Footer */
+    .ciFooter{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+    .ciSendBtn{flex:1;justify-content:center;min-width:130px;padding:10px 16px;font-size:.9rem;}
+    /* Summary (output) */
+    .ciSummary{
+      display:none;flex-direction:column;gap:11px;
+      padding:12px;
+      border-top:1px solid rgba(16,185,129,.18);
+      background:linear-gradient(180deg,rgba(16,185,129,.05),transparent);
+    }
+    .ciSummary.open{display:flex;}
+    .ciSummaryHeader{
+      display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;
+    }
+    .ciSummaryNotes{display:flex;flex-direction:column;gap:7px;}
+    .ciNoteCard{
+      border:1px solid rgba(148,163,184,.14);
+      border-left:3px solid var(--green);
+      border-radius:0 11px 11px 0;
+      padding:9px 12px;
+      font-size:.875rem;line-height:1.5;
+      background:rgba(255,255,255,.03);
+    }
+    .ciNoteTime{font-size:.71rem;color:var(--muted);margin-bottom:3px;}
+    /* Media grid */
+    .ciMediaGrid{
+      display:grid;
+      grid-template-columns:repeat(auto-fill,minmax(110px,1fr));
+      gap:8px;
+    }
+    .ciMediaCard{
+      border:1px solid rgba(148,163,184,.16);border-radius:12px;
+      overflow:hidden;background:var(--bg2);
+    }
+    .ciMediaCard img{width:100%;height:86px;object-fit:cover;display:block;cursor:zoom-in;}
+    .ciMediaCard video{width:100%;display:block;max-height:90px;}
+    .ciAudioCard{
+      display:flex;flex-direction:column;align-items:center;
+      padding:10px 10px 7px;gap:6px;
+      grid-column:1/-1;
+    }
+    .ciAudioCard audio{width:100%;}
+    .ciAudioIcon{font-size:1.2rem;color:var(--muted);}
+    .ciMediaLabel{
+      padding:5px 8px;font-size:.68rem;color:var(--muted);
+      border-top:1px solid rgba(148,163,184,.1);
+      white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    }
+    .ciNewBadge{
+      position:absolute;top:5px;left:5px;z-index:2;
+      display:inline-flex;align-items:center;gap:3px;
+      padding:2px 7px;border-radius:999px;
+      background:rgba(34,197,94,.92);color:#fff;
+      font-size:.6rem;font-weight:900;letter-spacing:.08em;text-transform:uppercase;
+      box-shadow:0 2px 8px rgba(34,197,94,.3);
+    }
+    /* Compat stubs (keep existing JS class refs working) */
+    .checkItemBody{display:none;}.checkItemBody.open{display:flex;}
+    .checkItemSummary{display:none;}.checkItemSummary.open{display:flex;}
     .imageCards{
       display: flex;
       flex-wrap: wrap;
@@ -1924,6 +2068,57 @@
                   <div class="previewStoreRow">
                     <div id="previewEbay"></div>
                     <div id="previewAmazon"></div>
+                  </div>
+                  <div id="checkItemCard" class="checkItemCard" style="display:none;">
+                    <!-- Header — always visible -->
+                    <div class="ciHeader">
+                      <div class="ciHeaderLeft">
+                        <button type="button" id="checkItemToggleBtn" class="ciToggleBtn" aria-expanded="false" aria-label="Toggle checker panel">
+                          <i class="fas fa-clipboard-check"></i>
+                        </button>
+                        <div class="ciTitleStack">
+                          <div class="ciTitle">Checker</div>
+                          <div class="ciSub" id="checkItemTitleSub">Request a warehouse check for this item.</div>
+                        </div>
+                      </div>
+                      <div class="ciHeaderRight">
+                        <span id="checkItemStatusBadge" class="badge badgeRed" style="display:none;">Check pending</span>
+                        <a id="checkItemsLink" href="/check-items" class="badge badgeBlue" style="text-decoration:none;"><i class="fas fa-arrow-up-right-from-square" style="margin-right:5px;"></i>Open</a>
+                      </div>
+                    </div>
+                    <!-- Input form (shown when open) -->
+                    <div id="checkItemBody" class="ciBody">
+                      <div class="ciTaskChips">
+                        <label class="ciChip" for="checkItemQuantity">
+                          <input id="checkItemQuantity" type="checkbox" /><i class="fas fa-hashtag"></i>Quantity
+                        </label>
+                        <label class="ciChip" for="checkItemTakePhotos">
+                          <input id="checkItemTakePhotos" type="checkbox" /><i class="fas fa-camera"></i>Photos
+                        </label>
+                        <label class="ciChip" for="checkItemColor">
+                          <input id="checkItemColor" type="checkbox" /><i class="fas fa-palette"></i>Color
+                        </label>
+                        <label class="ciChip" for="checkItemCondition">
+                          <input id="checkItemCondition" type="checkbox" /><i class="fas fa-magnifying-glass"></i>Condition
+                        </label>
+                      </div>
+                      <div class="ciNoteField">
+                        <textarea id="checkItemNote" rows="3" placeholder="Tell the checker what to look for... (optional — chips above work for common tasks)"></textarea>
+                      </div>
+                      <div class="ciFooter">
+                        <button class="btn btnPrimary ciSendBtn" id="btnSendCheckItem" type="button"><i class="fas fa-paper-plane"></i>Send to Checker</button>
+                        <button class="btn btnGhost btnMini" id="btnOpenCheckItems" type="button"><i class="fas fa-arrow-up-right-from-square"></i>Check Items</button>
+                      </div>
+                    </div>
+                    <!-- Completion summary (shown when check is complete, independent of open) -->
+                    <div id="checkItemSummary" class="ciSummary">
+                      <div class="ciSummaryHeader">
+                        <div class="badge badgeGreen"><i class="fas fa-circle-check" style="margin-right:6px;"></i>Check Complete</div>
+                        <div class="hint" id="checkItemSummaryTime"></div>
+                      </div>
+                      <div id="checkItemSummaryBody" class="ciSummaryNotes"></div>
+                      <div id="checkItemSummaryMedia" class="ciMediaGrid"></div>
+                    </div>
                   </div>
                 </div>
                 <div id="mobileUploadPanel" class="mobileUploadPanel" style="display:none;" aria-label="Mobile photo upload QR">
@@ -2384,6 +2579,12 @@
       workingDrafts: {},
       workingDraftSaveTimer: null,
       workingDraftDirty: false,
+      checkRequest: null,
+      checkRequestOpen: false,
+      checkRequestLoaded: false,
+      checkRequestSaveTimer: null,
+      checkRequestDirty: false,
+      checkRequestHydrating: false,
       sessionListedForCurrent: {ebay: false, amazon: false},
     };
 
@@ -3098,6 +3299,8 @@
         const isDone = it._done || (it.status || '').toString().trim().toLowerCase() === 'done' || (hasEbay && hasAmazon);
         const isActive = state.activeUpc && _upcEquals(state.activeUpc, upc);
         const isWorking = _hasWorkingDraft(upc);
+        const hasCheck = !!it.has_check_request;
+        const checkStatus = (it.check_request_status || '').toString().trim().toLowerCase();
         const title = (it.title || it.item_description || upc).toString().trim();
         const source = (it.source || '').toString().trim();
         const itemStatus = (it.item_status || '').toString().trim().toLowerCase();
@@ -3125,6 +3328,24 @@
           status.className = 'queueStatusIcon';
           status.title = 'Working draft saved';
           status.innerHTML = '<i class="fas fa-pen-fancy"></i>';
+          row.appendChild(status);
+        }
+        if(hasCheck){
+          const status = document.createElement('span');
+          status.className = 'queueStatusIcon';
+          if(checkStatus === 'complete'){
+            status.style.borderColor = 'rgba(34, 197, 94, 0.5)';
+            status.style.background = 'rgba(34, 197, 94, 0.16)';
+            status.style.color = '#86efac';
+            status.title = 'Check complete';
+            status.innerHTML = '<i class="fas fa-tools"></i>';
+          } else {
+            status.style.borderColor = 'rgba(239, 68, 68, 0.5)';
+            status.style.background = 'rgba(239, 68, 68, 0.14)';
+            status.style.color = '#fca5a5';
+            status.title = 'Check item pending';
+            status.innerHTML = '<i class="fas fa-tools"></i>';
+          }
           row.appendChild(status);
         }
 
@@ -3496,6 +3717,9 @@
       const _hist = state.listedHistory || (state.listedHistory = new Map());
       state.sessionListedForCurrent = _hist.get(clean) || {ebay: false, amazon: false};
       state.activeUpc = clean;
+      state.checkRequest = null;
+      state.checkRequestOpen = false;
+      state.checkRequestLoaded = false;
       renderQueue();
       $('upcSearch').value = clean;
       updateSearchQueueAction();
@@ -3520,6 +3744,9 @@
         }
         if(!data) throw new Error(`No local item found for UPC (${tried.join(', ')})`);
         state.item = data.item || {};
+        state.checkRequest = (state.item.checker && state.item.checker.request) ? state.item.checker.request : null;
+        state.checkRequestOpen = false;
+        state.checkRequestLoaded = true;
         state.baseImages = Array.isArray(state.item.images) ? [...state.item.images] : [];
         state.storeTemplateImages = {ebay: [], amazon: []};
         state.imageOrder = {ebay: [], amazon: []};
@@ -3529,6 +3756,7 @@
         rebuildImagesForActiveStore();
         updateConditionNoteVisibility();
         renderPreview();
+        renderCheckItemCard();
         setupMobileUploadForUPC(state.item.upc || clean);
         autofillForm();
         const draft = await _fetchWorkingDraft(clean);
@@ -3600,6 +3828,7 @@
       $('previewTitle').textContent = title;
 
       renderNoteCard();
+      renderCheckItemCard();
 
       const previewImages = _previewImagesForStore(_activeStoreKey());
       const firstImg = previewImages[0] || '';
@@ -3849,6 +4078,193 @@
         voiceEl.style.display = 'none';
         voiceEl.innerHTML = '';
       }
+    }
+
+    function _checkRequestFormData(){
+      const qtyChecked = !!$('checkItemQuantity')?.checked;
+      const takePictures = !!$('checkItemTakePhotos')?.checked;
+      const checkColor = !!$('checkItemColor')?.checked;
+      const checkCondition = !!$('checkItemCondition')?.checked;
+      const note = ($('checkItemNote')?.value || '').toString().trim();
+      return {
+        check_quantity: qtyChecked ? 1 : 0,
+        take_pictures: takePictures,
+        check_color: checkColor,
+        check_condition: checkCondition,
+        custom_note: note
+      };
+    }
+
+    function _checkRequestHasData(data){
+      if(!data) return false;
+      return Boolean(
+        (data.custom_note || '').toString().trim() ||
+        data.take_pictures ||
+        Number(data.check_quantity || 0) > 0 ||
+        data.check_color ||
+        data.check_condition
+      );
+    }
+
+    function _setCheckRequestOpen(open){
+      state.checkRequestOpen = !!open;
+      renderCheckItemCard();
+    }
+
+    function renderCheckCompletionSummary(){
+      const wrap = $('checkItemSummary');
+      const timeEl = $('checkItemSummaryTime');
+      const body = $('checkItemSummaryBody');
+      const media = $('checkItemSummaryMedia');
+      if(!wrap || !timeEl || !body || !media) return;
+      const req = state.checkRequest || null;
+      const status = (req?.status || '').toString().trim().toLowerCase();
+      const checker = (state.item && state.item.checker) ? state.item.checker : null;
+      const notes = Array.isArray(checker?.notes) ? checker.notes : [];
+      const assets = Array.isArray(checker?.media) ? checker.media : [];
+      const isComplete = !!req && status === 'complete';
+      if(!isComplete){
+        wrap.classList.remove('open');
+        timeEl.textContent = '';
+        body.innerHTML = '';
+        media.innerHTML = '';
+        return;
+      }
+
+      wrap.classList.add('open');
+      timeEl.textContent = req.completed_at ? `Completed ${fmtNoteTime(req.completed_at)}` : 'Completed';
+
+      body.innerHTML = notes.length
+        ? notes.slice(0, 5).map(n => {
+            const when = n.created_at ? fmtNoteTime(n.created_at) : '';
+            const txt = escapeHtml((n.note || '').toString()).replaceAll('\n', '<br>');
+            return `<div class="ciNoteCard">${when ? `<div class="ciNoteTime">${escapeHtml(when)}</div>` : ''}<div>${txt}</div></div>`;
+          }).join('')
+        : '<div class="hint" style="padding:4px 2px;">No checker notes yet.</div>';
+
+      media.innerHTML = assets.length
+        ? assets.slice(0, 9).map(a => {
+            const type = (a.media_type || '').toString().trim().toLowerCase();
+            const url = escapeHtml(a.url || '');
+            const name = escapeHtml(a.original_filename || (type === 'audio' ? 'voice note' : type === 'video' ? 'video' : 'image'));
+            const newBadge = '<span class="ciNewBadge">NEW</span>';
+            if(type === 'audio') return `<div class="ciMediaCard ciAudioCard"><div class="ciAudioIcon"><i class="fas fa-volume-high"></i></div><audio controls preload="metadata" src="${url}"></audio><div class="ciMediaLabel">${name}</div></div>`;
+            if(type === 'video') return `<div class="ciMediaCard" style="position:relative">${newBadge}<video controls preload="metadata" src="${url}"></video><div class="ciMediaLabel">${name}</div></div>`;
+            return `<div class="ciMediaCard" style="position:relative">${newBadge}<img src="${url}" alt="" onclick="window.open(this.src,'_blank','noopener')"><div class="ciMediaLabel">${name}</div></div>`;
+          }).join('')
+        : '<div class="hint" style="padding:4px 2px;">No checker media yet.</div>';
+    }
+
+    function renderCheckItemCard(){
+      const card = $('checkItemCard');
+      const toggleBtn = $('checkItemToggleBtn');
+      const body = $('checkItemBody');
+      const qty = $('checkItemQuantity');
+      const take = $('checkItemTakePhotos');
+      const color = $('checkItemColor');
+      const condition = $('checkItemCondition');
+      const note = $('checkItemNote');
+      const badge = $('checkItemStatusBadge');
+      if(!card || !toggleBtn || !body || !qty || !take || !color || !condition || !note || !badge) return;
+
+      if(!state.item){
+        card.style.display = 'none';
+        return;
+      }
+
+      card.style.display = 'block';
+      const req = state.checkRequest || null;
+      const hasReq = !!req;
+      const open = !!state.checkRequestOpen;
+      const status = (req?.status || '').toString().trim().toLowerCase();
+
+      state.checkRequestHydrating = true;
+      card.classList.toggle('open', open);
+      card.classList.toggle('ciPending', hasReq && status !== 'complete');
+      card.classList.toggle('ciComplete', hasReq && status === 'complete');
+      toggleBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      body.classList.toggle('open', open);
+      card.classList.toggle('active', hasReq || _checkRequestHasData(_checkRequestFormData()));
+      // Update subtitle
+      const subEl = $('checkItemTitleSub');
+      if(subEl){
+        if(hasReq && status === 'complete') subEl.textContent = 'Checker completed — see results below.';
+        else if(hasReq) subEl.textContent = 'Request sent — waiting for checker.';
+        else subEl.textContent = open ? 'Select tasks and send to the checker.' : 'Request a warehouse check for this item.';
+      }
+      // Update Check Items link with current UPC
+      const ciLink = $('checkItemsLink');
+      if(ciLink && state.activeUpc) ciLink.href = `/check-items?upc=${encodeURIComponent(state.activeUpc)}`;
+      badge.style.display = hasReq ? 'inline-flex' : 'none';
+      if(hasReq){
+        if(status === 'complete'){
+          badge.className = 'badge badgeGreen';
+          badge.textContent = 'Check complete';
+        } else {
+          badge.className = 'badge badgeRed';
+          badge.textContent = 'Check pending';
+        }
+      }
+
+      if(hasReq){
+        qty.checked = Number(req.check_quantity || 0) > 0;
+        take.checked = !!req.take_pictures;
+        color.checked = !!req.check_color;
+        condition.checked = !!req.check_condition;
+        note.value = (req.custom_note || '').toString();
+      } else {
+        qty.checked = false;
+        take.checked = false;
+        color.checked = false;
+        condition.checked = false;
+        note.value = '';
+      }
+      renderCheckCompletionSummary();
+      state.checkRequestHydrating = false;
+    }
+
+    async function saveCheckRequest({closeAfterSave=false} = {}){
+      const upc = (state.activeUpc || '').toString().trim();
+      if(!upc) return;
+      const payload = {
+        upc,
+        ..._checkRequestFormData(),
+        source: 'listingagent'
+      };
+      const hasData = _checkRequestHasData(payload);
+      if(!hasData){
+        state.checkRequest = null;
+        state.checkRequestOpen = false;
+        try{
+          const res = await apiPost('/api/listingagent/check_request', {upc});
+          state.checkRequest = res.request || null;
+        }catch(e){
+          log(`Check request save failed: ${e.message}`);
+        }
+        renderCheckItemCard();
+        renderQueue();
+        return;
+      }
+      try{
+        const res = await apiPost('/api/listingagent/check_request', payload);
+        state.checkRequest = res.request || null;
+        state.checkRequestOpen = closeAfterSave ? false : true;
+        renderCheckItemCard();
+        renderQueue();
+      }catch(e){
+        log(`Check request save failed: ${e.message}`);
+      }
+    }
+
+    function scheduleCheckRequestSave(){
+      if(state.checkRequestHydrating) return;
+      if(state.checkRequestSaveTimer){
+        clearTimeout(state.checkRequestSaveTimer);
+      }
+      state.checkRequestSaveTimer = setTimeout(() => {
+        state.checkRequestSaveTimer = null;
+        saveCheckRequest();
+      }, 350);
     }
 
     function resetTemplatesUI(){
@@ -7533,6 +7949,9 @@
       state.dragImageUrl = '';
       state.activeImages = new Set();
       state.inactiveImages = new Set();
+      state.checkRequest = null;
+      state.checkRequestOpen = false;
+      state.checkRequestLoaded = false;
       resetAmazonRestrictionHint({clearState:true});
       state.sessionListedForCurrent = {ebay: false, amazon: false};
       state.activeUpc = '';
@@ -7684,6 +8103,18 @@
       const inp = e.target;
       await uploadPhotos(inp.files);
       try{ inp.value = ''; }catch(err){}
+    });
+    if($('btnOpenCheckItems')) $('btnOpenCheckItems').onclick = () => {
+      const upc = (state.activeUpc || '').toString().trim();
+      const url = upc ? `/check-items?upc=${encodeURIComponent(upc)}` : '/check-items';
+      window.location.href = url;
+    };
+    if($('btnSendCheckItem')) $('btnSendCheckItem').onclick = async () => {
+      await saveCheckRequest({closeAfterSave:true});
+    };
+    if($('checkItemToggleBtn')) $('checkItemToggleBtn').addEventListener('click', () => {
+      state.checkRequestOpen = !state.checkRequestOpen;
+      renderCheckItemCard();
     });
 
     $('btnGenDesc').onclick = () => {
@@ -8041,12 +8472,20 @@
     state.queueMode = normalizeQueueMode(initialQueueMode, 'my');
     applyQueueModeUi();
     _migrateLegacyWorkingDraftsIfNeeded();
+    let initialUpcParam = '';
+    try{
+      initialUpcParam = (new URLSearchParams(window.location.search).get('upc') || '').toString().trim();
+    }catch(e){}
  
     renderPreview();
     resetTemplatesUI();
     resetCategorySuggestions();
     loadSettings();
     loadQueue().then(() => {
+      if(initialUpcParam){
+        selectUPC(initialUpcParam);
+        return;
+      }
       // Auto-open first non-done item in the queue if nothing is already active.
       if(!state.activeUpc && state.queue && state.queue.length){
         const first = state.queue.find(x => !x._done);
