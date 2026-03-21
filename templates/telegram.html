@@ -1,0 +1,727 @@
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.ico') }}">
+  <title>Telegram Alerts - Sweet Shelves</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    :root {
+      --bg: #eef5ff;
+      --card: #ffffff;
+      --ink: #10233f;
+      --muted: #64748b;
+      --border: #d7e3f4;
+      --accent: #2563eb;
+      --accent-2: #0ea5e9;
+      --good: #10b981;
+      --warn: #f59e0b;
+      --danger: #ef4444;
+      --radius: 16px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: 'Segoe UI', Arial, sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(37,99,235,0.12), transparent 36%),
+        radial-gradient(circle at top right, rgba(14,165,233,0.10), transparent 32%),
+        var(--bg);
+      color: var(--ink);
+    }
+    .wrap {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 18px 16px 80px;
+    }
+    .hero {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 18px;
+      flex-wrap: wrap;
+    }
+    .hero h1 {
+      margin: 0;
+      font-size: 1.55rem;
+      letter-spacing: -0.03em;
+    }
+    .hero p {
+      margin: 4px 0 0;
+      color: var(--muted);
+    }
+    .back-btn, .btn {
+      border: 0;
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-size: 0.9rem;
+      font-weight: 700;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      transition: transform .15s ease, box-shadow .15s ease, opacity .15s ease;
+    }
+    .back-btn:hover, .btn:hover { transform: translateY(-1px); }
+    .btn-primary { background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #fff; }
+    .btn-ghost { background: #fff; color: var(--ink); border: 1px solid var(--border); }
+    .btn-danger { background: #fef2f2; color: var(--danger); border: 1px solid #fecaca; }
+    .grid {
+      display: grid;
+      grid-template-columns: 1.1fr .9fr;
+      gap: 16px;
+      align-items: start;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: 0 10px 30px rgba(16,35,63,0.05);
+      padding: 18px;
+      margin-bottom: 16px;
+    }
+    .card h2 {
+      margin: 0 0 12px 0;
+      font-size: 1.05rem;
+      letter-spacing: -0.02em;
+    }
+    .subtle {
+      color: var(--muted);
+      font-size: 0.9rem;
+      line-height: 1.45;
+    }
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-bottom: 12px;
+    }
+    .field label {
+      font-size: 0.82rem;
+      font-weight: 700;
+      color: #334155;
+    }
+    .field input, .field select, .field textarea {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: #fff;
+      color: var(--ink);
+      padding: 11px 12px;
+      font-size: 0.95rem;
+      font-family: inherit;
+    }
+    .field input:focus, .field select:focus, .field textarea:focus {
+      outline: none;
+      border-color: rgba(37,99,235,0.55);
+      box-shadow: 0 0 0 3px rgba(37,99,235,0.10);
+    }
+    .row {
+      display: grid;
+      grid-template-columns: 1.2fr 1fr 1fr;
+      gap: 10px;
+    }
+    .row.two { grid-template-columns: 1.2fr 1fr; }
+    .stack { display: grid; gap: 12px; }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 0.72rem;
+      font-weight: 800;
+      letter-spacing: 0.01em;
+    }
+    .pill-good { background: rgba(16,185,129,0.12); color: #047857; }
+    .pill-warn { background: rgba(245,158,11,0.14); color: #92400e; }
+    .pill-blue { background: rgba(37,99,235,0.12); color: #1d4ed8; }
+    .switch-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 14px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: #f8fbff;
+      margin-bottom: 10px;
+    }
+    .switch-row label { font-weight: 700; color: #334155; }
+    .switch-row small { color: var(--muted); display: block; margin-top: 3px; }
+    .switch {
+      position: relative;
+      width: 46px;
+      height: 26px;
+      flex-shrink: 0;
+    }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider {
+      position: absolute;
+      inset: 0;
+      background: #cbd5e1;
+      border-radius: 999px;
+      transition: .2s;
+      cursor: pointer;
+    }
+    .slider:before {
+      content: "";
+      position: absolute;
+      width: 20px;
+      height: 20px;
+      left: 3px;
+      top: 3px;
+      border-radius: 50%;
+      background: #fff;
+      transition: .2s;
+    }
+    .switch input:checked + .slider { background: linear-gradient(135deg, var(--accent), var(--accent-2)); }
+    .switch input:checked + .slider:before { transform: translateX(20px); }
+    .hint {
+      margin-top: 10px;
+      border: 1px solid #fde68a;
+      background: #fffbeb;
+      color: #92400e;
+      border-radius: 12px;
+      padding: 12px;
+      font-size: 0.84rem;
+      line-height: 1.45;
+    }
+    .recipient-list {
+      display: grid;
+      gap: 10px;
+    }
+    .recipient-item {
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: #fff;
+      padding: 12px;
+    }
+    .recipient-item-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    .recipient-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin-top: 8px;
+    }
+    .mini-btn {
+      border: 0;
+      background: #e2e8f0;
+      color: #334155;
+      border-radius: 8px;
+      padding: 8px 10px;
+      cursor: pointer;
+      font-weight: 700;
+      font-size: 0.82rem;
+    }
+    .mini-btn:hover { opacity: 0.9; }
+    .mini-btn.red { background: #fee2e2; color: #b91c1c; }
+    .mini-btn.blue { background: #dbeafe; color: #1d4ed8; }
+    .status {
+      display: none;
+      padding: 12px 14px;
+      border-radius: 12px;
+      margin-bottom: 14px;
+      font-size: 0.92rem;
+    }
+    .status.ok { display: block; background: #dcfce7; border: 1px solid #bbf7d0; color: #166534; }
+    .status.err { display: block; background: #fee2e2; border: 1px solid #fecaca; color: #991b1b; }
+    .chat-card {
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 12px;
+      background: #fff;
+      margin-bottom: 10px;
+    }
+    .chat-card strong { display: block; margin-bottom: 4px; }
+    .chat-card .chat-id {
+      font-family: Consolas, monospace;
+      font-size: 0.88rem;
+      color: #0f172a;
+      margin-bottom: 4px;
+    }
+    .chat-card .chat-text {
+      font-size: 0.82rem;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+    .empty {
+      border: 1px dashed var(--border);
+      border-radius: 14px;
+      padding: 20px;
+      color: var(--muted);
+      background: #fff;
+      text-align: center;
+    }
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 14px;
+    }
+    @media (max-width: 900px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 640px) {
+      .row, .row.two { grid-template-columns: 1fr; }
+      .hero { align-items: flex-start; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="hero">
+      <div>
+        <a href="/tools" class="back-btn btn-ghost"><i class="fas fa-arrow-left"></i> Back to Tools</a>
+        <h1 style="margin-top:12px;">Telegram Alerts</h1>
+        <p>Send alerts to different Telegram users by alert type.</p>
+      </div>
+      <div class="pill pill-blue" id="tokenStatus"><i class="fas fa-robot"></i> Bot token not loaded</div>
+    </div>
+
+    <div id="status" class="status"></div>
+
+    <div class="grid">
+      <div>
+        <div class="card">
+          <h2>Bot Token</h2>
+          <div class="field">
+            <label for="botToken">Telegram Bot Token</label>
+            <input id="botToken" type="password" placeholder="Stored locally in the app">
+          </div>
+          <div class="subtle">The bot token is required for sending messages and for the chat discovery lookup.</div>
+          <div class="actions">
+            <button class="btn btn-primary" type="button" onclick="saveAllSettings()"><i class="fas fa-save"></i> Save Settings</button>
+            <button class="btn btn-ghost" type="button" onclick="loadSettings()"><i class="fas fa-rotate"></i> Reload</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Add Recipient</h2>
+          <div class="row">
+            <div class="field">
+              <label for="newChatId">Chat ID</label>
+              <input id="newChatId" type="text" placeholder="123456789">
+            </div>
+            <div class="field">
+              <label for="newDisplayName">Name</label>
+              <input id="newDisplayName" type="text" placeholder="Inventory Room">
+            </div>
+            <div class="field">
+              <label for="newAlertType">Alert Type</label>
+              <select id="newAlertType">
+                <option value="inventory">Inventory</option>
+                <option value="health">Health</option>
+                <option value="sync_overdue">Sync Overdue</option>
+              </select>
+            </div>
+          </div>
+          <div class="row two">
+            <div class="field">
+              <label for="newInterval">Send Interval</label>
+              <select id="newInterval">
+                <option value="10m">10 minutes</option>
+                <option value="30m">30 minutes</option>
+                <option value="1h">1 hour</option>
+                <option value="12h">12 hours</option>
+                <option value="1d" selected>1 day</option>
+                <option value="1w">1 week</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="newDisableNotification">Delivery</label>
+              <select id="newDisableNotification">
+                <option value="1">Silent</option>
+                <option value="0">Notify normally</option>
+              </select>
+            </div>
+          </div>
+          <div class="switch-row">
+            <div>
+              <label for="newEnabled">Enabled</label>
+              <small>Turn off without deleting the row.</small>
+            </div>
+            <label class="switch">
+              <input id="newEnabled" type="checkbox" checked>
+              <span class="slider"></span>
+            </label>
+          </div>
+          <button class="btn btn-primary" type="button" onclick="addRecipient()"><i class="fas fa-plus"></i> Add Recipient</button>
+          <div class="hint">
+            Users must message the bot at least once before their chat ID appears in the discovery panel below. For groups, add the group chat ID after the bot is added to the group.
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Recipients</h2>
+          <div id="recipientList" class="recipient-list"></div>
+          <div class="actions">
+            <button class="btn btn-primary" type="button" onclick="saveAllSettings()"><i class="fas fa-save"></i> Save All</button>
+            <button class="btn btn-ghost" type="button" onclick="sendTestMessage()"><i class="fas fa-paper-plane"></i> Send Test</button>
+            <button class="btn btn-ghost" type="button" onclick="sendAlertType('inventory')"><i class="fas fa-boxes-stacked"></i> Send Inventory</button>
+            <button class="btn btn-ghost" type="button" onclick="sendAlertType('health')"><i class="fas fa-heart-pulse"></i> Send Health</button>
+            <button class="btn btn-ghost" type="button" onclick="sendAlertType('sync_overdue')"><i class="fas fa-clock"></i> Send Sync Overdue</button>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="card">
+          <h2>Chat Discovery</h2>
+          <div class="subtle">Send a message to the bot, then refresh this list to pull the latest chats from Telegram.</div>
+          <div class="actions">
+            <button class="btn btn-primary" type="button" onclick="refreshChats()"><i class="fas fa-rotate"></i> Refresh Chats</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Recent Chats</h2>
+          <div id="recentChats" class="stack">
+            <div class="empty">No chats loaded yet.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let telegramRecipients = [];
+    let recentChats = [];
+
+    function showStatus(message, kind = 'ok') {
+      const box = document.getElementById('status');
+      box.className = `status ${kind}`;
+      box.textContent = message;
+      box.style.display = 'block';
+    }
+
+    function clearStatus() {
+      const box = document.getElementById('status');
+      box.style.display = 'none';
+      box.textContent = '';
+      box.className = 'status';
+    }
+
+    function renderTokenStatus(hasToken, suffix) {
+      const el = document.getElementById('tokenStatus');
+      if (hasToken) {
+        el.className = 'pill pill-good';
+        el.innerHTML = `<i class="fas fa-robot"></i> Bot token loaded${suffix ? ` ...${suffix}` : ''}`;
+      } else {
+        el.className = 'pill pill-warn';
+        el.innerHTML = '<i class="fas fa-triangle-exclamation"></i> Bot token not loaded';
+      }
+    }
+
+    function renderRecipients() {
+      const list = document.getElementById('recipientList');
+      if (!telegramRecipients.length) {
+        list.innerHTML = '<div class="empty">No recipients configured yet.</div>';
+        return;
+      }
+
+      list.innerHTML = telegramRecipients.map((row, index) => {
+        const enabled = Number(row.enabled || 0) === 1;
+        const silent = Number(row.disable_notification || 1) === 1;
+        return `
+          <div class="recipient-item">
+            <div class="recipient-item-top">
+              <div>
+                <strong>${escapeHtml(row.display_name || row.chat_id || `Recipient ${index + 1}`)}</strong>
+                <div class="subtle">Chat ID: <span style="font-family:Consolas,monospace;">${escapeHtml(row.chat_id || '')}</span></div>
+              </div>
+              <button class="mini-btn red" type="button" onclick="removeRecipient(${index})"><i class="fas fa-trash"></i> Remove</button>
+            </div>
+            <div class="row">
+              <div class="field">
+                <label>Chat ID</label>
+                <input type="text" value="${escapeAttr(row.chat_id || '')}" onchange="updateRecipientField(${index}, 'chat_id', this.value)">
+              </div>
+              <div class="field">
+                <label>Name</label>
+                <input type="text" value="${escapeAttr(row.display_name || '')}" onchange="updateRecipientField(${index}, 'display_name', this.value)">
+              </div>
+              <div class="field">
+                <label>Alert Type</label>
+                <select onchange="updateRecipientField(${index}, 'alert_type', this.value)">
+                  ${renderAlertTypeOptions(row.alert_type || 'inventory')}
+                </select>
+              </div>
+            </div>
+            <div class="row two">
+              <div class="field">
+                <label>Interval</label>
+                <select onchange="updateRecipientField(${index}, 'interval', this.value)">
+                  ${renderIntervalOptions(row.interval || '1d')}
+                </select>
+              </div>
+              <div class="field">
+                <label>Delivery</label>
+                <select onchange="updateRecipientField(${index}, 'disable_notification', this.value)">
+                  <option value="1" ${silent ? 'selected' : ''}>Silent</option>
+                  <option value="0" ${!silent ? 'selected' : ''}>Notify normally</option>
+                </select>
+              </div>
+            </div>
+            <div class="recipient-meta">
+              <label class="switch" title="Enabled">
+                <input type="checkbox" ${enabled ? 'checked' : ''} onchange="updateRecipientField(${index}, 'enabled', this.checked ? 1 : 0)">
+                <span class="slider"></span>
+              </label>
+              <span class="pill ${enabled ? 'pill-good' : 'pill-warn'}">${enabled ? 'Enabled' : 'Disabled'}</span>
+              <button class="mini-btn blue" type="button" onclick="testRecipient(${index})"><i class="fas fa-paper-plane"></i> Test</button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderAlertTypeOptions(selected) {
+      const options = [
+        ['inventory', 'Inventory'],
+        ['health', 'Health'],
+        ['sync_overdue', 'Sync Overdue']
+      ];
+      return options.map(([value, label]) => `<option value="${value}" ${String(selected) === value ? 'selected' : ''}>${label}</option>`).join('');
+    }
+
+    function renderIntervalOptions(selected) {
+      const options = [
+        ['10m', '10 minutes'],
+        ['30m', '30 minutes'],
+        ['1h', '1 hour'],
+        ['12h', '12 hours'],
+        ['1d', '1 day'],
+        ['1w', '1 week']
+      ];
+      return options.map(([value, label]) => `<option value="${value}" ${String(selected) === value ? 'selected' : ''}>${label}</option>`).join('');
+    }
+
+    function updateRecipientField(index, field, value) {
+      telegramRecipients[index][field] = value;
+    }
+
+    function addRecipient() {
+      const chatId = document.getElementById('newChatId').value.trim();
+      const displayName = document.getElementById('newDisplayName').value.trim();
+      const alertType = document.getElementById('newAlertType').value;
+      const interval = document.getElementById('newInterval').value;
+      const disableNotification = document.getElementById('newDisableNotification').value;
+      const enabled = document.getElementById('newEnabled').checked ? 1 : 0;
+
+      if (!chatId) {
+        showStatus('Please enter a Telegram chat ID.', 'err');
+        return;
+      }
+
+      if (telegramRecipients.find(r => String(r.chat_id || '') === chatId && String(r.alert_type || '') === alertType)) {
+        showStatus('That chat ID is already subscribed to this alert type.', 'err');
+        return;
+      }
+
+      telegramRecipients.push({
+        chat_id: chatId,
+        display_name: displayName,
+        alert_type: alertType,
+        interval: interval,
+        disable_notification: disableNotification,
+        enabled: enabled,
+        last_sent_at: '',
+        last_test_sent: ''
+      });
+
+      document.getElementById('newChatId').value = '';
+      document.getElementById('newDisplayName').value = '';
+      document.getElementById('newEnabled').checked = true;
+      renderRecipients();
+      showStatus('Recipient added. Save settings to persist it.', 'ok');
+    }
+
+    function removeRecipient(index) {
+      telegramRecipients.splice(index, 1);
+      renderRecipients();
+      showStatus('Recipient removed locally. Save settings to persist it.', 'ok');
+    }
+
+    function getRecipientChatIds(recipient) {
+      return recipient && recipient.chat_id ? [String(recipient.chat_id)] : [];
+    }
+
+    async function loadSettings() {
+      clearStatus();
+      try {
+        const resp = await fetch('/api/telegram/settings');
+        const data = await resp.json();
+        if (!resp.ok || !data.success) throw new Error(data.error || `HTTP ${resp.status}`);
+        telegramRecipients = Array.isArray(data.recipients) ? data.recipients : [];
+        renderRecipients();
+        renderTokenStatus(!!data.has_token, data.token_suffix || '');
+      } catch (err) {
+        showStatus(err.message, 'err');
+      }
+    }
+
+    async function saveAllSettings() {
+      clearStatus();
+      try {
+        const payload = {
+          bot_token: document.getElementById('botToken').value.trim(),
+          recipients: telegramRecipients
+        };
+        const resp = await fetch('/api/telegram/settings', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(payload)
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.success) throw new Error(data.error || `HTTP ${resp.status}`);
+        showStatus('Telegram settings saved.', 'ok');
+        document.getElementById('botToken').value = '';
+        loadSettings();
+      } catch (err) {
+        showStatus(err.message, 'err');
+      }
+    }
+
+    async function refreshChats() {
+      clearStatus();
+      const panel = document.getElementById('recentChats');
+      panel.innerHTML = '<div class="empty">Loading recent chats...</div>';
+      try {
+        const resp = await fetch('/api/telegram/recent-chats');
+        const data = await resp.json();
+        if (!resp.ok || !data.success) throw new Error(data.error || `HTTP ${resp.status}`);
+        recentChats = Array.isArray(data.chats) ? data.chats : [];
+        renderRecentChats();
+      } catch (err) {
+        panel.innerHTML = `<div class="empty">${escapeHtml(err.message)}</div>`;
+      }
+    }
+
+    function renderRecentChats() {
+      const panel = document.getElementById('recentChats');
+      if (!recentChats.length) {
+        panel.innerHTML = '<div class="empty">No chats returned yet. Message the bot, then try again.</div>';
+        return;
+      }
+
+      panel.innerHTML = recentChats.map(chat => {
+        const label = [
+          chat.title,
+          [chat.first_name, chat.last_name].filter(Boolean).join(' '),
+          chat.username ? `@${chat.username}` : '',
+          chat.type ? `(${chat.type})` : ''
+        ].filter(Boolean).join(' ');
+        return `
+          <div class="chat-card">
+            <strong>${escapeHtml(label || 'Telegram Chat')}</strong>
+            <div class="chat-id">${escapeHtml(chat.chat_id || '')}</div>
+            <div class="chat-text">${escapeHtml((chat.text || '').slice(0, 180) || 'No recent text')}</div>
+            <div class="actions">
+              <button class="mini-btn blue" type="button" data-chat="${escapeAttr(JSON.stringify(chat))}" onclick="useChat(this.dataset.chat)"><i class="fas fa-plus"></i> Use This Chat</button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function useChat(chat) {
+      if (typeof chat === 'string') {
+        try { chat = JSON.parse(chat); } catch (err) { chat = {}; }
+      }
+      document.getElementById('newChatId').value = chat.chat_id || '';
+      document.getElementById('newDisplayName').value = chat.title || chat.first_name || chat.username || '';
+      showStatus('Chat copied into the add form. Choose an alert type and save.', 'ok');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    async function sendTestMessage() {
+      clearStatus();
+      try {
+        const chatIds = telegramRecipients.map(r => String(r.chat_id || '').trim()).filter(Boolean);
+        if (!chatIds.length) {
+          throw new Error('Add at least one recipient before sending a test message.');
+        }
+        const message = 'Telegram test message from Sweet Shelves.';
+        const resp = await fetch('/api/telegram/send-test', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({chat_ids: chatIds, message})
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.success) throw new Error(data.error || `HTTP ${resp.status}`);
+        showStatus(`Sent test message to ${data.results.length} chat(s).`, 'ok');
+      } catch (err) {
+        showStatus(err.message, 'err');
+      }
+    }
+
+    async function sendAlertType(alertType) {
+      clearStatus();
+      try {
+        const endpointMap = {
+          inventory: '/api/telegram/send-inventory',
+          health: '/api/telegram/send-health',
+          sync_overdue: '/api/telegram/send-sync-overdue'
+        };
+        const endpoint = endpointMap[alertType];
+        if (!endpoint) throw new Error('Unknown alert type');
+        const resp = await fetch(endpoint, { method: 'POST' });
+        const data = await resp.json();
+        if (!resp.ok || !data.success) throw new Error(data.error || `HTTP ${resp.status}`);
+        const sent = Number(data.sent || 0);
+        showStatus(`${alertType.replace('_', ' ')} alert sent to ${sent} recipient(s).`, 'ok');
+      } catch (err) {
+        showStatus(err.message, 'err');
+      }
+    }
+
+    async function testRecipient(index) {
+      clearStatus();
+      try {
+        const recipient = telegramRecipients[index];
+        const chatIds = getRecipientChatIds(recipient);
+        if (!chatIds.length) throw new Error('Missing chat ID for this recipient.');
+        const resp = await fetch('/api/telegram/send-test', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            chat_ids: chatIds,
+            message: `Telegram test for ${recipient.display_name || recipient.chat_id || 'recipient'}`
+          })
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.success) throw new Error(data.error || `HTTP ${resp.status}`);
+        showStatus('Test message sent.', 'ok');
+      } catch (err) {
+        showStatus(err.message, 'err');
+      }
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+    }
+
+    function escapeAttr(value) {
+      return escapeHtml(value).replaceAll('`', '&#96;');
+    }
+
+    loadSettings();
+  </script>
+</body>
+</html>

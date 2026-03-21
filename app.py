@@ -28,7 +28,7 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent
 
 from inventory import find_item  # adjust this to match your actual import
-from DBmanager import ebayStoreDB, amazonStoreDB, store_ebay_order, createSearchRackDB, addToSearchRack, resolve_barcode_from_marketplace_sku
+from DBmanager import ebayStoreDB, amazonStoreDB, store_ebay_order, createSearchRackDB, addToSearchRack, resolve_barcode_from_marketplace_sku, ensure_sold_orders_schema
 from DBmanager import enrich_searchrack_db
 
 # Disable print statements globally for performance boost
@@ -1053,6 +1053,14 @@ def _effective_sold_order_barcode(order):
         return str(resolved or barcode).strip()
     except Exception:
         return barcode
+
+def _is_exact_traced_suffixed_sold_order(order):
+    source_upc = str(_sold_order_value(order, 'source_upc', '') or '').strip()
+    if not source_upc or '-' not in source_upc:
+        return False
+    trace_source = str(_sold_order_value(order, 'listing_trace_source', '') or '').strip().lower()
+    trace_id = str(_sold_order_value(order, 'listing_trace_id', '') or '').strip()
+    return trace_source == 'listingagent' or bool(trace_id)
 
 
 def _barcode_base_without_suffix(value):
@@ -13938,6 +13946,445 @@ def send_inventory_alert_email():
         import traceback
         traceback.print_exc()
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
+
+def _ensure_telegram_tables():
+    conn = None
+    try:
+        conn = sqlite3.connect('searchRack.db')
+        cur = conn.cursor()
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS telegram_config (
+                key TEXT PRIMARY KEY,
+                value TEXT,
+                updated_at TEXT
+            )
+        ''')
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS telegram_recipients (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id TEXT NOT NULL,
+                display_name TEXT,
+                alert_type TEXT DEFAULT 'inventory',
+                interval TEXT DEFAULT '1d',
+                enabled INTEGER DEFAULT 1,
+                disable_notification INTEGER DEFAULT 1,
+                last_sent_at TEXT,
+                last_test_sent TEXT,
+                created_at TEXT,
+                updated_at TEXT,
+                UNIQUE(chat_id, alert_type)
+            )
+        ''')
+        conn.commit()
+    finally:
+        if conn is not None:
+            conn.close()
+
+def _telegram_get_config_value(key, default=''):
+    _ensure_telegram_tables()
+    conn = None
+    try:
+        conn = sqlite3.connect('searchRack.db')
+        cur = conn.cursor()
+        cur.execute('SELECT value FROM telegram_config WHERE key = ?', (key,))
+        row = cur.fetchone()
+        return str(row[0] or '').strip() if row and row[0] is not None else default
+    except Exception:
+        return default
+    finally:
+        if conn is not None:
+            conn.close()
+
+def _telegram_set_config_value(key, value):
+    _ensure_telegram_tables()
+    conn = None
+    try:
+        conn = sqlite3.connect('searchRack.db')
+        cur = conn.cursor()
+        cur.execute('''
+            INSERT OR REPLACE INTO telegram_config (key, value, updated_at)
+            VALUES (?, ?, ?)
+        ''', (key, str(value or '').strip(), datetime.datetime.now().isoformat()))
+        conn.commit()
+    finally:
+        if conn is not None:
+            conn.close()
+
+def _telegram_get_bot_token():
+    token = _telegram_get_config_value('bot_token', '')
+    if token:
+        return token
+    return str(os.getenv('TELEGRAM_BOT_TOKEN') or '').strip()
+
+def _telegram_api_base():
+    token = _telegram_get_bot_token()
+    if not token:
+        return ''
+    return f'https://api.telegram.org/bot{token}'
+
+def _telegram_send_message(chat_id, text, disable_notification=True):
+    base = _telegram_api_base()
+    if not base:
+        return False, 'Telegram bot token is not configured'
+    if not chat_id:
+        return False, 'Missing Telegram chat id'
+
+    try:
+        resp = requests.post(
+            f'{base}/sendMessage',
+            json={
+                'chat_id': str(chat_id),
+                'text': str(text or ''),
+                'disable_notification': bool(disable_notification)
+            },
+            timeout=20
+        )
+        data = resp.json() if resp.content else {}
+        if not resp.ok or not data.get('ok'):
+            return False, data.get('description') or f'HTTP {resp.status_code}'
+        return True, data.get('result', {})
+    except Exception as e:
+        return False, str(e)
+
+def _telegram_parse_interval_minutes(interval):
+    raw = str(interval or '').strip().lower()
+    if raw == '10m':
+        return 10
+    if raw == '30m':
+        return 30
+    if raw == '1h':
+        return 60
+    if raw == '12h':
+        return 720
+    if raw == '1d':
+        return 1440
+    if raw == '1w':
+        return 10080
+    return 1440
+
+def _telegram_collect_recipient_rows():
+    _ensure_telegram_tables()
+    conn = sqlite3.connect('searchRack.db')
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    cur.execute('''
+        SELECT id, chat_id, display_name, alert_type, interval, enabled, disable_notification, last_sent_at, last_test_sent
+        FROM telegram_recipients
+        ORDER BY COALESCE(display_name, chat_id) COLLATE NOCASE ASC, id ASC
+    ''')
+    rows = [dict(row) for row in cur.fetchall()]
+    conn.close()
+    return rows
+
+def _telegram_recipient_label(recipient):
+    chat_id = str(_telegram_recipient_value(recipient, 'chat_id', '') or '').strip()
+    name = str(_telegram_recipient_value(recipient, 'display_name', '') or '').strip()
+    alert_type = str(_telegram_recipient_value(recipient, 'alert_type', '') or '').strip().lower()
+    if name:
+        return name
+    if chat_id:
+        return chat_id
+    return alert_type or 'Recipient'
+
+def _telegram_recipient_value(recipient, key, default=''):
+    if recipient is None:
+        return default
+    try:
+        if isinstance(recipient, dict):
+            return recipient.get(key, default)
+    except Exception:
+        pass
+    try:
+        return recipient[key]
+    except Exception:
+        return default
+
+def _telegram_subscription_targets(alert_type):
+    rows = []
+    for row in _telegram_collect_recipient_rows():
+        if int(row.get('enabled') or 0) != 1:
+            continue
+        if str(row.get('alert_type') or '').strip().lower() != str(alert_type or '').strip().lower():
+            continue
+        rows.append(row)
+    return rows
+
+def _telegram_send_alert_to_recipients(alert_type, text_builder, *, recipients=None):
+    sent = 0
+    errors = []
+    target_rows = recipients if recipients is not None else _telegram_subscription_targets(alert_type)
+    now_iso = datetime.datetime.now().isoformat()
+    if not target_rows:
+        return {'sent': 0, 'errors': [], 'skipped': 'No Telegram recipients configured for this alert type'}
+
+    conn = sqlite3.connect('searchRack.db')
+    cur = conn.cursor()
+    try:
+        for row in target_rows:
+            chat_id = str(row.get('chat_id') or '').strip()
+            if not chat_id:
+                continue
+            try:
+                body = str(text_builder(row) or '').strip()
+                label = _telegram_recipient_label(row)
+                text = f"Hi {label},\n\n{body}" if label else body
+                disable_notification = bool(int(row.get('disable_notification') or 1))
+                ok, result = _telegram_send_message(chat_id, text, disable_notification=disable_notification)
+                if ok:
+                    sent += 1
+                    cur.execute('''
+                        UPDATE telegram_recipients
+                        SET last_sent_at = ?, updated_at = ?
+                        WHERE id = ?
+                    ''', (now_iso, now_iso, row['id']))
+                else:
+                    errors.append({'chat_id': chat_id, 'error': result})
+            except Exception as inner_e:
+                errors.append({'chat_id': chat_id, 'error': str(inner_e)})
+        conn.commit()
+    finally:
+        conn.close()
+    return {'sent': sent, 'errors': errors}
+
+@app.route('/telegram')
+def telegram_page():
+    return render_template('telegram.html')
+
+@app.route('/api/telegram/settings', methods=['GET', 'POST'])
+def api_telegram_settings():
+    try:
+        _ensure_telegram_tables()
+        if request.method == 'GET':
+            config_token = _telegram_get_bot_token()
+            token_suffix = config_token[-4:] if len(config_token) >= 4 else config_token
+            recipients = _telegram_collect_recipient_rows()
+            return jsonify({
+                'success': True,
+                'has_token': bool(config_token),
+                'token_suffix': token_suffix,
+                'recipients': recipients
+            })
+
+        data = request.get_json() or {}
+        bot_token = str(data.get('bot_token') or '').strip()
+        if bot_token:
+            _telegram_set_config_value('bot_token', bot_token)
+        recipients = data.get('recipients', [])
+        conn = sqlite3.connect('searchRack.db')
+        cur = conn.cursor()
+        cur.execute('DELETE FROM telegram_recipients')
+        now_iso = datetime.datetime.now().isoformat()
+        for recipient in recipients:
+            if not isinstance(recipient, dict):
+                continue
+            chat_id = str(recipient.get('chat_id') or '').strip()
+            alert_type = str(recipient.get('alert_type') or 'inventory').strip().lower()
+            if not chat_id:
+                continue
+            display_name = str(recipient.get('display_name') or '').strip()
+            interval = str(recipient.get('interval') or '1d').strip()
+            enabled = 1 if str(recipient.get('enabled', 1)).strip().lower() not in ('0', 'false', 'no', 'off') else 0
+            disable_notification = 1 if str(recipient.get('disable_notification', 1)).strip().lower() not in ('0', 'false', 'no', 'off') else 0
+            cur.execute('''
+                INSERT INTO telegram_recipients
+                (chat_id, display_name, alert_type, interval, enabled, disable_notification, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (chat_id, display_name, alert_type, interval, enabled, disable_notification, now_iso, now_iso))
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e)}), 500
+
+@app.route('/api/telegram/recent-chats', methods=['GET'])
+def api_telegram_recent_chats():
+    try:
+        base = _telegram_api_base()
+        if not base:
+            return jsonify({'success': False, 'error': 'Telegram bot token is not configured'}), 400
+        limit = max(1, min(50, int(request.args.get('limit', 20))))
+        resp = requests.get(f'{base}/getUpdates', params={'timeout': 0, 'limit': limit}, timeout=20)
+        data = resp.json() if resp.content else {}
+        if not resp.ok or not data.get('ok'):
+            return jsonify({'success': False, 'error': data.get('description') or f'HTTP {resp.status_code}'}), 500
+
+        chats = []
+        seen = set()
+        for update in data.get('result', []):
+            msg = update.get('message') or update.get('edited_message') or update.get('channel_post') or {}
+            chat = msg.get('chat') or {}
+            chat_id = str(chat.get('id') or '').strip()
+            if not chat_id or chat_id in seen:
+                continue
+            seen.add(chat_id)
+            chats.append({
+                'chat_id': chat_id,
+                'title': chat.get('title') or '',
+                'username': chat.get('username') or '',
+                'first_name': chat.get('first_name') or '',
+                'last_name': chat.get('last_name') or '',
+                'type': chat.get('type') or '',
+                'text': msg.get('text') or '',
+                'date': msg.get('date') or ''
+            })
+
+        return jsonify({'success': True, 'chats': chats})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e)}), 500
+
+@app.route('/api/telegram/send-test', methods=['POST'])
+def api_telegram_send_test():
+    try:
+        data = request.get_json() or {}
+        chat_ids = data.get('chat_ids', [])
+        message = str(data.get('message') or 'Telegram test message from Sweet Shelves').strip()
+        if not chat_ids:
+            return jsonify({'success': False, 'error': 'No chat_ids provided'}), 400
+        results = []
+        for chat_id in chat_ids:
+            ok, result = _telegram_send_message(chat_id, message, disable_notification=False)
+            results.append({'chat_id': chat_id, 'success': ok, 'result': result})
+        return jsonify({'success': True, 'results': results})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e)}), 500
+
+@app.route('/api/telegram/send-inventory', methods=['POST'])
+def api_telegram_send_inventory():
+    try:
+        issues = collect_inventory_mismatches()
+        if not issues.get('has_issues'):
+            return jsonify({'success': True, 'message': 'No inventory issues found'}), 200
+
+        def _build_text(_recipient):
+            return generate_inventory_email_plain(issues)
+
+        recipients = _telegram_subscription_targets('inventory')
+        result = _telegram_send_alert_to_recipients('inventory', _build_text, recipients=recipients)
+        return jsonify({'success': True, 'sent': result['sent'], 'errors': result.get('errors', [])})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e)}), 500
+
+@app.route('/api/telegram/send-health', methods=['POST'])
+def api_telegram_send_health():
+    try:
+        stats = collect_health_stats()
+
+        def _build_text(_recipient):
+            return generate_health_email_plain(stats)
+
+        recipients = _telegram_subscription_targets('health')
+        result = _telegram_send_alert_to_recipients('health', _build_text, recipients=recipients)
+        return jsonify({'success': True, 'sent': result['sent'], 'errors': result.get('errors', [])})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e)}), 500
+
+@app.route('/api/telegram/send-sync-overdue', methods=['POST'])
+def api_telegram_send_sync_overdue():
+    try:
+        alert = _sync_manager_overdue_alert()
+        if not alert:
+            return jsonify({'success': True, 'message': 'No sync overdue alert is currently active'}), 200
+
+        def _build_text(_recipient):
+            lines = [
+                'SYNC OVERDUE ALERT',
+                f"Overdue count: {alert.get('overdue_count', 0)}",
+                f"Last sync: {alert.get('last_sync_at') or 'unknown'}",
+                f"Threshold: {alert.get('threshold_minutes') or 'unknown'} minutes",
+                '',
+                str(alert.get('message') or '').strip()
+            ]
+            return '\n'.join(line for line in lines if line is not None)
+
+        recipients = _telegram_subscription_targets('sync_overdue')
+        result = _telegram_send_alert_to_recipients('sync_overdue', _build_text, recipients=recipients)
+        return jsonify({'success': True, 'sent': result['sent'], 'errors': result.get('errors', [])})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e)}), 500
+
+def telegram_alert_worker():
+    """Background worker that sends Telegram alerts to per-user subscriptions."""
+    import time
+    while True:
+        try:
+            recipients = _telegram_collect_recipient_rows()
+            if not recipients or not _telegram_get_bot_token():
+                time.sleep(300)
+                continue
+
+            now = datetime.datetime.now()
+            sent_any = False
+
+            for alert_type in ('inventory', 'health', 'sync_overdue'):
+                relevant = []
+                for row in recipients:
+                    if int(row.get('enabled') or 0) != 1:
+                        continue
+                    if str(row.get('alert_type') or '').strip().lower() != alert_type:
+                        continue
+                    interval_minutes = _telegram_parse_interval_minutes(row.get('interval'))
+                    last_sent_raw = str(row.get('last_sent_at') or '').strip()
+                    if last_sent_raw:
+                        try:
+                            last_sent_dt = datetime.datetime.fromisoformat(last_sent_raw)
+                            if (now - last_sent_dt).total_seconds() < interval_minutes * 60:
+                                continue
+                        except Exception:
+                            pass
+                    relevant.append(row)
+
+                if not relevant:
+                    continue
+
+                if alert_type == 'inventory':
+                    issues = collect_inventory_mismatches()
+                    if not issues.get('has_issues'):
+                        continue
+
+                    def _build_text(_recipient):
+                        return generate_inventory_email_plain(issues)
+
+                    result = _telegram_send_alert_to_recipients(alert_type, _build_text, recipients=relevant)
+                    sent_any = sent_any or bool(result.get('sent'))
+                elif alert_type == 'health':
+                    stats = collect_health_stats()
+
+                    def _build_text(_recipient):
+                        return generate_health_email_plain(stats)
+
+                    result = _telegram_send_alert_to_recipients(alert_type, _build_text, recipients=relevant)
+                    sent_any = sent_any or bool(result.get('sent'))
+                elif alert_type == 'sync_overdue':
+                    alert = _sync_manager_overdue_alert()
+                    if not alert:
+                        continue
+
+                    def _build_text(_recipient):
+                        lines = [
+                            'SYNC OVERDUE ALERT',
+                            f"Overdue count: {alert.get('overdue_count', 0)}",
+                            f"Last sync: {alert.get('last_sync_at') or 'unknown'}",
+                            f"Threshold: {alert.get('threshold_minutes') or 'unknown'} minutes",
+                            '',
+                            str(alert.get('message') or '').strip()
+                        ]
+                        return '\n'.join(line for line in lines if line is not None)
+
+                    result = _telegram_send_alert_to_recipients(alert_type, _build_text, recipients=relevant)
+                    sent_any = sent_any or bool(result.get('sent'))
+
+            time.sleep(300 if sent_any else 600)
+        except Exception as e:
+            print(f"❌ Telegram alert worker error: {e}")
+            import traceback
+            traceback.print_exc()
+            time.sleep(300)
+
+def _start_telegram_alert_thread():
+    """Start the Telegram alert background thread."""
+    telegram_thread = threading.Thread(target=telegram_alert_worker, daemon=True)
+    telegram_thread.start()
+    print("🚀 Telegram alert thread started")
 
 def collect_health_stats():
     """Collect all health statistics for the app"""
@@ -41801,7 +42248,6 @@ def api_create_test_sold_order():
         barcode = _normalize_upc(data.get('barcode', '').strip())
         title   = data.get('title', '').strip()
         store   = (data.get('store') or 'test').strip().lower()
-
         try:
             quantity = max(1, int(data.get('quantity', 1)))
         except (ValueError, TypeError):
@@ -41843,6 +42289,25 @@ def api_create_test_sold_order():
         shipping_postal  = (data.get('shipping_postal_code') or '').strip()
         shipping_country = (data.get('shipping_country') or 'US').strip().upper() or 'US'
         set_shipped      = bool(data.get('set_shipped'))
+        exact_trace_mode = bool(data.get('exact_trace_mode')) or ('-' in barcode)
+        source_upc_input = (data.get('source_upc') or barcode or '').strip()
+        source_upc = _normalize_upc_preserve_suffix_for_match(source_upc_input)
+        if exact_trace_mode and not source_upc:
+            source_upc = barcode
+        source_base_upc = _barcode_base_without_suffix(source_upc)
+        listing_trace_source = (data.get('listing_trace_source') or '').strip().lower()
+        if exact_trace_mode and not listing_trace_source:
+            listing_trace_source = 'listingagent'
+        listing_trace_id = (data.get('listing_trace_id') or '').strip()
+        if exact_trace_mode and not listing_trace_id:
+            import time as _time
+            listing_trace_id = f"TEST-LISTING-{int(_time.time())}-{random.randint(1000,9999)}"
+        listing_listing_id = (data.get('listing_listing_id') or '').strip()
+        listing_offer_id = (data.get('listing_offer_id') or '').strip()
+        listing_sku = (data.get('listing_sku') or sku or '').strip()
+        listing_asin = (data.get('listing_asin') or item_id or '').strip()
+        if exact_trace_mode and source_upc and source_upc != barcode:
+            barcode = source_upc
 
         import datetime
         paid_time     = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -41851,6 +42316,7 @@ def api_create_test_sold_order():
         conn = sqlite3.connect('sold.db')
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
+        ensure_sold_orders_schema(cur, conn, default_store=store)
 
         cur.execute('''
             INSERT INTO orders (
@@ -41860,8 +42326,10 @@ def api_create_test_sold_order():
                 shipping_city, shipping_state, shipping_postal_code, shipping_country,
                 paid_time, shipped_time,
                 seller_fee, taxes, shipping_cost,
-                barcode, store, isHandled, rackupdated
-            ) VALUES (?,?,?,?,?,?, ?,  ?,?,?,?,?,?,?,  ?,?,  ?,?,?,  ?,?, '',0)
+                barcode, source_upc, source_base_upc, listing_trace_id, listing_trace_created_at,
+                listing_trace_source, listing_listing_id, listing_offer_id, listing_sku, listing_asin,
+                store, isHandled, rackupdated
+            ) VALUES (?,?,?,?,?,?, ?,  ?,?,?,?,?,?,?,  ?,?,  ?,?,?,  ?,?,?,?,?,?,?,?,?,?,?, '',0)
         ''', (
             order_id, item_id, sku, title, quantity, price,
             checkout_status,
@@ -41869,17 +42337,30 @@ def api_create_test_sold_order():
             shipping_city, shipping_state, shipping_postal, shipping_country,
             paid_time, shipped_time,
             seller_fee, taxes, shipping_cost,
-            barcode, store
+            barcode, source_upc, source_base_upc, listing_trace_id, paid_time if listing_trace_id else '',
+            listing_trace_source, listing_listing_id, listing_offer_id, listing_sku, listing_asin,
+            store
         ))
 
         conn.commit()
         inserted_id = cur.lastrowid
+        exact_traced = _is_exact_traced_suffixed_sold_order({
+            'source_upc': source_upc,
+            'listing_trace_source': listing_trace_source,
+            'listing_trace_id': listing_trace_id
+        })
 
         return jsonify({
             'success': True,
             'order_id': order_id,
             'id': inserted_id,
-            'message': 'Test order created successfully'
+            'message': 'Test order created successfully',
+            'barcode': barcode,
+            'source_upc': source_upc,
+            'source_base_upc': source_base_upc,
+            'listing_trace_id': listing_trace_id,
+            'listing_trace_source': listing_trace_source,
+            'exact_traced': exact_traced
         })
 
     except Exception as e:
@@ -42358,6 +42839,11 @@ def start_background_services():
         _start_emailer_alert_thread()
     except Exception as e:
         print(f"Failed to start emailer: {e}")
+
+    try:
+        _start_telegram_alert_thread()
+    except Exception as e:
+        print(f"Failed to start telegram alerts: {e}")
 
     try:
         _start_mail_center_refresh_thread()

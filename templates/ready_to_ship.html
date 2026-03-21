@@ -1586,7 +1586,31 @@ function patchReadyToShipPrepFlag(orderId) {
     const order = OrderManager.getOrder(orderId);
     const slot = document.querySelector(`.rt-prep-flag-slot[data-order-id="${String(orderId)}"]`);
     if (!slot) return;
-    slot.innerHTML = renderReadyToShipPrepFlag(order);
+    slot.innerHTML = renderReadyToShipMetaBadges(order);
+}
+
+function isExactTracedSuffixedOrder(order) {
+    if (!order || typeof order !== 'object') return false;
+    const sourceUpc = String(order.source_upc || '').trim();
+    if (!sourceUpc || !sourceUpc.includes('-')) return false;
+    const traceSource = String(order.listing_trace_source || '').trim().toLowerCase();
+    const traceId = String(order.listing_trace_id || '').trim();
+    return traceSource === 'listingagent' || traceId !== '';
+}
+
+function renderReadyToShipTraceBadge(order) {
+    if (!isExactTracedSuffixedOrder(order)) return '';
+    const sourceUpc = esc(order.source_upc || '');
+    return `<span class="rt-trace-badge" title="Exact listing-agent item: ${sourceUpc}"><i class="fas fa-tag"></i><span>Exact Listing</span></span>`;
+}
+
+function renderReadyToShipMetaBadges(order) {
+    const bits = [];
+    const traceBadge = renderReadyToShipTraceBadge(order);
+    const prepFlag = renderReadyToShipPrepFlag(order);
+    if (traceBadge) bits.push(traceBadge);
+    if (prepFlag) bits.push(prepFlag);
+    return bits.join('');
 }
 
 function tdTitle(order) {
@@ -1596,7 +1620,7 @@ function tdTitle(order) {
     const thumbHtml = imgSrc
         ? `<img src="${imgSrc}" style="width:44px;height:44px;object-fit:cover;border-radius:8px;margin-right:10px;vertical-align:middle;border:1px solid rgba(255,255,255,0.08);" onerror="this.src='${missingDataUrlThumb}'" loading="lazy">`
         : `<img src='${missingDataUrlThumb}' style="width:44px;height:44px;object-fit:cover;border-radius:8px;margin-right:10px;vertical-align:middle;border:1px solid rgba(255,255,255,0.08);">`;
-    return `<td class='sold-td-small'><div class="rt-title-wrap">${thumbHtml}<div class="rt-title-copy"><a href="#" class="order-title-link rt-title-link" data-order-id="${order.id}">${fullTitle}</a><div class="rt-prep-flag-slot" data-order-id="${order.id}">${renderReadyToShipPrepFlag(order)}</div></div></div></td>`;
+    return `<td class='sold-td-small'><div class="rt-title-wrap">${thumbHtml}<div class="rt-title-copy"><a href="#" class="order-title-link rt-title-link" data-order-id="${order.id}">${fullTitle}</a><div class="rt-prep-flag-slot" data-order-id="${order.id}">${renderReadyToShipMetaBadges(order)}</div></div></div></td>`;
 }
 
 function tdInfo(order) {
@@ -1644,6 +1668,9 @@ function createOrderRow(order, isCompleted = false) {
     const tr = document.createElement('tr');
     tr.dataset.orderId = order.id;
     tr.style.transition = 'all 0.3s ease';
+    if (isExactTracedSuffixedOrder(order)) {
+        tr.classList.add('rt-row-traced');
+    }
 
     const buttonHtml = isCompleted
         ? `<button class="handle-btn undo-btn status-btn status-btn-undo" data-id="${order.id}">
