@@ -3774,7 +3774,7 @@
         state.checkRequest = (state.item.checker && state.item.checker.request) ? state.item.checker.request : null;
         state.checkRequestOpen = false;
         state.checkRequestLoaded = true;
-        state.baseImages = Array.isArray(state.item.images) ? [...state.item.images] : [];
+        state.baseImages = _filterListingAgentBaseGalleryImages(state.item.images);
         state.storeTemplateImages = {ebay: [], amazon: []};
         state.imageOrder = {ebay: [], amazon: []};
         state.dragImageUrl = '';
@@ -6352,6 +6352,24 @@
       if(host.includes('ebayimg.com') || host.includes('ebaystatic.com') || host.includes('ebay')) return 'ebay';
 
       return 'img';
+    }
+
+    function _isListingAgentBaseGallerySource(source){
+      return source === 'upload' || source === 'prep' || source === 'macy';
+    }
+
+    function _filterListingAgentBaseGalleryImages(urls){
+      const out = [];
+      const seen = new Set();
+      const list = Array.isArray(urls) ? urls : [];
+      for(const raw of list){
+        const clean = (raw || '').toString().trim();
+        if(!clean || seen.has(clean)) continue;
+        if(!_isListingAgentBaseGallerySource(inferImageSource(clean))) continue;
+        seen.add(clean);
+        out.push(clean);
+      }
+      return out;
     }
 
     function buildImageLabels(urls){
