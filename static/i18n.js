@@ -341,7 +341,7 @@ const translations = {
   print_queued_barcodes: { en: 'Print queued barcodes', lt: 'Spausdinti eilėje esančius kodus' },
   bol_extract: { en: 'BOL Extract', lt: 'BOL išrašas' },
   extract_bol_data: { en: 'Extract BOL data from Excel files', lt: 'Išrašyti BOL duomenis iš Excel failų' },
-  listing_agent: { en: 'Listing Center', lt: 'Skelbimų centras' },
+  listing_agent: { en: 'Listing Agent', lt: 'Skelbimų agentas' },
   listing_agent_desc: { en: 'Draft and publish listings from UPCs', lt: 'Kurti ir publikuoti skelbimus pagal UPC' },
   sync_manager: { en: 'Sync Manager', lt: 'Sinchronizavimo tvarkyklė' },
   manage_syncing: { en: 'Manage eBay & Amazon syncing', lt: 'Valdyti eBay ir Amazon sinchronizavimą' },

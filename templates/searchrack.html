@@ -475,6 +475,8 @@ let _locationData = [];
 let _selectedLocation = null;
 let _selectedShelf = null;
 let _locationGroupFilter = null; // Store location group ID for filtering
+let _warehouseLiveSearchTimer = null;
+let _searchRequestSerial = 0;
 
 function createFilters(){
     const dbSelect = document.getElementById('db-select');
@@ -507,6 +509,7 @@ createFilters();
 // attach change listeners so switching DBs auto-refreshes the results
 function attachDBChangeHandlers(){
     document.getElementById('db-select').addEventListener('change', (e)=>{
+        cancelWarehouseLiveSearchTimer();
         const selectedDb = e.target.value;
         const isStore = STORES.includes(selectedDb);
 
@@ -580,8 +583,34 @@ function getActiveDBs(){
     return dbSelect && dbSelect.value ? [dbSelect.value] : [];
 }
 
-document.getElementById('search-btn').addEventListener('click', () => doSearch(true));
-document.getElementById('search-input').addEventListener('keyup', (e)=>{ if(e.key==='Enter') doSearch(true); });
+function cancelWarehouseLiveSearchTimer(){
+    if(_warehouseLiveSearchTimer){
+        clearTimeout(_warehouseLiveSearchTimer);
+        _warehouseLiveSearchTimer = null;
+    }
+}
+
+function scheduleWarehouseLiveSearch(){
+    if(!getActiveDBs().includes('searchRack')){
+        return;
+    }
+    cancelWarehouseLiveSearchTimer();
+    _warehouseLiveSearchTimer = setTimeout(() => {
+        doSearch(false);
+    }, 180);
+}
+
+document.getElementById('search-btn').addEventListener('click', () => {
+    cancelWarehouseLiveSearchTimer();
+    doSearch(true);
+});
+document.getElementById('search-input').addEventListener('keyup', (e)=>{
+    if(e.key === 'Enter'){
+        cancelWarehouseLiveSearchTimer();
+        doSearch(true);
+    }
+});
+document.getElementById('search-input').addEventListener('input', scheduleWarehouseLiveSearch);
 
 function showLoading(){
     document.getElementById('loadingOverlay').classList.add('active');
@@ -593,6 +622,7 @@ function hideLoading(){
 
 async function doSearch(clearInput = false, explicitQuery = null){
     if(typeof clearInput !== 'boolean') clearInput = false;
+    const searchRequestId = ++_searchRequestSerial;
     console.log('[SEARCH] doSearch called, clearInput:', clearInput, 'explicitQuery:', explicitQuery);
     showLoading();
     let q = explicitQuery !== null ? explicitQuery : document.getElementById('search-input').value.trim();
@@ -614,7 +644,7 @@ async function doSearch(clearInput = false, explicitQuery = null){
     // Store the query for later clearing
     const searchQuery = q;
     
-    _allResults = [];
+    const nextResults = [];
     let totalQty = 0;
     // If user requested fetch-all, send limit=0 to tell server to return all matches
     // default: fetch all results from server for each selected DB
@@ -629,7 +659,7 @@ async function doSearch(clearInput = false, explicitQuery = null){
             const resp = await fetch('/api/location_duplicates');
             const j = await resp.json();
             if(j && j.results) {
-                _allResults = j.results;
+                nextResults.push(...j.results);
                 if(j.total_quantity !== undefined){
                     totalQty = j.total_quantity;
                 }
@@ -658,7 +688,7 @@ async function doSearch(clearInput = false, explicitQuery = null){
                 }
                 if(j && j.results) {
                     console.log(`[SEARCH] ${db} adding ${j.results.length} results`);
-                    j.results.forEach(r=> _allResults.push(r));
+                    j.results.forEach(r=> nextResults.push(r));
                     // Accumulate total quantity if provided by backend
                     if(j.total_quantity !== undefined){
                         totalQty += j.total_quantity;
@@ -669,6 +699,10 @@ async function doSearch(clearInput = false, explicitQuery = null){
             }catch(err){console.error('search err',err)}
         }
     }
+    if(searchRequestId !== _searchRequestSerial){
+        return;
+    }
+    _allResults = nextResults;
     _currentPage = 1;
     _pageSize = parseInt(document.getElementById('page-size').value || '10', 10);
     // Update the 'Showing' label to include total result count and quantity

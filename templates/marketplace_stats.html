@@ -284,6 +284,51 @@
       font-size: 0.9rem;
       padding: 0 4px;
     }
+    .sale-thumb {
+      width: 38px;
+      height: 38px;
+      border-radius: 6px;
+      object-fit: cover;
+      vertical-align: middle;
+      cursor: pointer;
+    }
+    .thumb-placeholder {
+      width: 38px;
+      height: 38px;
+      border-radius: 6px;
+      background: #eef0f3;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: #c0c8d0;
+      font-size: 1rem;
+      vertical-align: middle;
+    }
+    .pagination {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 14px 24px;
+      background: white;
+      border-top: 1px solid #e0e4e8;
+      flex-wrap: wrap;
+    }
+    .page-btn {
+      padding: 6px 11px;
+      border: 1.5px solid #e0e4e8;
+      border-radius: 7px;
+      background: white;
+      color: #2c3e50;
+      cursor: pointer;
+      font-size: 0.85rem;
+      font-weight: 600;
+      transition: all 0.15s;
+    }
+    .page-btn:hover:not(:disabled) { background: #f1f5f9; border-color: #3498db; color: #3498db; }
+    .page-btn.active { background: #3498db; color: white; border-color: #3498db; }
+    .page-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .page-info { color: #7f8c8d; font-size: 0.85rem; padding: 0 4px; }
     @media (max-width: 768px) {
       body {
         padding: 10px;
@@ -405,6 +450,7 @@
         <table id="salesTable">
           <thead>
             <tr>
+              <th style="width:50px"></th>
               <th>Date</th>
               <th>Barcode</th>
               <th>Title</th>
@@ -415,7 +461,7 @@
           </thead>
           <tbody id="salesBody">
             <tr>
-              <td colspan="6" class="empty-state">Loading...</td>
+              <td colspan="7" class="empty-state">Loading...</td>
             </tr>
           </tbody>
         </table>
@@ -457,6 +503,9 @@
     const editModal = document.getElementById('editModal');
     const editForm = document.getElementById('editForm');
     let allSales = [];
+    let filteredSales = [];
+    let currentPage = 1;
+    const PAGE_SIZE = 20;
 
     // Setup filter event listeners
     document.getElementById('searchInput').addEventListener('input', filterSales);
@@ -475,33 +524,32 @@
       const dateFrom = document.getElementById('dateFrom').value;
       const dateTo = document.getElementById('dateTo').value;
 
-      let filtered = allSales.filter(sale => {
-        // Search filter
-        const matchesSearch = !searchTerm || 
-          sale.barcode.toLowerCase().includes(searchTerm) ||
+      filteredSales = allSales.filter(sale => {
+        const matchesSearch = !searchTerm ||
+          (sale.barcode || '').toLowerCase().includes(searchTerm) ||
           (sale.title && sale.title.toLowerCase().includes(searchTerm));
-
-        // Date filter
         let matchesDate = true;
         if (dateFrom || dateTo) {
-          const saleDate = sale.sale_date; // Format: YYYY-MM-DD
+          const saleDate = sale.sale_date;
           if (dateFrom && saleDate < dateFrom) matchesDate = false;
           if (dateTo && saleDate > dateTo) matchesDate = false;
         }
-
         return matchesSearch && matchesDate;
       });
 
-      displaySales(filtered);
-      updateStats(filtered);
-      
-      // Update results info
+      currentPage = 1;
+      displaySales(filteredSales);
+      updateStats(filteredSales);
+
       const resultsInfo = document.getElementById('resultsInfo');
-      if (filtered.length !== allSales.length) {
-        resultsInfo.textContent = `Showing ${filtered.length} of ${allSales.length} sales`;
-      } else {
-        resultsInfo.textContent = '';
-      }
+      resultsInfo.textContent = filteredSales.length !== allSales.length
+        ? `Showing ${filteredSales.length} of ${allSales.length} sales` : '';
+    }
+
+    function goToPage(page) {
+      currentPage = page;
+      displaySales(filteredSales);
+      document.querySelector('.sales-table').scrollIntoView({behavior:'smooth', block:'start'});
     }
 
     function updateStats(sales) {
@@ -514,104 +562,143 @@
       document.getElementById('totalRevenue').textContent = '$' + totalRevenue.toFixed(2);
     }
 
+    function thumbHtml(image) {
+      if (image && image !== 'null' && image !== 'None' && image.trim() !== '') {
+        return `<img class="sale-thumb" src="${image}" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'thumb-placeholder',innerHTML:'📦'}))" loading="lazy">`;
+      }
+      return `<span class="thumb-placeholder">📦</span>`;
+    }
+
     function displaySales(sales) {
       const tbody = document.getElementById('salesBody');
-      
-      if (sales.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No sales found</td></tr>';
-      } else {
-        // Group by session_id, then sort everything by date desc
-        const groups = new Map();
-        const displayItems = []; // {type:'session'|'single', sortKey, items|sale}
-        sales.forEach(sale => {
-          if (sale.session_id) {
-            if (!groups.has(sale.session_id)) groups.set(sale.session_id, []);
-            groups.get(sale.session_id).push(sale);
-          } else {
-            displayItems.push({type:'single', sortKey: sale.created_at || sale.sale_date || '', sale});
-          }
-        });
-        groups.forEach((items, sessionId) => {
-          if (items.length <= 1) {
-            displayItems.push({type:'single', sortKey: items[0].created_at || items[0].sale_date || '', sale: items[0]});
-          } else {
-            const newest = items.reduce((a,b) => (a.created_at||'') > (b.created_at||'') ? a : b);
-            displayItems.push({type:'session', sortKey: newest.created_at || newest.sale_date || '', sessionId, items});
-          }
-        });
-        // Sort newest first
-        displayItems.sort((a,b) => b.sortKey.localeCompare(a.sortKey));
+      const existing = document.getElementById('paginationBar');
+      if (existing) existing.remove();
 
-        const allRows = [];
-        displayItems.forEach(item => {
-          if (item.type === 'session') {
-            const {items, sessionId} = item;
-            const totalQty = items.reduce((s,i)=>s + (i.quantity || 1), 0);
-            const totalPrice = items.reduce((s,i)=>s + parseFloat(i.price || 0), 0);
-            const date = items[0].sale_date || '';
-            const rowId = `session-${sessionId}`;
-            const itemIds = items.map(i => i.id);
-            allRows.push(`
-              <tr class="session-row" data-target="${rowId}">
-                <td><span class="chevron">▶</span> ${date}</td>
-                <td colspan="2"><strong>${totalQty} items sold</strong> &mdash; <span style="color:#27ae60;font-weight:700">$${totalPrice.toFixed(2)}</span></td>
-                <td></td>
-                <td></td>
-                <td class="actions">
-                  <button class="btn-small btn-delete" onclick="event.stopPropagation(); deleteSession([${itemIds.join(',')}])">Delete All</button>
-                </td>
-              </tr>
-            `);
-            items.forEach(sale => {
-              const titleEscaped = (sale.title || '').replace(/'/g, "\\\\'").replace(/"/g, '&quot;');
-              const priceAuto = sale.price_auto === 1 || sale.price_auto === true;
-              const priceStyle = priceAuto ? 'font-style:italic;color:#7f8c8d' : '';
-              allRows.push(`
-                <tr class="child-row ${rowId}">
-                  <td><span style="color:#95a5a6;margin-right:4px">└</span>${sale.sale_date}</td>
-                  <td>${sale.barcode}</td>
-                  <td>${sale.title || '-'}</td>
-                  <td>${sale.quantity}</td>
-                  <td style="${priceStyle}">$${parseFloat(sale.price).toFixed(2)}</td>
-                  <td class="actions">
-                    <button class="btn-small btn-edit" onclick="editSale(${sale.id}, '${sale.barcode}', '${titleEscaped}', ${sale.quantity}, ${sale.price})">Edit</button>
-                    <button class="btn-small btn-delete" onclick="deleteSale(${sale.id})">Delete</button>
-                  </td>
-                </tr>
-              `);
-            });
-          } else {
-            const sale = item.sale;
+      if (sales.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No sales found</td></tr>';
+        return;
+      }
+
+      // Build displayItems (sessions or singles)
+      const groups = new Map();
+      const displayItems = [];
+      sales.forEach(sale => {
+        if (sale.session_id) {
+          if (!groups.has(sale.session_id)) groups.set(sale.session_id, []);
+          groups.get(sale.session_id).push(sale);
+        } else {
+          displayItems.push({type:'single', sortKey: sale.created_at || sale.sale_date || '', sale});
+        }
+      });
+      groups.forEach((items, sessionId) => {
+        if (items.length <= 1) {
+          displayItems.push({type:'single', sortKey: items[0].created_at || items[0].sale_date || '', sale: items[0]});
+        } else {
+          const newest = items.reduce((a,b) => (a.created_at||'') > (b.created_at||'') ? a : b);
+          displayItems.push({type:'session', sortKey: newest.created_at || newest.sale_date || '', sessionId, items});
+        }
+      });
+      displayItems.sort((a,b) => b.sortKey.localeCompare(a.sortKey));
+
+      // Paginate
+      const totalItems = displayItems.length;
+      const totalPages = Math.ceil(totalItems / PAGE_SIZE);
+      if (currentPage > totalPages) currentPage = Math.max(1, totalPages);
+      const pageItems = displayItems.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+
+      const allRows = [];
+      pageItems.forEach(item => {
+        if (item.type === 'session') {
+          const {items, sessionId} = item;
+          const totalQty = items.reduce((s,i) => s + (i.quantity || 1), 0);
+          const totalPrice = items.reduce((s,i) => s + parseFloat(i.price || 0), 0);
+          const date = items[0].sale_date || '';
+          const rowId = `session-${sessionId}`;
+          const itemIds = items.map(i => i.id);
+          const firstImg = items.find(i => i.image && i.image !== 'null' && i.image !== 'None');
+          allRows.push(`
+            <tr class="session-row" data-target="${rowId}">
+              <td style="text-align:center">${firstImg ? thumbHtml(firstImg.image) : `<span class="thumb-placeholder">🛒</span>`}</td>
+              <td><span class="chevron">▶</span> ${date}</td>
+              <td colspan="2"><strong>${totalQty} items sold</strong> &mdash; <span style="color:#27ae60;font-weight:700">$${totalPrice.toFixed(2)}</span></td>
+              <td></td>
+              <td class="actions">
+                <button class="btn-small btn-delete" onclick="event.stopPropagation(); deleteSession([${itemIds.join(',')}])">Delete All</button>
+              </td>
+            </tr>
+          `);
+          items.forEach(sale => {
             const titleEscaped = (sale.title || '').replace(/'/g, "\\\\'").replace(/"/g, '&quot;');
+            const priceAuto = sale.price_auto === 1 || sale.price_auto === true;
+            const priceStyle = priceAuto ? 'font-style:italic;color:#7f8c8d' : '';
             allRows.push(`
-              <tr>
-                <td>${sale.sale_date}</td>
+              <tr class="child-row ${rowId}">
+                <td style="text-align:center">${thumbHtml(sale.image)}</td>
+                <td><span style="color:#95a5a6;margin-right:4px">└</span>${sale.sale_date}</td>
                 <td>${sale.barcode}</td>
                 <td>${sale.title || '-'}</td>
                 <td>${sale.quantity}</td>
-                <td>$${parseFloat(sale.price).toFixed(2)}</td>
+                <td style="${priceStyle}">$${parseFloat(sale.price).toFixed(2)}</td>
                 <td class="actions">
                   <button class="btn-small btn-edit" onclick="editSale(${sale.id}, '${sale.barcode}', '${titleEscaped}', ${sale.quantity}, ${sale.price})">Edit</button>
                   <button class="btn-small btn-delete" onclick="deleteSale(${sale.id})">Delete</button>
                 </td>
               </tr>
             `);
-          }
-        });
-
-        tbody.innerHTML = allRows.join('');
-
-        // wire session row click to toggle children
-        tbody.querySelectorAll('.session-row').forEach(row => {
-          row.addEventListener('click', () => {
-            const target = row.dataset.target;
-            if (!target) return;
-            const children = tbody.querySelectorAll('.' + target);
-            const isOpen = row.classList.contains('open');
-            row.classList.toggle('open');
-            children.forEach(r => r.style.display = isOpen ? 'none' : 'table-row');
           });
+        } else {
+          const sale = item.sale;
+          const titleEscaped = (sale.title || '').replace(/'/g, "\\\\'").replace(/"/g, '&quot;');
+          allRows.push(`
+            <tr>
+              <td style="text-align:center">${thumbHtml(sale.image)}</td>
+              <td>${sale.sale_date}</td>
+              <td>${sale.barcode}</td>
+              <td>${sale.title || '-'}</td>
+              <td>${sale.quantity}</td>
+              <td>$${parseFloat(sale.price).toFixed(2)}</td>
+              <td class="actions">
+                <button class="btn-small btn-edit" onclick="editSale(${sale.id}, '${sale.barcode}', '${titleEscaped}', ${sale.quantity}, ${sale.price})">Edit</button>
+                <button class="btn-small btn-delete" onclick="deleteSale(${sale.id})">Delete</button>
+              </td>
+            </tr>
+          `);
+        }
+      });
+
+      tbody.innerHTML = allRows.join('');
+
+      // Wire session row click
+      tbody.querySelectorAll('.session-row').forEach(row => {
+        row.addEventListener('click', () => {
+          const target = row.dataset.target;
+          if (!target) return;
+          const children = tbody.querySelectorAll('.' + target);
+          const isOpen = row.classList.contains('open');
+          row.classList.toggle('open');
+          children.forEach(r => r.style.display = isOpen ? 'none' : 'table-row');
         });
+      });
+
+      // Render pagination
+      if (totalPages > 1) {
+        const bar = document.createElement('div');
+        bar.id = 'paginationBar';
+        bar.className = 'pagination';
+        let html = `<button class="page-btn" onclick="goToPage(${currentPage - 1})" ${currentPage === 1 ? 'disabled' : ''}>‹ Prev</button>`;
+        const start = Math.max(1, currentPage - 2);
+        const end = Math.min(totalPages, currentPage + 2);
+        if (start > 1) html += `<button class="page-btn" onclick="goToPage(1)">1</button>`;
+        if (start > 2) html += `<span class="page-info">…</span>`;
+        for (let i = start; i <= end; i++) {
+          html += `<button class="page-btn${i === currentPage ? ' active' : ''}" onclick="goToPage(${i})">${i}</button>`;
+        }
+        if (end < totalPages - 1) html += `<span class="page-info">…</span>`;
+        if (end < totalPages) html += `<button class="page-btn" onclick="goToPage(${totalPages})">${totalPages}</button>`;
+        html += `<span class="page-info">Page ${currentPage} of ${totalPages} · ${totalItems} items</span>`;
+        html += `<button class="page-btn" onclick="goToPage(${currentPage + 1})" ${currentPage === totalPages ? 'disabled' : ''}>Next ›</button>`;
+        bar.innerHTML = html;
+        document.getElementById('tableContainer').after(bar);
       }
     }
 
@@ -629,7 +716,7 @@
         }
       } catch (error) {
         console.error('Error loading sales:', error);
-        document.getElementById('salesBody').innerHTML = '<tr><td colspan="6" class="empty-state">Error loading sales</td></tr>';
+        document.getElementById('salesBody').innerHTML = '<tr><td colspan="7" class="empty-state">Error loading sales</td></tr>';
       }
     }
 

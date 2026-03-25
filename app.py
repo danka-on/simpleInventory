@@ -16515,7 +16515,7 @@ def _build_ready_to_ship_prep_context(cur, barcode, include_details=True, max_no
 def _listing_source_label(value):
     norm = _normalize_listing_source(value, default='system')
     if norm == 'listing_center':
-        return 'Listing Center'
+        return 'Listing Agent'
     if norm == 'user':
         return 'User'
     return 'System'
@@ -35570,7 +35570,29 @@ def searchrack_api():
         conn = sqlite3.connect('searchRack.db')
         try:
             cur = conn.cursor()
-            cur.execute('''SELECT TITLE, BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION, QUANTITY, IMAGE, ITEMID FROM SEARCHRACK WHERE TITLE LIKE ? OR BARCODE LIKE ?''', (f'%{q_stripped}%', f'%{q_stripped}%'))
+            tokens = []
+            seen_tokens = set()
+            for part in q_stripped.split():
+                token = str(part or '').strip()
+                if not token:
+                    continue
+                token_key = token.lower()
+                if token_key in seen_tokens:
+                    continue
+                seen_tokens.add(token_key)
+                tokens.append(token)
+            if not tokens:
+                tokens = [q_stripped]
+
+            title_sql = ' AND '.join(['TITLE LIKE ? COLLATE NOCASE' for _ in tokens])
+            barcode_sql = ' OR '.join(['BARCODE LIKE ? COLLATE NOCASE' for _ in tokens])
+            params = tuple([f'%{token}%' for token in tokens] + [f'%{token}%' for token in tokens])
+
+            cur.execute(f'''
+                SELECT TITLE, BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION, QUANTITY, IMAGE, ITEMID
+                FROM SEARCHRACK
+                WHERE ({title_sql}) OR ({barcode_sql})
+            ''', params)
             for row in cur.fetchall():
                 results.append({
                     'title': row[0],
@@ -35851,11 +35873,62 @@ def api_search_db(db_key):
         location_group_id = data.get('location_group_id')
         
         if q_stripped:
-            likes = []
-            for c in cols:
-                likes.append(f"LOWER(COALESCE({c},'')) LIKE ?")
-                params.append(f"%{q_stripped.lower()}%")
-            where_clause = ' WHERE ' + ' OR '.join(likes)
+            tokens = []
+            seen_tokens = set()
+            for part in q_stripped.split():
+                token = str(part or '').strip()
+                if not token:
+                    continue
+                token_key = token.lower()
+                if token_key in seen_tokens:
+                    continue
+                seen_tokens.add(token_key)
+                tokens.append(token)
+            if not tokens:
+                tokens = [q_stripped]
+
+            if db_key == 'searchRack':
+                title_col = next((c for c in cols if c.lower() == 'title'), None)
+                barcode_col = next((c for c in cols if c.lower() in ('barcode', 'upc')), None)
+                item_id_col = next((c for c in cols if c.lower() in ('itemid', 'item_id', 'sku')), None)
+
+                disjuncts = []
+
+                if title_col:
+                    title_col_sql = '"' + str(title_col).replace('"', '""') + '"'
+                    title_parts = [f"LOWER(COALESCE({title_col_sql},'')) LIKE ?" for _ in tokens]
+                    disjuncts.append('(' + ' AND '.join(title_parts) + ')')
+                    params.extend(f"%{token.lower()}%" for token in tokens)
+
+                aux_parts = []
+                aux_params = []
+                for col in [barcode_col, item_id_col]:
+                    if not col:
+                        continue
+                    col_sql = '"' + str(col).replace('"', '""') + '"'
+                    aux_parts.append(f"LOWER(COALESCE({col_sql},'')) LIKE ?")
+                    aux_params.append(f"%{q_stripped.lower()}%")
+
+                if aux_parts:
+                    disjuncts.append('(' + ' OR '.join(aux_parts) + ')')
+                    params.extend(aux_params)
+
+                if disjuncts:
+                    where_clause = ' WHERE ' + ' OR '.join(disjuncts)
+                else:
+                    likes = []
+                    for c in cols:
+                        col_sql = '"' + str(c).replace('"', '""') + '"'
+                        likes.append(f"LOWER(COALESCE({col_sql},'')) LIKE ?")
+                        params.append(f"%{q_stripped.lower()}%")
+                    where_clause = ' WHERE ' + ' OR '.join(likes)
+            else:
+                likes = []
+                for c in cols:
+                    col_sql = '"' + str(c).replace('"', '""') + '"'
+                    likes.append(f"LOWER(COALESCE({col_sql},'')) LIKE ?")
+                    params.append(f"%{q_stripped.lower()}%")
+                where_clause = ' WHERE ' + ' OR '.join(likes)
         
         # If a specific LOT was provided (BOL database only), add filter
         if db_key == 'bol' and lot_filter:
@@ -40887,16 +40960,32 @@ def api_marketplace_search():
         q = (request.args.get('q') or '').strip()
         if not q:
             return jsonify({'success': False, 'error': 'Missing q'}), 400
+        tokens = []
+        seen_tokens = set()
+        for part in q.split():
+            token = str(part or '').strip()
+            if not token:
+                continue
+            token_key = token.lower()
+            if token_key in seen_tokens:
+                continue
+            seen_tokens.add(token_key)
+            tokens.append(token)
+        if not tokens:
+            return jsonify({'success': False, 'error': 'Missing q'}), 400
         conn = sqlite3.connect('rawbol.db')
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
-        cur.execute('''
+        where_parts = ['item_description LIKE ? COLLATE NOCASE' for _ in tokens]
+        where_sql = ' AND '.join(where_parts)
+        params = tuple(f'%{token}%' for token in tokens)
+        cur.execute(f'''
             SELECT upc, item_description, image_url
             FROM raw_bol_items
-            WHERE item_description LIKE ? COLLATE NOCASE
+            WHERE {where_sql}
             ORDER BY created_at DESC
             LIMIT 30
-        ''', (f'%{q}%',))
+        ''', params)
         results = [dict(r) for r in cur.fetchall()]
         conn.close()
         return jsonify({'success': True, 'results': results})
@@ -41191,11 +41280,45 @@ def api_marketplace_sales():
     """Get all marketplace sales."""
     try:
         from marketplace_manager import get_marketplace_sales
-        
+
         limit = request.args.get('limit', type=int)
         offset = request.args.get('offset', type=int)
-        
+
         result = get_marketplace_sales(limit=limit, offset=offset)
+
+        # Enrich sales with thumbnail images from rawbol.db
+        if result.get('success') and result.get('sales'):
+            barcodes = list({str(s.get('barcode') or '').strip() for s in result['sales'] if s.get('barcode')})
+            image_map = {}
+            if barcodes:
+                try:
+                    _rawbol = sqlite3.connect('rawbol.db')
+                    _rawbol.row_factory = sqlite3.Row
+                    _rc = _rawbol.cursor()
+                    # Build all variants (with and without leading zero)
+                    variants = list({b for b in barcodes} |
+                                    {b.lstrip('0') for b in barcodes if b.startswith('0')})
+                    if variants:
+                        ph = ','.join('?' * len(variants))
+                        _rc.execute(
+                            f"SELECT upc, image_url FROM raw_bol_items "
+                            f"WHERE LOWER(TRIM(upc)) IN ({ph}) "
+                            f"AND image_url IS NOT NULL AND TRIM(image_url) != '' "
+                            f"ORDER BY rowid DESC",
+                            [v.lower() for v in variants]
+                        )
+                        for row in _rc.fetchall():
+                            key = str(row['upc'] or '').strip().lower()
+                            if key not in image_map:
+                                image_map[key] = row['image_url']
+                    _rawbol.close()
+                except Exception:
+                    pass
+            for sale in result['sales']:
+                bc = str(sale.get('barcode') or '').strip()
+                img = image_map.get(bc.lower()) or image_map.get(bc.lstrip('0').lower() if bc.startswith('0') else '')
+                sale['image'] = img or ''
+
         return jsonify(result)
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e)}), 500

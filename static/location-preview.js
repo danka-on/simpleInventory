@@ -57,7 +57,7 @@
     const style = document.createElement('style');
     style.id = STYLE_ID;
     style.textContent = [
-      '.sslp-root{position:fixed;inset:0;display:none;align-items:center;justify-content:center;padding:18px;background:rgba(2,6,23,0.72);backdrop-filter:blur(2px);z-index:20000;}',
+      '.sslp-root{position:fixed;inset:0;display:none;align-items:center;justify-content:center;padding:18px;background:rgba(2,6,23,0.72);backdrop-filter:blur(2px);z-index:2147483646;}',
       '.sslp-root.is-open{display:flex;}',
       '.sslp-dialog{width:min(1040px,96vw);max-height:min(90vh,920px);background:#fff;border:1px solid rgba(15,23,42,0.12);border-radius:18px;box-shadow:0 28px 90px rgba(15,23,42,0.35);overflow:hidden;display:flex;flex-direction:column;}',
       'html.ss-theme-night .sslp-dialog{background:#0f172a;border-color:rgba(148,163,184,0.24);box-shadow:0 28px 90px rgba(0,0,0,0.52);}',
@@ -67,10 +67,10 @@
       'html.ss-theme-night .sslp-title{color:#f8fafc;}',
       '.sslp-note{margin-top:4px;font-size:0.84rem;color:#64748b;}',
       'html.ss-theme-night .sslp-note{color:#94a3b8;}',
-      '.sslp-close{border:1px solid rgba(15,23,42,0.12);background:#f8fafc;color:#475569;border-radius:10px;width:38px;height:38px;font-size:1.2rem;line-height:1;cursor:pointer;flex:0 0 auto;}',
-      '.sslp-close:hover{background:#eef2ff;color:#0f172a;}',
-      'html.ss-theme-night .sslp-close{background:#1e293b;border-color:rgba(148,163,184,0.24);color:#cbd5e1;}',
-      'html.ss-theme-night .sslp-close:hover{background:#334155;color:#f8fafc;}',
+      '.sslp-close{border:1px solid rgba(220,38,38,0.18);background:#dc2626;color:#fff;border-radius:10px;width:38px;height:38px;font-size:1.2rem;line-height:1;cursor:pointer;flex:0 0 auto;box-shadow:0 8px 18px rgba(220,38,38,0.22);}',
+      '.sslp-close:hover{background:#b91c1c;color:#fff;}',
+      'html.ss-theme-night .sslp-close{background:#dc2626;border-color:rgba(248,113,113,0.3);color:#fff;box-shadow:0 8px 18px rgba(220,38,38,0.28);}',
+      'html.ss-theme-night .sslp-close:hover{background:#b91c1c;color:#fff;}',
       '.sslp-body{padding:18px;overflow:auto;}',
       '.sslp-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;}',
       '.sslp-card{display:flex;flex-direction:column;gap:10px;width:100%;appearance:none;border:1px solid rgba(15,23,42,0.1);border-radius:14px;background:#f8fafc;padding:12px;cursor:zoom-in;text-align:left;font:inherit;color:inherit;}',
@@ -83,10 +83,29 @@
       'html.ss-theme-night .sslp-image-wrap{background:#0b1220;border-color:rgba(148,163,184,0.18);}',
       '.sslp-image{display:block;max-width:100%;max-height:100%;object-fit:contain;}',
       '.sslp-expanded{display:flex;flex-direction:column;gap:12px;}',
-      '.sslp-expanded .sslp-image-wrap{min-height:320px;max-height:none;height:min(72vh,860px);cursor:default;}',
+      '.sslp-expanded .sslp-image-wrap{min-height:320px;max-height:none;height:min(72vh,860px);cursor:pointer;}',
       '.sslp-empty{padding:24px 8px;text-align:center;font-size:0.92rem;color:#64748b;}',
       'html.ss-theme-night .sslp-empty{color:#94a3b8;}',
-      '@media (max-width: 640px){.sslp-root{padding:10px;}.sslp-head{padding:14px 14px 10px;}.sslp-body{padding:14px;}.sslp-grid{grid-template-columns:1fr;}.sslp-expanded .sslp-image-wrap{height:min(62vh,680px);}}'
+      '.sslp-back-btn{display:inline-flex;align-items:center;gap:7px;margin-top:12px;padding:9px 16px;border:none;border-radius:10px;background:#334155;color:#e2e8f0;font-size:0.9rem;font-weight:700;cursor:pointer;transition:background .15s,color .15s;}',
+      '.sslp-back-btn:hover{background:#475569;color:#fff;}',
+      'html.ss-theme-night .sslp-back-btn{background:#1e293b;border:1px solid rgba(148,163,184,.2);color:#cbd5e1;}',
+      'html.ss-theme-night .sslp-back-btn:hover{background:#334155;color:#f8fafc;}',
+      '.sslp-close-row{display:none;padding-top:4px;}',
+      '@media (max-width: 640px){' +
+        '.sslp-root{align-items:flex-start;overflow:auto;padding:calc(env(safe-area-inset-top, 0px) + 72px) 8px calc(env(safe-area-inset-bottom, 0px) + 8px);}' +
+        '.sslp-dialog{width:min(100%,560px);max-height:none;min-height:0;}' +
+        '.sslp-head{position:sticky;top:0;z-index:3;background:#fff;}' +
+        'html.ss-theme-night .sslp-head{background:#0f172a;}' +
+        '.sslp-head{padding:12px 12px 10px;}' +
+        '.sslp-body{padding:12px;}' +
+        '.sslp-grid{grid-template-columns:1fr;}' +
+        '.sslp-expanded .sslp-image-wrap{height:min(52vh,520px);}' +
+        '.sslp-back-btn{width:100%;justify-content:center;padding:14px 16px;font-size:1rem;margin-top:0;}' +
+        '.sslp-expanded .sslp-back-btn{position:sticky;bottom:0;z-index:2;background:#1d4ed8;color:#fff;border-radius:0 0 12px 12px;box-shadow:0 -3px 14px rgba(0,0,0,.35);border-top:1px solid rgba(255,255,255,.12);}' +
+        '.sslp-expanded .sslp-back-btn:hover{background:#1e40af;}' +
+        '.sslp-close-row{display:flex;justify-content:center;padding-top:8px;}' +
+        '.sslp-close-row button{display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:13px 28px;border:none;border-radius:10px;background:#1d4ed8;color:#fff;font-size:1rem;font-weight:700;cursor:pointer;width:100%;}' +
+      '}'
     ].join('');
     document.head.appendChild(style);
   }
@@ -131,6 +150,19 @@
     });
 
     bodyEl.addEventListener('click', function (event) {
+      if (event.target.closest('[data-sslp-close]')) {
+        close();
+        return;
+      }
+      if (event.target.closest('[data-sslp-back]')) {
+        if (state.expandedIndex !== null && state.items.length > 1) {
+          state.expandedIndex = null;
+          render();
+        } else {
+          close();
+        }
+        return;
+      }
       const card = event.target.closest('[data-sslp-index]');
       if (!card) return;
       if (state.expandedIndex !== null) return;
@@ -389,23 +421,23 @@
 
     if (state.expandedIndex !== null && state.items[state.expandedIndex]) {
       const item = state.items[state.expandedIndex];
-      noteEl.textContent = state.items.length > 1
-        ? 'Click outside the image to return to both previews.'
-        : 'Click outside the image to close.';
+      const backLabel = state.items.length > 1 ? '← Back to previews' : '✕ Close';
+      noteEl.textContent = '';
       bodyEl.innerHTML = [
         '<div class="sslp-expanded">',
         '  <div class="sslp-label">' + escHtml(item.label) + '</div>',
-        '  <div class="sslp-image-wrap">',
+        '  <div class="sslp-image-wrap" data-sslp-back="1">',
         '    <img class="sslp-image" src="' + escHtml(item.src) + '" alt="' + escHtml(item.label) + '" loading="lazy">',
         '  </div>',
+        '  <button type="button" class="sslp-back-btn" data-sslp-back="1">' + backLabel + '</button>',
         '</div>'
       ].join('');
       return;
     }
 
     noteEl.textContent = state.items.length > 1
-      ? 'Click either image to enlarge it.'
-      : 'Click outside the preview to close.';
+      ? 'Tap an image to enlarge it.'
+      : '';
     bodyEl.innerHTML = '<div class="sslp-grid">' + state.items.map(function (item, index) {
       return [
         '<button type="button" class="sslp-card" data-sslp-index="' + index + '">',
@@ -415,7 +447,8 @@
         '  </div>',
         '</button>'
       ].join('');
-    }).join('') + '</div>';
+    }).join('') + '</div>' +
+    '<div class="sslp-close-row"><button type="button" data-sslp-close="1">✕ Close</button></div>';
   }
 
   async function open(options) {

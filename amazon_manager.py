@@ -685,8 +685,8 @@ class AmazonManager:
                                  shipping_cost, seller_fee, taxes, source_upc, source_base_upc, listing_trace_id,
                                  listing_trace_created_at, listing_trace_source, listing_listing_id, listing_offer_id,
                                  listing_sku, listing_asin)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'amazon', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            ''', (amazon_order_id, asin, sku, final_trace_barcode, title, quantity, price, shipped_time, purchase_date, image,
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            ''', (amazon_order_id, asin, sku, final_trace_barcode, title, quantity, price, shipped_time, purchase_date, image, 'amazon',
                                   shipping_name, shipping_city, shipping_state, shipping_postal, shipping_country,
                                   shipping_cost, seller_fee, taxes, source_upc, source_base_upc, listing_trace_id,
                                   listing_trace_created_at, listing_trace_source, listing_listing_id, listing_offer_id,

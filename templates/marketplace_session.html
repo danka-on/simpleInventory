@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Marketplace Sale</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -59,6 +60,20 @@
       transition: color 0.15s, background 0.15s;
     }
     .nav-link:hover { color: #f1f5f9; background: #334155; }
+    .nav-link.nav-link-history {
+      color: #fff;
+      font-size: 0.85rem;
+      font-weight: 700;
+      background: linear-gradient(135deg, #7c3aed 0%, #a855f7 100%);
+      border: 1px solid rgba(168,85,247,.4);
+      box-shadow: 0 2px 10px rgba(124,58,237,.45);
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .nav-link.nav-link-history:hover { background: linear-gradient(135deg, #6d28d9 0%, #9333ea 100%); box-shadow: 0 3px 14px rgba(124,58,237,.6); color: #fff; }
+    html.ss-theme-day .nav-link.nav-link-history { color: #fff; background: linear-gradient(135deg, #7c3aed 0%, #a855f7 100%); border-color: rgba(124,58,237,.35); box-shadow: 0 2px 10px rgba(124,58,237,.3); }
+    html.ss-theme-day .nav-link.nav-link-history:hover { background: linear-gradient(135deg, #6d28d9 0%, #9333ea 100%); color: #fff; }
     .nav-spacer { display: none; }
 
     /* ── Page wrap ── */
@@ -71,10 +86,11 @@
     /* ── Scan section ── */
     .scan-section {
       background: #1e293b;
-      border: 1px solid #334155;
+      border: 1px solid rgba(59,130,246,.35);
       border-radius: 14px;
       padding: 14px;
       margin-bottom: 12px;
+      box-shadow: 0 0 0 1px rgba(59,130,246,.07), 0 2px 12px rgba(59,130,246,.06);
     }
     .scan-row {
       display: flex;
@@ -87,7 +103,7 @@
       padding: 12px 16px;
       font-size: 1.05rem;
       background: #0f172a;
-      border: 1.5px solid #334155;
+      border: 1.5px solid rgba(59,130,246,.4);
       border-radius: 10px;
       color: #f1f5f9;
       transition: border-color 0.15s, box-shadow 0.15s;
@@ -100,10 +116,10 @@
     .scan-input::placeholder { color: #475569; }
     .scan-action-btn {
       padding: 10px 13px;
-      background: #0f172a;
-      border: 1.5px solid #334155;
+      background: rgba(59,130,246,.12);
+      border: 1.5px solid rgba(59,130,246,.4);
       border-radius: 10px;
-      color: #94a3b8;
+      color: #93c5fd;
       font-size: 0.82rem;
       font-weight: 600;
       cursor: pointer;
@@ -111,7 +127,7 @@
       transition: background 0.15s, color 0.15s, border-color 0.15s;
       flex-shrink: 0;
     }
-    .scan-action-btn:hover { background: #334155; color: #f1f5f9; }
+    .scan-action-btn:hover { background: rgba(59,130,246,.22); color: #bfdbfe; border-color: rgba(59,130,246,.6); }
     .scan-action-btn.active { background: #1e3a5f; border-color: #3b82f6; color: #93c5fd; }
     #toggleManual.closing { background: rgba(239,68,68,0.12); border-color: rgba(239,68,68,0.35); color: #f87171; }
 
@@ -405,6 +421,8 @@
       display: flex; align-items: center; justify-content: center;
     }
     .qty-btn:hover { background: #334155; color: #f1f5f9; border-color: #475569; }
+    .qty-btn.qty-plus { background: rgba(59,130,246,.1); border-color: rgba(59,130,246,.35); color: #93c5fd; }
+    .qty-btn.qty-plus:hover { background: rgba(59,130,246,.22); border-color: rgba(59,130,246,.6); color: #bfdbfe; }
     .qty-value {
       min-width: 26px;
       text-align: center;
@@ -470,7 +488,7 @@
     .override-input input:focus { outline: none; border-color: #3b82f6; }
     .override-input input::placeholder { color: #334155; }
     .submit-btn {
-      background: #15803d;
+      background: linear-gradient(135deg, #16a34a 0%, #0d9245 100%);
       color: #fff;
       border: none;
       padding: 11px 22px;
@@ -478,12 +496,13 @@
       font-size: 0.92rem;
       font-weight: 700;
       cursor: pointer;
-      transition: background 0.15s;
+      transition: background 0.15s, box-shadow 0.15s;
       white-space: nowrap;
       flex-shrink: 0;
+      box-shadow: 0 2px 14px rgba(22,163,74,.4);
     }
-    .submit-btn:hover:not(:disabled) { background: #166534; }
-    .submit-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .submit-btn:hover:not(:disabled) { background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%); box-shadow: 0 4px 18px rgba(22,163,74,.5); }
+    .submit-btn:disabled { opacity: 0.4; cursor: not-allowed; box-shadow: none; }
 
     /* Mobile submit bar — kept for JS compatibility, not used in new design */
     .mobile-submit-bar { display: none !important; }
@@ -566,6 +585,7 @@
     /* ── Responsive ── */
     @media (max-width: 600px) {
       .nav-link { display: none; }
+      .nav-link-history { display: flex; align-items: center; gap: 6px; }
       .page-wrap { padding: 10px 10px 120px; }
       .scan-row { flex-wrap: wrap; }
       .scan-input { flex: 1 1 100%; order: 0; }
@@ -602,12 +622,12 @@
     html.ss-theme-day .nav-back:hover { background: #f1f5f9; color: #0f172a; }
     html.ss-theme-day .nav-link { color: #64748b; }
     html.ss-theme-day .nav-link:hover { background: #f1f5f9; color: #0f172a; }
-    html.ss-theme-day .scan-section { background: #fff; border-color: #e2e8f0; }
-    html.ss-theme-day .scan-input { background: #f8fafc; border-color: #e2e8f0; color: #0f172a; }
+    html.ss-theme-day .scan-section { background: #fff; border-color: rgba(59,130,246,.3); box-shadow: 0 0 0 1px rgba(59,130,246,.06), 0 2px 10px rgba(59,130,246,.05); }
+    html.ss-theme-day .scan-input { background: #f8fafc; border-color: rgba(59,130,246,.35); color: #0f172a; }
     html.ss-theme-day .scan-input::placeholder { color: #94a3b8; }
     html.ss-theme-day .scan-input:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,0.1); }
-    html.ss-theme-day .scan-action-btn { background: #f8fafc; border-color: #e2e8f0; color: #374151; }
-    html.ss-theme-day .scan-action-btn:hover { background: #f1f5f9; }
+    html.ss-theme-day .scan-action-btn { background: rgba(59,130,246,.08); border-color: rgba(59,130,246,.3); color: #1d4ed8; }
+    html.ss-theme-day .scan-action-btn:hover { background: rgba(59,130,246,.15); }
     html.ss-theme-day .scan-action-btn.active { background: #dbeafe; border-color: #3b82f6; color: #1d4ed8; }
     html.ss-theme-day #toggleManual.closing { background: rgba(220,38,38,0.07); border-color: rgba(220,38,38,0.25); color: #dc2626; }
     html.ss-theme-day .collapsible-panel { border-top-color: #e2e8f0; }
@@ -632,6 +652,8 @@
     html.ss-theme-day .dollar-sign { color: #16a34a; }
     html.ss-theme-day .qty-btn { background: #f1f5f9; border-color: #e2e8f0; color: #374151; }
     html.ss-theme-day .qty-btn:hover { background: #e2e8f0; }
+    html.ss-theme-day .qty-btn.qty-plus { background: rgba(59,130,246,.1); border-color: rgba(59,130,246,.3); color: #1d4ed8; }
+    html.ss-theme-day .qty-btn.qty-plus:hover { background: rgba(59,130,246,.18); }
     html.ss-theme-day .qty-value { color: #0f172a; }
     html.ss-theme-day .remove-btn { color: #cbd5e1; }
     html.ss-theme-day .summary-footer { background: #fff; border-top-color: #e2e8f0; }
@@ -657,7 +679,7 @@
     <a href="/store-manager" class="nav-back" title="Back">&#8592;</a>
     <h1 data-i18n="marketplace_session">Marketplace Sale</h1>
     <div class="nav-links">
-      <a href="/marketplace-stats" class="nav-link">History</a>
+      <a href="/marketplace-stats" class="nav-link nav-link-history"><i class="fas fa-clock-rotate-left"></i> History</a>
       <a href="/marketplace-schedule-pickup" class="nav-link">Schedule Pickup</a>
       <a href="/marketplace-live-pickups" class="nav-link">Live Pickups</a>
     </div>
@@ -1745,7 +1767,7 @@
       if (e.target === this) closeImgModal();
     });
   </script>
-  <script src="/static/location-preview.js?v=20260317a"></script>
+  <script src="/static/location-preview.js?v=20260323b"></script>
   <script src="/static/i18n.js"></script>
 </body>
 </html>
