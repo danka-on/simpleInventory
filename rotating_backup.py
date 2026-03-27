@@ -1,189 +1,246 @@
 """
-Daily Rotating Backup System for searchRack.db
-===============================================
+Rotating SQLite backup utility for Sweet Shelves.
 
-Creates daily backups with a 10-day rotation:
-- Backups stored in backups/ folder
-- Named: searchRack-day1.db, searchRack-day2.db, ... searchRack-day10.db
-- Day 11 overwrites day 1, day 12 overwrites day 2, etc.
-- Keeps exactly 10 days of history
+Designed for cron on Linux/Debian:
+- makes a consistent SQLite snapshot using the sqlite3 backup API,
+- compresses backups with gzip to save space,
+- rotates old backups by count,
+- can back up one or more databases.
 
-Run this script daily (can be automated with Task Scheduler on Windows)
+Examples:
+  python rotating_backup.py backup
+  python rotating_backup.py backup --db searchRack.db --keep 14 --backup-dir /media/dk/USB/sweetshelves-db-backups
+  python rotating_backup.py backup --db searchRack.db --db sold.db
+  python rotating_backup.py list
 """
-import sqlite3
+
+from __future__ import annotations
+
+import argparse
+import gzip
 import os
 import shutil
+import sqlite3
+import tempfile
+from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-BACKUP_DIR = os.path.join(BASE_DIR, 'backups')
-DB_NAME = os.path.join(BASE_DIR, 'searchRack.db')
-MAX_BACKUPS = 10
 
-def ensure_backup_directory():
-    """Create backups directory if it doesn't exist"""
-    if not os.path.exists(BACKUP_DIR):
-        os.makedirs(BACKUP_DIR)
-        print(f"✅ Created {BACKUP_DIR}/ directory")
+BASE_DIR = Path(__file__).resolve().parent
+DEFAULT_BACKUP_DIR = BASE_DIR / "backups"
+DEFAULT_DATABASES = ["searchRack.db"]
+DEFAULT_KEEP = 10
 
-def get_current_day_slot():
-    """
-    Get the current day's backup slot (1-10)
-    Uses day of month modulo 10, so:
-    - Days 1, 11, 21, 31 → slot 1
-    - Days 2, 12, 22 → slot 2
-    - etc.
-    """
-    day_of_month = datetime.now().day
-    slot = ((day_of_month - 1) % MAX_BACKUPS) + 1
-    return slot
 
-def create_backup():
-    """Create a rotating backup of searchRack.db"""
-    if not os.path.exists(DB_NAME):
-        print(f"❌ Error: {DB_NAME} not found!")
-        return False
-    
-    ensure_backup_directory()
-    
-    # Get current day slot (1-10)
-    slot = get_current_day_slot()
-    backup_filename = f'searchRack-day{slot}.db'
-    backup_path = os.path.join(BACKUP_DIR, backup_filename)
-    
-    # Check if we're overwriting an old backup
-    if os.path.exists(backup_path):
-        old_time = datetime.fromtimestamp(os.path.getmtime(backup_path))
-        print(f"📝 Overwriting old backup from {old_time.strftime('%Y-%m-%d %H:%M:%S')}")
-    
+@dataclass
+class BackupResult:
+    db_name: str
+    output_path: Path
+    row_count: int | None
+    size_bytes: int
+
+
+def format_size(num_bytes: int) -> str:
+    size = float(num_bytes)
+    units = ["B", "KB", "MB", "GB"]
+    for unit in units:
+        if size < 1024 or unit == units[-1]:
+            return f"{size:.2f} {unit}"
+        size /= 1024.0
+    return f"{num_bytes} B"
+
+
+def ensure_directory(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+
+
+def resolve_databases(names: list[str]) -> list[Path]:
+    resolved = []
+    for name in names:
+        db_path = Path(name)
+        if not db_path.is_absolute():
+            db_path = BASE_DIR / db_path
+        resolved.append(db_path)
+    return resolved
+
+
+def sqlite_row_count(db_path: Path) -> int | None:
     try:
-        # Copy the database file
-        shutil.copy2(DB_NAME, backup_path)
-        
-        # Verify the backup is readable
-        test_conn = sqlite3.connect(backup_path)
-        test_cur = test_conn.cursor()
-        test_cur.execute("SELECT COUNT(*) FROM SEARCHRACK")
-        count = test_cur.fetchone()[0]
-        test_conn.close()
-        
-        # Get file size
-        size_mb = os.path.getsize(backup_path) / (1024 * 1024)
-        
-        print(f"✅ Backup created: {backup_filename}")
-        print(f"   📊 {count} items backed up")
-        print(f"   💾 Size: {size_mb:.2f} MB")
-        print(f"   📅 Slot: {slot}/10 (today is day {datetime.now().day} of month)")
-        
-        return True
-        
-    except Exception as e:
-        print(f"❌ Backup failed: {e}")
-        return False
+        with sqlite3.connect(db_path) as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND lower(name)='searchrack' LIMIT 1")
+            if cur.fetchone():
+                cur.execute("SELECT COUNT(*) FROM SEARCHRACK")
+                return int(cur.fetchone()[0])
+    except Exception:
+        return None
+    return None
 
-def list_backups():
-    """List all existing backups"""
-    if not os.path.exists(BACKUP_DIR):
-        print("No backups directory found")
-        return
-    
-    backups = []
-    for i in range(1, MAX_BACKUPS + 1):
-        filename = f'searchRack-day{i}.db'
-        filepath = os.path.join(BACKUP_DIR, filename)
-        if os.path.exists(filepath):
-            mtime = os.path.getmtime(filepath)
-            size = os.path.getsize(filepath) / (1024 * 1024)
-            backups.append({
-                'slot': i,
-                'filename': filename,
-                'date': datetime.fromtimestamp(mtime),
-                'size_mb': size
-            })
-    
-    if not backups:
-        print("No backups found")
-        return
-    
-    print(f"\n📦 Available Backups ({len(backups)}/10 slots):")
-    print("-" * 70)
-    for b in sorted(backups, key=lambda x: x['date'], reverse=True):
-        print(f"   Day {b['slot']}: {b['filename']}")
-        print(f"           Created: {b['date'].strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"           Size: {b['size_mb']:.2f} MB")
-        print()
 
-def restore_backup(slot):
-    """Restore a backup from a specific slot"""
-    backup_filename = f'searchRack-day{slot}.db'
-    backup_path = os.path.join(BACKUP_DIR, backup_filename)
-    
-    if not os.path.exists(backup_path):
-        print(f"❌ Backup slot {slot} not found!")
-        return False
-    
-    # Create a safety backup of current database
-    if os.path.exists(DB_NAME):
-        safety_backup = f'{DB_NAME}.before-restore-{datetime.now().strftime("%Y%m%d_%H%M%S")}'
-        shutil.copy2(DB_NAME, safety_backup)
-        print(f"📦 Created safety backup: {safety_backup}")
-    
+def prune_old_backups(backup_dir: Path, db_stem: str, keep: int) -> list[Path]:
+    pattern = f"{db_stem}-*.sqlite3.gz"
+    backups = sorted(
+        backup_dir.glob(pattern),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    removed = []
+    for old_path in backups[keep:]:
+        old_path.unlink(missing_ok=True)
+        removed.append(old_path)
+    return removed
+
+
+def create_sqlite_backup(db_path: Path, backup_dir: Path) -> BackupResult:
+    if not db_path.exists():
+        raise FileNotFoundError(f"Database not found: {db_path}")
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    db_stem = db_path.stem
+    output_path = backup_dir / f"{db_stem}-{timestamp}.sqlite3.gz"
+
+    temp_fd, temp_name = tempfile.mkstemp(prefix=f"{db_stem}-", suffix=".sqlite3", dir=str(backup_dir))
+    os.close(temp_fd)
+    temp_path = Path(temp_name)
+
     try:
-        # Restore the backup
-        shutil.copy2(backup_path, DB_NAME)
-        
-        # Verify
-        conn = sqlite3.connect(DB_NAME)
-        cur = conn.cursor()
-        cur.execute("SELECT COUNT(*) FROM SEARCHRACK")
-        count = cur.fetchone()[0]
-        conn.close()
-        
-        backup_date = datetime.fromtimestamp(os.path.getmtime(backup_path))
-        print(f"✅ Restored backup from day {slot}")
-        print(f"   📅 Backup date: {backup_date.strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"   📊 {count} items restored")
-        
-        return True
-        
-    except Exception as e:
-        print(f"❌ Restore failed: {e}")
-        return False
+        with sqlite3.connect(db_path) as src_conn, sqlite3.connect(temp_path) as dst_conn:
+            src_conn.backup(dst_conn)
+            dst_conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
 
-def main():
-    import sys
-    
-    print("=" * 70)
-    print("ROTATING BACKUP SYSTEM FOR searchRack.db")
-    print("=" * 70)
-    print(f"Maintains 10 days of backup history\n")
-    
-    if len(sys.argv) > 1:
-        command = sys.argv[1].lower()
-        
-        if command == 'backup':
-            create_backup()
-        elif command == 'list':
-            list_backups()
-        elif command == 'restore' and len(sys.argv) > 2:
-            try:
-                slot = int(sys.argv[2])
-                if 1 <= slot <= MAX_BACKUPS:
-                    restore_backup(slot)
-                else:
-                    print(f"❌ Slot must be between 1 and {MAX_BACKUPS}")
-            except ValueError:
-                print("❌ Invalid slot number")
-        else:
-            print("Usage:")
-            print("  python rotating_backup.py backup          - Create a backup")
-            print("  python rotating_backup.py list            - List all backups")
-            print("  python rotating_backup.py restore <1-10>  - Restore from backup")
-    else:
-        # Default: create backup
-        create_backup()
-        print("\n" + "-" * 70)
-        list_backups()
+        with open(temp_path, "rb") as src_file, gzip.open(output_path, "wb", compresslevel=6) as gz_file:
+            shutil.copyfileobj(src_file, gz_file)
 
-if __name__ == '__main__':
-    main()
+        row_count = sqlite_row_count(temp_path)
+        size_bytes = output_path.stat().st_size
+        return BackupResult(
+            db_name=db_path.name,
+            output_path=output_path,
+            row_count=row_count,
+            size_bytes=size_bytes,
+        )
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+
+def list_backups(backup_dir: Path, db_filters: list[str] | None = None) -> int:
+    if not backup_dir.exists():
+        print(f"No backup directory found at {backup_dir}")
+        return 0
+
+    all_files = sorted(
+        backup_dir.glob("*.sqlite3.gz"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    if db_filters:
+        allowed = {Path(name).stem for name in db_filters}
+        all_files = [p for p in all_files if p.name.split("-", 1)[0] in allowed]
+
+    if not all_files:
+        print(f"No backups found in {backup_dir}")
+        return 0
+
+    print(f"Backups in {backup_dir}:")
+    for path in all_files:
+        stat = path.stat()
+        created = datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+        print(f"  {path.name}")
+        print(f"    Created: {created}")
+        print(f"    Size:    {format_size(stat.st_size)}")
+    return 0
+
+
+def run_backup(db_paths: list[Path], backup_dir: Path, keep: int) -> int:
+    ensure_directory(backup_dir)
+    total_bytes = 0
+
+    for db_path in db_paths:
+        result = create_sqlite_backup(db_path, backup_dir)
+        removed = prune_old_backups(backup_dir, db_path.stem, keep)
+        total_bytes += result.size_bytes
+
+        print(f"Created backup for {result.db_name}")
+        print(f"  File: {result.output_path}")
+        if result.row_count is not None:
+            print(f"  Rows: {result.row_count}")
+        print(f"  Size: {format_size(result.size_bytes)}")
+        if removed:
+            print("  Rotated:")
+            for removed_path in removed:
+                print(f"    {removed_path.name}")
+
+    backup_files = list(backup_dir.glob("*.sqlite3.gz"))
+    total_on_disk = sum(path.stat().st_size for path in backup_files)
+    print(f"New backup data written: {format_size(total_bytes)}")
+    print(f"Total compressed backup usage in {backup_dir}: {format_size(total_on_disk)}")
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Rotating gzip-compressed SQLite backups")
+    subparsers = parser.add_subparsers(dest="command")
+
+    backup_parser = subparsers.add_parser("backup", help="Create one or more backups")
+    backup_parser.add_argument(
+        "--db",
+        action="append",
+        dest="databases",
+        default=None,
+        help="Database filename or absolute path. Can be provided multiple times.",
+    )
+    backup_parser.add_argument(
+        "--backup-dir",
+        default=str(DEFAULT_BACKUP_DIR),
+        help="Directory to store compressed backups",
+    )
+    backup_parser.add_argument(
+        "--keep",
+        type=int,
+        default=DEFAULT_KEEP,
+        help="How many backups to keep per database",
+    )
+
+    list_parser = subparsers.add_parser("list", help="List backups")
+    list_parser.add_argument(
+        "--backup-dir",
+        default=str(DEFAULT_BACKUP_DIR),
+        help="Directory containing backups",
+    )
+    list_parser.add_argument(
+        "--db",
+        action="append",
+        dest="databases",
+        default=None,
+        help="Optional database filename filter. Can be provided multiple times.",
+    )
+
+    return parser
+
+
+def main() -> int:
+    parser = build_parser()
+    args = parser.parse_args()
+
+    command = args.command or "backup"
+    databases = args.databases or DEFAULT_DATABASES
+    backup_dir = Path(args.backup_dir).expanduser()
+    keep = getattr(args, "keep", DEFAULT_KEEP)
+
+    if command == "backup":
+        if keep < 1:
+            print("--keep must be at least 1")
+            return 1
+        db_paths = resolve_databases(databases)
+        return run_backup(db_paths, backup_dir, keep)
+
+    if command == "list":
+        return list_backups(backup_dir, databases)
+
+    parser.print_help()
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

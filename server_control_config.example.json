@@ -1,0 +1,130 @@
+{
+  "connection": {
+    "host": "10.0.0.151",
+    "user": "dk",
+    "port": 22,
+    "key_path": "C:\\Users\\boxatron\\.ssh\\sweet_shelves_pi",
+    "connect_timeout_seconds": 8
+  },
+  "commands": [
+    {
+      "label": "Restart Sweet Shelves",
+      "command": "sudo systemctl restart sweetshelves.service",
+      "section": "Sweet Shelves",
+      "tone": "accent",
+      "confirm": false
+    },
+    {
+      "label": "Service Status",
+      "command": "systemctl status sweetshelves.service --no-pager",
+      "section": "Sweet Shelves",
+      "tone": "secondary",
+      "confirm": false
+    },
+    {
+      "label": "Pull Sweet Shelves Updates",
+      "command": "cd /opt/sweetshelves && git pull",
+      "section": "Sweet Shelves",
+      "tone": "secondary",
+      "confirm": false
+    },
+    {
+      "label": "Backup + Pull + Restart",
+      "command": "sh -lc 'cd /opt/sweetshelves && python3 rotating_backup.py backup && git pull && sudo systemctl restart sweetshelves.service'",
+      "section": "Sweet Shelves",
+      "tone": "accent",
+      "confirm": true
+    },
+    {
+      "label": "Backup Status & Health",
+      "command": "sh -lc 'echo \"Recent cron entries:\"; crontab -l 2>/dev/null || echo \"No user cron entries\"; echo; echo \"Recent backups:\"; python3 /opt/sweetshelves/rotating_backup.py list 2>/dev/null | head -n 30 || echo \"Backup list unavailable\"; echo; echo \"Storage:\"; df -h /opt/sweetshelves /mnt /media 2>/dev/null'",
+      "section": "Sweet Shelves",
+      "tone": "secondary",
+      "confirm": false
+    },
+    {
+      "label": "Run Backup Now",
+      "command": "cd /opt/sweetshelves && python3 rotating_backup.py backup",
+      "section": "Sweet Shelves",
+      "tone": "success",
+      "confirm": false
+    },
+    {
+      "label": "List Backups",
+      "command": "cd /opt/sweetshelves && python3 rotating_backup.py list",
+      "section": "Sweet Shelves",
+      "tone": "secondary",
+      "confirm": false
+    },
+    {
+      "label": "Restore Latest Backup",
+      "command": "cd /opt/sweetshelves && bash ./restore_searchrack.sh",
+      "section": "Sweet Shelves",
+      "tone": "warning",
+      "confirm": true
+    },
+    {
+      "label": "Backup/Pull Status",
+      "command": "sh -lc 'echo \"Latest backup:\"; latest=$(ls -t /mnt/db-backups/sweetshelves-db-backups/daily/searchRack-*.sqlite3.gz 2>/dev/null | head -1 || true); if [ -n \"$latest\" ]; then stat -c \"%y  %n\" \"$latest\"; else echo \"No backup found in /mnt/db-backups/sweetshelves-db-backups/daily\"; fi; echo; echo \"Recent pull activity:\"; git -C /opt/sweetshelves reflog --date=local --grep-reflog=\"pull\" -n 5 2>/dev/null || echo \"No git pull reflog entries found\"; echo; echo \"Current code version:\"; git -C /opt/sweetshelves log -1 --date=local --pretty=format:\"%ad  %h  %s\"; echo; echo; echo \"Service status:\"; systemctl is-active sweetshelves.service; systemctl status sweetshelves.service --no-pager -n 3 | tail -n 3'",
+      "section": "Sweet Shelves",
+      "tone": "info",
+      "confirm": false
+    },
+    {
+      "label": "Backup Helper",
+      "command": "sh -lc 'echo \"Create backup now:\"; echo \"  cd /opt/sweetshelves && python3 rotating_backup.py backup\"; echo; echo \"List backups:\"; echo \"  cd /opt/sweetshelves && python3 rotating_backup.py list\"; echo; echo \"Restore helper:\"; sed -n \"1,120p\" /opt/sweetshelves/restore_searchrack.sh 2>/dev/null || echo \"restore_searchrack.sh not found\"'",
+      "section": "Sweet Shelves",
+      "tone": "secondary",
+      "confirm": false
+    },
+    {
+      "label": "Check Disk",
+      "command": "df -h /",
+      "section": "Server",
+      "tone": "secondary",
+      "confirm": false
+    },
+    {
+      "label": "USB Stick Size",
+      "command": "sh -lc 'lsblk -o NAME,TRAN,SIZE,FSTYPE,MOUNTPOINT,LABEL,MODEL | { head -n 1; grep -i usb || true; }'",
+      "section": "Server",
+      "tone": "secondary",
+      "confirm": false
+    },
+    {
+      "label": "Server Status",
+      "command": "hostname && uptime && free -h",
+      "section": "Server",
+      "tone": "secondary",
+      "confirm": false
+    },
+    {
+      "label": "Open Server Terminal",
+      "action": "open_terminal",
+      "section": "Server",
+      "tone": "info",
+      "confirm": false
+    },
+    {
+      "label": "Reboot Server",
+      "command": "sudo reboot",
+      "section": "Server",
+      "tone": "danger",
+      "confirm": true
+    }
+  ],
+  "logs": [
+    {
+      "name": "Sweet Shelves Service",
+      "command": "journalctl -u sweetshelves.service -n 80 --no-pager"
+    },
+    {
+      "name": "System Log",
+      "command": "tail -n 80 /var/log/syslog"
+    },
+    {
+      "name": "Kernel Messages",
+      "command": "dmesg -T | tail -n 80"
+    }
+  ]
+}

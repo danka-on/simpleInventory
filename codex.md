@@ -17,16 +17,16 @@ sudo journalctl -u sweetshelves.service -f
 
 ## Deploying to Pi
 
-Pi host: `manager@superinventory.local`, app directory: `/opt/sweetshelves`
+Pi host: `dk@10.0.0.151`, app directory: `/opt/sweetshelves`
 
 ```powershell
 # Scripted deploy (hardcoded subset of files — update script when adding new files)
 .\deploy-to-pi.ps1
 
 # Manual SCP for specific files
-scp .\app.py manager@superinventory.local:/opt/sweetshelves/
-scp .\templates\*.html manager@superinventory.local:/opt/sweetshelves/templates/
-scp .\static\i18n.js manager@superinventory.local:/opt/sweetshelves/static/
+scp .\app.py dk@10.0.0.151:/opt/sweetshelves/
+scp .\templates\*.html dk@10.0.0.151:/opt/sweetshelves/templates/
+scp .\static\i18n.js dk@10.0.0.151:/opt/sweetshelves/static/
 ```
 
 **Never SCP database files (.db) from PC to Pi.** The Pi has its own live databases. Only transfer code, templates, and static assets.
@@ -38,7 +38,7 @@ After deploying, restart the service on the Pi: `sudo systemctl restart sweetshe
 Use this when asked to "push", "p", or "push to pi" with a specific file list and no DB transfer:
 
 ```powershell
-$h='manager@superinventory.local'; $t="$env:TEMP\pi-deploy.tar"; tar -cf $t DBmanager.py app.py static/shelf-creator.js templates/bulk_manifest.html templates/item_prep.html templates/item_prep_diagnostic.html templates/item_prep_diagnostic_view.html templates/items_to_list.html templates/movelocation.html templates/pictureposition.html templates/ready_to_ship.html templates/shelfmanager.html templates/tools.html templates/unified_search.html; scp $t "${h}:/tmp/pi-deploy.tar"; ssh $h "tar -xf /tmp/pi-deploy.tar -C /opt/sweetshelves && rm -f /tmp/pi-deploy.tar && sudo systemctl restart sweetshelves"; Remove-Item $t -Force
+$h='dk@10.0.0.151'; $t="$env:TEMP\pi-deploy.tar"; tar -cf $t DBmanager.py app.py static/shelf-creator.js templates/bulk_manifest.html templates/item_prep.html templates/item_prep_diagnostic.html templates/item_prep_diagnostic_view.html templates/items_to_list.html templates/movelocation.html templates/pictureposition.html templates/ready_to_ship.html templates/shelfmanager.html templates/tools.html templates/unified_search.html; scp $t "${h}:/tmp/pi-deploy.tar"; ssh $h "tar -xf /tmp/pi-deploy.tar -C /opt/sweetshelves && rm -f /tmp/pi-deploy.tar && sudo systemctl restart sweetshelves"; Remove-Item $t -Force
 ```
 
 This workflow:
@@ -53,7 +53,7 @@ This workflow:
 When user says "push", "p", "let's push", or "push to pi":
 - provide only the direct `scp` commands for the relevant files (no auto-execution),
 - when multiple template files are being pushed, combine them into a single `scp` line to `/opt/sweetshelves/templates/`,
-- always include the reset command: `ssh manager@superinventory.local "sudo systemctl restart sweetshelves.service"`,
+- always include the reset command: `ssh dk@10.0.0.151 "sudo systemctl restart sweetshelves.service"`,
 - exclude all `.db` files,
 - wait for user confirmation (`success` or `s`) before updating this memory checkpoint.
 - after each code change, include the relevant `scp` push command in the handoff so deployment is always easy to do next.

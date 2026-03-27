@@ -1534,6 +1534,23 @@ const OrderManager = {
     }
 };
 
+let _lastKnownReadyToShipVersion = null;
+let _lastKnownReadyToShipCount = null;
+
+function updateReadyToShipPollBaseline(data) {
+    if (!data || !data.success) return;
+    _lastKnownReadyToShipVersion = String(data.version || '');
+    _lastKnownReadyToShipCount = parseInt(data.count, 10) || 0;
+}
+
+async function fetchReadyToShipServerState(days) {
+    const resp = await fetch(`/api/ready-to-ship/count?days=${days}&_t=${Date.now()}`, { cache: 'no-store' });
+    if (!resp.ok) throw new Error(`ready-to-ship state request failed (${resp.status})`);
+    const data = await resp.json().catch(() => null);
+    if (!data || !data.success) throw new Error((data && data.error) || 'Failed to load ready-to-ship state');
+    return data;
+}
+
 // Utility functions
 function esc(s) {
     return String(s||'').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -2458,6 +2475,9 @@ async function fetchAndShowSoldOrders(days, forceRefresh = false) {
         const ordersResponse = await fetch(`/sold-orders?days=${days}${cacheBust}`, { cache: 'no-store' });
         const orders = await ordersResponse.json();
         renderSoldOrders(orders, false);
+        fetchReadyToShipServerState(days)
+            .then(updateReadyToShipPollBaseline)
+            .catch(err => console.warn('Failed to refresh ready-to-ship poll baseline:', err));
 
     } catch (error) {
         console.error('Error fetching orders:', error);
@@ -2774,9 +2794,8 @@ window.addEventListener('storage', function(e) {
 });
 
 // Method 3: Server-side polling — catches changes from OTHER devices/users.
-// Every 30 seconds, check if the order count changed. If it has, refresh the list.
+// Every 30 seconds, check if the lightweight server-side version changed. If it has, refresh the list.
 (function() {
-    let _lastKnownCount = null;
     let _pollActive = true;
 
     document.addEventListener('visibilitychange', function() {
@@ -2787,15 +2806,12 @@ window.addEventListener('storage', function(e) {
         if (!_pollActive || OrderManager.isLoading) return;
         try {
             const days = parseInt(document.getElementById('sold-orders-days')?.value) || loadedDays || 2;
-            const resp = await fetch(`/api/ready-to-ship/count?days=${days}&_t=${Date.now()}`, { cache: 'no-store' });
-            if (!resp.ok) return;
-            const data = await resp.json().catch(() => null);
-            if (!data || !data.success) return;
-            const count = parseInt(data.count, 10) || 0;
-            if (_lastKnownCount !== null && count !== _lastKnownCount) {
+            const data = await fetchReadyToShipServerState(days);
+            const version = String(data.version || '');
+            if (_lastKnownReadyToShipVersion !== null && version && version !== _lastKnownReadyToShipVersion) {
                 triggerSoldOrdersRefresh('poll');
             }
-            _lastKnownCount = count;
+            updateReadyToShipPollBaseline(data);
         } catch (e) { /* network blip — ignore */ }
     }
 
@@ -2803,11 +2819,8 @@ window.addEventListener('storage', function(e) {
     setTimeout(async () => {
         try {
             const days = parseInt(document.getElementById('sold-orders-days')?.value) || loadedDays || 2;
-            const resp = await fetch(`/api/ready-to-ship/count?days=${days}&_t=${Date.now()}`, { cache: 'no-store' });
-            if (resp.ok) {
-                const data = await resp.json().catch(() => null);
-                if (data && data.success) _lastKnownCount = parseInt(data.count, 10) || 0;
-            }
+            const data = await fetchReadyToShipServerState(days);
+            updateReadyToShipPollBaseline(data);
         } catch (e) {}
         setInterval(_pollServerCount, 30000);
     }, 3000);

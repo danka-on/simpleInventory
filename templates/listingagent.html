@@ -167,6 +167,39 @@
       opacity: 1;
       transform: translateX(-50%) translateY(0);
     }
+    .listingProcessBanner{
+      position: fixed;
+      top: 72px;
+      right: 18px;
+      z-index: 9998;
+      display: none;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      border-radius: 12px;
+      border: 1px solid rgba(245, 158, 11, 0.55);
+      background: rgba(120, 53, 15, 0.96);
+      color: #fde68a;
+      box-shadow: 0 14px 32px rgba(0,0,0,0.28);
+      font-weight: 800;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      pointer-events: none;
+    }
+    .listingProcessBanner.show{
+      display: inline-flex;
+    }
+    .listingProcessBanner i{
+      color: #fbbf24;
+    }
+    .listingProcessMeta{
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0;
+      text-transform: none;
+      color: #fef3c7;
+      opacity: 0.95;
+    }
 
     .backBtn{
       appearance: none;
@@ -900,6 +933,22 @@
       color: #10b981 !important;
       border-color: rgba(32,201,151,0.3) !important;
     }
+    .btn-search{
+      background: rgba(37,99,235,0.14) !important;
+      color: #2563eb !important;
+      border: 1px solid rgba(37,99,235,0.34) !important;
+      font-weight: 700 !important;
+      border-radius: 6px !important;
+      padding: 3px 8px !important;
+      cursor: pointer;
+      transition: all .15s ease;
+    }
+    .btn-search:hover{ background: rgba(37,99,235,0.22) !important; }
+    html.ss-theme-night .btn-search{
+      background: rgba(37,99,235,0.16) !important;
+      color: #60a5fa !important;
+      border-color: rgba(96,165,250,0.32) !important;
+    }
 
     .hint{
       margin-top: 8px;
@@ -1447,6 +1496,30 @@
       border-color: rgba(245, 158, 11, 0.9);
       background: rgba(245, 158, 11, 0.18);
     }
+    .queueItem.listingProcessing{
+      border-color: rgba(251, 191, 36, 0.58);
+      background: rgba(251, 191, 36, 0.16);
+    }
+    .queueItem.listingProcessing:hover{
+      background: rgba(251, 191, 36, 0.20);
+      border-color: rgba(251, 191, 36, 0.7);
+    }
+    .queueItem.listingProcessing.active{
+      border-color: #f59e0b;
+      background: rgba(251, 191, 36, 0.22);
+    }
+    .queueItem.errorListing{
+      border-color: rgba(239, 68, 68, 0.72);
+      background: rgba(127, 29, 29, 0.26);
+    }
+    .queueItem.errorListing:hover{
+      background: rgba(153, 27, 27, 0.30);
+      border-color: rgba(248, 113, 113, 0.75);
+    }
+    .queueItem.errorListing.active{
+      border-color: #ef4444;
+      background: rgba(153, 27, 27, 0.34);
+    }
     .queueItem.bad{
       border-color: rgba(239, 68, 68, 0.55);
       background: rgba(239, 68, 68, 0.10);
@@ -1486,6 +1559,22 @@
     }
     .queueItem.bad.active .queueNum{
       background: var(--red);
+      color: #fff;
+    }
+    .queueItem.listingProcessing .queueNum{
+      background: rgba(251, 191, 36, 0.22);
+      color: #fef3c7;
+    }
+    .queueItem.listingProcessing.active .queueNum{
+      background: #f59e0b;
+      color: #fff;
+    }
+    .queueItem.errorListing .queueNum{
+      background: rgba(239, 68, 68, 0.20);
+      color: #fecaca;
+    }
+    .queueItem.errorListing.active .queueNum{
+      background: #ef4444;
       color: #fff;
     }
     .queueTitle{
@@ -2339,6 +2428,13 @@
     </div>
   </div>
   <div class="listingToast" id="listingToast"></div>
+  <div class="listingProcessBanner" id="listingProcessBanner" aria-live="polite">
+    <i class="fas fa-spinner fa-spin"></i>
+    <div>
+      <div id="listingProcessBannerTitle">PROCESSING LISTING</div>
+      <div class="listingProcessMeta" id="listingProcessBannerMeta"></div>
+    </div>
+  </div>
 
   <div class="wrap">
       <div class="layout">
@@ -2786,9 +2882,11 @@
 
                 <div class="btnRow" style="margin-top:10px;justify-content:flex-start;">
                   <button class="btn btnGhost" id="btnAmazonCatalogSearch" type="button"><i class="fas fa-search"></i>Search</button>
+                  <button class="btn btnGhost" id="btnAmazonNoCatalog" type="button"><i class="fas fa-box-open"></i>No Catalog</button>
                   <button class="btn btnGhost" id="btnAmazonCatalogClear" type="button"><i class="fas fa-eraser"></i>Clear</button>
                 </div>
                 <div class="hint" id="amazonCatalogSelectHint" style="margin-top:8px;">Select a UPC or search to see available catalog listings.</div>
+                <div class="hint" id="amazonCatalogModeHint" style="margin-top:6px;display:none;"></div>
 
                 <div id="amazonTemplatesBox" class="miniBox" style="margin-top:10px;max-height:220px;overflow-y:auto;">
                   <div class="muted">Select a UPC to load catalog matches.</div>
@@ -2823,6 +2921,7 @@
 
               <div style="display:none;">
                 <input id="amazonAsin" type="text" placeholder="B0..." />
+                <input id="amazonCatalogMode" type="text" value="catalog" />
               </div>
               <div id="amazonRestrictionHint" class="hint" style="margin-top:0;margin-bottom:6px;"></div>
               <div class="row2">
@@ -2857,7 +2956,7 @@
                 </div>
               </div>
 
-              <div class="row2" style="display:none;">
+              <div class="row2" id="amazonManualFieldsRow" style="display:none;">
                 <div class="field">
                   <label for="amazonProductType">Product Type</label>
                   <input id="amazonProductType" type="text" placeholder="PRODUCT" />
@@ -2904,10 +3003,10 @@
       </div>
     </div>
   </div>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <script>
     const $ = (id) => document.getElementById(id);
     const AMAZON_VERBOSE_DEBUG = false;
+    let listingAgentQrLibPromise = null;
     const state = {
       activeStore: 'ebay',
       settings: {},
@@ -2923,6 +3022,7 @@
       queue: [],
       queueMode: 'my',
       activeUpc: '',
+      selectReqId: 0,
       mobileUploadUrl: '',
       mobileUploadVisible: false,
       mobileUploadPoll: null,
@@ -2939,6 +3039,7 @@
       selectedCompItemId: '',
       amazonCatalog: [],
       amazonCatalogDetail: null,
+      amazonCatalogMode: 'catalog',
       categoryReqId: 0,
       categorySuggestions: [],
       recommendedCategory: null,
@@ -2980,7 +3081,12 @@
       checkRequestSaveTimer: null,
       checkRequestDirty: false,
       checkRequestHydrating: false,
+      aiTitleReqId: 0,
+      aiDescReqId: 0,
       sessionListedForCurrent: {ebay: false, amazon: false},
+      ebaySpecificsAutoCloseArmed: false,
+      ebaySpecificsAutoCloseDone: false,
+      listingSubmissions: {},
     };
 
     function getReturnParam(){
@@ -2998,6 +3104,9 @@
     function toggleCard(cardId){
       const card = $(cardId);
       if(!card) return;
+      if(cardId === 'cardEbayAspects'){
+        state.ebaySpecificsAutoCloseArmed = false;
+      }
       card.classList.toggle('collapsed');
       // Save collapse state to localStorage
       const collapsed = JSON.parse(localStorage.getItem('listingAgentCollapsed') || '{}');
@@ -3054,7 +3163,14 @@
         badge.style.display = needsAttention ? 'none' : 'inline-flex';
         badge.textContent = 'Ready';
       }
-      setCardCollapsed('cardEbayAspects', !needsAttention);
+      if(needsAttention){
+        setCardCollapsed('cardEbayAspects', false, {persist:false});
+        return;
+      }
+      if(state.ebaySpecificsAutoCloseArmed && !state.ebaySpecificsAutoCloseDone){
+        setCardCollapsed('cardEbayAspects', true, {persist:false});
+        state.ebaySpecificsAutoCloseDone = true;
+      }
     }
 
     function log(line){
@@ -3218,13 +3334,20 @@
     function _setStoreListedUi(store, listed){
       const isListed = !!listed;
       const hasItem = !!(state.item || state.activeUpc);
+      const activeUpc = state.activeUpc || '';
+      const submission = activeUpc ? _getSubmissionEntry(activeUpc, store) : null;
+      const isProcessing = !!(submission && submission.status === 'processing');
       if(store === 'ebay'){
         const publishBtn = $('btnPublish');
         const editBtn = $('btnEbayEditListing');
         const bar = $('ebayListedBar');
         if(bar) bar.style.display = 'none';
         if(publishBtn){
-          if(isListed){
+          publishBtn.disabled = isProcessing;
+          if(isProcessing){
+            publishBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>Processing...';
+            publishBtn.classList.add('btnUpdateMode');
+          } else if(isListed){
             publishBtn.innerHTML = '<i class="fas fa-pen"></i>Update Listing';
             publishBtn.classList.add('btnUpdateMode');
           } else {
@@ -3243,7 +3366,11 @@
         const bar = $('amazonListedBar');
         if(bar) bar.style.display = 'none';
         if(putBtn){
-          if(isListed){
+          putBtn.disabled = isProcessing;
+          if(isProcessing){
+            putBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>Processing...';
+            putBtn.classList.add('btnUpdateMode');
+          } else if(isListed){
             putBtn.innerHTML = '<i class="fas fa-pen"></i>Update Listing';
             putBtn.classList.add('btnUpdateMode');
           } else {
@@ -3276,22 +3403,236 @@
       _showListingToast._t = setTimeout(() => el.classList.remove('show'), 3500);
     }
 
-    function markStoreListedForActiveItem(store, extra){
+    function _submissionKey(upc, store){
+      const key = _workingDraftKey(upc || '');
       const s = (store || '').toString().trim().toLowerCase();
-      if(s !== 'ebay' && s !== 'amazon') return;
-      const prev = state.sessionListedForCurrent || {ebay: false, amazon: false};
-      state.sessionListedForCurrent = {...prev, [s]: true};
-      // Persist to history so checkmark survives UPC switch within same session
-      const upc = state.activeUpc || '';
-      if(upc){
-        const hist = state.listedHistory || (state.listedHistory = new Map());
-        const entry = hist.get(upc) || {ebay: false, amazon: false};
-        hist.set(upc, {...entry, [s]: true});
+      if(!key || !s) return '';
+      return `${s}::${key}`;
+    }
+
+    function _getSubmissionEntries(){
+      const map = state.listingSubmissions && typeof state.listingSubmissions === 'object' ? state.listingSubmissions : {};
+      return Object.values(map).filter(Boolean);
+    }
+
+    function _getSubmissionEntry(upc, store){
+      const key = _submissionKey(upc, store);
+      if(!key) return null;
+      const map = state.listingSubmissions && typeof state.listingSubmissions === 'object' ? state.listingSubmissions : {};
+      return map[key] || null;
+    }
+
+    function _getQueueSubmissionState(upc){
+      const key = _workingDraftKey(upc || '');
+      if(!key) return null;
+      const entries = _getSubmissionEntries().filter((entry) => _workingDraftKey(entry?.upc || '') === key);
+      if(!entries.length) return null;
+      return entries.find((entry) => entry.status === 'processing')
+        || entries.find((entry) => entry.status === 'error')
+        || null;
+    }
+
+    function _setSubmissionEntry(upc, store, patch){
+      const key = _submissionKey(upc, store);
+      if(!key) return null;
+      const current = _getSubmissionEntry(upc, store) || {};
+      const next = {
+        ...current,
+        ...patch,
+        upc: _workingDraftKey(upc || ''),
+        store: (store || '').toString().trim().toLowerCase(),
+        updatedAt: new Date().toISOString(),
+      };
+      state.listingSubmissions = {...(state.listingSubmissions || {}), [key]: next};
+      return next;
+    }
+
+    function _clearSubmissionEntry(upc, store){
+      const key = _submissionKey(upc, store);
+      if(!key || !state.listingSubmissions || !state.listingSubmissions[key]) return;
+      const next = {...state.listingSubmissions};
+      delete next[key];
+      state.listingSubmissions = next;
+    }
+
+    function renderListingProcessBanner(){
+      const banner = $('listingProcessBanner');
+      const title = $('listingProcessBannerTitle');
+      const meta = $('listingProcessBannerMeta');
+      if(!banner || !title || !meta) return;
+      const processing = _getSubmissionEntries().filter((entry) => entry.status === 'processing');
+      if(!processing.length){
+        banner.classList.remove('show');
+        meta.textContent = '';
+        return;
       }
+      const activeKey = _workingDraftKey(state.activeUpc || '');
+      const activeEntry = processing.find((entry) => _workingDraftKey(entry.upc || '') === activeKey);
+      const primary = activeEntry || processing[0];
+      const queueItem = Array.isArray(state.queue) ? state.queue.find((it) => _upcEquals((it?.upc || '').toString().trim(), primary?.upc || '')) : null;
+      const itemTitle = (queueItem?.title || queueItem?.item_description || state.item?.title || primary?.upc || '').toString().trim();
+      title.textContent = 'PROCESSING LISTING';
+      const label = (primary?.store || '').toString().toLowerCase() === 'amazon' ? 'Amazon' : 'eBay';
+      meta.textContent = processing.length > 1
+        ? `${label}: ${itemTitle || (primary?.upc || '')} • ${processing.length} active submissions`
+        : `${label}: ${itemTitle || (primary?.upc || '')}`;
+      banner.classList.add('show');
+    }
+
+    function _markFieldInvalidAndFocus(id){
+      const el = $(id);
+      if(!el) return false;
+      el.classList.add('fieldInvalid');
+      _expandCardForElement(el);
+      try{ el.scrollIntoView({behavior: 'smooth', block: 'center'}); }catch(e){}
+      try{ el.focus({preventScroll: true}); }catch(e){
+        try{ el.focus(); }catch(err){}
+      }
+      return true;
+    }
+
+    function _highlightKnownFieldFromMessage(message, mappings){
+      const low = (message || '').toString().trim().toLowerCase();
+      if(!low) return false;
+      for(const map of (mappings || [])){
+        const needles = Array.isArray(map.needles) ? map.needles : [];
+        if(!needles.length) continue;
+        if(needles.some((needle) => low.includes(String(needle).toLowerCase()))){
+          return _markFieldInvalidAndFocus(map.id);
+        }
+      }
+      return false;
+    }
+
+    function highlightAmazonErrorFromError(err){
+      const msg = (err && err.message) ? String(err.message) : '';
+      const api = (err && err.api) ? err.api : {};
+      const handled = _highlightKnownFieldFromMessage(msg, [
+        {id: 'amazonProductType', needles: ['producttype', 'product type']},
+        {id: 'amazonSku', needles: ['sku is required', 'requested_sku', 'effective_sku']},
+        {id: 'amazonPrice', needles: ['price is required', 'amazon price']},
+        {id: 'title', needles: ['title is required', 'manual listing title']},
+        {id: 'listingDescEditor', needles: ['listing description', 'product_description', 'product description']},
+        {id: 'amazonConditionNote', needles: ['condition note']},
+        {id: 'amazonCatalogQ', needles: ['could not resolve asin from upc', 'select first', 'catalog item', 'asin appears restricted', 'restricted/gated', 'gated']},
+        {id: 'amazonUpc', needles: ['asin or upc is required', 'upc is required']},
+      ]);
+      if(handled) return true;
+      if(api?.restriction || /restricted|gated/i.test(msg)){
+        return _markFieldInvalidAndFocus('amazonCatalogQ');
+      }
+      return false;
+    }
+
+    function highlightEbayErrorFromError(err){
+      if(highlightMissingEbayAspectFromError(err)) return true;
+      const msg = (err && err.message) ? String(err.message) : '';
+      return _highlightKnownFieldFromMessage(msg, [
+        {id: 'fulfillmentPolicyId', needles: ['fulfillment policy', 'shipping policy']},
+        {id: 'paymentPolicyId', needles: ['payment policy']},
+        {id: 'returnPolicyId', needles: ['return policy']},
+        {id: 'categoryId', needles: ['category is required', 'category']},
+        {id: 'title', needles: ['title is required', 'title']},
+        {id: 'price', needles: ['price is required', 'price']},
+        {id: 'quantity', needles: ['quantity']},
+        {id: 'listingDescEditor', needles: ['listing description', 'description']},
+        {id: 'conditionDescription', needles: ['condition description']},
+        {id: 'sku', needles: ['sku is required', 'sku']},
+        {id: 'upc', needles: ['upc is required', 'upc']},
+      ]);
+    }
+
+    function _focusSubmissionError(entry){
+      if(!entry) return false;
+      const store = (entry.store || '').toString().trim().toLowerCase();
+      if(store === 'amazon'){
+        setStore('amazon');
+        return highlightAmazonErrorFromError({message: entry.message, api: entry.api || {}});
+      }
+      setStore('ebay');
+      return highlightEbayErrorFromError({message: entry.message, api: entry.api || {}});
+    }
+
+    function _showSubmissionError(entry){
+      if(!entry) return;
+      const storeLabel = (entry.store || '').toString().trim().toLowerCase() === 'amazon' ? 'Amazon' : 'eBay';
+      const itemTitle = (entry.title || entry.upc || '').toString().trim();
+      showIssueModal(
+        `${storeLabel} Listing Failed`,
+        `${itemTitle ? `${itemTitle}\n\n` : ''}${(entry.message || 'Unknown error').toString().trim()}`
+      );
+    }
+
+    function _maybeShowStoredSubmissionErrorForActiveItem(){
+      const entry = _getQueueSubmissionState(state.activeUpc || '');
+      if(!entry || entry.status !== 'error') return false;
+      _focusSubmissionError(entry);
+      _showSubmissionError(entry);
+      return true;
+    }
+
+    function _beginListingSubmission(upc, store, operation){
+      const clean = _workingDraftKey(upc || '');
+      const entry = _setSubmissionEntry(clean, store, {
+        status: 'processing',
+        operation: operation || 'Listing',
+        message: '',
+        api: {},
+        title: (state.item?.title || state.item?.bol?.description || clean || '').toString().trim(),
+        startedAt: new Date().toISOString(),
+      });
+      renderListingProcessBanner();
+      renderQueue();
       updateListingActionState();
+      window.scrollTo({top: 0, behavior: 'smooth'});
+      log(`${operation || 'Listing'} started in background.`);
+      return entry;
+    }
+
+    function _finishListingSubmissionSuccess(upc, store){
+      _clearSubmissionEntry(upc, store);
+      renderListingProcessBanner();
+      renderQueue();
+      updateListingActionState();
+    }
+
+    function _finishListingSubmissionError(upc, store, operation, err){
+      const clean = _workingDraftKey(upc || '');
+      const entry = _setSubmissionEntry(clean, store, {
+        status: 'error',
+        operation: operation || 'Listing',
+        message: (err && err.message) ? String(err.message) : String(err || 'Unknown error'),
+        api: (err && err.api) ? err.api : {},
+      });
+      renderListingProcessBanner();
+      renderQueue();
+      updateListingActionState();
+      if(_upcEquals(state.activeUpc || '', clean)){
+        _focusSubmissionError(entry);
+      }
+      _showSubmissionError(entry);
+      return entry;
+    }
+
+    function markStoreListedForUpc(upc, store, extra){
+      const s = (store || '').toString().trim().toLowerCase();
+      const clean = _workingDraftKey(upc || '');
+      if((s !== 'ebay' && s !== 'amazon') || !clean) return;
+      const hist = state.listedHistory || (state.listedHistory = new Map());
+      const entry = hist.get(clean) || {ebay: false, amazon: false};
+      hist.set(clean, {...entry, [s]: true});
+      if(_upcEquals(state.activeUpc || '', clean)){
+        const prev = state.sessionListedForCurrent || {ebay: false, amazon: false};
+        state.sessionListedForCurrent = {...prev, [s]: true};
+        updateListingActionState();
+        window.scrollTo({top: 0, behavior: 'smooth'});
+      }
       const label = s === 'ebay' ? 'eBay' : 'Amazon';
       _showListingToast(`✓ Successfully listed on ${label}`);
-      window.scrollTo({top: 0, behavior: 'smooth'});
+    }
+
+    function markStoreListedForActiveItem(store, extra){
+      markStoreListedForUpc(state.activeUpc || '', store, extra);
     }
 
     function _isUpcInQueue(upc){
@@ -3393,6 +3734,7 @@
       'offerId',
       'amazonSku',
       'amazonAsin',
+      'amazonCatalogMode',
       'amazonConditionType',
       'amazonConditionNote',
       'amazonPrice',
@@ -3448,6 +3790,11 @@
 
     function _workingDraftKey(upc){
       return formatUpc12((upc ?? '').toString().trim()) || (upc ?? '').toString().trim();
+    }
+
+    function _selectionStillActive(reqId, upc){
+      if(reqId !== state.selectReqId) return false;
+      return _workingDraftKey(state.activeUpc || '') === _workingDraftKey(upc || '');
     }
 
     function _hasWorkingDraft(upc){
@@ -3511,6 +3858,77 @@
       return data;
     }
 
+    function getAmazonListingTitle(){
+      return (
+        ($('title')?.value || '').toString().trim()
+        || (state.item?.title || '').toString().trim()
+        || (state.item?.bol?.description || '').toString().trim()
+      );
+    }
+
+    function _isAmazonManualMode(){
+      return ((state.amazonCatalogMode || 'catalog') === 'manual') && !((($('amazonAsin')?.value || '') + '').trim());
+    }
+
+    function _setAmazonManualRequirements(force=false){
+      const reqEl = $('amazonRequirements');
+      if(!reqEl) return;
+      const current = (reqEl.value || '').toString().trim().toUpperCase();
+      if(force || !current || current === 'LISTING_OFFER_ONLY'){
+        reqEl.value = 'LISTING';
+      }
+    }
+
+    function syncAmazonCatalogModeUI(){
+      const manual = _isAmazonManualMode();
+      const modeEl = $('amazonCatalogMode');
+      if(modeEl) modeEl.value = manual ? 'manual' : 'catalog';
+      const btn = $('btnAmazonNoCatalog');
+      if(btn){
+        btn.classList.toggle('btnPrimary', manual);
+        btn.classList.toggle('btnGhost', !manual);
+        btn.innerHTML = manual
+          ? '<i class="fas fa-box-open"></i>No Catalog Active'
+          : '<i class="fas fa-box-open"></i>No Catalog';
+      }
+      const hint = $('amazonCatalogModeHint');
+      if(hint){
+        if(manual){
+          hint.style.display = 'block';
+          hint.textContent = 'Manual mode uses the UPC plus your current title/description to create a new Amazon listing without selecting a catalog ASIN.';
+        } else {
+          hint.style.display = 'none';
+          hint.textContent = '';
+        }
+      }
+      const row = $('amazonManualFieldsRow');
+      if(row) row.style.display = manual ? 'grid' : 'none';
+    }
+
+    function setAmazonCatalogMode(mode, {silent=false, keepResults=true} = {}){
+      const nextMode = String(mode || 'catalog').trim().toLowerCase() === 'manual' ? 'manual' : 'catalog';
+      state.amazonCatalogMode = nextMode;
+      if(nextMode === 'manual'){
+        if($('amazonAsin')) $('amazonAsin').value = '';
+        state.amazonCatalogDetail = null;
+        if($('amazonCatalogDetail')) $('amazonCatalogDetail').innerHTML = '';
+        resetAmazonRestrictionHint({clearState:true});
+        _setAmazonManualRequirements();
+      }
+      syncAmazonCatalogModeUI();
+      if(!keepResults){
+        state.amazonCatalog = [];
+      }
+      renderAmazonTemplates();
+      if(!silent){
+        log(nextMode === 'manual'
+          ? 'Amazon No Catalog mode enabled.'
+          : 'Amazon catalog selection mode enabled.');
+      }
+      _resetNextField();
+      _scheduleWorkingDraftSave();
+    }
+
     function _applyWorkingDraft(draft){
       const data = draft && typeof draft === 'object' ? draft : null;
       if(!data) return false;
@@ -3541,6 +3959,7 @@
           }
         }
       }catch(e){}
+      setAmazonCatalogMode((fields.amazonCatalogMode || 'catalog'), {silent:true});
       updateConditionNoteVisibility();
       if(nextCategoryId){
         try{
@@ -3730,6 +4149,7 @@
       if(!state.queue || state.queue.length === 0){
         empty.style.display = 'block';
         updateSearchQueueAction();
+        renderListingProcessBanner();
         return;
       }
       empty.style.display = 'none';
@@ -3737,6 +4157,7 @@
       state.queue.forEach((it, idx) => {
         const upc = (it.upc || '').toString().trim();
         if(!upc) return;
+        const submission = _getQueueSubmissionState(upc);
         const hasEbay = !!((it.listed_ebay_at || '').toString().trim());
         const hasAmazon = !!((it.listed_amazon_at || '').toString().trim());
         const isDone = it._done || (it.status || '').toString().trim().toLowerCase() === 'done' || (hasEbay && hasAmazon);
@@ -3748,9 +4169,17 @@
         const source = (it.source || '').toString().trim();
         const itemStatus = (it.item_status || '').toString().trim().toLowerCase();
         const isBad = (source === 'list_manager' && itemStatus === 'bad');
+        const isProcessing = !!(submission && submission.status === 'processing');
+        const isErrorListing = !!(submission && submission.status === 'error');
 
         const row = document.createElement('div');
-        row.className = 'queueItem' + (isDone ? ' done' : '') + (isActive ? ' active' : '') + (isWorking ? ' working' : '') + (isBad ? ' bad' : '');
+        row.className = 'queueItem'
+          + (isDone ? ' done' : '')
+          + (isActive ? ' active' : '')
+          + (isWorking ? ' working' : '')
+          + (isBad ? ' bad' : '')
+          + (isProcessing ? ' listingProcessing' : '')
+          + (isErrorListing ? ' errorListing' : '');
         row.onclick = (e) => { if(e.target.closest('.queueRemove')) return; selectUPC(upc); };
 
         // Number
@@ -3762,10 +4191,30 @@
         // Title
         const titleEl = document.createElement('span');
         titleEl.className = 'queueTitle';
-        titleEl.textContent = isBad ? `(bad) ${title}` : title;
-        titleEl.title = isBad ? `(bad) ${title}` : title;
+        const displayTitle = isErrorListing ? `(error listing) ${title}` : (isBad ? `(bad) ${title}` : title);
+        titleEl.textContent = displayTitle;
+        titleEl.title = displayTitle;
         row.appendChild(titleEl);
 
+        if(isProcessing){
+          const status = document.createElement('span');
+          status.className = 'queueStatusIcon';
+          status.style.borderColor = 'rgba(251, 191, 36, 0.55)';
+          status.style.background = 'rgba(251, 191, 36, 0.18)';
+          status.style.color = '#fde68a';
+          status.title = `${(submission.operation || 'Listing').toString()} in progress`;
+          status.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+          row.appendChild(status);
+        } else if(isErrorListing){
+          const status = document.createElement('span');
+          status.className = 'queueStatusIcon';
+          status.style.borderColor = 'rgba(239, 68, 68, 0.65)';
+          status.style.background = 'rgba(239, 68, 68, 0.18)';
+          status.style.color = '#fecaca';
+          status.title = `${(submission.operation || 'Listing').toString()} failed. Open item for details.`;
+          status.innerHTML = '<i class="fas fa-triangle-exclamation"></i>';
+          row.appendChild(status);
+        }
         if(isWorking){
           const status = document.createElement('span');
           status.className = 'queueStatusIcon';
@@ -3827,6 +4276,7 @@
       updateQueueScrollState();
       updateSearchQueueAction();
       updateListingActionState();
+      renderListingProcessBanner();
     }
 
     function updateQueueScrollState(){
@@ -3967,7 +4417,13 @@
 
       if(platform === 'amazon'){
         if(r.sku) $('amazonSku').value = (r.sku || '').toString();
-        if(r.asin) $('amazonAsin').value = (r.asin || '').toString();
+        if(r.asin){
+          state.amazonCatalogMode = 'catalog';
+          $('amazonAsin').value = (r.asin || '').toString();
+        } else {
+          state.amazonCatalogMode = 'manual';
+          $('amazonAsin').value = '';
+        }
 
         const p = _toNumber(r.price);
         if(p !== null){
@@ -3976,6 +4432,7 @@
         }
         const q = _toNumber(r.quantity);
         if(q !== null) $('amazonQuantity').value = Math.max(0, Math.round(q));
+        syncAmazonCatalogModeUI();
 
         log('Loaded Amazon listing for edit.');
         return;
@@ -4142,6 +4599,10 @@
       const raw = (upc ?? '').toString().trim();
       const clean = normalizeUpc(raw) || raw;
       if(!clean) return;
+      const reqId = ++state.selectReqId;
+      const selectionKey = _workingDraftKey(clean);
+      state.aiTitleReqId += 1;
+      state.aiDescReqId += 1;
       _startLoading();
       if(state.workingDraftSaveTimer){
         clearTimeout(state.workingDraftSaveTimer);
@@ -4149,11 +4610,14 @@
       }
       if(state.activeUpc && state.workingDraftDirty){
         await saveWorkingDraftForActiveItem();
+        if(reqId !== state.selectReqId) return;
       }
       resetFormsForNewUPC(clean);
       state.manualRequiredAspects = [];
       state.ebayAspectSnapshot = {};
       state.ebayAspectManualEdits = new Set();
+      state.ebaySpecificsAutoCloseArmed = true;
+      state.ebaySpecificsAutoCloseDone = false;
       state.removedImages = new Set();
       state.activeImages = new Set();
       state.inactiveImages = new Set();
@@ -4184,12 +4648,15 @@
         for(const cand of candidates){
           try{
             data = await apiGet(`/api/listingagent/upc/${encodeURIComponent(cand)}`);
+            if(!_selectionStillActive(reqId, selectionKey)) return;
             break;
           }catch(err){
+            if(!_selectionStillActive(reqId, selectionKey)) return;
             tried.push(cand);
           }
         }
         if(!data) throw new Error(`No local item found for UPC (${tried.join(', ')})`);
+        if(!_selectionStillActive(reqId, selectionKey)) return;
         state.item = data.item || {};
         state.checkRequest = (state.item.checker && state.item.checker.request) ? state.item.checker.request : null;
         state.checkRequestOpen = false;
@@ -4208,19 +4675,28 @@
         setupMobileUploadForUPC(state.item.upc || clean);
         autofillForm();
         const draft = await _fetchWorkingDraft(clean);
+        if(!_selectionStillActive(reqId, selectionKey)) return;
         if(draft){
           const applyDraft = () => {
-            if(_workingDraftKey(state.activeUpc || clean) !== _workingDraftKey(clean)) return;
+            if(!_selectionStillActive(reqId, selectionKey)) return;
             _applyWorkingDraft(draft);
           };
           setTimeout(applyDraft, 250);
           setTimeout(applyDraft, 1100);
         }
+        if(!_selectionStillActive(reqId, selectionKey)) return;
         loadTemplatesForUPC(clean);
         log(`Loaded ${formatUpc12(state.item.upc || clean)}`);
+        updateListingActionState();
+        renderListingProcessBanner();
+        setTimeout(() => {
+          if(!_selectionStillActive(reqId, selectionKey)) return;
+          _maybeShowStoredSubmissionErrorForActiveItem();
+        }, 240);
 
         // offerId is restored if user clicks the Edit button
       } catch(e){
+        if(!_selectionStillActive(reqId, selectionKey)) return;
         log(`Load error: ${e.message}`);
       } finally {
         _stopLoading();
@@ -4323,6 +4799,7 @@
               `<i class="fas fa-barcode"></i><span class="previewBarcodeText">${escapeHtml(previewDisplayUpc)}</span>` +
             `</a>` +
             `<button type="button" id="btnCopyPreviewUpc" class="btn btn-sm btn-copy" data-upc="${escapeHtml(previewBaseUpc)}" title="Copy base barcode">Copy</button>` +
+            `<button type="button" id="btnSearchPreviewUpc" class="btn btn-sm btn-search" data-query="${escapeHtml([previewDisplayUpc, (item.title || item.bol?.description || '').toString().trim()].filter(Boolean).join(' '))}" title="Search Google with barcode and title">Search</button>` +
           `</span>`
         );
       }
@@ -4377,11 +4854,24 @@
           }
         };
       }
+      const googleSearchBtn = $('btnSearchPreviewUpc');
+      if(googleSearchBtn){
+        googleSearchBtn.onclick = () => {
+          const query = (googleSearchBtn.dataset.query || '').toString().trim();
+          if(!query) return;
+          const url = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
+          try{
+            window.open(url, '_blank', 'noopener,noreferrer');
+          }catch(e){
+            window.location.href = url;
+          }
+        };
+      }
       const qrBtn = $('btnToggleQrPhotoMode');
       if(qrBtn){
         qrBtn.style.display = item && item.upc ? 'inline-flex' : 'none';
         qrBtn.innerHTML = `<i class="fas fa-qrcode"></i>${state.mobileUploadVisible ? 'Close QR photo mode' : 'QR photo mode'}`;
-        qrBtn.onclick = () => {
+        qrBtn.onclick = async () => {
           const panel = $('mobileUploadPanel');
           const upc = state.activeUpc || item.upc || '';
           if(!panel) return;
@@ -4400,6 +4890,7 @@
           if(state.mobileUploadUrl){
             panel.style.display = 'block';
             if($('previewTop')) $('previewTop').classList.add('withQr');
+            try{ await ensureListingAgentQrLib(); }catch(e){}
             renderMobileQr(state.mobileUploadUrl);
             refreshMobileUploadedPhotos({silent:true});
             state.mobileUploadPoll = setInterval(() => {
@@ -4821,6 +5312,7 @@
       state.selectedCompItemId = '';
       state.amazonCatalog = [];
       state.amazonCatalogDetail = null;
+      state.amazonCatalogMode = 'catalog';
       if($('ebayCatalogBox')) $('ebayCatalogBox').innerHTML = '<div class="muted">Select a UPC to load catalog matches.</div>';
       if($('ebayCatalogQ')) $('ebayCatalogQ').value = '';
       if($('ebayCatalogHint')) $('ebayCatalogHint').textContent = 'Select a UPC to auto-search eBay catalog.';
@@ -4831,6 +5323,7 @@
       if($('amazonCatalogSelectHint')) $('amazonCatalogSelectHint').textContent = 'Select a UPC or search to see available catalog listings.';
       $('amazonCatalogDetail').innerHTML = '';
       resetAmazonRestrictionHint({clearState:true});
+      syncAmazonCatalogModeUI();
     }
 
     function _toNumber(val){
@@ -5853,12 +6346,14 @@
           // Clear missing-field highlight once user edits this aspect.
           inputEl.addEventListener('input', () => {
             inputEl.classList.remove('fieldInvalid');
+            state.ebaySpecificsAutoCloseArmed = false;
             _markEbayAspectManualEdit(name);
             _rememberEbayAspectSnapshot({[name]: inputEl.value || ''});
             if(state.activeStore === 'ebay') syncEbaySpecificsCardState();
           });
           inputEl.addEventListener('change', () => {
             inputEl.classList.remove('fieldInvalid');
+            state.ebaySpecificsAutoCloseArmed = false;
             _markEbayAspectManualEdit(name);
             _rememberEbayAspectSnapshot({[name]: inputEl.value || ''});
             if(state.activeStore === 'ebay') syncEbaySpecificsCardState();
@@ -5923,8 +6418,6 @@
       // Re-apply the selected catalog specifics after the category-specific UI renders.
       try{ _applySelectedEbayCatalogAspects({ifEmpty: true}); }catch(e){}
 
-      // Apply brand/color/material from Amazon catalog + title extraction
-      try{ applyCommonSpecificsFromAvailableData(); }catch(e){}
       try{ _rememberEbayAspectSnapshot(); }catch(e){}
       try{ syncEbaySpecificsCardState(); }catch(e){}
     }
@@ -6242,10 +6735,10 @@
           _clearEbayCatalogSelection();
         }
         box.innerHTML = state.item
-          ? `<div class="hint">${hasSelectedCatalog ? 'No additional eBay browse matches right now. Keeping the selected catalog specifics.' : 'No eBay catalog match for this UPC. Try searching by title.'}</div>`
+          ? `<div class="hint">${hasSelectedCatalog ? 'No additional eBay catalog matches right now. Keeping the selected catalog specifics.' : 'No eBay catalog match for this UPC.'}</div>`
           : '<div class="muted">Search to load eBay catalog matches.</div>';
         if(hint) hint.textContent = state.item
-          ? (hasSelectedCatalog ? 'Using saved catalog specifics.' : 'No matches. Try searching by title.')
+          ? (hasSelectedCatalog ? 'Using saved catalog specifics.' : 'No matches for this UPC.')
           : 'Search to see eBay catalog matches.';
         return;
       }
@@ -6326,9 +6819,6 @@
         }
       }
 
-      // Apply image if none set
-      if(imgUrl) try{ setStoreTemplateImages('ebay', [imgUrl]); }catch(e){}
-
       const priceEl = $('price');
       const suggestedPrice = Number(priceValue);
       if(priceEl && Number.isFinite(suggestedPrice) && suggestedPrice > 0){
@@ -6398,16 +6888,16 @@
 
     async function ebayCatalogSearch(){
       const typed = ($('ebayCatalogQ')?.value || '').trim();
+      const typedUpc = formatUpc12(_splitUpcSuffix(typed).base || typed);
       const upc = formatUpc12((($('upc')?.value || '').trim()));
-      const q = typed || upc;
+      const q = upc || typedUpc;
       if(!q){ log('Pick a UPC first (eBay catalog).'); return; }
+      if($('ebayCatalogQ')) $('ebayCatalogQ').value = q;
       _clearEbayCatalogSelection();
       if($('ebayCatalogHint')) $('ebayCatalogHint').textContent = 'Searching eBay catalog...';
       if($('ebayCatalogBox')) $('ebayCatalogBox').innerHTML = '<div class="hint">Searching eBay catalog…</div>';
       try{
-        const itemTitle = ($('title')?.value || state.item?.title || state.item?.bol?.description || '').toString().trim();
-        const titleParam = itemTitle ? `&title=${encodeURIComponent(itemTitle)}` : '';
-        const res = await apiGet(`/api/listingagent/ebay/catalog_search?${/^\d+$/.test(q.replace(/\s/g,'')) ? 'upc' : 'q'}=${encodeURIComponent(q)}&limit=10${titleParam}`);
+        const res = await apiGet(`/api/listingagent/ebay/catalog_search?upc=${encodeURIComponent(q)}&limit=10`);
         state.ebayCatalog = res.results || [];
         renderEbayCatalog();
       }catch(e){
@@ -6424,29 +6914,20 @@
 
       const results = Array.isArray(state.amazonCatalog) ? state.amazonCatalog : [];
       const currentAsin = ($('amazonAsin')?.value || '').toString().trim();
+      const manualMode = _isAmazonManualMode();
 
       // No results yet.
       if(!results.length){
         box.innerHTML = state.item
           ? '<div class="hint">No catalog matches for this UPC yet. Try searching by title or ASIN.</div>'
           : '<div class="muted">Search to load Amazon catalog matches.</div>';
-        if(hint) hint.textContent = state.item ? 'No matches found. Try searching by title or ASIN.' : 'Search to see available catalog listings.';
-        return;
-      }
-
-      // Auto-select: if ASIN empty, pick first result (recommended) and load detail.
-      if(!currentAsin){
-        const first = (results[0]?.asin || '').toString().trim();
-        if(first){
-          $('amazonAsin').value = first;
-          const firstPrice = results[0]?.store_price != null ? parseFloat(results[0].store_price) : null;
-          if(firstPrice != null && $('amazonPrice') && !($('amazonPrice').value || '').trim()){
-            $('amazonPrice').value = firstPrice.toFixed(2);
-            state.amazonPriceManuallySet = false;
-          }
-          loadAmazonCatalogDetail(first);
-          checkAmazonRestrictionForCurrentAsin({force:true, silent:true});
+        if(hint){
+          hint.textContent = manualMode
+            ? 'Manual mode is active. Catalog search is optional.'
+            : (state.item ? 'No matches found. Try searching by title or ASIN.' : 'Search to see available catalog listings.');
         }
+        syncAmazonCatalogModeUI();
+        return;
       }
 
       const selected = ($('amazonAsin')?.value || '').toString().trim();
@@ -6493,15 +6974,16 @@
         row.appendChild(main);
 
         row.onclick = () => {
+          state.amazonCatalogMode = 'catalog';
           $('amazonAsin').value = asin;
           setStoreTemplateImages('amazon', imgUrl ? [imgUrl] : []);
-          applyCommonSpecificsFromAvailableData({asin, brand, title});
           if(storePrice != null && $('amazonPrice') && !($('amazonPrice').value || '').trim()){
             $('amazonPrice').value = storePrice.toFixed(2);
             state.amazonPriceManuallySet = false;
           }
           loadAmazonCatalogDetail(asin);
           checkAmazonRestrictionForCurrentAsin({force:true, silent:false});
+          syncAmazonCatalogModeUI();
           renderAmazonTemplates(); // update selection highlight
           log(`Selected Amazon catalog ASIN ${asin} for listing.`);
 
@@ -6514,20 +6996,12 @@
       }
 
       box.appendChild(list);
-      try{
-        const selectedRow = results.find(r => ((r?.asin || '').toString().trim() === (($('amazonAsin')?.value || '').toString().trim()))) || results[0];
-        if(selectedRow){
-          applyCommonSpecificsFromAvailableData({
-            asin: (selectedRow.asin || '').toString().trim(),
-            brand: (selectedRow.brand || '').toString().trim(),
-            title: (selectedRow.title || '').toString().trim(),
-          });
-        }
-      }catch(e){}
-
       if(hint){
-        hint.innerHTML = `${results.length} match${results.length===1?'':'es'} found. Click one to select. <span class="badge badgeBlue">ASIN required</span>`;
+        hint.textContent = manualMode
+          ? `${results.length} match${results.length===1?'':'es'} found. Click one to use Amazon catalog instead, or stay in No Catalog mode.`
+          : `${results.length} match${results.length===1?'':'es'} found. Click one to select, or use No Catalog to create your own listing.`;
       }
+      syncAmazonCatalogModeUI();
     }
 
     function extractAmazonBullets(attributes){
@@ -6588,84 +7062,6 @@
         }
       });
       return target;
-    }
-
-    function _setEbayAspectIfEmpty(name, value){
-      return _setEbayAspectValue(name, value, {onlyIfBlank: true, respectManualEdits: true});
-    }
-
-    function applyCommonSpecificsFromAmazon(detail, seed = {}){
-      const d = detail || {};
-      const attrs = d.attributes || {};
-      const summaries = Array.isArray(d.summaries) ? d.summaries : [];
-      const s0 = summaries[0] || {};
-
-      const brand = (seed.brand || s0.brandName || s0.brand_name || _firstAmazonAttrValue(attrs, ['brand', 'brand_name', 'manufacturer'])).toString().trim();
-      const pairs = [
-        ['Brand', brand],
-        ['Type', (seed.type || _firstAmazonAttrValue(attrs, ['item_type_name', 'product_type', 'item_type_keyword']))],
-        ['Model', (seed.model || _firstAmazonAttrValue(attrs, ['model', 'model_name', 'model_number']))],
-        ['MPN', (seed.mpn || _firstAmazonAttrValue(attrs, ['manufacturer_part_number', 'mpn', 'part_number']))],
-        ['Color', (seed.color || _firstAmazonAttrValue(attrs, ['color', 'colour']))],
-        ['Size', (seed.size || _firstAmazonAttrValue(attrs, ['size_name', 'size']))],
-        ['Department', (seed.department || _firstAmazonAttrValue(attrs, ['department']))],
-        ['Style', (seed.style || _firstAmazonAttrValue(attrs, ['style']))],
-        ['Material', (seed.material || _firstAmazonAttrValue(attrs, ['material']))],
-      ];
-
-      let applied = 0;
-      for(const [name, value] of pairs){
-        if(_setEbayAspectIfEmpty(name, value)) applied += 1;
-      }
-      if(applied > 0){
-        log(`Auto-filled ${applied} common specific${applied === 1 ? '' : 's'} from catalog item.`);
-      }
-    }
-
-    function _extractLikelyColorFromText(text){
-      const t = (text || '').toString().toLowerCase();
-      if(!t) return '';
-      const colors = [
-        'rose gold','navy blue','light blue','dark blue','sky blue','royal blue',
-        'forest green','olive green','lime green','mint green',
-        'dark gray','light gray','charcoal gray',
-        'dark brown','light brown',
-        'off white','ivory',
-        'black','white','gray','grey','silver','gold','red','blue','green','yellow','orange','pink','purple','brown','beige','tan'
-      ];
-      for(const c of colors){
-        const re = new RegExp(`(^|[^a-z])${c.replace(/\s+/g, '\\s+')}([^a-z]|$)`, 'i');
-        if(re.test(t)) return c.replace(/\b\w/g, ch => ch.toUpperCase());
-      }
-      return '';
-    }
-
-    function _extractLikelyMaterialFromText(text){
-      const t = (text || '').toString().toLowerCase();
-      if(!t) return '';
-      const mats = ['stainless steel','leather','cotton','polyester','plastic','metal','wood','aluminum','rubber','silicone','ceramic','glass'];
-      for(const m of mats){
-        const re = new RegExp(`(^|[^a-z])${m.replace(/\s+/g, '\\s+')}([^a-z]|$)`, 'i');
-        if(re.test(t)) return m.replace(/\b\w/g, ch => ch.toUpperCase());
-      }
-      return '';
-    }
-
-    function applyCommonSpecificsFromAvailableData(seed = {}){
-      const selectedAsin = (($('amazonAsin')?.value || '').toString().trim() || (seed.asin || '').toString().trim());
-      const catalog = Array.isArray(state.amazonCatalog) ? state.amazonCatalog : [];
-      const selectedCatalog = catalog.find(r => ((r?.asin || '').toString().trim() === selectedAsin)) || catalog[0] || {};
-
-      const detail = state.amazonCatalogDetail || {};
-      const detailAsin = (detail.asin || '').toString().trim();
-      const detailUsable = (!selectedAsin || !detailAsin || selectedAsin === detailAsin) ? detail : {};
-
-      const title = (seed.title || $('title')?.value || state.item?.title || state.item?.bol?.description || selectedCatalog.title || '').toString().trim();
-      const brand = (seed.brand || selectedCatalog.brand || '').toString().trim();
-      const color = (seed.color || _extractLikelyColorFromText(title) || '').toString().trim();
-      const material = (seed.material || _extractLikelyMaterialFromText(title) || '').toString().trim();
-
-      applyCommonSpecificsFromAmazon(detailUsable, {brand, color, material});
     }
 
     function extractAmazonImages(detail){
@@ -6734,6 +7130,7 @@
     async function loadAmazonCatalogDetail(asin){
       const clean = (asin ?? '').toString().trim();
       if(!clean) return;
+      state.amazonCatalogMode = 'catalog';
       $('amazonCatalogDetail').innerHTML = `<div class=\"detailBox\"><div class=\"hint\">Loading Amazon catalog for ${escapeHtml(clean)}...</div></div>`;
       try{
         const res = await apiGet(`/api/listingagent/amazon/catalog_item?asin=${encodeURIComponent(clean)}&includedData=summaries,images,attributes`);
@@ -6745,7 +7142,6 @@
             setStoreTemplateImages('amazon', detailImages);
           }
         }
-        applyCommonSpecificsFromAvailableData({asin: clean});
         renderAmazonDetail();
       } catch(e){
         $('amazonCatalogDetail').innerHTML = `<div class=\"detailBox\"><div class=\"hint\">Amazon catalog error: ${escapeHtml(e.message)}</div></div>`;
@@ -6781,43 +7177,14 @@
         } finally { _stopLoading(); }
       })();
 
-      // eBay Product Catalog API — structured product specifics (Brand, Model, Color, etc.)
-      // Runs first; Browse API aggregation runs in parallel and fills any gaps.
-      _startLoading();
-      (async () => {
-        try{
-          const itemTitle = (state.item?.title || state.item?.bol?.description || '').toString().trim();
-          const titleParam = itemTitle ? `&title=${encodeURIComponent(itemTitle)}` : '';
-          const res = await apiGet(`/api/listingagent/ebay/product_specifics?upc=${encodeURIComponent(clean)}${titleParam}`);
-          if(reqId !== state.templateReqId) return;
-          if(res.found){
-            _applyEbayCatalogProduct(
-              res.epid || '',
-              res.title || '',
-              res.image || '',
-              res.aspects || {},
-              {
-                itemId: res.itemId || '',
-                ifEmpty: true,
-                categoryId: res.categoryId || '',
-                categoryPath: res.categoryPath || '',
-              }
-            );
-          }
-        } catch(e){ /* silent — Browse API + Amazon fills gaps */ }
-        finally { _stopLoading(); }
-      })();
-
-      // eBay Browse API catalog (live listing aspects + price comps; fills any gaps left by product catalog)
+      // eBay catalog search: UPC-only, without automatic selection/apply.
       _startLoading();
       (async () => {
         if($('ebayCatalogQ') && !$('ebayCatalogQ').value.trim()) $('ebayCatalogQ').value = clean;
         if($('ebayCatalogHint')) $('ebayCatalogHint').textContent = 'Searching eBay catalog...';
         if($('ebayCatalogBox')) $('ebayCatalogBox').innerHTML = '<div class="hint">Searching eBay catalog…</div>';
         try{
-          const itemTitle = (state.item?.title || state.item?.bol?.description || '').toString().trim();
-          const titleParam = itemTitle ? `&title=${encodeURIComponent(itemTitle)}` : '';
-          const res = await apiGet(`/api/listingagent/ebay/catalog_search?upc=${encodeURIComponent(clean)}&limit=10${titleParam}`);
+          const res = await apiGet(`/api/listingagent/ebay/catalog_search?upc=${encodeURIComponent(clean)}&limit=10`);
           if(reqId !== state.templateReqId) return;
           state.ebayCatalog = res.results || [];
           renderEbayCatalog();
@@ -7258,6 +7625,23 @@
       }
     }
 
+    function ensureListingAgentQrLib(){
+      if(typeof window.QRCode !== 'undefined') return Promise.resolve(window.QRCode);
+      if(listingAgentQrLibPromise) return listingAgentQrLibPromise;
+      listingAgentQrLibPromise = new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js';
+        script.async = true;
+        script.onload = () => resolve(window.QRCode);
+        script.onerror = () => {
+          listingAgentQrLibPromise = null;
+          reject(new Error('QR library failed to load'));
+        };
+        document.head.appendChild(script);
+      });
+      return listingAgentQrLibPromise;
+    }
+
     function renderMobileQr(url){
       const box = $('mobileQr');
       if(!box) return;
@@ -7577,6 +7961,7 @@
         $('amazonSku').value = (item.upc || amazonListings[0]?.sku || '').toString();
       }
       if(!$('amazonAsin').value.trim() && amazonListings[0]?.asin){
+        state.amazonCatalogMode = 'catalog';
         $('amazonAsin').value = (amazonListings[0].asin || '').toString();
         runAmazonRestrictionCheck();
       }
@@ -7605,13 +7990,13 @@
       }
 
       applySettingsToForm();
+      syncAmazonCatalogModeUI();
 
       // Auto-fill description if empty (WYSIWYG).
       if(descEditor() && descIsEmpty()) setDescHtml(defaultDescription());
 
       // Auto-suggest category from the best title we have.
       const t = ($('title')?.value || item.title || item.bol?.description || '').toString().trim();
-      try{ applyCommonSpecificsFromAvailableData({title: t}); }catch(e){}
       if(t) suggestCategories(t, {auto: true});
 
       // Refresh next-field navigator after autofill; delay slightly so category
@@ -7665,10 +8050,19 @@
 
     function collectAmazonPayload(){
       const selected = (Array.isArray(state.images) ? state.images : []).filter(u => _isImageEnabled(u) && _isUserUploadedImage(u));
+      const listingTitle = getAmazonListingTitle();
+      const aspects = collectEbayAspects();
       return {
         upc: $('amazonUpc').value.trim(),
         sku: $('amazonSku').value.trim(),
         asin: $('amazonAsin').value.trim(),
+        manualMode: _isAmazonManualMode(),
+        title: listingTitle,
+        listingDescription: getDescHtml().trim() || defaultDescription(),
+        brand: (
+          (aspects.Brand || aspects.brand || '').toString().trim()
+          || (state.item?.amazon_store?.listings?.[0]?.brand || '').toString().trim()
+        ),
         conditionType: $('amazonConditionType').value,
         conditionNote: $('amazonConditionNote').value.trim(),
         quantity: Number($('amazonQuantity').value || 1),
@@ -7729,6 +8123,18 @@
           el.classList.remove('fieldAttention');
           el.classList.remove('fieldInvalid');
           if(wrap) wrap.classList.remove('fieldAttentionWrap');
+          return;
+        }
+        if(id === 'conditionDescription' || id === 'amazonConditionNote'){
+          const isEmpty = !!empty(el.value);
+          el.classList.remove('fieldInvalid');
+          if(isEmpty){
+            el.classList.add('fieldAttention');
+            if(wrap) wrap.classList.add('fieldAttentionWrap');
+          } else {
+            el.classList.remove('fieldAttention');
+            if(wrap) wrap.classList.remove('fieldAttentionWrap');
+          }
           return;
         }
         const isEmpty = !!empty(el.value);
@@ -7796,10 +8202,12 @@
       const add = (id) => { const el = $(id); if(el) ids.push(el); };
 
       if(state.activeStore === 'amazon'){
+        if(_isAmazonManualMode()) add('title');
         add('amazonConditionType');
         if(!_isAmazonNewCondition()) add('amazonConditionNote');
         add('amazonPrice');
         add('amazonSku');
+        if(_isAmazonManualMode()) add('amazonProductType');
         add('listingDescEditor');
       } else {
         add('ebayCatalogQ');
@@ -7830,7 +8238,6 @@
       if(_isBlank(payload.fulfillmentPolicyId)) add('fulfillmentPolicyId', 'Fulfillment Policy');
       if(_isBlank(payload.paymentPolicyId)) add('paymentPolicyId', 'Payment Policy');
       if(_isBlank(payload.returnPolicyId)) add('returnPolicyId', 'Return Policy');
-      if(!_isEbayNewCondition() && _isBlank(payload.conditionDescription)) add('conditionDescription', 'Condition Description');
       if(payload.price === null || Number.isNaN(payload.price)) add('price', 'Price');
       if(!Number.isFinite(payload.quantity) || Number(payload.quantity) < 1) add('quantity', 'Quantity');
 
@@ -7851,13 +8258,22 @@
 
     function _getAmazonCompletionMissing(payload){
       const missing = [];
+      const mset = new Set();
       const add = (fieldId, label) => {
+        if(mset.has(fieldId)) return;
+        mset.add(fieldId);
         missing.push(label);
       };
-      if(_isBlank(payload.upc) && _isBlank(payload.asin)) add('amazonUpc', 'ASIN or UPC');
+      if(payload.manualMode){
+        if(_isBlank(payload.upc)) add('amazonUpc', 'UPC');
+        if(_isBlank(payload.title)) add('title', 'Title');
+        if(_isBlank(payload.listingDescription)) add('listingDescEditor', 'Listing Description');
+        if(_isBlank(payload.productType)) add('amazonProductType', 'Amazon Product Type');
+      } else if(_isBlank(payload.upc) && _isBlank(payload.asin)) {
+        add('amazonUpc', 'ASIN or UPC');
+      }
       if(_isBlank(payload.sku)) add('amazonSku', 'Amazon SKU');
       if(payload.price === null || Number.isNaN(payload.price)) add('amazonPrice', 'Amazon Price');
-      if(!_isAmazonNewCondition() && _isBlank(payload.conditionNote)) add('amazonConditionNote', 'Amazon Condition Note');
       return missing;
     }
 
@@ -7988,7 +8404,6 @@
         if(_isBlank(payload.fulfillmentPolicyId)) add('fulfillmentPolicyId', 'Fulfillment Policy');
         if(_isBlank(payload.paymentPolicyId)) add('paymentPolicyId', 'Payment Policy');
         if(_isBlank(payload.returnPolicyId)) add('returnPolicyId', 'Return Policy');
-        if(!_isEbayNewCondition() && _isBlank(payload.conditionDescription)) add('conditionDescription', 'Condition Description');
 
         if(payload.price === null || Number.isNaN(payload.price)) add('price', 'Price');
         if(!Number.isFinite(payload.quantity) || Number(payload.quantity) < 1) add('quantity', 'Quantity');
@@ -8018,13 +8433,21 @@
     function validateAmazonPayload(payload){
       clearFieldHighlights();
       const missing = [];
+      const mset = new Set();
       const add = (fieldId, label) => {
+        if(mset.has(fieldId)) return;
+        mset.add(fieldId);
         missing.push(label);
         markFieldInvalid(fieldId);
       };
+      if(payload.manualMode){
+        if(_isBlank(payload.upc)) add('amazonUpc', 'UPC');
+        if(_isBlank(payload.title)) add('title', 'Title');
+        if(_isBlank(payload.listingDescription)) add('listingDescEditor', 'Listing Description');
+        if(_isBlank(payload.productType)) add('amazonProductType', 'Amazon Product Type');
+      }
       if(_isBlank(payload.sku)) add('amazonSku', 'Amazon SKU');
       if(payload.price === null || Number.isNaN(payload.price)) add('amazonPrice', 'Amazon Price');
-      if(!_isAmazonNewCondition() && _isBlank(payload.conditionNote)) add('amazonConditionNote', 'Amazon Condition Note');
       return { ok: missing.length === 0, missing };
     }
 
@@ -8214,27 +8637,33 @@
         scrollToFirstInvalidField();
         return;
       }
-      setBusy(true);
-      log('Publishing to eBay...');
+      if(_getSubmissionEntry(payload.upc, 'ebay')?.status === 'processing'){
+        log('eBay listing is already processing for this item.');
+        _showListingToast('PROCESSING LISTING');
+        window.scrollTo({top: 0, behavior: 'smooth'});
+        return;
+      }
+      _beginListingSubmission(payload.upc, 'ebay', 'eBay Listing');
+      _showListingToast('PROCESSING LISTING');
       try{
         const res = await apiPost('/api/listingagent/ebay/publish', payload);
         // If backend returned a fresh offerId, store it for potential immediate re-edit
-        if(res.offerId && $('offerId') && !$('offerId').value.trim()){
+        if(_upcEquals(state.activeUpc || '', payload.upc) && res.offerId && $('offerId') && !$('offerId').value.trim()){
           $('offerId').value = res.offerId;
         }
         log(`Published. ListingId: ${res.listingId || '(see raw)'}`);
-        markStoreListedForActiveItem('ebay');
+        markStoreListedForUpc(payload.upc, 'ebay');
         if(payload.upc){
+          _clearSubmissionEntry(payload.upc, 'ebay');
           markQueueDone(payload.upc, 'ebay', {listingId: res.listingId, offerId: payload.offerId || res.offerId, sku: payload.sku});
           await loadQueue();
         }
       } catch(e){
-        highlightMissingEbayAspectFromError(e);
         log(`Publish failed: ${e.message}`);
-        showOperationFailureModal('Publish', e);
-      } finally {
-        setBusy(false);
+        _finishListingSubmissionError(payload.upc, 'ebay', 'eBay Listing', e);
+        return;
       }
+      _finishListingSubmissionSuccess(payload.upc, 'ebay');
     }
 
     async function loadLocationKeys({silent=false} = {}){
@@ -8544,7 +8973,9 @@
         const attrs = data.attributes || {};
         const ms = attrs.merchant_suggested_asin || [];
         if(!$('amazonAsin').value.trim() && Array.isArray(ms) && ms[0] && ms[0].value){
+          state.amazonCatalogMode = 'catalog';
           $('amazonAsin').value = ms[0].value;
+          syncAmazonCatalogModeUI();
           log(`Pulled ASIN from live SKU: ${ms[0].value}`);
         }
 
@@ -8582,9 +9013,14 @@
           return;
         }
       }
-
-      setBusy(true);
-      log('Putting Amazon offer...');
+      if(_getSubmissionEntry(payload.upc, 'amazon')?.status === 'processing'){
+        log('Amazon listing is already processing for this item.');
+        _showListingToast('PROCESSING LISTING');
+        window.scrollTo({top: 0, behavior: 'smooth'});
+        return;
+      }
+      _beginListingSubmission(payload.upc, 'amazon', 'Amazon Listing');
+      _showListingToast('PROCESSING LISTING');
       try{
         const res = await apiPost('/api/listingagent/amazon/put_offer', payload);
         const sub = res.data?.submissionId || res.data?.submission_id || '';
@@ -8593,14 +9029,15 @@
           log(`Amazon used existing SKU ${ctx.effective_sku} (requested ${ctx.requested_sku}).`);
         }
         log(`Amazon offer submitted${sub ? `: ${sub}` : ''}`);
-        markStoreListedForActiveItem('amazon', {asin: (res?.resolved_asin || payload.asin || '')});
+        markStoreListedForUpc(payload.upc, 'amazon', {asin: (res?.resolved_asin || payload.asin || '')});
         if(payload.upc){
+          _clearSubmissionEntry(payload.upc, 'amazon');
           markQueueDone(payload.upc, 'amazon', {sku: (ctx?.effective_sku || payload.sku), asin: (res?.resolved_asin || payload.asin)});
           await loadQueue();
         }
       } catch(e){
         log(`Amazon Put Offer failed: ${e.message}`);
-        showOperationFailureModal('Amazon Put Offer', e);
+        _finishListingSubmissionError(payload.upc, 'amazon', 'Amazon Listing', e);
         if(AMAZON_VERBOSE_DEBUG){
           const api = e?.api || {};
           const ctx = api?.context || {};
@@ -8629,9 +9066,9 @@
             if(attempts.length > shown.length) log(`Amazon debug: showing ${shown.length} of ${attempts.length} attempts.`);
           }
         }
-      } finally {
-        setBusy(false);
+        return;
       }
+      _finishListingSubmissionSuccess(payload.upc, 'amazon');
     }
 
     function clearAll(){
@@ -8643,6 +9080,8 @@
       state.workingDraftDirty = false;
       state.manualRequiredAspects = [];
       state.ebayAspectSnapshot = {};
+      state.ebaySpecificsAutoCloseArmed = false;
+      state.ebaySpecificsAutoCloseDone = false;
       stopMobilePhotoPoll();
       state.item = null;
       state.baseImages = [];
@@ -8689,6 +9128,8 @@
       $('amazonSuggestedPriceHint').style.display = 'none';
       $('amazonFoundBadge').style.display = 'none';
       state.amazonPriceManuallySet = false;
+      state.amazonCatalogMode = 'catalog';
+      syncAmazonCatalogModeUI();
 
       updateConditionNoteVisibility();
       resetTemplatesUI();
@@ -8769,19 +9210,37 @@
     if($('btnEbayCatalogSearch')) $('btnEbayCatalogSearch').onclick = () => ebayCatalogSearch();
     if($('ebayCatalogQ')) $('ebayCatalogQ').addEventListener('keydown', e => { if(e.key === 'Enter') ebayCatalogSearch(); });
     if($('btnAmazonCatalogSearch')) $('btnAmazonCatalogSearch').onclick = () => amazonCatalogSearch();
+    if($('btnAmazonNoCatalog')) $('btnAmazonNoCatalog').onclick = () => setAmazonCatalogMode('manual');
     if($('btnAmazonCatalogClear')) $('btnAmazonCatalogClear').onclick = () => {
       if($('amazonCatalogQ')) $('amazonCatalogQ').value = '';
       state.amazonCatalog = [];
       state.amazonCatalogDetail = null;
-      if($('amazonCatalogSelectHint')) $('amazonCatalogSelectHint').textContent = 'Search to see available catalog listings.';
+      if($('amazonCatalogSelectHint')){
+        $('amazonCatalogSelectHint').textContent = _isAmazonManualMode()
+          ? 'Manual mode is active. Catalog search is optional.'
+          : 'Search to see available catalog listings.';
+      }
       if($('amazonCatalogDetail')) $('amazonCatalogDetail').innerHTML = '';
       resetAmazonRestrictionHint({clearState:true});
+      syncAmazonCatalogModeUI();
       renderAmazonTemplates();
       log('Cleared Amazon catalog search.');
     };
     if($('amazonAsin')){
-      $('amazonAsin').addEventListener('input', () => runAmazonRestrictionCheck());
-      $('amazonAsin').addEventListener('change', () => checkAmazonRestrictionForCurrentAsin({force:true, silent:true}));
+      $('amazonAsin').addEventListener('input', () => {
+        if((($('amazonAsin').value || '') + '').trim()){
+          state.amazonCatalogMode = 'catalog';
+          syncAmazonCatalogModeUI();
+        }
+        runAmazonRestrictionCheck();
+      });
+      $('amazonAsin').addEventListener('change', () => {
+        if((($('amazonAsin').value || '') + '').trim()){
+          state.amazonCatalogMode = 'catalog';
+          syncAmazonCatalogModeUI();
+        }
+        checkAmazonRestrictionForCurrentAsin({force:true, silent:true});
+      });
       $('amazonAsin').addEventListener('blur', () => checkAmazonRestrictionForCurrentAsin({force:true, silent:true}));
     }
     if($('condition')) $('condition').addEventListener('change', () => {
@@ -8842,15 +9301,18 @@
       }
     };
     if($('btnAiDesc')) $('btnAiDesc').onclick = async () => {
-      if(!descIsEmpty() && !confirm('Overwrite current description with AI version?')) return;
       const btn = $('btnAiDesc');
       const orig = btn.innerHTML;
+      const reqId = ++state.aiDescReqId;
+      let upcKey = '';
       btn.disabled = true;
-      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating...';
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Working...';
       try{
-        const title = ($('title')?.value || state.item?.title || state.item?.bol?.description || '').toString().trim();
+        const systemTitle = (state.item?.title || state.item?.bol?.description || '').toString().trim();
+        const listingTitle = ($('title')?.value || systemTitle || '').toString().trim();
         const categoryId = (categorySelect()?.value || '').toString().trim();
         const upc = ($('upc')?.value || state.activeUpc || '').toString().trim();
+        upcKey = _workingDraftKey(upc || state.activeUpc || '');
         const aspects = {};
         const aspectsBox = $('ebayAspectsBox');
         if(aspectsBox){
@@ -8860,13 +9322,21 @@
             if(name && val) aspects[name] = val;
           });
         }
-        const res = await apiPost('/api/listingagent/ebay/generate_description', {title, category_id: categoryId, upc, aspects});
+        const res = await apiPost('/api/listingagent/ebay/generate_description', {
+          title: listingTitle,
+          listing_title: listingTitle,
+          system_title: systemTitle,
+          category_id: categoryId,
+          upc,
+          aspects
+        });
+        if(reqId !== state.aiDescReqId || _workingDraftKey(state.activeUpc || '') !== upcKey) return;
         if(!res.success) throw new Error(res.error || 'Unknown error');
         setDescHtml(res.description);
         log(`AI description applied (${res.source || 'ai'}).`);
       }catch(e){
+        if(reqId !== state.aiDescReqId || _workingDraftKey(state.activeUpc || '') !== upcKey) return;
         log(`AI description failed: ${e.message}`);
-        alert(`eBay AI description failed: ${e.message}`);
       } finally {
         btn.disabled = false;
         btn.innerHTML = orig;
@@ -8874,15 +9344,18 @@
     };
     if($('btnAiTitle')) $('btnAiTitle').onclick = async () => {
       if(!$('title')) return;
-      if($('title').value.trim() && !confirm('Overwrite current title with AI version?')) return;
       const btn = $('btnAiTitle');
       const orig = btn.innerHTML;
+      const reqId = ++state.aiTitleReqId;
+      let upcKey = '';
       btn.disabled = true;
-      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating...';
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Working...';
       try{
-        const title = ($('title')?.value || state.item?.title || state.item?.bol?.description || '').toString().trim();
+        const systemTitle = (state.item?.title || state.item?.bol?.description || '').toString().trim();
+        const title = (systemTitle || $('title')?.value || '').toString().trim();
         const categoryId = (categorySelect()?.value || '').toString().trim();
         const upc = ($('upc')?.value || state.activeUpc || '').toString().trim();
+        upcKey = _workingDraftKey(upc || state.activeUpc || '');
         const aspects = {};
         const aspectsBox = $('ebayAspectsBox');
         if(aspectsBox){
@@ -8892,15 +9365,22 @@
             if(name && val) aspects[name] = val;
           });
         }
-        const res = await apiPost('/api/listingagent/ebay/generate_title', {title, category_id: categoryId, upc, aspects});
+        const res = await apiPost('/api/listingagent/ebay/generate_title', {
+          title,
+          system_title: systemTitle,
+          category_id: categoryId,
+          upc,
+          aspects
+        });
+        if(reqId !== state.aiTitleReqId || _workingDraftKey(state.activeUpc || '') !== upcKey) return;
         if(!res.success) throw new Error(res.error || 'Unknown error');
         $('title').value = (res.title || '').trim();
         state.priceManuallySet = state.priceManuallySet;
         log(`AI title applied (${res.source || 'ai'}).`);
         try{ if($('title')) $('title').dispatchEvent(new Event('input', {bubbles:true})); }catch(e){}
       }catch(e){
+        if(reqId !== state.aiTitleReqId || _workingDraftKey(state.activeUpc || '') !== upcKey) return;
         log(`AI title failed: ${e.message}`);
-        alert(`eBay AI title failed: ${e.message}`);
       } finally {
         btn.disabled = false;
         btn.innerHTML = orig;
@@ -9099,10 +9579,12 @@
     };
     if($('btnLoadEbayAspects')) $('btnLoadEbayAspects').onclick = (e) => {
       e.preventDefault();
+      state.ebaySpecificsAutoCloseArmed = false;
       loadEbayAspectsForCurrentCategory({force: true});
     };
       if($('btnClearEbayAspects')) $('btnClearEbayAspects').onclick = (e) => {
       e.preventDefault();
+      state.ebaySpecificsAutoCloseArmed = false;
       clearEbayAspectValues();
       syncEbaySpecificsCardState();
       log('Cleared item specifics.');

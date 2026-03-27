@@ -9129,16 +9129,25 @@ def _extract_missing_ebay_aspect(error_text):
 def api_listingagent_ebay_locations():
     """Fetch inventory locations (locationKey) from eBay (requires sell.inventory scope)."""
     try:
-        resp = _ebay_api_request('GET', '/sell/inventory/v1/location', params={'limit': 50})
-        if resp.status_code >= 400:
-            return jsonify({'success': False, 'error': _ebay_extract_error(resp)}), 400
-        return jsonify({'success': True, 'data': resp.json() if resp.text else {}})
+        force_refresh = (request.args.get('refresh') or '').strip().lower() in ('1', 'true', 'yes')
+        locations = _listingagent_get_ebay_locations(force_refresh=force_refresh)
+        return jsonify({
+            'success': True,
+            'data': {
+                'locations': locations,
+                'total': len(locations),
+            }
+        })
+    except _ListingAgentUserError as e:
+        payload = {'success': False, 'error': str(e)}
+        payload.update(e.extra or {})
+        return jsonify(payload), e.status_code
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e, 'listingagent:ebay_locations')}), 500
 
 _LISTINGAGENT_EBAY_POLICIES_CACHE = {}
 _LISTINGAGENT_EBAY_POLICIES_LOCK = threading.Lock()
-_LISTINGAGENT_EBAY_LOCATIONS_CACHE = {'ts': 0.0, 'keys': []}
+_LISTINGAGENT_EBAY_LOCATIONS_CACHE = {'ts': 0.0, 'keys': [], 'locations': []}
 _LISTINGAGENT_EBAY_LOCATIONS_LOCK = threading.Lock()
 _LISTINGAGENT_EBAY_CONDITIONS_CACHE = {}
 _LISTINGAGENT_EBAY_CONDITIONS_LOCK = threading.Lock()
@@ -9218,18 +9227,19 @@ def _listingagent_get_ebay_business_policies(marketplace_id: str):
         _LISTINGAGENT_EBAY_POLICIES_CACHE[cache_key] = {'ts': now, 'data': data}
         return data
 
-def _listingagent_get_ebay_location_keys(*, force_refresh=False):
-    """Fetch seller inventory location keys from eBay Inventory API."""
+def _listingagent_get_ebay_locations(*, force_refresh=False):
+    """Fetch seller inventory locations from eBay Inventory API and cache them in-memory."""
     now = time.time()
     cached = _LISTINGAGENT_EBAY_LOCATIONS_CACHE
-    if (not force_refresh) and cached.get('keys') and (now - float(cached.get('ts') or 0)) < 10 * 60:
-        return list(cached.get('keys') or [])
+    if (not force_refresh) and cached.get('locations') and (now - float(cached.get('ts') or 0)) < 10 * 60:
+        return [dict(loc) for loc in (cached.get('locations') or [])]
 
     with _LISTINGAGENT_EBAY_LOCATIONS_LOCK:
         cached = _LISTINGAGENT_EBAY_LOCATIONS_CACHE
-        if (not force_refresh) and cached.get('keys') and (now - float(cached.get('ts') or 0)) < 10 * 60:
-            return list(cached.get('keys') or [])
+        if (not force_refresh) and cached.get('locations') and (now - float(cached.get('ts') or 0)) < 10 * 60:
+            return [dict(loc) for loc in (cached.get('locations') or [])]
 
+        locations_out = []
         keys = []
         offset = 0
         limit = 200
@@ -9247,16 +9257,33 @@ def _listingagent_get_ebay_location_keys(*, force_refresh=False):
                 if not isinstance(loc, dict):
                     continue
                 key = (loc.get('merchantLocationKey') or loc.get('locationKey') or '').strip()
-                if key and key not in seen:
-                    seen.add(key)
-                    keys.append(key)
+                if not key or key in seen:
+                    continue
+                seen.add(key)
+                keys.append(key)
+                normalized = dict(loc)
+                if not (normalized.get('locationKey') or '').strip():
+                    normalized['locationKey'] = key
+                if not (normalized.get('merchantLocationKey') or '').strip():
+                    normalized['merchantLocationKey'] = key
+                locations_out.append(normalized)
             if len(locations) < limit:
                 break
             offset += limit
 
         _LISTINGAGENT_EBAY_LOCATIONS_CACHE['ts'] = time.time()
         _LISTINGAGENT_EBAY_LOCATIONS_CACHE['keys'] = list(keys)
-        return keys
+        _LISTINGAGENT_EBAY_LOCATIONS_CACHE['locations'] = [dict(loc) for loc in locations_out]
+        return [dict(loc) for loc in locations_out]
+
+def _listingagent_get_ebay_location_keys(*, force_refresh=False):
+    """Fetch seller inventory location keys from eBay Inventory API."""
+    locations = _listingagent_get_ebay_locations(force_refresh=force_refresh)
+    return [
+        (loc.get('merchantLocationKey') or loc.get('locationKey') or '').strip()
+        for loc in locations
+        if (loc.get('merchantLocationKey') or loc.get('locationKey') or '').strip()
+    ]
 
 def _listingagent_resolve_ebay_location_key(preferred_key, *, force_refresh=False):
     """
@@ -11141,7 +11168,8 @@ def api_listingagent_ebay_generate_description():
     """Generate an AI-powered listing description using Claude API (Anthropic) if configured, else template."""
     try:
         data = request.get_json(force=True) or {}
-        title = (data.get('title') or '').strip()
+        title = (data.get('listing_title') or data.get('title') or '').strip()
+        system_title = (data.get('system_title') or '').strip()
         category_id = (data.get('category_id') or data.get('categoryId') or '').strip()
         aspects = data.get('aspects') or {}
         upc = (data.get('upc') or '').strip()
@@ -11160,7 +11188,8 @@ def api_listingagent_ebay_generate_description():
                 f"Write a compelling eBay listing description for the following product. "
                 f"Use plain HTML (h2, p, ul/li only). Be concise, highlight key features and condition. "
                 f"Do not include price. Do not mention eBay by name.\n\n"
-                f"Title: {title}\n"
+                f"Listing title: {title}\n"
+                + (f"Inventory system title: {system_title}\n" if system_title else "")
                 + (f"Category ID: {category_id}\n" if category_id else "")
                 + (f"UPC: {upc}\n" if upc else "")
                 + (f"Item specifics:\n{aspect_lines}\n" if aspect_lines else "")
@@ -11222,7 +11251,9 @@ def api_listingagent_ebay_generate_title():
     """Generate an AI-powered listing title using Claude API (Anthropic) if configured, else template."""
     try:
         data = request.get_json(force=True) or {}
-        title = (data.get('title') or '').strip()
+        form_title = (data.get('title') or '').strip()
+        system_title = (data.get('system_title') or '').strip()
+        title = (system_title or form_title).strip()
         category_id = (data.get('category_id') or data.get('categoryId') or '').strip()
         aspects = data.get('aspects') or {}
         upc = (data.get('upc') or '').strip()
@@ -11244,7 +11275,8 @@ def api_listingagent_ebay_generate_title():
                 "- Do not use quotes, bullets, or explanations.\n"
                 "- Include the most useful search terms first.\n"
                 "- Prefer brand, model, size, and key identifiers.\n\n"
-                f"Base title: {title}\n"
+                f"Inventory system title: {title}\n"
+                + (f"Current form title: {form_title}\n" if form_title and form_title != title else "")
                 + (f"Category ID: {category_id}\n" if category_id else "")
                 + (f"UPC: {upc}\n" if upc else "")
                 + (f"Item specifics:\n{aspect_lines}\n" if aspect_lines else "")
@@ -13045,6 +13077,118 @@ def _build_amazon_offer_attributes(
 
     return attrs
 
+def _amazon_manual_listing_text(value, limit=2000):
+    raw = str(value or '').strip()
+    if not raw:
+        return ''
+    try:
+        text = _mail_html_to_text(raw)
+    except Exception:
+        text = raw
+    text = re.sub(r'\s+', ' ', str(text or '')).strip()
+    if limit and len(text) > limit:
+        text = text[:limit].rstrip()
+    return text
+
+def _amazon_manual_listing_bullets(description_text, limit=5):
+    text = str(description_text or '').replace('\r', '\n')
+    parts = []
+    for chunk in re.split(r'(?:\n+|[.;]\s+)', text):
+        clean = re.sub(r'\s+', ' ', str(chunk or '')).strip(' -\t\r\n')
+        if not clean:
+            continue
+        if len(clean) > 220:
+            clean = clean[:220].rstrip()
+        parts.append(clean)
+        if len(parts) >= max(1, int(limit or 5)):
+            break
+    return parts
+
+def _build_amazon_manual_listing_attributes(
+    *,
+    upc,
+    asin,
+    title,
+    description_html,
+    brand,
+    condition_type,
+    condition_note,
+    fulfillment_channel_code,
+    quantity,
+    currency,
+    price,
+    include_identifiers=True,
+    marketplace_id=None,
+    offer_audience='ALL',
+    merchant_shipping_group=None,
+    price_value_key_override=None,
+    include_identifier_marketplace=False,
+    include_marketplace_fields=True,
+    include_offer_audience=True,
+    force_include_upc_when_asin=False,
+    force_exclude_asin_identifier=False,
+    price_model='purchasable_offer',
+    submitted_images=None
+):
+    attrs = _build_amazon_offer_attributes(
+        upc=upc,
+        asin=asin,
+        condition_type=condition_type,
+        condition_note=condition_note,
+        fulfillment_channel_code=fulfillment_channel_code,
+        quantity=quantity,
+        currency=currency,
+        price=price,
+        include_identifiers=include_identifiers,
+        marketplace_id=marketplace_id,
+        offer_audience=offer_audience,
+        merchant_shipping_group=merchant_shipping_group,
+        price_value_key_override=price_value_key_override,
+        include_identifier_marketplace=include_identifier_marketplace,
+        include_marketplace_fields=include_marketplace_fields,
+        include_offer_audience=include_offer_audience,
+        force_include_upc_when_asin=force_include_upc_when_asin,
+        force_exclude_asin_identifier=force_exclude_asin_identifier,
+        price_model=price_model
+    )
+
+    clean_title = _amazon_manual_listing_text(title, limit=200)
+    clean_desc = _amazon_manual_listing_text(description_html, limit=4000)
+    clean_brand = _amazon_manual_listing_text(brand, limit=100)
+
+    if clean_title:
+        entry = {'value': clean_title}
+        if marketplace_id and include_marketplace_fields:
+            entry['marketplace_id'] = marketplace_id
+        attrs['item_name'] = [entry]
+
+    if clean_desc:
+        entry = {'value': clean_desc}
+        if marketplace_id and include_marketplace_fields:
+            entry['marketplace_id'] = marketplace_id
+        attrs['product_description'] = [entry]
+
+        bullets = _amazon_manual_listing_bullets(clean_desc, limit=5)
+        if bullets:
+            attrs['bullet_point'] = []
+            for bullet in bullets:
+                bullet_entry = {'value': bullet}
+                if marketplace_id and include_marketplace_fields:
+                    bullet_entry['marketplace_id'] = marketplace_id
+                attrs['bullet_point'].append(bullet_entry)
+
+    if clean_brand:
+        entry = {'value': clean_brand}
+        if marketplace_id and include_marketplace_fields:
+            entry['marketplace_id'] = marketplace_id
+        attrs['brand'] = [entry]
+
+    image_urls = [u.strip() for u in (submitted_images or []) if isinstance(u, str) and u.strip()]
+    if image_urls:
+        attrs['item_image_locator'] = [{'media_location': u} for u in image_urls[:9]]
+
+    return attrs
+
 def _amazon_offer_price_attrs(currency, price, marketplace_id=None, offer_audience='ALL', include_marketplace_fields=True, include_offer_audience=True):
     value_key = _amazon_price_value_key(marketplace_id)
     price_num = float(price)
@@ -13085,6 +13229,10 @@ def api_listingagent_amazon_put_offer():
         resolved_asin = asin
         submitted_images = [u for u in (data.get('images') or []) if isinstance(u, str) and u.strip()]
         submitted_images = _listagent_localize_image_urls(upc or requested_sku or asin or 'amazon', submitted_images)
+        manual_mode = bool(data.get('manualMode') or data.get('manual_mode'))
+        manual_title = (data.get('title') or data.get('listingTitle') or '').strip()
+        manual_description = (data.get('listingDescription') or data.get('description') or '').strip()
+        manual_brand = (data.get('brand') or '').strip()
 
         if not sku:
             return jsonify({'success': False, 'error': 'SKU is required'}), 400
@@ -13095,6 +13243,8 @@ def api_listingagent_amazon_put_offer():
         price = _listingagent_parse_float(data.get('price'), None)
         if price is None:
             return jsonify({'success': False, 'error': 'Price is required'}), 400
+        if manual_mode and not asin and not manual_title:
+            return jsonify({'success': False, 'error': 'Title is required for Amazon No Catalog mode'}), 400
 
         condition_type = (data.get('conditionType') or settings.get('amazon_condition_type') or 'used_good').strip()
         condition_note = (data.get('conditionNote') or data.get('condition_note') or '').strip()
@@ -13105,6 +13255,8 @@ def api_listingagent_amazon_put_offer():
         merchant_shipping_group = (data.get('merchantShippingGroup') or settings.get('amazon_merchant_shipping_group') or '').strip()
         offer_audience = _amazon_offer_audience(settings)
         effective_requirements = requirements or 'LISTING_OFFER_ONLY'
+        if manual_mode and not asin and effective_requirements.upper() == 'LISTING_OFFER_ONLY':
+            effective_requirements = 'LISTING'
 
         marketplace_id_override = (data.get('marketplaceId') or '').strip()
         mp_id = marketplace_id_override or (settings.get('amazon_marketplace_id') or 'ATVPDKIKX0DER').strip() or 'ATVPDKIKX0DER'
@@ -13115,27 +13267,86 @@ def api_listingagent_amazon_put_offer():
             settings.get('amazon_fulfillment_channel_code') or 'DEFAULT'
         )
 
-        attributes = _build_amazon_offer_attributes(
-            upc=upc,
-            asin=resolved_asin,
-            condition_type=condition_type,
-            condition_note=condition_note,
-            fulfillment_channel_code=fulfillment_channel_code,
-            quantity=quantity,
-            currency=currency,
-            price=price,
-            marketplace_id=mp_id,
-            offer_audience=offer_audience,
-            merchant_shipping_group=merchant_shipping_group
-        )
-
-        # Best-effort: attach user-uploaded images when provided (non-new condition only).
-        # Amazon ignores extra attributes for LISTING_OFFER_ONLY; may apply for full listing types.
         is_new_condition = condition_type.lower() in ('new_new', 'new')
-        if submitted_images and not is_new_condition:
-            attributes['item_image_locator'] = [
-                {'media_location': u.strip()} for u in submitted_images[:9] if u.strip()
-            ]
+        manual_create_mode = bool(manual_mode and not asin)
+
+        def _build_amazon_runtime_attributes(
+            *,
+            asin_value,
+            include_identifiers,
+            price_value_key_override=None,
+            include_identifier_marketplace=False,
+            include_marketplace_fields=True,
+            include_offer_audience=True,
+            force_include_upc_when_asin=False,
+            force_exclude_asin_identifier=False,
+            price_model='purchasable_offer',
+            condition_value=None,
+            fulfillment_value=None,
+            quantity_value=None,
+            merchant_shipping_group_value=None
+        ):
+            cond = condition_type if condition_value is None else condition_value
+            fc = fulfillment_channel_code if fulfillment_value is None else fulfillment_value
+            qty_val = quantity if quantity_value is None else quantity_value
+            shipping_group_val = merchant_shipping_group if merchant_shipping_group_value is None else merchant_shipping_group_value
+            if manual_create_mode:
+                return _build_amazon_manual_listing_attributes(
+                    upc=upc,
+                    asin=asin_value,
+                    title=manual_title,
+                    description_html=manual_description,
+                    brand=manual_brand,
+                    condition_type=cond,
+                    condition_note=condition_note,
+                    fulfillment_channel_code=fc,
+                    quantity=qty_val,
+                    currency=currency,
+                    price=price,
+                    include_identifiers=include_identifiers,
+                    marketplace_id=mp_id,
+                    offer_audience=offer_audience,
+                    merchant_shipping_group=shipping_group_val,
+                    price_value_key_override=price_value_key_override,
+                    include_identifier_marketplace=include_identifier_marketplace,
+                    include_marketplace_fields=include_marketplace_fields,
+                    include_offer_audience=include_offer_audience,
+                    force_include_upc_when_asin=force_include_upc_when_asin,
+                    force_exclude_asin_identifier=force_exclude_asin_identifier,
+                    price_model=price_model,
+                    submitted_images=submitted_images
+                )
+            attrs_out = _build_amazon_offer_attributes(
+                upc=upc,
+                asin=asin_value,
+                condition_type=cond,
+                condition_note=condition_note,
+                fulfillment_channel_code=fc,
+                quantity=qty_val,
+                currency=currency,
+                price=price,
+                include_identifiers=include_identifiers,
+                marketplace_id=mp_id,
+                offer_audience=offer_audience,
+                merchant_shipping_group=shipping_group_val,
+                price_value_key_override=price_value_key_override,
+                include_identifier_marketplace=include_identifier_marketplace,
+                include_marketplace_fields=include_marketplace_fields,
+                include_offer_audience=include_offer_audience,
+                force_include_upc_when_asin=force_include_upc_when_asin,
+                force_exclude_asin_identifier=force_exclude_asin_identifier,
+                price_model=price_model
+            )
+            if submitted_images and not is_new_condition:
+                attrs_out['item_image_locator'] = [
+                    {'media_location': u.strip()} for u in submitted_images[:9] if u.strip()
+                ]
+            return attrs_out
+
+        attributes = _build_amazon_runtime_attributes(
+            asin_value=resolved_asin,
+            include_identifiers=True
+        )
 
         body = {
             'productType': product_type,
@@ -13157,7 +13368,7 @@ def api_listingagent_amazon_put_offer():
 
         existing_product_type = _amazon_get_listing_product_type(li, seller_id, sku, mp_id)
         sku_exists = bool(existing_product_type)
-        if not resolved_asin and upc:
+        if not resolved_asin and upc and not manual_create_mode:
             resolved_asin = _amazon_resolve_asin_from_upc(credentials, marketplace, mp_id, upc)
         if not sku_exists and resolved_asin:
             local_asin_sku = _amazon_find_local_sku_by_asin(resolved_asin)
@@ -13168,38 +13379,30 @@ def api_listingagent_amazon_put_offer():
                     existing_product_type = mapped_pt
                     sku_exists = True
                     effective_sku_source = 'local_asin_map'
-        if not resolved_asin and not sku_exists:
+        manual_create_mode = bool(manual_mode and not resolved_asin and not sku_exists)
+        if not resolved_asin and not sku_exists and not manual_create_mode:
             return jsonify({
                 'success': False,
                 'error': 'Could not resolve ASIN from UPC. Pick an ASIN from Current Store Catalog Select first.'
             }), 400
 
-        catalog_product_type = _amazon_get_catalog_product_type(credentials, marketplace, mp_id, resolved_asin)
+        catalog_product_type = _amazon_get_catalog_product_type(credentials, marketplace, mp_id, resolved_asin) if resolved_asin else None
         resolved_product_type = (
             existing_product_type
             or catalog_product_type
             or product_type
+            or 'PRODUCT'
         )
         # Rebuild attributes/body with runtime marketplace id so price field semantics
         # match the destination marketplace (value vs value_with_tax).
         include_identifiers_primary = not sku_exists
-        attributes = _build_amazon_offer_attributes(
-            upc=upc,
-            asin=resolved_asin,
-            condition_type=condition_type,
-            fulfillment_channel_code=fulfillment_channel_code,
-            quantity=quantity,
-            currency=currency,
-            price=price,
-            include_identifiers=include_identifiers_primary,
-            marketplace_id=mp_id,
-            offer_audience=offer_audience,
-            merchant_shipping_group=merchant_shipping_group,
-            condition_note=condition_note
+        attributes = _build_amazon_runtime_attributes(
+            asin_value=resolved_asin,
+            include_identifiers=include_identifiers_primary
         )
         body = {
             'productType': resolved_product_type,
-            'requirements': 'LISTING_OFFER_ONLY' if not sku_exists else effective_requirements,
+            'requirements': effective_requirements if manual_create_mode else ('LISTING_OFFER_ONLY' if not sku_exists else effective_requirements),
             'attributes': attributes
         }
 
@@ -13237,6 +13440,8 @@ def api_listingagent_amazon_put_offer():
                             'sku_exists': sku_exists,
                             'marketplace_id': mp_id,
                             'asin': resolved_asin,
+                            'manual_mode': manual_mode,
+                            'manual_create_mode': manual_create_mode,
                         }
                     }), 400
 
@@ -13327,7 +13532,7 @@ def api_listingagent_amazon_put_offer():
                 out.append(s)
             return out
 
-        if not sku_exists and not str(catalog_product_type or '').strip() and str(product_type or '').strip().upper() in ('', 'PRODUCT'):
+        if (not manual_create_mode) and (not sku_exists) and (not str(catalog_product_type or '').strip()) and str(product_type or '').strip().upper() in ('', 'PRODUCT'):
             return jsonify({
                 'success': False,
                 'error': 'Could not resolve Amazon productType for this ASIN. Select a catalog item and set Product Type from that category.',
@@ -13338,6 +13543,8 @@ def api_listingagent_amazon_put_offer():
                     'effective_sku_source': effective_sku_source,
                     'sku_exists': sku_exists,
                     'marketplace_id': mp_id,
+                    'manual_mode': manual_mode,
+                    'manual_create_mode': manual_create_mode,
                     'restriction_checked': bool((restriction_info or {}).get('checked')) if 'restriction_info' in locals() else False,
                     'restriction_restricted': bool((restriction_info or {}).get('restricted')) if 'restriction_info' in locals() else False,
                 }
@@ -13373,7 +13580,7 @@ def api_listingagent_amazon_put_offer():
             if not price_value_key_candidates:
                 price_value_key_candidates = ['value']
             upc_digits_ctx = ''.join(ch for ch in str(upc or '') if ch.isdigit())
-            preferred_id_mode = 'both' if upc_digits_ctx else 'asin'
+            preferred_id_mode = 'upc' if manual_create_mode else ('both' if upc_digits_ctx else 'asin')
             preferred_price_key = 'value_with_tax' if ('value_with_tax' in err_low or _amazon_price_value_key(mp_id) == 'value_with_tax') else 'value'
             price_key_candidates = _unique_values([preferred_price_key, 'both', 'value', 'value_with_tax'])[:3]
             product_type_plan = _unique_values([resolved_pt, resolved_product_type, product_type, 'PRODUCT'])[:2]
@@ -13445,7 +13652,7 @@ def api_listingagent_amazon_put_offer():
                                     fallback_specs.append({
                                         'label': f'fallback:create:{pt}:full:{cval}:{preferred_id_mode}:{pkey}',
                                         'product_type': pt,
-                                        'requirements': 'LISTING_OFFER_ONLY',
+                                        'requirements': 'LISTING' if manual_create_mode else 'LISTING_OFFER_ONLY',
                                         'include_identifiers': True,
                                         'include_condition': True,
                                         'condition_value': cval,
@@ -13486,25 +13693,20 @@ def api_listingagent_amazon_put_offer():
                     id_mode = (spec.get('identifier_mode') or 'asin').strip().lower()
                     force_upc_with_asin = id_mode in ('upc', 'both')
                     force_exclude_asin = id_mode == 'upc'
-                    attrs_fb = _build_amazon_offer_attributes(
-                        upc=upc,
-                        asin=resolved_asin,
-                        condition_type=cond_val,
-                        fulfillment_channel_code=fc_val,
-                        quantity=qty_val,
-                        currency=currency,
-                        price=price,
+                    attrs_fb = _build_amazon_runtime_attributes(
+                        asin_value=resolved_asin,
                         include_identifiers=bool(spec.get('include_identifiers')),
-                        marketplace_id=mp_id,
-                        offer_audience=offer_audience,
-                        merchant_shipping_group=(spec.get('merchant_shipping_group') or ''),
                         price_value_key_override=(spec.get('price_value_key') or ''),
                         include_marketplace_fields=bool(spec.get('include_marketplace_fields', True)),
                         include_offer_audience=bool(spec.get('include_offer_audience', True)),
                         force_include_upc_when_asin=force_upc_with_asin,
                         force_exclude_asin_identifier=force_exclude_asin,
                         include_identifier_marketplace=bool(spec.get('include_identifier_marketplace', False)),
-                        price_model=(spec.get('price_model') or 'purchasable_offer')
+                        price_model=(spec.get('price_model') or 'purchasable_offer'),
+                        condition_value=cond_val,
+                        fulfillment_value=fc_val,
+                        quantity_value=qty_val,
+                        merchant_shipping_group_value=(spec.get('merchant_shipping_group') or '')
                     )
                     body_fb = {
                         'productType': (spec.get('product_type') or resolved_pt or product_type),
@@ -13584,6 +13786,8 @@ def api_listingagent_amazon_put_offer():
                         'condition_type': condition_type,
                         'fulfillment_channel_code': fulfillment_channel_code,
                         'merchant_shipping_group': merchant_shipping_group,
+                        'manual_mode': manual_mode,
+                        'manual_create_mode': manual_create_mode,
                         'restriction_checked': bool((restriction_info or {}).get('checked')),
                         'restriction_restricted': bool((restriction_info or {}).get('restricted')),
                         'restriction_raw': ((restriction_info or {}).get('raw') if isinstance((restriction_info or {}).get('raw'), dict) else {}),
@@ -13664,6 +13868,8 @@ def api_listingagent_amazon_put_offer():
                 'effective_sku_source': effective_sku_source,
                 'sku_exists': sku_exists,
                 'marketplace_id': mp_id,
+                'manual_mode': manual_mode,
+                'manual_create_mode': manual_create_mode,
                 'merchant_shipping_group': merchant_shipping_group,
                 'restriction_checked': bool((restriction_info or {}).get('checked')),
                 'restriction_restricted': bool((restriction_info or {}).get('restricted')),
@@ -32852,6 +33058,7 @@ def get_sold_orders_route():
         # Process inventory reduction after fetching sold orders
         from DBmanager import process_sold_orders_inventory_reduction
         process_sold_orders_inventory_reduction()
+        _invalidate_ready_to_ship_cache()
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
@@ -33074,31 +33281,83 @@ def sold_orders():
 
     return jsonify(result)
 
+_READY_TO_SHIP_CACHE_DAYS = (1, 2, 3, 5, 7, 14, 30, 60, 90, 120)
+
+
+def _invalidate_ready_to_ship_cache(day_values=None):
+    values = tuple(day_values or _READY_TO_SHIP_CACHE_DAYS)
+    for days in values:
+        try:
+            cache.delete(f'view//sold-orders?days={days}')
+        except Exception:
+            pass
+        try:
+            cache.delete(f'view//api/ready-to-ship/count?days={days}')
+        except Exception:
+            pass
+
+
+def _ready_to_ship_poll_state(days):
+    conn = sqlite3.connect('sold.db')
+    try:
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute('''
+            SELECT id,
+                   COALESCE(TRIM(isHandled), '') AS isHandled,
+                   COALESCE(rackupdated, 0) AS rackupdated,
+                   COALESCE(barcode, '') AS barcode,
+                   COALESCE(location, '') AS location,
+                   COALESCE(isHandledDate, '') AS isHandledDate,
+                   COALESCE(paid_time, '') AS paid_time,
+                   COALESCE(shipped_time, '') AS shipped_time
+            FROM orders
+            WHERE paid_time >= date('now', '-' || ? || ' days')
+            ORDER BY id DESC
+        ''', (days,))
+        rows = cur.fetchall()
+
+        pending_count = 0
+        digest = hashlib.sha1()
+        for row in rows:
+            is_handled = str(row['isHandled'] or '').strip() == '1'
+            if not is_handled:
+                pending_count += 1
+            digest.update(
+                (
+                    f"{int(row['id'] or 0)}|"
+                    f"{1 if is_handled else 0}|"
+                    f"{int(row['rackupdated'] or 0)}|"
+                    f"{str(row['barcode'] or '').strip()}|"
+                    f"{str(row['location'] or '').strip()}|"
+                    f"{str(row['isHandledDate'] or '').strip()}|"
+                    f"{str(row['paid_time'] or '').strip()}|"
+                    f"{str(row['shipped_time'] or '').strip()}\n"
+                ).encode('utf-8', errors='ignore')
+            )
+
+        return {
+            'count': pending_count,
+            'total': len(rows),
+            'version': digest.hexdigest(),
+        }
+    finally:
+        conn.close()
+
+
 @app.route('/api/ready-to-ship/count', methods=['GET'])
-@cache.cached(timeout=60, query_string=True)
 def ready_to_ship_count():
-    """Return count of unhandled (ready to ship) orders within the last N days."""
+    """Return pending count plus a lightweight version fingerprint for cross-session refresh."""
     days = int(request.args.get('days', 2))
     if days < 1:
         days = 1
     elif days > 120:
         days = 120
-    conn = sqlite3.connect('sold.db')
     try:
-        cur = conn.cursor()
-        cur.execute('''
-            SELECT COUNT(*)
-            FROM orders
-            WHERE paid_time >= date('now', '-' || ? || ' days')
-              AND COALESCE(TRIM(isHandled), '') != '1'
-        ''', (days,))
-        row = cur.fetchone()
-        count = int(row[0] or 0) if row else 0
-        return jsonify({'success': True, 'count': count, 'days': days})
+        state = _ready_to_ship_poll_state(days)
+        return jsonify({'success': True, 'count': state['count'], 'total': state['total'], 'version': state['version'], 'days': days})
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e, 'ready_to_ship:count')}), 500
-    finally:
-        conn.close()
 
 
 @app.route('/get-order', methods=['GET'])
@@ -33496,15 +33755,7 @@ def mark_order_handled():
         cur.execute('DELETE FROM order_removal_allocations WHERE order_row_id = ?', (order_id,))
         conn.commit()
 
-        for _days in (1, 2, 3, 5, 7, 14, 30):
-            try:
-                cache.delete(f'view//sold-orders?days={_days}')
-            except Exception:
-                pass
-            try:
-                cache.delete(f'view//api/ready-to-ship/count?days={_days}')
-            except Exception:
-                pass
+        _invalidate_ready_to_ship_cache()
 
         return jsonify({'success': True, 'removed': len(audit_records) > 0})
 
@@ -33629,15 +33880,7 @@ def mark_order_unhandled():
         cur.execute('DELETE FROM order_removal_allocations WHERE order_row_id = ?', (order_id,))
         conn.commit()
 
-        for _days in (1, 2, 3, 5, 7, 14, 30):
-            try:
-                cache.delete(f'view//sold-orders?days={_days}')
-            except Exception:
-                pass
-            try:
-                cache.delete(f'view//api/ready-to-ship/count?days={_days}')
-            except Exception:
-                pass
+        _invalidate_ready_to_ship_cache()
 
         return jsonify({'success': True, 'restored': restored_count})
     except Exception as e:
@@ -35586,12 +35829,20 @@ def searchrack_api():
 
             title_sql = ' AND '.join(['TITLE LIKE ? COLLATE NOCASE' for _ in tokens])
             barcode_sql = ' OR '.join(['BARCODE LIKE ? COLLATE NOCASE' for _ in tokens])
-            params = tuple([f'%{token}%' for token in tokens] + [f'%{token}%' for token in tokens])
+            position_sql = ' OR '.join([
+                'ITEM_POSITION LIKE ? COLLATE NOCASE',
+                'PICTUREPOSITION LIKE ? COLLATE NOCASE'
+            ])
+            params = tuple(
+                [f'%{token}%' for token in tokens]
+                + [f'%{token}%' for token in tokens]
+                + [f'%{q_stripped}%'] * 2
+            )
 
             cur.execute(f'''
                 SELECT TITLE, BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION, QUANTITY, IMAGE, ITEMID
                 FROM SEARCHRACK
-                WHERE ({title_sql}) OR ({barcode_sql})
+                WHERE ({title_sql}) OR ({barcode_sql}) OR ({position_sql})
             ''', params)
             for row in cur.fetchall():
                 results.append({
@@ -35891,6 +36142,8 @@ def api_search_db(db_key):
                 title_col = next((c for c in cols if c.lower() == 'title'), None)
                 barcode_col = next((c for c in cols if c.lower() in ('barcode', 'upc')), None)
                 item_id_col = next((c for c in cols if c.lower() in ('itemid', 'item_id', 'sku')), None)
+                item_position_col = next((c for c in cols if c.lower() in ('item_position', 'itemposition', 'position')), None)
+                picture_position_col = next((c for c in cols if c.lower() in ('pictureposition', 'picture_position')), None)
 
                 disjuncts = []
 
@@ -35909,9 +36162,24 @@ def api_search_db(db_key):
                     aux_parts.append(f"LOWER(COALESCE({col_sql},'')) LIKE ?")
                     aux_params.append(f"%{q_stripped.lower()}%")
 
+                location_parts = []
+                location_params = []
+                for col in [item_position_col, picture_position_col]:
+                    if not col:
+                        continue
+                    col_sql = '"' + str(col).replace('"', '""') + '"'
+                    location_parts.append(f"LOWER(TRIM(COALESCE({col_sql},''))) = ?")
+                    location_params.append(q_stripped.lower())
+                    location_parts.append(f"LOWER(COALESCE({col_sql},'')) LIKE ?")
+                    location_params.append(f"%{q_stripped.lower()}%")
+
                 if aux_parts:
                     disjuncts.append('(' + ' OR '.join(aux_parts) + ')')
                     params.extend(aux_params)
+
+                if location_parts:
+                    disjuncts.append('(' + ' OR '.join(location_parts) + ')')
+                    params.extend(location_params)
 
                 if disjuncts:
                     where_clause = ' WHERE ' + ' OR '.join(disjuncts)
@@ -40300,6 +40568,7 @@ def sync_all():
         success_count = sum(1 for v in results.values() if 'success' in v)
         total_count = len(results)
         _listing_helper_scan_cache_clear()
+        _invalidate_ready_to_ship_cache()
         return jsonify({
             'success': True,
             'message': f'Sync completed: {success_count}/{total_count} successful',
@@ -40346,6 +40615,7 @@ def sync_ebay_orders_api():
         
         update_sync_timestamp('ebay_orders')
         _listing_helper_scan_cache_clear()
+        _invalidate_ready_to_ship_cache()
         return jsonify({'success': True, 'message': 'eBay orders synced successfully'})
     except Exception as e:
         return jsonify({'success': False, 'message': _safe_error(e, 'ebay orders sync')}), 500
@@ -40435,6 +40705,7 @@ def sync_amazon_orders_api():
         process_sold_orders_inventory_reduction()
         update_sync_timestamp('amazon_orders')
         _listing_helper_scan_cache_clear()
+        _invalidate_ready_to_ship_cache()
         return jsonify({'success': True, 'message': 'Amazon orders synced successfully'})
     except Exception as e:
         return jsonify({'success': False, 'message': _safe_error(e, 'amazon orders sync')}), 500
@@ -40804,6 +41075,7 @@ def fix_amazon_barcodes():
         sold_conn.commit()
         
         print(f"✅ Fixed {fixed_barcodes} barcodes and {fixed_images} images")
+        _invalidate_ready_to_ship_cache()
         
         return jsonify({
             'success': True,
@@ -42726,6 +42998,8 @@ def auto_sync_worker():
                     print(f"  ✅ eBay payouts synced: {payout_count} payouts")
                 except Exception as e:
                     print(f"  ⚠️ eBay payouts sync failed: {e}")
+
+                _invalidate_ready_to_ship_cache()
                 
                 # Update last auto-sync timestamp
                 conn = sqlite3.connect('sync_settings.db')

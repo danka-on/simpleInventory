@@ -2,6 +2,7 @@ credentials.json
 license\ type\ file
 tokens.json
 .env
+server_control_config.json
 venv/
 .venv/
 ebayStore.db
@@ -15,3 +16,7 @@ __pycache__/
 *.db-shm
 *.db-journal
 static/listingagent_uploads/
+build/
+dist/
+*.spec
+__desktop_build__/
