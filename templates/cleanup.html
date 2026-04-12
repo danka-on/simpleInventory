@@ -6,7 +6,7 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <title>Automatic Cleanup</title>
+    <title>Inventory Cleanup Status</title>
     <style>
         body{font-family:Segoe UI,Arial,sans-serif;background:#f7f7f8;margin:0;padding:18px}
         .top {display:flex;gap:10px;align-items:center;margin-bottom:24px}
@@ -29,45 +29,43 @@
 <body>
     <div class="top">
         <button class="btn btn-back" onclick="window.location.href='/searchrack'">← Back to Search</button>
-        <h1>🧹 Automatic Cleanup</h1>
+        <h1>🧹 Inventory Cleanup Status</h1>
     </div>
 
-    <!-- Pending Automatic Inventory Removals Section -->
+    <!-- Ready to Ship confirmation section -->
     <div class="section">
         <div class="section-header">
             <div class="section-title">
-                ⏰ Pending Automatic Inventory Removals
+                📦 Ready to Ship Inventory Confirmation
                 <span id="pending-grace-info" class="grace-info"></span>
             </div>
             <div class="action-buttons">
-                <button id="trigger-automatic-removal-btn" class="btn" style="background:#6f42c1; color:white;">Run Now</button>
+                <button id="trigger-automatic-removal-btn" class="btn" style="background:#2563eb; color:white;">Open Ready to Ship</button>
                 <button id="refresh-pending-btn" class="btn" style="background:#f0f0f0;">Refresh</button>
             </div>
         </div>
         <div class="info-box">
-            📦 Items sold and shipped will automatically reduce inventory after the grace period expires.
-            You can cancel, re-enable, or immediately process removals here.
+            📦 Sold inventory removal is manual now. Confirm the shipment from Ready to Ship to remove inventory exactly once and log the action.
         </div>
         <div id="pending-removals-container">
             <div id="pending-removals-loading" class="empty-state">Loading...</div>
         </div>
     </div>
 
-    <!-- Zero Quantity Pending Deletions Section -->
+    <!-- Zero quantity retention section -->
     <div class="section">
         <div class="section-header">
             <div class="section-title">
-                🗑️ Pending Zero-Quantity Deletions
+                🗂️ Zero-Quantity Retention
                 <span id="zero-qty-grace-info" class="grace-info"></span>
             </div>
             <div class="action-buttons">
-                <button id="run-zero-qty-now-btn" class="btn" style="background:#c92a2a; color:white;">Run Now</button>
+                <button id="run-zero-qty-now-btn" class="btn" style="background:#2563eb; color:white;">Open SearchRack</button>
                 <button id="refresh-zero-qty-btn" class="btn" style="background:#f0f0f0;">Refresh</button>
             </div>
         </div>
         <div class="info-box" style="background:#ffe5e5;border-left-color:#ff6b6b;color:#c92a2a">
-            🗑️ Items with zero quantity will be automatically deleted after the grace period expires.
-            You can cancel, re-enable, or immediately delete items here.
+            🗑️ Items that reach quantity 0 stay in inventory so you keep the barcode, location trail, and removal history. Use the zero quantity link in SearchRack to jump into rack history.
         </div>
         <div id="zero-qty-container">
             <div id="zero-qty-loading" class="empty-state">Loading...</div>
@@ -94,24 +92,23 @@ async function fetchPendingRemovals(){
         const j = await resp.json();
         console.log('Response data:', j);
         
-        // Update grace period info if available
-        try{
-            const graceInfoEl = document.getElementById('pending-grace-info');
-            if (graceInfoEl) {
-                if (j && typeof j.grace_hours !== 'undefined' && j.grace_hours !== null) {
-                    graceInfoEl.textContent = `(grace: ${j.grace_hours}h)`;
-                } else {
-                    graceInfoEl.textContent = '';
-                }
-            }
-        }catch(_e){ /* no-op */ }
-        
-        if(j.success && j.orders && j.orders.length > 0){
+        const graceInfoEl = document.getElementById('pending-grace-info');
+        if (graceInfoEl) graceInfoEl.textContent = '';
+
+        if(j.manual_mode){
+            container.innerHTML = `
+                <div class="empty-state">
+                    Automatic sold-order removal is disabled.
+                    <div style="margin-top:12px;">
+                        <a href="/ready_to_ship" class="btn" style="display:inline-block;background:#2563eb;color:white;text-decoration:none;">Open Ready to Ship</a>
+                    </div>
+                </div>`;
+        } else if(j.success && j.orders && j.orders.length > 0){
             console.log(`Found ${j.orders.length} pending removals`);
             displayPendingRemovals(j.orders);
         } else {
             console.log('No pending removals to display');
-            container.innerHTML = '<div class="empty-state">No pending automatic inventory removals</div>';
+            container.innerHTML = '<div class="empty-state">No pending manual follow-up found here. Use Ready to Ship for sold inventory removal.</div>';
         }
     }catch(err){
         console.error('Error fetching pending removals:', err);
@@ -124,7 +121,7 @@ function displayPendingRemovals(orders){
     const container = document.getElementById('pending-removals-container');
     
     if(!orders || orders.length === 0){
-        container.innerHTML = '<div class="empty-state">No pending automatic inventory removals</div>';
+        container.innerHTML = '<div class="empty-state">No pending manual follow-up found here. Use Ready to Ship for sold inventory removal.</div>';
         return;
     }
     
@@ -167,79 +164,19 @@ function displayPendingRemovals(orders){
 }
 
 async function cancelRemoval(orderId){
-    if(!confirm('Cancel automatic inventory removal for this order? You will need to manually adjust inventory.')){
-        return;
-    }
-    try{
-        const resp = await fetch(`/api/sold/cancel-removal/${orderId}`, {method: 'POST'});
-        const j = await resp.json();
-        if(j.success){
-            alert('Automatic removal cancelled');
-            fetchPendingRemovals();
-        } else {
-            alert('Failed to cancel: ' + (j.error || 'Unknown error'));
-        }
-    }catch(err){
-        console.error('Error cancelling removal:', err);
-        alert('Error cancelling removal');
-    }
+    window.location.href = '/ready_to_ship';
 }
 
 async function allowRemoval(orderId){
-    if(!confirm('Re-enable automatic inventory removal for this order?')){
-        return;
-    }
-    try{
-        const resp = await fetch(`/api/sold/allow-removal/${orderId}`, {method: 'POST'});
-        const j = await resp.json();
-        if(j.success){
-            alert('Automatic removal re-enabled');
-            fetchPendingRemovals();
-        } else {
-            alert('Failed to re-enable: ' + (j.error || 'Unknown error'));
-        }
-    }catch(err){
-        console.error('Error re-enabling removal:', err);
-        alert('Error re-enabling removal');
-    }
+    window.location.href = '/ready_to_ship';
 }
 
 async function removeNow(orderId){
-    if(!confirm('Immediately reduce inventory for this order? This bypasses the grace period.')){
-        return;
-    }
-    try{
-        const resp = await fetch(`/api/sold/remove-now/${orderId}`, {method: 'POST'});
-        const j = await resp.json();
-        if(j.success){
-            alert('Inventory reduced successfully. New quantity: ' + (typeof j.new_qty !== 'undefined' ? j.new_qty : 'updated'));
-            fetchPendingRemovals();
-        } else {
-            alert('Failed to remove now: ' + (j.error || 'Unknown error'));
-        }
-    }catch(err){
-        console.error('Error performing remove now:', err);
-        alert('Error performing remove now');
-    }
+    window.location.href = '/ready_to_ship';
 }
 
 async function triggerAutomaticRemoval(){
-    if(!confirm('Manually trigger the automatic removal process now? This will process all eligible items immediately.')){
-        return;
-    }
-    try{
-        const resp = await fetch('/api/sold/trigger-automatic-removal', {method: 'POST'});
-        const j = await resp.json();
-        if(j.success){
-            alert('Automatic removal process completed. Check console for details.');
-            setTimeout(fetchPendingRemovals, 1000);
-        } else {
-            alert('Failed to trigger: ' + (j.error || 'Unknown error'));
-        }
-    }catch(err){
-        console.error('Error triggering automatic removal:', err);
-        alert('Error triggering automatic removal');
-    }
+    window.location.href = '/ready_to_ship';
 }
 
 // ===== Zero Quantity Pending Deletions =====
@@ -253,24 +190,23 @@ async function fetchZeroQtyPending(){
         const j = await resp.json();
         console.log('Zero-qty response data:', j);
         
-        // Update grace period info if available
-        try{
-            const graceInfoEl = document.getElementById('zero-qty-grace-info');
-            if (graceInfoEl) {
-                if (j && typeof j.grace_hours !== 'undefined' && j.grace_hours !== null) {
-                    graceInfoEl.textContent = `(grace: ${j.grace_hours}h)`;
-                } else {
-                    graceInfoEl.textContent = '';
-                }
-            }
-        }catch(_e){ /* no-op */ }
-        
-        if(j.success && j.items && j.items.length > 0){
+        const graceInfoEl = document.getElementById('zero-qty-grace-info');
+        if (graceInfoEl) graceInfoEl.textContent = '';
+
+        if(j.manual_mode){
+            container.innerHTML = `
+                <div class="empty-state">
+                    Zero-quantity auto deletion is disabled. Zero-qty rows stay in SearchRack for history.
+                    <div style="margin-top:12px;">
+                        <a href="/searchrack?db=searchRack" class="btn" style="display:inline-block;background:#2563eb;color:white;text-decoration:none;">Open SearchRack</a>
+                    </div>
+                </div>`;
+        } else if(j.success && j.items && j.items.length > 0){
             console.log(`Found ${j.items.length} zero-qty pending deletions`);
             displayZeroQtyPending(j.items);
         } else {
             console.log('No zero-qty pending deletions to display');
-            container.innerHTML = '<div class="empty-state">No pending zero-quantity deletions</div>';
+            container.innerHTML = '<div class="empty-state">No zero-quantity deletions are pending because zero-qty items are retained for history.</div>';
         }
     }catch(err){
         console.error('Error fetching zero-qty pending:', err);
@@ -283,7 +219,7 @@ function displayZeroQtyPending(items){
     const container = document.getElementById('zero-qty-container');
     
     if(!items || items.length === 0){
-        container.innerHTML = '<div class="empty-state">No pending zero-quantity deletions</div>';
+        container.innerHTML = '<div class="empty-state">No zero-quantity deletions are pending because zero-qty items are retained for history.</div>';
         return;
     }
     
@@ -325,78 +261,19 @@ function displayZeroQtyPending(items){
 }
 
 async function cancelZeroQtyDeletion(barcode){
-    if(!confirm('Cancel automatic deletion for this zero-quantity item?')){
-        return;
-    }
-    try{
-        const resp = await fetch(`/api/zero_qty_cancel/${encodeURIComponent(barcode)}`, {method: 'POST'});
-        const j = await resp.json();
-        if(j.success){
-            alert('Automatic deletion cancelled');
-            fetchZeroQtyPending();
-        } else {
-            alert('Failed to cancel: ' + (j.error || 'Unknown error'));
-        }
-    }catch(err){
-        console.error('Error cancelling zero-qty deletion:', err);
-        alert('Error cancelling deletion');
-    }
+    window.location.href = `/searchrack?db=searchRack&q=${encodeURIComponent(barcode || '')}`;
 }
 
 async function allowZeroQtyDeletion(barcode){
-    if(!confirm('Re-enable automatic deletion for this zero-quantity item?')){
-        return;
-    }
-    try{
-        const resp = await fetch(`/api/zero_qty_allow/${encodeURIComponent(barcode)}`, {method: 'POST'});
-        const j = await resp.json();
-        if(j.success){
-            alert('Automatic deletion re-enabled');
-            fetchZeroQtyPending();
-        } else {
-            alert('Failed to re-enable: ' + (j.error || 'Unknown error'));
-        }
-    }catch(err){
-        console.error('Error re-enabling zero-qty deletion:', err);
-        alert('Error re-enabling deletion');
-    }
+    window.location.href = `/searchrack?db=searchRack&q=${encodeURIComponent(barcode || '')}`;
 }
 
 async function deleteZeroQtyNow(barcode){
-    if(!confirm('Immediately delete this zero-quantity item? This bypasses the grace period.')){
-        return;
-    }
-    try{
-        const resp = await fetch(`/api/zero_qty_delete_now/${encodeURIComponent(barcode)}`, {method: 'POST'});
-        const j = await resp.json();
-        if(j.success){
-            alert('Item deleted successfully');
-            fetchZeroQtyPending();
-        } else {
-            alert('Failed to delete: ' + (j.error || 'Unknown error'));
-        }
-    }catch(err){
-        console.error('Error deleting zero-qty item:', err);
-        alert('Error deleting item');
-    }
+    window.location.href = `/searchrack?db=searchRack&q=${encodeURIComponent(barcode || '')}&open_history=1&history_search=${encodeURIComponent(barcode || '')}`;
 }
 
 async function triggerZeroQtyPurge(){
-    if (!confirm('Run zero-quantity deletion now? This will delete all items past their grace period.')) {
-        return;
-    }
-    try {
-        const resp = await fetch('/api/zero_qty/trigger-purge', {method: 'POST'});
-        const data = await resp.json();
-        if (data.success) {
-            alert('✓ Zero-quantity purge completed! Refreshing...');
-            fetchZeroQtyPending();
-        } else {
-            alert('Error: ' + (data.error || 'Unknown error'));
-        }
-    } catch (err) {
-        alert('Error triggering zero-quantity purge: ' + err.message);
-    }
+    window.location.href = '/searchrack?db=searchRack';
 }
 
 // Attach event handlers

@@ -14,7 +14,8 @@
       "Bash(curl:*)",
       "Bash(cd:*)",
       "WebFetch(domain:developer-docs.shipping.amazon.com)",
-      "Bash(python3 -c \":*)"
+      "Bash(python3 -c \":*)",
+      "Bash(python -c \":*)"
     ]
   }
 }

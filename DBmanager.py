@@ -259,9 +259,12 @@ def _upc_exists_in_local_sources(candidate):
     return False
 
 def resolve_barcode_from_marketplace_sku(sku, *, platform=None, item_id=None, fallback_barcode=None):
-    sku_val = str(sku or '').strip()
-    fallback = str(fallback_barcode or '').strip()
-    item_id_val = str(item_id or '').strip()
+    sku_raw = str(sku or '').strip()
+    sku_val = sku_raw if _is_meaningful_marketplace_text(sku_raw) else ''
+    fallback_raw = str(fallback_barcode or '').strip()
+    fallback = fallback_raw if _is_meaningful_marketplace_text(fallback_raw) else ''
+    item_id_raw = str(item_id or '').strip()
+    item_id_val = item_id_raw if _is_meaningful_marketplace_text(item_id_raw) else ''
     if not sku_val and not item_id_val:
         return fallback
 
@@ -703,10 +706,12 @@ def store_ebay_order(order):
         cur = conn.cursor()
         ensure_sold_orders_schema(cur, conn, default_store='ebay')
 
-        sku_val = str(order.get('sku') or '').strip() or None
+        sku_raw = str(order.get('sku') or '').strip()
+        sku_val = sku_raw if _is_meaningful_marketplace_text(sku_raw) else None
 
         # Get barcode (UPC) from ebayStore.db using item_id
-        barcode_val = order.get('barcode')
+        barcode_raw = str(order.get('barcode') or '').strip()
+        barcode_val = barcode_raw if _is_meaningful_marketplace_text(barcode_raw) else None
         if not barcode_val and order.get('item_id'):
             try:
                 with connect_db('ebayStore.db') as ebay_conn:
@@ -717,7 +722,9 @@ def store_ebay_order(order):
                         if row[0]:
                             barcode_val = row[0]
                         if not sku_val and len(row) > 1 and row[1]:
-                            sku_val = str(row[1]).strip() or sku_val
+                            row_sku = str(row[1]).strip()
+                            if _is_meaningful_marketplace_text(row_sku):
+                                sku_val = row_sku
             except Exception:
                 pass
 
@@ -1270,15 +1277,14 @@ def enrich_searchrack_db(batch_size=500, do_backup=True):
 
 def process_sold_orders_inventory_reduction():
     """
-    Process sold orders and reduce searchRack.db quantities.
-    Only processes orders where:
-    - rackupdated = 0
-    - Has a shipped_time (item has been shipped)
-    - 48 hours have passed since shipped_time
-    - removal_cancelled is not 1
-    Marks orders as rackupdated = 1 after processing (whether found in searchRack or not).
+    Legacy compatibility shim.
+
+    Sold-order inventory changes now happen only when a user confirms the order
+    in Ready to Ship. This function intentionally does nothing so sync jobs can
+    keep calling it safely without silently removing inventory in the background.
     """
-    print("Processing sold orders for inventory reduction...")
+    print("Skipping automatic sold-order inventory reduction; Ready to Ship confirmation is authoritative.")
+    return
 
     try:
         # Use raw connections here because this is a long-running cross-DB operation

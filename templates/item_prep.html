@@ -13,22 +13,38 @@
     .btn-gray{background:#95a5a6;color:#fff}
     .btn-log{background:linear-gradient(180deg,#f59e0b 0%,#ea580c 100%);color:#fff;box-shadow:0 8px 18px rgba(234,88,12,0.22);font-weight:700}
     .btn-log:hover{filter:brightness(1.03)}
+    .printer-status-btn{display:inline-flex;align-items:center;gap:8px;font-weight:700;box-shadow:0 8px 18px rgba(15,23,42,0.16);transition:filter .15s ease, transform .15s ease}
+    .printer-status-btn:hover{filter:brightness(1.03)}
+    .printer-status-btn:active{transform:translateY(1px)}
+    .printer-status-btn.connected{background:linear-gradient(180deg,#22c55e 0%,#16a34a 100%);color:#fff}
+    .printer-status-btn.disconnected{background:linear-gradient(180deg,#ef4444 0%,#dc2626 100%);color:#fff}
+    .printer-status-btn.checking{background:linear-gradient(180deg,#64748b 0%,#475569 100%);color:#fff}
     .card{background:#fff;border:1px solid #e8e8e8;border-radius:14px;padding:16px;margin-top:14px}
     .row{display:flex;gap:10px;flex-wrap:wrap}
     .item{display:flex;gap:16px;align-items:center}
-    .thumb-stack{display:flex;flex-direction:column;align-items:stretch;width:104px}
-    .thumb-button-wrap{position:relative;display:flex;align-items:center;justify-content:center;min-height:80px}
-    .thumb-photo-btn{
-      margin-top:0;
-      min-height:44px;
+    .thumb-stack{--thumb-slot-size:104px;display:flex;flex-direction:column;align-items:stretch;width:var(--thumb-slot-size)}
+    .thumb-button-wrap{
+      position:relative;
       display:flex;
       align-items:center;
       justify-content:center;
-      gap:8px;
       width:100%;
-      padding:10px 12px;
+      height:var(--thumb-slot-size);
+      min-height:var(--thumb-slot-size);
+    }
+    .thumb-photo-btn{
+      position:absolute;
+      inset:0;
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      justify-content:center;
+      gap:10px;
+      width:100%;
+      height:100%;
+      padding:12px;
       border:none;
-      border-radius:12px;
+      border-radius:16px;
       background:linear-gradient(180deg,#16c784 0%,#00b894 100%);
       color:#fff;
       cursor:pointer;
@@ -39,10 +55,12 @@
       user-select:none;
       text-align:center;
       line-height:1.1;
+      box-sizing:border-box;
     }
     .thumb-photo-btn:hover{filter:brightness(1.03)}
     .thumb-photo-btn:active{transform:translateY(1px)}
-    .thumb-photo-btn .icon{font-size:1.15rem;line-height:1}
+    .thumb-photo-btn .icon{font-size:1.45rem;line-height:1}
+    .thumb-existing-media{display:flex;gap:4px;flex-wrap:wrap;margin-top:5px;max-width:100%}
     .hero{display:block;width:100%;max-height:32vh;object-fit:contain;background:#f8f8f8;border-radius:12px;margin:10px auto 0}
     .title{font-weight:700;font-size:1.1rem}
     .muted{color:#666;font-size:0.95rem}
@@ -217,6 +235,24 @@
     @keyframes spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
     .btn:disabled{opacity:0.5;cursor:not-allowed}
     .scan-validation-msg{margin-top:8px;font-size:0.95rem;color:#b91c1c;font-weight:700}
+    #goodEntriesToggle{background:#f8fafc;border:1.5px solid #94a3b8;color:#334155}
+    #goodEntriesList{background:#fff;border:1.5px solid #94a3b8;border-top:none}
+    .prep-history-row{display:flex;align-items:center;gap:10px;padding:8px 12px;cursor:pointer;border-bottom:1px solid #e8edf3;transition:background .12s}
+    .prep-history-row:hover{background:#f8fafc}
+    .prep-history-thumb{width:44px;height:44px;border-radius:7px;overflow:hidden;background:#e8e8e8;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:18px}
+    .prep-history-main{flex:1;min-width:0}
+    .prep-history-top{display:flex;align-items:flex-start;gap:8px;min-width:0}
+    .prep-history-note{flex:1;min-width:0;font-size:0.84rem;font-weight:700;color:#0f172a;line-height:1.24;white-space:normal;word-break:break-word}
+    .prep-history-note.empty{color:#94a3b8;font-weight:600}
+    .prep-history-detail{display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0;margin-top:4px}
+    .prep-history-upc{font-size:0.72rem;font-weight:700;color:#334155;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;max-width:100%}
+    .prep-history-meta{font-size:0.72rem;color:#64748b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
+    .prep-history-status{display:inline-flex;align-items:center;justify-content:center;align-self:flex-start;padding:4px 9px;border-radius:999px;font-size:0.72rem;font-weight:800;letter-spacing:0.04em}
+    .prep-history-status.good{background:#dcfce7;color:#166534}
+    .prep-history-status.bad{background:#fee2e2;color:#b91c1c}
+    .prep-history-status.return{background:#ffedd5;color:#9a3412}
+    .prep-history-location{display:inline-flex;align-items:center;gap:4px;padding:4px 9px;border:1px solid #bfdbfe;border-radius:999px;background:#eff6ff;color:#1d4ed8;font-size:0.72rem;font-weight:700;cursor:pointer}
+    .prep-history-location:hover{background:#dbeafe}
   .loading-overlay{position:absolute;top:0;left:0;right:0;bottom:0;background:rgba(255,255,255,0.9);display:flex;align-items:center;justify-content:center;z-index:10;border-radius:12px}
   .spinner{border:3px solid #f3f3f3;border-top:3px solid #00b894;border-radius:50%;width:24px;height:24px;animation:spin 1s linear infinite}
   @keyframes spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
@@ -257,9 +293,8 @@
       .btn{padding:8px 12px;font-size:0.9rem}
       .card{padding:12px;margin-top:8px}
       .hero{max-height:25vh}
-      .thumb-stack{width:112px}
-      .thumb-button-wrap{min-height:60px}
-      .thumb-photo-btn{min-height:46px;font-size:0.95rem}
+      .thumb-stack{--thumb-slot-size:112px}
+      .thumb-photo-btn{font-size:0.95rem}
       .big-actions .btn{padding:14px 0;font-size:1rem}
       .qty-display{margin:8px 0;padding:8px;gap:8px}
       .qty-number{font-size:1.8rem}
@@ -282,9 +317,8 @@
       .btn{padding:8px 12px;font-size:0.92rem}
       .card{padding:10px;margin-top:8px}
       .item{gap:10px}
-      .thumb-stack{width:108px}
-      .thumb-button-wrap{min-height:64px}
-      .thumb-photo-btn{margin-top:6px;min-height:42px;padding:8px 10px;font-size:0.88rem}
+      .thumb-stack{--thumb-slot-size:108px}
+      .thumb-photo-btn{padding:10px;font-size:0.88rem}
       #hero{max-height:18vh !important;margin-top:6px !important}
       #prepSummary{margin-top:6px !important;font-size:0.88rem}
       .note-wrap{margin-top:6px}
@@ -350,6 +384,17 @@
     html.ss-theme-night .btn-danger:hover { background: #dc2626; }
     html.ss-theme-night .btn-gray { background: #475569; }
     html.ss-theme-night .btn-log { background: linear-gradient(180deg,#f59e0b 0%,#c2410c 100%); color:#fff; box-shadow:0 8px 18px rgba(194,65,12,0.26); }
+    html.ss-theme-night #goodEntriesToggle { background:#0f172a; border-color:#475569; color:var(--ink, #e2e8f0); }
+    html.ss-theme-night #goodEntriesList { background:var(--card, #1e293b); border-color:#475569; }
+    html.ss-theme-night .prep-history-row { border-bottom-color:rgba(255,255,255,0.08); }
+    html.ss-theme-night .prep-history-row:hover { background:rgba(148,163,184,0.1); }
+    html.ss-theme-night .prep-history-thumb { background:#334155; color:#cbd5e1; }
+    html.ss-theme-night .prep-history-note { color:var(--ink, #e2e8f0); }
+    html.ss-theme-night .prep-history-note.empty { color:var(--muted, #94a3b8); }
+    html.ss-theme-night .prep-history-upc { color:var(--ink, #e2e8f0); }
+    html.ss-theme-night .prep-history-meta { color:var(--muted, #94a3b8); }
+    html.ss-theme-night .prep-history-location { background:#0f2747; border-color:#1d4ed8; color:#bfdbfe; }
+    html.ss-theme-night .prep-history-location:hover { background:#13315a; }
     html.ss-theme-night .loading-overlay { background: rgba(15,23,42,0.9); }
     html.ss-theme-night .page-loading-overlay { background: rgba(15,23,42,0.7); }
     html.ss-theme-night .exception-card { background: var(--card, #1e293b); border-color: rgba(255,255,255,0.1); }
@@ -369,6 +414,7 @@
 <div class="top">
   <h2 style="margin:0 auto;text-align:center;flex:1" data-i18n="preparation">Preparation</h2>
   <div style="display:flex;gap:10px;align-items:center;">
+    <button type="button" class="btn printer-status-btn checking" id="printerStatusBtn">🖨️ Checking Printer</button>
     <!-- Print Que button intentionally hidden for now; keep this spot for possible reactivation later. -->
       <a href="/item-prep/log" style="text-decoration:none"><button class="btn btn-log"><span aria-hidden="true">📋</span> Log</button></a>
   </div>
@@ -420,14 +466,14 @@
           <div class="thumb-stack">
             <div class="thumb-button-wrap">
               <div id="thumbLoadingOverlay" class="loading-overlay" style="display:none"><div class="spinner"></div></div>
+              <label for="pendingPhotoInput" title="Add photo" class="thumb-photo-btn">
+                <span class="icon" aria-hidden="true">📷</span>
+                <span>Add Photo</span>
+              </label>
             </div>
-            <label for="pendingPhotoInput" title="Add photo" class="thumb-photo-btn">
-              <span class="icon" aria-hidden="true">📷</span>
-              <span>Add Photo</span>
-            </label>
           </div>
           <!-- Existing good images: compact row below thumb -->
-          <div id="existingGoodImages" style="display:flex;gap:4px;flex-wrap:wrap;margin-top:5px;max-width:104px"></div>
+          <div id="existingGoodImages" class="thumb-existing-media"></div>
         </div>
         <div style="flex:1;min-width:0">
           <div class="title" id="title"></div>
@@ -439,11 +485,11 @@
 
       <!-- Good entries picker — shown when prior good preps exist -->
       <div id="goodEntriesPicker" style="display:none;margin-top:10px;position:relative">
-        <button type="button" id="goodEntriesToggle" onclick="toggleGoodEntriesDropdown()" style="width:100%;display:flex;align-items:center;justify-content:space-between;background:#f0f9f0;border:1.5px solid #27ae60;border-radius:10px;padding:8px 12px;cursor:pointer;font-size:0.9rem;color:#1a6e34;font-weight:600">
-          <span id="goodEntriesToggleLabel">Existing preps</span>
+        <button type="button" id="goodEntriesToggle" onclick="toggleGoodEntriesDropdown()" style="width:100%;display:flex;align-items:center;justify-content:space-between;border-radius:10px;padding:8px 12px;cursor:pointer;font-size:0.9rem;font-weight:600">
+          <span id="goodEntriesToggleLabel">Prep history</span>
           <span id="goodEntriesChevron" style="font-size:0.75rem;transition:transform .2s">▾</span>
         </button>
-        <div id="goodEntriesList" style="display:none;position:absolute;left:0;right:0;z-index:50;background:#fff;border:1.5px solid #27ae60;border-top:none;border-radius:0 0 10px 10px;box-shadow:0 4px 12px rgba(0,0,0,0.12);max-height:260px;overflow-y:auto"></div>
+        <div id="goodEntriesList" style="display:none;position:absolute;left:0;right:0;z-index:50;border-radius:0 0 10px 10px;box-shadow:0 4px 12px rgba(0,0,0,0.12);max-height:260px;overflow-y:auto"></div>
       </div>
 
       <!-- Existing good audio/video media -->
@@ -704,6 +750,10 @@
     let quickVoiceNoteUrl = '';
     let quickVoicePointerId = null;
     let quickVoiceMimeType = '';
+    let printerConfigState = null;
+    let printerStatusState = null;
+    let printerStatusPromise = null;
+    const ITEM_PREP_PRINTER_NOTICE_KEY = 'itemPrepPrinterNotice';
 
     function getQuickVoiceStatusEl(){
       return document.getElementById('quickVoiceNoteStatus');
@@ -1037,6 +1087,268 @@
       return raw.includes('-') ? raw.split('-')[0] : raw;
     }
 
+    function printerSettingsUrl(){
+      return '/printer-settings?return=' + encodeURIComponent('/item-prep');
+    }
+
+    function isSuffixedBarcode(value){
+      return /-\d+$/.test(String(value || '').trim());
+    }
+
+    function getCurrentItemTitle(){
+      const el = document.getElementById('title');
+      return String((el && el.textContent) || '').trim();
+    }
+
+    function mmValue(value, fallback){
+      const parsed = parseInt(value, 10);
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+    }
+
+    function updatePrinterStatusButton(status){
+      const btn = document.getElementById('printerStatusBtn');
+      if(!btn) return;
+      const connected = !!(status && status.connected);
+      const configured = !!(status && status.configured);
+      const displayName = String(
+        (status && (status.printer_name || status.printer_model || status.display_name)) ||
+        ((printerConfigState || {}).printer_name || (printerConfigState || {}).printer_model || 'Printer')
+      ).trim();
+      let text = '🖨️ Setup Printer';
+      let cls = 'btn printer-status-btn disconnected';
+      if(connected){
+        text = '🖨️ Printer Connected';
+        cls = 'btn printer-status-btn connected';
+      } else if(configured){
+        text = '🖨️ Printer Not Connected';
+        cls = 'btn printer-status-btn disconnected';
+      } else if(status === null){
+        text = '🖨️ Checking Printer';
+        cls = 'btn printer-status-btn checking';
+      }
+      btn.className = cls;
+      btn.textContent = text;
+      const detail = status && status.detail ? String(status.detail) : 'Open printer setup';
+      btn.title = displayName ? `${displayName}: ${detail}` : detail;
+    }
+
+    async function loadPrinterStatus(force=false){
+      if(printerStatusPromise && !force) return printerStatusPromise;
+      if(force){
+        printerStatusState = null;
+        updatePrinterStatusButton(null);
+      }
+      const url = '/api/printer/status' + (force ? ('?ts=' + Date.now()) : '');
+      printerStatusPromise = fetch(url)
+        .then(async (response) => {
+          const data = await response.json().catch(()=>({success:false, error:'Invalid printer status response'}));
+          if(data && data.success){
+            printerConfigState = data.config || printerConfigState || {};
+            printerStatusState = data.status || null;
+            updatePrinterStatusButton(printerStatusState);
+            return data;
+          }
+          throw new Error((data && data.error) || 'Printer status unavailable');
+        })
+        .catch((error) => {
+          printerStatusState = {
+            configured: false,
+            connected: false,
+            can_print: false,
+            detail: error && error.message ? error.message : 'Printer status unavailable'
+          };
+          updatePrinterStatusButton(printerStatusState);
+          return {success:false, error: printerStatusState.detail};
+        })
+        .finally(() => {
+          printerStatusPromise = null;
+        });
+      return printerStatusPromise;
+    }
+
+    function stashPrinterNotice(message){
+      const text = String(message || '').trim();
+      if(!text) return;
+      try{
+        sessionStorage.setItem(ITEM_PREP_PRINTER_NOTICE_KEY, text);
+      }catch(_){}
+    }
+
+    function showStashedPrinterNotice(){
+      let text = '';
+      try{
+        text = String(sessionStorage.getItem(ITEM_PREP_PRINTER_NOTICE_KEY) || '').trim();
+        sessionStorage.removeItem(ITEM_PREP_PRINTER_NOTICE_KEY);
+      }catch(_){
+        text = '';
+      }
+      if(!text) return;
+      const statusMsg = document.getElementById('statusMsg');
+      if(!statusMsg) return;
+      statusMsg.innerHTML = '<span class="bad">' + esc(text) + '</span>';
+      setTimeout(()=>{
+        if(statusMsg && statusMsg.textContent === text){
+          statusMsg.textContent = '';
+        }
+      }, 4500);
+    }
+
+    function shouldPrepareBrowserPrintWindow(mayProduceSuffixedBarcode){
+      return !!(
+        mayProduceSuffixedBarcode &&
+        printerConfigState &&
+        String(printerConfigState.print_method || '').toLowerCase() === 'browser' &&
+        printerStatusState &&
+        printerStatusState.can_print
+      );
+    }
+
+    function prepareBrowserPrintWindow(mayProduceSuffixedBarcode){
+      if(!shouldPrepareBrowserPrintWindow(mayProduceSuffixedBarcode)) return null;
+      const popup = window.open('', '', 'toolbar=0,location=0,menubar=0,scrollbars=0,status=0,titlebar=0');
+      if(!popup) return null;
+      try{
+        popup.document.write('<!DOCTYPE html><html><head><title></title></head><body style="font-family:Arial,sans-serif;padding:16px;color:#334155">Preparing label...</body></html>');
+        popup.document.close();
+      }catch(_){}
+      return popup;
+    }
+
+    function closePreparedPrintWindow(printWindow){
+      if(!printWindow || printWindow.closed) return;
+      try{ printWindow.close(); }catch(_){}
+    }
+
+    function printBarcodeBrowserWithConfig(barcodeData, config, preparedWindow){
+      const widthMm = mmValue(config && config.label_width, 62);
+      const heightMm = mmValue(config && config.label_height, 29);
+      const showName = !(config && (config.label_show_name === false || String(config.label_show_name) === '0'));
+      const showBarcode = !(config && (config.label_show_barcode === false || String(config.label_show_barcode) === '0'));
+      const showBarcodeText = !(config && (config.label_show_barcode_text === false || String(config.label_show_barcode_text) === '0'));
+      const PX_PER_MM = 96 / 25.4;
+      const designTitleSize = Math.max(6, parseInt(config && config.label_title_font_size, 10) || Math.max(8, Math.min(12, Math.round(heightMm * 0.32))));
+      const designBarcodeFontSize = Math.max(6, parseInt(config && config.label_barcode_font_size, 10) || Math.max(9, Math.min(12, Math.round(heightMm * 0.34))));
+      const designBarcodeHeight = Math.max(20, parseInt(config && config.label_barcode_height, 10) || Math.max(26, Math.round(heightMm * 1.2)));
+      const designBarcodeWidth = Math.max(0.6, parseFloat(config && config.label_barcode_scale) || (widthMm >= 62 ? 1.8 : 1.6));
+      const titlePx = Math.max(12, Math.round(designTitleSize * PX_PER_MM * 0.9));
+      const fontPx = Math.max(10, Math.round(designBarcodeFontSize * PX_PER_MM * 0.92));
+      const barcodeHeight = Math.max(24, Math.round(designBarcodeHeight * PX_PER_MM * 0.95));
+      const barcodeWidth = Math.max(1.2, designBarcodeWidth * 1.35);
+      const titleLines = Math.max(1, parseInt(config && config.label_title_lines, 10) || 2);
+      const titleMaxHeight = Math.ceil(titlePx * 1.08 * titleLines);
+      const titleHtml = showName && barcodeData.description
+        ? `<div class="barcode-title">${esc(barcodeData.description || '')}</div>`
+        : '';
+      const barcodeTextHtml = (!showBarcode && showBarcodeText && String(barcodeData.upc || '').trim())
+        ? `<div class="barcode-plain-text">${esc(String(barcodeData.upc || ''))}</div>`
+        : '';
+      const barcodeSvgHtml = showBarcode ? '<svg id="barcode"></svg>' : '';
+      const barcodeScript = showBarcode
+        ? [
+            '  <script>',
+            `    JsBarcode("#barcode", ${JSON.stringify(String(barcodeData.upc || ''))}, { format: "CODE128", width: ${barcodeWidth}, height: ${barcodeHeight}, displayValue: ${showBarcodeText ? 'true' : 'false'}, fontSize: ${fontPx}, margin: 0 });`,
+            '    setTimeout(function(){ window.print(); }, 350);',
+            '    window.onafterprint = function(){ window.close(); };',
+            '  <\/script>'
+          ].join('\n')
+        : [
+            '  <script>',
+            '    setTimeout(function(){ window.print(); }, 350);',
+            '    window.onafterprint = function(){ window.close(); };',
+            '  <\/script>'
+          ].join('\n');
+      const printWindow = preparedWindow || window.open('', '', 'toolbar=0,location=0,menubar=0,scrollbars=0,status=0,titlebar=0');
+      if(!printWindow){
+        throw new Error('Allow popups so the barcode label can auto-print');
+      }
+      const html = [
+        '<!DOCTYPE html>',
+        '<html>',
+        '<head>',
+        '  <title></title>',
+        '  <style>',
+        `    @page { size: ${widthMm}mm ${heightMm}mm; margin: 0; }`,
+        `    html, body { width: ${widthMm}mm; height: ${heightMm}mm; margin: 0 !important; padding: 0 !important; background: white !important; overflow: hidden !important; }`,
+        '    body { font-family: Arial, sans-serif; display: block; }',
+        `    .barcode-label { width: ${widthMm}mm; height: ${heightMm}mm; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 1.5mm 2mm; gap: 1.5mm; box-sizing: border-box; overflow: hidden; margin: 0; }`,
+        `    .barcode-title { font-size: ${titlePx}px; font-weight: bold; text-align: center; color: #000; width: 100%; line-height: 1.08; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: ${titleLines}; overflow: hidden; word-break: break-word; max-height: ${titleMaxHeight}px; }`,
+        `    .barcode-plain-text { font-size: ${fontPx}px; font-weight: bold; text-align: center; color: #000; width: 100%; line-height: 1.08; word-break: break-all; }`,
+        `    #barcode { display: block; width: calc(${widthMm}mm - 8mm); max-height: calc(${heightMm}mm - 10mm); }`,
+        '    @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } header, footer { display: none !important; } }',
+        '  </style>',
+        '  <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"><\/script>',
+        '</head>',
+        '<body>',
+        '  <div class="barcode-label">',
+        `    ${titleHtml}`,
+        `    ${barcodeSvgHtml}`,
+        `    ${barcodeTextHtml}`,
+        '  </div>',
+        barcodeScript,
+        '</body>',
+        '</html>'
+      ].join('\n');
+      printWindow.document.open();
+      printWindow.document.write(html);
+      printWindow.document.close();
+      return true;
+    }
+
+    async function maybeAutoPrintSuffixedBarcode(upc, description, preparedWindow){
+      const barcode = String(upc || '').trim();
+      if(!isSuffixedBarcode(barcode)){
+        closePreparedPrintWindow(preparedWindow);
+        return {printed:false, skipped:'not_suffixed'};
+      }
+
+      const config = printerConfigState || {};
+      const printMethod = String(config.print_method || '').toLowerCase();
+      if(!printerStatusState || !printerStatusState.can_print){
+        closePreparedPrintWindow(preparedWindow);
+        return {printed:false, error:'Printer is not ready. Open Printer Setup to reconnect it.'};
+      }
+
+      if(printMethod === 'browser'){
+        try{
+          printBarcodeBrowserWithConfig({
+            upc: barcode,
+            description: description || getCurrentItemTitle()
+          }, config, preparedWindow);
+          return {printed:true, method:'browser'};
+        }catch(error){
+          closePreparedPrintWindow(preparedWindow);
+          return {printed:false, error:error && error.message ? error.message : 'Browser print failed'};
+        }
+      }
+
+      closePreparedPrintWindow(preparedWindow);
+      try{
+        const response = await fetch('/api/printer/print-barcode', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({
+            upc: barcode,
+            item_description: description || getCurrentItemTitle(),
+            quantity: 1
+          })
+        });
+        const data = await response.json().catch(()=>({success:false, error:'Printer response invalid'}));
+        if(data && data.success){
+          return {printed:true, method:'direct'};
+        }
+        return {printed:false, error:(data && data.error) || 'Direct print failed'};
+      }catch(error){
+        return {printed:false, error:error && error.message ? error.message : 'Direct print failed'};
+      }
+    }
+
+    function autoPrintResultMarkup(result){
+      if(!result || result.skipped === 'not_suffixed') return '';
+      if(result.printed) return ' <span class="ok">(suffix label sent to printer)</span>';
+      if(result.error) return ' <span class="bad">(label not printed: ' + esc(result.error) + ')</span>';
+      return '';
+    }
+
     function getItemsToListLinkFallback(){
       const base = currentBaseUpc();
       if(!base) return '/items-to-list';
@@ -1303,6 +1615,44 @@
       }
     });
 
+    function prepHistoryStatusLabel(status){
+      const normalized = String(status || '').trim().toLowerCase();
+      if(normalized === 'bad') return 'BAD';
+      if(normalized === 'return') return 'RETURN';
+      return 'GOOD';
+    }
+
+    function prepHistoryStatusClass(status){
+      const normalized = String(status || '').trim().toLowerCase();
+      if(normalized === 'bad') return 'bad';
+      if(normalized === 'return') return 'return';
+      return 'good';
+    }
+
+    function prepHistoryDateText(value){
+      const raw = String(value || '').trim();
+      return raw ? raw.replace('T',' ').slice(0,16) : '';
+    }
+
+    function openPrepHistoryLocation(entry){
+      const locationCode = String((entry && (entry.location_code || entry.location)) || '').trim();
+      const previewKey = String((entry && (entry.location_preview || entry.preview_key || entry.pictureposition)) || '').trim();
+      if(!locationCode && !previewKey) return;
+      if(window.SSLocationPreview){
+        const titleSource = locationCode || previewKey;
+        window.SSLocationPreview.openForLocation(locationCode || previewKey, previewKey, `Location: ${String(titleSource || '').toUpperCase()}`);
+        return;
+      }
+      const looksLikePicturePath = /[\\/]|\\.(png|jpe?g|webp|gif)$/i.test(previewKey);
+      if(previewKey && looksLikePicturePath){
+        const src = previewKey.startsWith('/') ? previewKey : `/static/pictureposition/${previewKey}`;
+        window.open(`${src}?t=${Date.now()}`, '_blank', 'noopener');
+        return;
+      }
+      const shelfCode = locationCode || previewKey;
+      window.open(`/shelf-image/${encodeURIComponent(shelfCode.toLowerCase())}.png?t=${Date.now()}`, '_blank', 'noopener');
+    }
+
     async function loadGoodEntriesPicker(baseUpc){
       const picker = document.getElementById('goodEntriesPicker');
       const list = document.getElementById('goodEntriesList');
@@ -1317,17 +1667,15 @@
         const j = await fetch('/api/items_prep/good_entries/'+encodeURIComponent(baseUpc)).then(r=>r.json()).catch(()=>({}));
         const entries = j.entries || [];
         if(!entries.length) return;
-        if(label) label.textContent = `${entries.length} existing prep${entries.length===1?'':'s'} — tap to edit`;
+        if(label) label.textContent = `${entries.length} prep history ${entries.length===1 ? 'entry' : 'entries'} — tap to edit`;
 
         entries.forEach(entry => {
           const row = document.createElement('div');
-          row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:8px 12px;cursor:pointer;border-bottom:1px solid #e8f5e9;transition:background .12s';
-          row.onmouseenter = ()=>{ row.style.background='#f0f9f0'; };
-          row.onmouseleave = ()=>{ row.style.background=''; };
+          row.className = 'prep-history-row';
 
           // Thumbnail
           const imgWrap = document.createElement('div');
-          imgWrap.style.cssText = 'width:44px;height:44px;border-radius:7px;overflow:hidden;background:#e8e8e8;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:18px';
+          imgWrap.className = 'prep-history-thumb';
           if(entry.image_url){
             const img = document.createElement('img');
             img.src = entry.image_url;
@@ -1341,25 +1689,80 @@
 
           // Text column
           const textCol = document.createElement('div');
-          textCol.style.cssText = 'flex:1;min-width:0';
+          textCol.className = 'prep-history-main';
+
+          const topLine = document.createElement('div');
+          topLine.className = 'prep-history-top';
+
+          const statusChip = document.createElement('span');
+          statusChip.className = `prep-history-status ${prepHistoryStatusClass(entry.status)}`;
+          statusChip.textContent = prepHistoryStatusLabel(entry.status);
+          topLine.appendChild(statusChip);
+
+          const noteEl = document.createElement('div');
+          noteEl.className = `prep-history-note${entry.note ? '' : ' empty'}`;
+          noteEl.textContent = entry.note || 'No note';
+          topLine.appendChild(noteEl);
+
+          textCol.appendChild(topLine);
+
+          const detailLine = document.createElement('div');
+          detailLine.className = 'prep-history-detail';
 
           // UPC with suffix highlighted
           const upcEl = document.createElement('div');
-          upcEl.style.cssText = 'font-size:0.82rem;font-weight:600;color:#333;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+          upcEl.className = 'prep-history-upc';
           if(entry.is_suffix){
             const parts = entry.upc.split('-');
-            upcEl.innerHTML = `<span style="color:#555">${esc(parts[0])}</span><span style="color:#27ae60">-${esc(parts.slice(1).join('-'))}</span>`;
+            const suffixColor = prepHistoryStatusClass(entry.status) === 'bad'
+              ? '#dc2626'
+              : (prepHistoryStatusClass(entry.status) === 'return' ? '#c2410c' : '#27ae60');
+            upcEl.innerHTML = `<span style="color:#64748b">${esc(parts[0])}</span><span style="color:${suffixColor}">-${esc(parts.slice(1).join('-'))}</span>`;
           } else {
             upcEl.textContent = entry.upc;
           }
-          textCol.appendChild(upcEl);
+          detailLine.appendChild(upcEl);
 
-          // Note + date row
+          const locationEntries = Array.isArray(entry.location_entries) && entry.location_entries.length
+            ? entry.location_entries
+            : (entry.location_code ? [{
+                location_code: entry.location_code,
+                preview_key: entry.location_preview || entry.pictureposition || entry.location_code,
+                available_qty: Number(entry.quantity || 0)
+              }] : []);
+          locationEntries.forEach(loc => {
+            const locCode = String((loc && loc.location_code) || '').trim();
+            if(!locCode) return;
+            const locBtn = document.createElement('button');
+            locBtn.type = 'button';
+            locBtn.className = 'prep-history-location';
+            const locQty = Number((loc && loc.available_qty) || 0);
+            const locLabel = /^[a-z0-9-]+$/i.test(locCode) ? locCode.toUpperCase() : locCode;
+            locBtn.textContent = locQty > 1 ? `${locLabel} x${locQty}` : locLabel;
+            locBtn.title = 'Open location picture';
+            locBtn.onclick = (ev)=>{
+              ev.preventDefault();
+              ev.stopPropagation();
+              openPrepHistoryLocation({
+                location_code: loc.location_code,
+                location_preview: loc.preview_key || loc.location_preview || '',
+                pictureposition: loc.preview_key || ''
+              });
+            };
+            detailLine.appendChild(locBtn);
+          });
+          textCol.appendChild(detailLine);
+
           const metaEl = document.createElement('div');
-          metaEl.style.cssText = 'font-size:0.72rem;color:#888;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px';
-          const datePart = entry.updated_at ? entry.updated_at.replace('T',' ').slice(0,16) : '';
-          metaEl.textContent = [entry.note, datePart].filter(Boolean).join(' · ');
-          textCol.appendChild(metaEl);
+          metaEl.className = 'prep-history-meta';
+          const metaParts = [];
+          if(entry.lot_number) metaParts.push(`LOT ${entry.lot_number}`);
+          const datePart = prepHistoryDateText(entry.updated_at);
+          if(datePart) metaParts.push(datePart);
+          if(metaParts.length){
+            metaEl.textContent = metaParts.join(' · ');
+            textCol.appendChild(metaEl);
+          }
 
           row.appendChild(textCol);
 
@@ -1567,11 +1970,8 @@
       const baseForLoad = currentBaseUpc() || (it.upc || '');
       if(hasGoodQty){
         loadExistingGoodData(baseForLoad).catch(()=>{});
-        loadGoodEntriesPicker(baseForLoad).catch(()=>{});
-      } else {
-        const picker = document.getElementById('goodEntriesPicker');
-        if(picker) picker.style.display = 'none';
       }
+      loadGoodEntriesPicker(baseForLoad).catch(()=>{});
       statusMsg.textContent='';
       // Hide No Barcode button when item is displayed
       document.getElementById('noBarcodeBtn').classList.add('hidden');
@@ -1858,6 +2258,12 @@
       });
     }
     renderQuickVoiceNote();
+    const printerStatusBtn = document.getElementById('printerStatusBtn');
+    if(printerStatusBtn){
+      printerStatusBtn.onclick = ()=>{
+        window.location.href = printerSettingsUrl();
+      };
+    }
     
     document.getElementById('undoBtn').onclick = async ()=>{
       if(!lastEntry) return;
@@ -1901,9 +2307,11 @@
       if(!currentUpc) return;
       if(!tryBeginPrepAction()) return;
       let releaseDeferred = false;
+      const preparedPrintWindow = prepareBrowserPrintWindow(goodForceNewSuffix || isSuffixedBarcode(currentUpc));
       try{
         const continueAction = await maybeRunPlateSetPrompt();
         if(!continueAction){
+          closePreparedPrintWindow(preparedPrintWindow);
           return;
         }
         const quickNote = getQuickPrepNoteText();
@@ -1925,6 +2333,7 @@
         if(result && result.success){ 
           let noteSaveError = '';
           let voiceSaveError = '';
+          let autoPrintResult = null;
           const resultUpc = result.upc || currentUpc;
           const resultBaseUpc = result.base_upc || (String(resultUpc || '').includes('-') ? String(resultUpc).split('-')[0] : String(resultUpc || currentUpc || ''));
           if(quickNote){
@@ -1956,6 +2365,7 @@
             try{ await uploadPendingMedia(resultUpc, 'good'); }catch(e){ console.error('Pending media upload error:',e); }
             clearPendingMedia();
           }
+          autoPrintResult = await maybeAutoPrintSuffixedBarcode(resultUpc, getCurrentItemTitle(), preparedPrintWindow);
           // Store for undo with action type
           lastEntry = {
             upc: resultUpc,
@@ -1969,8 +2379,9 @@
           showUndoButton();
           const exceptionTag = result.exception_overage ? ' <span class="bad">(saved as exception)</span>' : '';
           const forcedTag = result.forced_lot_override ? (' <span class="bad">(forced current LOT ' + esc(result.lot_number || '') + ', flagged)</span>') : '';
-          statusMsg.innerHTML='<span class="ok">Marked GOOD (Qty: '+currentQty+')</span>' + exceptionTag + forcedTag + (noteSaveError ? (' <span class="bad">' + noteSaveError + '</span>') : '') + (voiceSaveError ? (' <span class="bad">' + voiceSaveError + '</span>') : '');
+          statusMsg.innerHTML='<span class="ok">Marked GOOD (Qty: '+currentQty+')</span>' + exceptionTag + forcedTag + autoPrintResultMarkup(autoPrintResult) + (noteSaveError ? (' <span class="bad">' + noteSaveError + '</span>') : '') + (voiceSaveError ? (' <span class="bad">' + voiceSaveError + '</span>') : '');
         } else { 
+          closePreparedPrintWindow(preparedPrintWindow);
           const errorMsg = result && result.error ? result.error : 'Unknown error';
           console.error('Failed to mark good:', result);
           statusMsg.innerHTML='<span class="bad">Failed: ' + errorMsg + '</span>'; 
@@ -1983,11 +2394,13 @@
           endPrepAction();
         }, 3000);
       }catch(e){
+        closePreparedPrintWindow(preparedPrintWindow);
         console.error('Good button error:', e);
         const statusMsg = document.getElementById('statusMsg');
         statusMsg.innerHTML='<span class="bad">Failed: ' + e + '</span>';
       }finally{
         if(!releaseDeferred){
+          closePreparedPrintWindow(preparedPrintWindow);
           hidePageLoading();
           endPrepAction();
         }
@@ -2216,9 +2629,11 @@
     }
 
     window.addEventListener('DOMContentLoaded', async ()=>{
+      loadPrinterStatus().catch(()=>{});
       lotsReadyPromise = loadLots(); // Load LOT selector first
       await lotsReadyPromise;
       setupDeviceMode();
+      showStashedPrinterNotice();
       // If no UPC param, focus the manual input for quick scanning/typing
       try{
         const params = new URLSearchParams(window.location.search);
@@ -2252,6 +2667,12 @@
     });
     window.addEventListener('beforeunload', stopScanner);
     window.addEventListener('beforeunload', stopQuickVoiceStream);
+    window.addEventListener('focus', ()=>{ loadPrinterStatus(true).catch(()=>{}); });
+    document.addEventListener('visibilitychange', ()=>{
+      if(document.visibilityState === 'visible'){
+        loadPrinterStatus(true).catch(()=>{});
+      }
+    });
 
     // Auto-trigger lookup if ?upc= is provided OR if coming from no-barcode page
     window.addEventListener('DOMContentLoaded', async ()=>{
@@ -2287,6 +2708,11 @@
       }catch(e){}
     });
   </script>
+  <script src="/static/location-preview.js?v=20260331a"></script>
   <script src="/static/i18n.js?v=20260203c"></script>
+  <script>
+    // Wake printer on page load (fire-and-forget)
+    fetch('/api/printer/wake', {method:'POST'}).catch(()=>{});
+  </script>
 </body>
 </html>

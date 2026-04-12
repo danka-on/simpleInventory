@@ -21,7 +21,7 @@
     .btn-gray:hover { background:#7f8c8d; }
     .form-group { margin-bottom:16px; }
     label { display:block; margin-bottom:6px; font-weight:600; color:#2c3e50; }
-    input[type="text"], select { width:100%; padding:10px; border:1px solid #ddd; border-radius:8px; font-size:14px; }
+    input[type="text"], input[type="number"], select { width:100%; padding:10px; border:1px solid #ddd; border-radius:8px; font-size:14px; }
     .status-msg { margin-top:12px; padding:10px; border-radius:6px; font-size:14px; }
     .status-success { background:#d1f2eb; color:#00b894; border:1px solid #00b894; }
     .status-error { background:#fadbd8; color:#e74c3c; border:1px solid #e74c3c; }
@@ -37,6 +37,18 @@
     .instructions h3 { margin-bottom:8px; font-size:16px; }
     .instructions ul { margin-left:20px; }
     .instructions li { margin-bottom:6px; }
+    .status-row { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:12px; }
+    .status-pill { display:inline-flex; align-items:center; gap:8px; padding:8px 14px; border-radius:999px; font-size:14px; font-weight:700; }
+    .status-pill.connected { background:#dcfce7; color:#166534; border:1px solid #86efac; }
+    .status-pill.disconnected { background:#fee2e2; color:#b91c1c; border:1px solid #fca5a5; }
+    .status-pill.checking { background:#e2e8f0; color:#334155; border:1px solid #cbd5e1; }
+    .status-detail { color:#475569; font-size:14px; line-height:1.4; }
+    .field-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; }
+    .subtle-note { color:#64748b; font-size:12px; margin-top:6px; line-height:1.45; }
+    .preset-card { background:linear-gradient(180deg,#eff6ff 0%,#f8fafc 100%); border:1px solid #bfdbfe; border-radius:10px; padding:14px; margin-bottom:16px; }
+    .preset-card strong { color:#1d4ed8; display:block; margin-bottom:6px; }
+    .preset-card p { color:#334155; font-size:14px; line-height:1.45; margin-bottom:10px; }
+    .preset-actions { display:flex; gap:10px; flex-wrap:wrap; }
   </style>
 </head>
 <body>
@@ -44,16 +56,31 @@
     <h1>🖨️ Printer Settings</h1>
     
     <div class="card">
-      <a href="/"><button class="btn btn-danger">← Back to Home</button></a>
+      <a id="backLink" href="/"><button id="backBtn" class="btn btn-danger">← Back to Home</button></a>
+      <a href="/printer-label-designer" style="margin-left:8px;"><button class="btn btn-secondary" type="button">✎ Open Label Visualizer</button></a>
     </div>
     
     <div class="card">
       <h2 style="margin-bottom:16px">Current Status</h2>
+      <div class="status-row">
+        <span id="liveStatusPill" class="status-pill checking">Checking printer...</span>
+        <button class="btn btn-gray" id="refreshStatusBtn" type="button">↻ Refresh Status</button>
+      </div>
+      <div id="liveStatusDetail" class="status-detail" style="margin-bottom:12px;">Checking saved printer connection...</div>
       <div id="currentConfig" style="color:#7f8c8d;">Loading...</div>
     </div>
     
     <div class="card">
       <h2 style="margin-bottom:16px">Printer Configuration</h2>
+
+      <div class="preset-card">
+        <strong>Brother QL-820NWBc Quick Start</strong>
+        <p>Pick the setup path you want at the top. WiFi/browser mode is the best fit for iPad + Brother label printing, and Bluetooth mode switches into thermal direct-print setup and scans for nearby printer devices on the server right away.</p>
+        <div class="preset-actions">
+          <button class="btn btn-secondary" id="brotherPresetBtn" type="button">Use WiFi / Browser Mode</button>
+          <button class="btn btn-secondary" id="bluetoothPresetBtn" type="button">Use Bluetooth Scan Mode</button>
+        </div>
+      </div>
       
       <div class="form-group">
         <label>Printer Type</label>
@@ -108,13 +135,75 @@
           <input type="number" id="networkPort" placeholder="9100" value="9100">
           <small style="color:#7f8c8d; font-size:12px;">Most ESC/POS printers use port 9100</small>
         </div>
+        <div class="form-group">
+          <label>Printer MAC Address <span style="font-size:11px;color:#7f8c8d;">(for Wake-on-LAN)</span></label>
+          <input type="text" id="printerMac" placeholder="e.g., AA:BB:CC:DD:EE:FF" style="font-family:monospace;">
+          <small style="color:#7f8c8d; font-size:12px;">Found on the printer label or Brother web UI. Needed to wake from fully powered-off state.</small>
+        </div>
       </div>
       
       <div class="form-group">
         <label>Printer Name (Optional)</label>
         <input type="text" id="printerName" placeholder="e.g., Label Printer">
       </div>
-      
+
+      <div class="form-group">
+        <label>Printer Model (Optional)</label>
+        <input type="text" id="printerModel" placeholder="e.g., Brother QL-820NWBc">
+        <div class="subtle-note">Shown in the live status so you can tell which printer profile `item-prep` is using.</div>
+      </div>
+
+      <div class="form-group">
+        <label>Label Size</label>
+        <div class="field-grid">
+          <div>
+            <label for="labelWidth" style="font-size:13px;">Width (mm)</label>
+            <input type="number" id="labelWidth" min="12" max="120" step="1" value="50">
+          </div>
+          <div>
+            <label for="labelHeight" style="font-size:13px;">Height (mm)</label>
+            <input type="number" id="labelHeight" min="8" max="300" step="1" value="30">
+          </div>
+        </div>
+        <div class="subtle-note">These dimensions are used for barcode label layout. A 62mm-wide roll is a common starting point for the Brother QL-820NWBc.</div>
+      </div>
+
+      <div class="form-group">
+        <label for="brotherQlLabel">Brother QL Label Type</label>
+        <select id="brotherQlLabel">
+          <option value="">Auto (match width to continuous roll)</option>
+          <optgroup label="62mm">
+            <option value="62">62 — 62mm continuous (black, DK-22205)</option>
+            <option value="62red">62red — 62mm continuous black+red (DK-22251)</option>
+            <option value="62x29">62x29 — 62×29mm die-cut</option>
+            <option value="62x100">62x100 — 62×100mm die-cut</option>
+          </optgroup>
+          <optgroup label="29mm">
+            <option value="29">29 — 29mm continuous</option>
+            <option value="29x42">29x42 — 29×42mm die-cut</option>
+            <option value="29x90">29x90 — 29×90mm die-cut (address)</option>
+          </optgroup>
+          <optgroup label="Other widths">
+            <option value="12">12 — 12mm continuous</option>
+            <option value="17">17 — 17mm continuous</option>
+            <option value="38">38 — 38mm continuous</option>
+            <option value="50">50 — 50mm continuous</option>
+            <option value="54">54 — 54mm continuous</option>
+            <option value="102">102 — 102mm continuous</option>
+            <option value="17x54">17x54 — 17×54mm die-cut</option>
+            <option value="17x87">17x87 — 17×87mm die-cut</option>
+            <option value="39x90">39x90 — 39×90mm die-cut</option>
+            <option value="52x29">52x29 — 52×29mm die-cut</option>
+            <option value="102x51">102x51 — 102×51mm die-cut</option>
+            <option value="102x152">102x152 — 102×152mm die-cut</option>
+            <option value="d12">d12 — 12mm round die-cut</option>
+            <option value="d24">d24 — 24mm round die-cut</option>
+            <option value="d58">d58 — 58mm round die-cut</option>
+          </optgroup>
+        </select>
+        <div class="subtle-note">Only needed for Brother QL printers. The label type must match the roll physically loaded in the printer.</div>
+      </div>
+
       <button class="btn btn-secondary" id="scanBtn">🔍 Scan for Devices</button>
       <button class="btn btn-primary" id="saveBtn">💾 Save Configuration</button>
       <button class="btn btn-gray" id="testBtn">🧪 Test Print</button>
@@ -140,6 +229,11 @@
     const printerName = document.getElementById('printerName');
     const networkIp = document.getElementById('networkIp');
     const networkPort = document.getElementById('networkPort');
+    const printerMac = document.getElementById('printerMac');
+    const printerModel = document.getElementById('printerModel');
+    const labelWidth = document.getElementById('labelWidth');
+    const labelHeight = document.getElementById('labelHeight');
+    const brotherQlLabel = document.getElementById('brotherQlLabel');
     const saveBtn = document.getElementById('saveBtn');
     const scanBtn = document.getElementById('scanBtn');
     const testBtn = document.getElementById('testBtn');
@@ -152,32 +246,45 @@
     const directConnectionFields = document.getElementById('directConnectionFields');
     const networkFields = document.getElementById('networkFields');
     const escposOnlyFields = document.getElementById('escposOnlyFields');
+    const liveStatusPill = document.getElementById('liveStatusPill');
+    const liveStatusDetail = document.getElementById('liveStatusDetail');
+    const refreshStatusBtn = document.getElementById('refreshStatusBtn');
+    const brotherPresetBtn = document.getElementById('brotherPresetBtn');
+    const bluetoothPresetBtn = document.getElementById('bluetoothPresetBtn');
+    const backLink = document.getElementById('backLink');
+    const backBtn = document.getElementById('backBtn');
     
     let platformInfo = null;
+    const returnUrl = new URLSearchParams(window.location.search).get('return') || '/';
+
+    if (backLink) backLink.href = returnUrl;
+    if (backBtn && returnUrl.includes('/item-prep')) {
+      backBtn.textContent = '← Back to Item Prep';
+    }
     
+    function updateTestButtonState() {
+      testBtn.style.display = 'inline-block';
+      testBtn.textContent = printMethod.value === 'browser' ? '🧾 Open Test Label' : '🧪 Test Print';
+    }
+
     // Toggle fields based on print method
     printMethod.addEventListener('change', () => {
       if (printMethod.value === 'browser') {
-        // Browser print mode - hide all printer-specific fields
-        directConnectionFields.classList.add('hidden');
-        networkFields.classList.add('hidden');
+        // Browser print mode still keeps connection details visible for live status checks.
         escposOnlyFields.classList.add('hidden');
-        scanBtn.style.display = 'none';
-        testBtn.style.display = 'none';
+        printerType.dispatchEvent(new Event('change'));
         showBrowserInstructions();
       } else {
         // ESC/POS mode - show printer configuration
         escposOnlyFields.classList.remove('hidden');
-        testBtn.style.display = 'inline-block';
         // Trigger printer type change to show correct fields
         printerType.dispatchEvent(new Event('change'));
       }
+      updateTestButtonState();
     });
     
     // Toggle between network and direct connection fields
     printerType.addEventListener('change', () => {
-      if (printMethod.value === 'browser') return; // Skip if browser mode
-      
       if (printerType.value === 'network') {
         directConnectionFields.classList.add('hidden');
         networkFields.classList.remove('hidden');
@@ -200,19 +307,13 @@
     // Detect platform from server
     async function detectPlatform() {
       try {
-        // Get platform info from a test API call
         const response = await fetch('/api/printer/config');
         const data = await response.json();
-        
-        // Determine platform from user agent or set Windows as default
-        const userAgent = navigator.userAgent.toLowerCase();
-        const isLinux = userAgent.includes('linux');
-        const isRaspberryPi = userAgent.includes('raspbian') || userAgent.includes('raspberry');
-        
-        if (isRaspberryPi) {
+
+        if (data && data.server_platform_type === 'raspberry_pi') {
           platformInfo = 'raspberry_pi';
           showRaspberryPiInstructions();
-        } else if (isLinux) {
+        } else if (data && data.server_platform_type === 'linux') {
           platformInfo = 'linux';
           showLinuxInstructions();
         } else {
@@ -243,13 +344,14 @@
               <li>✅ Works from iPad, phone, or desktop</li>
               <li>✅ No drivers or configuration required</li>
               <li>✅ Can print multiple barcodes at once</li>
+              <li>✅ Use "Open Test Label" to bring up the browser print sheet</li>
               <li>✅ Can save as PDF for later</li>
             </ul>
           </li>
           <li><strong>Best for:</strong> Testing, occasional printing, using existing printers</li>
         </ul>
         <div style="background:#e8f5e9; padding:12px; border-radius:8px; margin-top:12px; border:1px solid #4caf50;">
-          <strong>💡 Recommended:</strong> Start with Browser Print mode. It's simple and works with your HP Envy right away!
+          <strong>💡 Recommended:</strong> For a Brother QL-820NWBc, use Browser Print with a saved network IP so item-prep can verify the printer is reachable before auto-printing suffix labels.
         </div>
       `;
     }
@@ -273,8 +375,8 @@
             </ul>
           </li>
           <li><strong>Step 3:</strong> Enter IP address below (e.g., 192.168.1.100)</li>
-          <li><strong>Step 4:</strong> Set port to 9100 (default for ESC/POS printers)</li>
-          <li><strong>Step 5:</strong> Save and test print</li>
+          <li><strong>Step 4:</strong> Leave port at 9100 as a starting point. Browser mode will also try common network printer ports when checking status.</li>
+          <li><strong>Step 5:</strong> Save and use "Open Test Label" to bring up the print sheet on your iPad or browser</li>
         </ul>
         <div style="background:#e3f2fd; padding:12px; border-radius:8px; margin-top:12px; border:1px solid #2196f3;">
           <strong>💡 Tip for iPad Users:</strong> Once configured, you can print from your iPad's browser by accessing this Flask app on your network (e.g., http://[server-ip]:5000)
@@ -328,7 +430,7 @@ sudo chmod 666 /dev/rfcomm0</pre>
       `;
       portLabel.textContent = 'Device Path';
       bluetoothAddress.placeholder = '/dev/rfcomm0';
-      portHint.textContent = 'e.g., /dev/rfcomm0, /dev/ttyUSB0, or /dev/ttyAMA0';
+      portHint.textContent = 'e.g., /dev/rfcomm0, /dev/ttyUSB0, or /dev/ttyACM0';
     }
     
     function showLinuxInstructions() {
@@ -338,7 +440,7 @@ sudo chmod 666 /dev/rfcomm0</pre>
           <li><strong>Step 1:</strong> Pair your Bluetooth printer using your system's Bluetooth manager</li>
           <li><strong>Step 2:</strong> Find the device path:
             <ul style="margin-top:6px;">
-              <li>Serial/USB: <code>/dev/ttyUSB0</code> or <code>/dev/ttyAMA0</code></li>
+              <li>Serial/USB: <code>/dev/ttyUSB0</code> or <code>/dev/ttyACM0</code></li>
               <li>Bluetooth RFCOMM: <code>/dev/rfcomm0</code></li>
               <li>Or click "Scan for Devices" below</li>
             </ul>
@@ -349,7 +451,219 @@ sudo chmod 666 /dev/rfcomm0</pre>
       `;
       portLabel.textContent = 'Device Path';
       bluetoothAddress.placeholder = '/dev/rfcomm0';
-      portHint.textContent = 'e.g., /dev/rfcomm0, /dev/ttyUSB0, /dev/ttyAMA0';
+      portHint.textContent = 'e.g., /dev/rfcomm0, /dev/ttyUSB0, /dev/ttyACM0';
+    }
+
+    function mmValue(value, fallback) {
+      const parsed = parseFloat(value);
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+    }
+
+    function openBrowserTestLabel() {
+      const popup = window.open('', 'printer-test-label', 'width=780,height=620');
+      if (!popup) {
+        showStatus('Your browser blocked the test-label window. Allow popups and try again.', 'error');
+        return;
+      }
+
+      const widthMm = mmValue(labelWidth.value, 62);
+      const heightMm = mmValue(labelHeight.value, 29);
+      const fontPx = Math.max(12, Math.round(Math.min(widthMm, heightMm) * 0.75));
+      const headline = 'TEST LABEL';
+      const printerLine = (printerModel.value || printerName.value || 'Brother QL-820NWBc').trim();
+      const ipLine = (networkIp.value || 'Choose the Brother printer in the print sheet').trim();
+      const sizeLine = `${Math.round(widthMm)}mm x ${Math.round(heightMm)}mm`;
+
+      const doc = popup.document;
+      doc.open();
+      doc.write('<!doctype html><title>Printer Test Label</title>');
+      doc.close();
+
+      const style = doc.createElement('style');
+      style.textContent = `
+        @page { size: ${widthMm}mm ${heightMm}mm; margin: 0; }
+        html, body {
+          margin: 0;
+          padding: 0;
+          width: ${widthMm}mm;
+          height: ${heightMm}mm;
+          font-family: Arial, sans-serif;
+          background: #fff;
+        }
+        body {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .label {
+          width: ${widthMm}mm;
+          height: ${heightMm}mm;
+          padding: 1.5mm;
+          box-sizing: border-box;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 1.5mm;
+          text-align: center;
+        }
+        .headline {
+          font-size: ${fontPx}px;
+          font-weight: 700;
+          line-height: 1.1;
+        }
+        .subline {
+          font-size: ${Math.max(10, fontPx - 2)}px;
+          line-height: 1.15;
+        }
+        .rule {
+          width: 100%;
+          border-top: 1px solid #000;
+          margin: 1mm 0;
+        }
+      `;
+      doc.head.appendChild(style);
+
+      const label = doc.createElement('div');
+      label.className = 'label';
+
+      const headlineEl = doc.createElement('div');
+      headlineEl.className = 'headline';
+      headlineEl.textContent = headline;
+      label.appendChild(headlineEl);
+
+      const ruleEl = doc.createElement('div');
+      ruleEl.className = 'rule';
+      label.appendChild(ruleEl);
+
+      const printerEl = doc.createElement('div');
+      printerEl.className = 'subline';
+      printerEl.textContent = printerLine;
+      label.appendChild(printerEl);
+
+      const ipEl = doc.createElement('div');
+      ipEl.className = 'subline';
+      ipEl.textContent = ipLine;
+      label.appendChild(ipEl);
+
+      const sizeEl = doc.createElement('div');
+      sizeEl.className = 'subline';
+      sizeEl.textContent = `Label Size: ${sizeLine}`;
+      label.appendChild(sizeEl);
+
+      doc.body.innerHTML = '';
+      doc.body.appendChild(label);
+      popup.focus();
+      setTimeout(() => {
+        try {
+          popup.print();
+        } catch (error) {
+          console.error('Popup print failed:', error);
+        }
+      }, 350);
+      showStatus('Test label opened. Use the browser print sheet to pick the Brother printer.', 'success');
+    }
+
+    function applyBrotherPreset() {
+      printMethod.value = 'browser';
+      printMethod.dispatchEvent(new Event('change'));
+      printerType.value = 'network';
+      printerType.dispatchEvent(new Event('change'));
+      printerMode.value = 'thermal';
+      printerModel.value = 'Brother QL-820NWBc';
+      if (!printerName.value.trim()) {
+        printerName.value = 'Brother QL-820NWBc';
+      }
+      labelWidth.value = 62;
+      labelHeight.value = 29;
+      if (!networkPort.value) {
+        networkPort.value = 9100;
+      }
+      showStatus('Brother QL-820NWBc defaults applied. Enter the printer IP, save, then use Open Test Label.', 'info');
+    }
+
+    function applyBluetoothPreset() {
+      printMethod.value = 'escpos';
+      printMethod.dispatchEvent(new Event('change'));
+      printerType.value = 'bluetooth';
+      printerType.dispatchEvent(new Event('change'));
+      printerMode.value = 'thermal';
+      printerModel.value = 'Brother QL-820NWBc';
+      if (!printerName.value.trim()) {
+        printerName.value = 'Brother QL-820NWBc';
+      }
+      labelWidth.value = 62;
+      labelHeight.value = 29;
+      showStatus('Bluetooth thermal mode ready. Scanning for printer devices on the server...', 'info');
+      scanForDevices();
+    }
+
+    function renderLiveStatus(status) {
+      const connected = !!(status && status.connected);
+      const configured = !!(status && status.configured);
+      let pillClass = 'status-pill checking';
+      let pillText = 'Checking printer...';
+
+      if (connected) {
+        pillClass = 'status-pill connected';
+        pillText = 'Connected';
+      } else if (configured) {
+        pillClass = 'status-pill disconnected';
+        pillText = 'Not Connected';
+      } else {
+        pillClass = 'status-pill disconnected';
+        pillText = 'Not Set Up';
+      }
+
+      liveStatusPill.className = pillClass;
+      liveStatusPill.textContent = pillText;
+      liveStatusDetail.textContent = status && status.detail
+        ? status.detail
+        : 'Save a printer connection to start live status checks.';
+    }
+
+    async function loadPrinterStatus() {
+      liveStatusPill.className = 'status-pill checking';
+      liveStatusPill.textContent = 'Checking printer...';
+      liveStatusDetail.textContent = 'Checking saved printer connection...';
+
+      try {
+        const response = await fetch('/api/printer/status?ts=' + Date.now());
+        const data = await response.json();
+        if (data.success && data.status) {
+          renderLiveStatus(data.status);
+        } else {
+          renderLiveStatus({ configured: false, connected: false, detail: data.error || 'Status unavailable' });
+        }
+      } catch (error) {
+        renderLiveStatus({ configured: false, connected: false, detail: 'Status unavailable: ' + error.message });
+      }
+    }
+
+    async function scanForDevices() {
+      showStatus('Scanning for Bluetooth/USB printer devices on the server...', 'info');
+      scanBtn.disabled = true;
+      
+      try {
+        const response = await fetch('/api/printer/scan-bluetooth', {
+          method: 'POST'
+        });
+        const data = await response.json();
+        
+        if (data.success && data.devices.length > 0) {
+          showStatus(`Found ${data.devices.length} device(s)`, 'success');
+          renderDeviceList(data.devices);
+        } else if (data.success) {
+          showStatus('No Bluetooth or USB printer devices were found on the server.', 'info');
+          deviceList.classList.add('hidden');
+        } else {
+          showStatus('Scan failed: ' + data.error, 'error');
+        }
+      } catch (error) {
+        showStatus('Scan failed: ' + error.message, 'error');
+      } finally {
+        scanBtn.disabled = false;
+      }
     }
     
     function showStatus(message, type = 'info') {
@@ -375,20 +689,21 @@ sudo chmod 666 /dev/rfcomm0</pre>
           
           if (method === 'browser') {
             configDisplay += `<small style="color:#28a745;">✓ Works with any printer via browser</small><br>`;
-          } else {
-            configDisplay += `<strong>Printer Type:</strong> ${config.printer_type || 'Not configured'}<br>`;
-            configDisplay += `<strong>Printer Mode:</strong> ${config.printer_mode || 'thermal'}<br>`;
-            
-            if (config.printer_type === 'network') {
-              configDisplay += `<strong>Network IP:</strong> ${config.network_ip || 'Not configured'}<br>`;
-              configDisplay += `<strong>Network Port:</strong> ${config.network_port || '9100'}<br>`;
-            } else {
-              const portLabel = platformInfo === 'windows' ? 'COM Port' : 'Device Path';
-              configDisplay += `<strong>${portLabel}:</strong> ${config.bluetooth_address || 'Not configured'}<br>`;
-            }
-            
-            configDisplay += `<strong>Printer Name:</strong> ${config.printer_name || 'Not set'}<br>`;
           }
+          configDisplay += `<strong>Printer Type:</strong> ${config.printer_type || 'Not configured'}<br>`;
+          configDisplay += `<strong>Printer Mode:</strong> ${config.printer_mode || 'thermal'}<br>`;
+          
+          if (config.printer_type === 'network') {
+            configDisplay += `<strong>Network IP:</strong> ${config.network_ip || 'Not configured'}<br>`;
+            configDisplay += `<strong>Network Port:</strong> ${config.network_port || '9100'}<br>`;
+          } else {
+            const currentPortLabel = platformInfo === 'windows' ? 'COM Port' : 'Device Path';
+            configDisplay += `<strong>${currentPortLabel}:</strong> ${config.bluetooth_address || 'Not configured'}<br>`;
+          }
+          
+          configDisplay += `<strong>Printer Model:</strong> ${config.printer_model || 'Not set'}<br>`;
+          configDisplay += `<strong>Printer Name:</strong> ${config.printer_name || 'Not set'}<br>`;
+          configDisplay += `<strong>Label Size:</strong> ${config.label_width || 50}mm × ${config.label_height || 30}mm<br>`;
           
           configDisplay += `<strong>Last Updated:</strong> ${config.updated_at || 'Never'}`;
           
@@ -407,8 +722,13 @@ sudo chmod 666 /dev/rfcomm0</pre>
           if (config.printer_mode) printerMode.value = config.printer_mode;
           if (config.bluetooth_address) bluetoothAddress.value = config.bluetooth_address;
           if (config.printer_name) printerName.value = config.printer_name;
+          if (config.printer_model) printerModel.value = config.printer_model;
           if (config.network_ip) networkIp.value = config.network_ip;
           if (config.network_port) networkPort.value = config.network_port;
+          printerMac.value = config.printer_mac || '';
+          if (config.label_width) labelWidth.value = config.label_width;
+          if (config.label_height) labelHeight.value = config.label_height;
+          brotherQlLabel.value = config.brother_ql_label || '';
         } else {
           currentConfig.textContent = 'No printer configured yet.';
         }
@@ -417,31 +737,7 @@ sudo chmod 666 /dev/rfcomm0</pre>
       }
     }
     
-    scanBtn.addEventListener('click', async () => {
-      showStatus('Scanning for devices...', 'info');
-      scanBtn.disabled = true;
-      
-      try {
-        const response = await fetch('/api/printer/scan-bluetooth', {
-          method: 'POST'
-        });
-        const data = await response.json();
-        
-        if (data.success && data.devices.length > 0) {
-          showStatus(`Found ${data.devices.length} device(s)`, 'success');
-          renderDeviceList(data.devices);
-        } else if (data.success) {
-          showStatus('No devices found', 'info');
-          deviceList.classList.add('hidden');
-        } else {
-          showStatus('Scan failed: ' + data.error, 'error');
-        }
-      } catch (error) {
-        showStatus('Scan failed: ' + error.message, 'error');
-      } finally {
-        scanBtn.disabled = false;
-      }
-    });
+    scanBtn.addEventListener('click', scanForDevices);
     
     function renderDeviceList(devices) {
       deviceList.innerHTML = '<h3 style="margin-bottom:12px">Available Devices</h3>' +
@@ -475,13 +771,32 @@ sudo chmod 666 /dev/rfcomm0</pre>
         printer_mode: printerMode.value,
         bluetooth_address: bluetoothAddress.value.trim(),
         printer_name: printerName.value.trim(),
+        printer_model: printerModel.value.trim(),
         network_ip: networkIp.value.trim(),
-        network_port: networkPort.value || 9100
+        network_port: networkPort.value || 9100,
+        label_width: labelWidth.value || 50,
+        label_height: labelHeight.value || 30,
+        brother_ql_label: brotherQlLabel.value,
+        printer_mac: printerMac.value.trim()
       };
       
       // Validation
+      const widthValue = parseInt(config.label_width, 10);
+      const heightValue = parseInt(config.label_height, 10);
+      if (!Number.isFinite(widthValue) || widthValue <= 0) {
+        showStatus('Label width must be a positive number', 'error');
+        return;
+      }
+      if (!Number.isFinite(heightValue) || heightValue <= 0) {
+        showStatus('Label height must be a positive number', 'error');
+        return;
+      }
+
       if (config.print_method === 'browser') {
-        // Browser mode needs no validation
+        if (config.printer_type === 'network' && !config.network_ip) {
+          showStatus('Enter the Brother printer IP so live status can verify the connection.', 'error');
+          return;
+        }
       } else if (config.printer_type === 'network') {
         if (!config.network_ip) {
           showStatus('Please enter printer IP address', 'error');
@@ -515,6 +830,7 @@ sudo chmod 666 /dev/rfcomm0</pre>
         if (data.success) {
           showStatus('Configuration saved successfully!', 'success');
           loadCurrentConfig();
+          loadPrinterStatus();
         } else {
           showStatus('Save failed: ' + data.error, 'error');
         }
@@ -526,6 +842,11 @@ sudo chmod 666 /dev/rfcomm0</pre>
     });
     
     testBtn.addEventListener('click', async () => {
+      if (printMethod.value === 'browser') {
+        openBrowserTestLabel();
+        return;
+      }
+
       // Check if any printer is configured
       if (printerType.value === 'network' && !networkIp.value.trim()) {
         showStatus('Please configure network printer IP first', 'error');
@@ -534,7 +855,7 @@ sudo chmod 666 /dev/rfcomm0</pre>
         showStatus('Please configure printer port/address first', 'error');
         return;
       }
-      
+
       showStatus('Sending test print...', 'info');
       testBtn.disabled = true;
       
@@ -553,13 +874,21 @@ sudo chmod 666 /dev/rfcomm0</pre>
         showStatus('Test print failed: ' + error.message, 'error');
       } finally {
         testBtn.disabled = false;
+        loadPrinterStatus();
       }
     });
+
+    brotherPresetBtn.addEventListener('click', applyBrotherPreset);
+    bluetoothPresetBtn.addEventListener('click', applyBluetoothPreset);
+    refreshStatusBtn.addEventListener('click', loadPrinterStatus);
     
     // Load current config and detect platform on page load
     detectPlatform().then(() => {
       loadCurrentConfig();
+      loadPrinterStatus();
+      updateTestButtonState();
     });
+    window.addEventListener('focus', loadPrinterStatus);
   </script>
 </body>
 </html>

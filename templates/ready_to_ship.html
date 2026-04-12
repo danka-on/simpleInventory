@@ -2025,6 +2025,142 @@ async function fetchOrderLocationOptions(orderId) {
     return data;
 }
 
+function promptNoBarcode(order) {
+    return new Promise((resolve) => {
+        const existing = document.getElementById('no-barcode-popup');
+        if (existing) existing.remove();
+
+        const finderParams = new URLSearchParams({
+            title: order.title || '',
+            order_id: order.order_id || order.id || '',
+            barcode: '',
+            image: order.image || ''
+        });
+        const finderUrl = `/finder?${finderParams.toString()}`;
+
+        const overlay = document.createElement('div');
+        overlay.id = 'no-barcode-popup';
+        overlay.className = 'loc-alloc-overlay';
+
+        const card = document.createElement('div');
+        card.className = 'loc-alloc-card';
+        card.style.maxWidth = '380px';
+        card.onclick = (e) => e.stopPropagation();
+
+        const title = document.createElement('h3');
+        title.className = 'loc-alloc-title';
+        title.style.color = '#f87171';
+        title.textContent = 'No Barcode Attached';
+
+        const subtitle = document.createElement('p');
+        subtitle.className = 'loc-alloc-subtitle';
+        subtitle.textContent = 'This order has no barcode. Use Find Item to link one first, or skip to complete without removing inventory.';
+
+        const actions = document.createElement('div');
+        actions.className = 'loc-alloc-actions';
+        actions.style.cssText = 'flex-direction:column;gap:8px;';
+
+        const findBtn = document.createElement('a');
+        findBtn.href = finderUrl;
+        findBtn.target = '_blank';
+        findBtn.className = 'loc-alloc-confirm';
+        findBtn.style.cssText = 'text-align:center;text-decoration:none;display:block;';
+        findBtn.textContent = 'Find Item';
+
+        const skipBtn = document.createElement('button');
+        skipBtn.type = 'button';
+        skipBtn.className = 'loc-alloc-confirm';
+        skipBtn.style.background = 'linear-gradient(135deg,#64748b,#475569)';
+        skipBtn.textContent = 'Skip & Complete';
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.type = 'button';
+        cancelBtn.className = 'loc-alloc-cancel';
+        cancelBtn.textContent = 'Cancel';
+
+        actions.appendChild(findBtn);
+        actions.appendChild(skipBtn);
+        actions.appendChild(cancelBtn);
+        card.appendChild(title);
+        card.appendChild(subtitle);
+        card.appendChild(actions);
+        overlay.appendChild(card);
+        document.body.appendChild(overlay);
+
+        skipBtn.onclick = () => { overlay.remove(); resolve(true); };
+        cancelBtn.onclick = () => { overlay.remove(); resolve(false); };
+        overlay.onclick = () => { overlay.remove(); resolve(false); };
+    });
+}
+
+function promptNoLocation(order) {
+    return new Promise((resolve) => {
+        const existing = document.getElementById('no-location-popup');
+        if (existing) existing.remove();
+
+        const finderParams = new URLSearchParams({
+            title: order.title || '',
+            order_id: order.order_id || order.id || '',
+            barcode: order.barcode || '',
+            image: order.image || ''
+        });
+        const finderUrl = `/finder?${finderParams.toString()}`;
+
+        const overlay = document.createElement('div');
+        overlay.id = 'no-location-popup';
+        overlay.className = 'loc-alloc-overlay';
+
+        const card = document.createElement('div');
+        card.className = 'loc-alloc-card';
+        card.style.maxWidth = '380px';
+        card.onclick = (e) => e.stopPropagation();
+
+        const title = document.createElement('h3');
+        title.className = 'loc-alloc-title';
+        title.style.color = '#fbbf24';
+        title.textContent = 'No Inventory Found';
+
+        const subtitle = document.createElement('p');
+        subtitle.className = 'loc-alloc-subtitle';
+        subtitle.textContent = 'No warehouse location was found for this item. Use Find Item to locate it first, or skip to complete without removing inventory.';
+
+        const actions = document.createElement('div');
+        actions.className = 'loc-alloc-actions';
+        actions.style.cssText = 'flex-direction:column;gap:8px;';
+
+        const findBtn = document.createElement('a');
+        findBtn.href = finderUrl;
+        findBtn.target = '_blank';
+        findBtn.className = 'loc-alloc-confirm';
+        findBtn.style.cssText = 'text-align:center;text-decoration:none;display:block;';
+        findBtn.textContent = 'Find Item';
+
+        const skipBtn = document.createElement('button');
+        skipBtn.type = 'button';
+        skipBtn.className = 'loc-alloc-confirm';
+        skipBtn.style.background = 'linear-gradient(135deg,#64748b,#475569)';
+        skipBtn.textContent = 'Skip & Complete';
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.type = 'button';
+        cancelBtn.className = 'loc-alloc-cancel';
+        cancelBtn.textContent = 'Cancel';
+
+        actions.appendChild(findBtn);
+        actions.appendChild(skipBtn);
+        actions.appendChild(cancelBtn);
+        card.appendChild(title);
+        card.appendChild(subtitle);
+        card.appendChild(actions);
+        overlay.appendChild(card);
+        document.body.appendChild(overlay);
+
+        skipBtn.onclick = () => { overlay.remove(); resolve(true); };
+        cancelBtn.onclick = () => { overlay.remove(); resolve(false); };
+        overlay.onclick = () => { overlay.remove(); resolve(false); };
+    });
+}
+
 function promptLocationAllocation(order, options) {
     return new Promise((resolve) => {
         const existing = document.getElementById('location-allocation-popup');
@@ -2289,11 +2425,26 @@ async function handleOrderStatusChange(orderId, isUndo) {
     const originalState = order.isHandled;
     let optimisticApplied = false;
     let locationAllocations = [];
+    let skipInventory = false;
 
     try {
         if (!isUndo) {
             const options = await fetchOrderLocationOptions(orderId);
-            if (options.needs_choice) {
+            if (!options.barcode) {
+                const skip = await promptNoBarcode(order);
+                if (!skip) {
+                    restoreBtn();
+                    return;
+                }
+                skipInventory = true;
+            } else if (!options.can_fulfill) {
+                const skip = await promptNoLocation(order);
+                if (!skip) {
+                    restoreBtn();
+                    return;
+                }
+                skipInventory = true;
+            } else if (options.needs_choice) {
                 const chosen = await promptLocationAllocation(order, options);
                 if (!chosen || !chosen.length) {
                     restoreBtn();
@@ -2314,7 +2465,7 @@ async function handleOrderStatusChange(orderId, isUndo) {
 
         // Update server
         const endpoint = isUndo ? '/mark-order-unhandled' : '/mark-order-handled';
-        const payload = isUndo ? { id: orderId } : { id: orderId, allocations: locationAllocations };
+        const payload = isUndo ? { id: orderId } : { id: orderId, allocations: locationAllocations, skip_inventory: skipInventory };
         const response = await fetch(endpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -3076,7 +3227,11 @@ async function loadReadyToShipOrderStats(order, host) {
         const preppedQty = Math.max(0, parsePosInt(data.prepped_qty, 0));
         const baseBarcode = prepBaseUpc(data.base_barcode || data.barcode || order.barcode || '');
         const searchKey = String(baseBarcode || data.barcode || order.barcode || '').trim();
-        const warehouseHref = searchKey ? `/searchrack?db=searchRack&q=${encodeURIComponent(searchKey)}` : '';
+        const warehouseHref = searchKey
+            ? (warehouseQty === 0
+                ? `/searchrack?db=searchRack&q=${encodeURIComponent(searchKey)}&open_history=1&history_search=${encodeURIComponent(searchKey)}`
+                : `/searchrack?db=searchRack&q=${encodeURIComponent(searchKey)}`)
+            : '';
         const macyHref = searchKey ? `/searchrack?db=bol&q=${encodeURIComponent(searchKey)}` : '';
         const soldHref = searchKey ? `/searchrack?db=sold&q=${encodeURIComponent(searchKey)}` : '';
         const itemsToListUrl = String(data.items_to_list_url || buildItemsToListSearchUrl(baseBarcode));

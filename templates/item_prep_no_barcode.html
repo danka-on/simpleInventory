@@ -245,7 +245,23 @@
     searchInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') searchItems(searchInput.value); });
     searchBtn.addEventListener('click', () => searchItems(searchInput.value));
 
-    function printBarcodeBrowser(barcodeData) {
+    function printBarcodeBrowser(barcodeData, config = {}) {
+  const widthMm = Math.max(12, parseInt(config.label_width, 10) || 62);
+  const heightMm = Math.max(8, parseInt(config.label_height, 10) || 29);
+  const showName = !(config && (config.label_show_name === false || String(config.label_show_name) === '0'));
+  const showBarcode = !(config && (config.label_show_barcode === false || String(config.label_show_barcode) === '0'));
+  const showBarcodeText = !(config && (config.label_show_barcode_text === false || String(config.label_show_barcode_text) === '0'));
+  const PX_PER_MM = 96 / 25.4;
+  const designTitleSize = Math.max(6, parseInt(config && config.label_title_font_size, 10) || Math.max(8, Math.min(12, Math.round(heightMm * 0.32))));
+  const designBarcodeFontSize = Math.max(6, parseInt(config && config.label_barcode_font_size, 10) || Math.max(9, Math.min(12, Math.round(heightMm * 0.34))));
+  const designBarcodeHeight = Math.max(20, parseInt(config && config.label_barcode_height, 10) || Math.max(26, Math.round(heightMm * 1.2)));
+  const designBarcodeWidth = Math.max(0.6, parseFloat(config && config.label_barcode_scale) || (widthMm >= 62 ? 1.8 : 1.6));
+  const titlePx = Math.max(12, Math.round(designTitleSize * PX_PER_MM * 0.9));
+  const fontPx = Math.max(10, Math.round(designBarcodeFontSize * PX_PER_MM * 0.92));
+  const barcodeHeight = Math.max(24, Math.round(designBarcodeHeight * PX_PER_MM * 0.95));
+  const barcodeWidth = Math.max(1.2, designBarcodeWidth * 1.35);
+  const titleLines = Math.max(1, parseInt(config && config.label_title_lines, 10) || 2);
+  const titleMaxHeight = Math.ceil(titlePx * 1.08 * titleLines);
   const printWindow = window.open('', '', 'toolbar=0,location=0,menubar=0,scrollbars=0,status=0,titlebar=0');
   const html = [
   '<!DOCTYPE html>',
@@ -253,8 +269,8 @@
   '<head>',
   '  <title></title>',
   '  <style>',
-  '    @page {',
-  '      size: 3in 1in;',
+  `    @page {`,
+  `      size: ${widthMm}mm ${heightMm}mm;`,
   '      margin: 0;',
   "      /* Remove all headers/footers in most browsers */",
   '      @top-left { content: none }',
@@ -264,11 +280,12 @@
   '      @bottom-center { content: none }',
   '      @bottom-right { content: none }',
   '    }',
-  '    html, body { width: 100%; height: 100%; margin: 0 !important; padding: 0 !important; background: white !important; box-shadow: none !important; }',
-  '    body { font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 1in; }',
-  '    .barcode-label { width: 3in; height: 1in; display: flex; flex-direction: column; align-items: center; justify-content: center; page-break-inside: avoid; break-inside: avoid; padding: 0; }',
-  '    .barcode-title { font-size: 12px; font-weight: bold; text-align: center; margin-bottom: 2px; color: #000; max-width: 2.8in; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }',
-  '    #barcode { display: block; margin: 0 auto; width: 2.6in; height: 0.5in; }',
+  `    html, body { width: ${widthMm}mm; height: ${heightMm}mm; margin: 0 !important; padding: 0 !important; background: white !important; box-shadow: none !important; overflow: hidden !important; }`,
+  '    body { font-family: Arial, sans-serif; display: block; }',
+  `    .barcode-label { width: ${widthMm}mm; height: ${heightMm}mm; display: flex; flex-direction: column; align-items: center; justify-content: center; page-break-inside: avoid; break-inside: avoid; padding: 1.5mm 2mm; gap: 1.5mm; box-sizing: border-box; margin: 0; }`,
+  `    .barcode-title { font-size: ${titlePx}px; font-weight: bold; text-align: center; color: #000; width: 100%; line-height: 1.08; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: ${titleLines}; overflow: hidden; word-break: break-word; max-height: ${titleMaxHeight}px; }`,
+  `    .barcode-plain-text { font-size: ${fontPx}px; font-weight: bold; text-align: center; color: #000; width: 100%; line-height: 1.08; word-break: break-all; }`,
+  `    #barcode { display: block; margin: 0 auto; width: calc(${widthMm}mm - 8mm); max-height: calc(${heightMm}mm - 10mm); }`,
   '    @media print {',
   '      .barcode-label { border: none; page-break-inside: avoid; break-inside: avoid; }',
   '      body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }',
@@ -279,21 +296,31 @@
         '</head>',
         '<body>',
         '  <div class="barcode-label">',
-        '    <div class="barcode-title">' + (barcodeData.description || '') + '</div>',
-        '    <svg id="barcode"></svg>',
+        (showName && barcodeData.description ? '    <div class="barcode-title">' + (barcodeData.description || '') + '</div>' : ''),
+        (showBarcode ? '    <svg id="barcode"></svg>' : ''),
+        (!showBarcode && showBarcodeText ? '    <div class="barcode-plain-text">' + (barcodeData.upc || '') + '</div>' : ''),
         '  </div>',
-        '  <script>',
-        '    JsBarcode("#barcode", "' + (barcodeData.upc || '') + '", {',
-        '      format: "CODE128",',
-        '      width: 2,',
-        '      height: 40,',
-        '      displayValue: true,',
-        '      fontSize: 12,',
-        '      margin: 0',
-        '    });',
-        '    setTimeout(function() { window.print(); }, 400);',
-        '    window.onafterprint = function() { window.close(); };',
-        '  <\/script>',
+        (showBarcode
+          ? [
+              '  <script>',
+              '    JsBarcode("#barcode", "' + (barcodeData.upc || '') + '", {',
+              '      format: "CODE128",',
+              `      width: ${barcodeWidth},`,
+              `      height: ${barcodeHeight},`,
+              `      displayValue: ${showBarcodeText ? 'true' : 'false'},`,
+              `      fontSize: ${fontPx},`,
+              '      margin: 0',
+              '    });',
+              '    setTimeout(function() { window.print(); }, 400);',
+              '    window.onafterprint = function() { window.close(); };',
+              '  <\/script>'
+            ].join('\n')
+          : [
+              '  <script>',
+              '    setTimeout(function() { window.print(); }, 400);',
+              '    window.onafterprint = function() { window.close(); };',
+              '  <\/script>'
+            ].join('\n')),
         '</body>',
         '</html>'
       ].join('\n');
@@ -321,7 +348,7 @@
         
         if (printerConfig.print_method === 'browser') {
           statusMsg.textContent = 'Opening print dialog...';
-          printBarcodeBrowser({ upc: selectedItem.upc, description: selectedItem.item_description });
+          printBarcodeBrowser({ upc: selectedItem.upc, description: selectedItem.item_description }, printerConfig);
           printBarcodeBtn.textContent = '✓ ' + tr('print_dialog_opened', 'Print Dialog Opened!');
           printBarcodeBtn.style.background = '#2ecc71';
           statusMsg.textContent = 'Print dialog opened! Loading item prep...';

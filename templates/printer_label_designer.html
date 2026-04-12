@@ -1,0 +1,921 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Label Visualizer</title>
+  <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(34,197,94,0.18), transparent 28%),
+        radial-gradient(circle at top right, rgba(59,130,246,0.16), transparent 30%),
+        linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%);
+      color: #0f172a;
+      padding: 18px;
+    }
+    .container { max-width: 1280px; margin: 0 auto; }
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 18px;
+    }
+    .title-stack h1 { margin: 0 0 6px; font-size: 34px; }
+    .title-stack p { margin: 0; color: #475569; font-size: 15px; }
+    .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+    .btn {
+      border: none;
+      border-radius: 12px;
+      padding: 12px 16px;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+      box-shadow: 0 10px 20px rgba(15, 23, 42, 0.08);
+    }
+    .btn:hover { transform: translateY(-1px); }
+    .btn-primary { background: #0f766e; color: #fff; }
+    .btn-secondary { background: #2563eb; color: #fff; }
+    .btn-soft { background: #fff; color: #0f172a; border: 1px solid #cbd5e1; }
+    .card {
+      background: rgba(255, 255, 255, 0.92);
+      border: 1px solid rgba(148, 163, 184, 0.28);
+      border-radius: 22px;
+      padding: 18px;
+      box-shadow: 0 22px 40px rgba(15, 23, 42, 0.08);
+      backdrop-filter: blur(10px);
+    }
+    .hero {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 18px;
+      flex-wrap: wrap;
+      margin-bottom: 18px;
+    }
+    .hero h2 { margin: 0 0 8px; font-size: 20px; }
+    .hero p { margin: 0; color: #475569; line-height: 1.45; }
+    .hero-meta {
+      min-width: 280px;
+      background: linear-gradient(135deg, #ecfeff 0%, #eff6ff 100%);
+      border: 1px solid #bae6fd;
+      border-radius: 18px;
+      padding: 14px;
+      color: #0f172a;
+      font-size: 14px;
+      line-height: 1.45;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: minmax(320px, 410px) minmax(320px, 410px) minmax(340px, 1fr);
+      gap: 18px;
+      align-items: start;
+    }
+    .card h3 {
+      margin: 0 0 14px;
+      font-size: 17px;
+      color: #0f172a;
+    }
+    .field-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .field-grid.single { grid-template-columns: 1fr; }
+    .form-group { margin-bottom: 14px; }
+    label {
+      display: block;
+      font-size: 13px;
+      font-weight: 700;
+      color: #334155;
+      margin-bottom: 6px;
+    }
+    input[type="text"],
+    input[type="number"],
+    textarea,
+    select {
+      width: 100%;
+      border: 1px solid #cbd5e1;
+      border-radius: 12px;
+      padding: 11px 12px;
+      font-size: 14px;
+      color: #0f172a;
+      background: #fff;
+    }
+    textarea { min-height: 96px; resize: vertical; }
+    input[readonly] {
+      background: #f8fafc;
+      color: #64748b;
+      cursor: default;
+    }
+    .checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 14px;
+      border: 1px solid #dbeafe;
+      border-radius: 14px;
+      background: #f8fbff;
+      margin-bottom: 12px;
+    }
+    .checkbox-row input { width: 18px; height: 18px; }
+    .checkbox-row strong { font-size: 14px; color: #1e3a8a; }
+    .hint {
+      color: #64748b;
+      font-size: 12px;
+      line-height: 1.45;
+      margin-top: 6px;
+    }
+    .preview-card { min-height: 100%; }
+    .preview-stage {
+      background:
+        linear-gradient(90deg, rgba(148,163,184,0.12) 1px, transparent 1px),
+        linear-gradient(rgba(148,163,184,0.12) 1px, transparent 1px),
+        linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
+      background-size: 24px 24px, 24px 24px, auto;
+      border: 1px solid #dbeafe;
+      border-radius: 22px;
+      padding: 24px;
+      min-height: 440px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: auto;
+    }
+    .preview-footnote {
+      margin-top: 14px;
+      font-size: 13px;
+      color: #475569;
+      line-height: 1.45;
+    }
+    .status {
+      margin-top: 16px;
+      padding: 13px 14px;
+      border-radius: 14px;
+      font-size: 14px;
+      display: none;
+    }
+    .status.show { display: block; }
+    .status.info { background: #dbeafe; color: #1d4ed8; border: 1px solid #93c5fd; }
+    .status.success { background: #dcfce7; color: #166534; border: 1px solid #86efac; }
+    .status.error { background: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5; }
+    .mini-pills { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+    .mini-pill {
+      padding: 7px 10px;
+      border-radius: 999px;
+      background: #eef2ff;
+      color: #3730a3;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .preset-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      background: rgba(255,255,255,0.92);
+      border: 1px solid rgba(148,163,184,0.28);
+      border-radius: 16px;
+      padding: 12px 16px;
+      box-shadow: 0 4px 12px rgba(15,23,42,0.06);
+      margin-bottom: 18px;
+    }
+    .preset-bar label {
+      font-size: 13px;
+      font-weight: 700;
+      color: #334155;
+      margin: 0;
+      white-space: nowrap;
+    }
+    .preset-bar select { width: 220px; margin: 0; }
+    .preset-bar input[type="text"] { width: 180px; margin: 0; }
+    .btn-danger { background: #ef4444; color: #fff; }
+    .btn-danger:hover { background: #dc2626; }
+    .btn-sm { padding: 8px 14px; font-size: 13px; border-radius: 10px; }
+    @media (max-width: 1100px) {
+      .grid { grid-template-columns: 1fr; }
+      .preview-stage { min-height: 360px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="topbar">
+      <div class="title-stack">
+        <h1>Label Visualizer</h1>
+        <p>Shape the item name, barcode text, and live sample before saving it for everyday printing.</p>
+      </div>
+      <div class="actions">
+        <a href="/printer-settings"><button class="btn btn-soft" type="button">← Back to Printer Settings</button></a>
+        <button class="btn btn-primary" id="saveBtn" type="button">Save Layout</button>
+        <button class="btn btn-secondary" id="testPrintBtn" type="button">Test Print This Sample</button>
+      </div>
+    </div>
+
+    <div class="card hero">
+      <div>
+        <h2>Printer-Aware Label Preview</h2>
+        <p>This preview uses your saved printer mode and media size so the visualizer matches what item-prep will normally send. Width comes from your current label roll and stays fixed here while you tune the printed content.</p>
+        <div class="mini-pills">
+          <span class="mini-pill" id="printerMethodPill">Loading printer method…</span>
+          <span class="mini-pill" id="printerModelPill">Loading printer profile…</span>
+        </div>
+      </div>
+      <div class="hero-meta" id="printerSummary">Loading printer settings…</div>
+    </div>
+
+    <div class="preset-bar">
+      <label>Presets</label>
+      <select id="presetSelect">
+        <option value="">— select a preset —</option>
+      </select>
+      <input type="text" id="presetNameInput" placeholder="New preset name…">
+      <button class="btn btn-primary btn-sm" id="savePresetBtn" type="button">Save as Preset</button>
+      <button class="btn btn-secondary btn-sm" id="updatePresetBtn" type="button" disabled>Update Selected</button>
+      <button class="btn btn-danger btn-sm" id="deletePresetBtn" type="button" disabled>Delete</button>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <h3>Sample Content</h3>
+        <div class="form-group">
+          <label for="sampleName">Example Item Name</label>
+          <textarea id="sampleName">Sample Inventory Item With A Longer Name</textarea>
+        </div>
+        <div class="field-grid">
+          <div class="form-group">
+            <label for="sampleBarcode">Example Barcode</label>
+            <input type="text" id="sampleBarcode" value="012345678905">
+          </div>
+          <div class="form-group">
+            <label for="sampleSuffix">Optional Suffix</label>
+            <input type="text" id="sampleSuffix" value="-01">
+          </div>
+        </div>
+        <div class="checkbox-row">
+          <input type="checkbox" id="useSuffixToggle">
+          <div>
+            <strong>Append the suffix to the barcode preview</strong>
+            <div class="hint">Use this to preview barcode-only versus barcode-plus-suffix labels.</div>
+          </div>
+        </div>
+        <div class="hint">The preview and test print use the exact barcode text shown below the preview. For suffix labels, type the sample suffix exactly the way you want it to print.</div>
+      </div>
+
+      <div class="card">
+        <h3>Label Layout</h3>
+        <div class="checkbox-row">
+          <input type="checkbox" id="showNameToggle">
+          <div>
+            <strong>Print item name</strong>
+            <div class="hint">Saved and previewed — controls whether item name prints on labels.</div>
+          </div>
+        </div>
+        <div class="checkbox-row">
+          <input type="checkbox" id="showBarcodeToggle" checked>
+          <div>
+            <strong>Print barcode</strong>
+            <div class="hint">Saved and previewed — turns the barcode bars on or off.</div>
+          </div>
+        </div>
+        <div class="checkbox-row">
+          <input type="checkbox" id="showBarcodeTextToggle" checked>
+          <div>
+            <strong>Print barcode text</strong>
+            <div class="hint">Saved and previewed — controls whether human-readable digits print below the bars.</div>
+          </div>
+        </div>
+        <div class="field-grid">
+          <div class="form-group">
+            <label for="labelWidthDisplay">Label Width</label>
+            <input type="number" id="labelWidthDisplay" readonly>
+            <div class="hint">This comes from your saved printer/media setup and is treated as fixed here.</div>
+          </div>
+          <div class="form-group">
+            <label for="labelHeightInput">Label Height (mm)</label>
+            <input type="number" id="labelHeightInput" min="5" max="300" step="1" value="29">
+            <div class="hint" id="heightBehaviorHint">Height changes the cut length on continuous Brother QL rolls.</div>
+          </div>
+        </div>
+        <div class="field-grid">
+          <div class="form-group">
+            <label for="titleFontSizeInput">Item Name Font Size</label>
+            <input type="number" id="titleFontSizeInput" min="6" max="48" step="1" value="10">
+          </div>
+          <div class="form-group">
+            <label for="titleLinesInput">Item Name Max Lines</label>
+            <select id="titleLinesInput">
+              <option value="1">1 line</option>
+              <option value="2" selected>2 lines</option>
+              <option value="3">3 lines</option>
+              <option value="4">4 lines</option>
+            </select>
+          </div>
+        </div>
+        <div class="field-grid">
+          <div class="form-group">
+            <label for="barcodeFontSizeInput">Barcode Text Font Size</label>
+            <input type="number" id="barcodeFontSizeInput" min="6" max="36" step="1" value="10">
+          </div>
+          <div class="form-group">
+            <label for="barcodeHeightInput">Barcode Height</label>
+            <input type="number" id="barcodeHeightInput" min="20" max="140" step="1" value="34">
+          </div>
+        </div>
+        <div class="field-grid">
+          <div class="form-group">
+            <label for="barcodeScaleInput">Barcode Width Scale</label>
+            <input type="number" id="barcodeScaleInput" min="0.6" max="4" step="0.1" value="1.8">
+          </div>
+          <div class="form-group">
+            <label>Printed Barcode Text</label>
+            <input type="text" id="fullBarcodeDisplay" readonly>
+          </div>
+        </div>
+        <div class="hint">The width scale changes how dense the bars are. If the barcode feels cramped, raise the label height or reduce the name font before widening the bars too much.</div>
+      </div>
+
+      <div class="card preview-card">
+        <h3>Live Preview</h3>
+        <div class="preview-stage">
+          <div id="previewMount"></div>
+        </div>
+        <div class="preview-footnote" id="previewFootnote">Rendering sample label…</div>
+      </div>
+    </div>
+
+    <div id="statusMsg" class="status"></div>
+  </div>
+
+  <script>
+    const PREVIEW_SCALE = 4;
+    const sampleName = document.getElementById('sampleName');
+    const sampleBarcode = document.getElementById('sampleBarcode');
+    const sampleSuffix = document.getElementById('sampleSuffix');
+    const useSuffixToggle = document.getElementById('useSuffixToggle');
+    const labelWidthDisplay = document.getElementById('labelWidthDisplay');
+    const labelHeightInput = document.getElementById('labelHeightInput');
+    const heightBehaviorHint = document.getElementById('heightBehaviorHint');
+    const titleFontSizeInput = document.getElementById('titleFontSizeInput');
+    const titleLinesInput = document.getElementById('titleLinesInput');
+    const barcodeFontSizeInput = document.getElementById('barcodeFontSizeInput');
+    const barcodeHeightInput = document.getElementById('barcodeHeightInput');
+    const barcodeScaleInput = document.getElementById('barcodeScaleInput');
+    const fullBarcodeDisplay = document.getElementById('fullBarcodeDisplay');
+    const previewMount = document.getElementById('previewMount');
+    const previewFootnote = document.getElementById('previewFootnote');
+    const printerMethodPill = document.getElementById('printerMethodPill');
+    const printerModelPill = document.getElementById('printerModelPill');
+    const printerSummary = document.getElementById('printerSummary');
+    const statusMsg = document.getElementById('statusMsg');
+    const showNameToggle = document.getElementById('showNameToggle');
+    const showBarcodeToggle = document.getElementById('showBarcodeToggle');
+    const showBarcodeTextToggle = document.getElementById('showBarcodeTextToggle');
+    const saveBtn = document.getElementById('saveBtn');
+    const testPrintBtn = document.getElementById('testPrintBtn');
+    const presetSelect = document.getElementById('presetSelect');
+    const presetNameInput = document.getElementById('presetNameInput');
+    const savePresetBtn = document.getElementById('savePresetBtn');
+    const updatePresetBtn = document.getElementById('updatePresetBtn');
+    const deletePresetBtn = document.getElementById('deletePresetBtn');
+
+    let printerConfig = null;
+    let presetsCache = [];
+
+    function updateHeightBehaviorHint() {
+      if (!heightBehaviorHint) return;
+      const labelType = String((printerConfig && printerConfig.brother_ql_label) || '').trim().toLowerCase();
+      if (!labelType) {
+        heightBehaviorHint.textContent = 'Height changes the cut length on continuous Brother QL rolls. If your printer uses die-cut media, pick that exact Brother label type in Printer Settings.';
+        return;
+      }
+      const isContinuous = !labelType.includes('x') && !labelType.startsWith('d');
+      heightBehaviorHint.textContent = isContinuous
+        ? `Height changes the cut length for the saved continuous roll type "${labelType}".`
+        : `The saved Brother label type "${labelType}" is die-cut, so physical label height is fixed by the roll.`;
+    }
+
+    function syncPresetActionState() {
+      const hasSelection = !!presetSelect.value;
+      updatePresetBtn.disabled = !hasSelection;
+      deletePresetBtn.disabled = !hasSelection;
+      presetNameInput.placeholder = hasSelection ? 'Rename selected preset…' : 'New preset name…';
+    }
+
+    function mmValue(value, fallback) {
+      const parsed = parseFloat(value);
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+    }
+
+    function intValue(value, fallback, minValue, maxValue) {
+      let parsed = parseInt(value, 10);
+      if (!Number.isFinite(parsed)) parsed = fallback;
+      if (Number.isFinite(minValue)) parsed = Math.max(minValue, parsed);
+      if (Number.isFinite(maxValue)) parsed = Math.min(maxValue, parsed);
+      return parsed;
+    }
+
+    function floatValue(value, fallback, minValue, maxValue) {
+      let parsed = parseFloat(value);
+      if (!Number.isFinite(parsed)) parsed = fallback;
+      if (Number.isFinite(minValue)) parsed = Math.max(minValue, parsed);
+      if (Number.isFinite(maxValue)) parsed = Math.min(maxValue, parsed);
+      return parsed;
+    }
+
+    function showStatus(message, type) {
+      statusMsg.textContent = message;
+      statusMsg.className = `status show ${type || 'info'}`;
+    }
+
+    function currentBarcodeText() {
+      const base = String(sampleBarcode.value || '').trim();
+      const suffix = useSuffixToggle.checked ? String(sampleSuffix.value || '').trim() : '';
+      return `${base}${suffix}`.trim();
+    }
+
+    function currentSample() {
+      return {
+        item_description: String(sampleName.value || '').trim(),
+        upc: currentBarcodeText()
+      };
+    }
+
+    function currentLayout() {
+      return {
+        label_width: mmValue(labelWidthDisplay.value, 65),
+        label_height: mmValue(labelHeightInput.value, 29),
+        label_show_name: !!showNameToggle.checked,
+        label_show_barcode: !!showBarcodeToggle.checked,
+        label_show_barcode_text: !!showBarcodeTextToggle.checked,
+        label_title_font_size: intValue(titleFontSizeInput.value, 10, 6, 48),
+        label_barcode_font_size: intValue(barcodeFontSizeInput.value, 10, 6, 36),
+        label_barcode_height: intValue(barcodeHeightInput.value, 34, 20, 140),
+        label_barcode_scale: floatValue(barcodeScaleInput.value, 1.8, 0.6, 4.0),
+        label_title_lines: intValue(titleLinesInput.value, 2, 1, 4)
+      };
+    }
+
+    function buildLabelNode(doc, layout, sample, options = {}) {
+      const useMm = !!options.useMm;
+      const physicalScale = options.physicalScale || (96 / 25.4);
+      const scale = useMm ? physicalScale : (options.scale || PREVIEW_SCALE);
+      const widthStyle = useMm ? `${layout.label_width}mm` : `${Math.round(layout.label_width * scale)}px`;
+      const heightStyle = useMm ? `${layout.label_height}mm` : `${Math.round(layout.label_height * scale)}px`;
+      const paddingStyle = useMm ? '1.6mm 2mm' : `${Math.round(1.6 * scale)}px ${Math.round(2 * scale)}px`;
+      const gapStyle = useMm ? '1.4mm' : `${Math.max(4, Math.round(1.4 * scale))}px`;
+      const titleFontSize = useMm
+        ? Math.max(12, Math.round(layout.label_title_font_size * physicalScale * 0.9))
+        : Math.round(layout.label_title_font_size * scale * 0.9);
+      const barcodeFontSize = useMm
+        ? Math.max(10, Math.round(layout.label_barcode_font_size * physicalScale * 0.92))
+        : Math.round(layout.label_barcode_font_size * scale * 0.92);
+      const barcodeHeight = useMm
+        ? Math.max(24, Math.round(layout.label_barcode_height * physicalScale * 0.95))
+        : Math.round(layout.label_barcode_height * scale * 0.95);
+      const barcodeWidth = Math.max(1.2, layout.label_barcode_scale * 1.35);
+      const titleLineHeight = useMm ? 1.08 : 1.12;
+      const showBarcode = !!layout.label_show_barcode;
+      const showBarcodeText = !!layout.label_show_barcode_text;
+
+      const label = doc.createElement('div');
+      label.style.width = widthStyle;
+      label.style.height = heightStyle;
+      label.style.background = '#fff';
+      label.style.color = '#000';
+      label.style.display = 'flex';
+      label.style.flexDirection = 'column';
+      label.style.alignItems = 'center';
+      label.style.justifyContent = 'center';
+      label.style.boxSizing = 'border-box';
+      label.style.padding = paddingStyle;
+      label.style.gap = gapStyle;
+      label.style.borderRadius = useMm ? '0' : '18px';
+      label.style.boxShadow = useMm ? 'none' : '0 22px 34px rgba(15, 23, 42, 0.16)';
+      label.style.overflow = 'hidden';
+
+      if (layout.label_show_name && sample.item_description) {
+        const title = doc.createElement('div');
+        title.textContent = sample.item_description;
+        title.style.width = '100%';
+        title.style.fontSize = `${titleFontSize}px`;
+        title.style.fontWeight = '700';
+        title.style.lineHeight = String(titleLineHeight);
+        title.style.textAlign = 'center';
+        title.style.display = '-webkit-box';
+        title.style.webkitBoxOrient = 'vertical';
+        title.style.webkitLineClamp = String(layout.label_title_lines);
+        title.style.overflow = 'hidden';
+        title.style.wordBreak = 'break-word';
+        title.style.maxHeight = `${Math.ceil(titleFontSize * titleLineHeight * layout.label_title_lines)}px`;
+        label.appendChild(title);
+      }
+
+      let svg = null;
+      if (showBarcode) {
+        svg = doc.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+        svg.style.width = '100%';
+        svg.style.height = 'auto';
+        svg.style.display = 'block';
+        label.appendChild(svg);
+      } else if (showBarcodeText && sample.upc) {
+        const barcodeText = doc.createElement('div');
+        barcodeText.textContent = sample.upc;
+        barcodeText.style.width = '100%';
+        barcodeText.style.fontSize = `${barcodeFontSize}px`;
+        barcodeText.style.fontWeight = '700';
+        barcodeText.style.lineHeight = '1.05';
+        barcodeText.style.textAlign = 'center';
+        barcodeText.style.wordBreak = 'break-all';
+        label.appendChild(barcodeText);
+      }
+
+      return {
+        root: label,
+        barcodeNode: svg,
+        barcodeOptions: {
+          format: 'CODE128',
+          width: barcodeWidth,
+          height: barcodeHeight,
+          displayValue: showBarcodeText,
+          fontSize: barcodeFontSize,
+          margin: 0
+        }
+      };
+    }
+
+    function renderPreview() {
+      if (!window.JsBarcode) {
+        showStatus('Barcode preview library failed to load', 'error');
+        return;
+      }
+
+      const layout = currentLayout();
+      const sample = currentSample();
+      const barcodeText = sample.upc || '012345678905';
+      const previewSample = {
+        item_description: sample.item_description || 'Sample Inventory Item',
+        upc: barcodeText
+      };
+
+      fullBarcodeDisplay.value = barcodeText;
+      previewMount.innerHTML = '';
+
+      const built = buildLabelNode(document, layout, previewSample);
+      previewMount.appendChild(built.root);
+
+      try {
+        if (built.barcodeNode) {
+          JsBarcode(built.barcodeNode, barcodeText, built.barcodeOptions);
+        }
+        const parts = [];
+        parts.push(layout.label_show_name ? 'Item name enabled.' : 'Item name hidden.');
+        parts.push(layout.label_show_barcode ? 'Barcode enabled.' : 'Barcode hidden.');
+        parts.push(layout.label_show_barcode_text ? 'Barcode text enabled.' : 'Barcode text hidden.');
+        previewFootnote.textContent = `${layout.label_width}mm wide label preview. ${parts.join(' ')}`;
+      } catch (error) {
+        previewFootnote.textContent = 'That barcode value could not be rendered. Try a different sample.';
+        showStatus('Preview failed: ' + error.message, 'error');
+      }
+    }
+
+    function openBrowserPrintPreview() {
+      const layout = currentLayout();
+      const sample = currentSample();
+      const barcodeText = sample.upc;
+      if (!barcodeText) {
+        showStatus('Enter a sample barcode before printing', 'error');
+        return;
+      }
+
+      // Render label off-screen in the main document so JsBarcode has a live DOM
+      const offscreen = document.createElement('div');
+      offscreen.style.cssText = 'position:absolute;left:-9999px;top:-9999px;visibility:hidden;';
+      document.body.appendChild(offscreen);
+
+      // Use physical CSS pixel scale (96dpi = 3.78px/mm) so JsBarcode renders at the
+      // same proportions as the live preview. useMm:true passed height:34 to JsBarcode
+      // which produced a very different SVG aspect ratio than the preview (height:129).
+      const PX_PER_MM = 96 / 25.4;
+      let labelHtml;
+      try {
+        const built = buildLabelNode(document, layout, {
+          item_description: sample.item_description || 'Sample Inventory Item',
+          upc: barcodeText
+        }, { useMm: true, physicalScale: PX_PER_MM });
+        offscreen.appendChild(built.root);
+        if (built.barcodeNode) {
+          JsBarcode(built.barcodeNode, barcodeText, built.barcodeOptions);
+        }
+        labelHtml = built.root.outerHTML;
+      } catch (error) {
+        showStatus('Print preview failed: ' + error.message, 'error');
+        return;
+      } finally {
+        document.body.removeChild(offscreen);
+      }
+
+      // Build popup HTML via string concatenation. All closing tags use the <\/ escape
+      // so the HTML parser never finds a raw closing tag inside this script block.
+      // Keep the label's rendered dimensions intact so print output matches the live
+      // preview instead of stretching the label container to the entire page.
+      const W = layout.label_width, H = layout.label_height;
+      const css = '@page{size:' + W + 'mm ' + H + 'mm;margin:0}'
+        + 'html,body{margin:0;padding:0;width:' + W + 'mm;height:' + H + 'mm;background:#fff;overflow:hidden}'
+        + 'body{display:block}'
+        + 'body>div{width:' + W + 'mm!important;height:' + H + 'mm!important;border-radius:0!important;box-shadow:none!important;margin:0!important}';
+      const fullHtml = '<!DOCTYPE html><html><head><meta charset="utf-8">'
+        + '<title>Label Print<\/title>'
+        + '<style>' + css + '<\/style>'
+        + '<\/head><body>' + labelHtml + '<\/body><\/html>';
+
+      const blob = new Blob([fullHtml], { type: 'text/html' });
+      const blobUrl = URL.createObjectURL(blob);
+      const popup = window.open(blobUrl, 'label-visualizer-print', 'width=900,height=720');
+      if (!popup) {
+        URL.revokeObjectURL(blobUrl);
+        showStatus('Allow popups so the test print can open the browser print sheet.', 'error');
+        return;
+      }
+
+      popup.focus();
+      setTimeout(() => {
+        try { popup.print(); } catch (e) { console.error('Popup print failed:', e); }
+        URL.revokeObjectURL(blobUrl);
+      }, 800);
+      showStatus('Test label opened. Use the browser print sheet to send it to the Brother printer.', 'success');
+    }
+
+    function applyPresetToForm(preset) {
+      presetNameInput.value = preset.name || '';
+      labelHeightInput.value = preset.label_height || 29;
+      showNameToggle.checked = preset.label_show_name !== false;
+      showBarcodeToggle.checked = preset.label_show_barcode !== false;
+      showBarcodeTextToggle.checked = preset.label_show_barcode_text !== false;
+      titleFontSizeInput.value = preset.label_title_font_size || 10;
+      barcodeFontSizeInput.value = preset.label_barcode_font_size || 10;
+      barcodeHeightInput.value = preset.label_barcode_height || 34;
+      barcodeScaleInput.value = parseFloat(preset.label_barcode_scale || 1.8).toFixed(1);
+      titleLinesInput.value = String(preset.label_title_lines || 2);
+      renderPreview();
+    }
+
+    function populatePresetDropdown(presets, selectedId) {
+      const current = selectedId || presetSelect.value;
+      presetSelect.innerHTML = '<option value="">— select a preset —<\/option>';
+      presets.forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p.id;
+        opt.textContent = p.name;
+        if (String(p.id) === String(current)) opt.selected = true;
+        presetSelect.appendChild(opt);
+      });
+      syncPresetActionState();
+    }
+
+    async function loadPresets() {
+      try {
+        const res = await fetch('/api/printer/label-presets');
+        const data = await res.json();
+        if (data.success) {
+          presetsCache = data.presets || [];
+          populatePresetDropdown(presetsCache);
+        }
+      } catch (e) { /* silent — presets are non-critical */ }
+    }
+
+    async function savePreset() {
+      const name = presetNameInput.value.trim();
+      if (!name) { showStatus('Enter a name for the preset.', 'error'); return; }
+      const layout = currentLayout();
+      savePresetBtn.disabled = true;
+      try {
+        const res = await fetch('/api/printer/label-presets', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(Object.assign({ name }, layout))
+        });
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error || 'Save failed');
+        presetsCache.push({ id: data.id, name: data.name, ...layout });
+        presetsCache.sort((a, b) => a.name.localeCompare(b.name));
+        populatePresetDropdown(presetsCache, data.id);
+        showStatus('Preset "' + data.name + '" saved.', 'success');
+      } catch (e) {
+        showStatus('Could not save preset: ' + e.message, 'error');
+      } finally {
+        savePresetBtn.disabled = false;
+      }
+    }
+
+    async function updatePreset() {
+      const id = presetSelect.value;
+      if (!id) {
+        showStatus('Select a preset to update.', 'error');
+        return;
+      }
+      const name = presetNameInput.value.trim();
+      if (!name) {
+        showStatus('Enter a preset name before updating.', 'error');
+        return;
+      }
+      const layout = currentLayout();
+      updatePresetBtn.disabled = true;
+      try {
+        const res = await fetch('/api/printer/label-presets/' + id, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(Object.assign({ name }, layout))
+        });
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error || 'Update failed');
+        presetsCache = presetsCache.map((preset) => (
+          String(preset.id) === String(id)
+            ? Object.assign({}, preset, { name: data.name }, layout)
+            : preset
+        ));
+        presetsCache.sort((a, b) => a.name.localeCompare(b.name));
+        populatePresetDropdown(presetsCache, id);
+        showStatus('Preset "' + data.name + '" updated.', 'success');
+      } catch (e) {
+        showStatus('Could not update preset: ' + e.message, 'error');
+      } finally {
+        syncPresetActionState();
+      }
+    }
+
+    async function deletePreset() {
+      const id = presetSelect.value;
+      if (!id) return;
+      const preset = presetsCache.find(p => String(p.id) === String(id));
+      const name = preset ? preset.name : 'this preset';
+      if (!confirm('Delete preset "' + name + '"?')) return;
+      deletePresetBtn.disabled = true;
+      try {
+        const res = await fetch('/api/printer/label-presets/' + id, { method: 'DELETE' });
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error || 'Delete failed');
+        presetsCache = presetsCache.filter(p => String(p.id) !== String(id));
+        populatePresetDropdown(presetsCache);
+        presetNameInput.value = '';
+        showStatus('Preset deleted.', 'success');
+      } catch (e) {
+        showStatus('Could not delete preset: ' + e.message, 'error');
+        syncPresetActionState();
+      }
+    }
+
+    presetSelect.addEventListener('change', () => {
+      syncPresetActionState();
+      if (!presetSelect.value) {
+        presetNameInput.value = '';
+        return;
+      }
+      const preset = presetsCache.find(p => String(p.id) === presetSelect.value);
+      if (preset) applyPresetToForm(preset);
+    });
+    savePresetBtn.addEventListener('click', savePreset);
+    updatePresetBtn.addEventListener('click', updatePreset);
+    deletePresetBtn.addEventListener('click', deletePreset);
+
+    async function loadConfig() {
+      showStatus('Loading printer and label settings…', 'info');
+      try {
+        const response = await fetch('/api/printer/config?ts=' + Date.now());
+        const data = await response.json();
+        if (!data.success) {
+          throw new Error(data.error || 'Failed to load printer settings');
+        }
+
+        printerConfig = data.config || {};
+        const widthMm = mmValue(printerConfig.label_width, 65);
+        const heightMm = mmValue(printerConfig.label_height, 29);
+
+        labelWidthDisplay.value = widthMm;
+        labelHeightInput.value = heightMm;
+        const savedShowName = printerConfig.label_show_name !== false && String(printerConfig.label_show_name) !== '0';
+        const savedShowBarcode = printerConfig.label_show_barcode !== false && String(printerConfig.label_show_barcode) !== '0';
+        const savedShowBarcodeText = printerConfig.label_show_barcode_text !== false && String(printerConfig.label_show_barcode_text) !== '0';
+        showNameToggle.checked = savedShowName;
+        showBarcodeToggle.checked = savedShowBarcode;
+        showBarcodeTextToggle.checked = savedShowBarcodeText;
+        titleFontSizeInput.value = intValue(printerConfig.label_title_font_size, 10, 6, 48);
+        barcodeFontSizeInput.value = intValue(printerConfig.label_barcode_font_size, 10, 6, 36);
+        barcodeHeightInput.value = intValue(printerConfig.label_barcode_height, 34, 20, 140);
+        barcodeScaleInput.value = floatValue(printerConfig.label_barcode_scale, 1.8, 0.6, 4.0).toFixed(1);
+        titleLinesInput.value = String(intValue(printerConfig.label_title_lines, 2, 1, 4));
+
+        const printerName = printerConfig.printer_name || printerConfig.printer_model || 'Printer profile not named';
+        const printMethod = String(printerConfig.print_method || 'browser').toLowerCase();
+        const methodLabel = printMethod === 'browser' ? 'Browser Print' : 'ESC/POS Direct';
+        const targetText = printerConfig.printer_type === 'network'
+          ? (printerConfig.network_ip ? `${printerConfig.network_ip}:${printerConfig.network_port || 9100}` : 'No network IP saved')
+          : (printerConfig.bluetooth_address || 'No direct printer path saved');
+
+        printerMethodPill.textContent = methodLabel;
+        printerModelPill.textContent = printerName;
+        printerSummary.innerHTML = '<strong>' + printerName + '<\/strong><br>Target: ' + targetText + '<br>Label size: ' + widthMm + 'mm \xd7 ' + heightMm + 'mm';
+        updateHeightBehaviorHint();
+
+        renderPreview();
+        showStatus('Label visualizer ready', 'success');
+      } catch (error) {
+        showStatus('Could not load saved settings — using defaults. (' + error.message + ')', 'error');
+        printerMethodPill.textContent = 'Browser Print';
+        printerModelPill.textContent = 'No printer configured';
+        printerSummary.textContent = 'No printer settings saved yet. Visit Printer Settings to configure.';
+        updateHeightBehaviorHint();
+        renderPreview();
+      }
+    }
+
+    async function saveLayout() {
+      const layout = currentLayout();
+      const mergedConfig = Object.assign({}, printerConfig || {}, layout);
+
+      showStatus('Saving label layout…', 'info');
+      saveBtn.disabled = true;
+      try {
+        const response = await fetch('/api/printer/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(mergedConfig)
+        });
+        const data = await response.json();
+        if (!data.success) {
+          throw new Error(data.error || 'Save failed');
+        }
+        printerConfig = mergedConfig;
+        updateHeightBehaviorHint();
+        showStatus('Label layout saved. Regular item-prep labels will use these settings.', 'success');
+      } catch (error) {
+        showStatus('Save failed: ' + error.message, 'error');
+      } finally {
+        saveBtn.disabled = false;
+      }
+    }
+
+    async function testPrint() {
+      const layout = currentLayout();
+      const sample = currentSample();
+      if (!sample.upc) {
+        showStatus('Enter a sample barcode before test printing.', 'error');
+        return;
+      }
+
+      showStatus('Sending the sample label directly to the thermal printer…', 'info');
+      testPrintBtn.disabled = true;
+      try {
+        const response = await fetch('/api/printer/test-sample', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(Object.assign({}, layout, sample))
+        });
+        const data = await response.json();
+        if (!data.success) {
+          throw new Error(data.error || 'Test print failed');
+        }
+        showStatus(data.message || 'Sample label sent to printer', 'success');
+      } catch (error) {
+        showStatus('Test print failed: ' + error.message, 'error');
+      } finally {
+        testPrintBtn.disabled = false;
+      }
+    }
+
+    [
+      sampleName,
+      sampleBarcode,
+      sampleSuffix,
+      useSuffixToggle,
+      showNameToggle,
+      showBarcodeToggle,
+      showBarcodeTextToggle,
+      labelHeightInput,
+      titleFontSizeInput,
+      titleLinesInput,
+      barcodeFontSizeInput,
+      barcodeHeightInput,
+      barcodeScaleInput
+    ].forEach((element) => {
+      const eventName = element.type === 'checkbox' ? 'change' : 'input';
+      element.addEventListener(eventName, renderPreview);
+    });
+
+    saveBtn.addEventListener('click', saveLayout);
+    testPrintBtn.addEventListener('click', testPrint);
+
+    loadConfig();
+    loadPresets();
+    syncPresetActionState();
+    renderPreview(); // immediate render with defaults while config loads async
+  </script>
+</body>
+</html>

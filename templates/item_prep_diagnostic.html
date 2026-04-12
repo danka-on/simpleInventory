@@ -46,6 +46,47 @@
   .status-bubble.good.active{background:#2ecc71;border-color:#2ecc71}
   .status-bubble.bad.active{background:#e74c3c;border-color:#e74c3c}
   .status-bubble.return.active{background:#8b4513;border-color:#8b4513}
+  .return-all-good-wrap{display:none;flex-direction:column;gap:8px;margin:14px 0 6px}
+  .return-all-good-bubble{
+    width:100%;
+    border:none;
+    border-radius:22px;
+    padding:16px 20px;
+    background:linear-gradient(180deg,#ecfdf5 0%,#d1fae5 100%);
+    color:#065f46;
+    cursor:pointer;
+    text-align:left;
+    box-shadow:0 16px 28px rgba(16,185,129,0.14);
+    border:3px solid rgba(16,185,129,0.22);
+    transition:transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+  }
+  .return-all-good-bubble:hover{transform:translateY(-1px);box-shadow:0 20px 34px rgba(16,185,129,0.18)}
+  .return-all-good-bubble.active{
+    background:linear-gradient(180deg,#16a34a 0%,#059669 100%);
+    color:#fff;
+    border-color:#047857;
+    box-shadow:0 20px 36px rgba(5,150,105,0.28);
+  }
+  .return-all-good-eyebrow{display:block;font-size:0.74rem;font-weight:800;letter-spacing:0.14em;text-transform:uppercase;opacity:0.78}
+  .return-all-good-title{display:block;margin-top:4px;font-size:1.45rem;font-weight:900;letter-spacing:0.02em}
+  .return-all-good-hint{display:block;margin-top:6px;font-size:0.96rem;font-weight:600;line-height:1.35}
+  .diag-toolbar{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;margin-top:12px;flex-wrap:wrap}
+  .diag-location-panel{display:flex;flex-direction:column;align-items:flex-end;gap:8px;flex:1;min-width:280px}
+  .diag-location-picker{display:none;justify-content:flex-end;gap:8px;flex-wrap:wrap;width:100%}
+  .diag-location-chip{border:2px solid #dbe3ef;background:#fff;color:#1f3b57;border-radius:999px;padding:9px 14px;font-size:0.95rem;font-weight:700;cursor:pointer;transition:all 0.18s ease}
+  .diag-location-chip:hover{border-color:#93c5fd;background:#eff6ff}
+  .diag-location-chip.active{background:#2563eb;border-color:#2563eb;color:#fff;box-shadow:0 8px 18px rgba(37,99,235,0.22)}
+  .diag-location-hint{display:none;width:100%;text-align:right;color:#64748b;font-size:0.88rem;font-weight:600}
+  .diag-location-tools{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap;width:100%}
+  .diag-location-card{display:none;align-items:center;gap:10px;padding:8px 10px;border:1px solid #cfe0f5;border-radius:12px;background:linear-gradient(180deg,#f8fbff 0%,#eff6ff 100%);max-width:100%;width:min(100%,340px);text-align:left}
+  .diag-location-preview{display:flex;align-items:center;gap:10px;background:transparent;border:none;padding:0;margin:0;cursor:pointer;text-align:left;flex:1;min-width:0;font:inherit;color:inherit}
+  .diag-location-thumb{width:54px;height:54px;border-radius:10px;object-fit:cover;flex-shrink:0;background:#dbeafe}
+  .diag-location-copy{display:flex;flex-direction:column;gap:3px;min-width:0;flex:1}
+  .diag-location-label{font-size:0.72rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.05em}
+  .diag-location-code{font-size:0.98rem;font-weight:800;color:#1d4ed8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .diag-location-more{font-size:0.78rem;color:#64748b;font-weight:600}
+  .diag-location-clear{display:none;background:#e74c3c;color:#fff;align-items:center;justify-content:center;flex:0 0 auto;padding:7px 12px;font-size:0.86rem;font-weight:700;border-radius:999px;white-space:nowrap}
+  .diag-location-meta{display:none;width:100%;text-align:right;color:#64748b;font-size:0.84rem;font-weight:600}
   .set-position-btn{background:#3498db;color:#fff;border:none;padding:16px 24px;border-radius:12px;cursor:pointer;font-size:1.2rem;font-weight:600;display:flex;align-items:center;gap:10px;margin:12px 0}
   .set-position-btn:hover{background:#2980b9}
   .set-position-btn i{font-size:1.4rem}
@@ -221,13 +262,34 @@
     html.ss-theme-night .status-bubble.good.active{background:#22c55e;border-color:#22c55e}
     html.ss-theme-night .status-bubble.bad.active{background:#ef4444;border-color:#ef4444}
     html.ss-theme-night .status-bubble.return.active{background:#b7791f;border-color:#b7791f}
+    html.ss-theme-night .return-all-good-bubble{
+      background:linear-gradient(180deg,#052e2b 0%,#064e3b 100%);
+      color:#d1fae5;
+      border-color:#0f766e;
+      box-shadow:0 20px 34px rgba(0,0,0,0.35);
+    }
+    html.ss-theme-night .return-all-good-bubble.active{
+      background:linear-gradient(180deg,#22c55e 0%,#059669 100%);
+      color:#ecfdf5;
+      border-color:#34d399;
+      box-shadow:0 22px 40px rgba(5,150,105,0.34);
+    }
+    html.ss-theme-night .diag-location-chip{background:#111827;border-color:#334155;color:#e2e8f0}
+    html.ss-theme-night .diag-location-chip:hover{background:#0f1d31;border-color:#1d4ed8}
+    html.ss-theme-night .diag-location-chip.active{background:#1d4ed8;border-color:#1d4ed8;color:#eff6ff}
+    html.ss-theme-night .diag-location-card{background:linear-gradient(180deg,#0f1d31 0%,#082f49 100%);border-color:#1d4ed8}
+    html.ss-theme-night .diag-location-thumb{background:#0f172a}
+    html.ss-theme-night .diag-location-label{color:#93c5fd}
+    html.ss-theme-night .diag-location-code{color:#dbeafe}
+    html.ss-theme-night .diag-location-more,
+    html.ss-theme-night .diag-location-meta,
+    html.ss-theme-night .diag-location-hint{color:#94a3b8}
     html.ss-theme-night .reason-btn{background:#111827;border-color:#334155;color:#e2e8f0}
     html.ss-theme-night .reason-btn.active{background:#10b981;border-color:#10b981;color:#fff}
     html.ss-theme-night input[type="text"],
     html.ss-theme-night textarea{background:#0f172a;border-color:rgba(255,255,255,0.12);color:#e2e8f0}
     html.ss-theme-night input[type="text"]::placeholder,
     html.ss-theme-night textarea::placeholder{color:#94a3b8}
-    html.ss-theme-night #locationText{color:#60a5fa}
     html.ss-theme-night .note-bubble{background:#111827;border-color:rgba(255,255,255,0.08)}
     html.ss-theme-night .note-bubble .note-text{color:#e2e8f0}
     html.ss-theme-night .note-bubble .note-time{color:#94a3b8}
@@ -266,8 +328,13 @@
       .cam-overlay-btn{bottom:12px}
       .thumb-wrap{width:90px;height:90px}
       .status-bubble{padding:10px 16px;font-size:0.95rem}
+      .return-all-good-bubble{padding:14px 18px}
+      .return-all-good-title{font-size:1.2rem}
+      .return-all-good-hint{font-size:0.88rem}
       .reason-btn{padding:10px 14px;font-size:0.95rem}
       .set-position-btn{padding:12px 18px;font-size:1rem}
+      .diag-location-panel{min-width:240px}
+      .diag-location-card{width:min(100%,300px)}
       .complete-wrap{margin-top:24px}
       .btn-complete{padding:12px 16px;font-size:1rem}
       textarea{min-height:60px !important}
@@ -279,13 +346,25 @@
       .cam-wrap{max-width:100%}
       video{max-height:40vh}
       .thumb-wrap{width:100px;height:100px}
+      .diag-toolbar{flex-direction:column;align-items:stretch}
+      .diag-location-panel{min-width:0;width:100%;align-items:stretch}
+      .diag-location-picker,
+      .diag-location-tools{justify-content:flex-start}
+      .diag-location-hint,
+      .diag-location-meta{text-align:left}
+      .diag-location-card{width:100%}
     }
     
     @media (max-width: 480px) {
       body{padding:12px}
       .status-bubble{padding:10px 14px;font-size:0.95rem}
+      .return-all-good-bubble{padding:14px 16px;border-radius:18px}
+      .return-all-good-title{font-size:1.15rem}
+      .return-all-good-hint{font-size:0.86rem}
       .reason-btn{padding:10px 14px;font-size:0.9rem}
       .cam-btn{padding:12px 16px;font-size:1rem}
+      .diag-location-chip{font-size:0.88rem;padding:8px 12px}
+      .diag-location-thumb{width:48px;height:48px}
     }
   </style>
 </head>
@@ -328,6 +407,40 @@
   }
 })();
 </script>
+<script>
+const ITEM_PREP_PRINTER_NOTICE_KEY = 'itemPrepPrinterNotice';
+let diagnosticItemDescription = '';
+
+function isSuffixedBarcode(value){
+  return /-\d+$/.test(String(value || '').trim());
+}
+
+function stashPrinterNotice(message){
+  const text = String(message || '').trim();
+  if(!text) return;
+  try{
+    sessionStorage.setItem(ITEM_PREP_PRINTER_NOTICE_KEY, text);
+  }catch(_){}
+}
+
+async function printSubmittedSuffixLabel(upc, description){
+  const payload = {
+    upc: String(upc || '').trim(),
+    item_description: String(description || '').trim(),
+    quantity: 1
+  };
+  const response = await fetch('/api/printer/print-barcode', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(payload)
+  });
+  const data = await response.json().catch(()=>({success:false, error:'Printer response invalid'}));
+  if(!(data && data.success)){
+    throw new Error((data && data.error) || 'Suffix label failed to print');
+  }
+  return data;
+}
+</script>
   <div class="top">
     <a id="back-link" href="/"><button class="btn btn-danger">Back</button></a>
     <div class="diag-title-wrap">
@@ -367,24 +480,43 @@
       <div>UPC:</div>
       <div id="upcText">{{ upc }}</div>
     </div>
+
+    <div id="returnAllGoodWrap" class="return-all-good-wrap">
+      <button type="button" id="returnAllGoodBubble" class="return-all-good-bubble" aria-pressed="false">
+        <span class="return-all-good-eyebrow">Return Override</span>
+        <span class="return-all-good-title">ALL GOOD</span>
+        <span id="returnAllGoodHint" class="return-all-good-hint">Tap if this return checks out and should save without printing a label.</span>
+      </button>
+    </div>
     
-    <!-- Status bubbles and Set Position button in one row -->
-    <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 12px;">
+    <div class="diag-toolbar">
       <div id="statusBubbleWrap" class="status-bubbles" style="margin: 0;">
         <button type="button" class="status-bubble good" data-status="good">Good</button>
         <button type="button" class="status-bubble bad" data-status="bad">Bad</button>
         <button type="button" class="status-bubble return" data-status="return">Return</button>
       </div>
-      
-      <button type="button" class="set-position-btn" id="setPositionBtn" style="margin: 0; padding: 12px 18px; font-size: 1rem;">
-        <i class="fas fa-map-marker-alt"></i> Set Position
-      </button>
-    </div>
-    
-    <!-- Location display -->
-    <div id="locationRow" style="display:none;margin-top:8px">
-      <span style="font-weight:600;margin-right:8px">Location:</span>
-      <span id="locationText" style="color:#2980b9;cursor:pointer;text-decoration:underline"></span>
+
+      <div class="diag-location-panel">
+        <div id="locationPicker" class="diag-location-picker"></div>
+        <div id="locationHint" class="diag-location-hint"></div>
+        <div class="diag-location-tools">
+          <div id="locationCardWrap" class="diag-location-card">
+            <button type="button" id="locationPreviewBtn" class="diag-location-preview">
+              <img id="locationThumb" class="diag-location-thumb" src="" alt="Location preview">
+              <span class="diag-location-copy">
+                <span class="diag-location-label">Position</span>
+                <span id="locationCodeText" class="diag-location-code"></span>
+                <span id="locationMoreText" class="diag-location-more" style="display:none"></span>
+              </span>
+            </button>
+            <button type="button" class="btn diag-location-clear" id="clearLocationBtn">Clear Location</button>
+          </div>
+          <button type="button" class="set-position-btn" id="setPositionBtn" style="margin: 0; padding: 12px 18px; font-size: 1rem;">
+            <i class="fas fa-map-marker-alt"></i> Set Position
+          </button>
+        </div>
+        <div id="locationMeta" class="diag-location-meta"></div>
+      </div>
     </div>
     <form id="diagForm" enctype="multipart/form-data">
       <input type="hidden" name="upc" value="{{ upc }}">
@@ -575,7 +707,7 @@
     function activeRowStatus(){
       return isBadFlow
         ? 'bad'
-        : (isReturnFlow ? 'return' : (statusInput.value || ''));
+        : (isReturnFlow ? ((statusInput.value || '') === 'good' ? 'good' : 'return') : (statusInput.value || ''));
     }
 
     function setVoiceHint(text, isError=false){
@@ -1434,10 +1566,13 @@
         const msg = document.getElementById('msg');
         if(res.ok && j && j.success){
           // Also POST status (status, reason) when status is set.
+          let continuedWithoutLot = false;
+          let finalUpc = '{{ upc }}';
+          let statusVal = '';
+          let deferredPrinterNotice = '';
+          let printSuccessNote = '';
           try{
-            const statusVal = activeRowStatus();
-            let continuedWithoutLot = false;
-            let finalUpc = '{{ upc }}';
+            statusVal = activeRowStatus();
             console.log('[SAVE] Status value:', statusVal);
             if(statusVal && (statusVal === 'good' || statusVal === 'bad' || statusVal === 'return')){
               const reasonVal = (document.getElementById('reasonSelect') && document.getElementById('reasonSelect').value) || '';
@@ -1549,13 +1684,28 @@
               pendingVideos.splice(0, pendingVideos.length);
               renderSavedVideos();
             }
+
+            const urlParams = new URLSearchParams(window.location.search);
+            const flowSource = String(urlParams.get('from') || '').trim().toLowerCase();
+            const fromItems = flowSource === 'items';
+            if(!fromItems && (flowSource === 'bad' || flowSource === 'return') && (statusVal === 'bad' || statusVal === 'return') && isSuffixedBarcode(finalUpc)){
+              try{
+                await printSubmittedSuffixLabel(finalUpc, diagnosticItemDescription);
+                printSuccessNote = ' and sent suffix label to printer';
+              }catch(printError){
+                deferredPrinterNotice = `Saved ${statusVal} item, but suffix label did not print: ${printError.message || printError}`;
+              }
+            }
           }catch(e){ 
             console.error('[SAVE] Status save error:', e);
             msg.textContent = 'Status save error: ' + e;
             return;
           }
           diagnosticCompleted = true; // Mark as completed to prevent cleanup
-          msg.textContent = (typeof continuedWithoutLot !== 'undefined' && continuedWithoutLot) ? 'Saved diagnostic (continued without LOT)' : 'Saved diagnostic';
+          if(deferredPrinterNotice){
+            stashPrinterNotice(deferredPrinterNotice);
+          }
+          msg.textContent = (continuedWithoutLot ? 'Saved diagnostic (continued without LOT)' : 'Saved diagnostic') + printSuccessNote;
           // If a return URL was provided in query params, go back to it preserving filters
           try{
             const params = new URLSearchParams(window.location.search);
@@ -1610,19 +1760,44 @@
     const statusBubbles = document.querySelectorAll('.status-bubble');
     const statusBubbleWrap = document.getElementById('statusBubbleWrap');
     const statusInput = document.getElementById('statusInput');
+    const returnAllGoodWrap = document.getElementById('returnAllGoodWrap');
+    const returnAllGoodBubble = document.getElementById('returnAllGoodBubble');
+    const returnAllGoodHint = document.getElementById('returnAllGoodHint');
 
     function notesAreAllowedForStatus(status){
       const normalized = String(status || '').trim().toLowerCase();
       return ['good', 'bad', 'return'].includes(normalized);
     }
 
+    function resolveSelectedStatus(selectedStatus){
+      const normalized = String(selectedStatus || '').trim().toLowerCase();
+      if(isBadFlow) return 'bad';
+      if(isReturnFlow && normalized !== 'good') return 'return';
+      return normalized;
+    }
+
+    function updateReturnAllGoodBubble(selectedStatus){
+      if(!returnAllGoodWrap || !returnAllGoodBubble || !returnAllGoodHint) return;
+      if(!isReturnFlow){
+        returnAllGoodWrap.style.display = 'none';
+        returnAllGoodBubble.classList.remove('active');
+        returnAllGoodBubble.setAttribute('aria-pressed', 'false');
+        return;
+      }
+      returnAllGoodWrap.style.display = 'flex';
+      const isAllGood = selectedStatus === 'good';
+      returnAllGoodBubble.classList.toggle('active', isAllGood);
+      returnAllGoodBubble.setAttribute('aria-pressed', isAllGood ? 'true' : 'false');
+      returnAllGoodHint.textContent = isAllGood
+        ? 'Saving this return as good. No label will print when you tap Done.'
+        : 'Default return behavior. Tap this if the item checks out and should save without printing a label.';
+    }
+
     function updateNoteComposerState(){
       const noteInput = document.getElementById('newNoteInput');
       const addBtn = document.getElementById('addNoteBtn');
       if(!noteInput || !addBtn) return;
-      const currentStatus = isBadFlow
-        ? 'bad'
-        : (isReturnFlow ? 'return' : (statusInput.value || ''));
+      const currentStatus = activeRowStatus();
       const allowed = notesAreAllowedForStatus(currentStatus);
       noteInput.disabled = !allowed;
       addBtn.disabled = !allowed;
@@ -1633,11 +1808,13 @@
     }
     
     function updateStatusBubbles(selectedStatus){
+      const resolvedStatus = resolveSelectedStatus(selectedStatus);
       statusBubbles.forEach(bubble => {
         const status = bubble.dataset.status;
-        bubble.classList.toggle('active', status === selectedStatus);
+        bubble.classList.toggle('active', status === resolvedStatus);
       });
-      statusInput.value = selectedStatus;
+      statusInput.value = resolvedStatus;
+      updateReturnAllGoodBubble(resolvedStatus);
       updateNoteComposerState();
       loadDiagnosticMedia().catch(()=>{});
     }
@@ -1649,6 +1826,14 @@
         updateDoneButtonState(); // Update button state when status changes
       });
     });
+    if(returnAllGoodBubble){
+      returnAllGoodBubble.addEventListener('click', () => {
+        if(!isReturnFlow) return;
+        const nextStatus = activeRowStatus() === 'good' ? 'return' : 'good';
+        updateStatusBubbles(nextStatus);
+        updateDoneButtonState();
+      });
+    }
     if(isForcedDiagnosticFlow){
       updateStatusBubbles(isReturnFlow ? 'return' : 'bad');
       if(statusBubbleWrap){
@@ -1672,7 +1857,7 @@
       const doneBtn = document.getElementById('doneBtn');
       const completeBtn = document.getElementById('completeBtn');
       const hasReason = reasonSelect.value && reasonSelect.value.trim() !== '';
-      const currentStatus = statusInput.value;
+      const currentStatus = activeRowStatus();
       
       // For "good" status, allow saving without a reason (defect is optional)
       // For non-good statuses (bad/return), require a reason
@@ -1911,6 +2096,7 @@
         if(!upc) return;
         const r = await fetch(`/api/bol_lookup?upc=${encodeURIComponent(upc)}`);
         const j = await r.json();
+        diagnosticItemDescription = String((j && j.item && j.item.item_description) || '').trim();
         if(j.found && j.item && j.item.temporary){
           isTemporaryEntry = true;
         }
@@ -2041,7 +2227,7 @@
     }
 
     async function addNote(){
-      if(!notesAreAllowedForStatus(isBadFlow ? 'bad' : (isReturnFlow ? 'return' : statusInput.value))){
+      if(!notesAreAllowedForStatus(activeRowStatus())){
         alert('Notes can only be added to Good, Bad, or Return rows.');
         return;
       }
@@ -2095,28 +2281,223 @@
     });
     updateNoteComposerState();
 
-    // Position functionality - bind directly since script is at end of body
-    console.log('=== About to look for setPositionBtn ===');
-    console.log('All elements with set-position-btn class:', document.querySelectorAll('.set-position-btn'));
-    console.log('Element with id setPositionBtn:', document.getElementById('setPositionBtn'));
+    let diagLocationState = null;
+    let diagSelectedLocationKey = '';
+
     (function(){
       const btn = document.getElementById('setPositionBtn');
-      if(!btn){
-        console.error('ERROR: setPositionBtn not found!');
-        console.log('Available button IDs:', Array.from(document.querySelectorAll('button')).map(b => b.id).filter(id => id));
-        return;
-      }
-      console.log('SUCCESS: setPositionBtn found:', btn);
-      console.log('Button outer HTML:', btn.outerHTML.substring(0, 100));
+      if(!btn) return;
       btn.addEventListener('click', ()=>{
-        console.log('=== setPositionBtn CLICKED! ===');
         const upc = '{{ upc }}'.trim();
         const currentUrl = window.location.href;
-        console.log('Navigating to position with UPC:', upc);
         window.location.href = `/position?for_diagnostic=${encodeURIComponent(upc)}&return=${encodeURIComponent(currentUrl)}`;
       });
-      console.log('Click handler attached successfully');
     })();
+
+    function normalizeDiagLocationKey(value){
+      const normalized = String(value || '').trim().toLowerCase();
+      return normalized || '__no_location__';
+    }
+
+    function diagLocationLooksLikePicturePath(value){
+      const key = String(value || '').trim();
+      return !!key && (/\.(jpe?g|png|gif|webp)$/i.test(key) || /^https?:\/\//i.test(key) || key.startsWith('/') || key.includes('/'));
+    }
+
+    function diagLocationDisplayCode(value){
+      const raw = String(value || '').trim();
+      if(!raw) return '';
+      const tail = raw.split(/[\\/]/).pop() || raw;
+      return tail.toUpperCase();
+    }
+
+    function diagLocationEntryKey(entry){
+      return normalizeDiagLocationKey(
+        entry && (entry.location_key || entry.location_code || entry.preview_key)
+      );
+    }
+
+    function diagLocationEntries(info){
+      return info && Array.isArray(info.location_entries)
+        ? info.location_entries.filter(entry => String((entry && (entry.location_code || entry.preview_key)) || '').trim())
+        : [];
+    }
+
+    function diagLocationThumbSrc(entry){
+      const previewKey = String((entry && (entry.preview_key || entry.pictureposition || entry.location_preview)) || '').trim();
+      const locationCode = String((entry && (entry.location_code || entry.location)) || '').trim();
+      if(previewKey && diagLocationLooksLikePicturePath(previewKey)){
+        const src = /^https?:\/\//i.test(previewKey) || previewKey.startsWith('/')
+          ? previewKey
+          : `/static/pictureposition/${previewKey}`;
+        return `${src}?t=${Date.now()}`;
+      }
+      const shelfCode = locationCode || previewKey;
+      return shelfCode ? `/shelf-image/${encodeURIComponent(shelfCode.toLowerCase())}.png?t=${Date.now()}` : '';
+    }
+
+    function getSelectedDiagLocationEntry(info){
+      const entries = diagLocationEntries(info);
+      if(!entries.length) return null;
+      if(entries.length === 1){
+        diagSelectedLocationKey = diagLocationEntryKey(entries[0]);
+        return entries[0];
+      }
+      const active = entries.find(entry => diagLocationEntryKey(entry) === diagSelectedLocationKey);
+      return active || null;
+    }
+
+    function openDiagLocationPreview(entry){
+      const active = entry || getSelectedDiagLocationEntry(diagLocationState);
+      if(!active) return;
+      const previewKey = String((active.preview_key || active.pictureposition || active.location_preview) || '').trim();
+      const locationCode = String((active.location_code || active.location) || '').trim();
+      if(previewKey && diagLocationLooksLikePicturePath(previewKey)){
+        showLocationImage(previewKey, '');
+        return;
+      }
+      showLocationImage('', locationCode || previewKey);
+    }
+
+    function renderDiagLocationPicker(entries){
+      const picker = document.getElementById('locationPicker');
+      if(!picker) return;
+      picker.innerHTML = '';
+      if(!entries.length || entries.length === 1){
+        picker.style.display = 'none';
+        return;
+      }
+      entries.forEach((entry)=>{
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'diag-location-chip';
+        const code = diagLocationDisplayCode(entry.location_code || entry.preview_key || '');
+        const qty = Math.max(0, Number(entry.available_qty || 0));
+        btn.textContent = qty > 1 ? `${code} x${qty}` : code;
+        if(diagLocationEntryKey(entry) === diagSelectedLocationKey){
+          btn.classList.add('active');
+        }
+        btn.addEventListener('click', ()=>{
+          diagSelectedLocationKey = diagLocationEntryKey(entry);
+          renderLocationState(diagLocationState);
+        });
+        picker.appendChild(btn);
+      });
+      picker.style.display = 'flex';
+    }
+
+    function renderLocationState(info){
+      diagLocationState = info && info.success ? info : null;
+      const entries = diagLocationEntries(info);
+      const setBtn = document.getElementById('setPositionBtn');
+      const cardWrap = document.getElementById('locationCardWrap');
+      const clearBtn = document.getElementById('clearLocationBtn');
+      const previewBtn = document.getElementById('locationPreviewBtn');
+      const thumb = document.getElementById('locationThumb');
+      const codeText = document.getElementById('locationCodeText');
+      const moreText = document.getElementById('locationMoreText');
+      const hint = document.getElementById('locationHint');
+      const meta = document.getElementById('locationMeta');
+      if(!setBtn || !cardWrap || !clearBtn || !previewBtn || !thumb || !codeText || !moreText || !hint || !meta){
+        return;
+      }
+
+      if(entries.length > 1){
+        const hasCurrentSelection = entries.some(entry => diagLocationEntryKey(entry) === diagSelectedLocationKey);
+        if(!hasCurrentSelection){
+          diagSelectedLocationKey = '';
+        }
+      } else if(entries.length === 1){
+        diagSelectedLocationKey = diagLocationEntryKey(entries[0]);
+      } else {
+        diagSelectedLocationKey = '';
+      }
+
+      renderDiagLocationPicker(entries);
+      const selectedEntry = getSelectedDiagLocationEntry(info);
+      const hasAnyLocation = !!entries.length || !!String((info && (info.location_code || info.preview_key || info.location || info.pictureposition)) || '').trim();
+
+      if(!hasAnyLocation){
+        setBtn.style.display = '';
+        cardWrap.style.display = 'none';
+        clearBtn.style.display = 'none';
+        clearBtn.disabled = false;
+        clearBtn.textContent = 'Clear Location';
+        previewBtn.onclick = null;
+        moreText.style.display = 'none';
+        hint.style.display = 'none';
+        hint.textContent = '';
+        meta.style.display = 'none';
+        meta.textContent = '';
+        thumb.removeAttribute('src');
+        return;
+      }
+
+      setBtn.style.display = 'none';
+      cardWrap.style.display = 'flex';
+
+      if(entries.length > 1){
+        hint.style.display = '';
+        hint.textContent = selectedEntry
+          ? 'Selected location will clear 1 quantity from inventory.'
+          : 'Select a location bubble to preview or clear 1 quantity.';
+        meta.textContent = entries.map(entry => {
+          const code = diagLocationDisplayCode(entry.location_code || entry.preview_key || '');
+          const qty = Math.max(0, Number(entry.available_qty || 0));
+          return qty > 1 ? `${code} x${qty}` : code;
+        }).join(' · ');
+        meta.style.display = meta.textContent ? '' : 'none';
+      } else {
+        hint.style.display = 'none';
+        hint.textContent = '';
+        if(selectedEntry && Number(selectedEntry.available_qty || 0) > 1){
+          const code = diagLocationDisplayCode(selectedEntry.location_code || selectedEntry.preview_key || '');
+          meta.textContent = `${selectedEntry.available_qty} qty currently in ${code}.`;
+          meta.style.display = '';
+        } else {
+          meta.style.display = 'none';
+          meta.textContent = '';
+        }
+      }
+
+      if(!selectedEntry){
+        cardWrap.style.display = 'none';
+        previewBtn.onclick = null;
+        clearBtn.style.display = 'none';
+        thumb.removeAttribute('src');
+        moreText.style.display = 'none';
+        return;
+      }
+
+      previewBtn.style.display = 'flex';
+      previewBtn.onclick = ()=> openDiagLocationPreview(selectedEntry);
+      const displayCode = diagLocationDisplayCode(selectedEntry.location_code || selectedEntry.preview_key || info.location_code || info.preview_key || '');
+      codeText.textContent = displayCode || 'Location';
+      const thumbSrc = diagLocationThumbSrc(selectedEntry);
+      if(thumbSrc){
+        thumb.style.display = '';
+        thumb.src = thumbSrc;
+        thumb.onerror = ()=>{ thumb.style.display = 'none'; };
+      } else {
+        thumb.style.display = 'none';
+        thumb.removeAttribute('src');
+      }
+
+      if(entries.length > 1){
+        moreText.textContent = `${entries.length - 1} other location${entries.length === 2 ? '' : 's'} available`;
+        moreText.style.display = '';
+      } else if(Number(selectedEntry.available_qty || 0) > 1){
+        moreText.textContent = `${selectedEntry.available_qty} qty in this location`;
+        moreText.style.display = '';
+      } else {
+        moreText.style.display = 'none';
+      }
+
+      const allowClear = entries.length > 1
+        ? !!selectedEntry.clear_target_row_id
+        : !!(selectedEntry.clear_target_row_id || info.clearable);
+      clearBtn.style.display = allowClear ? 'flex' : 'none';
+    }
 
     async function loadLocation(){
       const upc = '{{ upc }}'.trim();
@@ -2126,23 +2507,11 @@
         const lot = (params.get('lot') || '').trim();
         const query = lot ? (`?lot=${encodeURIComponent(lot)}`) : '';
         const res = await fetch(`/api/items_prep/location/${encodeURIComponent(upc)}${query}`);
-        const j = await res.json();
-        if(j.success && (j.location || j.pictureposition)){
-          const row = document.getElementById('locationRow');
-          const text = document.getElementById('locationText');
-          if(j.pictureposition){
-            text.textContent = 'Picture Position (click to view)';
-            text.style.cursor = 'pointer';
-            text.onclick = ()=> showLocationImage(j.pictureposition);
-          } else if(j.location){
-            text.textContent = j.location.toUpperCase();
-            text.style.cursor = 'pointer';
-            text.onclick = ()=> showLocationImage(null, j.location);
-          }
-          row.style.display = 'flex';
-        }
+        const j = await res.json().catch(()=>({success:false}));
+        renderLocationState(j);
       }catch(e){
         console.error('Failed to load location:', e);
+        renderLocationState(null);
       }
     }
 
@@ -2166,6 +2535,61 @@
         modalImg.src = `/shelf-image/${encodeURIComponent(shelfCode.toLowerCase())}.png?t=${Date.now()}`;
         modal.style.display = 'flex';
       }
+    }
+
+    async function clearCurrentLocation(){
+      const clearBtn = document.getElementById('clearLocationBtn');
+      const upc = '{{ upc }}'.trim();
+      const info = diagLocationState;
+      const selectedEntry = getSelectedDiagLocationEntry(info);
+      if(!clearBtn || !upc || !info){
+        return;
+      }
+      if(!selectedEntry){
+        alert('Select a location bubble first so we know which location to clear.');
+        return;
+      }
+
+      const label = diagLocationDisplayCode(selectedEntry.location_code || selectedEntry.preview_key || '');
+      if(!window.confirm(`Clear location ${label || 'for this item'} for 1 quantity?`)){
+        return;
+      }
+
+      const originalText = clearBtn.textContent;
+      try{
+        clearBtn.disabled = true;
+        clearBtn.textContent = 'Clearing...';
+        const payload = {
+          upc,
+          lot_number: String((info && info.lot_number) || '').trim(),
+          location: String(selectedEntry.location_code || info.location_code || info.location || '').trim(),
+          preview_key: String(selectedEntry.preview_key || info.preview_key || info.pictureposition || '').trim(),
+          clear_target_row_id: selectedEntry.clear_target_row_id || info.clear_target_row_id || null
+        };
+        const res = await fetch('/api/items_prep/location/clear', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(payload)
+        });
+        const j = await res.json().catch(()=>({success:false,error:'Invalid response'}));
+        if(!(j && j.success)){
+          throw new Error((j && j.error) || 'Failed to clear location');
+        }
+        await loadLocation();
+        if(j.warning){
+          alert(`Location label cleared, but inventory row was not updated: ${j.warning}`);
+        }
+      }catch(err){
+        alert(err.message || 'Failed to clear location');
+      }finally{
+        clearBtn.disabled = false;
+        clearBtn.textContent = originalText;
+      }
+    }
+
+    const clearLocationBtnEl = document.getElementById('clearLocationBtn');
+    if(clearLocationBtnEl){
+      clearLocationBtnEl.addEventListener('click', clearCurrentLocation);
     }
 
     // Load existing status on page load

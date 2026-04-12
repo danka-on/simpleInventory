@@ -1,10 +1,11 @@
 $ErrorActionPreference = 'Stop'
 
-$repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$exeName = 'SweetShelvesServerConsole'
+$repoRoot    = Split-Path -Parent $MyInvocation.MyCommand.Path
+$exeName     = 'SweetShelvesServerConsole'
 $desktopPath = [Environment]::GetFolderPath('Desktop')
-$buildRoot = Join-Path $repoRoot '__desktop_build__'
-$iconPath = Join-Path $repoRoot 'static\favicon.ico'
+$buildRoot   = Join-Path $repoRoot '__desktop_build__'
+$iconPath    = Join-Path $repoRoot 'static\favicon.ico'
+$exePath     = Join-Path $repoRoot "$exeName.exe"
 
 if (!(Test-Path $buildRoot)) {
     New-Item -ItemType Directory -Path $buildRoot | Out-Null
@@ -21,18 +22,24 @@ try {
         --windowed `
         --name $exeName `
         --icon $iconPath `
-        --distpath $desktopPath `
+        --distpath $repoRoot `
         --workpath (Join-Path $buildRoot 'work') `
         --specpath $buildRoot `
         remote_server_console.py
     if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed with exit code $LASTEXITCODE" }
 
-    $exampleConfig = Join-Path $repoRoot 'server_control_config.example.json'
-    $desktopConfig = Join-Path $desktopPath 'server_control_config.example.json'
-    Copy-Item $exampleConfig $desktopConfig -Force
+    # Desktop shortcut pointing to exe in the repo folder
+    $shortcutPath = Join-Path $desktopPath 'Sweet Shelves Console.lnk'
+    $shell    = New-Object -ComObject WScript.Shell
+    $shortcut = $shell.CreateShortcut($shortcutPath)
+    $shortcut.TargetPath       = $exePath
+    $shortcut.IconLocation     = "$exePath,0"
+    $shortcut.Description      = 'Sweet Shelves Server Console'
+    $shortcut.WorkingDirectory = $repoRoot
+    $shortcut.Save()
 
-    Write-Host "Built $exeName.exe on your desktop."
-    Write-Host "Config example copied to $desktopConfig"
+    Write-Host "Built: $exePath"
+    Write-Host "Shortcut: $shortcutPath"
 }
 finally {
     Pop-Location

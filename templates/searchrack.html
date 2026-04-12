@@ -113,6 +113,25 @@
     .location-card-quantity{font-size:1.2rem;font-weight:700;color:#0066cc;margin-top:4px}
     .breadcrumb-separator{margin:0 8px;color:#999}
 
+    /* Scrollable results table — prevents page-level horizontal overflow */
+    #results { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    #results table { min-width: 500px; }
+
+    /* Sticky Actions column — always visible while scrolling table horizontally */
+    #results table td:last-child,
+    #results table th:last-child {
+        position: sticky;
+        right: 0;
+        z-index: 2;
+        background: #fff;
+        box-shadow: -2px 0 5px rgba(0,0,0,0.07);
+    }
+    #results table th:last-child { background: #f0f0f0; z-index: 3; }
+    html.ss-theme-night #results table td:last-child { background: #0f172a; }
+    html.ss-theme-night #results table th:last-child { background: #1e293b; }
+    /* Duplicate-group rows need their own bg on the sticky cell */
+    #results table tr[style*="background:#fff3cd"] td:last-child { background: #fff3cd; }
+
     /* Mobile responsive styles */
     @media (max-width: 768px) {
         body { padding: 10px; }
@@ -445,6 +464,9 @@
                 <select id="history-method" style="padding:8px;border-radius:6px;border:1px solid #ddd;">
                     <option value="">All Methods</option>
                     <option value="automatic">🤖 Automatic Removal</option>
+                    <option value="automatic_allocated">🤖 Automatic Removal (Allocated)</option>
+                    <option value="manual_handled">✅ Ready to Ship Confirmation</option>
+                    <option value="manual_handled_undo">↩️ Ready to Ship Undo</option>
                     <option value="manual_sold_removal">🛒 Manual Sold Removal</option>
                     <option value="manual">🗑️ Manual Deletion</option>
                     <option value="manual_edit">✏️ Manual Edit</option>
@@ -998,6 +1020,10 @@ function renderResults(results){
         const qtyValue = toIntLike(r.quantity, allowZeroQty);
         console.log('[QTY DEBUG]', 'barcode:', r.barcode, 'qtyValue after toIntLike:', qtyValue);
         const qty = esc(String(qtyValue))
+        const historySearchValue = String(barcodeRaw || '').trim();
+        const qtyCellHtml = (dbRaw === 'searchRack')
+            ? `<a href="#" class="qty-history-link${qtyValue === 0 ? ' zero-qty-history-link' : ''}" data-history-search="${esc(historySearchValue)}" title="View barcode history" style="font-weight:700;text-decoration:underline;cursor:pointer;color:${qtyValue === 0 ? '#c0392b' : '#2980b9'};">${qty}</a>`
+            : qty
         const db = esc(dbRaw)
         let locDisplay = '';
         if(r.pictureposition) locDisplay = r.pictureposition;
@@ -1174,7 +1200,7 @@ function renderResults(results){
                 itemIdCell +
                 lotCell +
                 locationCell +
-                `<td>${qty}</td>`+
+                `<td>${qtyCellHtml}</td>`+
                 dateCell +
                 dateSoldCell +
                 dateShippedCell +
@@ -1195,6 +1221,10 @@ function renderResults(results){
     document.querySelectorAll('.location-link').forEach(el=> el.addEventListener('click', onViewLocation));
     document.querySelectorAll('.location-multi-link').forEach(el=> el.addEventListener('click', onViewLocationMulti));
     document.querySelectorAll('.lot-link').forEach(el=> el.addEventListener('click', onViewLotDetails));
+    document.querySelectorAll('.qty-history-link').forEach(el=> el.addEventListener('click', (e)=>{
+        e.preventDefault();
+        openHistoryModalWithSearch(el.getAttribute('data-history-search') || '', '');
+    }));
     // double-click to open archive action when in archived list
     document.querySelectorAll('tbody tr').forEach(tr=>{
         tr.addEventListener('dblclick', async (e)=>{
@@ -1289,24 +1319,30 @@ function toggleActionDropdown(event, db, id, mergedIdsJson) {
 }
 
 function positionDropdown(dropdown, button) {
+    // Measure dimensions while visible but off-screen (getBoundingClientRect returns 0 when display:none)
+    dropdown.style.visibility = 'hidden';
+    dropdown.style.display = 'block';
+    dropdown.style.left = '0px';
+    dropdown.style.top = '0px';
+
     const rect = button.getBoundingClientRect();
-    const dropdownRect = dropdown.getBoundingClientRect();
-    
+    const dw = dropdown.offsetWidth;
+    const dh = dropdown.offsetHeight;
+
     let left = rect.left;
     let top = rect.bottom + 5;
-    
-    // Adjust if dropdown goes off screen
-    if (left + dropdownRect.width > window.innerWidth) {
-        left = window.innerWidth - dropdownRect.width - 10;
+
+    // Clamp to viewport with 8px margin
+    if (left + dw > window.innerWidth - 8) {
+        left = Math.max(8, window.innerWidth - dw - 8);
     }
-    
-    if (top + dropdownRect.height > window.innerHeight) {
-        top = rect.top - dropdownRect.height - 5;
+    if (top + dh > window.innerHeight - 8) {
+        top = Math.max(8, rect.top - dh - 5);
     }
-    
+
     dropdown.style.left = left + 'px';
     dropdown.style.top = top + 'px';
-    dropdown.style.display = 'block';
+    dropdown.style.visibility = 'visible';
 }
 
 function closeActionDropdown() {
@@ -1726,6 +1762,16 @@ window.addEventListener('load', ()=>{
         const params = new URLSearchParams(window.location.search);
         const dbParam = params.get('db');
         const qParam = params.get('q') || params.get('search');
+        const historySearchParam = params.get('history_search') || '';
+        const historyMethodParam = params.get('history_method') || '';
+        const historySortParam = params.get('history_sort') || 'desc';
+        const openHistoryParam = params.get('open_history') === '1';
+        const maybeOpenHistoryFromUrl = () => {
+            if (!openHistoryParam) return;
+            setTimeout(() => {
+                openHistoryModalWithSearch(historySearchParam || qParam || '', historyMethodParam, historySortParam);
+            }, 80);
+        };
         
         // Update back button based on unified search context
         if(typeof updateBackButton === 'function') updateBackButton();
@@ -1775,6 +1821,7 @@ window.addEventListener('load', ()=>{
                     }
 
                     doSearch(false, qParam || null);
+                    maybeOpenHistoryFromUrl();
                     return;
                 } else {
                     console.warn('[LOAD] Unknown db param:', dbParam);
@@ -1783,6 +1830,7 @@ window.addEventListener('load', ()=>{
             
             // Ensure search runs if not triggered above
             doSearch(false, qParam || null);
+            maybeOpenHistoryFromUrl();
             return;
         }
 
@@ -1858,9 +1906,7 @@ document.getElementById('location-duplicates-btn').addEventListener('click', () 
 document.getElementById('rack-history-btn').addEventListener('click', () => {
     // Close dropdown
     document.getElementById('inventory-dropdown').classList.remove('active');
-    // Open history modal
-    document.getElementById('historyModal').style.display = 'flex';
-    loadHistory();
+    openHistoryModalWithSearch('', '');
 });
 
 // Automatic Cleanup button
@@ -1886,6 +1932,17 @@ document.getElementById('history-search').addEventListener('keypress', (e) => {
 });
 document.getElementById('history-sort').addEventListener('change', loadHistory);
 document.getElementById('history-method').addEventListener('change', loadHistory);
+
+function openHistoryModalWithSearch(search, method = '', sort = 'desc') {
+    const historySearchEl = document.getElementById('history-search');
+    const historyMethodEl = document.getElementById('history-method');
+    const historySortEl = document.getElementById('history-sort');
+    if (historySearchEl) historySearchEl.value = String(search || '').trim();
+    if (historyMethodEl) historyMethodEl.value = String(method || '').trim();
+    if (historySortEl) historySortEl.value = String(sort || 'desc').trim() || 'desc';
+    document.getElementById('historyModal').style.display = 'flex';
+    loadHistory();
+}
 
 async function loadHistory() {
     const search = document.getElementById('history-search').value;
@@ -2453,8 +2510,10 @@ async function showCompleteHistory(orderId) {
                 const removedAt = h.removed_at ? new Date(h.removed_at).toLocaleString() : 'Unknown';
                 const typeLabel = {
                     'automatic': 'Auto Removal',
+                    'automatic_allocated': 'Auto Removal (Allocated)',
                     'manual': 'Manual Delete',
                     'manual_immediate': 'Immediate Removal',
+                    'manual_handled': 'Ready to Ship Confirmation',
                     'manual_sold_removal': 'Manual Sold Removal',
                     'manual_sold_selection': 'Manual Selection',
                     'finder_removal': 'Finder Removal',
@@ -2515,7 +2574,7 @@ async function showPendingRemoval(orderId, remainingMins) {
 
         const html = `
             <div style="padding:10px;">
-                <h3 style="color:#f39c12;margin-bottom:15px;">⏳ PENDING - Awaiting Automatic Removal</h3>
+                <h3 style="color:#f39c12;margin-bottom:15px;">⏳ PENDING - Confirm In Ready to Ship</h3>
                 <div style="background:#fff3cd;padding:12px;border-radius:8px;margin-bottom:15px;">
                     <div><strong>Order ID:</strong> ${order.order_id || 'N/A'}</div>
                     <div><strong>Title:</strong> ${esc(order.title || 'N/A')}</div>
@@ -2524,12 +2583,12 @@ async function showPendingRemoval(orderId, remainingMins) {
                 </div>
                 <div style="background:#ffeaa7;padding:15px;border-radius:8px;text-align:center;margin-bottom:15px;">
                     <div style="font-size:1.2rem;font-weight:700;color:#d35400;">⏱️ ${timeStr} remaining</div>
-                    <div style="font-size:0.9rem;color:#7f8c8d;margin-top:4px;">until automatic inventory removal</div>
+                    <div style="font-size:0.9rem;color:#7f8c8d;margin-top:4px;">automatic removal is disabled; confirm from Ready to Ship instead</div>
                 </div>
                 <div style="display:flex;gap:10px;justify-content:center;">
                     <button onclick="removeNow(${orderId})"
-                            style="padding:12px 24px;background:#e74c3c;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:600;font-size:1rem;">
-                        🚀 Remove Now
+                            style="padding:12px 24px;background:#2563eb;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:600;font-size:1rem;">
+                        Open Ready to Ship
                     </button>
                     <button onclick="document.getElementById('viewModal').style.display='none'"
                             style="padding:12px 24px;background:#95a5a6;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:600;font-size:1rem;">
@@ -2546,25 +2605,7 @@ async function showPendingRemoval(orderId, remainingMins) {
 
 // Remove inventory immediately (skip grace period)
 async function removeNow(orderId) {
-    if (!confirm('Remove inventory for this order now? This will skip the grace period.')) return;
-
-    try {
-        const resp = await fetch(`/api/sold/remove-now/${orderId}`, { method: 'POST' });
-        const data = await resp.json();
-
-        if (data.success) {
-            const msg = data.inventory_found
-                ? `Inventory removed! Qty: ${data.old_qty} → ${data.new_qty}`
-                : 'Order marked as processed. No matching inventory found.';
-            alert(msg);
-            document.getElementById('viewModal').style.display = 'none';
-            doSearch(); // Refresh results
-        } else {
-            alert('Error: ' + (data.error || 'Unknown'));
-        }
-    } catch (e) {
-        alert('Error: ' + e.message);
-    }
+    window.location.href = '/ready_to_ship';
 }
 
 // Show NOT REMOVED popup with finder-like UPC matching
@@ -2580,14 +2621,15 @@ async function showNotRemoved(orderId) {
 
         const order = data.order || {};
         const matches = data.matches || [];
+        const finderHref = `/finder?order_id=${orderId}&title=${encodeURIComponent(order.title || '')}&barcode=${encodeURIComponent(order.barcode || '')}&image=${encodeURIComponent(order.image || '')}`;
 
         let matchesHtml = '';
         if (matches.length === 0) {
             matchesHtml = `
                 <div style="background:#fee;padding:15px;border-radius:8px;text-align:center;">
                     <div style="font-size:1.1rem;color:#e74c3c;font-weight:600;margin-bottom:8px;">No matching inventory found</div>
-                    <div style="font-size:0.9rem;color:#7f8c8d;margin-bottom:12px;">Use Item Finder for manual search</div>
-                    <a href="/finder?order_id=${orderId}&title=${encodeURIComponent(order.title || '')}&barcode=${encodeURIComponent(order.barcode || '')}&image=${encodeURIComponent(order.image || '')}"
+                    <div style="font-size:0.9rem;color:#7f8c8d;margin-bottom:12px;">Use Item Finder to match the order, then return to Ready to Ship to confirm removal.</div>
+                    <a href="${finderHref}"
                        style="display:inline-block;padding:10px 20px;background:#6c5ce7;color:white;text-decoration:none;border-radius:6px;font-weight:600;">
                         Open Item Finder
                     </a>
@@ -2595,24 +2637,20 @@ async function showNotRemoved(orderId) {
         } else {
             matchesHtml = '<div style="max-height:300px;overflow-y:auto;">';
             matches.forEach(m => {
-                const loc = m.ITEM_POSITION || m.PICTUREPOSITION || 'No Location';
-                const locLower = (m.ITEM_POSITION || '').toLowerCase();
+                const loc = m.item_position || m.pictureposition || m.location_code || 'No Location';
+                const locLower = String(m.item_position || m.pictureposition || m.location_code || '').toLowerCase();
                 matchesHtml += `
                     <div style="background:#f8f9fa;padding:12px;border-radius:8px;margin-bottom:8px;display:flex;align-items:center;gap:12px;">
-                        <img src="${m.IMAGE || ''}" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2250%22 height=%2250%22><rect fill=%22%23f0f0f0%22 width=%22100%25%22 height=%22100%25%22/></svg>'"
+                        <img src="${m.image || ''}" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2250%22 height=%2250%22><rect fill=%22%23f0f0f0%22 width=%22100%25%22 height=%22100%25%22/></svg>'"
                              style="width:50px;height:50px;object-fit:cover;border-radius:6px;">
                         <div style="flex:1;">
-                            <div style="font-weight:600;font-size:0.9rem;">${esc(m.TITLE || 'Unknown')}</div>
+                            <div style="font-weight:600;font-size:0.9rem;">${esc(m.title || 'Unknown')}</div>
                             <div style="font-size:0.85rem;color:#7f8c8d;">
                                 <span style="background:#6c5ce7;color:white;padding:2px 8px;border-radius:4px;cursor:pointer;"
                                       onclick="showLocPopupFromInvStatus('${loc}', '${locLower}')">${loc}</span>
-                                <span style="margin-left:8px;">Qty: ${m.QUANTITY || 0}</span>
+                                <span style="margin-left:8px;">Qty: ${m.quantity || 0}</span>
                             </div>
                         </div>
-                        <button onclick="selectInventoryToRemove(${orderId}, ${m.ID})"
-                                style="padding:8px 16px;background:#e74c3c;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:600;">
-                            Remove
-                        </button>
                     </div>`;
             });
             matchesHtml += '</div>';
@@ -2620,19 +2658,30 @@ async function showNotRemoved(orderId) {
 
         const html = `
             <div style="padding:10px;">
-                <h3 style="color:#e74c3c;margin-bottom:15px;">❌ NOT REMOVED - Select Inventory</h3>
+                <h3 style="color:#e74c3c;margin-bottom:15px;">❌ NOT REMOVED - Confirm In Ready to Ship</h3>
                 <div style="background:#fee;padding:12px;border-radius:8px;margin-bottom:15px;">
                     <div><strong>Order ID:</strong> ${order.order_id || 'N/A'}</div>
                     <div><strong>Title:</strong> ${esc(order.title || 'N/A')}</div>
                     <div><strong>Barcode:</strong> ${order.barcode ? formatUpcDisplay(order.barcode) : 'N/A'}</div>
                     <div><strong>Qty Sold:</strong> ${order.quantity || 1}</div>
                 </div>
+                <div style="background:#fff7ed;padding:12px;border-radius:8px;margin-bottom:15px;color:#9a3412;">
+                    Sold-order inventory removal now only happens from the Ready to Ship confirmation flow.
+                </div>
                 <h4 style="margin-bottom:10px;">Matching Inventory Items</h4>
                 ${matchesHtml}
-                <button onclick="document.getElementById('viewModal').style.display='none'"
-                        style="margin-top:15px;padding:10px 20px;background:#95a5a6;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:600;">
-                    Cancel
-                </button>
+                <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:15px;">
+                    <a href="/ready_to_ship" style="padding:10px 20px;background:#2563eb;color:white;text-decoration:none;border-radius:6px;font-weight:600;">
+                        Open Ready to Ship
+                    </a>
+                    <a href="${finderHref}" style="padding:10px 20px;background:#6c5ce7;color:white;text-decoration:none;border-radius:6px;font-weight:600;">
+                        Open Item Finder
+                    </a>
+                    <button onclick="document.getElementById('viewModal').style.display='none'"
+                            style="padding:10px 20px;background:#95a5a6;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:600;">
+                        Close
+                    </button>
+                </div>
             </div>`;
 
         showViewModal(html);
@@ -2668,26 +2717,7 @@ function showLocPopupFromInvStatus(locCode, locLower) {
 
 // Select specific inventory item to remove for a sold order
 async function selectInventoryToRemove(orderId, searchrackId) {
-    if (!confirm('Remove inventory from this location?')) return;
-
-    try {
-        const resp = await fetch(`/api/sold/manual-remove/${orderId}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ searchrack_id: searchrackId, qty: 1 })
-        });
-        const data = await resp.json();
-
-        if (data.success) {
-            alert(`Inventory removed! Qty: ${data.old_qty} → ${data.new_qty}`);
-            document.getElementById('viewModal').style.display = 'none';
-            doSearch(); // Refresh results
-        } else {
-            alert('Error: ' + (data.error || 'Unknown'));
-        }
-    } catch (e) {
-        alert('Error: ' + e.message);
-    }
+    window.location.href = '/ready_to_ship';
 }
 
 // Store last order ID for back navigation

@@ -394,6 +394,32 @@ def backup_health():
     }
 
 
+def git_info(repo_path):
+    try:
+        out = run(
+            f"git -C {repo_path} log -1 --pretty=format:'%ar|%s' 2>/dev/null"
+        ).strip("'")
+        if "|" in out:
+            when, subject = out.split("|", 1)
+            return {"when": when.strip(), "subject": subject.strip()}
+    except Exception:
+        pass
+    return {"when": None, "subject": None}
+
+
+def git_info(repo_path):
+    try:
+        out = run(
+            f"git -C {repo_path} log -1 --pretty=format:'%ar|%s' 2>/dev/null"
+        ).strip("'")
+        if "|" in out:
+            when, subject = out.split("|", 1)
+            return {"when": when.strip(), "subject": subject.strip()}
+    except Exception:
+        pass
+    return {"when": None, "subject": None}
+
+
 def service_status(service_name):
     active = run(f"systemctl is-active {service_name}").strip()
     is_active = active == "active"
@@ -430,6 +456,7 @@ payload = {
     "temperature_c": cpu_temperature(),
     "load_average": load_average(),
     "service": service_status("sweetshelves.service"),
+    "git": git_info("/opt/sweetshelves"),
     "timestamp": int(time.time()),
 }
 
@@ -648,7 +675,6 @@ class RemoteServerConsole(tk.Tk):
         self.logs_job = None
         self.command_counter = 0
         self.last_stats = {}
-        self.connection_collapsed = False
 
         self.host_var    = tk.StringVar(value=str(self.config_data["connection"].get("host", "")))
         self.user_var    = tk.StringVar(value=str(self.config_data["connection"].get("user", "")))
@@ -715,14 +741,26 @@ class RemoteServerConsole(tk.Tk):
         self._build_metric_row()
         _sep(self, SURFACE2, height=1)
 
-        # Middle: connection drawer (collapsible left) + commands (right)
-        middle = tk.Frame(self, bg=BASE)
-        middle.pack(fill="x", padx=0)
-        self._conn_drawer_outer = middle
+        # Main area: buttons left | logs right
+        main = tk.Frame(self, bg=BASE)
+        main.pack(fill="both", expand=True)
+        main.columnconfigure(0, weight=0, minsize=320)
+        main.columnconfigure(1, weight=0, minsize=1)
+        main.columnconfigure(2, weight=1)
+        main.rowconfigure(0, weight=1)
 
-        self._build_commands_section(middle)
-        _sep(self, SURFACE2, height=1)
-        self._build_logs_section()
+        # Left: connection drawer + command buttons
+        left_col = tk.Frame(main, bg=MANTLE)
+        left_col.grid(row=0, column=0, sticky="nsew")
+        self._build_commands_left(left_col)
+
+        # Divider
+        tk.Frame(main, bg=SURFACE2, width=1).grid(row=0, column=1, sticky="ns")
+
+        # Right: logs
+        right_col = tk.Frame(main, bg=MANTLE)
+        right_col.grid(row=0, column=2, sticky="nsew")
+        self._build_logs_right(right_col)
 
     # ── Header bar ────────────────────────────────────────────────────────────
     def _build_header(self):
@@ -748,10 +786,6 @@ class RemoteServerConsole(tk.Tk):
 
         self._mk_btn(right, "⟳  Refresh", self.refresh_all,
                      bg=SURFACE1, fg=SAPPHIRE, font=("Segoe UI Semibold", 9)
-                     ).pack(side="left", padx=(0, 6))
-        self._mk_btn(right, "Settings",
-                     lambda: self._toggle_conn_drawer(),
-                     bg=SURFACE1, fg=SUBTEXT1, font=("Segoe UI", 9)
                      ).pack(side="left", padx=(0, 6))
         self._mk_btn(right, "Open Config",
                      self.open_config_file,
@@ -798,117 +832,153 @@ class RemoteServerConsole(tk.Tk):
                 tk.Frame(row, bg=sep_color, width=1).grid(
                     row=0, column=idx, sticky="nse")
 
-    # ── Commands section ──────────────────────────────────────────────────────
-    def _build_commands_section(self, parent):
-        frame = tk.Frame(parent, bg=BASE)
-        frame.pack(fill="both", expand=True)
-        frame.columnconfigure(0, weight=3)
-        frame.columnconfigure(1, weight=1)
-        frame.columnconfigure(2, weight=2)
+    # ── Left panel: connection settings + command buttons ─────────────────────
+    def _build_commands_left(self, parent):
+        parent.rowconfigure(2, weight=1)
+        parent.columnconfigure(0, weight=1)
 
-        # Connection drawer slot (col 0 when visible, otherwise hidden)
-        self._conn_col = tk.Frame(frame, bg=MANTLE, width=0)
-        self._conn_col.grid(row=0, column=0, sticky="nsew")
-        self._conn_col.grid_remove()
-        self._build_conn_drawer_content(self._conn_col)
-        self._conn_frame_ref = frame
+        # Connection settings at top
+        conn_frame = tk.Frame(parent, bg=MANTLE)
+        conn_frame.grid(row=0, column=0, columnspan=2, sticky="ew")
+        self._build_conn_inline(conn_frame)
 
-        # Sweet Shelves commands (col 0 normally, col 1 when drawer open)
-        ss_panel = self._build_command_group(frame, "Sweet Shelves", "Sweet Shelves")
-        ss_panel.grid(row=0, column=1, sticky="nsew", padx=0)
-        self._ss_cmd_panel = ss_panel
+        # Separator — must use grid here since parent uses grid
+        tk.Frame(parent, bg=SURFACE2, height=1).grid(row=1, column=0, columnspan=2, sticky="ew")
 
-        # Divider
-        tk.Frame(frame, bg=SURFACE2, width=1).grid(row=0, column=1, sticky="nse")
+        # Scrollable command area
+        cmd_canvas = tk.Canvas(parent, bg=MANTLE, highlightthickness=0)
+        cmd_canvas.grid(row=2, column=0, sticky="nsew")
+        vsb = tk.Scrollbar(parent, orient="vertical", command=cmd_canvas.yview)
+        vsb.grid(row=2, column=1, sticky="ns")
+        cmd_canvas.configure(yscrollcommand=vsb.set)
 
-        # Server commands (col 2)
-        srv_panel = self._build_command_group(frame, "Server", "Server")
-        srv_panel.grid(row=0, column=2, sticky="nsew")
-        self._srv_cmd_panel = srv_panel
+        scroll_frame = tk.Frame(cmd_canvas, bg=MANTLE)
+        win_id = cmd_canvas.create_window((0, 0), window=scroll_frame, anchor="nw")
 
-        self._cmd_frame = frame
+        def _on_resize(e):
+            cmd_canvas.itemconfigure(win_id, width=e.width)
+        def _on_frame_change(e):
+            cmd_canvas.configure(scrollregion=cmd_canvas.bbox("all"))
 
-        # Store button parent refs for re-render
-        self.command_buttons_parent = frame
+        cmd_canvas.bind("<Configure>", _on_resize)
+        scroll_frame.bind("<Configure>", _on_frame_change)
 
-    def _build_command_group(self, parent, title, section_key):
-        panel = tk.Frame(parent, bg=BASE)
+        def _on_mousewheel(e):
+            cmd_canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+        cmd_canvas.bind_all("<MouseWheel>", _on_mousewheel)
 
-        # Section header
-        header = tk.Frame(panel, bg=MANTLE)
-        header.pack(fill="x")
-        tk.Label(header, text=title.upper(),
-                 font=("Segoe UI Semibold", 9),
+        self._populate_cmd_scroll(scroll_frame)
+
+        self._cmd_scroll_frame = scroll_frame
+        self._cmd_canvas = cmd_canvas
+
+    def _populate_cmd_scroll(self, parent):
+        """Render terminal pin → SS section → Server section into a scroll frame."""
+        # ── Terminal access pinned at very top ─────────────────────────────
+        terminal_cmd = next(
+            (c for c in self.config_data.get("commands", [])
+             if c.get("action") == "open_terminal"), None)
+        pin = tk.Frame(parent, bg=MANTLE)
+        pin.pack(fill="x", padx=12, pady=(10, 6))
+        if terminal_cmd:
+            self._mk_btn(
+                pin,
+                "⌨  " + terminal_cmd.get("label", "Open Server Terminal"),
+                lambda c=terminal_cmd: self.execute_command(c),
+                bg="#64748b", fg="#ffffff",
+                font=("Segoe UI Semibold", 10), padx=14, pady=10, anchor="w",
+            ).pack(fill="x")
+        _sep(parent, SURFACE2)
+
+        self._build_command_group_in(parent, "Sweet Shelves", "Sweet Shelves")
+        _sep(parent, SURFACE2)
+        self._build_command_group_in(parent, "Server", "Server")
+
+    def _build_command_group_in(self, parent, title, section_key):
+        hdr = tk.Frame(parent, bg=MANTLE)
+        hdr.pack(fill="x")
+        tk.Label(hdr, text=title.upper(),
+                 font=("Segoe UI", 8, "bold"),
                  fg=SUBTEXT0, bg=MANTLE,
-                 padx=18, pady=10).pack(side="left")
+                 padx=16, pady=10).pack(side="left")
 
-        # Buttons container
-        btn_area = tk.Frame(panel, bg=BASE)
-        btn_area.pack(fill="both", expand=True, padx=14, pady=12)
+        btn_area = tk.Frame(parent, bg=MANTLE)
+        btn_area.pack(fill="x", padx=12, pady=(0, 10))
 
         commands = [c for c in self.config_data.get("commands", [])
-                    if self._command_section_name(c) == section_key]
+                    if self._command_section_name(c) == section_key
+                    and c.get("action") != "open_terminal"]
+
+        # Orange (accent) buttons float to top of each section
+        commands.sort(key=lambda c: 0 if c.get("tone") == "accent" else 1)
 
         for cmd in commands:
             bg, fg = self._cmd_colors(cmd)
-            row = tk.Frame(btn_area, bg=BASE)
-            row.pack(fill="x", pady=3)
             self._mk_btn(
-                row, cmd.get("label", "?"),
+                btn_area, cmd.get("label", "?"),
                 lambda c=cmd: self.execute_command(c),
                 bg=bg, fg=fg,
                 font=("Segoe UI Semibold", 10),
-                padx=16, pady=8,
-                anchor="w",
-            ).pack(fill="x")
-
-        return panel
+                padx=14, pady=8, anchor="w",
+            ).pack(fill="x", pady=2)
 
     def _cmd_colors(self, cmd):
-        tone = cmd.get("tone", "secondary")
-        mapping = {
-            "accent":    (BLUE,    CRUST),
-            "primary":   (SAPPHIRE, CRUST),
-            "success":   (GREEN,   CRUST),
-            "warning":   (PEACH,   CRUST),
-            "danger":    (RED,     CRUST),
-            "info":      (MAUVE,   CRUST),
-            "secondary": (SURFACE1, SUBTEXT1),
-        }
-        # Auto-infer from label if tone not set
-        if tone not in mapping:
-            label = cmd.get("label", "").lower()
-            if "restart" in label or "reboot" in label:
-                return mapping["accent"]
-            if "backup" in label and "restore" not in label:
-                return mapping["success"]
-            if "restore" in label:
-                return mapping["warning"]
-            if "terminal" in label:
-                return mapping["info"]
-            return mapping["secondary"]
-        return mapping[tone]
+        """
+        Simple, consistent scheme:
+          orange  — restart / compound ops  (accent tone)
+          red     — destructive             (danger tone)
+          slate   — terminal access         (open_terminal action)
+          blue    — everything else
+        """
+        if cmd.get("action") == "open_terminal":
+            return ("#64748b", "#ffffff")
+        tone = cmd.get("tone", "")
+        label = cmd.get("label", "").lower()
+        # Danger: reboot
+        if tone == "danger" or "reboot" in label:
+            return ("#dc2626", "#ffffff")
+        # Orange: restart / compound ops
+        if tone == "accent" or "restart" in label:
+            return ("#dd6b20", "#ffffff")
+        # Everything else: blue
+        return ("#3b82f6", "#ffffff")
 
-    # ── Connection drawer ─────────────────────────────────────────────────────
-    def _build_conn_drawer_content(self, parent):
-        inner = tk.Frame(parent, bg=MANTLE)
-        inner.pack(fill="both", expand=True, padx=0)
+    # ── Inline connection panel (left column top) ─────────────────────────────
+    def _build_conn_inline(self, parent):
+        # Toggle-able — show/hide details
+        self._conn_details_visible = False
 
-        # Header
-        hdr = tk.Frame(inner, bg=MANTLE)
-        hdr.pack(fill="x", padx=18, pady=(14, 0))
-        tk.Label(hdr, text="CONNECTION", font=("Segoe UI Semibold", 9),
+        hdr = tk.Frame(parent, bg=MANTLE)
+        hdr.pack(fill="x", padx=14, pady=(12, 8))
+        tk.Label(hdr, text="CONNECTION",
+                 font=("Segoe UI", 8, "bold"),
                  fg=SUBTEXT0, bg=MANTLE).pack(side="left")
-        self._mk_btn(hdr, "✕", self._toggle_conn_drawer,
-                     bg=SURFACE0, fg=SUBTEXT0,
-                     font=("Segoe UI", 9), padx=8, pady=3
-                     ).pack(side="right")
 
-        _sep(inner, SURFACE2, pady=(10, 0))
+        self._conn_toggle_btn = self._mk_btn(
+            hdr, "▸ Edit",
+            self._toggle_conn_details,
+            bg=SURFACE0, fg=SAPPHIRE,
+            font=("Segoe UI", 8), padx=8, pady=2)
+        self._conn_toggle_btn.pack(side="right")
 
-        body = tk.Frame(inner, bg=MANTLE)
-        body.pack(fill="both", expand=True, padx=18, pady=14)
+        # Mini status line (always visible)
+        self._conn_mini_frame = tk.Frame(parent, bg=MANTLE)
+        self._conn_mini_frame.pack(fill="x", padx=14, pady=(0, 10))
+        self._conn_status_lbl = tk.Label(
+            self._conn_mini_frame,
+            textvariable=self.conn_state_var,
+            font=("Segoe UI Semibold", 10), fg=SUBTEXT0, bg=MANTLE)
+        self._conn_status_lbl.pack(side="left")
+        tk.Label(self._conn_mini_frame,
+                 textvariable=self.conn_mini_var,
+                 font=("Segoe UI", 9), fg=OVERLAY, bg=MANTLE
+                 ).pack(side="left", padx=(8, 0))
 
+        # Expandable details
+        self._conn_details = tk.Frame(parent, bg=MANTLE)
+        # (hidden by default — only shown when toggled)
+
+        body = self._conn_details
         fields = [
             ("Host",    self.host_var),
             ("User",    self.user_var),
@@ -919,95 +989,92 @@ class RemoteServerConsole(tk.Tk):
         for label, var in fields:
             tk.Label(body, text=label,
                      font=("Segoe UI", 9), fg=SUBTEXT0, bg=MANTLE
-                     ).pack(anchor="w", pady=(8, 2))
+                     ).pack(anchor="w", padx=14, pady=(6, 1))
             row = tk.Frame(body, bg=MANTLE)
-            row.pack(fill="x")
-            entry = ttk.Entry(row, textvariable=var, width=24)
-            entry.pack(side="left", fill="x", expand=True)
+            row.pack(fill="x", padx=14)
+            ttk.Entry(row, textvariable=var, width=22).pack(side="left", fill="x", expand=True)
             if label == "SSH Key":
                 self._mk_btn(row, "Browse", self.browse_key,
-                             bg=SURFACE1, fg=SUBTEXT1,
-                             font=("Segoe UI", 9), padx=8, pady=4
-                             ).pack(side="left", padx=(6, 0))
+                             bg=SURFACE0, fg=SUBTEXT1,
+                             font=("Segoe UI", 8), padx=6, pady=3
+                             ).pack(side="left", padx=(4, 0))
 
-        _sep(body, SURFACE2, pady=(14, 0))
-
+        _sep(body, SURFACE2, pady=(10, 0))
         btn_row = tk.Frame(body, bg=MANTLE)
-        btn_row.pack(fill="x", pady=(10, 0))
-        self._mk_btn(btn_row, "Save & Connect", self.test_connection,
-                     bg=BLUE, fg=CRUST,
-                     font=("Segoe UI Semibold", 10), padx=14, pady=8
+        btn_row.pack(fill="x", padx=14, pady=(8, 12))
+        self._mk_btn(btn_row, "Connect", self.test_connection,
+                     bg="#2563eb", fg="#ffffff",
+                     font=("Segoe UI Semibold", 10), padx=12, pady=7
                      ).pack(side="left", fill="x", expand=True, padx=(0, 4))
-        self._mk_btn(btn_row, "Save Only", self.save_settings,
+        self._mk_btn(btn_row, "Save", self.save_settings,
                      bg=SURFACE1, fg=SUBTEXT1,
-                     font=("Segoe UI", 10), padx=10, pady=8
+                     font=("Segoe UI", 10), padx=10, pady=7
                      ).pack(side="left")
-
-        _sep(body, SURFACE2, pady=(14, 0))
-
-        # Status indicator
-        self._conn_status_lbl = tk.Label(
-            body, textvariable=self.conn_state_var,
-            font=("Segoe UI Semibold", 11), fg=SUBTEXT0, bg=MANTLE)
-        self._conn_status_lbl.pack(anchor="w", pady=(10, 2))
         tk.Label(body, textvariable=self.conn_detail_var,
-                 font=("Segoe UI", 9), fg=SUBTEXT0, bg=MANTLE,
-                 wraplength=220, justify="left").pack(anchor="w")
+                 font=("Segoe UI", 8), fg=OVERLAY, bg=MANTLE,
+                 wraplength=280, justify="left"
+                 ).pack(anchor="w", padx=14, pady=(0, 8))
 
-    def _toggle_conn_drawer(self):
-        col = self._conn_col
-        if self._conn_drawer_visible:
-            col.grid_remove()
-            self._conn_drawer_visible = False
+    def _toggle_conn_details(self):
+        if self._conn_details_visible:
+            self._conn_details.pack_forget()
+            self._conn_details_visible = False
+            self._conn_toggle_btn.configure(text="▸ Edit")
         else:
-            col.configure(width=280)
-            col.grid()
-            self._conn_drawer_visible = True
+            self._conn_details.pack(fill="x")
+            self._conn_details_visible = True
+            self._conn_toggle_btn.configure(text="▴ Hide")
 
-    # ── Logs section ──────────────────────────────────────────────────────────
-    def _build_logs_section(self):
-        outer = tk.Frame(self, bg=MANTLE)
-        outer.pack(fill="both", expand=True)
+    # ── Right panel: logs ─────────────────────────────────────────────────────
+    def _build_logs_right(self, parent):
+        parent.rowconfigure(0, weight=1)
+        parent.columnconfigure(0, weight=1)
 
-        notebook = ttk.Notebook(outer)
-        notebook.pack(fill="both", expand=True, padx=0, pady=0)
+        notebook = ttk.Notebook(parent)
+        notebook.grid(row=0, column=0, sticky="nsew")
 
         # Server logs tab
         log_tab = tk.Frame(notebook, bg=MANTLE)
         notebook.add(log_tab, text="  Server Logs  ")
         log_tab.columnconfigure(0, weight=1)
-        log_tab.columnconfigure(1, weight=0)
         log_tab.rowconfigure(1, weight=1)
 
         log_hdr = tk.Frame(log_tab, bg=MANTLE)
-        log_hdr.grid(row=0, column=0, columnspan=2, sticky="ew", padx=14, pady=(10, 6))
-        tk.Label(log_hdr, text="LOG SOURCE",
+        log_hdr.grid(row=0, column=0, sticky="ew", padx=14, pady=(10, 6))
+        tk.Label(log_hdr, text="SOURCE",
                  font=("Segoe UI", 8, "bold"),
                  fg=SUBTEXT0, bg=MANTLE).pack(side="left", padx=(0, 10))
         self.log_combo = ttk.Combobox(log_hdr, textvariable=self.log_choice_var,
-                                      state="readonly", width=28)
+                                      state="readonly", width=30)
         self.log_combo.pack(side="left")
         self.log_combo.bind("<<ComboboxSelected>>", lambda _: self.refresh_logs())
+        self._mk_btn(log_hdr, "⟳", self.refresh_logs,
+                     bg=SURFACE0, fg=SAPPHIRE,
+                     font=("Segoe UI", 9), padx=8, pady=3
+                     ).pack(side="left", padx=(8, 0))
 
         self.log_text = tk.Text(
-            log_tab, height=10,
-            bg=CRUST, fg=SUBTEXT1,
+            log_tab,
+            bg=CRUST, fg="#a6e3a1",
             insertbackground=TEXT,
             relief="flat", wrap="none",
             padx=14, pady=12,
             font=("Consolas", 9),
         )
-        self.log_text.grid(row=1, column=0, columnspan=2, sticky="nsew")
+        self.log_text.grid(row=1, column=0, sticky="nsew")
+        sb = tk.Scrollbar(log_tab, orient="vertical", command=self.log_text.yview)
+        sb.grid(row=1, column=1, sticky="ns")
+        self.log_text.configure(yscrollcommand=sb.set)
         self.log_text.configure(state="disabled")
 
-        # Activity log tab
+        # Activity tab
         act_tab = tk.Frame(notebook, bg=MANTLE)
         notebook.add(act_tab, text="  Activity  ")
         act_tab.rowconfigure(0, weight=1)
         act_tab.columnconfigure(0, weight=1)
 
         self.activity_text = tk.Text(
-            act_tab, height=10,
+            act_tab,
             bg=CRUST, fg=SUBTEXT1,
             insertbackground=TEXT,
             relief="flat", wrap="word",
@@ -1015,6 +1082,9 @@ class RemoteServerConsole(tk.Tk):
             font=("Consolas", 9),
         )
         self.activity_text.grid(row=0, column=0, sticky="nsew")
+        asb = tk.Scrollbar(act_tab, orient="vertical", command=self.activity_text.yview)
+        asb.grid(row=0, column=1, sticky="ns")
+        self.activity_text.configure(yscrollcommand=asb.set)
         self.activity_text.configure(state="disabled")
 
     # ── Helpers ───────────────────────────────────────────────────────────────
@@ -1023,26 +1093,24 @@ class RemoteServerConsole(tk.Tk):
                 bg=SURFACE1, fg=TEXT,
                 font=("Segoe UI Semibold", 10),
                 padx=14, pady=7, anchor="center", **kw):
-        """Create a styled tk.Button (not ttk — full color control)."""
+        """Create a styled tk.Button with hover highlight."""
+        hover = _brighten(bg, 28)
         btn = tk.Button(
             parent, text=text, command=command,
-            bg=bg, fg=fg, activebackground=_brighten(bg), activeforeground=fg,
+            bg=bg, fg=fg, activebackground=hover, activeforeground=fg,
             font=font, relief="flat", bd=0,
             padx=padx, pady=pady, cursor="hand2",
             anchor=anchor, **kw,
         )
+        btn.bind("<Enter>", lambda _e, b=btn, h=hover: b.configure(bg=h))
+        btn.bind("<Leave>", lambda _e, b=btn, n=bg:    b.configure(bg=n))
         return btn
 
     def render_command_buttons(self):
         """Rebuild command buttons when config changes."""
-        for panel in [self._ss_cmd_panel, self._srv_cmd_panel]:
-            panel.destroy()
-        self._ss_cmd_panel = self._build_command_group(
-            self._cmd_frame, "Sweet Shelves", "Sweet Shelves")
-        self._ss_cmd_panel.grid(row=0, column=1, sticky="nsew")
-        self._srv_cmd_panel = self._build_command_group(
-            self._cmd_frame, "Server", "Server")
-        self._srv_cmd_panel.grid(row=0, column=2, sticky="nsew")
+        for widget in self._cmd_scroll_frame.winfo_children():
+            widget.destroy()
+        self._populate_cmd_scroll(self._cmd_scroll_frame)
 
     def _update_conn_mini(self):
         user = self.user_var.get().strip()
@@ -1107,7 +1175,7 @@ class RemoteServerConsole(tk.Tk):
             return explicit
         label = str(command.get("label", "")).lower()
         raw   = str(command.get("command", "")).lower()
-        if "sweetshelves" in label or "/opt/sweetshelves" in raw:
+        if "sweetshelves" in label or "sweetshelves" in raw:
             return "Sweet Shelves"
         return "Server"
 
@@ -1304,9 +1372,16 @@ class RemoteServerConsole(tk.Tk):
 
         # ── Sweet Shelves service tile ──────────────────────────────────────
         svc = stats.get("service", {})
+        git = stats.get("git", {})
         if svc.get("active"):
             up = svc.get("uptime") or "running"
-            self._ss_tile.set_live("LIVE", GREEN, f"Up {up}", GREEN)
+            git_when    = git.get("when") or ""
+            git_subject = git.get("subject") or ""
+            if git_when and git_subject:
+                detail = f"Up {up}  ·  pulled {git_when}  —  {git_subject}"
+            else:
+                detail = f"Up {up}"
+            self._ss_tile.set_live("LIVE", GREEN, detail, GREEN)
         else:
             self._ss_tile.set_live("DOWN", RED, "sweetshelves.service is not running", RED)
 

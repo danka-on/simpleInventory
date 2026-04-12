@@ -266,35 +266,35 @@
         </section>
 
         <section class="settings-card" id="section-removal">
-            <h2>Automatic Removal Settings</h2>
-            <p class="desc">Set the grace period before removing inventory for shipped sold orders.</p>
+            <h2>Ready to Ship Confirmation Mode</h2>
+            <p class="desc">Automatic sold-order removal is disabled. Inventory comes out only when the shipment is confirmed in Ready to Ship.</p>
             <form id="graceForm">
-                <label for="graceHours">Grace period (hours)</label>
-                <input type="number" id="graceHours" min="0" max="240" step="0.01" value="48">
+                <label for="graceHours">Legacy grace period (inactive)</label>
+                <input type="number" id="graceHours" min="0" max="240" step="0.01" value="48" disabled>
                 <div class="actions">
-                    <button type="submit" class="btn btn-primary">Save Grace Period</button>
+                    <button type="button" class="btn btn-primary" onclick="window.location.href='/ready_to_ship'">Open Ready to Ship</button>
                 </div>
                 <div class="preset-group">
-                    <button type="button" class="preset-btn" onclick="setGracePeriodPreset(0.0167)">1 min (testing)</button>
-                    <button type="button" class="preset-btn" onclick="setGracePeriodPreset(0.0833)">5 min (testing)</button>
-                    <button type="button" class="preset-btn" onclick="setGracePeriodPreset(1)">1 hour</button>
-                    <button type="button" class="preset-btn" onclick="setGracePeriodPreset(24)">24 hours</button>
-                    <button type="button" class="preset-btn" onclick="setGracePeriodPreset(48)">48 hours (default)</button>
-                    <button type="button" class="preset-btn" onclick="setGracePeriodPreset(72)">72 hours</button>
+                    <button type="button" class="preset-btn" disabled>1 min (inactive)</button>
+                    <button type="button" class="preset-btn" disabled>5 min (inactive)</button>
+                    <button type="button" class="preset-btn" disabled>1 hour (inactive)</button>
+                    <button type="button" class="preset-btn" disabled>24 hours (inactive)</button>
+                    <button type="button" class="preset-btn" disabled>48 hours (inactive)</button>
+                    <button type="button" class="preset-btn" disabled>72 hours (inactive)</button>
                 </div>
                 <div id="graceStatus" class="status-line"></div>
             </form>
         </section>
 
         <section class="settings-card" id="section-zero-qty">
-            <h2>Zero-Quantity Deletion Settings</h2>
-            <p class="desc">Configure automatic deletion of inventory items with zero quantity.</p>
+            <h2>Zero-Quantity Retention</h2>
+            <p class="desc">Items that hit quantity 0 stay in SearchRack so you can keep barcode/location history and jump into rack history later.</p>
             <label class="check-row">
-                <input type="checkbox" id="showZeroQtyPending">
-                <span>Show pending zero-quantity deletions</span>
+                <input type="checkbox" id="showZeroQtyPending" disabled>
+                <span>Legacy zero-quantity queue (inactive)</span>
             </label>
-            <label for="zeroQtyInterval">Deletion interval (after reaching 0 qty)</label>
-            <select id="zeroQtyInterval">
+            <label for="zeroQtyInterval">Legacy deletion interval (inactive)</label>
+            <select id="zeroQtyInterval" disabled>
                 <option value="1">1 minute (testing)</option>
                 <option value="60">1 hour</option>
                 <option value="720">12 hours</option>
@@ -302,12 +302,12 @@
                 <option value="2880">48 hours</option>
             </select>
             <div class="actions">
-                <button type="button" class="btn btn-primary" onclick="saveZeroQtySettings()">Save Settings</button>
-                <button type="button" class="btn btn-success" onclick="scanZeroQtyNow()">Scan Now</button>
+                <button type="button" class="btn btn-primary" onclick="window.location.href='/searchrack?db=searchRack'">Open SearchRack</button>
+                <button type="button" class="btn btn-success" onclick="window.location.href='/searchrack?db=searchRack&open_history=1'">Open Rack History</button>
             </div>
             <div id="zeroQtyStatus" class="status-line"></div>
             <div id="zeroQtyPendingContainer" style="display:none;margin-top:16px;">
-                <h3 style="margin-top:0;color:#e74c3c;">Pending Zero-Quantity Deletions</h3>
+                <h3 style="margin-top:0;color:#e74c3c;">Zero-Quantity Retention Status</h3>
                 <div id="zeroQtyPendingList" style="font-size:0.95em;"></div>
             </div>
         </section>
@@ -427,35 +427,26 @@
                     document.getElementById('graceHours').value = j.hours;
                 }
             }catch(e){ console.warn('Failed to load grace period', e); }
+            const el = document.getElementById('graceStatus');
+            el.style.display = '';
+            el.style.color = '#2563eb';
+            el.textContent = 'Automatic sold-order removal is disabled. Use Ready to Ship to confirm shipments.';
         }
         document.getElementById('graceForm').addEventListener('submit', async function(e){
             e.preventDefault();
-            const hours = parseFloat(document.getElementById('graceHours').value || '48');
-            try{
-                const r = await fetch('/api/grace_period', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({hours})});
-                const j = await r.json();
-                const el = document.getElementById('graceStatus');
-                if(j.success){ 
-                    el.style.display=''; 
-                    el.style.color='#388e3c'; 
-                    // Format display: show minutes if < 1 hour, otherwise show hours
-                    const displayText = j.hours < 1 ? `${Math.round(j.hours * 60)} minutes` : `${j.hours} hours`;
-                    el.textContent = 'Saved: ' + displayText;
-                }
-                else { el.style.display=''; el.style.color='#e74c3c'; el.textContent = 'Save failed: '+(j.error||'Unknown'); }
-                setTimeout(()=>{el.style.display='none';}, 2000);
-            }catch(err){
-                const el = document.getElementById('graceStatus');
-                el.style.display=''; el.style.color='#e74c3c'; el.textContent = 'Save failed';
-                setTimeout(()=>{el.style.display='none';}, 2000);
-            }
+            const el = document.getElementById('graceStatus');
+            el.style.display = '';
+            el.style.color = '#2563eb';
+            el.textContent = 'Automatic sold-order removal is disabled. Use Ready to Ship instead.';
         });
         
         // Set grace period preset
         function setGracePeriodPreset(hours) {
             document.getElementById('graceHours').value = hours;
-            // Trigger form submit
-            document.getElementById('graceForm').dispatchEvent(new Event('submit'));
+            const el = document.getElementById('graceStatus');
+            el.style.display = '';
+            el.style.color = '#2563eb';
+            el.textContent = 'Preset changes are inactive because automatic sold-order removal is disabled.';
         }
         
         // On page load, always show saved settings and grace period
@@ -467,58 +458,23 @@
                 const r = await fetch('/api/zero_qty_settings');
                 const j = await r.json();
                 if (j.success) {
-                    document.getElementById('showZeroQtyPending').checked = j.show_display || false;
+                    document.getElementById('showZeroQtyPending').checked = false;
                     document.getElementById('zeroQtyInterval').value = j.interval_minutes || 1440;
-                    
-                    if (j.show_display) {
-                        loadZeroQtyPending();
-                    }
                 }
             } catch(e) {
                 console.warn('Failed to load zero-qty settings', e);
             }
+            const el = document.getElementById('zeroQtyStatus');
+            el.style.display = '';
+            el.style.color = '#2563eb';
+            el.textContent = 'Zero-quantity items are retained for history and are not auto-deleted.';
         }
         
         async function saveZeroQtySettings() {
-            const showDisplay = document.getElementById('showZeroQtyPending').checked;
-            const intervalMinutes = parseInt(document.getElementById('zeroQtyInterval').value);
-            
-            try {
-                const r = await fetch('/api/zero_qty_settings', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({
-                        show_display: showDisplay,
-                        interval_minutes: intervalMinutes
-                    })
-                });
-                const j = await r.json();
-                const el = document.getElementById('zeroQtyStatus');
-                
-                if (j.success) {
-                    el.style.display = '';
-                    el.style.color = '#388e3c';
-                    el.textContent = 'Settings saved!';
-                    
-                    if (showDisplay) {
-                        loadZeroQtyPending();
-                    } else {
-                        document.getElementById('zeroQtyPendingContainer').style.display = 'none';
-                    }
-                } else {
-                    el.style.display = '';
-                    el.style.color = '#e74c3c';
-                    el.textContent = 'Save failed: ' + (j.error || 'Unknown');
-                }
-                
-                setTimeout(() => { el.style.display = 'none'; }, 2000);
-            } catch(err) {
-                const el = document.getElementById('zeroQtyStatus');
-                el.style.display = '';
-                el.style.color = '#e74c3c';
-                el.textContent = 'Save failed';
-                setTimeout(() => { el.style.display = 'none'; }, 2000);
-            }
+            const el = document.getElementById('zeroQtyStatus');
+            el.style.display = '';
+            el.style.color = '#2563eb';
+            el.textContent = 'Zero-quantity items are retained for history and are not auto-deleted.';
         }
         
         async function loadZeroQtyPending() {
@@ -536,9 +492,9 @@
                 const container = document.getElementById('zeroQtyPendingContainer');
                 const listEl = document.getElementById('zeroQtyPendingList');
                 
-                if (!j.success || !j.items || j.items.length === 0) {
+                if (!j.success || j.manual_mode || !j.items || j.items.length === 0) {
                     container.style.display = 'block';
-                    listEl.innerHTML = '<div style="color:#999;padding:12px;text-align:center;">No items pending deletion</div>';
+                    listEl.innerHTML = '<div style="color:#999;padding:12px;text-align:center;">Zero-quantity items stay in SearchRack for history. Open SearchRack to inspect them.</div>';
                     return;
                 }
                 
@@ -600,52 +556,14 @@
         }
         
         async function deleteZeroQtyItemNow(searchrackId) {
-            if (!confirm('Delete this item immediately?')) return;
-            
-            try {
-                const r = await fetch(`/api/zero_qty_delete_now/${searchrackId}`, {method: 'POST'});
-                const j = await r.json();
-                
-                if (j.success) {
-                    alert('Item deleted successfully');
-                    loadZeroQtyPending();
-                } else {
-                    alert('Delete failed: ' + (j.error || 'Unknown error'));
-                }
-            } catch(err) {
-                alert('Delete failed: ' + err.message);
-            }
+            window.location.href = '/searchrack?db=searchRack';
         }
         
         async function scanZeroQtyNow() {
             const el = document.getElementById('zeroQtyStatus');
             el.style.display = '';
-            el.style.color = '#2196F3';
-            el.textContent = 'Scanning for zero-quantity items...';
-            
-            try {
-                const r = await fetch('/api/zero_qty/trigger-purge', {method: 'POST'});
-                const j = await r.json();
-                
-                if (j.success) {
-                    el.style.color = '#388e3c';
-                    el.textContent = '✓ Scan completed! Check terminal for details.';
-                    
-                    // Refresh pending list if visible
-                    if (document.getElementById('showZeroQtyPending').checked) {
-                        setTimeout(() => loadZeroQtyPending(), 500);
-                    }
-                } else {
-                    el.style.color = '#e74c3c';
-                    el.textContent = 'Scan failed: ' + (j.error || 'Unknown error');
-                }
-                
-                setTimeout(() => { el.style.display = 'none'; }, 3000);
-            } catch(err) {
-                el.style.color = '#e74c3c';
-                el.textContent = 'Scan failed: ' + err.message;
-                setTimeout(() => { el.style.display = 'none'; }, 3000);
-            }
+            el.style.color = '#2563eb';
+            el.textContent = 'Zero-quantity auto deletion is disabled. Use SearchRack or Rack History instead.';
         }
         
         // Watch checkbox changes
