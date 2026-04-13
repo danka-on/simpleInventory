@@ -1087,6 +1087,65 @@
       return raw.includes('-') ? raw.split('-')[0] : raw;
     }
 
+    function syncItemPrepUrl(upc, options){
+      try{
+        const url = new URL(window.location.href);
+        const nextUpc = String(upc || '').trim();
+        const opts = options || {};
+        if(nextUpc){
+          url.searchParams.set('upc', nextUpc);
+        } else {
+          url.searchParams.delete('upc');
+        }
+        if(opts.forceFocus){
+          url.searchParams.set('forceFocus', '1');
+        } else {
+          url.searchParams.delete('forceFocus');
+        }
+        if(opts.showUndo){
+          url.searchParams.set('showUndo', '1');
+        } else {
+          url.searchParams.delete('showUndo');
+        }
+        window.history.replaceState({}, '', url.toString());
+      }catch(_){}
+    }
+
+    function buildItemPrepReturnUrl(options){
+      try{
+        const url = new URL(window.location.href);
+        const opts = options || {};
+        const nextUpc = String(
+          opts.upc != null
+            ? opts.upc
+            : (currentUpc || url.searchParams.get('upc') || '')
+        ).trim();
+        if(nextUpc){
+          url.searchParams.set('upc', nextUpc);
+        } else {
+          url.searchParams.delete('upc');
+        }
+        if(opts.forceFocus){
+          url.searchParams.set('forceFocus', '1');
+        } else {
+          url.searchParams.delete('forceFocus');
+        }
+        if(opts.showUndo){
+          url.searchParams.set('showUndo', '1');
+        } else {
+          url.searchParams.delete('showUndo');
+        }
+        return `${url.pathname}${url.search}`;
+      }catch(_){
+        const params = [];
+        const fallbackUpc = String((options && options.upc) || currentUpc || '').trim();
+        if(fallbackUpc) params.push(`upc=${encodeURIComponent(fallbackUpc)}`);
+        if(options && options.forceFocus) params.push('forceFocus=1');
+        if(options && options.showUndo) params.push('showUndo=1');
+        return `/item-prep${params.length ? `?${params.join('&')}` : ''}`;
+      }
+    }
+
     function printerSettingsUrl(){
       return '/printer-settings?return=' + encodeURIComponent('/item-prep');
     }
@@ -1773,7 +1832,7 @@
           row.appendChild(arrow);
 
           row.onclick = ()=>{
-            const ret = encodeURIComponent('/item-prep?forceFocus=1');
+            const ret = encodeURIComponent(buildItemPrepReturnUrl({upc: currentUpc}));
             window.location.href = '/item-prep/diagnostic?upc='+encodeURIComponent(entry.upc)+'&return='+ret;
           };
           list.appendChild(row);
@@ -1805,6 +1864,7 @@
       document.getElementById('noBarcodeBtn').classList.remove('hidden');
       currentUpc = null;
       currentLookupInfo = null;
+      syncItemPrepUrl('');
       resetQtyDisplay();
       setupDeviceMode();
     }
@@ -1907,6 +1967,7 @@
         setTimeout(()=>{ statusMsg.textContent=''; }, 1000);
         currentUpc = null;
         currentLookupInfo = null;
+        syncItemPrepUrl('');
         const prepSummary = document.getElementById('prepSummary');
         if(prepSummary) prepSummary.textContent = '';
         clearQuickVoiceNote();
@@ -1916,6 +1977,7 @@
       }
       const it = j.item||{};
       currentUpc = it.upc || upc; // Store the actual UPC (may be suffixed if duplicate)
+      syncItemPrepUrl(currentUpc);
       currentLookupInfo = {
         unchecked_remaining: Number(it.unchecked_remaining || 0),
         items_to_list_url: it.items_to_list_url || '',
@@ -2459,7 +2521,7 @@
             const requestedLotQuery = requestedLotParam ? ('&requested_lot=' + encodeURIComponent(requestedLotParam)) : '';
             const noLotQuery = data.continued_without_lot ? '&continued_without_lot=1' : '';
             const exceptionOverageQuery = data.exception_overage ? '&exception_overage=1' : '';
-            window.location.href = '/item-prep/diagnostic?upc='+encodeURIComponent(data.suffixed_upc)+'&from=return&qty='+currentQty+lotQuery+requestedLotQuery+noLotQuery+exceptionOverageQuery+'&return='+encodeURIComponent('/item-prep?forceFocus=1&showUndo=1');
+            window.location.href = '/item-prep/diagnostic?upc='+encodeURIComponent(data.suffixed_upc)+'&from=return&qty='+currentQty+lotQuery+requestedLotQuery+noLotQuery+exceptionOverageQuery+'&return='+encodeURIComponent(buildItemPrepReturnUrl({showUndo: true}));
           }, 300);
           releaseDeferred = true;
         } else {
@@ -2535,7 +2597,7 @@
             const requestedLotQuery = requestedLotParam ? ('&requested_lot=' + encodeURIComponent(requestedLotParam)) : '';
             const noLotQuery = data.continued_without_lot ? '&continued_without_lot=1' : '';
             const exceptionOverageQuery = data.exception_overage ? '&exception_overage=1' : '';
-            window.location.href = '/item-prep/diagnostic?upc='+encodeURIComponent(data.suffixed_upc)+'&from=bad&qty='+currentQty+lotQuery+requestedLotQuery+noLotQuery+exceptionOverageQuery+'&return='+encodeURIComponent('/item-prep?forceFocus=1&showUndo=1');
+            window.location.href = '/item-prep/diagnostic?upc='+encodeURIComponent(data.suffixed_upc)+'&from=bad&qty='+currentQty+lotQuery+requestedLotQuery+noLotQuery+exceptionOverageQuery+'&return='+encodeURIComponent(buildItemPrepReturnUrl({showUndo: true}));
           }, 300);
           releaseDeferred = true;
         } else {

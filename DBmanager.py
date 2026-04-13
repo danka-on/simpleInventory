@@ -453,7 +453,7 @@ def createEbayStoreDB():
         except sqlite3.Error as e:
             print("something went wrong with table ", e)
 
-def addToSearchRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITION=None):
+def addToSearchRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITION=None, TITLE_OVERRIDE=None):
     """Add item directly to searchRack.db with enrichment from ebayStore.db and bol.db"""
     # Validate barcode and position before doing any DB work
     if not BARCODE or not str(BARCODE).strip():
@@ -498,6 +498,9 @@ def addToSearchRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITI
                     itemid = BARCODE
         except Exception as e:
             print(f"Warning: Could not lookup in bol.db: {e}")
+
+    if not title and TITLE_OVERRIDE and str(TITLE_OVERRIDE).strip():
+        title = str(TITLE_OVERRIDE).strip()
 
     barcode_norm = str(BARCODE).strip()
     position_norm = str(ITEM_POSITION).strip()

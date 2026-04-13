@@ -1706,12 +1706,23 @@ async function printSubmittedSuffixLabel(upc, description){
             stashPrinterNotice(deferredPrinterNotice);
           }
           msg.textContent = (continuedWithoutLot ? 'Saved diagnostic (continued without LOT)' : 'Saved diagnostic') + printSuccessNote;
-          // If a return URL was provided in query params, go back to it preserving filters
+          // If a return URL was provided, navigate to it — but strip ?upc so item-prep
+          // opens clean after a completed diagnostic (back button still restores the UPC
+          // because the back link href is set separately and is never modified here).
           try{
             const params = new URLSearchParams(window.location.search);
             const ret = params.get('return');
-            if(ret){ setTimeout(()=>{ window.location.href = ret; }, 600); }
-            else { setTimeout(()=>{ window.location.href='/item-prep?forceFocus=1'; }, 600); }
+            if(ret){
+              let dest = ret;
+              try{
+                const u = new URL(ret, window.location.origin);
+                u.searchParams.delete('upc');
+                dest = u.pathname + (u.search ? u.search : '') + (u.hash ? u.hash : '');
+              }catch(_){}
+              setTimeout(()=>{ window.location.href = dest; }, 600);
+            } else {
+              setTimeout(()=>{ window.location.href='/item-prep?forceFocus=1'; }, 600);
+            }
           }catch(_){ setTimeout(()=>{ window.location.href='/item-prep?forceFocus=1'; }, 600); }
         } else {
           const errText = (j && j.error) ? j.error : ('HTTP '+res.status+' '+(res.statusText||''));

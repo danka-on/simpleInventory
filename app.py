@@ -349,6 +349,73 @@ def _ensure_order_removal_allocations_table(cur):
     ''')
     cur.execute('CREATE INDEX IF NOT EXISTS idx_order_removal_allocations_order ON order_removal_allocations(order_row_id)')
 
+def _ensure_ready_to_ship_notes_table(cur):
+    """Persist Ready to Ship-only shipper notes separate from marketplace/order data."""
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS ready_to_ship_notes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_row_id INTEGER NOT NULL UNIQUE,
+            note TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_ready_to_ship_notes_order ON ready_to_ship_notes(order_row_id)')
+
+def _ready_to_ship_note_payload(note_row=None):
+    if not note_row:
+        return {
+            'ready_to_ship_note': '',
+            'ready_to_ship_note_created_at': '',
+            'ready_to_ship_note_updated_at': '',
+            'has_ready_to_ship_note': False
+        }
+
+    note_text = str(note_row['note'] or '')
+    return {
+        'ready_to_ship_note': note_text,
+        'ready_to_ship_note_created_at': str(note_row['created_at'] or ''),
+        'ready_to_ship_note_updated_at': str(note_row['updated_at'] or ''),
+        'has_ready_to_ship_note': bool(note_text.strip())
+    }
+
+def _apply_ready_to_ship_note_payload(order_dict, note_row=None):
+    payload = _ready_to_ship_note_payload(note_row)
+    order_dict.update(payload)
+    return order_dict
+
+def _load_ready_to_ship_note_lookup(cur, order_row_ids):
+    ids = []
+    seen = set()
+    for raw_id in (order_row_ids or []):
+        try:
+            order_id = int(raw_id)
+        except Exception:
+            continue
+        if order_id in seen:
+            continue
+        seen.add(order_id)
+        ids.append(order_id)
+
+    if not ids:
+        return {}
+
+    _ensure_ready_to_ship_notes_table(cur)
+    placeholders = ','.join('?' for _ in ids)
+    rows = cur.execute(f'''
+        SELECT order_row_id, note, created_at, updated_at
+        FROM ready_to_ship_notes
+        WHERE order_row_id IN ({placeholders})
+    ''', ids).fetchall()
+
+    lookup = {}
+    for row in rows:
+        try:
+            lookup[int(row['order_row_id'])] = row
+        except Exception:
+            continue
+    return lookup
+
 def _sold_location_key(value):
     s = str(value or '').strip()
     if not s:
@@ -1375,11 +1442,21 @@ def _is_order_processing_claim_stale(claimed_at_value, timeout_minutes=10):
         return default
 
 
-def _effective_sold_order_barcode(order):
+def _effective_sold_order_barcode(order, prefer_manual_override=False):
     source_upc = str(_sold_order_value(order, 'source_upc', '') or '').strip()
+    barcode = str(_sold_order_value(order, 'barcode', '') or '').strip()
+
+    # Finder can manually link a sold order to a different warehouse barcode.
+    # In ready-to-ship/removal flows, honor that explicit override instead of
+    # forcing the original traced source_upc.
+    if prefer_manual_override and source_upc and barcode:
+        source_key = _sold_removal_barcode_key(source_upc)
+        barcode_key = _sold_removal_barcode_key(barcode)
+        if source_key and barcode_key and source_key != barcode_key:
+            return barcode
+
     if source_upc:
         return source_upc
-    barcode = str(_sold_order_value(order, 'barcode', '') or '').strip()
     sku = str(_sold_order_value(order, 'sku', '') or '').strip()
     platform = str(_sold_order_value(order, 'store', '') or '').strip().lower()
     item_id = str(_sold_order_value(order, 'item_id', '') or '').strip()
@@ -32831,12 +32908,27 @@ def additemtrue():
     form_barcode = request.form.get('barcode', '').strip()
     form_position = request.form.get('item_position', '').strip()
     form_pictureposition = request.form.get('pictureposition', '').strip()
+    raw_title_overrides = request.form.get('title_overrides', '').strip()
 
     # Use form data if available, otherwise use session variables
     final_barcode = form_barcode or session.get('inv_barcode')
     final_position = form_position or session.get('inv_position_code')
     final_pictureposition = form_pictureposition or session.get('inv_pictureposition_path')
     same_position = session.get('inv_same_position', False)
+
+    title_overrides = {}
+    if raw_title_overrides:
+        try:
+            parsed = json.loads(raw_title_overrides)
+            if isinstance(parsed, dict):
+                for raw_key, raw_title in parsed.items():
+                    key = _normalize_scanned_upc(raw_key)
+                    value = str(raw_title or '').strip()
+                    if not key or not value:
+                        continue
+                    title_overrides[str(key)] = value[:200]
+        except Exception:
+            title_overrides = {}
     
     # Validate that we have required data
     if not final_barcode:
@@ -32867,7 +32959,14 @@ def additemtrue():
         
         # Add each barcode to SearchRack
         for barcode_item in barcodes:
-            addToSearchRack(item_position_to_store, barcode_item, None, final_pictureposition)
+            normalized_barcode = _normalize_scanned_upc(barcode_item)
+            base_barcode = normalized_barcode.split('-', 1)[0] if normalized_barcode else ''
+            title_override = (
+                title_overrides.get(normalized_barcode)
+                or title_overrides.get(base_barcode)
+                or None
+            )
+            addToSearchRack(item_position_to_store, barcode_item, None, final_pictureposition, title_override)
             print(f"Added to searchRack: position={item_position_to_store}, barcode={barcode_item}, pictureposition={final_pictureposition}")
 
         # SearchRack writes should be visible immediately in /searchrack.
@@ -32893,7 +32992,8 @@ def additemtrue():
     # Add script to clear sessionStorage after successful add
     clear_script = '''<script>
         sessionStorage.removeItem('barcode');
-        sessionStorage.removeItem('barcode_entries');'''
+        sessionStorage.removeItem('barcode_entries');
+        sessionStorage.removeItem('additem_manual_titles');'''
     # Only clear position if not locked
     if not same_position:
         clear_script += '''
@@ -32908,6 +33008,7 @@ def additemtrue():
         // Clear all session storage including lock state
         sessionStorage.removeItem('barcode');
         sessionStorage.removeItem('barcode_entries');
+        sessionStorage.removeItem('additem_manual_titles');
         sessionStorage.removeItem('item_position');
         sessionStorage.removeItem('pictureposition_path');
         sessionStorage.removeItem('positionLocked');
@@ -33191,6 +33292,154 @@ def process_barcode():
 
     return render_template("additem.html")
 
+
+def _add_item_screening_lookup(barcode):
+    actual = _normalize_scanned_upc(barcode)
+    if not actual:
+        return {
+            'barcode': '',
+            'title': '',
+            'image_url': '',
+            'title_source': '',
+            'image_source': '',
+            'needs_manual_title': True,
+            'missing_image': True
+        }
+
+    variants = _marketplace_upc_lookup_variants(actual)
+    title = ''
+    image_url = ''
+    title_source = ''
+    image_source = ''
+
+    def _pick_row(cur, query):
+        for candidate in variants:
+            row = cur.execute(query, (candidate,)).fetchone()
+            if row:
+                return row
+        return None
+
+    try:
+        with db_connection('rawbol.db') as conn:
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            row = _pick_row(cur, '''
+                SELECT upc, item_description, image_url
+                FROM raw_bol_items
+                WHERE upc IS NOT NULL
+                  AND TRIM(upc) != ''
+                  AND LOWER(TRIM(upc)) = ?
+                ORDER BY rowid DESC
+                LIMIT 1
+            ''')
+            if row:
+                title = str(row['item_description'] or '').strip()
+                image_url = str(row['image_url'] or '').strip()
+                if title:
+                    title_source = 'rawbol'
+                if image_url:
+                    image_source = 'rawbol'
+    except Exception:
+        pass
+
+    if not title or not image_url:
+        try:
+            with db_connection('bol.db') as conn:
+                conn.row_factory = sqlite3.Row
+                cur = conn.cursor()
+                row = _pick_row(cur, '''
+                    SELECT upc, item_description, image_url
+                    FROM bol_items
+                    WHERE upc IS NOT NULL
+                      AND TRIM(upc) != ''
+                      AND LOWER(TRIM(upc)) = ?
+                    ORDER BY id DESC
+                    LIMIT 1
+                ''')
+                if row:
+                    if not title:
+                        title = str(row['item_description'] or '').strip()
+                        if title:
+                            title_source = 'bol'
+                    if not image_url:
+                        image_url = str(row['image_url'] or '').strip()
+                        if image_url:
+                            image_source = 'bol'
+        except Exception:
+            pass
+
+    if not title or not image_url:
+        try:
+            with db_connection('searchRack.db') as conn:
+                conn.row_factory = sqlite3.Row
+                cur = conn.cursor()
+                cur.execute("PRAGMA table_info('SEARCHRACK')")
+                cols = [r[1] for r in cur.fetchall()]
+                cols_lower = {str(c).lower(): c for c in cols}
+                barcode_col = cols_lower.get('barcode') or cols_lower.get('upc')
+                title_col = cols_lower.get('title')
+                image_col = cols_lower.get('image') or cols_lower.get('images')
+                id_col = cols_lower.get('id') or 'rowid'
+
+                if barcode_col and (title_col or image_col):
+                    title_expr = title_col or "''"
+                    image_expr = image_col or "''"
+                    row = _pick_row(cur, f'''
+                        SELECT COALESCE({title_expr}, '') AS title,
+                               COALESCE({image_expr}, '') AS image_url
+                        FROM SEARCHRACK
+                        WHERE {barcode_col} IS NOT NULL
+                          AND TRIM({barcode_col}) != ''
+                          AND LOWER(TRIM({barcode_col})) = ?
+                        ORDER BY {id_col} DESC
+                        LIMIT 1
+                    ''')
+                    if row:
+                        if not title:
+                            title = str(row['title'] or '').strip()
+                            if title:
+                                title_source = 'searchrack'
+                        if not image_url:
+                            image_url = str(row['image_url'] or '').strip()
+                            if image_url:
+                                image_source = 'searchrack'
+        except Exception:
+            pass
+
+    return {
+        'barcode': actual,
+        'title': title,
+        'image_url': image_url,
+        'title_source': title_source,
+        'image_source': image_source,
+        'needs_manual_title': not bool(title),
+        'missing_image': not bool(image_url)
+    }
+
+
+@app.route('/api/add-item/screen', methods=['POST'])
+def api_add_item_screen():
+    try:
+        data = request.get_json(silent=True) or {}
+        raw_barcodes = data.get('barcodes') or []
+        if not isinstance(raw_barcodes, list):
+            return jsonify({'success': False, 'error': 'barcodes must be an array'}), 400
+
+        payload = {}
+        seen = set()
+        for raw in raw_barcodes:
+            barcode = _normalize_scanned_upc(raw)
+            if not barcode:
+                continue
+            key = str(barcode).strip()
+            if key in seen:
+                continue
+            seen.add(key)
+            payload[key] = _add_item_screening_lookup(key)
+
+        return jsonify({'success': True, 'items': payload})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'add_item:screen')}), 500
 
 
 @app.route('/additem', methods=['POST'])
@@ -34317,9 +34566,11 @@ def sold_orders():
     
     # Get orders from sold.db
     sold_conn = sqlite3.connect('sold.db')
+    prepared_orders = []
     try:
         sold_conn.row_factory = sqlite3.Row
         sold_cur = sold_conn.cursor()
+        _ensure_ready_to_ship_notes_table(sold_cur)
         # Only show orders from the last N days.
         # Keep ordering deterministic for duplicate suppression and UI stability.
         sold_cur.execute('''
@@ -34364,19 +34615,25 @@ def sold_orders():
 
         if duplicate_count > 0:
             print(f"[sold_orders] Deduped {duplicate_count} transient duplicate row(s) from sold.db query")
+
+        note_lookup = _load_ready_to_ship_note_lookup(sold_cur, [order['id'] for order in orders])
+        for order in orders:
+            order_dict = dict(order)
+            _apply_ready_to_ship_note_payload(order_dict, note_lookup.get(int(order['id'])))
+            prepared_orders.append(order_dict)
     finally:
         sold_conn.close()
     
     # Enrich with location from searchRack.db
     result = []
+    rack_conn = None
     try:
         rack_conn = sqlite3.connect('searchRack.db')
         rack_conn.row_factory = sqlite3.Row
         rack_cur = rack_conn.cursor()
         
-        for order in orders:
-            order_dict = dict(order)
-            effective_barcode = _effective_sold_order_barcode(order_dict)
+        for order_dict in prepared_orders:
+            effective_barcode = _effective_sold_order_barcode(order_dict, prefer_manual_override=True)
             if effective_barcode:
                 order_dict['stored_barcode'] = str(order_dict.get('barcode') or '').strip()
                 order_dict['barcode'] = effective_barcode
@@ -34423,9 +34680,13 @@ def sold_orders():
     except Exception as e:
         # If searchRack.db is unavailable, return orders without location enrichment
         print(f"Warning: searchRack.db unavailable, skipping location lookup: {e}")
-        result = [dict(order) for order in orders]
+        result = prepared_orders
     finally:
-        rack_conn.close()
+        try:
+            if rack_conn is not None:
+                rack_conn.close()
+        except Exception:
+            pass
 
     return jsonify(result)
 
@@ -34450,6 +34711,7 @@ def _ready_to_ship_poll_state(days):
     try:
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
+        _ensure_ready_to_ship_notes_table(cur)
         cur.execute('''
             SELECT id,
                    COALESCE(TRIM(isHandled), '') AS isHandled,
@@ -34464,6 +34726,7 @@ def _ready_to_ship_poll_state(days):
             ORDER BY id DESC
         ''', (days,))
         rows = cur.fetchall()
+        note_lookup = _load_ready_to_ship_note_lookup(cur, [row['id'] for row in rows])
 
         pending_count = 0
         digest = hashlib.sha1()
@@ -34471,6 +34734,8 @@ def _ready_to_ship_poll_state(days):
             is_handled = str(row['isHandled'] or '').strip() == '1'
             if not is_handled:
                 pending_count += 1
+            note_row = note_lookup.get(int(row['id']))
+            note_payload = _ready_to_ship_note_payload(note_row)
             digest.update(
                 (
                     f"{int(row['id'] or 0)}|"
@@ -34480,7 +34745,9 @@ def _ready_to_ship_poll_state(days):
                     f"{str(row['location'] or '').strip()}|"
                     f"{str(row['isHandledDate'] or '').strip()}|"
                     f"{str(row['paid_time'] or '').strip()}|"
-                    f"{str(row['shipped_time'] or '').strip()}\n"
+                    f"{str(row['shipped_time'] or '').strip()}|"
+                    f"{str(note_payload['ready_to_ship_note'] or '').strip()}|"
+                    f"{str(note_payload['ready_to_ship_note_updated_at'] or '').strip()}\n"
                 ).encode('utf-8', errors='ignore')
             )
 
@@ -34513,10 +34780,12 @@ def get_order():
     order_id = request.args.get('id')
     if not order_id:
         return jsonify({'error': 'Missing order id'}), 400
+    conn = None
     try:
         conn = sqlite3.connect('sold.db')
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
+        _ensure_ready_to_ship_notes_table(cur)
         cur.execute("SELECT * FROM orders WHERE id = ?", (order_id,))
         order = cur.fetchone()
         
@@ -34525,7 +34794,9 @@ def get_order():
             
         # Convert sqlite3.Row to dict
         order_dict = dict(order)
-        effective_barcode = _effective_sold_order_barcode(order_dict)
+        note_lookup = _load_ready_to_ship_note_lookup(cur, [order_id])
+        _apply_ready_to_ship_note_payload(order_dict, note_lookup.get(int(order['id'])))
+        effective_barcode = _effective_sold_order_barcode(order_dict, prefer_manual_override=True)
         if effective_barcode:
             order_dict['stored_barcode'] = str(order_dict.get('barcode') or '').strip()
             order_dict['barcode'] = effective_barcode
@@ -34533,7 +34804,67 @@ def get_order():
     except Exception as e:
         return jsonify({'error': _safe_error(e)}), 500
     finally:
-        conn.close()
+        try:
+            if conn is not None:
+                conn.close()
+        except Exception:
+            pass
+
+@app.route('/api/ready-to-ship/note/<int:order_id>', methods=['POST'])
+def ready_to_ship_save_note(order_id):
+    conn = None
+    try:
+        data = request.get_json(silent=True) or {}
+        raw_note = str(data.get('note') or '')
+        note = raw_note.replace('\r\n', '\n').replace('\r', '\n').strip()
+        if len(note) > 2000:
+            return jsonify({'success': False, 'error': 'Note is too long (max 2000 characters).'}), 400
+
+        conn = sqlite3.connect('sold.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        _ensure_ready_to_ship_notes_table(cur)
+
+        order = cur.execute('SELECT id FROM orders WHERE id = ?', (order_id,)).fetchone()
+        if not order:
+            return jsonify({'success': False, 'error': 'Order not found'}), 404
+
+        if note:
+            existing = cur.execute('SELECT id FROM ready_to_ship_notes WHERE order_row_id = ?', (order_id,)).fetchone()
+            if existing:
+                cur.execute('''
+                    UPDATE ready_to_ship_notes
+                    SET note = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE order_row_id = ?
+                ''', (note, order_id))
+            else:
+                cur.execute('''
+                    INSERT INTO ready_to_ship_notes (order_row_id, note)
+                    VALUES (?, ?)
+                ''', (order_id, note))
+        else:
+            cur.execute('DELETE FROM ready_to_ship_notes WHERE order_row_id = ?', (order_id,))
+
+        conn.commit()
+        note_row = cur.execute('''
+            SELECT note, created_at, updated_at
+            FROM ready_to_ship_notes
+            WHERE order_row_id = ?
+        ''', (order_id,)).fetchone()
+
+        _invalidate_ready_to_ship_cache()
+
+        payload = _ready_to_ship_note_payload(note_row)
+        payload['success'] = True
+        return jsonify(payload)
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'ready_to_ship:note')}), 500
+    finally:
+        try:
+            if conn is not None:
+                conn.close()
+        except Exception:
+            pass
 
 @app.route('/api/ready-to-ship/location-options/<int:order_id>', methods=['GET'])
 def ready_to_ship_location_options(order_id):
@@ -34550,7 +34881,7 @@ def ready_to_ship_location_options(order_id):
         if not order:
             return jsonify({'success': False, 'error': 'Order not found'}), 404
 
-        barcode = _effective_sold_order_barcode(order)
+        barcode = _effective_sold_order_barcode(order, prefer_manual_override=True)
         sold_qty = max(1, _coerce_int(order['quantity'], 1))
         existing_allocations = _load_order_removal_allocations(sold_cur, order_id)
 
@@ -34623,7 +34954,7 @@ def ready_to_ship_order_stats(order_id):
         if not order:
             return jsonify({'success': False, 'error': 'Order not found'}), 404
 
-        barcode = _effective_sold_order_barcode(order)
+        barcode = _effective_sold_order_barcode(order, prefer_manual_override=True)
         prep_stats = _ready_to_ship_items_to_list_stats_for_barcode(barcode)
         return jsonify({
             'success': True,
@@ -34722,7 +35053,7 @@ def mark_order_handled():
                 'already_handled': True
             }), 409
 
-        barcode = _effective_sold_order_barcode(order)
+        barcode = _effective_sold_order_barcode(order, prefer_manual_override=True)
         sold_qty = max(1, _coerce_int(order['quantity'], 1))
         order_ref = (order['order_id'] or '').strip()
         title = (order['title'] or '').strip()
@@ -34748,8 +35079,15 @@ def mark_order_handled():
             """, (order_id,))
             cur.execute('DELETE FROM order_removal_allocations WHERE order_row_id = ?', (order_id,))
             conn.commit()
+            handled_row = cur.execute('SELECT COALESCE(isHandledDate, "") AS isHandledDate FROM orders WHERE id = ?', (order_id,)).fetchone()
             _invalidate_ready_to_ship_cache()
-            return jsonify({'success': True, 'removed': False, 'removed_units': 0, 'locations': []})
+            return jsonify({
+                'success': True,
+                'removed': False,
+                'removed_units': 0,
+                'locations': [],
+                'handled_at': (handled_row['isHandledDate'] if handled_row else '')
+            })
 
         if not barcode:
             return _release_claim({
@@ -34822,6 +35160,7 @@ def mark_order_handled():
         """, (location_summary, location_summary, order_id))
         cur.execute('DELETE FROM order_removal_allocations WHERE order_row_id = ?', (order_id,))
         conn.commit()
+        handled_row = cur.execute('SELECT COALESCE(isHandledDate, "") AS isHandledDate FROM orders WHERE id = ?', (order_id,)).fetchone()
 
         _invalidate_ready_to_ship_cache()
 
@@ -34829,7 +35168,8 @@ def mark_order_handled():
             'success': True,
             'removed': removal_result.get('removed', False),
             'removed_units': removal_result.get('removed_units', 0),
-            'locations': removal_result.get('locations', [])
+            'locations': removal_result.get('locations', []),
+            'handled_at': (handled_row['isHandledDate'] if handled_row else '')
         })
 
     except Exception as e:
@@ -34992,7 +35332,7 @@ def mark_order_unhandled():
 
         _invalidate_ready_to_ship_cache()
 
-        return jsonify({'success': True, 'restored': restored_count})
+        return jsonify({'success': True, 'restored': restored_count, 'handled_at': ''})
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
     finally:
@@ -35087,7 +35427,7 @@ def repair_missing_removals():
 
         for order in orders:
             results['total_checked'] += 1
-            barcode = _effective_sold_order_barcode(order)
+            barcode = _effective_sold_order_barcode(order, prefer_manual_override=True)
             order_id = order['order_id']
             sold_qty = order['quantity'] or 1
 
@@ -35278,7 +35618,7 @@ def remove_sold_now(order_id):
             sold_conn.close()
             return jsonify({'success': False, 'error': 'Already removed from inventory'}), 400
 
-        barcode = _effective_sold_order_barcode(order)
+        barcode = _effective_sold_order_barcode(order, prefer_manual_override=True)
         if not barcode:
             sold_conn.close()
             return jsonify({'success': False, 'error': 'No barcode on order'}), 400
@@ -35356,7 +35696,7 @@ def find_inventory_for_sold(order_id):
         if not order:
             return jsonify({'success': False, 'error': 'Order not found'}), 404
 
-        barcode = _effective_sold_order_barcode(order)
+        barcode = _effective_sold_order_barcode(order, prefer_manual_override=True)
 
         if not barcode:
             return jsonify({

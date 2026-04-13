@@ -421,6 +421,191 @@
     }
     .status-btn-undo:hover { box-shadow: 0 4px 14px rgba(245,158,11,0.4); }
 
+    /* ── Note button (table cell) ─────────────────────────────────────────── */
+    .rt-note-btn {
+      width: 36px;
+      height: 36px;
+      min-width: 36px;
+      border-radius: 10px;
+      border: 1px solid rgba(148,163,184,0.25);
+      background: rgba(30,41,59,0.6);
+      color: #cbd5e1;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+      font-weight: 700;
+      font-size: 1rem;
+      flex-shrink: 0;
+    }
+    .rt-note-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(0,0,0,0.25); }
+    .rt-note-btn.is-empty {
+      border-style: dashed;
+      border-color: rgba(96,165,250,0.45);
+      background: rgba(37,99,235,0.12);
+      color: #93c5fd;
+    }
+    .rt-note-btn.has-note {
+      border-color: rgba(245,158,11,0.5);
+      background: rgba(245,158,11,0.18);
+      color: #fde68a;
+    }
+    .rt-note-btn.has-note:hover { box-shadow: 0 4px 14px rgba(245,158,11,0.28); }
+    .rt-note-plus { line-height: 1; font-size: 1.15rem; }
+
+    /* ── Note modal card ──────────────────────────────────────────────────── */
+    .rt-note-modal-card {
+      width: min(560px, 96vw);
+      max-height: calc(100vh - 48px);
+      overflow-y: auto;
+      overflow-x: hidden;
+      text-align: left;
+      padding: 22px 24px 20px;
+    }
+    .rt-note-context {
+      margin-bottom: 14px;
+      padding: 11px 14px;
+      border-radius: 10px;
+      background: rgba(15,23,42,0.35);
+      border: 1px solid rgba(148,163,184,0.14);
+    }
+    .rt-note-context strong {
+      display: block;
+      margin-bottom: 3px;
+      color: #f1f5f9;
+      font-size: 0.93rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .rt-note-context small {
+      display: block;
+      color: #94a3b8;
+      font-size: 0.82rem;
+      line-height: 1.4;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .rt-note-textarea {
+      width: 100%;
+      min-height: 160px;
+      resize: vertical;
+      border-radius: 10px;
+      border: 1px solid rgba(148,163,184,0.22);
+      background: rgba(15,23,42,0.55);
+      color: #e2e8f0;
+      padding: 12px 14px;
+      font: inherit;
+      font-size: 0.97rem;
+      line-height: 1.5;
+      box-sizing: border-box;
+      outline: none;
+    }
+    .rt-note-textarea:focus {
+      border-color: rgba(96,165,250,0.55);
+      box-shadow: 0 0 0 3px rgba(59,130,246,0.18);
+    }
+    .rt-note-meta {
+      margin-top: 8px;
+      color: #94a3b8;
+      font-size: 0.82rem;
+      min-height: 1.2em;
+    }
+    .rt-note-actions {
+      margin-top: 16px;
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+      flex-wrap: wrap;
+    }
+    .rt-note-action {
+      border: none;
+      border-radius: 10px;
+      padding: 10px 18px;
+      font-size: 0.93rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: transform 0.15s ease, opacity 0.15s ease;
+      white-space: nowrap;
+    }
+    .rt-note-action:hover { transform: translateY(-1px); }
+    .rt-note-action:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+    .rt-note-action.secondary {
+      background: rgba(148,163,184,0.14);
+      color: #cbd5e1;
+      border: 1px solid rgba(148,163,184,0.2);
+    }
+    .rt-note-action.danger {
+      background: rgba(239,68,68,0.14);
+      color: #fca5a5;
+      border: 1px solid rgba(239,68,68,0.28);
+    }
+    .rt-note-action.primary {
+      background: linear-gradient(135deg, #10b981, #059669);
+      color: #fff;
+      box-shadow: 0 6px 16px rgba(16,185,129,0.22);
+    }
+
+    /* ── Day-mode overrides ───────────────────────────────────────────────── */
+    html.ss-theme-day .rt-note-btn {
+      background: #f1f5f9;
+      border-color: #cbd5e1;
+      color: #475569;
+    }
+    html.ss-theme-day .rt-note-btn.is-empty {
+      background: #eff6ff;
+      border-color: #93c5fd;
+      color: #2563eb;
+      border-style: dashed;
+    }
+    html.ss-theme-day .rt-note-btn.has-note {
+      background: #fffbeb;
+      border-color: #fbbf24;
+      color: #b45309;
+    }
+    html.ss-theme-day .rt-note-context {
+      background: #f8fafc;
+      border-color: #e2e8f0;
+    }
+    html.ss-theme-day .rt-note-context strong { color: #111827; }
+    html.ss-theme-day .rt-note-context small { color: #6b7280; }
+    html.ss-theme-day .rt-note-textarea {
+      background: #fff;
+      color: #111827;
+      border-color: #d1d5db;
+    }
+    html.ss-theme-day .rt-note-textarea:focus {
+      border-color: #3b82f6;
+      box-shadow: 0 0 0 3px rgba(59,130,246,0.14);
+    }
+    html.ss-theme-day .rt-note-meta { color: #6b7280; }
+    html.ss-theme-day .rt-note-action.secondary {
+      background: #f1f5f9;
+      color: #374151;
+      border: 1px solid #d1d5db;
+    }
+    html.ss-theme-day .rt-note-action.danger {
+      background: #fef2f2;
+      color: #dc2626;
+      border: 1px solid #fca5a5;
+    }
+
+    /* ── Mobile / iPad ────────────────────────────────────────────────────── */
+    @media (max-width: 768px) {
+      .rt-note-btn { width: 40px; height: 40px; min-width: 40px; border-radius: 12px; }
+      .rt-note-modal-card { padding: 18px 16px 16px; }
+      .rt-note-textarea { min-height: 130px; font-size: 1rem; }
+      .rt-note-actions { gap: 8px; }
+      .rt-note-action { flex: 1 1 auto; text-align: center; padding: 12px 12px; font-size: 0.97rem; }
+    }
+    @media (max-width: 480px) {
+      .rt-note-modal-card { padding: 16px 14px 14px; }
+      .rt-note-actions { flex-direction: column-reverse; gap: 8px; }
+      .rt-note-action { width: 100%; }
+    }
+
     /* Completed tab: green left border on rows */
     #completed-orders-table tbody tr {
       border-left: 3px solid #10b981;
@@ -458,7 +643,18 @@
     }
 
     /* Popup overlay */
-    .order-popup-overlay {}
+    .order-popup-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0,0,0,0.55);
+      backdrop-filter: blur(3px);
+      padding: 16px;
+      overflow-y: auto;
+    }
     .order-popup-card {
       background: #1e293b;
       border-radius: 16px;
@@ -1393,12 +1589,13 @@
                                 <th style="text-align:left;" data-i18n="info">Info</th>
                                 <th style="text-align:center; width:60px;" data-i18n="loc">Loc</th>
                                 <th style="text-align:center; width:40px;">#</th>
+                                <th style="text-align:center; width:72px;">Note</th>
                                 <th style="text-align:center; width:80px;" data-i18n="status">Status</th>
                             </tr>
                         </thead>
                         <tbody style="font-size:0.85rem;">
                             <tr class="loading-row">
-                                <td colspan="5" class="rt-empty">
+                                <td colspan="6" class="rt-empty">
                                     <i class="fas fa-spinner fa-spin"></i> <span data-i18n="loading_orders">Loading orders...</span>
                                 </td>
                             </tr>
@@ -1416,12 +1613,14 @@
                                 <th style="text-align:left;" data-i18n="info">Info</th>
                                 <th style="text-align:center; width:60px;" data-i18n="loc">Loc</th>
                                 <th style="text-align:center; width:40px;">#</th>
+                                <th style="text-align:center; width:72px;">Note</th>
+                                <th style="text-align:left; width:160px;">Completed At</th>
                                 <th style="text-align:center; width:80px;" data-i18n="status">Status</th>
                             </tr>
                         </thead>
                         <tbody style="font-size:0.85rem;">
                             <tr class="loading-row">
-                                <td colspan="5" class="rt-empty">
+                                <td colspan="7" class="rt-empty">
                                     <i class="fas fa-spinner fa-spin"></i> <span data-i18n="loading_orders">Loading orders...</span>
                                 </td>
                             </tr>
@@ -1680,6 +1879,234 @@ function tdQuantity(order) {
     return `<td style="text-align:center;">${qtyHtml}</td>`;
 }
 
+function readyToShipOrderHasNote(order) {
+    return !!String(order && order.ready_to_ship_note || '').trim();
+}
+
+function renderReadyToShipNoteButton(order) {
+    const hasNote = readyToShipOrderHasNote(order);
+    const label = hasNote ? 'Open note' : 'Add note';
+    const updatedAt = formatCompletedAt(order && order.ready_to_ship_note_updated_at);
+    const title = hasNote && updatedAt ? `${label} (updated ${updatedAt})` : label;
+    const iconHtml = hasNote
+        ? '<i class="fas fa-note-sticky" aria-hidden="true"></i>'
+        : '<span class="rt-note-plus" aria-hidden="true">+</span>';
+    return `<button type="button" class="rt-note-btn ${hasNote ? 'has-note' : 'is-empty'}" data-order-id="${order.id}" title="${esc(title)}" aria-label="${esc(title)}">${iconHtml}</button>`;
+}
+
+function tdNote(order) {
+    return `<td class="rt-note-cell" data-order-id="${order.id}" style="text-align:center;">${renderReadyToShipNoteButton(order)}</td>`;
+}
+
+function tdCompletedAt(order) {
+    const completedAt = formatCompletedAt(order && order.isHandledDate);
+    return `<td class="sold-td-small rt-completed-at">${completedAt ? esc(completedAt) : '—'}</td>`;
+}
+
+function parseReadyToShipDate(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return null;
+
+    const variants = [raw];
+    if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(raw)) {
+        variants.unshift(raw.replace(' ', 'T'));
+        variants.push(raw.replace(' ', 'T') + 'Z');
+    }
+
+    for (const variant of variants) {
+        const parsed = new Date(variant);
+        if (!isNaN(parsed.getTime())) {
+            return parsed;
+        }
+    }
+    return null;
+}
+
+function handledAtSortValue(order) {
+    const parsed = parseReadyToShipDate(order && order.isHandledDate);
+    if (parsed) return parsed.getTime();
+
+    const fallback = parseInt(order && order.id, 10);
+    return Number.isNaN(fallback) ? 0 : fallback;
+}
+
+function compareCompletedOrders(a, b) {
+    const timeDiff = handledAtSortValue(b) - handledAtSortValue(a);
+    if (timeDiff !== 0) return timeDiff;
+
+    const aId = parseInt(a && a.id, 10);
+    const bId = parseInt(b && b.id, 10);
+    if (!Number.isNaN(aId) && !Number.isNaN(bId) && bId !== aId) {
+        return bId - aId;
+    }
+
+    return String(b && b.order_id || '').localeCompare(String(a && a.order_id || ''));
+}
+
+function buildReadyToShipEmptyRow(message, colspan, iconHtml = '') {
+    return `<tr><td colspan="${colspan}" class="rt-empty">${iconHtml}${message}</td></tr>`;
+}
+
+function patchReadyToShipNoteCell(orderId) {
+    const order = OrderManager.getOrder(orderId);
+    document.querySelectorAll(`.rt-note-cell[data-order-id="${String(orderId)}"]`).forEach(cell => {
+        cell.innerHTML = renderReadyToShipNoteButton(order || { id: orderId });
+    });
+}
+
+function syncReadyToShipNoteState(orderId, payload) {
+    const order = OrderManager.getOrder(orderId);
+    if (!order) return;
+    order.ready_to_ship_note = String(payload && payload.ready_to_ship_note || '');
+    order.ready_to_ship_note_created_at = String(payload && payload.ready_to_ship_note_created_at || '');
+    order.ready_to_ship_note_updated_at = String(payload && payload.ready_to_ship_note_updated_at || '');
+    order.has_ready_to_ship_note = !!String(order.ready_to_ship_note || '').trim();
+    patchReadyToShipNoteCell(orderId);
+    OrderManager.saveToLocalStorage();
+}
+
+function notifyReadyToShipOrderChange(orderId) {
+    try {
+        const bc = new BroadcastChannel('rts_order_update');
+        bc.postMessage({ orderId: String(orderId), noteUpdated: true });
+        bc.close();
+    } catch (e) { /* BroadcastChannel not supported in all envs */ }
+    try {
+        localStorage.setItem('sold_orders_refresh', String(Date.now()));
+    } catch (e) {}
+}
+
+function showReadyToShipNotePopup(orderId) {
+    const order = OrderManager.getOrder(orderId);
+    if (!order) {
+        showToast('Order not found', 'error');
+        return;
+    }
+
+    const existing = document.getElementById('rt-note-modal');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'rt-note-modal';
+    overlay.className = 'order-popup-overlay';
+    overlay.onclick = (e) => { if (e.target === overlay) closeModal(); };
+
+    const popup = document.createElement('div');
+    popup.className = 'order-popup-card rt-note-modal-card';
+
+    const title = String(order.title || '').trim() || 'Untitled order';
+    const buyer = String(order.shipping_name || '').trim();
+    const orderRef = String(order.order_id || order.id || '').trim();
+    const existingNote = String(order.ready_to_ship_note || '');
+    const createdAt = formatCompletedAt(order.ready_to_ship_note_created_at);
+    const updatedAt = formatCompletedAt(order.ready_to_ship_note_updated_at);
+    const metaText = existingNote
+        ? updatedAt ? `Last updated ${updatedAt}` : createdAt ? `Saved ${createdAt}` : 'Saved note'
+        : 'No note saved yet.';
+
+    popup.innerHTML = `
+        <div class="popup-group-title" style="font-size:1.05rem;font-weight:800;margin-bottom:6px;">Ready to Ship Note</div>
+        <div class="popup-muted" style="margin-bottom:16px;">This note only lives in Ready to Ship so the shipper can see important handling details.</div>
+        <div class="rt-note-context">
+            <strong>${esc(title)}</strong>
+            <small>${esc(buyer || 'No buyer name')} | Order ${esc(orderRef)}</small>
+        </div>
+        <textarea class="rt-note-textarea" maxlength="2000" placeholder="Add a Ready to Ship note for this order...">${esc(existingNote)}</textarea>
+        <div class="rt-note-meta">${esc(metaText)}</div>
+        <div class="rt-note-actions">
+            ${existingNote ? '<button type="button" class="rt-note-action danger" data-role="clear-note">Remove Note</button>' : ''}
+            <button type="button" class="rt-note-action secondary" data-role="cancel-note">Cancel</button>
+            <button type="button" class="rt-note-action primary" data-role="save-note">Save Note</button>
+        </div>
+    `;
+
+    overlay.appendChild(popup);
+    document.body.appendChild(overlay);
+
+    const textarea = popup.querySelector('.rt-note-textarea');
+    const saveBtn = popup.querySelector('[data-role="save-note"]');
+    const cancelBtn = popup.querySelector('[data-role="cancel-note"]');
+    const clearBtn = popup.querySelector('[data-role="clear-note"]');
+    const meta = popup.querySelector('.rt-note-meta');
+
+    function closeModal() {
+        document.removeEventListener('keydown', onKeyDown);
+        overlay.remove();
+    }
+
+    function setBusy(isBusy) {
+        [saveBtn, cancelBtn, clearBtn].forEach(btn => {
+            if (!btn) return;
+            btn.disabled = isBusy;
+        });
+        if (textarea) textarea.disabled = isBusy;
+    }
+
+    async function persistNote(rawValue) {
+        const normalized = String(rawValue || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+        if (normalized.length > 2000) {
+            showToast('Note is too long', 'error');
+            return;
+        }
+
+        setBusy(true);
+        try {
+            const response = await fetch(`/api/ready-to-ship/note/${encodeURIComponent(orderId)}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ note: normalized })
+            });
+            const data = await response.json().catch(() => ({ success: false, error: 'Invalid server response' }));
+            if (!response.ok || !data.success) {
+                throw new Error(data.error || 'Failed to save note');
+            }
+
+            syncReadyToShipNoteState(orderId, data);
+            notifyReadyToShipOrderChange(orderId);
+            closeModal();
+            showToast(normalized ? 'Ready to Ship note saved' : 'Ready to Ship note removed');
+        } catch (error) {
+            console.error('Ready to Ship note save error:', error);
+            if (meta) meta.textContent = 'Save failed. Please try again.';
+            showToast('Failed to save note: ' + error.message, 'error');
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    function onKeyDown(e) {
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            closeModal();
+        }
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+            e.preventDefault();
+            persistNote(textarea.value);
+        }
+    }
+
+    document.addEventListener('keydown', onKeyDown);
+    overlay.onclick = (e) => {
+        if (e.target === overlay) closeModal();
+    };
+    popup.onclick = (e) => e.stopPropagation();
+    cancelBtn.onclick = () => closeModal();
+    saveBtn.onclick = () => persistNote(textarea.value);
+    if (clearBtn) {
+        clearBtn.onclick = () => {
+            if (!window.confirm('Remove this Ready to Ship note?')) return;
+            persistNote('');
+        };
+    }
+
+    requestAnimationFrame(() => {
+        if (textarea) {
+            textarea.focus();
+            textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+        }
+    });
+}
+
 // Create a single order row
 function createOrderRow(order, isCompleted = false) {
     const tr = document.createElement('tr');
@@ -1697,8 +2124,11 @@ function createOrderRow(order, isCompleted = false) {
             <i class="fas fa-check"></i>
         </button>`;
 
-    tr.innerHTML = tdTitle(order) + tdInfo(order) + tdLocation(order) + tdQuantity(order) +
-        `<td style="text-align: center;">${buttonHtml}</td>`;
+    tr.innerHTML = isCompleted
+        ? tdTitle(order) + tdInfo(order) + tdLocation(order) + tdQuantity(order) + tdNote(order) + tdCompletedAt(order) +
+            `<td style="text-align: center;">${buttonHtml}</td>`
+        : tdTitle(order) + tdInfo(order) + tdLocation(order) + tdQuantity(order) + tdNote(order) +
+            `<td style="text-align: center;">${buttonHtml}</td>`;
 
     return tr;
 }
@@ -1760,17 +2190,26 @@ function renderSoldOrders(orders, fromCache = false) {
     let hasCompleted = false;
 
     const dedupedOrders = dedupeOrdersForRender(orders);
+    const pendingOrders = [];
+    const completedOrders = [];
+
     dedupedOrders.forEach(order => {
         OrderManager.setOrder(order);
-        const row = createOrderRow(order, order.isHandled);
-
         if (order.isHandled) {
-            completedFragment.appendChild(row);
-            hasCompleted = true;
+            completedOrders.push(order);
         } else {
-            pendingFragment.appendChild(row);
-            hasPending = true;
+            pendingOrders.push(order);
         }
+    });
+
+    pendingOrders.forEach(order => {
+        pendingFragment.appendChild(createOrderRow(order, false));
+        hasPending = true;
+    });
+
+    completedOrders.sort(compareCompletedOrders).forEach(order => {
+        completedFragment.appendChild(createOrderRow(order, true));
+        hasCompleted = true;
     });
 
     // Clear and update pending table
@@ -1778,7 +2217,7 @@ function renderSoldOrders(orders, fromCache = false) {
     if (hasPending) {
         pendingTbody.appendChild(pendingFragment);
     } else {
-        pendingTbody.innerHTML = '<tr><td colspan="5" class="rt-empty"><i class="fas fa-check-circle" style="font-size:2rem;display:block;margin-bottom:8px;color:#10b981;"></i>No pending orders</td></tr>';
+        pendingTbody.innerHTML = buildReadyToShipEmptyRow('No pending orders', 6, '<i class="fas fa-check-circle" style="font-size:2rem;display:block;margin-bottom:8px;color:#10b981;"></i>');
     }
 
     // Clear and update completed table
@@ -1786,7 +2225,7 @@ function renderSoldOrders(orders, fromCache = false) {
     if (hasCompleted) {
         completedTbody.appendChild(completedFragment);
     } else {
-        completedTbody.innerHTML = '<tr><td colspan="5" class="rt-empty"><i class="fas fa-inbox" style="font-size:2rem;display:block;margin-bottom:8px;"></i>No completed orders yet</td></tr>';
+        completedTbody.innerHTML = buildReadyToShipEmptyRow('No completed orders yet', 7, '<i class="fas fa-inbox" style="font-size:2rem;display:block;margin-bottom:8px;"></i>');
     }
 
     updatePendingCount();
@@ -2478,6 +2917,10 @@ async function handleOrderStatusChange(orderId, isUndo) {
             throw new Error(data.error || 'Failed to update order');
         }
 
+        if (orderInMem) {
+            orderInMem.isHandledDate = isUndo ? '' : String(data.handled_at || '').trim();
+        }
+
         // Server confirmed — now persist to localStorage and broadcast to other tabs
         OrderManager.saveToLocalStorage();
         try {
@@ -2498,7 +2941,7 @@ async function handleOrderStatusChange(orderId, isUndo) {
                 : document.querySelector('#sold-orders-table tbody');
 
             // Remove "no orders" message if present
-            const noOrdersMsg = targetTable.querySelector('td[colspan="5"]');
+            const noOrdersMsg = targetTable.querySelector('td.rt-empty, td.rt-error');
             if (noOrdersMsg) noOrdersMsg.closest('tr').remove();
 
             // Fade-in from left
@@ -2518,7 +2961,9 @@ async function handleOrderStatusChange(orderId, isUndo) {
                 ? document.querySelector('#sold-orders-table tbody')
                 : document.querySelector('#completed-orders-table tbody');
             if (sourceTable.children.length === 0) {
-                sourceTable.innerHTML = `<tr><td colspan="5" class="rt-empty">${updatedOrder.isHandled ? 'No pending orders' : 'No completed orders yet'}</td></tr>`;
+                sourceTable.innerHTML = updatedOrder.isHandled
+                    ? buildReadyToShipEmptyRow('No pending orders', 6)
+                    : buildReadyToShipEmptyRow('No completed orders yet', 7);
             }
         }, 260);
 
@@ -2637,8 +3082,8 @@ async function fetchAndShowSoldOrders(days, forceRefresh = false) {
         // Show error state
         const pendingTbody = document.querySelector('#sold-orders-table tbody');
         const completedTbody = document.querySelector('#completed-orders-table tbody');
-        pendingTbody.innerHTML = '<tr><td colspan="5" class="rt-error">Failed to load orders. <a href="#" onclick="window.fetchAndShowSoldOrders(' + days + ', true); return false;">Retry</a></td></tr>';
-        completedTbody.innerHTML = '<tr><td colspan="5" class="rt-empty">No completed orders yet</td></tr>';
+        pendingTbody.innerHTML = '<tr><td colspan="6" class="rt-error">Failed to load orders. <a href="#" onclick="window.fetchAndShowSoldOrders(' + days + ', true); return false;">Retry</a></td></tr>';
+        completedTbody.innerHTML = buildReadyToShipEmptyRow('No completed orders yet', 7);
     } finally {
         OrderManager.isLoading = false;
     }
@@ -2698,6 +3143,14 @@ function setupTabs() {
 
 function setupEventDelegation() {
     document.addEventListener('click', function(e) {
+        const noteBtn = e.target.closest('.rt-note-btn');
+        if (noteBtn) {
+            e.preventDefault();
+            e.stopPropagation();
+            showReadyToShipNotePopup(noteBtn.getAttribute('data-order-id'));
+            return;
+        }
+
         // Handle order status buttons (check/undo)
         const handleBtn = e.target.closest('.handle-btn');
         if (handleBtn) {
@@ -3485,7 +3938,8 @@ document.addEventListener('keydown', function(e) {
 function fmtET(ts){
     try{
         if(!ts) return '';
-        const d = new Date(ts);
+        const d = ts instanceof Date ? ts : parseReadyToShipDate(ts);
+        if(!d) return String(ts);
         if(isNaN(d.getTime())) return String(ts);
         const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', year:'numeric', month:'2-digit', day:'2-digit', hour:'numeric', minute:'2-digit', hour12:true }).formatToParts(d);
         const vals = {}; parts.forEach(p=> vals[p.type] = p.value);
@@ -3493,6 +3947,10 @@ function fmtET(ts){
         let hour = vals.hour || String(d.getHours()).padStart(2,'0'); let minute = vals.minute || String(d.getMinutes()).padStart(2,'0'); const ampm = (vals.dayPeriod||'').toLowerCase(); hour = String(hour).replace(/^0/, '');
         return `${year}-${month}-${day} ${hour}:${minute}${ampm}`;
     }catch(e){ return String(ts); }
+}
+
+function formatCompletedAt(ts) {
+    return fmtET(ts);
 }
 
 // Make critical functions available globally
