@@ -119,17 +119,30 @@
 
     /* Sticky Actions column — mobile only */
     @media (max-width: 768px) {
+        /* border-collapse:collapse breaks position:sticky in iOS Safari —
+           separate+border-spacing:0 looks identical but fixes the bug */
+        #results table {
+            border-collapse: separate;
+            border-spacing: 0;
+        }
+        /* Prevent doubled borders from separate model */
+        #results table tr:not(:first-child) td,
+        #results table tr:not(:first-child) th { border-top: none; }
+        #results table td:not(:first-child),
+        #results table th:not(:first-child) { border-left: none; }
+
         #results table td:last-child,
         #results table th:last-child {
             position: sticky;
             right: 0;
             z-index: 2;
             background: #f7f7f8;
-            border-left: 2px solid #e6e6e6;
+            border-left: 2px solid #e6e6e6 !important;
+            vertical-align: middle;
         }
         #results table th:last-child { background: #f0f0f0; z-index: 3; }
-        html.ss-theme-night #results table td:last-child { background: #1e293b !important; border-left-color: rgba(255,255,255,0.08); }
-        html.ss-theme-night #results table th:last-child { background: #334155 !important; border-left-color: rgba(255,255,255,0.08); }
+        html.ss-theme-night #results table td:last-child { background: #1e293b !important; border-left-color: rgba(255,255,255,0.08) !important; }
+        html.ss-theme-night #results table th:last-child { background: #334155 !important; border-left-color: rgba(255,255,255,0.08) !important; }
         #results table tr[style*="background:#fff3cd"] td:last-child { background: #fff3cd; }
     }
 
