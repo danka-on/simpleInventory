@@ -131,8 +131,8 @@
         #results table td:not(:first-child),
         #results table th:not(:first-child) { border-left: none; }
 
-        #results table td:last-child,
-        #results table th:last-child {
+        #results table td.results-action-col.is-sticky,
+        #results table th.results-action-col.is-sticky {
             position: sticky;
             right: 0;
             z-index: 2;
@@ -140,10 +140,10 @@
             border-left: 2px solid #e6e6e6 !important;
             vertical-align: middle;
         }
-        #results table th:last-child { background: #f0f0f0; z-index: 3; }
-        html.ss-theme-night #results table td:last-child { background: #1e293b !important; border-left-color: rgba(255,255,255,0.08) !important; }
-        html.ss-theme-night #results table th:last-child { background: #334155 !important; border-left-color: rgba(255,255,255,0.08) !important; }
-        #results table tr[style*="background:#fff3cd"] td:last-child { background: #fff3cd; }
+        #results table th.results-action-col.is-sticky { background: #f0f0f0; z-index: 3; }
+        html.ss-theme-night #results table td.results-action-col.is-sticky { background: #1e293b !important; border-left-color: rgba(255,255,255,0.08) !important; }
+        html.ss-theme-night #results table th.results-action-col.is-sticky { background: #334155 !important; border-left-color: rgba(255,255,255,0.08) !important; }
+        #results table tr[style*="background:#fff3cd"] td.results-action-col.is-sticky { background: #fff3cd; }
     }
 
     /* Mobile responsive styles */
@@ -922,6 +922,8 @@ function missingThumb(width=48,height=48,text='No Img'){ return 'data:image/svg+
 function renderResults(results){
     const container = document.getElementById('results');
     if(!results || results.length===0){ container.innerHTML = '<div class="small-muted">No results</div>'; return; }
+    const selectedDb = (document.getElementById('db-select') || {}).value || '';
+    const isMobile = window.innerWidth <= 768;
     // Check if any results are from searchRack to decide whether to show Date Added column
     const hasSearchRack = results.some(r => r.source_db === 'searchRack');
     const hasEbayStore = results.some(r => r.source_db === 'ebayStore');
@@ -929,9 +931,12 @@ function renderResults(results){
     const hasSold = results.some(r => r.source_db === 'sold');
     const hasBol = results.some(r => r.source_db === 'bol');
     const hasReturns = results.some(r => r.source_db === 'returns');
+    const useMobileWarehouseActionSlot = isMobile && selectedDb === 'searchRack' && hasSearchRack;
     
     // Build dynamic headers based on which databases are present
-    const dateAddedHeader = hasSearchRack ? '<th>Date Added</th>' : '';
+    const dateAddedHeader = hasSearchRack
+        ? `<th>${useMobileWarehouseActionSlot ? 'Action' : 'Date Added'}</th>`
+        : '';
     const itemIdHeader = (hasEbayStore || hasAmazonStore) ? '<th>Item ID</th>' : '';
     const lotHeader = hasBol ? '<th>LOT #</th>' : '';
     const locationHeader = (!hasEbayStore && !hasAmazonStore && !hasBol && !hasReturns) ? '<th>Location</th>' : ''; // Show location for warehouse and sold
@@ -945,8 +950,11 @@ function renderResults(results){
     const originalShippingHeader = hasReturns ? '<th>Orig Ship</th>' : '';
     const returnShippingHeader = hasReturns ? '<th>Return Ship</th>' : '';
     const totalReturnCostHeader = hasReturns ? '<th>Total Cost</th>' : '';
+    const actionsHeader = useMobileWarehouseActionSlot
+        ? ''
+        : `<th class="results-action-col${isMobile ? ' is-sticky' : ''}">Actions</th>`;
     
-    let html = `<table><thead><tr><th>Title</th><th>Barcode</th>${itemIdHeader}${lotHeader}${locationHeader}<th>Qty</th>${dateAddedHeader}${dateSoldHeader}${dateShippedHeader}${invStatusHeader}${storeHeader}${returnDateHeader}${refundAmountHeader}${originalShippingHeader}${returnShippingHeader}${totalReturnCostHeader}<th>DB</th><th>Actions</th></tr></thead><tbody>`;
+    let html = `<table><thead><tr><th>Title</th><th>Barcode</th>${itemIdHeader}${lotHeader}${locationHeader}<th>Qty</th>${dateAddedHeader}${dateSoldHeader}${dateShippedHeader}${invStatusHeader}${storeHeader}${returnDateHeader}${refundAmountHeader}${originalShippingHeader}${returnShippingHeader}${totalReturnCostHeader}<th>DB</th>${actionsHeader}</tr></thead><tbody>`;
     let lastGroupBarcode = null;
     results.forEach((r, idx)=>{
     // Add visual separator between different duplicate groups
@@ -1094,7 +1102,13 @@ function renderResults(results){
     const createdInfo = (!isArchived && r.created_at) ? `<div class="small-muted">Added: ${fmtLocal(r.created_at)}</div>` : '';
     
     // Dynamic column cells based on which databases are shown
-    const dateCell = hasSearchRack ? (dbRaw === 'searchRack' && r.created_at ? `<td>${fmtLocal(r.created_at)}</td>` : '<td></td>') : '';
+    const dateCell = hasSearchRack
+        ? (
+            useMobileWarehouseActionSlot
+                ? `<td><div class="results-actions">${actionHtml}</div></td>`
+                : (dbRaw === 'searchRack' && r.created_at ? `<td>${fmtLocal(r.created_at)}</td>` : '<td></td>')
+          )
+        : '';
     const itemIdCell = (hasEbayStore || hasAmazonStore) ? `<td>${itemid}</td>` : '';
     
     // LOT # cell for BOL items
@@ -1226,7 +1240,7 @@ function renderResults(results){
                 returnShippingCell +
                 totalReturnCostCell +
                 `<td>${ (r.archived||db==='archived') ? ('Archive ('+esc(DB_LABELS[r.orig_source_db]||r.orig_source_db||'Unknown')+')') : esc(DB_LABELS[db] || db) }</td>`+
-                `<td><div class="results-actions">${actionHtml}</div></td>`+
+                (useMobileWarehouseActionSlot ? '' : `<td class="results-action-col${isMobile ? ' is-sticky' : ''}"><div class="results-actions">${actionHtml}</div></td>`) +
                 `</tr>`;
     })
     html += '</tbody></table>';

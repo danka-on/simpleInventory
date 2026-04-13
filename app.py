@@ -33037,7 +33037,11 @@ def barcode_page():
     if request.args.get("pictureposition") == "1":
         # Will be handled by JS below
         pass
-    return render_template("barcode.html")
+    response = make_response(render_template("barcode.html"))
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
 
 @app.route("/pictures")
 def pictures_page():
@@ -33268,11 +33272,19 @@ def process_position():
     if is_locked:
         # Shelf is locked - go to multibarcode page
         print("DEBUG: Redirecting to multibarcode.html (locked)")
-        return render_template("multibarcode.html")
+        response = make_response(render_template("multibarcode.html"))
+        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+        return response
     else:
         # Normal flow - go to barcode page
         print("DEBUG: Redirecting to barcode.html")
-        return render_template("barcode.html")
+        response = make_response(render_template("barcode.html"))
+        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+        return response
 
 
 #inventory flow #3
@@ -33446,7 +33458,7 @@ def api_add_item_screen():
         return jsonify({'success': False, 'error': _safe_error(e, 'add_item:screen')}), 500
 
 
-@app.route('/additem', methods=['POST'])
+@app.route('/additem', methods=['GET', 'POST'])
 def additem_page():
     response = make_response(render_template("additem.html"))
     response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
@@ -33458,13 +33470,21 @@ def additem_page():
 @app.route('/additem-multi', methods=['GET'])
 def additem_multi_page():
     """Page for multi-barcode adds when shelf is locked"""
-    return render_template("additem_multi.html")
+    response = make_response(render_template("additem_multi.html"))
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
 
 
 @app.route('/multibarcode', methods=['GET'])
 def multibarcode_page():
     """Multi-barcode scanning page with list building"""
-    return render_template("multibarcode.html")
+    response = make_response(render_template("multibarcode.html"))
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
 
 
 @app.route('/toggle', methods=['POST'])

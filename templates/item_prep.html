@@ -1115,11 +1115,7 @@
       try{
         const url = new URL(window.location.href);
         const opts = options || {};
-        const nextUpc = String(
-          opts.upc != null
-            ? opts.upc
-            : (currentUpc || url.searchParams.get('upc') || '')
-        ).trim();
+        const nextUpc = String(opts.upc != null ? opts.upc : '').trim();
         if(nextUpc){
           url.searchParams.set('upc', nextUpc);
         } else {
@@ -1138,7 +1134,7 @@
         return `${url.pathname}${url.search}`;
       }catch(_){
         const params = [];
-        const fallbackUpc = String((options && options.upc) || currentUpc || '').trim();
+        const fallbackUpc = String((options && options.upc) || '').trim();
         if(fallbackUpc) params.push(`upc=${encodeURIComponent(fallbackUpc)}`);
         if(options && options.forceFocus) params.push('forceFocus=1');
         if(options && options.showUndo) params.push('showUndo=1');
@@ -1832,6 +1828,7 @@
           row.appendChild(arrow);
 
           row.onclick = ()=>{
+            syncItemPrepUrl(currentUpc);
             const ret = encodeURIComponent(buildItemPrepReturnUrl({upc: currentUpc}));
             window.location.href = '/item-prep/diagnostic?upc='+encodeURIComponent(entry.upc)+'&return='+ret;
           };
@@ -1977,7 +1974,6 @@
       }
       const it = j.item||{};
       currentUpc = it.upc || upc; // Store the actual UPC (may be suffixed if duplicate)
-      syncItemPrepUrl(currentUpc);
       currentLookupInfo = {
         unchecked_remaining: Number(it.unchecked_remaining || 0),
         items_to_list_url: it.items_to_list_url || '',

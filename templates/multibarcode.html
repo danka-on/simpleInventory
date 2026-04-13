@@ -411,7 +411,7 @@
 
     <!-- ZXing Library -->
     <script src="https://unpkg.com/@zxing/library@0.19.1/umd/index.min.js"></script>
-    <script src="/static/barcode-entry-state.js"></script>
+    <script src="/static/barcode-entry-state.js?v=20260413b"></script>
     
     <script>
         const barcodeEntryState = window.BarcodeEntryState;
@@ -738,7 +738,22 @@
         // Setup device mode and conditionally initialize camera
         setupDeviceMode();
         
-        // Submit barcodes function (shared by Done button and auto-submit)
+        function postBarcodeSubmission(barcodesString) {
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = '/submitbarcode';
+            
+            const input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = 'scanned_result';
+            input.value = String(barcodesString || '').trim();
+            
+            form.appendChild(input);
+            document.body.appendChild(form);
+            form.submit();
+        }
+
+        // Submit barcodes function for the Done button
         function submitBarcodes() {
             if (barcodeItems.length === 0) return;
 
@@ -750,20 +765,8 @@
             } else {
                 sessionStorage.setItem('barcode', barcodesString);
             }
-            
-            // Submit to /submitbarcode via POST
-            const form = document.createElement('form');
-            form.method = 'POST';
-            form.action = '/submitbarcode';
-            
-            const input = document.createElement('input');
-            input.type = 'hidden';
-            input.name = 'scanned_result';
-            input.value = barcodesString;
-            
-            form.appendChild(input);
-            document.body.appendChild(form);
-            form.submit();
+
+            postBarcodeSubmission(barcodesString);
         }
         
         // Done button handler
@@ -775,10 +778,9 @@
         });
         
         document.getElementById('skipBtn').addEventListener('click', function() {
-            // Skip directly to add item page (empty barcode)
             sessionStorage.removeItem('barcode');
             sessionStorage.removeItem('barcode_entries');
-            window.location.href = '/additem';
+            postBarcodeSubmission('');
         });
         
         document.getElementById('exitBtn').addEventListener('click', function() {

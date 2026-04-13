@@ -163,7 +163,7 @@
         </div>
     </div>
 
-    <script src="/static/barcode-entry-state.js"></script>
+    <script src="/static/barcode-entry-state.js?v=20260413b"></script>
     <script>
         // DOM Elements
         const scannedResultInput = document.getElementById('scanned_result');
@@ -316,6 +316,28 @@
             }
         }
 
+        function submitBarcodePayload(barcodeString) {
+            const payload = String(barcodeString || '').trim();
+            if (barcodeEntryState) {
+                const entries = barcodeEntryState.parseEntriesFromString(payload);
+                if (entries.length) {
+                    barcodeEntryState.saveEntries(entries);
+                } else {
+                    sessionStorage.removeItem('barcode');
+                    sessionStorage.removeItem('barcode_entries');
+                }
+            } else if (payload) {
+                sessionStorage.setItem('barcode', payload);
+            } else {
+                sessionStorage.removeItem('barcode');
+            }
+
+            const form = document.getElementById('scan_form');
+            if (!form) return;
+            document.getElementById('scanned_result').value = payload;
+            form.submit();
+        }
+
         function currentSingleActualCode() {
             if (!pendingSingleBarcode) return '';
             return pendingSingleSuffix > 0
@@ -352,10 +374,7 @@
                 return;
             }
 
-            const form = document.getElementById('scan_form');
-            if (form) {
-                form.submit();
-            }
+            submitBarcodePayload(finalCode);
         }
 
         function queueSingleBarcode(code) {
@@ -518,12 +537,8 @@
         function submitBarcodes() {
             clearAutoSubmitTimer();
             if (scannedBarcodes.length === 0) return;
-            // Store all barcodes (comma-separated) and proceed
             const barcodeString = scannedBarcodes.join(',');
-            sessionStorage.setItem('barcode', barcodeString);
-            document.getElementById('scanned_result').value = barcodeString;
-            // Submit to add item to shelf
-            window.location.href = '/additem';
+            submitBarcodePayload(barcodeString);
         }
 
         function showMultiBarcodeUI() {
@@ -633,19 +648,23 @@
                 });
             }
 
+            const skipForm = document.getElementById('skipForm');
+            if (skipForm) {
+                skipForm.addEventListener('submit', function() {
+                    const storedEntries = barcodeEntryState ? barcodeEntryState.loadEntries() : [];
+                    const storedBarcode = (barcodeEntryState && storedEntries.length)
+                        ? barcodeEntryState.serializeEntries(storedEntries)
+                        : sessionStorage.getItem('barcode');
+                    if (storedBarcode) {
+                        this.querySelector('input[name="scanned_result"]').value = storedBarcode;
+                    }
+                });
+            }
+
             if (isShelfLocked()) {
                 showMultiBarcodeUI();
             } else {
                 hideMultiBarcodeUI();
-            }
-        });
-
-        // On skip, if barcode exists in sessionStorage, keep it. If not, do nothing (let backend handle empty).
-        document.getElementById('skipForm').addEventListener('submit', function(e) {
-            const storedBarcode = sessionStorage.getItem('barcode');
-            if (storedBarcode) {
-                // If barcode exists, submit it instead of empty
-                this.querySelector('input[name="scanned_result"]').value = storedBarcode;
             }
         });
     </script>
@@ -684,6 +703,6 @@
         window.location.href = '/';
     });
     </script>
-    <script src="/static/i18n.js?v=20260203d"></script>
+    <script src="/static/i18n.js?v=20260413b"></script>
 </body>
 </html>
