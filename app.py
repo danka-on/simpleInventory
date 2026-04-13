@@ -33290,7 +33290,11 @@ def process_barcode():
         session['inv_barcode'] = _normalize_scanned_upc(scanned)
     print("Received scanned code:", session.get('inv_barcode'))
 
-    return render_template("additem.html")
+    response = make_response(render_template("additem.html"))
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
 
 
 def _add_item_screening_lookup(barcode):
@@ -33444,9 +33448,11 @@ def api_add_item_screen():
 
 @app.route('/additem', methods=['POST'])
 def additem_page():
-    #return pictures
-
-    return render_template("additem.html")
+    response = make_response(render_template("additem.html"))
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
 
 
 @app.route('/additem-multi', methods=['GET'])
