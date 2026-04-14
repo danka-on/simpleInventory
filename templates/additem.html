@@ -847,8 +847,38 @@
         return openMissingDataModal(issues);
     }
 
-    function submitAddItemForm(form) {
+    async function submitAddItemForm(form) {
         syncAddItemFormFields();
+        const formData = new FormData(form);
+        try {
+            const res = await fetch('/additemtrue', {
+                method: 'POST',
+                body: formData,
+                headers: { 'Accept': '*/*' }
+            });
+            if (res.ok) {
+                const data = await res.json().catch(() => null);
+                if (data && data.success) {
+                    sessionStorage.removeItem('barcode');
+                    sessionStorage.removeItem('barcode_entries');
+                    sessionStorage.removeItem('additem_manual_titles');
+                    sessionStorage.removeItem('item_position');
+                    sessionStorage.removeItem('pictureposition_path');
+                    const wasLocked = sessionStorage.getItem('positionLocked') === 'true';
+                    if (wasLocked) {
+                        sessionStorage.removeItem('positionLocked');
+                        fetch('/toggle', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ checked: false })
+                        }).catch(() => {});
+                    }
+                    window.location.replace('/position');
+                    return;
+                }
+            }
+        } catch (_) { /* fall through to native */ }
+        // Native fallback (e.g. server returned non-JSON error page)
         form.submit();
     }
 
@@ -871,10 +901,10 @@
             if (!screeningResult || screeningResult.continueSubmit === false) {
                 return;
             }
-            submitAddItemForm(form);
+            await submitAddItemForm(form);
         } catch (err) {
             console.error('Add item screening failed, submitting anyway:', err);
-            submitAddItemForm(form);
+            await submitAddItemForm(form);
         } finally {
             addItemSubmitInFlight = false;
             if (addButton) addButton.disabled = false;
@@ -931,8 +961,9 @@
         const timerDiv = document.getElementById('autoSubmitTimer');
         timerDiv.style.display = 'none';
     }
-    // Cancel timer on any user input or touch
-    ['keydown','mousedown','touchstart'].forEach(evt => {
+    // Cancel timer on keyboard/mouse input — intentionally excludes touchstart
+    // so mobile page-load scroll or a residual finger touch doesn't kill the timer
+    ['keydown', 'mousedown'].forEach(evt => {
         window.addEventListener(evt, cancelAutoSubmitTimer, { once: true, passive: true });
     });
     ['pointerdown', 'keydown', 'touchstart'].forEach(evt => {
