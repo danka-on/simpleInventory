@@ -961,9 +961,8 @@
         const timerDiv = document.getElementById('autoSubmitTimer');
         timerDiv.style.display = 'none';
     }
-    // Cancel timer on keyboard/mouse input — intentionally excludes touchstart
-    // so mobile page-load scroll or a residual finger touch doesn't kill the timer
-    ['keydown', 'mousedown'].forEach(evt => {
+    // Cancel timer on any user input or touch
+    ['keydown','mousedown','touchstart'].forEach(evt => {
         window.addEventListener(evt, cancelAutoSubmitTimer, { once: true, passive: true });
     });
     ['pointerdown', 'keydown', 'touchstart'].forEach(evt => {
