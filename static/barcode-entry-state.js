@@ -182,20 +182,44 @@
     }
 
     function setSingleScanSuffix(code, suffix) {
-        const normalizedCode = String(code || '').trim();
+        const rawCode = String(code || '').trim();
+        if (!rawCode) return [];
+
+        const split = splitActualCode(rawCode);
+        const normalizedCode = String(split.code || rawCode).trim();
         if (!normalizedCode) return [];
-        return normalizeEntries([{ code: normalizedCode, suffix: Math.max(0, parseInt(suffix, 10) || 0), quantity: 1 }]);
+
+        let normalizedSuffix = parseInt(suffix, 10);
+        if (!Number.isFinite(normalizedSuffix) || normalizedSuffix < 0) normalizedSuffix = 0;
+        if (normalizedSuffix === 0 && split.suffix > 0) {
+            normalizedSuffix = split.suffix;
+        }
+
+        return normalizeEntries([{ code: normalizedCode, suffix: normalizedSuffix, quantity: 1 }]);
     }
 
     function addBaseScan(entries, code) {
         const normalized = normalizeEntries(entries);
         const rawCode = String(code || '').trim();
         if (!rawCode) return normalized;
-        const existingBase = normalized.find(entry => entry.code === rawCode && entry.suffix === 0);
+
+        const split = splitActualCode(rawCode);
+        const normalizedCode = String(split.code || rawCode).trim();
+        if (!normalizedCode) return normalized;
+
+        if (split.suffix > 0) {
+            const existingSuffix = normalized.find(entry => entry.code === normalizedCode && entry.suffix === split.suffix);
+            if (existingSuffix) return normalized;
+
+            normalized.push({ code: normalizedCode, suffix: split.suffix, quantity: 1 });
+            return normalizeEntries(normalized);
+        }
+
+        const existingBase = normalized.find(entry => entry.code === normalizedCode && entry.suffix === 0);
         if (existingBase) {
             existingBase.quantity += 1;
         } else {
-            normalized.push({ code: rawCode, suffix: 0, quantity: 1 });
+            normalized.push({ code: normalizedCode, suffix: 0, quantity: 1 });
         }
         return normalizeEntries(normalized);
     }

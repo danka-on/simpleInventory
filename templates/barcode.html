@@ -87,6 +87,127 @@
             cursor: pointer;
             font-weight: 600;
         }
+        .missing-title-modal {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.6);
+            z-index: 100000;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .missing-title-card {
+            background: #fffdf8;
+            border-radius: 16px;
+            padding: 18px 20px 16px;
+            width: 92%;
+            max-width: 430px;
+            box-shadow: 0 18px 40px rgba(0,0,0,0.28);
+            border: 1px solid #f3d9a2;
+        }
+        .missing-title-accent {
+            height: 6px;
+            border-radius: 999px;
+            background: linear-gradient(90deg, #f59e0b, #ef4444);
+            margin: -18px -20px 14px;
+        }
+        .missing-title-icon {
+            width: 52px;
+            height: 52px;
+            border-radius: 50%;
+            background: rgba(245, 158, 11, 0.14);
+            color: #d97706;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.45rem;
+            margin: 0 auto 12px;
+            animation: missingTitlePulse 1.15s ease-in-out infinite;
+        }
+        @keyframes missingTitlePulse {
+            0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.16); }
+            50% { transform: scale(1.06); box-shadow: 0 0 0 12px rgba(245, 158, 11, 0); }
+        }
+        .missing-title-heading {
+            margin: 0 0 8px;
+            text-align: center;
+            color: #1f2937;
+            font-size: 1.08rem;
+            font-weight: 800;
+        }
+        .missing-title-body {
+            margin: 0 0 8px;
+            color: #374151;
+            font-size: 0.97rem;
+            line-height: 1.45;
+            text-align: center;
+        }
+        .missing-title-code {
+            margin: 0 0 14px;
+            text-align: center;
+            font-family: monospace;
+            font-size: 1rem;
+            font-weight: 800;
+            color: #b45309;
+        }
+        .missing-title-keyboard {
+            width: 100%;
+            margin: 0 0 12px;
+            padding: 11px 14px;
+            border-radius: 10px;
+            border: 1px dashed #d97706;
+            background: rgba(245, 158, 11, 0.08);
+            color: #92400e;
+            font-size: 0.96rem;
+            font-weight: 800;
+            cursor: pointer;
+            -webkit-appearance: none;
+            appearance: none;
+        }
+        .missing-title-keyboard:active {
+            transform: translateY(1px);
+        }
+        .missing-title-input {
+            width: 100%;
+            margin: 0 0 14px;
+            padding: 12px 14px;
+            font-size: 1rem;
+            border: 2px solid #f2c66d;
+            border-radius: 10px;
+            box-sizing: border-box;
+        }
+        .missing-title-input:focus {
+            outline: none;
+            border-color: #f59e0b;
+            box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.16);
+        }
+        .missing-title-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: flex-end;
+        }
+        .missing-title-btn {
+            border: none;
+            border-radius: 10px;
+            padding: 10px 14px;
+            font-weight: 700;
+            cursor: pointer;
+            margin-top: 0;
+        }
+        .missing-title-btn.cancel {
+            background: #e5e7eb;
+            color: #374151;
+        }
+        .missing-title-btn.skip {
+            background: #fde68a;
+            color: #92400e;
+        }
+        .missing-title-btn.save {
+            background: #f59e0b;
+            color: #fff;
+        }
     </style>
 </head>
 <body>
@@ -163,6 +284,22 @@
         </div>
     </div>
 
+    <div id="missingTitleModal" class="missing-title-modal">
+        <div class="missing-title-card">
+            <div class="missing-title-accent"></div>
+            <div class="missing-title-icon"><i class="fas fa-wave-square"></i></div>
+            <h3 class="missing-title-heading">Missing Macy/BOL title</h3>
+            <p class="missing-title-body">This barcode has no title match. Add a warehouse title now or skip and add without a title.</p>
+            <div class="missing-title-code" id="missingTitleBarcodeText"></div>
+            <button type="button" id="missingTitleKeyboardBtn" class="missing-title-keyboard">Tap Here to Type Title</button>
+            <input type="text" id="missingTitleInput" class="missing-title-input" maxlength="200" placeholder="Enter a warehouse title" autocomplete="off" autocapitalize="words" spellcheck="false" inputmode="text" enterkeyhint="done">
+            <div class="missing-title-actions">
+                <button type="button" id="missingTitleSkipBtn" class="missing-title-btn skip">Skip Without Title</button>
+                <button type="button" id="missingTitleSaveBtn" class="missing-title-btn save">Save Title</button>
+            </div>
+        </div>
+    </div>
+
     <script src="/static/barcode-entry-state.js?v=20260413b"></script>
     <script>
         // DOM Elements
@@ -171,12 +308,25 @@
         const t = (key, fallback) => (window.i18n && window.i18n.t) ? window.i18n.t(key) : fallback;
         const invalidModal = document.getElementById('invalidModal');
         const invalidModalClose = document.getElementById('invalidModalClose');
+        const missingTitleModal = document.getElementById('missingTitleModal');
+        const missingTitleBarcodeText = document.getElementById('missingTitleBarcodeText');
+        const missingTitleKeyboardBtn = document.getElementById('missingTitleKeyboardBtn');
+        const missingTitleInput = document.getElementById('missingTitleInput');
+        const missingTitleSkipBtn = document.getElementById('missingTitleSkipBtn');
+        const missingTitleSaveBtn = document.getElementById('missingTitleSaveBtn');
         const barcodeEntryState = window.BarcodeEntryState;
+        const MANUAL_TITLE_STORAGE_KEY = 'additem_manual_titles';
+        const MANUAL_TITLE_SKIP_STORAGE_KEY = 'additem_manual_title_skips';
         let invalidModalOpen = false;
+        let missingTitleModalOpen = false;
+        let missingTitleModalResolver = null;
+        let missingTitleKeyboardTapRequired = false;
         const SINGLE_SCAN_CAPTURE_MS = 700;
         let pendingSingleBarcode = '';
         let pendingSingleSuffix = 0;
         let pendingSingleSubmitTimer = null;
+        let barcodeScanQueue = Promise.resolve();
+        const screeningCache = new Map();
 
         // Macy barcode filtering
         let allowedUPCs = [];
@@ -279,34 +429,346 @@
             checkPictureUploadStatus();
         }
 
+        function splitScannedBarcode(code) {
+            const raw = String(code || '').trim();
+            if (!raw) return { base: '', suffix: '' };
+
+            if (barcodeEntryState && typeof barcodeEntryState.splitActualCode === 'function') {
+                const split = barcodeEntryState.splitActualCode(raw);
+                return {
+                    base: String((split && split.code) || '').trim(),
+                    suffix: split && split.suffix > 0 ? String(split.suffix) : ''
+                };
+            }
+
+            const match = raw.match(/^(.*?)-(\d+)$/);
+            if (match && match[1]) {
+                return { base: String(match[1] || '').trim(), suffix: String(match[2] || '').trim() };
+            }
+            return { base: raw, suffix: '' };
+        }
+
+        function hasLiteralBarcodeSuffix(code) {
+            return !!splitScannedBarcode(code).suffix;
+        }
+
         // Validate barcode format (reject invalid formats)
         function isValidBarcode(code) {
-            // Must be all digits
-            if (!/^\d+$/.test(code)) {
+            const split = splitScannedBarcode(code);
+            if (!/^\d+$/.test(split.base)) {
                 return false;
             }
             // Valid lengths for this workflow: UPC-family only (8, 11, 12, 13)
-            const len = code.length;
+            const len = split.base.length;
             if (len < 8 || len > 13) {
+                return false;
+            }
+            if (split.suffix && !/^[1-9]\d*$/.test(split.suffix)) {
                 return false;
             }
             return true;
         }
 
         function normalizeScannedBarcode(code) {
-            const s0 = String(code || '').trim();
-            if (!/^\d+$/.test(s0)) return s0;
-            if (s0.length > 13 && s0.startsWith('0')) {
-                const stripped = s0.replace(/^0+/, '');
-                if (stripped && stripped.length <= 13) return stripped;
+            const split = splitScannedBarcode(code);
+            let base = split.base;
+            if (/^\d+$/.test(base) && base.length > 13 && base.startsWith('0')) {
+                const stripped = base.replace(/^0+/, '');
+                if (stripped && stripped.length <= 13) {
+                    base = stripped;
+                }
             }
-            return s0;
+            if (!base) return '';
+            return split.suffix ? `${base}-${split.suffix}` : base;
         }
 
         function formatUpcDisplay(code) {
-            const s = String(code || '').trim();
-            if (/^\d+$/.test(s) && s.length <= 12) return s.padStart(12, '0');
-            return s;
+            const split = splitScannedBarcode(code);
+            const base = (/^\d+$/.test(split.base) && split.base.length <= 12)
+                ? split.base.padStart(12, '0')
+                : split.base;
+            return split.suffix ? `${base}-${split.suffix}` : base;
+        }
+
+        function normalizeManualTitleKey(code) {
+            const split = splitScannedBarcode(code);
+            return String(split.base || '').trim();
+        }
+
+        function loadManualTitleOverrides() {
+            const raw = sessionStorage.getItem(MANUAL_TITLE_STORAGE_KEY);
+            if (!raw) return {};
+            try {
+                const parsed = JSON.parse(raw);
+                if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+                const clean = {};
+                Object.entries(parsed).forEach(([rawKey, rawValue]) => {
+                    const key = normalizeManualTitleKey(rawKey);
+                    const value = String(rawValue || '').replace(/\s+/g, ' ').trim();
+                    if (key && value) clean[key] = value.slice(0, 200);
+                });
+                return clean;
+            } catch (_) {
+                return {};
+            }
+        }
+
+        function saveManualTitleOverrides(overrides) {
+            const next = {};
+            Object.entries(overrides || {}).forEach(([rawKey, rawValue]) => {
+                const key = normalizeManualTitleKey(rawKey);
+                const value = String(rawValue || '').replace(/\s+/g, ' ').trim();
+                if (key && value) next[key] = value.slice(0, 200);
+            });
+            if (Object.keys(next).length) {
+                sessionStorage.setItem(MANUAL_TITLE_STORAGE_KEY, JSON.stringify(next));
+            } else {
+                sessionStorage.removeItem(MANUAL_TITLE_STORAGE_KEY);
+            }
+            return next;
+        }
+
+        function loadSkippedManualTitles() {
+            const raw = sessionStorage.getItem(MANUAL_TITLE_SKIP_STORAGE_KEY);
+            if (!raw) return {};
+            try {
+                const parsed = JSON.parse(raw);
+                if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+                const clean = {};
+                Object.entries(parsed).forEach(([rawKey, rawValue]) => {
+                    const key = normalizeManualTitleKey(rawKey);
+                    if (key && rawValue) clean[key] = true;
+                });
+                return clean;
+            } catch (_) {
+                return {};
+            }
+        }
+
+        function saveSkippedManualTitles(skips) {
+            const next = {};
+            Object.entries(skips || {}).forEach(([rawKey, rawValue]) => {
+                const key = normalizeManualTitleKey(rawKey);
+                if (key && rawValue) next[key] = true;
+            });
+            if (Object.keys(next).length) {
+                sessionStorage.setItem(MANUAL_TITLE_SKIP_STORAGE_KEY, JSON.stringify(next));
+            } else {
+                sessionStorage.removeItem(MANUAL_TITLE_SKIP_STORAGE_KEY);
+            }
+            return next;
+        }
+
+        function playMissingTitleAlert() {
+            try {
+                const Ctx = window.AudioContext || window.webkitAudioContext;
+                if (!Ctx) return;
+                const ctx = window.audioCtx || new Ctx();
+                window.audioCtx = ctx;
+                const start = ctx.currentTime + 0.02;
+                const notes = [
+                    { freq: 932, at: 0, dur: 0.09 },
+                    { freq: 698, at: 0.12, dur: 0.1 },
+                    { freq: 1046, at: 0.26, dur: 0.15 }
+                ];
+                notes.forEach(note => {
+                    const osc = ctx.createOscillator();
+                    const gain = ctx.createGain();
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(note.freq, start + note.at);
+                    gain.gain.setValueAtTime(0.0001, start + note.at);
+                    gain.gain.exponentialRampToValueAtTime(0.17, start + note.at + 0.02);
+                    gain.gain.exponentialRampToValueAtTime(0.0001, start + note.at + note.dur);
+                    osc.connect(gain);
+                    gain.connect(ctx.destination);
+                    osc.start(start + note.at);
+                    osc.stop(start + note.at + note.dur + 0.03);
+                    osc.onended = () => {
+                        osc.disconnect();
+                        gain.disconnect();
+                    };
+                });
+            } catch (_) {}
+            if (navigator.vibrate) navigator.vibrate([90, 60, 90, 60, 130]);
+        }
+
+        function requiresMissingTitleKeyboardTap() {
+            const ua = navigator.userAgent || '';
+            return /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && 'ontouchend' in document);
+        }
+
+        function setMissingTitleScanPause(active) {
+            if (barcodeInput) {
+                barcodeInput.readOnly = !!active;
+            }
+            try {
+                if (document.activeElement && typeof document.activeElement.blur === 'function') {
+                    document.activeElement.blur();
+                }
+            } catch (_) {}
+        }
+
+        function unlockMissingTitleTyping(retry = true) {
+            missingTitleKeyboardTapRequired = false;
+            if (missingTitleKeyboardBtn) {
+                missingTitleKeyboardBtn.style.display = 'none';
+            }
+            if (missingTitleInput) {
+                missingTitleInput.readOnly = false;
+            }
+            focusMissingTitleEntry(retry);
+        }
+
+        function closeMissingTitleModal(result) {
+            if (!missingTitleModal) return;
+            missingTitleModal.style.display = 'none';
+            missingTitleModalOpen = false;
+            missingTitleKeyboardTapRequired = false;
+            if (missingTitleInput) {
+                missingTitleInput.readOnly = false;
+            }
+            if (missingTitleKeyboardBtn) {
+                missingTitleKeyboardBtn.style.display = 'none';
+            }
+            setMissingTitleScanPause(false);
+            const resolver = missingTitleModalResolver;
+            missingTitleModalResolver = null;
+            if (resolver) resolver(result || { action: 'dismiss', title: '' });
+            window.setTimeout(() => {
+                if (missingTitleModalOpen || !barcodeInput) return;
+                barcodeInput.focus();
+                if (typeof barcodeInput.select === 'function') barcodeInput.select();
+            }, 60);
+        }
+
+        function focusMissingTitleEntry(retry = false) {
+            if (!missingTitleInput) return;
+
+            const attemptFocus = () => {
+                if (!missingTitleModalOpen) return;
+                try {
+                    if (document.activeElement && document.activeElement !== missingTitleInput && typeof document.activeElement.blur === 'function') {
+                        document.activeElement.blur();
+                    }
+                } catch (_) {}
+                try {
+                    missingTitleInput.focus({ preventScroll: true });
+                } catch (_) {
+                    missingTitleInput.focus();
+                }
+                if (typeof missingTitleInput.click === 'function') missingTitleInput.click();
+                if (typeof missingTitleInput.select === 'function') missingTitleInput.select();
+                if (typeof missingTitleInput.setSelectionRange === 'function') {
+                    const end = missingTitleInput.value.length;
+                    missingTitleInput.setSelectionRange(end, end);
+                }
+            };
+
+            attemptFocus();
+            if (retry) {
+                window.requestAnimationFrame(attemptFocus);
+                window.setTimeout(attemptFocus, 50);
+                window.setTimeout(attemptFocus, 180);
+            }
+        }
+
+        function openMissingTitleModal(code) {
+            if (!missingTitleModal || !missingTitleInput || !missingTitleBarcodeText) {
+                return Promise.resolve({ action: 'skip', title: '' });
+            }
+
+            if (missingTitleModalResolver) {
+                closeMissingTitleModal({ action: 'dismiss', title: '' });
+            }
+
+            missingTitleBarcodeText.textContent = formatUpcDisplay(code);
+            missingTitleInput.value = '';
+            missingTitleInput.style.borderColor = '#f2c66d';
+            missingTitleInput.style.boxShadow = '';
+            missingTitleKeyboardTapRequired = requiresMissingTitleKeyboardTap();
+            missingTitleInput.readOnly = missingTitleKeyboardTapRequired;
+            if (missingTitleKeyboardBtn) {
+                missingTitleKeyboardBtn.style.display = missingTitleKeyboardTapRequired ? 'block' : 'none';
+            }
+            missingTitleModal.style.display = 'flex';
+            missingTitleModalOpen = true;
+            setMissingTitleScanPause(true);
+            playMissingTitleAlert();
+            if (missingTitleKeyboardTapRequired) {
+                window.requestAnimationFrame(() => {
+                    if (missingTitleModalOpen && missingTitleKeyboardBtn) missingTitleKeyboardBtn.focus();
+                });
+            } else {
+                focusMissingTitleEntry(true);
+            }
+
+            return new Promise(resolve => {
+                missingTitleModalResolver = resolve;
+            });
+        }
+
+        async function fetchAddItemScreeningSingle(code) {
+            const key = normalizeManualTitleKey(code);
+            if (!key) return null;
+            if (screeningCache.has(key)) return screeningCache.get(key);
+
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 3000);
+            try {
+                const response = await fetch('/api/add-item/screen', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ barcodes: [key] }),
+                    signal: controller.signal
+                });
+                const payload = await response.json().catch(() => ({}));
+                if (!response.ok || payload.success === false) {
+                    throw new Error((payload && payload.error) || 'Unable to screen item');
+                }
+                const item = payload.items && (payload.items[key] || payload.items[code]) ? (payload.items[key] || payload.items[code]) : null;
+                screeningCache.set(key, item);
+                return item;
+            } finally {
+                clearTimeout(timeout);
+            }
+        }
+
+        async function ensureScannedBarcodeReadyForAdd(code) {
+            const key = normalizeManualTitleKey(code);
+            if (!key) return true;
+
+            const overrides = loadManualTitleOverrides();
+            if (overrides[key]) return true;
+            const skipped = loadSkippedManualTitles();
+            if (skipped[key]) return true;
+
+            try {
+                const item = await fetchAddItemScreeningSingle(key);
+                if (!item || !item.needs_manual_title) return true;
+            } catch (err) {
+                console.error('Barcode screening failed; allowing scan:', err);
+                return true;
+            }
+
+            const modalResult = await openMissingTitleModal(code);
+            if (!modalResult || (modalResult.action !== 'skip' && modalResult.action !== 'save')) return false;
+
+            if (modalResult.action === 'skip') {
+                skipped[key] = true;
+                saveSkippedManualTitles(skipped);
+                return true;
+            }
+
+            const value = String((modalResult && modalResult.title) || '').replace(/\s+/g, ' ').trim();
+            if (!value) return false;
+
+            overrides[key] = value.slice(0, 200);
+            saveManualTitleOverrides(overrides);
+            if (skipped[key]) {
+                delete skipped[key];
+                saveSkippedManualTitles(skipped);
+            }
+            return true;
         }
 
         function clearPendingSingleSubmit() {
@@ -314,6 +776,13 @@
                 clearTimeout(pendingSingleSubmitTimer);
                 pendingSingleSubmitTimer = null;
             }
+        }
+
+        function resetPendingSingleBarcode() {
+            pendingSingleBarcode = '';
+            pendingSingleSuffix = 0;
+            document.getElementById('scanned_result').value = '';
+            scannedResultInput.style.background = '';
         }
 
         function submitBarcodePayload(barcodeString) {
@@ -340,6 +809,7 @@
 
         function currentSingleActualCode() {
             if (!pendingSingleBarcode) return '';
+            if (hasLiteralBarcodeSuffix(pendingSingleBarcode)) return pendingSingleBarcode;
             return pendingSingleSuffix > 0
                 ? `${pendingSingleBarcode}-${pendingSingleSuffix}`
                 : pendingSingleBarcode;
@@ -352,14 +822,21 @@
             scannedResultInput.style.background = '#e0ffe0';
         }
 
-        function commitPendingSingleBarcode() {
+        async function commitPendingSingleBarcode() {
             clearPendingSingleSubmit();
             const finalCode = currentSingleActualCode();
             if (!finalCode) return;
 
+            const ready = await ensureScannedBarcodeReadyForAdd(finalCode);
+            if (!ready) {
+                resetPendingSingleBarcode();
+                if (barcodeInput) barcodeInput.focus();
+                return;
+            }
+
             if (barcodeEntryState) {
                 barcodeEntryState.saveEntries(
-                    barcodeEntryState.setSingleScanSuffix(pendingSingleBarcode, pendingSingleSuffix)
+                    barcodeEntryState.parseEntriesFromString(finalCode)
                 );
             } else {
                 sessionStorage.setItem('barcode', finalCode);
@@ -381,7 +858,7 @@
             const normalized = String(code || '').trim();
             if (!normalized) return;
 
-            if (pendingSingleBarcode === normalized) {
+            if (pendingSingleBarcode === normalized && !hasLiteralBarcodeSuffix(normalized)) {
                 pendingSingleSuffix += 1;
             } else {
                 pendingSingleBarcode = normalized;
@@ -391,14 +868,19 @@
             playBeep();
             updatePendingSingleDisplay();
             clearPendingSingleSubmit();
-            pendingSingleSubmitTimer = setTimeout(commitPendingSingleBarcode, SINGLE_SCAN_CAPTURE_MS);
+            pendingSingleSubmitTimer = setTimeout(() => {
+                commitPendingSingleBarcode().catch(err => {
+                    console.error('Commit pending barcode failed:', err);
+                    resetPendingSingleBarcode();
+                });
+            }, SINGLE_SCAN_CAPTURE_MS);
         }
 
         // Handle barcode input for manual or scanner input
         function handleBarcodeInput(code) {
             const trimmed = String(code || '').trim();
             if (!trimmed) return;
-            handleBarcodeScan(trimmed);
+            queueBarcodeScan(trimmed);
             barcodeInput.value = '';
         }
 
@@ -441,6 +923,64 @@
                 if (e.target === invalidModal) closeInvalidModal();
             });
         }
+        if (missingTitleSkipBtn) {
+            missingTitleSkipBtn.addEventListener('click', () => closeMissingTitleModal({ action: 'skip', title: '' }));
+        }
+        if (missingTitleSaveBtn) {
+            missingTitleSaveBtn.addEventListener('click', () => {
+                const value = String(missingTitleInput && missingTitleInput.value || '').replace(/\s+/g, ' ').trim();
+                if (!value) {
+                    if (missingTitleInput) {
+                        missingTitleInput.style.borderColor = '#dc2626';
+                        missingTitleInput.style.boxShadow = '0 0 0 3px rgba(220,38,38,0.16)';
+                        missingTitleInput.focus();
+                    }
+                    return;
+                }
+                closeMissingTitleModal({ action: 'save', title: value });
+            });
+        }
+        if (missingTitleInput) {
+            const handleMissingTitleTap = (e) => {
+                if (!missingTitleKeyboardTapRequired) return;
+                if (e) e.preventDefault();
+                unlockMissingTitleTyping(false);
+            };
+            missingTitleInput.addEventListener('input', () => {
+                missingTitleInput.style.borderColor = '#f2c66d';
+                missingTitleInput.style.boxShadow = '';
+            });
+            missingTitleInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (missingTitleSaveBtn) missingTitleSaveBtn.click();
+                } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    focusMissingTitleEntry(true);
+                }
+            });
+            missingTitleInput.addEventListener('touchend', handleMissingTitleTap);
+            missingTitleInput.addEventListener('mouseup', handleMissingTitleTap);
+        }
+        if (missingTitleKeyboardBtn) {
+            const handleMissingTitleKeyboardBtn = (e) => {
+                if (e) e.preventDefault();
+                unlockMissingTitleTyping(true);
+            };
+            missingTitleKeyboardBtn.addEventListener('click', handleMissingTitleKeyboardBtn);
+            missingTitleKeyboardBtn.addEventListener('touchend', handleMissingTitleKeyboardBtn);
+        }
+        if (missingTitleModal) {
+            missingTitleModal.addEventListener('click', (e) => {
+                if (e.target === missingTitleModal) {
+                    if (missingTitleKeyboardTapRequired && missingTitleKeyboardBtn) {
+                        missingTitleKeyboardBtn.focus();
+                        return;
+                    }
+                    focusMissingTitleEntry(true);
+                }
+            });
+        }
 
         // Multi-barcode scanning state
         let scannedBarcodes = [];
@@ -461,7 +1001,15 @@
             return sessionStorage.getItem('positionLocked') === 'true';
         }
 
-        function addBarcodeToList(code) {
+        async function addBarcodeToList(code) {
+            const ready = await ensureScannedBarcodeReadyForAdd(code);
+            if (!ready) {
+                if (barcodeInput) {
+                    barcodeInput.value = '';
+                    barcodeInput.focus();
+                }
+                return;
+            }
             // Avoid duplicates
             if (scannedBarcodes.includes(code)) {
                 playErrorBeep();
@@ -561,8 +1109,17 @@
             clearAutoSubmitTimer();
         }
 
+        function queueBarcodeScan(code) {
+            const raw = String(code || '').trim();
+            if (!raw || missingTitleModalOpen) return barcodeScanQueue;
+            barcodeScanQueue = barcodeScanQueue.then(() => handleBarcodeScan(raw)).catch(err => {
+                console.error('Barcode scan processing failed:', err);
+            });
+            return barcodeScanQueue;
+        }
+
         // Ensure barcode is set in sessionStorage on successful scan or input
-        function handleBarcodeScan(code) {
+        async function handleBarcodeScan(code) {
             code = normalizeScannedBarcode(code);
             // Validate barcode format
             if (!isValidBarcode(code)) {
@@ -586,7 +1143,7 @@
 
             if (isShelfLocked()) {
                 showMultiBarcodeUI();
-                addBarcodeToList(code);
+                await addBarcodeToList(code);
                 return;
             }
 
@@ -692,6 +1249,8 @@
         sessionStorage.removeItem('item_position');
         sessionStorage.removeItem('barcode');
         sessionStorage.removeItem('barcode_entries');
+        sessionStorage.removeItem('additem_manual_titles');
+        sessionStorage.removeItem('additem_manual_title_skips');
         sessionStorage.removeItem('pictureposition_path');
         sessionStorage.removeItem('positionLocked');
         // Notify server to clear lock state

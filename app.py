@@ -6750,6 +6750,46 @@ def _preplog_auto_assigned_entries(*, include_undone=False, lot_number='', limit
         filtered.append(row)
     return filtered
 
+def _preplog_attach_voice_notes(items):
+    """Attach voice_notes list to each prep-log row from items_prep_media in bol.db."""
+    rows = [dict(it or {}) for it in (items or [])]
+    if not rows:
+        return rows
+    all_upcs = list({str(row.get('upc') or '').strip() for row in rows if row.get('upc')})
+    voice_by_upc = {}
+    if all_upcs:
+        try:
+            with db_connection('bol.db') as conn:
+                conn.row_factory = sqlite3.Row
+                cur = conn.cursor()
+                for i in range(0, len(all_upcs), 350):
+                    chunk = all_upcs[i:i + 350]
+                    placeholders = ','.join('?' * len(chunk))
+                    cur.execute(
+                        f"SELECT upc, id, file_path, mime_type, created_at FROM items_prep_media "
+                        f"WHERE upc IN ({placeholders}) COLLATE NOCASE AND COALESCE(media_type,'') = 'audio' "
+                        f"ORDER BY created_at DESC, id DESC",
+                        tuple(chunk)
+                    )
+                    for vr in cur.fetchall():
+                        rel = (vr['file_path'] or '').strip()
+                        if not rel:
+                            continue
+                        uk = (vr['upc'] or '').upper()
+                        audio_url = rel if rel.startswith(('http://', 'https://', '/')) else f"/static/{rel}"
+                        voice_by_upc.setdefault(uk, []).append({
+                            'id': vr['id'],
+                            'url': audio_url,
+                            'mime_type': vr['mime_type'] or '',
+                            'created_at': vr['created_at'] or ''
+                        })
+        except Exception:
+            pass
+    for row in rows:
+        uk = (str(row.get('upc') or '')).upper()
+        row['voice_notes'] = voice_by_upc.get(uk, [])
+    return rows
+
 def _preplog_attach_titles(items):
     """Attach `item_title` to prep-log rows, preferring bol.db then rawbol.db."""
     rows = [dict(it or {}) for it in (items or [])]
@@ -8219,6 +8259,7 @@ def api_preplog_recent():
         if lot_filter:
             items = [it for it in items if _normalize_lot_number(it.get('lot_number')).lower() == lot_filter.lower()]
         items = _preplog_attach_titles(items)
+        items = _preplog_attach_voice_notes(items)
 
         return jsonify({'success': True, 'items': items})
     except Exception as e:
@@ -16775,11 +16816,14 @@ def _build_ready_to_ship_prep_context(cur, barcode, include_details=True, max_no
                 'latest_at': '',
                 'notes': [],
                 'images': [],
+                'voice_notes': [],
                 'note_count': 0,
                 'image_count': 0,
+                'voice_note_count': 0,
                 'has_suffixed': '-' in str(scope_upc or ''),
                 '_note_keys': set(),
                 '_image_ids': set(),
+                '_audio_ids': set(),
             }
         return entry_map[key]
 
@@ -16873,6 +16917,29 @@ def _build_ready_to_ship_prep_context(cur, barcode, include_details=True, max_no
                 target.setdefault('images', []).append(image)
                 if str(image_id or '').isdigit():
                     existing_image_ids.add(int(image_id))
+
+        source_audio_ids = source.get('_audio_ids') or set()
+        target_audio_ids = target.get('_audio_ids')
+        if not isinstance(target_audio_ids, set):
+            target_audio_ids = set(target_audio_ids or [])
+            target['_audio_ids'] = target_audio_ids
+        added_audio_count = 0
+        for audio_id in source_audio_ids:
+            if audio_id in target_audio_ids:
+                continue
+            target_audio_ids.add(audio_id)
+            added_audio_count += 1
+        if added_audio_count:
+            target['voice_note_count'] = int(target.get('voice_note_count') or 0) + added_audio_count
+        if include_details:
+            existing_audio_ids = {int(vn.get('id') or 0) for vn in (target.get('voice_notes') or []) if str(vn.get('id') or '').isdigit()}
+            for vn in (source.get('voice_notes') or []):
+                vn_id = vn.get('id')
+                if str(vn_id or '').isdigit() and int(vn_id) in existing_audio_ids:
+                    continue
+                target.setdefault('voice_notes', []).append(vn)
+                if str(vn_id or '').isdigit():
+                    existing_audio_ids.add(int(vn_id))
 
     try:
         cur.execute('''
@@ -16995,6 +17062,44 @@ def _build_ready_to_ship_prep_context(cur, barcode, include_details=True, max_no
 
     try:
         cur.execute('''
+            SELECT id, upc, COALESCE(row_status, '') AS row_status,
+                   file_path, COALESCE(mime_type,'') AS mime_type, created_at
+            FROM items_prep_media
+            WHERE (upc = ? COLLATE NOCASE OR upc LIKE ? ESCAPE '\\')
+              AND COALESCE(media_type,'') = 'audio'
+            ORDER BY created_at DESC, id DESC
+            LIMIT 20
+        ''', (requested_base, like_related))
+        audio_rows = [dict(r) for r in cur.fetchall()]
+    except Exception:
+        audio_rows = []
+
+    for row in audio_rows:
+        raw_upc = _normalize_upc_preserve_suffix_for_match(row.get('upc'))
+        scope_upc, scope_status = _items_to_list_asset_scope(raw_upc, row.get('row_status'))
+        if not scope_upc:
+            continue
+        entry = ensure_entry(scope_upc, scope_status)
+        file_path = str(row.get('file_path') or '').strip()
+        if not file_path:
+            continue
+        audio_url = file_path if file_path.startswith(('http://', 'https://', '/')) else f"/static/{file_path}"
+        audio_id = row.get('id')
+        audio_ids = entry.setdefault('_audio_ids', set())
+        if audio_id not in audio_ids:
+            audio_ids.add(audio_id)
+            entry['voice_note_count'] = int(entry.get('voice_note_count') or 0) + 1
+            if include_details:
+                entry.setdefault('voice_notes', []).append({
+                    'id': audio_id,
+                    'url': audio_url,
+                    'mime_type': row.get('mime_type') or '',
+                    'created_at': row.get('created_at') or ''
+                })
+            push_timestamp(entry, row.get('created_at'))
+
+    try:
+        cur.execute('''
             SELECT upc,
                    MAX(
                        CASE
@@ -17023,7 +17128,7 @@ def _build_ready_to_ship_prep_context(cur, barcode, include_details=True, max_no
     working_entries = []
 
     for entry in entry_map.values():
-        if entry['note_count'] <= 0 and not str(entry.get('reason') or '').strip() and entry['image_count'] <= 0:
+        if entry['note_count'] <= 0 and not str(entry.get('reason') or '').strip() and entry['image_count'] <= 0 and int(entry.get('voice_note_count') or 0) <= 0:
             continue
         entry['relevance_rank'] = _ready_to_ship_prep_relevance(requested_upc, entry.get('scope_upc'))
         entry['relevance_label'] = _ready_to_ship_prep_relevance_label(requested_upc, entry.get('scope_upc'))
@@ -17091,7 +17196,7 @@ def _build_ready_to_ship_prep_context(cur, barcode, include_details=True, max_no
     has_suffixed = False
 
     for entry in merged_entries:
-        if entry['note_count'] <= 0 and not str(entry.get('reason') or '').strip() and entry['image_count'] <= 0:
+        if entry['note_count'] <= 0 and not str(entry.get('reason') or '').strip() and entry['image_count'] <= 0 and int(entry.get('voice_note_count') or 0) <= 0:
             continue
         note_total += int(entry.get('note_count') or 0)
         image_total += int(entry.get('image_count') or 0)
@@ -17112,11 +17217,18 @@ def _build_ready_to_ship_prep_context(cur, barcode, include_details=True, max_no
                 key=lambda img: (_ready_to_ship_prep_sort_value(img.get('created_at')), int(img.get('id') or 0) if str(img.get('id') or '').isdigit() else 0),
                 reverse=True
             )[:max_images_per_entry]
+            entry['voice_notes'] = sorted(
+                entry.get('voice_notes') or [],
+                key=lambda vn: (_ready_to_ship_prep_sort_value(vn.get('created_at')), int(vn.get('id') or 0) if str(vn.get('id') or '').isdigit() else 0),
+                reverse=True
+            )[:10]
         else:
             entry.pop('notes', None)
             entry.pop('images', None)
+            entry.pop('voice_notes', None)
         entry.pop('_note_keys', None)
         entry.pop('_image_ids', None)
+        entry.pop('_audio_ids', None)
         entries.append(entry)
 
     entries.sort(
@@ -22744,6 +22856,38 @@ def api_items_prep_good_entries(base_upc):
                         'is_suffix': '-' in upc_entry,
                         'legacy_inventory': True
                     })
+        # Bulk-fetch voice notes for all entries
+        if entries:
+            all_upcs = [e['upc'] for e in entries]
+            voice_by_upc = {}
+            try:
+                placeholders = ','.join('?' * len(all_upcs))
+                cur.execute(
+                    f"SELECT upc, id, file_path, mime_type, created_at FROM items_prep_media "
+                    f"WHERE upc IN ({placeholders}) COLLATE NOCASE AND COALESCE(media_type,'') = 'audio' "
+                    f"ORDER BY created_at DESC, id DESC LIMIT 50",
+                    all_upcs
+                )
+                for vr in cur.fetchall():
+                    vr_dict = dict(vr)
+                    rel = (vr_dict.get('file_path') or '').strip()
+                    if not rel:
+                        continue
+                    uk = (vr_dict.get('upc') or '').upper()
+                    audio_url = rel if rel.startswith(('http://', 'https://', '/')) else f"/static/{rel}"
+                    voice_by_upc.setdefault(uk, []).append({
+                        'id': vr_dict.get('id'),
+                        'url': audio_url,
+                        'mime_type': vr_dict.get('mime_type') or '',
+                        'created_at': vr_dict.get('created_at') or ''
+                    })
+            except Exception:
+                pass
+            for e in entries:
+                e['voice_notes'] = voice_by_upc.get((e.get('upc') or '').upper(), [])
+        else:
+            for e in entries:
+                e['voice_notes'] = []
         return jsonify({'success': True, 'entries': entries})
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
@@ -23447,6 +23591,98 @@ def api_items_prep_undo():
     except Exception as e:
         print(f'Undo error: {e}')
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
+
+
+@app.route('/api/items_prep/history_entry/delete', methods=['POST'])
+def api_items_prep_history_entry_delete():
+    """Delete a prep-history row and restore its quantity/state."""
+    conn = None
+    try:
+        data = request.get_json() or {}
+        if _coerce_bool(data.get('legacy_inventory')):
+            return jsonify({'success': False, 'error': 'Legacy inventory rows cannot be deleted from prep history'}), 400
+
+        upc = _normalize_upc_preserve_suffix_for_match(_normalize_upc(data.get('upc')))
+        status = _normalize_prep_row_status(data.get('status'))
+        if status not in ('good', 'bad', 'return'):
+            return jsonify({'success': False, 'error': 'Invalid prep status'}), 400
+        if not upc:
+            return jsonify({'success': False, 'error': 'Missing upc'}), 400
+
+        try:
+            qty = int(data.get('quantity', data.get('qty', 1)) or 1)
+        except Exception:
+            qty = 1
+        if qty < 1:
+            qty = 1
+
+        base_upc = _strip_leading_zeros_numeric(_normalize_upc(data.get('base_upc')))
+        if not base_upc:
+            base_upc = upc.split('-', 1)[0] if '-' in upc else upc
+        lot_number = _normalize_lot_number(_preferred_lot_from_request(data))
+
+        ok, err, code = _items_prep_undo_core(
+            upc=upc,
+            status=status,
+            qty=qty,
+            base_upc=base_upc,
+            lot_number=lot_number,
+            action='history_delete'
+        )
+        if not ok:
+            return jsonify({'success': False, 'error': err or 'Delete failed'}), (code or 400)
+
+        _ensure_items_prep_tables()
+        asset_scope_upc, asset_scope_status = _items_to_list_asset_scope(upc, status)
+        assets_deleted = {'images': 0, 'notes': 0, 'media': 0}
+        assets_preserved_shared = False
+
+        if asset_scope_upc:
+            conn = sqlite3.connect('bol.db')
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+
+            should_delete_assets = True
+            delete_scope_status = None
+            if '-' not in asset_scope_upc and asset_scope_status:
+                cur.execute('''
+                    SELECT COUNT(*)
+                    FROM items_prep_status
+                    WHERE upc = ? COLLATE NOCASE
+                      AND COALESCE(status, '') = ? COLLATE NOCASE
+                ''', (asset_scope_upc, asset_scope_status))
+                remaining_rows = int((cur.fetchone() or [0])[0] or 0)
+                if remaining_rows > 0:
+                    should_delete_assets = False
+                    assets_preserved_shared = True
+                else:
+                    delete_scope_status = asset_scope_status
+
+            if should_delete_assets:
+                assets_deleted = _items_prep_delete_diagnostic_assets(
+                    cur,
+                    asset_scope_upc,
+                    row_status=delete_scope_status
+                )
+                conn.commit()
+                try:
+                    update_data_version()
+                except Exception:
+                    pass
+
+        return jsonify({
+            'success': True,
+            'upc': upc,
+            'status': status,
+            'assets_deleted': assets_deleted,
+            'assets_preserved_shared': assets_preserved_shared
+        })
+
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'items_prep_history_delete')}), 500
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 @app.route('/api/items_prep/diagnostic', methods=['POST'])
@@ -32993,7 +33229,8 @@ def additemtrue():
     clear_script = '''<script>
         sessionStorage.removeItem('barcode');
         sessionStorage.removeItem('barcode_entries');
-        sessionStorage.removeItem('additem_manual_titles');'''
+        sessionStorage.removeItem('additem_manual_titles');
+        sessionStorage.removeItem('additem_manual_title_skips');'''
     # Only clear position if not locked
     if not same_position:
         clear_script += '''
@@ -33009,6 +33246,7 @@ def additemtrue():
         sessionStorage.removeItem('barcode');
         sessionStorage.removeItem('barcode_entries');
         sessionStorage.removeItem('additem_manual_titles');
+        sessionStorage.removeItem('additem_manual_title_skips');
         sessionStorage.removeItem('item_position');
         sessionStorage.removeItem('pictureposition_path');
         sessionStorage.removeItem('positionLocked');

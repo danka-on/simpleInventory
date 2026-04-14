@@ -253,6 +253,22 @@
     .prep-history-status.return{background:#ffedd5;color:#9a3412}
     .prep-history-location{display:inline-flex;align-items:center;gap:4px;padding:4px 9px;border:1px solid #bfdbfe;border-radius:999px;background:#eff6ff;color:#1d4ed8;font-size:0.72rem;font-weight:700;cursor:pointer}
     .prep-history-location:hover{background:#dbeafe}
+    .prep-history-voice{margin-top:5px;display:flex;flex-direction:column;gap:4px}
+    .prep-history-voice audio{width:100%;height:32px;border-radius:6px}
+    .prep-history-reprint{flex-shrink:0;background:none;border:1px solid #cbd5e1;border-radius:8px;color:#475569;padding:5px 7px;cursor:pointer;font-size:0.82rem;line-height:1;transition:background .12s,color .12s}
+    .prep-history-reprint:hover{background:#eff6ff;border-color:#93c5fd;color:#1d4ed8}
+    .prep-history-delete{flex-shrink:0;display:inline-flex;align-items:center;gap:6px;padding:7px 10px;border:1px solid #fecaca;border-radius:8px;background:#fff1f2;color:#b91c1c;font-size:0.78rem;font-weight:800;line-height:1;cursor:pointer;transition:background .12s,color .12s,border-color .12s}
+    .prep-history-delete:hover{background:#ffe4e6;border-color:#fda4af;color:#991b1b}
+    .prep-history-actions{position:relative;flex-shrink:0}
+    .prep-history-actions summary{list-style:none}
+    .prep-history-actions summary::-webkit-details-marker{display:none}
+    .prep-history-menu-btn{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;color:#475569;cursor:pointer;font-size:1rem;line-height:1;transition:background .12s,color .12s,border-color .12s}
+    .prep-history-menu-btn:hover{background:#eff6ff;border-color:#93c5fd;color:#1d4ed8}
+    .prep-history-menu{position:absolute;top:calc(100% + 6px);right:0;min-width:156px;padding:6px;background:#fff;border:1px solid #cbd5e1;border-radius:10px;box-shadow:0 10px 24px rgba(15,23,42,0.18);z-index:80;display:flex;flex-direction:column;gap:4px}
+    .prep-history-menu-item{display:flex;align-items:center;gap:8px;width:100%;padding:8px 10px;border:none;border-radius:8px;background:transparent;color:#334155;font-size:0.82rem;font-weight:700;text-align:left;cursor:pointer}
+    .prep-history-menu-item:hover{background:#f8fafc}
+    .prep-history-menu-item.danger{color:#b91c1c}
+    .prep-history-menu-item.danger:hover{background:#fef2f2}
   .loading-overlay{position:absolute;top:0;left:0;right:0;bottom:0;background:rgba(255,255,255,0.9);display:flex;align-items:center;justify-content:center;z-index:10;border-radius:12px}
   .spinner{border:3px solid #f3f3f3;border-top:3px solid #00b894;border-radius:50%;width:24px;height:24px;animation:spin 1s linear infinite}
   @keyframes spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
@@ -395,6 +411,17 @@
     html.ss-theme-night .prep-history-meta { color:var(--muted, #94a3b8); }
     html.ss-theme-night .prep-history-location { background:#0f2747; border-color:#1d4ed8; color:#bfdbfe; }
     html.ss-theme-night .prep-history-location:hover { background:#13315a; }
+    html.ss-theme-night .prep-history-reprint { border-color:rgba(255,255,255,0.15); color:#94a3b8; }
+    html.ss-theme-night .prep-history-reprint:hover { background:#0f2747; border-color:#1d4ed8; color:#bfdbfe; }
+    html.ss-theme-night .prep-history-delete { background:rgba(127,29,29,0.24); border-color:rgba(248,113,113,0.42); color:#fecaca; }
+    html.ss-theme-night .prep-history-delete:hover { background:rgba(127,29,29,0.34); border-color:#f87171; color:#fee2e2; }
+    html.ss-theme-night .prep-history-menu-btn { background:#0f172a; border-color:rgba(255,255,255,0.15); color:#94a3b8; }
+    html.ss-theme-night .prep-history-menu-btn:hover { background:#0f2747; border-color:#1d4ed8; color:#bfdbfe; }
+    html.ss-theme-night .prep-history-menu { background:#0f172a; border-color:#334155; box-shadow:0 14px 30px rgba(2,6,23,0.42); }
+    html.ss-theme-night .prep-history-menu-item { color:var(--ink, #e2e8f0); }
+    html.ss-theme-night .prep-history-menu-item:hover { background:rgba(148,163,184,0.12); }
+    html.ss-theme-night .prep-history-menu-item.danger { color:#fca5a5; }
+    html.ss-theme-night .prep-history-menu-item.danger:hover { background:rgba(239,68,68,0.12); }
     html.ss-theme-night .loading-overlay { background: rgba(15,23,42,0.9); }
     html.ss-theme-night .page-loading-overlay { background: rgba(15,23,42,0.7); }
     html.ss-theme-night .exception-card { background: var(--card, #1e293b); border-color: rgba(255,255,255,0.1); }
@@ -1404,6 +1431,38 @@
       return '';
     }
 
+    async function reprintLabel(upc, title){
+      const config = printerConfigState || {};
+      const printMethod = String(config.print_method || '').toLowerCase();
+      if(!printerStatusState || !printerStatusState.can_print){
+        alert('Printer is not ready. Open Printer Setup to reconnect it.');
+        return;
+      }
+      if(printMethod === 'browser'){
+        const win = window.open('', '', 'toolbar=0,location=0,menubar=0,scrollbars=0,status=0,titlebar=0');
+        try{
+          printBarcodeBrowserWithConfig({upc, description: title}, config, win);
+        }catch(e){
+          if(win) win.close();
+          alert((e && e.message) || 'Print failed');
+        }
+        return;
+      }
+      try{
+        const res = await fetch('/api/printer/print-barcode', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({upc, item_description: title, quantity: 1})
+        });
+        const data = await res.json().catch(()=>({}));
+        if(!data || !data.success){
+          alert((data && data.error) || 'Print failed');
+        }
+      }catch(e){
+        alert((e && e.message) || 'Print failed');
+      }
+    }
+
     function getItemsToListLinkFallback(){
       const base = currentBaseUpc();
       if(!base) return '/items-to-list';
@@ -1652,6 +1711,14 @@
       const chevron = document.getElementById('goodEntriesChevron');
       if(list) list.style.display = 'none';
       if(chevron) chevron.style.transform = '';
+      closeAllPrepHistoryMenus();
+    }
+
+    function closeAllPrepHistoryMenus(exceptEl){
+      document.querySelectorAll('.prep-history-actions[open]').forEach(el => {
+        if(exceptEl && el === exceptEl) return;
+        el.removeAttribute('open');
+      });
     }
 
     function toggleGoodEntriesDropdown(){
@@ -1667,6 +1734,8 @@
       const picker = document.getElementById('goodEntriesPicker');
       if(picker && !picker.contains(e.target)){
         closeGoodEntriesDropdown();
+      } else if(!e.target.closest('.prep-history-actions')){
+        closeAllPrepHistoryMenus();
       }
     });
 
@@ -1706,6 +1775,91 @@
       }
       const shelfCode = locationCode || previewKey;
       window.open(`/shelf-image/${encodeURIComponent(shelfCode.toLowerCase())}.png?t=${Date.now()}`, '_blank', 'noopener');
+    }
+
+    function renderPrepSummaryForItem(it){
+      const prepSummary = document.getElementById('prepSummary');
+      if(!prepSummary) return;
+      const item = it || {};
+      const lotNote = (currentLookupInfo && currentLookupInfo.lot_decision_note)
+        ? (`<div style="font-size:0.8rem;color:#e67e22;margin-top:4px">${esc(currentLookupInfo.lot_decision_note)}</div>`)
+        : '';
+      const goodQty = Number(item.good_qty || 0);
+      const itlUrl = (currentLookupInfo && currentLookupInfo.items_to_list_url) || item.items_to_list_url || '/items-to-list';
+      const prepBadge = goodQty > 0
+        ? `<a href="${esc(itlUrl)}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:5px;background:#2980b9;color:#fff;border-radius:8px;padding:5px 12px;font-size:1rem;font-weight:700;text-decoration:none">✓ Prep: ${goodQty}</a>`
+        : '';
+      prepSummary.innerHTML = prepBadge + lotNote;
+    }
+
+    async function refreshPrepHistoryDisplay(baseUpc){
+      const base = String(baseUpc || currentBaseUpc() || '').trim();
+      if(!base) return;
+      try{
+        const lotQ = getLotQueryString();
+        const res = await fetch('/api/bol_lookup?upc=' + encodeURIComponent(base) + lotQ);
+        const j = await res.json().catch(()=>({}));
+        if(j && j.found && j.item){
+          const item = j.item || {};
+          currentLookupInfo = Object.assign({}, currentLookupInfo || {}, {
+            unchecked_remaining: Number(item.unchecked_remaining || 0),
+            items_to_list_url: item.items_to_list_url || ((currentLookupInfo && currentLookupInfo.items_to_list_url) || ''),
+            overage_candidate: !!item.is_overage_candidate
+          });
+          renderPrepSummaryForItem(item);
+        } else {
+          renderPrepSummaryForItem({ good_qty: 0 });
+        }
+      }catch(e){
+        console.error('refreshPrepHistoryDisplay lookup error:', e);
+      }
+      await Promise.all([
+        loadExistingGoodData(base).catch(err => console.error('refresh existing good data failed:', err)),
+        loadGoodEntriesPicker(base).catch(err => console.error('refresh prep history picker failed:', err))
+      ]);
+    }
+
+    async function deletePrepHistoryEntry(entry, baseUpc){
+      if(!entry || entry.legacy_inventory){
+        alert('This inventory row cannot be deleted from prep history.');
+        return;
+      }
+      const upc = String(entry.upc || '').trim();
+      const statusLabel = prepHistoryStatusLabel(entry.status);
+      const qty = Math.max(1, Number(entry.quantity || 1) || 1);
+      const lotPart = entry.lot_number ? ` in LOT ${entry.lot_number}` : '';
+      const qtyPart = qty > 1 ? ` Qty ${qty}.` : '.';
+      if(!confirm(`Delete this ${statusLabel} prep entry for ${upc}${lotPart}?${qtyPart} This will remove the whole entry and restore its quantity.`)) return;
+      try{
+        const res = await fetch('/api/items_prep/history_entry/delete', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({
+            upc: upc,
+            status: entry.status,
+            quantity: qty,
+            base_upc: String(baseUpc || currentBaseUpc() || '').trim(),
+            lot_number: entry.lot_number || '',
+            legacy_inventory: !!entry.legacy_inventory
+          })
+        });
+        const j = await res.json().catch(()=>({}));
+        if(!(res.ok && j && j.success)){
+          alert('Failed to delete prep entry: ' + ((j && j.error) || 'unknown'));
+          return;
+        }
+        closeAllPrepHistoryMenus();
+        await refreshPrepHistoryDisplay(baseUpc || currentBaseUpc() || upc);
+        const statusMsg = document.getElementById('statusMsg');
+        if(statusMsg){
+          const sharedNote = j.assets_preserved_shared ? ' Shared media was kept because another entry still uses it.' : '';
+          statusMsg.innerHTML = `<span class="ok">Deleted prep entry.</span>${sharedNote ? `<span class="muted">${sharedNote}</span>` : ''}`;
+          setTimeout(()=>{ statusMsg.textContent=''; }, 2400);
+        }
+      }catch(e){
+        console.error('Delete prep history entry error:', e);
+        alert('Error deleting prep entry: ' + e);
+      }
     }
 
     async function loadGoodEntriesPicker(baseUpc){
@@ -1819,7 +1973,38 @@
             textCol.appendChild(metaEl);
           }
 
+          // Voice notes
+          const voiceNotes = Array.isArray(entry.voice_notes) ? entry.voice_notes : [];
+          if(voiceNotes.length){
+            const voiceWrap = document.createElement('div');
+            voiceWrap.className = 'prep-history-voice';
+            voiceNotes.forEach(vn => {
+              const audio = document.createElement('audio');
+              audio.controls = true;
+              audio.preload = 'metadata';
+              audio.src = vn.url || '';
+              if(vn.mime_type) audio.type = vn.mime_type;
+              audio.onclick = ev => ev.stopPropagation();
+              voiceWrap.appendChild(audio);
+            });
+            textCol.appendChild(voiceWrap);
+          }
+
           row.appendChild(textCol);
+
+          if(!entry.legacy_inventory){
+            const deleteAction = document.createElement('button');
+            deleteAction.type = 'button';
+            deleteAction.className = 'prep-history-delete';
+            deleteAction.textContent = '🗑 Delete';
+            deleteAction.title = 'Delete this prep entry';
+            deleteAction.onclick = async (ev) => {
+              ev.preventDefault();
+              ev.stopPropagation();
+              await deletePrepHistoryEntry(entry, baseUpc);
+            };
+            row.appendChild(deleteAction);
+          }
 
           // Arrow
           const arrow = document.createElement('div');
@@ -2004,18 +2189,7 @@
       const hero = document.getElementById('hero'); hero.style.display=''; hero.src = it.image_url || '';
       document.getElementById('title').textContent = it.item_description || '';
       document.getElementById('upcTxt').textContent = it.upc || '';
-      const prepSummary = document.getElementById('prepSummary');
-      if(prepSummary){
-        const lotNote = (currentLookupInfo && currentLookupInfo.lot_decision_note)
-          ? (`<div style="font-size:0.8rem;color:#e67e22;margin-top:4px">${esc(currentLookupInfo.lot_decision_note)}</div>`)
-          : '';
-        const goodQty = Number(it.good_qty || 0);
-        const itlUrl = (currentLookupInfo && currentLookupInfo.items_to_list_url) || '/items-to-list';
-        const prepBadge = goodQty > 0
-          ? `<a href="${esc(itlUrl)}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:5px;background:#2980b9;color:#fff;border-radius:8px;padding:5px 12px;font-size:1rem;font-weight:700;text-decoration:none">✓ Prep: ${goodQty}</a>`
-          : '';
-        prepSummary.innerHTML = prepBadge + lotNote;
-      }
+      renderPrepSummaryForItem(it);
       clearQuickPrepNote();
       clearQuickVoiceNote();
       clearPendingMedia();

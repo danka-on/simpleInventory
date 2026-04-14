@@ -255,6 +255,29 @@
     }
     .bad { color: #dc2626; }
 
+    .voice-notes {
+      margin-top: 7px;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .voice-notes audio {
+      width: 100%;
+      height: 32px;
+      border-radius: 6px;
+    }
+    .voice-note-meta {
+      font-size: 0.75rem;
+      color: #94a3b8;
+      margin-top: 1px;
+    }
+    .btn-reprint {
+      background: #f1f5f9;
+      color: #475569;
+      border: 1px solid #cbd5e1;
+    }
+    .btn-reprint:hover { background: #e2e8f0; }
+
     /* ── Photo modal ── */
     .modal-bg {
       position: fixed;
@@ -506,6 +529,31 @@
       }catch(e){ status.textContent = 'Error: ' + e.message; }
     }
 
+    async function reprintFromLog(btn, upc, title){
+      if(!upc) return;
+      const origText = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = '…';
+      try{
+        const res = await fetch('/api/printer/print-barcode',{
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({upc, item_description:title||upc, quantity:1})
+        });
+        const data = await res.json().catch(()=>({}));
+        if(data && data.success){
+          btn.textContent = '✓';
+          setTimeout(()=>{ btn.textContent = origText; btn.disabled = false; }, 1500);
+          return;
+        }
+        alert((data && data.error) || 'Printer not connected. Open Item Prep to set up the printer.');
+      }catch(e){
+        alert('Print failed: ' + (e.message||'unknown error'));
+      }
+      btn.textContent = origText;
+      btn.disabled = false;
+    }
+
     function statusCls(st){
       const s = String(st ?? '').toLowerCase();
       if(s === 'return') return 'status-return';
@@ -710,6 +758,15 @@
           preloadEntryThumb(photoUpc, lot);
         }
 
+        const voiceNotes = Array.isArray(it.voice_notes) ? it.voice_notes : [];
+        const voiceNotesHtml = voiceNotes.length
+          ? `<div class="voice-notes">${voiceNotes.map(vn => `
+              <div>
+                <audio controls preload="metadata" src="${esc(vn.url||'')}"></audio>
+                <div class="voice-note-meta">🎙️ Voice note${vn.created_at ? ' · ' + esc(fmtTime(vn.created_at)) : ''}</div>
+              </div>`).join('')}
+            </div>` : '';
+
         const row = document.createElement('div');
         row.className = 'entry' + (undone ? ' undone' : '');
         row.dataset.entryId = String(id);
@@ -733,12 +790,18 @@
               <input class="edit-note${note ? ' note-active' : ''}" data-note="${esc(id)}" type="text" value="${esc(note)}" placeholder="Add/edit note" ${undone ? 'disabled' : ''}>
               <input class="edit-qty" data-qty="${esc(id)}" type="number" min="1" step="1" value="${esc(qty)}" ${undone ? 'disabled' : ''}>
             </div>
+            ${voiceNotesHtml}
           </div>
           <div class="entry-actions">
+            <button class="btn btn-reprint" data-reprint-upc="${esc(upc)}" data-reprint-title="${esc(displayTitle)}">🖨️ Re-print</button>
             <button class="btn btn-save" data-save="${esc(id)}" ${undone ? 'disabled' : ''}>Save</button>
             <button class="btn btn-undo" data-undo="${esc(id)}" ${undone ? 'disabled' : ''}>Delete</button>
           </div>
         `;
+
+        // Event: re-print
+        const reprintBtn = row.querySelector('[data-reprint-upc]');
+        if(reprintBtn) reprintBtn.onclick = () => reprintFromLog(reprintBtn, reprintBtn.dataset.reprintUpc, reprintBtn.dataset.reprintTitle);
 
         // Event: undo
         const undoBtn = row.querySelector('[data-undo]');

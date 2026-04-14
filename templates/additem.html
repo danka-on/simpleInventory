@@ -862,6 +862,7 @@
                     sessionStorage.removeItem('barcode');
                     sessionStorage.removeItem('barcode_entries');
                     sessionStorage.removeItem('additem_manual_titles');
+                    sessionStorage.removeItem('additem_manual_title_skips');
                     sessionStorage.removeItem('item_position');
                     sessionStorage.removeItem('pictureposition_path');
                     const wasLocked = sessionStorage.getItem('positionLocked') === 'true';
@@ -892,18 +893,9 @@
 
         try {
             syncAddItemFormFields();
-            const screeningResult = await screenAddItemSubmission();
-            if (screeningResult && screeningResult.manualTitles) {
-                mergeManualTitleOverrides(screeningResult.manualTitles);
-                syncAddItemFormFields();
-                renderBarcodeEditor();
-            }
-            if (!screeningResult || screeningResult.continueSubmit === false) {
-                return;
-            }
             await submitAddItemForm(form);
         } catch (err) {
-            console.error('Add item screening failed, submitting anyway:', err);
+            console.error('Add item submit failed, retrying native form submit:', err);
             await submitAddItemForm(form);
         } finally {
             addItemSubmitInFlight = false;
@@ -1032,6 +1024,7 @@
         sessionStorage.removeItem('barcode');
         sessionStorage.removeItem('barcode_entries');
         sessionStorage.removeItem('additem_manual_titles');
+        sessionStorage.removeItem('additem_manual_title_skips');
         sessionStorage.removeItem('pictureposition_path');
         // Optionally clear any other related sessionStorage keys
         // Do NOT submit any form or reload to a new page
@@ -1047,6 +1040,7 @@
         sessionStorage.removeItem('barcode');
         sessionStorage.removeItem('barcode_entries');
         sessionStorage.removeItem('additem_manual_titles');
+        sessionStorage.removeItem('additem_manual_title_skips');
         sessionStorage.removeItem('pictureposition_path');
         sessionStorage.removeItem('positionLocked');
         // Notify server to clear lock state

@@ -913,6 +913,22 @@
       gap: 8px;
       flex-wrap: wrap;
     }
+    .order-popup-card .rt-prep-voice-notes {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-top: 10px;
+    }
+    .order-popup-card .rt-prep-voice-note audio {
+      width: 100%;
+      height: 36px;
+      border-radius: 6px;
+    }
+    .order-popup-card .rt-prep-voice-note-meta {
+      font-size: 0.72rem;
+      color: #94a3b8;
+      margin-top: 2px;
+    }
     .order-popup-card .rt-prep-images {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
@@ -3528,10 +3544,12 @@ function renderReadyToShipPrepContextHtml(context) {
     const noteCount = parsePosInt(summary.note_count, 0);
     const defectCount = parsePosInt(summary.defect_count, 0);
     const imageCount = parsePosInt(summary.image_count, 0);
+    const voiceNoteTotal = entries.reduce((sum, e) => sum + (Array.isArray(e.voice_notes) ? e.voice_notes.length : 0), 0);
     if (entryCount > 0) chips.push(`<span class="rt-prep-chip meta"><i class="fas fa-layer-group"></i> ${entryCount} row${entryCount === 1 ? '' : 's'}</span>`);
     if (noteCount > 0) chips.push(`<span class="rt-prep-chip meta"><i class="fas fa-note-sticky"></i> ${noteCount} note${noteCount === 1 ? '' : 's'}</span>`);
     if (defectCount > 0) chips.push(`<span class="rt-prep-chip alert"><i class="fas fa-triangle-exclamation"></i> ${defectCount} defect${defectCount === 1 ? '' : 's'}</span>`);
     if (imageCount > 0) chips.push(`<span class="rt-prep-chip meta"><i class="fas fa-camera"></i> ${imageCount} photo${imageCount === 1 ? '' : 's'}</span>`);
+    if (voiceNoteTotal > 0) chips.push(`<span class="rt-prep-chip meta">🎙️ ${voiceNoteTotal} voice note${voiceNoteTotal === 1 ? '' : 's'}</span>`);
     if (summary.latest_at) chips.push(`<span class="rt-prep-chip meta"><i class="fas fa-clock"></i> ${esc(fmtET(summary.latest_at))}</span>`);
 
     const entryHtml = entries.map((entry, index) => {
@@ -3548,6 +3566,7 @@ function renderReadyToShipPrepContextHtml(context) {
 
         const notes = Array.isArray(entry.notes) ? entry.notes : [];
         const images = Array.isArray(entry.images) ? entry.images : [];
+        const voiceNotes = Array.isArray(entry.voice_notes) ? entry.voice_notes : [];
         const notesHtml = notes.length
             ? `<div class="rt-prep-notes">${notes.map(note => `
                 <div class="rt-prep-note ${note.kind === 'status' ? 'is-status' : ''}">
@@ -3569,6 +3588,14 @@ function renderReadyToShipPrepContextHtml(context) {
             }).join('')}</div>`
             : '';
         const hiddenImageCount = Math.max(0, parsePosInt(entry.image_count, 0) - images.length);
+        const voiceNotesHtml = voiceNotes.length
+            ? `<div class="rt-prep-voice-notes">${voiceNotes.map(vn => `
+                <div class="rt-prep-voice-note">
+                    <audio controls preload="metadata" src="${esc(vn.url || '')}"></audio>
+                    <div class="rt-prep-voice-note-meta">🎙️ Voice note${vn.created_at ? ' · ' + esc(fmtET(vn.created_at)) : ''}</div>
+                </div>
+            `).join('')}</div>`
+            : '';
 
         return `
             <div class="rt-prep-entry ${isDefect ? 'is-defect' : ''}">
@@ -3586,6 +3613,7 @@ function renderReadyToShipPrepContextHtml(context) {
                 ${hiddenNoteCount > 0 ? `<div class="popup-muted" style="margin-top:8px;">+${hiddenNoteCount} older note${hiddenNoteCount === 1 ? '' : 's'}</div>` : ''}
                 ${imagesHtml}
                 ${hiddenImageCount > 0 ? `<div class="popup-muted" style="margin-top:8px;">+${hiddenImageCount} older photo${hiddenImageCount === 1 ? '' : 's'}</div>` : ''}
+                ${voiceNotesHtml}
             </div>
         `;
     }).join('');
