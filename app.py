@@ -21134,6 +21134,47 @@ def test_printer_sample():
         logger.error('printer:test-sample failed: %s', e, exc_info=True)
         return jsonify({'success': False, 'error': str(e).strip() or _safe_error(e)}), 500
 
+@app.route('/api/printer/label-preview', methods=['POST'])
+def printer_label_preview_api():
+    """Render the exact printer raster used by the label designer preview."""
+    try:
+        data = request.get_json(silent=True) or {}
+        upc = str(data.get('upc', '') or '').strip()
+        item_description = str(data.get('item_description', '') or '').strip()
+        layout_override = {
+            'label_width': data.get('label_width', 65),
+            'label_height': data.get('label_height', 29),
+            'label_show_name': data.get('label_show_name', True),
+            'label_show_barcode': data.get('label_show_barcode', True),
+            'label_show_barcode_text': data.get('label_show_barcode_text', True),
+            'label_title_font_size': data.get('label_title_font_size', 10),
+            'label_barcode_font_size': data.get('label_barcode_font_size', 10),
+            'label_barcode_height': data.get('label_barcode_height', 34),
+            'label_barcode_scale': data.get('label_barcode_scale', 1.8),
+            'label_title_lines': data.get('label_title_lines', 2),
+        }
+
+        if not upc:
+            return jsonify({'success': False, 'error': 'Barcode is required'}), 400
+
+        img = printer_manager.render_label_preview_image(
+            upc,
+            item_description,
+            layout_override=layout_override
+        )
+        buffer = io.BytesIO()
+        img.save(buffer, format='PNG')
+        encoded = base64.b64encode(buffer.getvalue()).decode('ascii')
+        return jsonify({
+            'success': True,
+            'image_data': f'data:image/png;base64,{encoded}',
+            'width_px': img.width,
+            'height_px': img.height
+        })
+    except Exception as e:
+        logger.error('printer:label-preview failed: %s', e, exc_info=True)
+        return jsonify({'success': False, 'error': str(e).strip() or _safe_error(e)}), 500
+
 @app.route('/api/printer/print-barcode', methods=['POST'])
 def print_barcode_api():
     """Print barcode label"""

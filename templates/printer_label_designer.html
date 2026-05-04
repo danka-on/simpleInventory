@@ -387,6 +387,8 @@
 
     let printerConfig = null;
     let presetsCache = [];
+    let previewRequestSeq = 0;
+    let previewTimer = null;
 
     function updateHeightBehaviorHint() {
       if (!heightBehaviorHint) return;
@@ -470,19 +472,46 @@
       const heightStyle = useMm ? `${layout.label_height}mm` : `${Math.round(layout.label_height * scale)}px`;
       const paddingStyle = useMm ? '1.6mm 2mm' : `${Math.round(1.6 * scale)}px ${Math.round(2 * scale)}px`;
       const gapStyle = useMm ? '1.4mm' : `${Math.max(4, Math.round(1.4 * scale))}px`;
+      const paddingYPx = useMm
+        ? 1.6 * physicalScale * 2
+        : Math.round(1.6 * scale) * 2;
+      const gapPx = useMm
+        ? 1.4 * physicalScale
+        : Math.max(4, Math.round(1.4 * scale));
       const titleFontSize = useMm
         ? Math.max(12, Math.round(layout.label_title_font_size * physicalScale * 0.9))
         : Math.round(layout.label_title_font_size * scale * 0.9);
       const barcodeFontSize = useMm
         ? Math.max(10, Math.round(layout.label_barcode_font_size * physicalScale * 0.92))
         : Math.round(layout.label_barcode_font_size * scale * 0.92);
-      const barcodeHeight = useMm
+      let barcodeHeight = useMm
         ? Math.max(24, Math.round(layout.label_barcode_height * physicalScale * 0.95))
         : Math.round(layout.label_barcode_height * scale * 0.95);
       const barcodeWidth = Math.max(1.2, layout.label_barcode_scale * 1.35);
       const titleLineHeight = useMm ? 1.08 : 1.12;
       const showBarcode = !!layout.label_show_barcode;
       const showBarcodeText = !!layout.label_show_barcode_text;
+      const hasTitle = !!(layout.label_show_name && sample.item_description);
+      const labelHeightPx = useMm
+        ? layout.label_height * physicalScale
+        : Math.round(layout.label_height * scale);
+      const availableHeightPx = Math.max(12, labelHeightPx - paddingYPx);
+      const titleReservedPx = hasTitle
+        ? Math.ceil(titleFontSize * titleLineHeight * layout.label_title_lines)
+        : 0;
+      const barcodeTextReservedPx = showBarcodeText && sample.upc
+        ? Math.ceil(barcodeFontSize * 1.05)
+        : 0;
+      const visibleBlockCount = [
+        hasTitle,
+        showBarcode,
+        !showBarcode && showBarcodeText && sample.upc
+      ].filter(Boolean).length;
+      const gapReservedPx = Math.max(0, visibleBlockCount - 1) * gapPx;
+      const nonBarcodeReservedPx = titleReservedPx + barcodeTextReservedPx + gapReservedPx;
+      if (showBarcode && nonBarcodeReservedPx + barcodeHeight > availableHeightPx) {
+        barcodeHeight = Math.max(8, Math.floor(availableHeightPx - nonBarcodeReservedPx));
+      }
 
       const label = doc.createElement('div');
       label.style.width = widthStyle;
@@ -500,7 +529,7 @@
       label.style.boxShadow = useMm ? 'none' : '0 22px 34px rgba(15, 23, 42, 0.16)';
       label.style.overflow = 'hidden';
 
-      if (layout.label_show_name && sample.item_description) {
+      if (hasTitle) {
         const title = doc.createElement('div');
         title.textContent = sample.item_description;
         title.style.width = '100%';
@@ -551,12 +580,65 @@
       };
     }
 
-    function renderPreview() {
+    function renderBrowserPreviewFallback(layout, previewSample, note) {
       if (!window.JsBarcode) {
-        showStatus('Barcode preview library failed to load', 'error');
+        previewFootnote.textContent = note || 'Exact preview failed and barcode preview library is unavailable.';
         return;
       }
 
+      previewMount.innerHTML = '';
+      const built = buildLabelNode(document, layout, previewSample);
+      previewMount.appendChild(built.root);
+
+      try {
+        if (built.barcodeNode) {
+          JsBarcode(built.barcodeNode, previewSample.upc, built.barcodeOptions);
+        }
+        previewFootnote.textContent = note || 'Browser fallback preview shown.';
+      } catch (error) {
+        previewFootnote.textContent = 'That barcode value could not be rendered. Try a different sample.';
+        showStatus('Preview failed: ' + error.message, 'error');
+      }
+    }
+
+    async function renderExactPrinterPreview(seq, layout, previewSample) {
+      try {
+        const response = await fetch('/api/printer/label-preview', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(Object.assign({}, layout, previewSample))
+        });
+        const data = await response.json();
+        if (seq !== previewRequestSeq) return;
+        if (!data.success || !data.image_data) {
+          throw new Error(data.error || 'Preview render failed');
+        }
+
+        const img = new Image();
+        img.alt = 'Exact printed label preview';
+        img.src = data.image_data;
+        img.style.width = `${Math.round(layout.label_width * PREVIEW_SCALE)}px`;
+        img.style.height = `${Math.round(layout.label_height * PREVIEW_SCALE)}px`;
+        img.style.display = 'block';
+        img.style.background = '#fff';
+        img.style.border = '1px solid rgba(15,23,42,0.18)';
+        img.style.boxShadow = '0 22px 34px rgba(15, 23, 42, 0.16)';
+        img.style.objectFit = 'fill';
+        previewMount.innerHTML = '';
+        previewMount.appendChild(img);
+
+        const parts = [];
+        parts.push(layout.label_show_name ? 'Item name enabled.' : 'Item name hidden.');
+        parts.push(layout.label_show_barcode ? 'Barcode enabled.' : 'Barcode hidden.');
+        parts.push(layout.label_show_barcode_text ? 'Barcode text enabled.' : 'Barcode text hidden.');
+        previewFootnote.textContent = `Exact printer raster: ${layout.label_width}mm x ${layout.label_height}mm, ${data.width_px}x${data.height_px}px. ${parts.join(' ')}`;
+      } catch (error) {
+        if (seq !== previewRequestSeq) return;
+        renderBrowserPreviewFallback(layout, previewSample, 'Exact printer preview failed; browser fallback shown. ' + error.message);
+      }
+    }
+
+    function renderPreview() {
       const layout = currentLayout();
       const sample = currentSample();
       const barcodeText = sample.upc || '012345678905';
@@ -566,24 +648,13 @@
       };
 
       fullBarcodeDisplay.value = barcodeText;
-      previewMount.innerHTML = '';
+      previewFootnote.textContent = 'Rendering exact printer raster.';
 
-      const built = buildLabelNode(document, layout, previewSample);
-      previewMount.appendChild(built.root);
-
-      try {
-        if (built.barcodeNode) {
-          JsBarcode(built.barcodeNode, barcodeText, built.barcodeOptions);
-        }
-        const parts = [];
-        parts.push(layout.label_show_name ? 'Item name enabled.' : 'Item name hidden.');
-        parts.push(layout.label_show_barcode ? 'Barcode enabled.' : 'Barcode hidden.');
-        parts.push(layout.label_show_barcode_text ? 'Barcode text enabled.' : 'Barcode text hidden.');
-        previewFootnote.textContent = `${layout.label_width}mm wide label preview. ${parts.join(' ')}`;
-      } catch (error) {
-        previewFootnote.textContent = 'That barcode value could not be rendered. Try a different sample.';
-        showStatus('Preview failed: ' + error.message, 'error');
-      }
+      const seq = ++previewRequestSeq;
+      if (previewTimer) clearTimeout(previewTimer);
+      previewTimer = setTimeout(() => {
+        renderExactPrinterPreview(seq, layout, previewSample);
+      }, 120);
     }
 
     function openBrowserPrintPreview() {

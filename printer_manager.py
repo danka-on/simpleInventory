@@ -1001,52 +1001,100 @@ class PrinterManager:
                 scaled_height = max(1, round(barcode_img.height * scale))
                 return barcode_img.resize((scaled_width, scaled_height), Image.LANCZOS).convert('RGB')
 
-            blocks = []
+            block_entries = []
+
+            def _add_block(image, *, protected=False, gap_before=0):
+                if image is None:
+                    return
+                block_entries.append({
+                    'image': image,
+                    'protected': bool(protected),
+                    'gap_before': max(0, int(gap_before or 0))
+                })
+
             if title_text:
                 title_block = _render_text_block(
                     title_text,
                     title_font_px,
                     self._coerce_dimension(layout.get('label_title_lines'), 2, minimum=1, maximum=4)
                 )
-                if title_block is not None:
-                    blocks.append(title_block)
+                _add_block(title_block, protected=True)
 
             if show_barcode:
-                barcode_blocks = []
                 barcode_block = _render_barcode_only()
-                if barcode_block is not None:
-                    barcode_blocks.append(barcode_block)
+                has_barcode_block = barcode_block is not None
+                _add_block(
+                    barcode_block,
+                    protected=False,
+                    gap_before=block_gap_px if block_entries else 0
+                )
                 if show_barcode_text:
                     barcode_text_block = _render_text_block(barcode_value, barcode_font_px, 1, break_words=True)
-                    if barcode_text_block is not None:
-                        barcode_blocks.append(barcode_text_block)
-                if barcode_blocks:
-                    stacked_height = sum(block.height for block in barcode_blocks) + (text_gap_px * (len(barcode_blocks) - 1))
-                    stacked_width = max(block.width for block in barcode_blocks)
-                    barcode_group = Image.new('RGB', (stacked_width, stacked_height), 'white')
-                    cursor_y = 0
-                    for block in barcode_blocks:
-                        x = max(0, (stacked_width - block.width) // 2)
-                        barcode_group.paste(block, (x, cursor_y))
-                        cursor_y += block.height + text_gap_px
-                    blocks.append(barcode_group)
+                    _add_block(
+                        barcode_text_block,
+                        protected=True,
+                        gap_before=text_gap_px if has_barcode_block else (block_gap_px if block_entries else 0)
+                    )
             elif show_barcode_text:
                 barcode_text_only = _render_text_block(barcode_value, barcode_font_px, 1, break_words=True)
-                if barcode_text_only is not None:
-                    blocks.append(barcode_text_only)
+                _add_block(barcode_text_only, protected=True, gap_before=block_gap_px if block_entries else 0)
 
             canvas = Image.new('RGB', (label_width_px, label_height_px), 'white')
-            if not blocks:
+            if not block_entries:
                 return canvas
 
-            total_height = sum(block.height for block in blocks) + (block_gap_px * (len(blocks) - 1))
+            def _entries_height(entries):
+                return sum(entry['image'].height + entry.get('gap_before', 0) for entry in entries)
+
+            total_height = _entries_height(block_entries)
+            if total_height > label_height_px:
+                gap_total = sum(entry.get('gap_before', 0) for entry in block_entries)
+                available_for_blocks = max(len(block_entries), label_height_px - gap_total)
+                fitted_entries = []
+                protected_height = sum(
+                    entry['image'].height for entry in block_entries
+                    if entry.get('protected')
+                )
+                shrinkable_entries = [
+                    entry for entry in block_entries
+                    if not entry.get('protected')
+                ]
+
+                if shrinkable_entries and protected_height < available_for_blocks:
+                    remaining_height = available_for_blocks - protected_height
+                    shrinkable_height = sum(entry['image'].height for entry in shrinkable_entries)
+                    for entry in block_entries:
+                        block = entry['image']
+                        fitted = block
+                        if entry.get('protected'):
+                            fitted_entries.append({**entry, 'image': fitted})
+                            continue
+
+                        target_height = max(8, round(block.height * remaining_height / max(1, shrinkable_height)))
+                        if target_height < block.height:
+                            scale = target_height / float(block.height)
+                            target_width = max(1, round(block.width * scale))
+                            fitted = block.resize((target_width, target_height), Image.LANCZOS)
+                        fitted_entries.append({**entry, 'image': fitted})
+                else:
+                    scale = available_for_blocks / float(max(1, sum(entry['image'].height for entry in block_entries)))
+                    for entry in block_entries:
+                        block = entry['image']
+                        target_height = max(6, round(block.height * scale))
+                        target_width = max(1, round(block.width * scale))
+                        fitted_entries.append({**entry, 'image': block.resize((target_width, target_height), Image.LANCZOS)})
+
+                block_entries = fitted_entries
+                total_height = _entries_height(block_entries)
+
             start_y = max(0, (label_height_px - total_height) // 2)
             cursor_y = start_y
-            for block in blocks:
-                paste_block = block
-                if block.width > content_width:
-                    scale = content_width / float(block.width)
-                    paste_block = block.resize((content_width, max(1, round(block.height * scale))), Image.LANCZOS)
+            for entry in block_entries:
+                cursor_y += entry.get('gap_before', 0)
+                paste_block = entry['image']
+                if paste_block.width > content_width:
+                    scale = content_width / float(paste_block.width)
+                    paste_block = paste_block.resize((content_width, max(1, round(paste_block.height * scale))), Image.LANCZOS)
                 if cursor_y >= label_height_px:
                     break
                 available_height = label_height_px - cursor_y
@@ -1054,7 +1102,7 @@ class PrinterManager:
                     paste_block = paste_block.crop((0, 0, paste_block.width, available_height))
                 x = max(0, (label_width_px - paste_block.width) // 2)
                 canvas.paste(paste_block, (x, cursor_y))
-                cursor_y += paste_block.height + block_gap_px
+                cursor_y += paste_block.height
 
             return canvas
         except Exception as e:
@@ -1085,6 +1133,68 @@ class PrinterManager:
         closest = min(label_map.keys(), key=lambda k: abs(k - width))
         return label_map[closest]
 
+    def _prepare_brother_ql_canvas(self, img, layout_override=None):
+        """Return the exact monochrome canvas sent to brother_ql before conversion."""
+        layout = self.get_label_layout(layout_override)
+        effective_width_mm = self._coerce_dimension(layout.get('label_width'), self.label_width or 62, minimum=12, maximum=120)
+        effective_height_mm = self._coerce_dimension(layout.get('label_height'), self.label_height or 30, minimum=5, maximum=300)
+        print_dpi = 300
+        target_w = max(1, round(effective_width_mm * print_dpi / 25.4))
+        target_h = max(1, round(effective_height_mm * print_dpi / 25.4))
+        try:
+            from brother_ql.devicedependent import label_type_specs
+            label_id = self._get_brother_ql_label_id(layout_override)
+            specs = label_type_specs.get(label_id) or {}
+            dots_total = specs.get('dots_total') or ()
+            if len(dots_total) >= 1 and dots_total[0]:
+                target_w = int(dots_total[0])
+            if len(dots_total) >= 2 and dots_total[1]:
+                target_h = int(dots_total[1])
+        except Exception:
+            pass
+
+        if img.mode == 'RGBA':
+            bg = Image.new('RGB', img.size, 'white')
+            bg.paste(img, mask=img.split()[3])
+            img = bg
+        if img.mode != 'L':
+            img = img.convert('L')
+
+        fit_w = target_w
+        fit_h = max(1, round(img.height * target_w / img.width))
+        resized = img.resize((fit_w, fit_h), Image.LANCZOS)
+
+        # Threshold to pure black/white - LANCZOS produces gray anti-alias pixels which
+        # brother_ql routes into the red ink channel when red=True, causing colored bars.
+        resized = resized.point(lambda p: 0 if p < 128 else 255)
+
+        # Find the bounding box of actual black pixels, ignoring white quiet zones.
+        from PIL import ImageOps
+        bbox = ImageOps.invert(resized).getbbox()
+        if bbox:
+            content_top = max(0, bbox[1] - 2)
+            content_bottom = min(fit_h, bbox[3] + 2)
+            content = resized.crop((0, content_top, fit_w, content_bottom))
+        else:
+            content = resized
+
+        canvas = Image.new('L', (target_w, target_h), 255)
+        if content.height <= target_h:
+            dst_y = (target_h - content.height) // 2
+            canvas.paste(content, (0, dst_y))
+        else:
+            canvas.paste(content.crop((0, 0, fit_w, target_h)), (0, 0))
+
+        return canvas, layout, effective_width_mm, effective_height_mm, target_w, target_h, print_dpi
+
+    def render_label_preview_image(self, upc, item_description=None, layout_override=None):
+        """Render the same label raster used by the print pipeline for WYSIWYG preview."""
+        img = self.generate_barcode_image(upc, item_description, layout_override=layout_override)
+        if self._is_brother_ql_printer():
+            canvas, *_ = self._prepare_brother_ql_canvas(img, layout_override=layout_override)
+            return canvas.convert('RGB')
+        return img.convert('RGB')
+
     def _print_via_brother_ql(self, img, layout_override=None):
         """Send a PIL image to the Brother QL printer using the native raster protocol."""
         import re
@@ -1098,29 +1208,15 @@ class PrinterManager:
             )
 
         # Place barcode on a canvas sized to label_width × label_height mm at 300 DPI.
-        # Scale to fill the full label width first (matching the preview), falling back
-        # to height-fit only if the barcode would overflow the label height.
-        # Preserving bar width is critical — horizontal compression causes partial scan failures.
-        layout = self.get_label_layout(layout_override)
-        effective_width_mm = self._coerce_dimension(layout.get('label_width'), self.label_width or 62, minimum=12, maximum=120)
-        effective_height_mm = self._coerce_dimension(layout.get('label_height'), self.label_height or 30, minimum=5, maximum=300)
-        PRINT_DPI = 300
-        target_w = max(1, round(effective_width_mm * PRINT_DPI / 25.4))
-        target_h = max(1, round(effective_height_mm * PRINT_DPI / 25.4))
-
-        # Convert mode before compositing so we can always paste onto a white canvas
-        if img.mode == 'RGBA':
-            bg = Image.new('RGB', img.size, 'white')
-            bg.paste(img, mask=img.split()[3])
-            img = bg
-        if img.mode != 'L':
-            img = img.convert('L')
-
-        # Scale to fill the full label width (matching the preview), then crop to height.
-        # Never shrink to fit height — that compresses bar widths and breaks scanning.
-        fit_w = target_w
-        fit_h = max(1, round(img.height * target_w / img.width))
-
+        img, layout, effective_width_mm, effective_height_mm, target_w, target_h, print_dpi = self._prepare_brother_ql_canvas(
+            img,
+            layout_override=layout_override
+        )
+        log.warning(
+            f"[brother_ql] prepared canvas {img.size}, target ({target_w}, {target_h}) "
+            f"for {effective_width_mm}x{effective_height_mm}mm @{print_dpi}dpi"
+        )
+        '''
         import logging as _lg
         _lg.getLogger(__name__).warning(
             f"[brother_ql] scaling {img.size} → ({fit_w}, {fit_h}), canvas ({target_w}, {target_h}) "
@@ -1155,6 +1251,7 @@ class PrinterManager:
             # The label height acts as a cut boundary, same as CSS overflow:hidden in preview.
             canvas.paste(content.crop((0, 0, fit_w, target_h)), (0, 0))
         img = canvas
+        '''
 
         # Extract just the model ID — user may have saved "Brother QL-820NWBc"
         # but brother_ql expects "QL-820NWB" or "QL-820NWBc"

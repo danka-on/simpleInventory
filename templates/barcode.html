@@ -87,6 +87,129 @@
             cursor: pointer;
             font-weight: 600;
         }
+        .no-barcode-open-btn {
+            width: 100%;
+            max-width: 360px;
+            border: none;
+            border-radius: 8px;
+            background: #34495e;
+            color: #fff;
+            font-weight: 700;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            box-shadow: 0 3px 10px rgba(44, 62, 80, 0.22);
+        }
+        .no-barcode-modal {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.58);
+            z-index: 99998;
+            align-items: center;
+            justify-content: center;
+            padding: 18px;
+        }
+        .no-barcode-card {
+            width: 92%;
+            max-width: 430px;
+            background: #fff;
+            border-radius: 12px;
+            padding: 18px 20px 16px;
+            box-shadow: 0 16px 36px rgba(0,0,0,0.28);
+            position: relative;
+        }
+        .no-barcode-close-btn {
+            position: absolute;
+            top: 10px;
+            right: 12px;
+            width: 30px;
+            height: 30px;
+            border: none;
+            background: none;
+            color: #7f8c8d;
+            font-size: 1.2rem;
+            padding: 0;
+            margin: 0;
+        }
+        .no-barcode-card h3 {
+            margin: 2px 36px 10px 0;
+            color: #2c3e50;
+            font-size: 1.25rem;
+        }
+        .no-barcode-card label {
+            display: block;
+            font-weight: 700;
+            color: #34495e;
+            margin-top: 12px;
+            margin-bottom: 6px;
+        }
+        .no-barcode-card input[type="text"] {
+            width: 100%;
+            box-sizing: border-box;
+            margin: 0;
+            border: 2px solid #d7dee5;
+            border-radius: 8px;
+            font-size: 1.05rem;
+            padding: 11px 12px;
+        }
+        .no-barcode-actions {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-top: 14px;
+        }
+        .no-barcode-actions button {
+            margin: 0;
+            border: none;
+            border-radius: 8px;
+            color: #fff;
+            font-weight: 700;
+            padding: 11px 12px;
+            font-size: 1rem;
+        }
+        .no-barcode-generate { background: #2980b9; }
+        .no-barcode-print { background: #8e44ad; }
+        .no-barcode-use {
+            grid-column: 1 / -1;
+            background: #16a34a;
+        }
+        .no-barcode-status {
+            min-height: 22px;
+            margin-top: 10px;
+            font-weight: 700;
+            color: #52616b;
+        }
+        .no-barcode-status.ok { color: #15803d; }
+        .no-barcode-status.bad { color: #dc2626; }
+        .no-barcode-keypad {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+            margin-top: 12px;
+            user-select: none;
+            touch-action: manipulation;
+        }
+        .no-barcode-keypad button {
+            margin: 0;
+            border: none;
+            border-radius: 8px;
+            background: #eef2f7;
+            color: #17202a;
+            font-weight: 800;
+            font-size: 1.25rem;
+            min-height: 48px;
+            padding: 10px 8px;
+            cursor: pointer;
+        }
+        .no-barcode-keypad button:active {
+            background: #dbeafe;
+        }
+        .no-barcode-keypad .no-barcode-key-action {
+            background: #d7dee5;
+            font-size: 0.95rem;
+        }
         .missing-title-modal {
             display: none;
             position: fixed;
@@ -412,6 +535,10 @@
 
     <!-- Barcode Text Input (primary input) -->
     <input type="text" id="barcodeTextInput" name="barcodeTextInput" placeholder="Scan or enter barcode" data-i18n="scan_or_enter_barcode" autocomplete="off" autocapitalize="off" spellcheck="false" />
+    <button type="button" id="noBarcodeBtn" class="no-barcode-open-btn">
+        <i class="fas fa-barcode"></i>
+        <span>No Barcode</span>
+    </button>
     <form id="scan_form" action="/submitbarcode" method="POST">
         <input name="scanned_result" type="text" id="scanned_result" placeholder="BARCODE will appear here" data-i18n="barcode_will_appear" style="font-weight: bold;" readonly>
     </form>
@@ -438,6 +565,36 @@
             <div style="text-align:right;">
                 <button class="invalid-close" id="invalidModalClose" data-i18n="close">Close</button>
             </div>
+        </div>
+    </div>
+
+    <div id="noBarcodeModal" class="no-barcode-modal">
+        <div class="no-barcode-card">
+            <button type="button" id="noBarcodeCloseBtn" class="no-barcode-close-btn" aria-label="Close">&#x2715;</button>
+            <h3>No Barcode</h3>
+            <label for="noBarcodeInput">Barcode</label>
+            <input type="text" id="noBarcodeInput" placeholder="Enter barcode or generate one" autocomplete="off" autocapitalize="off" spellcheck="false">
+            <div id="noBarcodeKeypad" class="no-barcode-keypad" aria-label="Barcode number pad">
+                <button type="button" data-no-barcode-key="1">1</button>
+                <button type="button" data-no-barcode-key="2">2</button>
+                <button type="button" data-no-barcode-key="3">3</button>
+                <button type="button" data-no-barcode-key="4">4</button>
+                <button type="button" data-no-barcode-key="5">5</button>
+                <button type="button" data-no-barcode-key="6">6</button>
+                <button type="button" data-no-barcode-key="7">7</button>
+                <button type="button" data-no-barcode-key="8">8</button>
+                <button type="button" data-no-barcode-key="9">9</button>
+                <button type="button" class="no-barcode-key-action" data-no-barcode-action="clear">Clear</button>
+                <button type="button" data-no-barcode-key="0">0</button>
+                <button type="button" class="no-barcode-key-action" data-no-barcode-action="backspace">Back</button>
+            </div>
+            <label for="noBarcodeDescriptionInput">Label title</label>
+            <input type="text" id="noBarcodeDescriptionInput" placeholder="No barcode item" autocomplete="off" autocapitalize="words" spellcheck="false">
+            <div class="no-barcode-actions">
+                <button type="button" id="noBarcodeGenerateBtn" class="no-barcode-generate">Generate Unique</button>
+                <button type="button" id="noBarcodeUseBtn" class="no-barcode-use">Add Item</button>
+            </div>
+            <div id="noBarcodeStatus" class="no-barcode-status" aria-live="polite"></div>
         </div>
     </div>
 
@@ -516,6 +673,7 @@
     </div>
 
     <script src="/static/barcode-entry-state.js?v=20260420a"></script>
+    <script src="/static/no-barcode-label.js?v=20260504c"></script>
     <script>
         // DOM Elements
         const scannedResultInput = document.getElementById('scanned_result');
@@ -1521,6 +1679,21 @@
                 console.error('Barcode scan processing failed:', err);
             });
             return barcodeScanQueue;
+        }
+
+        if (window.NoBarcodeLabelFlow) {
+            window.NoBarcodeLabelFlow.init({
+                focusTarget: barcodeInput,
+                onOpen: () => {
+                    if (typeof setMissingTitleScanPause === 'function') setMissingTitleScanPause(true);
+                },
+                onClose: () => {
+                    if (typeof setMissingTitleScanPause === 'function') setMissingTitleScanPause(false);
+                },
+                onUseBarcode: (barcode) => {
+                    queueBarcodeScan(barcode);
+                }
+            });
         }
 
         // Ensure barcode is set in sessionStorage on successful scan or input

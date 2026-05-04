@@ -967,6 +967,13 @@ document.getElementById('sort-select').addEventListener('change', () => {
     // page-size control hidden when fetching all by default
 
 function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function escJs(s){
+    return String(s == null ? '' : s)
+        .replace(/\\/g, '\\\\')
+        .replace(/'/g, "\\'")
+        .replace(/\r/g, '\\r')
+        .replace(/\n/g, '\\n');
+}
 function formatUpcDisplay(code){
     const s = String(code || '').trim();
     if (/^\d+$/.test(s) && s.length <= 12) return s.padStart(12, '0');
@@ -1405,10 +1412,16 @@ function toggleActionDropdown(event, db, id, mergedIdsJson) {
     } else {
         let buttons = `<button onclick="onEdit('${db}', ${id}); closeActionDropdown()">Edit</button>
                       <button onclick="onDelete('${db}', ${id}); closeActionDropdown()">Delete</button>`;
+        const idArg = escJs(id);
         if (db === 'searchRack') {
             const row = document.querySelector(`tr[data-src="${db}"][data-id="${id}"]`);
             const barcode = row ? row.children[1].textContent : '';
-            buttons = `<button onclick="onEditLocation(${id}, '${esc(barcode)}'); closeActionDropdown()">Edit Location</button>` + buttons;
+            buttons =
+                `<button onclick="onPrintResultBarcode('searchRack', '${idArg}'); closeActionDropdown()">Reprint Barcode</button>` +
+                `<button onclick="onEditLocation(${id}, '${esc(barcode)}'); closeActionDropdown()">Edit Location</button>` +
+                buttons;
+        } else if (db === 'bol') {
+            buttons = `<button onclick="onPrintResultBarcode('bol', '${idArg}'); closeActionDropdown()">Print Barcode</button>` + buttons;
         }
         dropdown.innerHTML = buttons;
     }
@@ -1455,6 +1468,70 @@ function closeActionDropdown() {
         dropdown.remove();
     }
     document.removeEventListener('click', closeActionDropdownOnClick);
+}
+
+function findSearchResultRecord(db, id) {
+    const dbKey = String(db || '');
+    const idKey = String(id || '');
+    return (_allResults || []).find(r => String(r && r.source_db || '') === dbKey && String(r && r.id || '') === idKey) || null;
+}
+
+function resultBarcodeValue(record) {
+    if (!record) return '';
+    const raw = record.raw || {};
+    return String(
+        record.barcode ||
+        raw.upc ||
+        raw.UPC ||
+        raw.BARCODE ||
+        raw.Barcode ||
+        raw.barcode ||
+        raw.bar_code ||
+        ''
+    ).trim();
+}
+
+function resultTitleValue(record) {
+    if (!record) return '';
+    const raw = record.raw || {};
+    return String(
+        record.title ||
+        raw.Title ||
+        raw.title ||
+        raw.TITLE ||
+        raw.item_description ||
+        raw.DESCRIPTION ||
+        raw.description ||
+        ''
+    ).replace(/\s+/g, ' ').trim();
+}
+
+async function onPrintResultBarcode(db, id) {
+    const record = findSearchResultRecord(db, id);
+    const barcode = resultBarcodeValue(record);
+    const title = resultTitleValue(record);
+    if (!barcode) {
+        alert('No barcode found for this item.');
+        return;
+    }
+    try {
+        const response = await fetch('/api/printer/print-barcode', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                upc: barcode,
+                item_description: title || 'Warehouse item',
+                quantity: 1
+            })
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data.success) {
+            throw new Error((data && data.error) || 'Print failed');
+        }
+        alert(`Barcode sent to printer: ${barcode}`);
+    } catch (error) {
+        alert('Print failed: ' + ((error && error.message) || 'Unknown error'));
+    }
 }
 
 function closeActionDropdownOnClick(event) {
