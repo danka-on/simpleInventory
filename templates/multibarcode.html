@@ -116,8 +116,10 @@
         .barcode-list {
             width: 100%;
             margin: 20px 0;
-            max-height: 400px;
+            max-height: calc(100vh - 300px);
+            min-height: 120px;
             overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
         }
         
         .barcode-item {
@@ -157,6 +159,17 @@
             gap: 8px;
             flex: 1;
             min-width: 0;
+        }
+
+        .barcode-item-title {
+            font-size: 0.78em;
+            font-weight: 400;
+            opacity: 0.82;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 100%;
+            display: block;
         }
 
         .barcode-item-meta {
@@ -312,6 +325,32 @@
             50% { background: #27ae60; }
             100% { background: #2ecc71; }
         }
+
+        /* Scanned-suffix rows: fixed suffix came directly from scanner */
+        .barcode-item-scanned {
+            background: #fef9c3 !important;
+            color: #713f12;
+            border: 1px solid #e8cf48;
+        }
+
+        .barcode-item-scanned .barcode-text {
+            color: #713f12;
+        }
+
+        .barcode-item-scanned .barcode-item-meta {
+            color: #92400e;
+            opacity: 1;
+        }
+
+        .barcode-item-scanned .delete-btn {
+            background: rgba(113, 63, 18, 0.12);
+            color: #713f12;
+        }
+
+        .barcode-item-scanned .delete-btn:hover {
+            background: rgba(185, 28, 28, 0.16);
+            color: #991b1b;
+        }
         
         /* Navigation buttons */
         .nav-buttons {
@@ -368,9 +407,12 @@
             inset: 0;
             background: rgba(0,0,0,0.6);
             z-index: 100000;
-            align-items: center;
+            align-items: flex-start;
             justify-content: center;
             padding: 20px;
+            padding-bottom: max(env(safe-area-inset-bottom, 20px), 20px);
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
         }
 
         .missing-title-card {
@@ -379,8 +421,39 @@
             padding: 18px 20px 16px;
             width: 92%;
             max-width: 430px;
+            max-height: calc(100vh - 40px);
+            max-height: calc(100dvh - 40px);
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+            overscroll-behavior: contain;
+            margin: 10px auto;
             box-shadow: 0 18px 40px rgba(0,0,0,0.28);
             border: 1px solid #f3d9a2;
+            position: relative;
+        }
+
+        .missing-title-close-btn {
+            position: absolute;
+            top: 10px;
+            right: 12px;
+            width: 30px;
+            height: 30px;
+            border: none;
+            background: none;
+            color: #9ca3af;
+            font-size: 1.2rem;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            padding: 0;
+            z-index: 1;
+        }
+
+        .missing-title-close-btn:active {
+            background: #f3f4f6;
+            color: #374151;
         }
 
         .missing-title-accent {
@@ -434,23 +507,57 @@
             color: #b45309;
         }
 
-        .missing-title-keyboard {
+        .missing-title-hint {
+            display: none;
+            margin: -4px 0 12px;
+            text-align: center;
+            color: #92400e;
+            font-size: 0.82rem;
+            font-weight: 700;
+            line-height: 1.35;
+        }
+
+        .missing-title-photo {
+            display: none;
+            margin: 0 0 14px;
+            padding: 10px;
+            border: 1px solid #fcd34d;
+            border-radius: 12px;
+            background: #fffbeb;
+        }
+
+        .missing-title-photo-btn {
             width: 100%;
-            margin: 0 0 12px;
             padding: 11px 14px;
             border-radius: 10px;
-            border: 1px dashed #d97706;
-            background: rgba(245, 158, 11, 0.08);
+            border: 1px solid #f59e0b;
+            background: #fff7ed;
             color: #92400e;
-            font-size: 0.96rem;
+            font-size: 0.95rem;
             font-weight: 800;
             cursor: pointer;
             -webkit-appearance: none;
             appearance: none;
         }
 
-        .missing-title-keyboard:active {
-            transform: translateY(1px);
+        .missing-title-photo-status {
+            margin-top: 8px;
+            text-align: center;
+            color: #92400e;
+            font-size: 0.82rem;
+            font-weight: 700;
+            line-height: 1.35;
+        }
+
+        .missing-title-photo-preview {
+            display: none;
+            width: 100%;
+            max-height: 170px;
+            object-fit: cover;
+            border-radius: 10px;
+            margin-top: 10px;
+            border: 1px solid rgba(146, 64, 14, 0.18);
+            background: #fff;
         }
 
         .missing-title-input {
@@ -469,6 +576,116 @@
             box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.16);
         }
 
+        .missing-title-keypad {
+            display: none;
+            flex-direction: column;
+            gap: 10px;
+            margin: 0 0 14px;
+        }
+
+        .missing-title-keypad-row {
+            display: grid;
+            gap: 5px;
+            width: 100%;
+            align-items: stretch;
+        }
+
+        .missing-title-keypad-row.ten {
+            grid-template-columns: repeat(10, minmax(0, 1fr));
+        }
+
+        .missing-title-keypad-row.nine {
+            grid-template-columns: repeat(9, minmax(0, 1fr));
+            width: 92%;
+            margin: 0 auto;
+        }
+
+        .missing-title-keypad-row.seven {
+            grid-template-columns: repeat(7, minmax(0, 1fr));
+            width: 78%;
+            margin: 0 auto;
+        }
+
+        .missing-title-keypad-row.eight {
+            grid-template-columns: repeat(8, minmax(0, 1fr));
+            width: 88%;
+            margin: 0 auto;
+        }
+
+        .missing-title-keypad-key {
+            height: 38px;
+            border: 1px solid #f2c66d;
+            border-radius: 9px;
+            background: #fff;
+            color: #7c2d12;
+            font-size: 0.8rem;
+            font-weight: 800;
+            cursor: pointer;
+            -webkit-appearance: none;
+            appearance: none;
+            padding: 0;
+            line-height: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 0;
+            white-space: nowrap;
+            overflow: hidden;
+        }
+
+        .missing-title-keypad-key:active {
+            transform: translateY(1px);
+            background: #fff7ed;
+        }
+
+        .missing-title-keypad-key.action {
+            background: #fff7ed;
+            color: #92400e;
+        }
+
+        .missing-title-keypad-key.wide {
+            grid-column: span 3;
+        }
+        .missing-title-keypad-row.num-row {
+            border-bottom: 2px solid #f2c66d;
+            padding-bottom: 6px;
+            margin-bottom: 2px;
+        }
+        .missing-title-keypad-row.num-row .missing-title-keypad-key {
+            background: #fef3c7;
+        }
+        .missing-title-keypad-row.num-row .missing-title-keypad-key:active {
+            background: #fde68a;
+        }
+
+        @media (max-width: 430px) {
+            .missing-title-keypad {
+                gap: 8px;
+            }
+
+            .missing-title-keypad-row {
+                gap: 4px;
+            }
+
+            .missing-title-keypad-row.nine {
+                width: 94%;
+            }
+
+            .missing-title-keypad-row.seven {
+                width: 82%;
+            }
+
+            .missing-title-keypad-row.eight {
+                width: 90%;
+            }
+
+            .missing-title-keypad-key {
+                height: 36px;
+                border-radius: 8px;
+                font-size: 0.75rem;
+            }
+        }
+
         .missing-title-actions {
             display: flex;
             flex-wrap: wrap;
@@ -485,19 +702,10 @@
             margin-top: 0;
         }
 
-        .missing-title-btn.cancel {
-            background: #e5e7eb;
-            color: #374151;
-        }
-
-        .missing-title-btn.skip {
-            background: #fde68a;
-            color: #92400e;
-        }
-
         .missing-title-btn.save {
-            background: #f59e0b;
+            background: #16a34a;
             color: #fff;
+            flex: 1;
         }
     </style>
 </head>
@@ -549,28 +757,106 @@
 
     <div id="missingTitleModal" class="missing-title-modal">
         <div class="missing-title-card">
+            <button type="button" id="missingTitleCloseBtn" class="missing-title-close-btn" aria-label="Close">&#x2715;</button>
             <div class="missing-title-accent"></div>
             <div class="missing-title-icon"><i class="fas fa-wave-square"></i></div>
-            <h3 class="missing-title-heading">Missing Macy/BOL title</h3>
-            <p class="missing-title-body">This barcode has no title match. Add a warehouse title now or skip and add without a title.</p>
+            <h3 class="missing-title-heading">Missing Title/Image</h3>
             <div class="missing-title-code" id="missingTitleBarcodeText"></div>
-            <button type="button" id="missingTitleKeyboardBtn" class="missing-title-keyboard">Tap Here to Type Title</button>
             <input type="text" id="missingTitleInput" class="missing-title-input" maxlength="200" placeholder="Enter a warehouse title" autocomplete="off" autocapitalize="words" spellcheck="false" inputmode="text" enterkeyhint="done">
+            <div id="missingTitlePhotoSection" class="missing-title-photo">
+                <input type="file" id="missingTitlePhotoInput" accept="image/*" capture="environment" style="display:none">
+                <button type="button" id="missingTitlePhotoBtn" class="missing-title-photo-btn">Photo Mode For Thumbnail</button>
+                <div id="missingTitlePhotoStatus" class="missing-title-photo-status">Optional: capture a thumbnail while this item is already being fixed.</div>
+                <img id="missingTitlePhotoPreview" class="missing-title-photo-preview" alt="Thumbnail preview">
+            </div>
+            <div id="missingTitleKeypad" class="missing-title-keypad" aria-hidden="true">
+                <div class="missing-title-keypad-row ten num-row">
+                    <button type="button" class="missing-title-keypad-key" data-title-key="1">1</button>
+                    <button type="button" class="missing-title-keypad-key" data-title-key="2">2</button>
+                    <button type="button" class="missing-title-keypad-key" data-title-key="3">3</button>
+                    <button type="button" class="missing-title-keypad-key" data-title-key="4">4</button>
+                    <button type="button" class="missing-title-keypad-key" data-title-key="5">5</button>
+                    <button type="button" class="missing-title-keypad-key" data-title-key="6">6</button>
+                    <button type="button" class="missing-title-keypad-key" data-title-key="7">7</button>
+                    <button type="button" class="missing-title-keypad-key" data-title-key="8">8</button>
+                    <button type="button" class="missing-title-keypad-key" data-title-key="9">9</button>
+                    <button type="button" class="missing-title-keypad-key" data-title-key="0">0</button>
+                </div>
+                <div class="missing-title-keypad-row ten">
+                    <button type="button" class="missing-title-keypad-key" data-title-key="q">Q</button>
+                    <button type="button" class="missing-title-keypad-key" data-title-key="w">W</button>
+                    <button type="button" class="missing-title-keypad-key" data-title-key="e">E</button>
+                    <button type="button" class="missing-title-keypad-key" data-title-key="r">R</button>
+                    <button type="button" class="missing-title-keypad-key" data-title-key="t">T</button>
+                    <button type="button" class="missing-title-keypad-key" data-title-key="y">Y</button>
+                    <button type="button" class="missing-title-keypad-key" data-title-key="u">U</button>
+                    <button type="button" class="missing-title-keypad-key" data-title-key="i">I</button>
+                    <button type="button" class="missing-title-keypad-key" data-title-key="o">O</button>
+                    <button type="button" class="missing-title-keypad-key" data-title-key="p">P</button>
+                </div>
+                <div class="missing-title-keypad-row nine">
+                    <button type="button" class="missing-title-keypad-key" data-title-key="a">A</button>
+                    <button type="button" class="missing-title-keypad-key" data-title-key="s">S</button>
+                    <button type="button" class="missing-title-keypad-key" data-title-key="d">D</button>
+                    <button type="button" class="missing-title-keypad-key" data-title-key="f">F</button>
+                    <button type="button" class="missing-title-keypad-key" data-title-key="g">G</button>
+                    <button type="button" class="missing-title-keypad-key" data-title-key="h">H</button>
+                    <button type="button" class="missing-title-keypad-key" data-title-key="j">J</button>
+                    <button type="button" class="missing-title-keypad-key" data-title-key="k">K</button>
+                    <button type="button" class="missing-title-keypad-key" data-title-key="l">L</button>
+                </div>
+                <div class="missing-title-keypad-row seven">
+                    <button type="button" class="missing-title-keypad-key" data-title-key="z">Z</button>
+                    <button type="button" class="missing-title-keypad-key" data-title-key="x">X</button>
+                    <button type="button" class="missing-title-keypad-key" data-title-key="c">C</button>
+                    <button type="button" class="missing-title-keypad-key" data-title-key="v">V</button>
+                    <button type="button" class="missing-title-keypad-key" data-title-key="b">B</button>
+                    <button type="button" class="missing-title-keypad-key" data-title-key="n">N</button>
+                    <button type="button" class="missing-title-keypad-key" data-title-key="m">M</button>
+                </div>
+                <div class="missing-title-keypad-row eight">
+                    <button type="button" class="missing-title-keypad-key" data-title-key="-">-</button>
+                    <button type="button" class="missing-title-keypad-key" data-title-key="&amp;">&amp;</button>
+                    <button type="button" class="missing-title-keypad-key" data-title-key="'">&#39;</button>
+                    <button type="button" class="missing-title-keypad-key action wide" data-title-key=" ">Space</button>
+                    <button type="button" class="missing-title-keypad-key action" data-title-action="backspace">⌫</button>
+                    <button type="button" class="missing-title-keypad-key action" data-title-action="clear">Clear</button>
+                </div>
+            </div>
             <div class="missing-title-actions">
-                <button type="button" id="missingTitleSkipBtn" class="missing-title-btn skip">Skip Without Title</button>
-                <button type="button" id="missingTitleSaveBtn" class="missing-title-btn save">Save Title</button>
+                <button type="button" id="missingTitleSaveBtn" class="missing-title-btn save">Complete</button>
             </div>
         </div>
     </div>
 
     <!-- ZXing Library -->
     <script src="https://unpkg.com/@zxing/library@0.19.1/umd/index.min.js"></script>
-    <script src="/static/barcode-entry-state.js?v=20260413b"></script>
+    <script src="/static/barcode-entry-state.js?v=20260420a"></script>
     
     <script>
         const barcodeEntryState = window.BarcodeEntryState;
         const MANUAL_TITLE_STORAGE_KEY = 'additem_manual_titles';
+        const SCANNED_SUFFIXES_KEY = 'barcode_scanned_suffixes';
+
+        function loadScannedSuffixCodes() {
+            const raw = sessionStorage.getItem(SCANNED_SUFFIXES_KEY);
+            if (!raw) return new Set();
+            try {
+                const parsed = JSON.parse(raw);
+                return Array.isArray(parsed) ? new Set(parsed) : new Set();
+            } catch (_) { return new Set(); }
+        }
+
+        function persistScannedSuffixCodes() {
+            if (scannedSuffixCodes.size) {
+                sessionStorage.setItem(SCANNED_SUFFIXES_KEY, JSON.stringify([...scannedSuffixCodes]));
+            } else {
+                sessionStorage.removeItem(SCANNED_SUFFIXES_KEY);
+            }
+        }
+
         let barcodeItems = barcodeEntryState ? barcodeEntryState.loadEntries() : [];
+        let scannedSuffixCodes = loadScannedSuffixCodes();
         let codeReader = null;
         let selectedDeviceId = null;
         let barcodeScanQueue = Promise.resolve();
@@ -584,15 +870,22 @@
         const readerDiv = document.getElementById('reader');
         const missingTitleModal = document.getElementById('missingTitleModal');
         const missingTitleBarcodeText = document.getElementById('missingTitleBarcodeText');
-        const missingTitleKeyboardBtn = document.getElementById('missingTitleKeyboardBtn');
+        const missingTitleHint = document.getElementById('missingTitleHint');
         const missingTitleInput = document.getElementById('missingTitleInput');
+        const missingTitlePhotoSection = document.getElementById('missingTitlePhotoSection');
+        const missingTitlePhotoInput = document.getElementById('missingTitlePhotoInput');
+        const missingTitlePhotoBtn = document.getElementById('missingTitlePhotoBtn');
+        const missingTitlePhotoStatus = document.getElementById('missingTitlePhotoStatus');
+        const missingTitlePhotoPreview = document.getElementById('missingTitlePhotoPreview');
+        const missingTitleKeypad = document.getElementById('missingTitleKeypad');
         const missingTitleSkipBtn = document.getElementById('missingTitleSkipBtn');
         const missingTitleSaveBtn = document.getElementById('missingTitleSaveBtn');
         const MANUAL_TITLE_SKIP_STORAGE_KEY = 'additem_manual_title_skips';
         let missingTitleModalOpen = false;
         let missingTitleModalResolver = null;
-        let missingTitleKeyboardTapRequired = false;
         let missingTitleResumeCamera = false;
+        let missingTitlePendingPhotoData = '';
+        let missingTitleCurrentIssue = null;
         
         // Check if shelf is still locked
         function isShelfLocked() {
@@ -613,28 +906,35 @@
             const deviceType = getDeviceType();
             const scannerMode = localStorage.getItem('scannerMode'); // 'camera' or 'handheld'
             
-            // Force handheld mode if selected in settings
-            const isHandheldMode = scannerMode === 'handheld';
-            
-            if (isHandheldMode || deviceType === 'iPad' || deviceType === 'Android Tablet' || deviceType === 'Desktop') {
-                // Hide camera for tablets and desktop OR if handheld mode is enabled
+            // Camera only starts if explicitly set to 'camera' mode (default is handheld scanner)
+            const isCameraMode = scannerMode === 'camera';
+
+            if (!isCameraMode || deviceType === 'iPad' || deviceType === 'Android Tablet' || deviceType === 'Desktop') {
+                // Handheld scanner mode (default for all devices unless camera explicitly chosen)
                 if (readerDiv) readerDiv.style.display = 'none';
-                // Focus on input
                 barcodeInput.focus();
-                // Prevent camera initialization
                 window.initializeCamera = function() {};
             } else {
-                // Mobile: show camera
+                // Mobile with camera mode explicitly enabled in settings
                 if (readerDiv) readerDiv.style.display = '';
-                // Initialize camera
                 setTimeout(initializeCamera, 100);
             }
         }
         
+        // Shared AudioContext — browsers limit simultaneous contexts; reuse to prevent silent failures
+        function _ensureAudioCtx() {
+            const Ctx = window.AudioContext || window.webkitAudioContext;
+            if (!Ctx) return null;
+            if (!window.audioCtx) window.audioCtx = new Ctx();
+            if (window.audioCtx.state === 'suspended') window.audioCtx.resume().catch(() => {});
+            return window.audioCtx;
+        }
+
         // Play success beep
         function playBeep() {
             try {
-                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const ctx = _ensureAudioCtx();
+                if (!ctx) return;
                 const osc = ctx.createOscillator();
                 const gain = ctx.createGain();
                 osc.type = 'sine';
@@ -652,11 +952,12 @@
                 console.error('Beep error:', e);
             }
         }
-        
+
         // Play error beep
         function playErrorBeep() {
             try {
-                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const ctx = _ensureAudioCtx();
+                if (!ctx) return;
                 const osc = ctx.createOscillator();
                 const gain = ctx.createGain();
                 osc.type = 'square';
@@ -735,8 +1036,14 @@
         }
 
         function normalizeManualTitleKey(code) {
-            const split = splitScannedBarcode(code);
-            return String(split.base || '').trim();
+            return normalizeScannedBarcode(code);
+        }
+
+        function barcodeItemActualCode(item) {
+            if (!item) return '';
+            const base = String(item.code || '').trim();
+            const suffix = parseInt(item.suffix, 10) || 0;
+            return suffix > 0 ? `${base}-${suffix}` : base;
         }
 
         function loadManualTitleOverrides() {
@@ -803,6 +1110,27 @@
             return next;
         }
 
+        function clearPendingManualTitleState(code) {
+            const key = normalizeManualTitleKey(code);
+            if (!key) return;
+
+            const overrides = loadManualTitleOverrides();
+            if (overrides[key]) {
+                delete overrides[key];
+                saveManualTitleOverrides(overrides);
+            }
+
+            const skipped = loadSkippedManualTitles();
+            if (skipped[key]) {
+                delete skipped[key];
+                saveSkippedManualTitles(skipped);
+            }
+
+            if (screeningCache && typeof screeningCache.delete === 'function') {
+                screeningCache.delete(key);
+            }
+        }
+
         function playMissingTitleAlert() {
             try {
                 const Ctx = window.AudioContext || window.webkitAudioContext;
@@ -847,6 +1175,131 @@
             return deviceType === 'Mobile' || deviceType === 'iPad';
         }
 
+        function tryShowVirtualKeyboard() {
+            try {
+                if (navigator.virtualKeyboard && typeof navigator.virtualKeyboard.show === 'function') {
+                    navigator.virtualKeyboard.show();
+                }
+            } catch (_) {}
+        }
+
+        function setMissingTitleKeypadVisibility(show) {
+            const shouldShow = !!show;
+            if (missingTitleHint) {
+                missingTitleHint.style.display = shouldShow ? 'block' : 'none';
+            }
+            if (missingTitleKeypad) {
+                missingTitleKeypad.style.display = shouldShow ? 'flex' : 'none';
+                missingTitleKeypad.setAttribute('aria-hidden', shouldShow ? 'false' : 'true');
+            }
+        }
+
+        function normalizeMissingTitleInsertedChar(char) {
+            const text = String(char || '');
+            if (!/^[a-z]$/i.test(text) || !missingTitleInput) return text;
+            const value = String(missingTitleInput.value || '');
+            const start = typeof missingTitleInput.selectionStart === 'number'
+                ? missingTitleInput.selectionStart
+                : value.length;
+            const prev = start > 0 ? value.charAt(start - 1) : '';
+            return !prev || /[\s\-&(\/]/.test(prev) ? text.toUpperCase() : text.toLowerCase();
+        }
+
+        function insertMissingTitleText(char) {
+            if (!missingTitleInput) return;
+            const rawChar = String(char || '');
+            if (!rawChar) return;
+            const value = String(missingTitleInput.value || '');
+            const start = typeof missingTitleInput.selectionStart === 'number'
+                ? missingTitleInput.selectionStart
+                : value.length;
+            const end = typeof missingTitleInput.selectionEnd === 'number'
+                ? missingTitleInput.selectionEnd
+                : value.length;
+            const insertChar = normalizeMissingTitleInsertedChar(rawChar);
+            const next = (value.slice(0, start) + insertChar + value.slice(end)).slice(0, 200);
+            missingTitleInput.value = next;
+            const caret = Math.min(start + insertChar.length, next.length);
+            try {
+                missingTitleInput.setSelectionRange(caret, caret);
+            } catch (_) {}
+            missingTitleInput.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+
+        function backspaceMissingTitleText() {
+            if (!missingTitleInput) return;
+            const value = String(missingTitleInput.value || '');
+            const start = typeof missingTitleInput.selectionStart === 'number'
+                ? missingTitleInput.selectionStart
+                : value.length;
+            const end = typeof missingTitleInput.selectionEnd === 'number'
+                ? missingTitleInput.selectionEnd
+                : value.length;
+            if (!value) return;
+            let next = value;
+            let caret = start;
+            if (start !== end) {
+                next = value.slice(0, start) + value.slice(end);
+            } else if (start > 0) {
+                next = value.slice(0, start - 1) + value.slice(end);
+                caret = start - 1;
+            }
+            missingTitleInput.value = next;
+            try {
+                missingTitleInput.setSelectionRange(caret, caret);
+            } catch (_) {}
+            missingTitleInput.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+
+        function clearMissingTitleText() {
+            if (!missingTitleInput) return;
+            missingTitleInput.value = '';
+            try {
+                missingTitleInput.setSelectionRange(0, 0);
+            } catch (_) {}
+            missingTitleInput.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+
+        function resetMissingTitlePhotoState() {
+            missingTitlePendingPhotoData = '';
+            if (missingTitlePhotoInput) {
+                missingTitlePhotoInput.value = '';
+            }
+            if (missingTitlePhotoPreview) {
+                missingTitlePhotoPreview.style.display = 'none';
+                missingTitlePhotoPreview.removeAttribute('src');
+            }
+            if (missingTitlePhotoStatus) {
+                missingTitlePhotoStatus.textContent = 'Optional: capture a thumbnail while this item is already being fixed.';
+            }
+        }
+
+        function setMissingTitlePhotoVisibility(show) {
+            if (!missingTitlePhotoSection) return;
+            missingTitlePhotoSection.style.display = show ? 'block' : 'none';
+        }
+
+        async function uploadMissingTitleThumbnail(code, title, imageData) {
+            const barcode = normalizeManualTitleKey(code);
+            const itemTitle = String(title || '').replace(/\s+/g, ' ').trim();
+            const photoData = String(imageData || '').trim();
+            if (!barcode || !itemTitle || !photoData) return { success: false, skipped: true };
+            const response = await fetch('/api/items-prep/temp-item', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    upc: barcode,
+                    item_description: itemTitle,
+                    image_data: photoData
+                })
+            });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok || payload.success === false) {
+                throw new Error((payload && payload.error) || 'Unable to save thumbnail');
+            }
+            return payload;
+        }
+
         function suspendBarcodeCaptureForMissingTitle(suspend) {
             if (barcodeInput) {
                 barcodeInput.readOnly = !!suspend;
@@ -882,17 +1335,6 @@
             }
         }
 
-        function unlockMissingTitleTyping(retry = true) {
-            missingTitleKeyboardTapRequired = false;
-            if (missingTitleKeyboardBtn) {
-                missingTitleKeyboardBtn.style.display = 'none';
-            }
-            if (missingTitleInput) {
-                missingTitleInput.readOnly = false;
-            }
-            focusMissingTitleEntry(retry);
-        }
-
         function focusMissingTitleEntry(retry = false) {
             if (!missingTitleInput) return;
 
@@ -910,6 +1352,7 @@
                 } catch (_) {
                     missingTitleInput.focus();
                 }
+                tryShowVirtualKeyboard();
                 if (typeof missingTitleInput.click === 'function') missingTitleInput.click();
                 if (typeof missingTitleInput.select === 'function') missingTitleInput.select();
                 if (typeof missingTitleInput.setSelectionRange === 'function') {
@@ -930,13 +1373,10 @@
             if (!missingTitleModal) return;
             missingTitleModal.style.display = 'none';
             missingTitleModalOpen = false;
-            missingTitleKeyboardTapRequired = false;
-            if (missingTitleInput) {
-                missingTitleInput.readOnly = false;
-            }
-            if (missingTitleKeyboardBtn) {
-                missingTitleKeyboardBtn.style.display = 'none';
-            }
+            missingTitleCurrentIssue = null;
+            resetMissingTitlePhotoState();
+            setMissingTitlePhotoVisibility(false);
+            setMissingTitleKeypadVisibility(false);
             suspendBarcodeCaptureForMissingTitle(false);
             const resolver = missingTitleModalResolver;
             missingTitleModalResolver = null;
@@ -950,7 +1390,7 @@
             }, 60);
         }
 
-        function openMissingTitleModal(code) {
+        function openMissingTitleModal(code, issue = {}) {
             if (!missingTitleModal || !missingTitleInput || !missingTitleBarcodeText) {
                 return Promise.resolve({ action: 'skip', title: '' });
             }
@@ -959,26 +1399,25 @@
                 closeMissingTitleModal({ action: 'dismiss', title: '' });
             }
 
+            missingTitleCurrentIssue = Object.assign({
+                barcode: normalizeManualTitleKey(code),
+                existingTitle: '',
+                missingImage: false
+            }, issue || {});
+            const existingTitle = String(missingTitleCurrentIssue.existingTitle || '').replace(/\s+/g, ' ').trim();
             missingTitleBarcodeText.textContent = formatUpcDisplay(code);
-            missingTitleInput.value = '';
+            missingTitleInput.value = existingTitle;
             missingTitleInput.style.borderColor = '#f2c66d';
             missingTitleInput.style.boxShadow = '';
-            missingTitleKeyboardTapRequired = requiresMissingTitleKeyboardTap();
-            missingTitleInput.readOnly = missingTitleKeyboardTapRequired;
-            if (missingTitleKeyboardBtn) {
-                missingTitleKeyboardBtn.style.display = missingTitleKeyboardTapRequired ? 'block' : 'none';
-            }
+            resetMissingTitlePhotoState();
+            setMissingTitlePhotoVisibility(!!missingTitleCurrentIssue.missingImage);
+            missingTitleInput.readOnly = false;
+            setMissingTitleKeypadVisibility(requiresMissingTitleKeyboardTap());
             missingTitleModal.style.display = 'flex';
             missingTitleModalOpen = true;
             suspendBarcodeCaptureForMissingTitle(true);
             playMissingTitleAlert();
-            if (missingTitleKeyboardTapRequired) {
-                window.requestAnimationFrame(() => {
-                    if (missingTitleModalOpen && missingTitleKeyboardBtn) missingTitleKeyboardBtn.focus();
-                });
-            } else {
-                focusMissingTitleEntry(true);
-            }
+            focusMissingTitleEntry(true);
 
             return new Promise(resolve => {
                 missingTitleModalResolver = resolve;
@@ -991,7 +1430,7 @@
             if (screeningCache.has(key)) return screeningCache.get(key);
 
             const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), 3000);
+            const timeout = setTimeout(() => controller.abort(), 8000);
             try {
                 const response = await fetch('/api/add-item/screen', {
                     method: 'POST',
@@ -1003,7 +1442,10 @@
                 if (!response.ok || payload.success === false) {
                     throw new Error((payload && payload.error) || 'Unable to screen item');
                 }
-                const item = payload.items && (payload.items[key] || payload.items[code]) ? (payload.items[key] || payload.items[code]) : null;
+                let item = payload.items && (payload.items[key] || payload.items[code]) ? (payload.items[key] || payload.items[code]) : null;
+                if (!item && payload.items && Object.keys(payload.items).length === 1) {
+                    item = payload.items[Object.keys(payload.items)[0]];
+                }
                 screeningCache.set(key, item);
                 return item;
             } finally {
@@ -1020,15 +1462,20 @@
             const skipped = loadSkippedManualTitles();
             if (skipped[key]) return true;
 
+            let item = null;
             try {
-                const item = await fetchAddItemScreeningSingle(key);
-                if (!item || !item.needs_manual_title) return true;
+                item = await fetchAddItemScreeningSingle(key);
+                if (!item || (!item.needs_manual_title && !item.missing_image)) return true;
             } catch (err) {
-                console.error('Barcode screening failed; allowing scan:', err);
-                return true;
+                console.error('Barcode screening failed; requiring manual item data:', err);
+                item = { needs_manual_title: true, missing_image: true, title: '' };
             }
 
-            const modalResult = await openMissingTitleModal(code);
+            const modalResult = await openMissingTitleModal(code, {
+                barcode: key,
+                existingTitle: String(item.title || '').trim(),
+                missingImage: Boolean(item.missing_image)
+            });
             if (!modalResult || (modalResult.action !== 'skip' && modalResult.action !== 'save')) return false;
 
             if (modalResult.action === 'skip') {
@@ -1040,6 +1487,15 @@
             const value = String((modalResult && modalResult.title) || '').replace(/\s+/g, ' ').trim();
             if (!value) return false;
 
+            if (modalResult.photoData) {
+                try {
+                    await uploadMissingTitleThumbnail(key, value, modalResult.photoData);
+                } catch (err) {
+                    console.error('Thumbnail save failed:', err);
+                    alert('Thumbnail was not saved: ' + (err && err.message ? err.message : 'unknown error'));
+                }
+            }
+
             overrides[key] = value.slice(0, 200);
             saveManualTitleOverrides(overrides);
             if (skipped[key]) {
@@ -1050,7 +1506,7 @@
         }
 
         function formatBarcodeEntry(item) {
-            if (!barcodeEntryState) return formatUpcDisplay(item.code || '');
+            if (!barcodeEntryState) return formatUpcDisplay(item.suffix > 0 ? `${item.code}-${item.suffix}` : (item.code || ''));
             return barcodeEntryState.displayCode(item, formatUpcDisplay);
         }
 
@@ -1062,6 +1518,7 @@
             if (barcodeEntryState) {
                 barcodeItems = barcodeEntryState.saveEntries(barcodeItems);
             }
+            persistScannedSuffixCodes();
             return barcodeItems;
         }
         
@@ -1088,15 +1545,33 @@
                 return;
             }
             
-            if (barcodeEntryState) {
+            const s = splitScannedBarcode(code);
+            if (s.suffix) {
+                // Suffix came directly from the scanner — insert directly so it's never stripped,
+                // and track it so the row renders as a fixed scanned-suffix item.
+                const baseCode = s.base;
+                const suffixNum = parseInt(s.suffix, 10);
+                const existingSuffix = barcodeItems.find(item => item.code === baseCode && item.suffix === suffixNum);
+                if (existingSuffix) {
+                    existingSuffix.quantity = Math.max(1, parseInt(existingSuffix.quantity, 10) || 1) + 1;
+                } else {
+                    barcodeItems.push({ code: baseCode, suffix: suffixNum, quantity: 1 });
+                }
+                if (barcodeEntryState) {
+                    barcodeItems = barcodeEntryState.normalizeEntries(barcodeItems);
+                }
+                scannedSuffixCodes.add(`${baseCode}-${suffixNum}`);
+                persistBarcodeItems();
+            } else if (barcodeEntryState) {
                 barcodeItems = barcodeEntryState.addBaseScan(barcodeItems, code);
                 persistBarcodeItems();
             } else {
-                const existingItem = barcodeItems.find(item => item.code === code);
+                const entryCode = s.base || code;
+                const existingItem = barcodeItems.find(item => item.code === entryCode && item.suffix === 0);
                 if (existingItem) {
                     existingItem.quantity++;
                 } else {
-                    barcodeItems.push({ code: code, quantity: 1, suffix: 0 });
+                    barcodeItems.push({ code: entryCode, suffix: 0, quantity: 1 });
                 }
             }
             playBeep();
@@ -1115,16 +1590,25 @@
         
         // Remove one quantity of barcode from list
         function removeBarcode(index) {
+            const item = barcodeItems[index];
+            const removedKey = normalizeManualTitleKey(barcodeItemActualCode(item));
+            const scannedSuffixKey = item && item.suffix > 0 ? `${item.code}-${item.suffix}` : '';
             if (barcodeEntryState) {
                 barcodeItems = barcodeEntryState.removeOne(barcodeItems, index);
                 persistBarcodeItems();
             } else {
-                const item = barcodeItems[index];
-                if (item.quantity > 1) {
+                if (item && item.quantity > 1) {
                     item.quantity--;
                 } else {
                     barcodeItems.splice(index, 1);
                 }
+            }
+            if (scannedSuffixKey && !barcodeItems.some(entry => `${entry.code}-${entry.suffix}` === scannedSuffixKey)) {
+                scannedSuffixCodes.delete(scannedSuffixKey);
+                persistScannedSuffixCodes();
+            }
+            if (removedKey && !barcodeItems.some(entry => normalizeManualTitleKey(barcodeItemActualCode(entry)) === removedKey)) {
+                clearPendingManualTitleState(removedKey);
             }
             updateList();
         }
@@ -1138,8 +1622,9 @@
             return barcodeScanQueue;
         }
 
-        if (missingTitleSkipBtn) {
-            missingTitleSkipBtn.addEventListener('click', () => closeMissingTitleModal({ action: 'skip', title: '' }));
+        const missingTitleCloseBtn = document.getElementById('missingTitleCloseBtn');
+        if (missingTitleCloseBtn) {
+            missingTitleCloseBtn.addEventListener('click', () => closeMissingTitleModal({ action: 'skip', title: '' }));
         }
 
         if (missingTitleSaveBtn) {
@@ -1153,16 +1638,40 @@
                     }
                     return;
                 }
-                closeMissingTitleModal({ action: 'save', title: value });
+                closeMissingTitleModal({ action: 'save', title: value, photoData: missingTitlePendingPhotoData || '' });
+            });
+        }
+
+        if (missingTitlePhotoBtn && missingTitlePhotoInput) {
+            missingTitlePhotoBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                missingTitlePhotoInput.click();
+            });
+            missingTitlePhotoInput.addEventListener('change', () => {
+                const file = missingTitlePhotoInput.files && missingTitlePhotoInput.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = () => {
+                    missingTitlePendingPhotoData = String(reader.result || '');
+                    if (missingTitlePhotoPreview && missingTitlePendingPhotoData) {
+                        missingTitlePhotoPreview.src = missingTitlePendingPhotoData;
+                        missingTitlePhotoPreview.style.display = 'block';
+                    }
+                    if (missingTitlePhotoStatus) {
+                        missingTitlePhotoStatus.textContent = 'Thumbnail ready to save with this title.';
+                    }
+                };
+                reader.onerror = () => {
+                    missingTitlePendingPhotoData = '';
+                    if (missingTitlePhotoStatus) {
+                        missingTitlePhotoStatus.textContent = 'Photo capture failed. Try again.';
+                    }
+                };
+                reader.readAsDataURL(file);
             });
         }
 
         if (missingTitleInput) {
-            const handleMissingTitleTap = (e) => {
-                if (!missingTitleKeyboardTapRequired) return;
-                if (e) e.preventDefault();
-                unlockMissingTitleTyping(false);
-            };
             missingTitleInput.addEventListener('input', () => {
                 missingTitleInput.style.borderColor = '#f2c66d';
                 missingTitleInput.style.boxShadow = '';
@@ -1176,26 +1685,32 @@
                     focusMissingTitleEntry(true);
                 }
             });
-            missingTitleInput.addEventListener('touchend', handleMissingTitleTap);
-            missingTitleInput.addEventListener('mouseup', handleMissingTitleTap);
         }
 
-        if (missingTitleKeyboardBtn) {
-            const handleMissingTitleKeyboardBtn = (e) => {
-                if (e) e.preventDefault();
-                unlockMissingTitleTyping(true);
+        if (missingTitleKeypad) {
+            const handleMissingTitleKeypadPress = (e) => {
+                const btn = e.target.closest('[data-title-key], [data-title-action]');
+                if (!btn) return;
+                e.preventDefault();
+                e.stopPropagation();
+                const action = btn.getAttribute('data-title-action');
+                if (action === 'backspace') {
+                    backspaceMissingTitleText();
+                    return;
+                }
+                if (action === 'clear') {
+                    clearMissingTitleText();
+                    return;
+                }
+                const key = btn.getAttribute('data-title-key');
+                if (key) insertMissingTitleText(key);
             };
-            missingTitleKeyboardBtn.addEventListener('click', handleMissingTitleKeyboardBtn);
-            missingTitleKeyboardBtn.addEventListener('touchend', handleMissingTitleKeyboardBtn);
+            missingTitleKeypad.addEventListener('click', handleMissingTitleKeypadPress);
         }
 
         if (missingTitleModal) {
             missingTitleModal.addEventListener('click', (e) => {
                 if (e.target === missingTitleModal) {
-                    if (missingTitleKeyboardTapRequired && missingTitleKeyboardBtn) {
-                        missingTitleKeyboardBtn.focus();
-                        return;
-                    }
                     focusMissingTitleEntry(true);
                 }
             });
@@ -1225,27 +1740,44 @@
                 `;
                 doneButton.disabled = true;
             } else {
-                barcodeListEl.innerHTML = barcodeItems.map((item, index) => `
-                    <div class="barcode-item">
-                        <div class="barcode-item-main">
-                            <span class="barcode-text">${formatBarcodeEntry(item)}</span>
-                            <div class="barcode-item-meta">
-                                <span>${item.suffix > 0 ? 'Singular suffix item' : `Qty ${item.quantity}`}</span>
-                                ${item.suffix === 0 && item.quantity > 1 ? '<span>Use + to split one out as a suffix item</span>' : ''}
-                            </div>
-                        </div>
-                        <div class="barcode-item-controls">
+                const manualTitles = loadManualTitleOverrides();
+                barcodeListEl.innerHTML = barcodeItems.map((item, index) => {
+                    const isScannedSuffix = item.suffix > 0 && scannedSuffixCodes.has(`${item.code}-${item.suffix}`);
+                    const rowClass = `barcode-item${isScannedSuffix ? ' barcode-item-scanned' : ''}`;
+                    const qty = Math.max(1, parseInt(item.quantity, 10) || 1);
+                    const metaLabel = item.suffix > 0
+                        ? (isScannedSuffix ? `Scanned suffix - fixed · Qty ${qty}` : (qty > 1 ? `Suffix item · Qty ${qty}` : 'Singular suffix item'))
+                        : `Qty ${item.quantity}`;
+                    const suffixControls = isScannedSuffix ? '' : `
                             <div class="suffix-editor">
                                 <button class="suffix-btn" onclick="adjustSuffix(${index}, -1)" ${item.suffix > 0 ? '' : 'disabled'} title="Lower suffix">-</button>
                                 <span class="suffix-label">${formatSuffixLabel(item)}</span>
                                 <button class="suffix-btn" onclick="adjustSuffix(${index}, 1)" title="Raise suffix">+</button>
+                            </div>`;
+                    const titleKey = normalizeManualTitleKey(barcodeItemActualCode(item));
+                    const cachedItem = screeningCache.get(titleKey);
+                    const rawTitle = manualTitles[titleKey] || (cachedItem && cachedItem.title ? String(cachedItem.title).trim() : '');
+                    const titleHtml = rawTitle
+                        ? `<span class="barcode-item-title">${rawTitle.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</span>`
+                        : '';
+                    return `
+                    <div class="${rowClass}">
+                        <div class="barcode-item-main">
+                            <span class="barcode-text">${formatBarcodeEntry(item)}</span>
+                            ${titleHtml}
+                            <div class="barcode-item-meta">
+                                <span>${metaLabel}</span>
+                                ${item.suffix === 0 && item.quantity > 1 ? '<span>Use + to split one out as a suffix item</span>' : ''}
                             </div>
+                        </div>
+                        <div class="barcode-item-controls">
+                            ${suffixControls}
                             <button class="delete-btn" onclick="removeBarcode(${index})" title="Remove one">
                                 <i class="fas fa-times"></i>
                             </button>
                         </div>
-                    </div>
-                `).join('');
+                    </div>`;
+                }).reverse().join('');
                 doneButton.disabled = false;
             }
             
@@ -1348,7 +1880,9 @@
 
             const barcodesString = barcodeEntryState
                 ? barcodeEntryState.serializeEntries(barcodeItems)
-                : barcodeItems.map(item => item.code).join(',');
+                : barcodeItems.map(item => item.suffix > 0 ? `${item.code}-${item.suffix}` : item.code).join(',');
+
+            // Save to sessionStorage so additem.html can read barcodes after navigation
             if (barcodeEntryState) {
                 barcodeItems = barcodeEntryState.saveEntries(barcodeItems);
             } else {
@@ -1363,6 +1897,11 @@
         
         // Navigation button handlers
         document.getElementById('backBtn').addEventListener('click', function() {
+            sessionStorage.removeItem('barcode');
+            sessionStorage.removeItem('barcode_entries');
+            sessionStorage.removeItem('additem_manual_titles');
+            sessionStorage.removeItem('additem_manual_title_skips');
+            sessionStorage.removeItem(SCANNED_SUFFIXES_KEY);
             window.location.href = '/position';
         });
         
@@ -1371,6 +1910,7 @@
             sessionStorage.removeItem('barcode_entries');
             sessionStorage.removeItem('additem_manual_titles');
             sessionStorage.removeItem('additem_manual_title_skips');
+            sessionStorage.removeItem(SCANNED_SUFFIXES_KEY);
             postBarcodeSubmission('');
         });
         
@@ -1380,6 +1920,7 @@
             sessionStorage.removeItem('barcode_entries');
             sessionStorage.removeItem('additem_manual_titles');
             sessionStorage.removeItem('additem_manual_title_skips');
+            sessionStorage.removeItem(SCANNED_SUFFIXES_KEY);
             sessionStorage.removeItem('item_position');
             sessionStorage.removeItem('pictureposition_path');
             sessionStorage.removeItem('positionLocked');

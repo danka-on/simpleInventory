@@ -323,6 +323,7 @@
                 <option value="inventory">Inventory</option>
                 <option value="health">Health</option>
                 <option value="sync_overdue">Sync Overdue</option>
+                <option value="api_issue">API Issue Text Alert</option>
               </select>
             </div>
           </div>
@@ -371,6 +372,7 @@
             <button class="btn btn-ghost" type="button" onclick="sendAlertType('inventory')"><i class="fas fa-boxes-stacked"></i> Send Inventory</button>
             <button class="btn btn-ghost" type="button" onclick="sendAlertType('health')"><i class="fas fa-heart-pulse"></i> Send Health</button>
             <button class="btn btn-ghost" type="button" onclick="sendAlertType('sync_overdue')"><i class="fas fa-clock"></i> Send Sync Overdue</button>
+            <button class="btn btn-ghost" type="button" onclick="sendAlertType('api_issue')"><i class="fas fa-plug-circle-exclamation"></i> Send API Issue</button>
           </div>
         </div>
       </div>
@@ -432,7 +434,7 @@
 
       list.innerHTML = telegramRecipients.map((row, index) => {
         const enabled = Number(row.enabled || 0) === 1;
-        const silent = Number(row.disable_notification || 1) === 1;
+        const silent = String(row.disable_notification ?? '1') !== '0';
         return `
           <div class="recipient-item">
             <div class="recipient-item-top">
@@ -490,7 +492,8 @@
       const options = [
         ['inventory', 'Inventory'],
         ['health', 'Health'],
-        ['sync_overdue', 'Sync Overdue']
+        ['sync_overdue', 'Sync Overdue'],
+        ['api_issue', 'API Issue Text Alert']
       ];
       return options.map(([value, label]) => `<option value="${value}" ${String(selected) === value ? 'selected' : ''}>${label}</option>`).join('');
     }
@@ -656,11 +659,11 @@
         const resp = await fetch('/api/telegram/send-test', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({chat_ids: chatIds, message})
+          body: JSON.stringify({chat_ids: chatIds, message, disable_notification: false})
         });
         const data = await resp.json();
         if (!resp.ok || !data.success) throw new Error(data.error || `HTTP ${resp.status}`);
-        showStatus(`Sent test message to ${data.results.length} chat(s).`, 'ok');
+        showStatus(`Sent test message to ${data.results.length} chat(s) with normal notification.`, 'ok');
       } catch (err) {
         showStatus(err.message, 'err');
       }
@@ -672,7 +675,8 @@
         const endpointMap = {
           inventory: '/api/telegram/send-inventory',
           health: '/api/telegram/send-health',
-          sync_overdue: '/api/telegram/send-sync-overdue'
+          sync_overdue: '/api/telegram/send-sync-overdue',
+          api_issue: '/api/telegram/send-api-issue'
         };
         const endpoint = endpointMap[alertType];
         if (!endpoint) throw new Error('Unknown alert type');
@@ -697,12 +701,13 @@
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({
             chat_ids: chatIds,
-            message: `Telegram test for ${recipient.display_name || recipient.chat_id || 'recipient'}`
+            message: `Telegram test for ${recipient.display_name || recipient.chat_id || 'recipient'}`,
+            disable_notification: false
           })
         });
         const data = await resp.json();
         if (!resp.ok || !data.success) throw new Error(data.error || `HTTP ${resp.status}`);
-        showStatus('Test message sent.', 'ok');
+        showStatus('Test message sent with normal notification.', 'ok');
       } catch (err) {
         showStatus(err.message, 'err');
       }

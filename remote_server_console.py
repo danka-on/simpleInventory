@@ -18,7 +18,15 @@ CONFIG_FILENAME = "server_control_config.json"
 EXAMPLE_CONFIG_FILENAME = "server_control_config.example.json"
 REFRESH_INTERVAL_MS = 5000
 LOG_REFRESH_INTERVAL_MS = 6000
+HISTORY_REFRESH_INTERVAL_MS = 60000
 DEFAULT_KEY_PATH = str(Path.home() / ".ssh" / "sweet_shelves_pi")
+HISTORY_RANGE_OPTIONS = {
+    "24h": 24,
+    "3d": 72,
+    "7d": 168,
+    "30d": 720,
+    "90d": 2160,
+}
 
 # ── Catppuccin Mocha palette ─────────────────────────────────────────────────
 BASE     = "#1e1e2e"   # window background
@@ -465,6 +473,78 @@ PY
 """.strip()
 
 
+REMOTE_HISTORY_SCRIPT_TEMPLATE = r"""
+python3 - <<'PY'
+import json
+import os
+import sqlite3
+import time
+
+db_path = "/opt/sweetshelves/server_metrics.db"
+hours = __HOURS__
+payload = {
+    "status": "ok",
+    "hours": hours,
+    "db_path": db_path,
+    "points": [],
+    "count": 0,
+}
+
+if not os.path.exists(db_path):
+    payload["status"] = "missing_db"
+    print(json.dumps(payload))
+    raise SystemExit
+
+conn = None
+try:
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='system_metric_snapshots'"
+    )
+    if not cur.fetchone():
+        payload["status"] = "missing_table"
+        print(json.dumps(payload))
+        raise SystemExit
+
+    cutoff_ts = int(time.time()) - (hours * 3600)
+    cur.execute(
+        '''
+        SELECT collected_at, collected_ts, cpu_percent, memory_percent, disk_percent, temp_c
+        FROM system_metric_snapshots
+        WHERE collected_ts >= ?
+        ORDER BY collected_ts ASC
+        ''',
+        (cutoff_ts,)
+    )
+    rows = cur.fetchall()
+    payload["points"] = [
+        {
+            "collected_at": row["collected_at"],
+            "collected_ts": row["collected_ts"],
+            "cpu_percent": row["cpu_percent"],
+            "memory_percent": row["memory_percent"],
+            "disk_percent": row["disk_percent"],
+            "temp_c": row["temp_c"],
+        }
+        for row in rows
+    ]
+    payload["count"] = len(payload["points"])
+    if payload["points"]:
+        payload["latest"] = payload["points"][-1]
+except Exception as exc:
+    payload["status"] = "error"
+    payload["error"] = str(exc)
+finally:
+    if conn is not None:
+        conn.close()
+
+print(json.dumps(payload))
+PY
+""".strip()
+
+
 def app_root() -> Path:
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
@@ -653,6 +733,191 @@ class MetricCard(tk.Frame):
         self._redraw()
 
 
+def build_remote_history_script(hours):
+    safe_hours = max(1, min(int(hours or 24), 24 * 365))
+    return REMOTE_HISTORY_SCRIPT_TEMPLATE.replace("__HOURS__", str(safe_hours))
+
+
+class HistoryChart(tk.Frame):
+    """Simple canvas line chart for lightweight remote system history."""
+
+    def __init__(self, master, title, line_color, *, max_value=None, unit=""):
+        super().__init__(master, bg=SURFACE0)
+        self._title = title
+        self._line_color = line_color
+        self._max_value = max_value
+        self._unit = unit
+        self._points = []
+
+        inner = tk.Frame(self, bg=SURFACE0)
+        inner.pack(fill="both", expand=True, padx=14, pady=12)
+        tk.Label(inner, text=title.upper(),
+                 font=("Segoe UI", 8, "bold"),
+                 fg=SUBTEXT0, bg=SURFACE0).pack(anchor="w")
+        self._summary_lbl = tk.Label(inner, text="Waiting for history...",
+                                     font=("Segoe UI", 8),
+                                     fg=SUBTEXT0, bg=SURFACE0,
+                                     justify="left", wraplength=420)
+        self._summary_lbl.pack(anchor="w", pady=(4, 8))
+        self._canvas = tk.Canvas(inner, height=180, bg=SURFACE0, highlightthickness=0)
+        self._canvas.pack(fill="both", expand=True)
+        self._canvas.bind("<Configure>", lambda _e: self._redraw())
+
+    def set_points(self, points, summary_text=None):
+        clean_points = []
+        for ts, value in points:
+            if not isinstance(ts, (int, float)) or not isinstance(value, (int, float)):
+                continue
+            clean_points.append((int(ts), float(value)))
+        self._points = clean_points
+        self._summary_lbl.configure(text=summary_text or self._default_summary())
+        self._redraw()
+
+    def set_message(self, message):
+        self._points = []
+        self._summary_lbl.configure(text=message)
+        self._redraw()
+
+    def _default_summary(self):
+        if not self._points:
+            return "No history yet."
+        values = [value for _, value in self._points]
+        latest = values[-1]
+        return (
+            f"Latest {self._fmt_value(latest)}  ·  "
+            f"Min {self._fmt_value(min(values))}  ·  "
+            f"Max {self._fmt_value(max(values))}"
+        )
+
+    def _fmt_value(self, value):
+        if not isinstance(value, (int, float)):
+            return "—"
+        return f"{value:.1f}{self._unit}"
+
+    def _downsample(self, points, max_points):
+        if len(points) <= max_points:
+            return list(points)
+        bucket_size = len(points) / float(max_points)
+        sampled = []
+        for idx in range(max_points):
+            start = int(idx * bucket_size)
+            end = int((idx + 1) * bucket_size)
+            bucket = points[start:max(start + 1, end)]
+            if not bucket:
+                continue
+            avg_ts = int(sum(ts for ts, _ in bucket) / len(bucket))
+            avg_value = sum(value for _, value in bucket) / len(bucket)
+            sampled.append((avg_ts, avg_value))
+        return sampled
+
+    def _y_bounds(self, values):
+        if self._max_value is not None:
+            lo, hi = 0.0, float(self._max_value)
+        else:
+            lo = min(values)
+            hi = max(values)
+            if hi == lo:
+                pad = 5.0 if hi == 0 else max(1.0, abs(hi) * 0.12)
+                lo -= pad
+                hi += pad
+            else:
+                pad = (hi - lo) * 0.15
+                lo = max(0.0, lo - pad)
+                hi += pad
+        if hi <= lo:
+            hi = lo + 1.0
+        return lo, hi
+
+    def _format_axis_value(self, value):
+        if not isinstance(value, (int, float)):
+            return "—"
+        if self._unit == "%":
+            return f"{value:.0f}%"
+        return f"{value:.0f}{self._unit}"
+
+    def _format_time_label(self, ts):
+        try:
+            now = time.time()
+            if abs(now - ts) >= 172800:
+                return time.strftime("%m/%d", time.localtime(ts))
+            return time.strftime("%m/%d %H:%M", time.localtime(ts))
+        except Exception:
+            return "—"
+
+    def _redraw(self):
+        canvas = self._canvas
+        width = max(canvas.winfo_width(), 40)
+        height = max(canvas.winfo_height(), 80)
+        canvas.delete("all")
+        canvas.create_rectangle(0, 0, width, height, fill=CRUST, outline="")
+
+        if not self._points:
+            canvas.create_text(
+                width / 2,
+                height / 2,
+                text="No history yet",
+                fill=OVERLAY,
+                font=("Segoe UI", 11),
+            )
+            return
+
+        draw_points = self._downsample(self._points, max(24, min(320, width // 3)))
+        values = [value for _, value in draw_points]
+        lo, hi = self._y_bounds(values)
+
+        left = 42
+        right = 12
+        top = 16
+        bottom = 28
+        plot_w = max(10, width - left - right)
+        plot_h = max(10, height - top - bottom)
+
+        for idx in range(4):
+            frac = idx / 3.0
+            y = top + plot_h * frac
+            canvas.create_line(left, y, width - right, y, fill=SURFACE1, width=1)
+            axis_value = hi - ((hi - lo) * frac)
+            canvas.create_text(
+                left - 6,
+                y,
+                text=self._format_axis_value(axis_value),
+                fill=OVERLAY,
+                font=("Segoe UI", 8),
+                anchor="e",
+            )
+
+        if len(draw_points) == 1:
+            x_vals = [left + plot_w / 2.0]
+        else:
+            step = plot_w / float(len(draw_points) - 1)
+            x_vals = [left + (step * idx) for idx in range(len(draw_points))]
+
+        coords = []
+        for idx, (_, value) in enumerate(draw_points):
+            x = x_vals[idx]
+            y = top + ((hi - value) / (hi - lo)) * plot_h
+            coords.extend([x, y])
+
+        if len(coords) >= 4:
+            canvas.create_line(*coords, fill=self._line_color, width=2, smooth=True, splinesteps=12)
+        elif len(coords) == 2:
+            canvas.create_oval(coords[0] - 2, coords[1] - 2, coords[0] + 2, coords[1] + 2,
+                               fill=self._line_color, outline="")
+
+        last_x, last_y = coords[-2], coords[-1]
+        canvas.create_oval(last_x - 3, last_y - 3, last_x + 3, last_y + 3,
+                           fill=self._line_color, outline="")
+        canvas.create_line(left, top, left, top + plot_h, fill=SURFACE2, width=1)
+        canvas.create_line(left, top + plot_h, width - right, top + plot_h, fill=SURFACE2, width=1)
+
+        canvas.create_text(left, height - 10,
+                           text=self._format_time_label(draw_points[0][0]),
+                           fill=OVERLAY, font=("Segoe UI", 8), anchor="w")
+        canvas.create_text(width - right, height - 10,
+                           text=self._format_time_label(draw_points[-1][0]),
+                           fill=OVERLAY, font=("Segoe UI", 8), anchor="e")
+
+
 def _sep(parent, color=SURFACE1, height=1, pady=0):
     """Thin horizontal separator line."""
     tk.Frame(parent, bg=color, height=height).pack(fill="x", pady=pady)
@@ -673,6 +938,7 @@ class RemoteServerConsole(tk.Tk):
         self.event_queue = queue.Queue()
         self.stats_job = None
         self.logs_job = None
+        self.history_job = None
         self.command_counter = 0
         self.last_stats = {}
 
@@ -682,6 +948,8 @@ class RemoteServerConsole(tk.Tk):
         self.key_path_var = tk.StringVar(value=str(self.config_data["connection"].get("key_path", "")))
         self.timeout_var = tk.StringVar(value=str(self.config_data["connection"].get("connect_timeout_seconds", 8)))
         self.log_choice_var      = tk.StringVar()
+        self.history_range_var   = tk.StringVar(value="7d")
+        self.history_status_var  = tk.StringVar(value="Waiting for history...")
         self.conn_state_var      = tk.StringVar(value="Not connected")
         self.conn_detail_var     = tk.StringVar(value="Configure connection settings and click Connect.")
         self.conn_mini_var       = tk.StringVar(value="")
@@ -1067,6 +1335,50 @@ class RemoteServerConsole(tk.Tk):
         self.log_text.configure(yscrollcommand=sb.set)
         self.log_text.configure(state="disabled")
 
+        # History tab
+        hist_tab = tk.Frame(notebook, bg=MANTLE)
+        notebook.add(hist_tab, text="  History  ")
+        hist_tab.columnconfigure(0, weight=1)
+        hist_tab.rowconfigure(1, weight=1)
+
+        hist_hdr = tk.Frame(hist_tab, bg=MANTLE)
+        hist_hdr.grid(row=0, column=0, sticky="ew", padx=14, pady=(10, 6))
+        tk.Label(hist_hdr, text="RANGE",
+                 font=("Segoe UI", 8, "bold"),
+                 fg=SUBTEXT0, bg=MANTLE).pack(side="left", padx=(0, 10))
+        self.history_combo = ttk.Combobox(
+            hist_hdr,
+            textvariable=self.history_range_var,
+            state="readonly",
+            width=8,
+            values=list(HISTORY_RANGE_OPTIONS.keys()),
+        )
+        self.history_combo.pack(side="left")
+        self.history_combo.bind("<<ComboboxSelected>>", lambda _e: self.refresh_history())
+        self._mk_btn(hist_hdr, "⟳", self.refresh_history,
+                     bg=SURFACE0, fg=SAPPHIRE,
+                     font=("Segoe UI", 9), padx=8, pady=3
+                     ).pack(side="left", padx=(8, 10))
+        tk.Label(hist_hdr, textvariable=self.history_status_var,
+                 font=("Segoe UI", 8),
+                 fg=OVERLAY, bg=MANTLE).pack(side="left")
+
+        charts = tk.Frame(hist_tab, bg=MANTLE)
+        charts.grid(row=1, column=0, sticky="nsew", padx=14, pady=(0, 14))
+        charts.columnconfigure(0, weight=1)
+        charts.columnconfigure(1, weight=1)
+        charts.rowconfigure(0, weight=1)
+        charts.rowconfigure(1, weight=1)
+
+        self.cpu_history_chart = HistoryChart(charts, "CPU", BLUE, max_value=100, unit="%")
+        self.cpu_history_chart.grid(row=0, column=0, sticky="nsew", padx=(0, 6), pady=(0, 6))
+        self.mem_history_chart = HistoryChart(charts, "Memory", GREEN, max_value=100, unit="%")
+        self.mem_history_chart.grid(row=0, column=1, sticky="nsew", padx=(6, 0), pady=(0, 6))
+        self.disk_history_chart = HistoryChart(charts, "Disk", YELLOW, max_value=100, unit="%")
+        self.disk_history_chart.grid(row=1, column=0, sticky="nsew", padx=(0, 6), pady=(6, 0))
+        self.temp_history_chart = HistoryChart(charts, "Temperature", RED, unit="°C")
+        self.temp_history_chart.grid(row=1, column=1, sticky="nsew", padx=(6, 0), pady=(6, 0))
+
         # Activity tab
         act_tab = tk.Frame(notebook, bg=MANTLE)
         notebook.add(act_tab, text="  Activity  ")
@@ -1183,6 +1495,7 @@ class RemoteServerConsole(tk.Tk):
     def refresh_all(self):
         self.refresh_stats()
         self.refresh_logs()
+        self.refresh_history()
 
     def refresh_stats(self):
         self._spawn_worker("stats_refresh", self._stats_worker)
@@ -1195,6 +1508,14 @@ class RemoteServerConsole(tk.Tk):
         if self.logs_job:
             self.after_cancel(self.logs_job)
         self.logs_job = self.after(LOG_REFRESH_INTERVAL_MS, self.refresh_logs)
+
+    def refresh_history(self):
+        hours = self._selected_history_hours()
+        self.history_status_var.set(f"Loading {self.history_range_var.get()} history...")
+        self._spawn_worker("history_refresh", self._history_worker, hours)
+        if self.history_job:
+            self.after_cancel(self.history_job)
+        self.history_job = self.after(HISTORY_REFRESH_INTERVAL_MS, self.refresh_history)
 
     def test_connection(self):
         self.save_settings()
@@ -1271,6 +1592,21 @@ class RemoteServerConsole(tk.Tk):
         except Exception as exc:
             self.event_queue.put({"type": job_type, "ok": False, "error": str(exc)})
 
+    def _history_worker(self, job_type, hours):
+        try:
+            result = self.ssh.run(build_remote_history_script(hours), timeout=20)
+            if result.returncode != 0:
+                self.event_queue.put({
+                    "type": job_type,
+                    "ok": False,
+                    "error": (result.stderr or result.stdout).strip(),
+                })
+                return
+            history = json.loads(result.stdout.strip())
+            self.event_queue.put({"type": job_type, "ok": True, "history": history})
+        except Exception as exc:
+            self.event_queue.put({"type": job_type, "ok": False, "error": str(exc)})
+
     def _logs_worker(self, job_type, _payload):
         name = self.log_choice_var.get().strip()
         chosen = next((l for l in self.config_data.get("logs", [])
@@ -1325,6 +1661,8 @@ class RemoteServerConsole(tk.Tk):
             self._handle_connection_test(message)
         elif t == "stats_refresh":
             self._handle_stats_update(message)
+        elif t == "history_refresh":
+            self._handle_history_update(message)
         elif t == "log_refresh":
             self._handle_logs_update(message)
         elif t.startswith("command_"):
@@ -1424,6 +1762,70 @@ class RemoteServerConsole(tk.Tk):
             tmp_val = "—"
         self.temp_card.set_value(tmp_pct, tmp_val, self._temp_label(tmp))
 
+    def _handle_history_update(self, message):
+        charts = (
+            self.cpu_history_chart,
+            self.mem_history_chart,
+            self.disk_history_chart,
+            self.temp_history_chart,
+        )
+        if not message.get("ok"):
+            error = message.get("error", "Unable to load history.")
+            self.history_status_var.set("History unavailable")
+            for chart in charts:
+                chart.set_message(error)
+            return
+
+        history = message.get("history", {}) or {}
+        status = history.get("status", "ok")
+        points = history.get("points", []) or []
+        latest = history.get("latest") or {}
+
+        if status == "missing_db":
+            text = "No history DB yet. Wait for the Pi sampler to write its first snapshot."
+            self.history_status_var.set("No history yet")
+            for chart in charts:
+                chart.set_message(text)
+            return
+        if status == "missing_table":
+            text = "History storage exists, but the snapshot table is not ready yet."
+            self.history_status_var.set("History initializing")
+            for chart in charts:
+                chart.set_message(text)
+            return
+        if status == "error":
+            error = history.get("error", "Unknown history query error.")
+            self.history_status_var.set("History query failed")
+            for chart in charts:
+                chart.set_message(error)
+            return
+        if not points:
+            text = "No samples were found for this time range yet."
+            self.history_status_var.set(f"No {self.history_range_var.get()} samples")
+            for chart in charts:
+                chart.set_message(text)
+            return
+
+        latest_ts = latest.get("collected_ts")
+        latest_label = self._format_history_time(latest_ts)
+        self.history_status_var.set(
+            f"{len(points)} samples  ·  {self.history_range_var.get()}  ·  latest {latest_label}"
+        )
+
+        def _metric_points(key):
+            out = []
+            for row in points:
+                ts = row.get("collected_ts")
+                value = row.get(key)
+                if isinstance(ts, (int, float)) and isinstance(value, (int, float)):
+                    out.append((int(ts), float(value)))
+            return out
+
+        self.cpu_history_chart.set_points(_metric_points("cpu_percent"))
+        self.mem_history_chart.set_points(_metric_points("memory_percent"))
+        self.disk_history_chart.set_points(_metric_points("disk_percent"))
+        self.temp_history_chart.set_points(_metric_points("temp_c"))
+
     def _handle_logs_update(self, message):
         name = message.get("log_name", "Log")
         if not message.get("ok"):
@@ -1452,6 +1854,15 @@ class RemoteServerConsole(tk.Tk):
         self.activity_text.insert("end", f"[{ts}]  {text}\n\n")
         self.activity_text.see("end")
         self.activity_text.configure(state="disabled")
+
+    def _selected_history_hours(self):
+        return HISTORY_RANGE_OPTIONS.get(self.history_range_var.get(), 168)
+
+    def _format_history_time(self, ts):
+        try:
+            return time.strftime("%m/%d %H:%M", time.localtime(int(ts)))
+        except Exception:
+            return "—"
 
     def _set_text(self, widget, text):
         widget.configure(state="normal")

@@ -466,6 +466,7 @@ if (orderBarcode) {
 }
 
 function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+function attrEsc(s) { return esc(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
 function formatUpcDisplay(code) {
   const s = String(code || '').trim();
   if (/^\d+$/.test(s) && s.length <= 12) return s.padStart(12, '0');
@@ -510,15 +511,20 @@ function renderWarehouse(items) {
 
   el.innerHTML = items.map((item, idx) => {
     const imgSrc = item.image || missingImg;
-    const loc = esc(item.item_position || '');
-    const picPos = item.pictureposition || ''; // DEPRECATED: pictureposition field
-    const picPosEsc = esc(picPos);
+    const rawItemPosition = String(item.item_position || '').trim();
+    const picPos = String(item.pictureposition || '').trim(); // DEPRECATED: pictureposition field
+    const rawLoc = (picPos && (!rawItemPosition || rawItemPosition.toLowerCase() === 'picture'))
+      ? picPos
+      : (rawItemPosition || picPos);
+    const loc = esc(rawLoc);
+    const locAttr = attrEsc(rawLoc);
+    const picPosEsc = attrEsc(picPos);
     const locBadgeHtml = loc
-      ? `<span class="loc-badge" style="cursor:pointer;" data-loc="${loc}" data-pic="${picPosEsc}" onclick="showLocPopup(this.dataset.loc, this.dataset.pic)">${loc}</span>`
+      ? `<span class="loc-badge" style="cursor:pointer;" data-loc="${locAttr}" data-pic="${picPosEsc}" onclick="showLocPopup(this.dataset.loc, this.dataset.pic)">${loc}</span>`
       : '';
     // Show "Match" button if we have an order_id (from ready-to-ship), otherwise "Remove"
     const actionBtn = orderId
-      ? `<button class="search-rack-btn" data-idx="${idx}" onclick="handleMatch(${item.id}, '${esc(item.barcode)}', '${loc}', this)">${t('match') || 'Match'}</button>`
+      ? `<button class="search-rack-btn" data-idx="${idx}" data-searchrack-id="${attrEsc(item.id)}" data-barcode="${attrEsc(item.barcode)}" data-location="${locAttr}" onclick="handleMatchFromButton(this)">${t('match') || 'Match'}</button>`
       : `<button class="remove-btn" data-idx="${idx}" onclick="handleRemove(${item.id}, '${esc(item.barcode)}', this)">${t('remove')}</button>`;
 
     const itemTitle = item.title || '';
@@ -735,6 +741,11 @@ async function undoRemove() {
 // Last match info for undo
 let _lastMatch = null;
 
+function handleMatchFromButton(btnEl) {
+  const searchrackId = parseInt(btnEl.dataset.searchrackId || '0', 10) || 0;
+  handleMatch(searchrackId, btnEl.dataset.barcode || '', btnEl.dataset.location || '', btnEl);
+}
+
 // Match barcode and location to sold order (when accessed from ready-to-ship)
 async function handleMatch(searchrackId, barcode, location, btnEl) {
   if (!orderId) {
@@ -746,24 +757,27 @@ async function handleMatch(searchrackId, barcode, location, btnEl) {
     const resp = await fetch(`/api/sold/match-barcode/${orderId}`, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({barcode: barcode, location: location})
+      body: JSON.stringify({barcode: barcode, location: location, searchrack_id: searchrackId})
     });
     const data = await resp.json();
 
     if (data.success) {
+      const savedLocation = data.new_location || location || '';
+      const savedSearchrackId = data.searchrack_id || searchrackId;
       // Store for undo
       _lastMatch = {
         order_id: orderId,
         old_barcode: data.old_barcode,
         old_location: data.old_location,
+        old_searchrack_id: data.old_searchrack_id || '',
         new_barcode: barcode,
-        new_location: location,
-        searchrack_id: searchrackId,
+        new_location: savedLocation,
+        searchrack_id: savedSearchrackId,
         btnEl: btnEl
       };
 
       // Mark card as matched
-      const card = document.getElementById('wh-card-' + searchrackId);
+      const card = document.getElementById('wh-card-' + savedSearchrackId);
       if (card) {
         card.style.background = '#e8f5e9';
         card.style.border = '2px solid #4caf50';
@@ -777,7 +791,7 @@ async function handleMatch(searchrackId, barcode, location, btnEl) {
 
       // Show success banner with undo button
       const banner = document.getElementById('successBanner');
-      const locText = location ? ` | Loc: ${location}` : '';
+      const locText = savedLocation ? ` | Loc: ${savedLocation}` : '';
       banner.innerHTML = `${t('barcode_matched') || 'Matched!'} UPC: ${formatUpcDisplay(barcode)}${locText}
         <button class="undo-btn" onclick="undoMatch()">${t('undo') || 'Undo'}</button>`;
       banner.style.display = 'block';
@@ -801,7 +815,11 @@ async function undoMatch() {
     const resp = await fetch(`/api/sold/match-barcode/${_lastMatch.order_id}`, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({barcode: _lastMatch.old_barcode || '', location: _lastMatch.old_location || ''})
+      body: JSON.stringify({
+        barcode: _lastMatch.old_barcode || '',
+        location: _lastMatch.old_location || '',
+        searchrack_id: _lastMatch.old_searchrack_id || null
+      })
     });
     const data = await resp.json();
 

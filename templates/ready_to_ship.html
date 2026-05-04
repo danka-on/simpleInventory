@@ -316,6 +316,66 @@
       transition: color 0.15s ease;
     }
     .sold-td-small a:hover { color: #bfdbfe; text-decoration: underline; }
+    .rt-loc-cell-wrap {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      max-width: 100%;
+      min-width: 0;
+    }
+    .rt-loc-cell-wrap .order-loc-link {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .rt-loc-gear {
+      width: 28px;
+      height: 28px;
+      min-width: 28px;
+      border-radius: 8px;
+      border: 1px solid rgba(148,163,184,0.3);
+      background: rgba(15,23,42,0.75);
+      color: #cbd5e1;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 0.78rem;
+      transition: transform 0.15s ease, background 0.15s ease, color 0.15s ease;
+    }
+    .rt-loc-gear:hover {
+      transform: translateY(-1px);
+      background: rgba(59,130,246,0.18);
+      color: #bfdbfe;
+    }
+    .rt-loc-menu {
+      position: fixed;
+      z-index: 10080;
+      min-width: 190px;
+      padding: 7px;
+      border-radius: 10px;
+      background: #0f172a;
+      border: 1px solid rgba(148,163,184,0.28);
+      box-shadow: 0 18px 45px rgba(0,0,0,0.42);
+    }
+    .rt-loc-menu button {
+      width: 100%;
+      border: 0;
+      border-radius: 8px;
+      padding: 9px 10px;
+      background: transparent;
+      color: #e2e8f0;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.84rem;
+      font-weight: 700;
+      text-align: left;
+    }
+    .rt-loc-menu button:hover { background: rgba(148,163,184,0.14); }
+    .rt-loc-menu button.danger { color: #fca5a5; }
+    .rt-loc-menu button.danger:hover { background: rgba(239,68,68,0.14); }
     .rt-qty-multi {
       display: inline-block;
       color: #ef4444;
@@ -1328,6 +1388,24 @@
     }
     html.ss-theme-day .sold-td-small a { color: #2563eb; }
     html.ss-theme-day .sold-td-small a:hover { color: #1d4ed8; }
+    html.ss-theme-day .rt-loc-gear {
+      background: #f8fafc;
+      border-color: #cbd5e1;
+      color: #475569;
+    }
+    html.ss-theme-day .rt-loc-gear:hover {
+      background: #eff6ff;
+      color: #1d4ed8;
+    }
+    html.ss-theme-day .rt-loc-menu {
+      background: #fff;
+      border-color: #d1d5db;
+      box-shadow: 0 18px 45px rgba(15,23,42,0.18);
+    }
+    html.ss-theme-day .rt-loc-menu button { color: #111827; }
+    html.ss-theme-day .rt-loc-menu button:hover { background: #f1f5f9; }
+    html.ss-theme-day .rt-loc-menu button.danger { color: #dc2626; }
+    html.ss-theme-day .rt-loc-menu button.danger:hover { background: #fef2f2; }
     html.ss-theme-day .rt-trace-badge {
       color: #92400e;
       background: rgba(251, 191, 36, 0.18);
@@ -1860,13 +1938,69 @@ function tdInfo(order) {
     return `<td class='sold-td-small'><a href="#" class="order-info-link" data-order-id="${order.id}">${buyer}</a></td>`;
 }
 
+function readyToShipFinderUrl(order) {
+    const finderParams = new URLSearchParams({
+        title: order.title || '',
+        order_id: order.id || '',
+        barcode: order.barcode || '',
+        image: order.image || ''
+    });
+    return `/finder?${finderParams.toString()}`;
+}
+
+function readyToShipWarehouseMatchUrl(order) {
+    if (!order) return '';
+    if (order.warehouse_match_url) return order.warehouse_match_url;
+    const matchId = String(order.finder_searchrack_id || '').trim();
+    if (!matchId || matchId === '0') return '';
+    const searchKey = String(
+        order.finder_matched_barcode
+        || order.stored_barcode
+        || order.barcode
+        || order.finder_matched_location
+        || order.stored_location
+        || order.location
+        || order.title
+        || ''
+    ).trim();
+    const params = new URLSearchParams({ db: 'searchRack', warehouse_match_id: matchId });
+    if (searchKey) params.set('q', searchKey);
+    const matchLocation = String(order.finder_matched_location || order.stored_location || order.location || '').trim();
+    if (matchLocation) params.set('location', matchLocation);
+    return `/searchrack?${params.toString()}`;
+}
+
+function readyToShipLocationIsLocked(order) {
+    return !!(order && (order.location_locked || String(order.stored_location || '').trim()));
+}
+
+function readyToShipOrderIsHandled(order) {
+    const raw = String(order && order.isHandled != null ? order.isHandled : '').trim().toLowerCase();
+    return raw === '1' || raw === 'true' || raw === 'yes';
+}
+
+function readyToShipLocationCanEdit(order) {
+    return readyToShipLocationIsLocked(order) && !readyToShipOrderIsHandled(order);
+}
+
+function readyToShipLocationGearHtml(order) {
+    if (!readyToShipLocationCanEdit(order)) return '';
+    return `<button type="button" class="rt-loc-gear" data-order-id="${order.id}" title="Location options" aria-label="Location options"><i class="fas fa-gear"></i></button>`;
+}
+
+function readyToShipLocationCellHtml(order, innerHtml, extraAttrs = '') {
+    const gear = readyToShipLocationGearHtml(order);
+    if (!gear) return `<td class='sold-td-small' ${extraAttrs}>${innerHtml}</td>`;
+    return `<td class='sold-td-small' ${extraAttrs}><span class="rt-loc-cell-wrap">${innerHtml}${gear}</span></td>`;
+}
+
 function tdLocation(order) {
     const missingDataUrl = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="120" height="80"><rect width="100%" height="100%" fill="#1e293b"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#475569" font-size="12">Image missing</text></svg>');
 
     // Check if multiple locations exist
     if (order.locations && Array.isArray(order.locations) && order.locations.length > 1) {
         const locationCodes = order.locations.map(loc => esc(loc.code)).join(', ');
-        return `<td class='sold-td-small'><a href="#" class="order-loc-link" data-order-id="${order.id}" style="color:#fbbf24;font-weight:bold;">${locationCodes}</a></td>`;
+        return readyToShipLocationCellHtml(order, `<a href="#" class="order-loc-link" data-order-id="${order.id}" style="color:#fbbf24;font-weight:bold;">${locationCodes}</a>`);
     }
 
     // Single location (legacy or single result)
@@ -1874,18 +2008,17 @@ function tdLocation(order) {
 
     if (locationText.match(/\.(jpg|jpeg|png)$/i)) {
         const thumb = `/static/pictureposition/${locationText}`;
-        return `<td class='sold-td-small'><a href="#" class="order-loc-link" data-order-id="${order.id}"><img src="${thumb}" style="max-width:60px;max-height:60px;border-radius:8px;border:1px solid rgba(255,255,255,0.08);" onerror="this.src='${missingDataUrl}'" loading="lazy"></a></td>`;
+        return readyToShipLocationCellHtml(order, `<a href="#" class="order-loc-link" data-order-id="${order.id}"><img src="${thumb}" style="max-width:60px;max-height:60px;border-radius:8px;border:1px solid rgba(255,255,255,0.08);" onerror="this.src='${missingDataUrl}'" loading="lazy"></a>`);
     }
 
     if (!locationText) {
         if (order.location_search) {
-            const finderParams = new URLSearchParams({title: order.title || '', order_id: order.id || '', barcode: order.barcode || '', image: order.image || ''});
-            return `<td class='sold-td-small'><a href="/finder?${finderParams.toString()}" target="_blank" style="color:#f87171;font-weight:700;font-size:0.75rem;text-decoration:none;padding:3px 8px;border:1px solid rgba(239,68,68,0.3);border-radius:6px;background:rgba(239,68,68,0.1);">Find</a></td>`;
+            return `<td class='sold-td-small'><a href="${readyToShipFinderUrl(order)}" target="_blank" style="color:#f87171;font-weight:700;font-size:0.75rem;text-decoration:none;padding:3px 8px;border:1px solid rgba(239,68,68,0.3);border-radius:6px;background:rgba(239,68,68,0.1);">Find</a></td>`;
         }
-        return `<td class='sold-td-small' style="color:#475569;font-style:italic;">—</td>`;
+        return `<td class='sold-td-small' style="color:#475569;font-style:italic;">-</td>`;
     }
 
-    return `<td class='sold-td-small'><a href="#" class="order-loc-link" data-order-id="${order.id}">${locationText}</a></td>`;
+    return readyToShipLocationCellHtml(order, `<a href="#" class="order-loc-link" data-order-id="${order.id}">${locationText}</a>`);
 }
 
 function tdQuantity(order) {
@@ -3034,6 +3167,86 @@ function showToast(message, type = 'info') {
         setTimeout(() => toast.remove(), 300);
     }, 3000);
 }
+
+function closeReadyToShipLocationMenu() {
+    const existing = document.getElementById('rt-location-menu');
+    if (existing) existing.remove();
+}
+
+function showReadyToShipLocationMenu(orderId, anchor) {
+    closeReadyToShipLocationMenu();
+    const order = OrderManager.getOrder(orderId);
+    if (!order) return;
+
+    const warehouseUrl = readyToShipWarehouseMatchUrl(order);
+    const menu = document.createElement('div');
+    menu.id = 'rt-location-menu';
+    menu.className = 'rt-loc-menu';
+    menu.innerHTML = `
+        ${warehouseUrl ? '<button type="button" data-role="warehouse"><i class="fas fa-warehouse"></i><span>Open Warehouse Match</span></button>' : ''}
+        <button type="button" data-role="finder"><i class="fas fa-magnifying-glass"></i><span>Use Finder Again</span></button>
+        <button type="button" class="danger" data-role="clear"><i class="fas fa-eraser"></i><span>Clear Location</span></button>
+    `;
+    document.body.appendChild(menu);
+
+    const rect = anchor.getBoundingClientRect();
+    const menuRect = menu.getBoundingClientRect();
+    const left = Math.min(window.innerWidth - menuRect.width - 8, Math.max(8, rect.right - menuRect.width));
+    const top = Math.min(window.innerHeight - menuRect.height - 8, rect.bottom + 6);
+    menu.style.left = `${left}px`;
+    menu.style.top = `${Math.max(8, top)}px`;
+
+    const closeOnOutside = (event) => {
+        if (!menu.contains(event.target) && !anchor.contains(event.target)) {
+            closeReadyToShipLocationMenu();
+            document.removeEventListener('click', closeOnOutside, true);
+        }
+    };
+    setTimeout(() => document.addEventListener('click', closeOnOutside, true), 0);
+
+    menu.addEventListener('click', async (event) => {
+        const btn = event.target.closest('button[data-role]');
+        if (!btn) return;
+        event.preventDefault();
+        event.stopPropagation();
+
+        const role = btn.getAttribute('data-role');
+        if (role === 'warehouse') {
+            closeReadyToShipLocationMenu();
+            window.open(warehouseUrl, '_blank');
+            return;
+        }
+
+        if (role === 'finder') {
+            closeReadyToShipLocationMenu();
+            window.open(readyToShipFinderUrl(order), '_blank');
+            return;
+        }
+
+        if (role === 'clear') {
+            if (!window.confirm('Clear this locked location?')) return;
+            btn.disabled = true;
+            try {
+                const response = await fetch(`/api/ready-to-ship/clear-location/${encodeURIComponent(orderId)}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({})
+                });
+                const data = await response.json().catch(() => ({ success: false, error: 'Invalid server response' }));
+                if (!response.ok || !data.success) {
+                    throw new Error(data.error || 'Failed to clear location');
+                }
+                closeReadyToShipLocationMenu();
+                OrderManager.clearCache();
+                showToast('Location cleared');
+                triggerSoldOrdersRefresh('location_clear');
+            } catch (error) {
+                btn.disabled = false;
+                showToast('Failed to clear location: ' + error.message, 'error');
+            }
+        }
+    });
+}
 // ============================================================================
 // DATA FETCHING - With localStorage caching for instant loads
 // ============================================================================
@@ -3079,13 +3292,21 @@ async function fetchAndShowSoldOrders(days, forceRefresh = false) {
         .then(data => {
             if (!data.success) {
                 console.warn('Background order sync failed:', data.error);
+                return;
             }
+            loadSoldOrders(days, true);
         })
         .catch(err => console.warn('Background order sync error:', err));
 
         // Fetch authoritative list for UI
         const ordersResponse = await fetch(`/sold-orders?days=${days}${cacheBust}`, { cache: 'no-store' });
+        if (!ordersResponse.ok) {
+            throw new Error(`Sold orders request failed (${ordersResponse.status})`);
+        }
         const orders = await ordersResponse.json();
+        if (!Array.isArray(orders)) {
+            throw new Error((orders && orders.error) || 'Sold orders response was not a list');
+        }
         renderSoldOrders(orders, false);
         fetchReadyToShipServerState(days)
             .then(updateReadyToShipPollBaseline)
@@ -3115,7 +3336,13 @@ async function loadSoldOrders(days, force = false) {
             cache: 'no-store',
             priority: 'high'
         });
+        if (!response.ok) {
+            throw new Error(`Sold orders request failed (${response.status})`);
+        }
         const orders = await response.json();
+        if (!Array.isArray(orders)) {
+            throw new Error((orders && orders.error) || 'Sold orders response was not a list');
+        }
         renderSoldOrders(orders);
     } catch (error) {
         console.error('Error loading orders:', error);
@@ -3164,6 +3391,14 @@ function setupEventDelegation() {
             e.preventDefault();
             e.stopPropagation();
             showReadyToShipNotePopup(noteBtn.getAttribute('data-order-id'));
+            return;
+        }
+
+        const locGear = e.target.closest('.rt-loc-gear');
+        if (locGear) {
+            e.preventDefault();
+            e.stopPropagation();
+            showReadyToShipLocationMenu(locGear.getAttribute('data-order-id'), locGear);
             return;
         }
 

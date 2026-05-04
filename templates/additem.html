@@ -315,10 +315,11 @@
             </div>
         </div>
     </form>
-    <script src="/static/barcode-entry-state.js?v=20260413b"></script>
+    <script src="/static/barcode-entry-state.js?v=20260420a"></script>
     <script>
     const barcodeEntryState = window.BarcodeEntryState;
     const MANUAL_TITLE_STORAGE_KEY = 'additem_manual_titles';
+    const MANUAL_TITLE_SKIP_STORAGE_KEY = 'additem_manual_title_skips';
     let autoSubmitTimeout = null;
     let timerInterval = null;
     let addItemSubmitInFlight = false;
@@ -347,10 +348,21 @@
         if (!raw) return '';
         if (barcodeEntryState && typeof barcodeEntryState.splitActualCode === 'function') {
             const split = barcodeEntryState.splitActualCode(raw);
-            return String(split.code || raw).trim();
+            const base = String(split.code || raw).trim();
+            return split.suffix > 0 ? `${base}-${split.suffix}` : base;
         }
         const match = raw.match(/^(.*?)-(\d+)$/);
-        return match && match[1] ? String(match[1]).trim() : raw;
+        return match && match[1] ? `${String(match[1]).trim()}-${String(match[2] || '').trim()}` : raw;
+    }
+
+    function barcodeEntryActualCode(entry) {
+        if (!entry) return '';
+        if (barcodeEntryState && typeof barcodeEntryState.actualCode === 'function') {
+            return barcodeEntryState.actualCode(entry);
+        }
+        const base = String(entry.code || entry || '').trim();
+        const suffix = parseInt(entry.suffix, 10) || 0;
+        return suffix > 0 ? `${base}-${suffix}` : base;
     }
 
     function loadManualTitleOverrides() {
@@ -394,7 +406,7 @@
         const entryList = Array.isArray(entries) ? entries : getBarcodeEntries();
         const allowed = new Set();
         entryList.forEach(entry => {
-            const key = normalizeManualTitleKey(entry && entry.code ? entry.code : entry);
+            const key = normalizeManualTitleKey(barcodeEntryActualCode(entry));
             if (key) allowed.add(key);
         });
         const current = loadManualTitleOverrides();
@@ -427,6 +439,32 @@
             }
         });
         return saveManualTitleOverrides(next);
+    }
+
+    function clearPendingManualTitleState(code) {
+        const key = normalizeManualTitleKey(code);
+        if (!key) return;
+
+        const overrides = loadManualTitleOverrides();
+        if (overrides[key]) {
+            delete overrides[key];
+            saveManualTitleOverrides(overrides);
+        }
+
+        try {
+            const rawSkips = sessionStorage.getItem(MANUAL_TITLE_SKIP_STORAGE_KEY);
+            const skips = rawSkips ? JSON.parse(rawSkips) : {};
+            if (skips && typeof skips === 'object' && !Array.isArray(skips) && skips[key]) {
+                delete skips[key];
+                if (Object.keys(skips).length) {
+                    sessionStorage.setItem(MANUAL_TITLE_SKIP_STORAGE_KEY, JSON.stringify(skips));
+                } else {
+                    sessionStorage.removeItem(MANUAL_TITLE_SKIP_STORAGE_KEY);
+                }
+            }
+        } catch (_) {
+            sessionStorage.removeItem(MANUAL_TITLE_SKIP_STORAGE_KEY);
+        }
     }
 
     function getBarcodeEntries() {
@@ -479,10 +517,11 @@
             const displayCode = barcodeEntryState
                 ? barcodeEntryState.displayCode(item, formatUpcDisplay)
                 : formatUpcDisplay(item.code || '');
-            const manualTitle = getManualTitleOverride(item.code || '');
+            const manualTitle = getManualTitleOverride(barcodeEntryActualCode(item));
             const suffixLabel = item.suffix > 0 ? `Suffix ${item.suffix}` : 'Base';
+            const itemQty = Math.max(1, parseInt(item.quantity, 10) || 1);
             const metaText = item.suffix > 0
-                ? 'Singular suffix item'
+                ? (itemQty > 1 ? `Suffix item | Qty ${itemQty}` : 'Singular suffix item')
                 : (item.quantity > 1 ? `Qty ${item.quantity} | Use + to split one out as a suffix item` : 'Qty 1');
             const manualTitleHtml = manualTitle
                 ? `<div class="barcode-entry-manual-title">Warehouse title: ${escapeHtml(manualTitle)}</div>`
@@ -593,8 +632,13 @@
     window.removeAddItemBarcode = function(index) {
         if (!barcodeEntryState) return;
         const entries = getBarcodeEntries();
+        const removed = entries[index];
+        const removedKey = normalizeManualTitleKey(barcodeEntryActualCode(removed));
         const nextEntries = barcodeEntryState.removeOne(entries, index);
         persistBarcodeEntries(nextEntries);
+        if (removedKey && !nextEntries.some(entry => normalizeManualTitleKey(barcodeEntryActualCode(entry)) === removedKey)) {
+            clearPendingManualTitleState(removedKey);
+        }
     };
 
     function getScreeningBarcodes() {
@@ -602,7 +646,7 @@
         const ordered = [];
         const entries = getBarcodeEntries();
         entries.forEach(entry => {
-            const key = normalizeManualTitleKey(entry && entry.code ? entry.code : '');
+            const key = normalizeManualTitleKey(barcodeEntryActualCode(entry));
             if (key && !seen.has(key)) {
                 seen.add(key);
                 ordered.push(key);
@@ -667,8 +711,11 @@
 
     function describeIssueFlags(issue) {
         const flags = [];
-        if (issue.needsManualTitle) flags.push('No title found');
-        if (issue.missingImage) flags.push('No thumbnail found');
+        if (issue.missingFromMacyBol) flags.push('Not in MacyBOL');
+        else {
+            if (issue.needsManualTitle) flags.push('No title found');
+            if (issue.missingImage) flags.push('No thumbnail found');
+        }
         return flags.join(' | ') || 'Incomplete data';
     }
 
@@ -711,7 +758,7 @@
                                             data-barcode="${escapeHtml(issue.barcode)}"
                                             maxlength="200"
                                             placeholder="Enter a warehouse title"
-                                            value="${escapeHtml(issue.savedManualTitle || '')}"
+                                            value="${escapeHtml(issue.savedManualTitle || issue.existingTitle || '')}"
                                         >
                                     ` : ''}
                                     <div class="missing-data-helper">${helperLines.join('<br>')}</div>
@@ -823,17 +870,20 @@
 
         barcodes.forEach(barcode => {
             const key = normalizeManualTitleKey(barcode);
-            const item = screeningItems[barcode] || screeningItems[key] || {};
+            let item = screeningItems[barcode] || screeningItems[key] || {};
+            if ((!item || !Object.keys(item).length) && barcodes.length === 1 && Object.keys(screeningItems).length === 1) {
+                item = screeningItems[Object.keys(screeningItems)[0]] || {};
+            }
             const savedManualTitle = currentOverrides[key] || '';
-            const needsManualTitle = Boolean(item.needs_manual_title) && !savedManualTitle;
-            // Only block for a missing title — a missing image is informational only
-            if (!needsManualTitle) {
+            const missingFromMacyBol = item.macy_found === false || Boolean(item.needs_manual_title);
+            if (!missingFromMacyBol || savedManualTitle) {
                 return;
             }
             issues.push({
                 barcode: key || barcode,
+                missingFromMacyBol,
                 needsManualTitle: true,
-                missingImage: Boolean(item.missing_image),
+                missingImage: true,
                 existingTitle: String(item.title || '').trim(),
                 savedManualTitle
             });
@@ -893,6 +943,21 @@
 
         try {
             syncAddItemFormFields();
+            let screening;
+            try {
+                screening = await screenAddItemSubmission();
+            } catch (screenErr) {
+                console.error('Add item screening failed:', screenErr);
+                alert('Could not verify Macy/BOL item data. Please try Add Item again.');
+                return;
+            }
+            if (!screening || screening.continueSubmit === false) {
+                return;
+            }
+            if (screening.manualTitles) {
+                mergeManualTitleOverrides(screening.manualTitles);
+                syncAddItemFormFields();
+            }
             await submitAddItemForm(form);
         } catch (err) {
             console.error('Add item submit failed, retrying native form submit:', err);

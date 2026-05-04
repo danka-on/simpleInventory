@@ -965,7 +965,8 @@
     }
 
     function isAcceptedUpcForPrep(upc){
-      return /^\d{12,13}$/.test(String(upc || ''));
+      // Some UPC-A values are stored without a leading zero in the prep databases.
+      return /^\d{11,13}$/.test(String(upc || ''));
     }
 
     function clearScanValidationMsg(){
@@ -1820,16 +1821,31 @@
     }
 
     async function deletePrepHistoryEntry(entry, baseUpc){
-      if(!entry || entry.legacy_inventory){
-        alert('This inventory row cannot be deleted from prep history.');
+      if(!entry){
         return;
       }
       const upc = String(entry.upc || '').trim();
+      const isLegacyInventory = !!entry.legacy_inventory;
       const statusLabel = prepHistoryStatusLabel(entry.status);
       const qty = Math.max(1, Number(entry.quantity || 1) || 1);
       const lotPart = entry.lot_number ? ` in LOT ${entry.lot_number}` : '';
       const qtyPart = qty > 1 ? ` Qty ${qty}.` : '.';
-      if(!confirm(`Delete this ${statusLabel} prep entry for ${upc}${lotPart}?${qtyPart} This will remove the whole entry and restore its quantity.`)) return;
+      const confirmText = isLegacyInventory
+        ? `Delete this older inventory entry for ${upc}${lotPart}?${qtyPart} This will remove the warehouse quantity that is making it appear here.`
+        : `Delete this ${statusLabel} prep entry for ${upc}${lotPart}?${qtyPart} This will remove the whole entry and restore its quantity.`;
+      if(!confirm(confirmText)) return;
+      const inventoryRowIds = [];
+      const addInventoryRowId = (value) => {
+        const rowId = Number(value || 0);
+        if(rowId > 0 && !inventoryRowIds.includes(rowId)) inventoryRowIds.push(rowId);
+      };
+      if(Array.isArray(entry.inventory_row_ids)) entry.inventory_row_ids.forEach(addInventoryRowId);
+      if(Array.isArray(entry.location_entries)){
+        entry.location_entries.forEach(loc => {
+          if(Array.isArray(loc.row_ids)) loc.row_ids.forEach(addInventoryRowId);
+          addInventoryRowId(loc.clear_target_row_id);
+        });
+      }
       try{
         const res = await fetch('/api/items_prep/history_entry/delete', {
           method: 'POST',
@@ -1840,7 +1856,8 @@
             quantity: qty,
             base_upc: String(baseUpc || currentBaseUpc() || '').trim(),
             lot_number: entry.lot_number || '',
-            legacy_inventory: !!entry.legacy_inventory
+            legacy_inventory: isLegacyInventory,
+            inventory_row_ids: inventoryRowIds
           })
         });
         const j = await res.json().catch(()=>({}));
@@ -1853,7 +1870,15 @@
         const statusMsg = document.getElementById('statusMsg');
         if(statusMsg){
           const sharedNote = j.assets_preserved_shared ? ' Shared media was kept because another entry still uses it.' : '';
-          statusMsg.innerHTML = `<span class="ok">Deleted prep entry.</span>${sharedNote ? `<span class="muted">${sharedNote}</span>` : ''}`;
+          const sync = j.preplog_sync || {};
+          const skipSyncWarning = !!j.legacy_inventory_deleted || !!j.status_deleted_only;
+          const syncWarning = !skipSyncWarning && (Number(sync.remaining_qty || 0) > 0 || sync.warning)
+            ? ' Prep log may still need review for this exact quantity.'
+            : '';
+          const deletedText = j.legacy_inventory_deleted
+            ? 'Deleted older inventory entry.'
+            : (j.status_deleted_only ? 'Deleted older prep entry.' : 'Deleted prep entry.');
+          statusMsg.innerHTML = `<span class="ok">${deletedText}</span>${sharedNote ? `<span class="muted">${sharedNote}</span>` : ''}${syncWarning ? `<span class="muted">${syncWarning}</span>` : ''}`;
           setTimeout(()=>{ statusMsg.textContent=''; }, 2400);
         }
       }catch(e){
@@ -1992,19 +2017,19 @@
 
           row.appendChild(textCol);
 
-          if(!entry.legacy_inventory){
-            const deleteAction = document.createElement('button');
-            deleteAction.type = 'button';
-            deleteAction.className = 'prep-history-delete';
-            deleteAction.textContent = '🗑 Delete';
-            deleteAction.title = 'Delete this prep entry';
-            deleteAction.onclick = async (ev) => {
-              ev.preventDefault();
-              ev.stopPropagation();
-              await deletePrepHistoryEntry(entry, baseUpc);
-            };
-            row.appendChild(deleteAction);
-          }
+          const deleteAction = document.createElement('button');
+          deleteAction.type = 'button';
+          deleteAction.className = 'prep-history-delete';
+          deleteAction.textContent = 'Delete';
+          deleteAction.title = entry.legacy_inventory
+            ? 'Delete this older inventory entry'
+            : 'Delete this prep entry';
+          deleteAction.onclick = async (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            await deletePrepHistoryEntry(entry, baseUpc);
+          };
+          row.appendChild(deleteAction);
 
           // Arrow
           const arrow = document.createElement('div');

@@ -15,7 +15,31 @@
       "Bash(cd:*)",
       "WebFetch(domain:developer-docs.shipping.amazon.com)",
       "Bash(python3 -c \":*)",
-      "Bash(python -c \":*)"
+      "Bash(python -c \":*)",
+      "Bash(ssh manager@superinventory.local \"ls /opt/sweetshelves/static/barcode-entry-state.js 2>/dev/null && echo EXISTS || echo MISSING\")",
+      "Bash(ssh manager@raspberrypi.local \"echo connected\")",
+      "Bash(ssh -i \"C:/Users/boxatron/.ssh/sweet_shelves_pi\" dk@10.0.0.151 \"ls /opt/sweetshelves/static/barcode-entry-state.js 2>/dev/null && echo EXISTS || echo MISSING; grep -n 'formatBarcodeEntry\\\\|displayCode\\\\|addBaseScan' /opt/sweetshelves/templates/multibarcode.html | head -10\")",
+      "Bash(ssh -i \"C:/Users/boxatron/.ssh/sweet_shelves_pi\" dk@10.0.0.151 \"grep -n 'function displayCode\\\\|function addBaseScan\\\\|splitActualCode' /opt/sweetshelves/static/barcode-entry-state.js | head -10\")",
+      "Bash(ssh -i \"C:/Users/boxatron/.ssh/sweet_shelves_pi\" dk@10.0.0.151 \"sed -n '1420,1470p' /opt/sweetshelves/templates/multibarcode.html\")",
+      "Bash(ssh -i \"C:/Users/boxatron/.ssh/sweet_shelves_pi\" dk@10.0.0.151 \"grep -n 'normalizeScannedBarcode\\\\|splitScannedBarcode' /opt/sweetshelves/templates/multibarcode.html | head -10\")",
+      "Bash(ssh -i \"C:/Users/boxatron/.ssh/sweet_shelves_pi\" dk@10.0.0.151 \"sed -n '910,960p' /opt/sweetshelves/templates/multibarcode.html\")",
+      "Bash(ssh -i \"C:/Users/boxatron/.ssh/sweet_shelves_pi\" dk@10.0.0.151 \"sed -n '201,226p' /opt/sweetshelves/static/barcode-entry-state.js\")",
+      "Bash(certutil -hashfile c:/Users/boxatron/Desktop/simpleInventory/static/barcode-entry-state.js MD5)",
+      "Bash(ssh -i \"C:/Users/boxatron/.ssh/sweet_shelves_pi\" dk@10.0.0.151 \"md5sum /opt/sweetshelves/static/barcode-entry-state.js\")",
+      "Bash(ssh -i \"C:/Users/boxatron/.ssh/sweet_shelves_pi\" dk@10.0.0.151 \"md5sum /opt/sweetshelves/templates/multibarcode.html\")",
+      "Bash(ssh -i \"C:/Users/boxatron/.ssh/sweet_shelves_pi\" dk@10.0.0.151 \"grep -n 'formatBarcodeEntry\\\\|displayCode\\\\|item\\\\.code\\\\|item\\\\.suffix\\\\|addBaseScan' /opt/sweetshelves/templates/multibarcode.html | head -15\")",
+      "Bash(ssh -i \"C:/Users/boxatron/.ssh/sweet_shelves_pi\" dk@10.0.0.151 \"sed -n '1730,1755p' /opt/sweetshelves/templates/multibarcode.html\")",
+      "Bash(ssh -i \"C:/Users/boxatron/.ssh/sweet_shelves_pi\" dk@10.0.0.151 \"md5sum /opt/sweetshelves/templates/multibarcode.html /opt/sweetshelves/static/barcode-entry-state.js; grep -c '.' /opt/sweetshelves/templates/multibarcode.html\")",
+      "Bash(ssh -i \"C:/Users/boxatron/.ssh/sweet_shelves_pi\" dk@10.0.0.151 \"sed -n '1643,1680p' /opt/sweetshelves/templates/multibarcode.html\")",
+      "Bash(ssh -i \"C:/Users/boxatron/.ssh/sweet_shelves_pi\" dk@10.0.0.151 \"md5sum /opt/sweetshelves/app.py /opt/sweetshelves/DBmanager.py /opt/sweetshelves/templates/barcode.html /opt/sweetshelves/templates/searchrack.html /opt/sweetshelves/templates/item_prep.html /opt/sweetshelves/templates/items_to_list.html /opt/sweetshelves/remote_server_console.py 2>/dev/null\")",
+      "Bash(ssh -i \"C:/Users/boxatron/.ssh/sweet_shelves_pi\" dk@10.0.0.151 \"ls /opt/sweetshelves/remote_server_console.py 2>/dev/null && echo EXISTS || echo MISSING\")",
+      "Bash(ssh -i \"C:/Users/boxatron/.ssh/sweet_shelves_pi\" dk@10.0.0.151 \"md5sum /opt/sweetshelves/templates/multibarcode.html /opt/sweetshelves/templates/barcode.html /opt/sweetshelves/templates/items_to_list.html\")",
+      "Bash(ssh -i \"C:/Users/boxatron/.ssh/sweet_shelves_pi\" dk@10.0.0.151 \"sed -n '1604,1640p' /opt/sweetshelves/templates/multibarcode.html\")",
+      "Bash(ssh -i \"C:/Users/boxatron/.ssh/sweet_shelves_pi\" dk@10.0.0.151 \"md5sum /opt/sweetshelves/templates/additem.html\")",
+      "Bash(scp -i \"C:/Users/boxatron/.ssh/sweet_shelves_pi\" c:/Users/boxatron/Desktop/simpleInventory/templates/barcode.html dk@10.0.0.151:/opt/sweetshelves/templates/)",
+      "Bash(scp -i \"C:/Users/boxatron/.ssh/sweet_shelves_pi\" c:/Users/boxatron/Desktop/simpleInventory/templates/multibarcode.html dk@10.0.0.151:/opt/sweetshelves/templates/)",
+      "Bash(scp -i \"C:/Users/boxatron/.ssh/sweet_shelves_pi\" c:/Users/boxatron/Desktop/simpleInventory/templates/items_to_list.html dk@10.0.0.151:/opt/sweetshelves/templates/)",
+      "Bash(ssh -i \"C:/Users/boxatron/.ssh/sweet_shelves_pi\" dk@10.0.0.151 \"sudo systemctl restart sweetshelves.service && echo 'Service restarted'\")"
     ]
   }
 }

@@ -32,7 +32,6 @@
 
         let quantity = parseInt(source.quantity, 10);
         if (!Number.isFinite(quantity) || quantity < 1) quantity = 1;
-        if (suffix > 0) quantity = 1;
 
         return {
             code,
@@ -87,12 +86,12 @@
                 return;
             }
 
-            const uniqueSuffix = nextAvailableSuffix(out, entry.code, entry.suffix, -1);
-            out.push({
-                code: entry.code,
-                suffix: uniqueSuffix,
-                quantity: 1
-            });
+            const existingSuffix = out.find(item => item.code === entry.code && item.suffix === entry.suffix);
+            if (existingSuffix) {
+                existingSuffix.quantity += entry.quantity;
+            } else {
+                out.push(entry);
+            }
         });
 
         return out;
@@ -119,7 +118,7 @@
         const expanded = [];
         normalized.forEach(entry => {
             const code = actualCode(entry);
-            const quantity = entry.suffix > 0 ? 1 : Math.max(1, parseInt(entry.quantity, 10) || 1);
+            const quantity = Math.max(1, parseInt(entry.quantity, 10) || 1);
             for (let i = 0; i < quantity; i += 1) {
                 expanded.push(code);
             }
@@ -209,7 +208,10 @@
 
         if (split.suffix > 0) {
             const existingSuffix = normalized.find(entry => entry.code === normalizedCode && entry.suffix === split.suffix);
-            if (existingSuffix) return normalized;
+            if (existingSuffix) {
+                existingSuffix.quantity += 1;
+                return normalizeEntries(normalized);
+            }
 
             normalized.push({ code: normalizedCode, suffix: split.suffix, quantity: 1 });
             return normalizeEntries(normalized);
@@ -264,13 +266,13 @@
 
         const baseEntry = normalized.find((entry, entryIndex) => entryIndex !== index && entry.code === item.code && entry.suffix === 0);
         if (baseEntry) {
-            baseEntry.quantity += 1;
+            baseEntry.quantity += Math.max(1, parseInt(item.quantity, 10) || 1);
             normalized.splice(index, 1);
             return normalizeEntries(normalized);
         }
 
         item.suffix = 0;
-        item.quantity = 1;
+        item.quantity = Math.max(1, parseInt(item.quantity, 10) || 1);
         return normalizeEntries(normalized);
     }
 
@@ -279,7 +281,7 @@
         if (index < 0 || index >= normalized.length) return normalized;
 
         const item = normalized[index];
-        if (item.suffix === 0 && item.quantity > 1) {
+        if (item.quantity > 1) {
             item.quantity -= 1;
         } else {
             normalized.splice(index, 1);
@@ -289,7 +291,7 @@
 
     function totalCount(entries) {
         const normalized = normalizeEntries(entries);
-        return normalized.reduce((sum, entry) => sum + (entry.suffix > 0 ? 1 : entry.quantity), 0);
+        return normalized.reduce((sum, entry) => sum + entry.quantity, 0);
     }
 
     global.BarcodeEntryState = {

@@ -499,12 +499,15 @@ def addToSearchRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITI
         except Exception as e:
             print(f"Warning: Could not lookup in bol.db: {e}")
 
+    custom_title = 0
     if not title and TITLE_OVERRIDE and str(TITLE_OVERRIDE).strip():
         title = str(TITLE_OVERRIDE).strip()
+        custom_title = 1
 
     barcode_norm = str(BARCODE).strip()
     position_norm = str(ITEM_POSITION).strip()
     has_picture = PICTUREPOSITION and str(PICTUREPOSITION).strip()
+    has_suffix = '-' in barcode_norm
 
     with connect_db('searchRack.db') as conn:
         cursor = conn.cursor()
@@ -521,13 +524,15 @@ def addToSearchRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITI
                 CREATED_AT TEXT
             )''')
 
-            # Ensure IMAGE column exists (for older databases)
+            # Ensure IMAGE and CUSTOM_TITLE columns exist (for older databases)
             try:
                 cursor.execute('PRAGMA table_info(SEARCHRACK)')
                 cols = [r[1] for r in cursor.fetchall()]
                 if 'IMAGE' not in cols:
                     cursor.execute('ALTER TABLE SEARCHRACK ADD COLUMN IMAGE TEXT')
-                    conn.commit()
+                if 'CUSTOM_TITLE' not in cols:
+                    cursor.execute('ALTER TABLE SEARCHRACK ADD COLUMN CUSTOM_TITLE INTEGER DEFAULT 0')
+                conn.commit()
             except sqlite3.Error:
                 pass
 
@@ -543,6 +548,14 @@ def addToSearchRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITI
                     AND (PICTUREPOSITION IS NULL OR TRIM(PICTUREPOSITION) = '')
                 """, (barcode_norm, position_norm))
                 existing_same_location = cursor.fetchone()
+            elif has_suffix:
+                cursor.execute("""
+                    SELECT ID, QUANTITY FROM SEARCHRACK
+                    WHERE TRIM(BARCODE) = ? COLLATE NOCASE
+                    AND TRIM(ITEM_POSITION) = ? COLLATE NOCASE
+                    AND TRIM(COALESCE(PICTUREPOSITION, '')) = ? COLLATE NOCASE
+                """, (barcode_norm, position_norm, str(PICTUREPOSITION).strip()))
+                existing_same_location = cursor.fetchone()
 
             now_iso = datetime.datetime.now().isoformat()
 
@@ -556,17 +569,18 @@ def addToSearchRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITI
                         TITLE = COALESCE(?, TITLE),
                         ITEMID = COALESCE(?, ITEMID),
                         IMAGE = COALESCE(?, IMAGE),
+                        CUSTOM_TITLE = CASE WHEN ? = 1 THEN 1 ELSE COALESCE(CUSTOM_TITLE, 0) END,
                         CREATED_AT = ?
                     WHERE ID = ?
-                """, (new_qty, title, itemid, image, now_iso, existing_id))
+                """, (new_qty, title, itemid, image, custom_title, now_iso, existing_id))
                 action = f"incremented quantity to {new_qty} for barcode={barcode_norm}, position={position_norm}"
 
                 _log_rack_history(barcode_norm, title, 1, existing_id, existing_qty, new_qty, 'add_to_shelf', position_norm)
             else:
                 cursor.execute("""
-                    INSERT INTO SEARCHRACK (TITLE, BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION, ITEMID, QUANTITY, IMAGE, CREATED_AT)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (title, barcode_norm, position_norm, IMAGES, PICTUREPOSITION, itemid, 1, image, now_iso))
+                    INSERT INTO SEARCHRACK (TITLE, BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION, ITEMID, QUANTITY, IMAGE, CUSTOM_TITLE, CREATED_AT)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (title, barcode_norm, position_norm, IMAGES, PICTUREPOSITION, itemid, 1, image, custom_title, now_iso))
                 new_id = cursor.lastrowid
                 if has_picture:
                     action = f"added new picture position entry (always unique): barcode={barcode_norm}, picture={PICTUREPOSITION}"

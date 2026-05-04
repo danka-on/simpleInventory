@@ -21,16 +21,16 @@ sudo journalctl -u sweetshelves.service -f
 
 ## Deploying to Pi
 
-Pi host: `manager@superinventory.local`, app directory: `/opt/sweetshelves`
+Pi host: `dk@10.0.0.151`, SSH key: `C:/Users/boxatron/.ssh/sweet_shelves_pi`, app directory: `/opt/sweetshelves`
 
 ```powershell
 # Scripted deploy (hardcoded subset of files — update script when adding new files)
 .\deploy-to-pi.ps1
 
 # Manual SCP for specific files
-scp .\app.py manager@superinventory.local:/opt/sweetshelves/
-scp .\templates\*.html manager@superinventory.local:/opt/sweetshelves/templates/
-scp .\static\i18n.js manager@superinventory.local:/opt/sweetshelves/static/
+scp -i C:/Users/boxatron/.ssh/sweet_shelves_pi .\app.py dk@10.0.0.151:/opt/sweetshelves/
+scp -i C:/Users/boxatron/.ssh/sweet_shelves_pi .\templates\*.html dk@10.0.0.151:/opt/sweetshelves/templates/
+scp -i C:/Users/boxatron/.ssh/sweet_shelves_pi .\static\i18n.js dk@10.0.0.151:/opt/sweetshelves/static/
 ```
 
 **Never SCP database files (.db) from PC to Pi.** The Pi has its own live databases. Only transfer code, templates, and static assets.

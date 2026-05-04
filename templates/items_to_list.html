@@ -1074,6 +1074,7 @@ let pendingLotSelection = '';
 let selectMode = false;
 let currentPage = 1;
 let currentLimit = 25;
+let directSearchMode = false;
 let lastRenderedResults = []; // Cache last results for re-rendering
 let pendingMarketplaceSaves = 0;
 let columnSort = { key: '', dir: 'desc' };
@@ -1194,29 +1195,32 @@ async function hydrateListingAgentQueueState(rows){
 }
 
 function _buildBolItemsQueryContext(){
-  let lot = document.getElementById('filter-lot').value.trim();
-  if(!lot && pendingLotSelection) lot = pendingLotSelection;
   const q = document.getElementById('filter-q').value.trim();
+  const directSearch = !!q && !!directSearchMode;
+  let lot = directSearch ? '' : document.getElementById('filter-lot').value.trim();
+  if(!directSearch && !lot && pendingLotSelection) lot = pendingLotSelection;
   const sort = document.getElementById('sort-select').value;
-  const checkedStatuses = Array.from(document.querySelectorAll('.status-checkbox:checked')).map(cb => cb.value);
+  const checkedStatuses = directSearch
+    ? []
+    : Array.from(document.querySelectorAll('.status-checkbox:checked')).map(cb => cb.value);
   const status = checkedStatuses.length > 0 ? checkedStatuses.join(',') : '';
-  const defectFilter = (document.getElementById('filter-defect') && document.getElementById('filter-defect').value) || '';
-  const listedVal = document.getElementById('filter-listed-select').value;
-  const autoListedVal = (document.getElementById('filter-auto-listed-select') && document.getElementById('filter-auto-listed-select').value) || '';
-  const warehouseFilterVal = (document.getElementById('filter-warehouse-select') && document.getElementById('filter-warehouse-select').value) || '';
+  const defectFilter = directSearch ? '' : ((document.getElementById('filter-defect') && document.getElementById('filter-defect').value) || '');
+  const listedVal = directSearch ? '' : document.getElementById('filter-listed-select').value;
+  const autoListedVal = directSearch ? '' : ((document.getElementById('filter-auto-listed-select') && document.getElementById('filter-auto-listed-select').value) || '');
+  const warehouseFilterVal = directSearch ? '' : ((document.getElementById('filter-warehouse-select') && document.getElementById('filter-warehouse-select').value) || '');
 
   const listedStores = [];
   const amazonCb = document.getElementById('filter-listed-amazon');
   const ebayCb = document.getElementById('filter-listed-ebay');
   const fbCb = document.getElementById('filter-listed-fb');
-  if (amazonCb && amazonCb.checked) listedStores.push('amazon');
-  if (ebayCb && ebayCb.checked) listedStores.push('ebay');
-  if (fbCb && fbCb.checked) listedStores.push('facebook');
+  if (!directSearch && amazonCb && amazonCb.checked) listedStores.push('amazon');
+  if (!directSearch && ebayCb && ebayCb.checked) listedStores.push('ebay');
+  if (!directSearch && fbCb && fbCb.checked) listedStores.push('facebook');
   const autoListedStores = [];
   const autoAmazonCb = document.getElementById('filter-auto-listed-amazon');
   const autoEbayCb = document.getElementById('filter-auto-listed-ebay');
-  if (autoAmazonCb && autoAmazonCb.checked) autoListedStores.push('amazon');
-  if (autoEbayCb && autoEbayCb.checked) autoListedStores.push('ebay');
+  if (!directSearch && autoAmazonCb && autoAmazonCb.checked) autoListedStores.push('amazon');
+  if (!directSearch && autoEbayCb && autoEbayCb.checked) autoListedStores.push('ebay');
 
   const params = new URLSearchParams();
   if(lot) params.set('lot', lot);
@@ -1243,6 +1247,7 @@ function _buildBolItemsQueryContext(){
   if(defectFilter) params.set('defect', defectFilter);
 
   const cacheKey = JSON.stringify({
+    direct_search: directSearch ? 1 : 0,
     lot,
     q,
     sort: sort || 'last_edited',
@@ -1519,6 +1524,7 @@ function updateGearResetButton(){
 function onGearSettingChanged(){
   const lotEl = document.getElementById('filter-lot');
   if(lotEl) pendingLotSelection = lotEl.value || '';
+  directSearchMode = false;
   saveGearSettings();
   updateGearResetButton();
 }
@@ -1542,6 +1548,7 @@ function applyDirectSearchFromURL(params){
   const q = (p.get('q') || '').trim();
   const qEl = document.getElementById('filter-q');
   if(qEl) qEl.value = q;
+  directSearchMode = !!q;
   pendingLotSelection = '';
   applyGearSettings(GEAR_DEFAULTS);
   updateGearResetButton();
@@ -1670,7 +1677,7 @@ function buildCurrentItemsToListUrl(){
     params.delete('column_sort_key');
     params.delete('column_sort_dir');
   }
-  if(isDirectSearchActivated()){
+  if(directSearchMode && (params.get('q') || '').trim()){
     params.set('direct_search', '1');
   } else {
     params.delete('direct_search');
@@ -1712,11 +1719,13 @@ function syncItemsToListHistory(mode = 'replace'){
 function restoreItemsToListStateFromURL(params){
   const p = (params instanceof URLSearchParams) ? params : new URLSearchParams(window.location.search);
   const directSearch = isDirectSearchActivated(p);
+  directSearchMode = directSearch && !!((p.get('q') || '').trim());
 
   restoreFilterUiSettings();
   if(directSearch){
     applyDirectSearchFromURL(p);
   } else {
+    directSearchMode = false;
     restoreGearSettings();
     setFiltersFromURL(p);
   }
@@ -2121,16 +2130,14 @@ function render(results){
     const title = esc(r.title||'');
     const img = esc(r.image||'');
     const thumb = img ? img.replace('s-l1600.jpg', 's-l140.jpg') : '';
-    const upcRaw = r.upc||'';
-    // Pad UPCs that are 11 digits or less to 12 digits for display/copy
-    // (Internal system still uses stripped version)
-    const upcPadded = (upcRaw.length > 0 && upcRaw.length <= 11 && /^\d+$/.test(upcRaw)) 
-      ? upcRaw.padStart(12, '0') 
-      : upcRaw;
-    const upcDisplayRaw = String(upcPadded || '');
-    const upcSuffixMatch = upcDisplayRaw.match(/^(.*?)(-\d+)$/);
-    const upcMainRaw = upcSuffixMatch ? upcSuffixMatch[1] : upcDisplayRaw;
+    const upcRaw = String(r.upc||'');
+    const upcSuffixMatch = upcRaw.match(/^(\d+)(-\d+)$/);
+    const upcBaseRaw = upcSuffixMatch ? upcSuffixMatch[1] : upcRaw;
     const upcSuffixRaw = upcSuffixMatch ? upcSuffixMatch[2] : '';
+    // Display/copy UPC-A as 12 digits while keeping internal DB keys untouched.
+    const upcMainRaw = (upcBaseRaw.length > 0 && upcBaseRaw.length <= 11 && /^\d+$/.test(upcBaseRaw))
+      ? upcBaseRaw.padStart(12, '0')
+      : upcBaseRaw;
     const upcDisplayHtml = upcSuffixRaw
       ? `<span class="upc-main">${esc(upcMainRaw)}</span><span class="upc-suffix">${esc(upcSuffixRaw)}</span>`
       : `<span class="upc-main">${esc(upcMainRaw)}</span>`;
@@ -2312,11 +2319,12 @@ function render(results){
     const noteTitleParts = [];
     if(hasTextNote) noteTitleParts.push('Text notes');
     if(hasVoiceNote) noteTitleParts.push(`${audioCount} voice note${audioCount===1?'':'s'}`);
+    const noteIconGlyph = hasTextNote ? '📝' : '🔊';
     const noteCell = hasNote
       ? `<td style="text-align:center;font-size:1.05rem">`+
           `<button type="button" class="note-icon note-icon-btn" data-upc="${apiUpc}" data-lot="${esc(r.lot_number||'')}" data-status="${esc(status)}" title="${esc(noteTitleParts.join(' | ') || 'Open notes')}">`+
-            `<span>📝</span>`+
-            `${hasVoiceNote ? '<span class="note-audio-flag">🔊</span>' : ''}`+
+            `<span>${noteIconGlyph}</span>`+
+            `${hasVoiceNote && hasTextNote ? '<span class="note-audio-flag">🔊</span>' : ''}`+
           `</button>`+
         `</td>`
       : `<td style="text-align:center"></td>`;
@@ -2475,6 +2483,7 @@ const resetGearBtn = document.getElementById('reset-gear-filters');
 if(resetGearBtn){
   resetGearBtn.addEventListener('click', (e)=>{
     e.preventDefault();
+    directSearchMode = false;
     applyGearSettings(GEAR_DEFAULTS);
     saveGearSettings();
     updateGearResetButton();
@@ -3070,10 +3079,26 @@ if (backBtn) {
     window.location.href = '/'; 
   });
 }
+function runItemsToListSearch(e){
+  const qEl = document.getElementById('filter-q');
+  const q = qEl ? String(qEl.value || '').trim() : '';
+  currentPage = 1;
+  if(q){
+    directSearchMode = true;
+    pendingLotSelection = '';
+    applyGearSettings(GEAR_DEFAULTS);
+    saveGearSettings();
+    updateGearResetButton();
+  } else {
+    directSearchMode = false;
+  }
+  loadItems(e, { historyMode: 'push' });
+}
+
 // Trigger load on Enter in search
-document.getElementById('filter-q').addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ e.preventDefault(); loadItems(e, { historyMode: 'push' }); } });
+document.getElementById('filter-q').addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ e.preventDefault(); runItemsToListSearch(e); } });
 // Search button click handler
-document.getElementById('search-btn').addEventListener('click', (e)=>{ loadItems(e, { historyMode: 'push' }); });
+document.getElementById('search-btn').addEventListener('click', (e)=>{ runItemsToListSearch(e); });
 
 // Select mode and delete handlers
 
