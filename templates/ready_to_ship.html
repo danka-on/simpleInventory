@@ -513,6 +513,186 @@
     }
     .rt-note-btn.has-note:hover { box-shadow: 0 4px 14px rgba(245,158,11,0.28); }
     .rt-note-plus { line-height: 1; font-size: 1.15rem; }
+    .rt-label-btn {
+      width: 36px;
+      height: 36px;
+      min-width: 36px;
+      border-radius: 10px;
+      border: 1px solid rgba(16,185,129,0.42);
+      background: rgba(16,185,129,0.14);
+      color: #86efac;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+      font-size: 0.98rem;
+      position: relative;
+    }
+    .rt-label-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(16,185,129,0.28); }
+    .rt-label-count-badge {
+      position: absolute;
+      right: -6px;
+      top: -6px;
+      min-width: 18px;
+      height: 18px;
+      padding: 0 5px;
+      border-radius: 999px;
+      background: #f59e0b;
+      color: #111827;
+      border: 1px solid rgba(255,255,255,0.35);
+      font-size: 0.65rem;
+      font-weight: 900;
+      line-height: 18px;
+      text-align: center;
+    }
+    .rt-label-empty {
+      display: inline-flex;
+      width: 36px;
+      height: 36px;
+      align-items: center;
+      justify-content: center;
+      color: #475569;
+      font-size: 0.85rem;
+    }
+    .btn-labels {
+      height: 36px;
+      border: 1px solid rgba(96,165,250,0.28);
+      border-radius: 10px;
+      background: rgba(37,99,235,0.16);
+      color: #bfdbfe;
+      font-weight: 800;
+      padding: 0 12px;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      cursor: pointer;
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+    .btn-labels:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(37,99,235,0.22); }
+    .rt-label-drop {
+      margin-top: 12px;
+      padding: 18px 16px;
+      border: 2px dashed rgba(96,165,250,0.38);
+      border-radius: 12px;
+      background: rgba(15,23,42,0.32);
+      color: #cbd5e1;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.15s ease, background 0.15s ease;
+    }
+    .rt-label-drop.is-dragover {
+      border-color: #60a5fa;
+      background: rgba(37,99,235,0.18);
+    }
+    .rt-label-drop strong {
+      display: block;
+      color: #e2e8f0;
+      margin-bottom: 4px;
+    }
+    .rt-label-drop small {
+      display: block;
+      color: #94a3b8;
+      line-height: 1.35;
+    }
+    .rt-label-attached {
+      margin-top: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: rgba(16,185,129,0.12);
+      border: 1px solid rgba(16,185,129,0.24);
+      color: #d1fae5;
+      font-size: 0.9rem;
+    }
+    .rt-label-attached-list {
+      display: grid;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .rt-label-attached-list .rt-label-attached {
+      margin-top: 0;
+    }
+    .rt-label-attached-name {
+      min-width: 0;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+    .rt-label-inline-actions {
+      display: inline-flex;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+    .rt-label-inline-link {
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .rt-label-mini-btn {
+      border: 1px solid rgba(148,163,184,0.26);
+      border-radius: 8px;
+      background: rgba(15,23,42,0.34);
+      color: #e2e8f0;
+      padding: 7px 9px;
+      cursor: pointer;
+      font-weight: 800;
+    }
+    .rt-label-mini-btn.danger {
+      border-color: rgba(239,68,68,0.34);
+      color: #fecaca;
+      background: rgba(239,68,68,0.12);
+    }
+    .rt-label-results {
+      margin-top: 14px;
+      display: grid;
+      gap: 8px;
+      max-height: 260px;
+      overflow-y: auto;
+      font-size: 0.9rem;
+    }
+    .rt-label-result {
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: rgba(15,23,42,0.34);
+      border: 1px solid rgba(148,163,184,0.15);
+      color: #cbd5e1;
+    }
+    .rt-label-results.saved-list {
+      max-height: 340px;
+      border: 1px solid rgba(245,158,11,0.18);
+      border-radius: 10px;
+      padding: 8px;
+      background: rgba(15,23,42,0.18);
+    }
+    .rt-label-result.ok {
+      border-color: rgba(16,185,129,0.3);
+      color: #d1fae5;
+    }
+    .rt-label-result.saved {
+      border-color: rgba(245,158,11,0.34);
+      color: #fde68a;
+    }
+    .rt-label-result.bad {
+      border-color: rgba(239,68,68,0.32);
+      color: #fecaca;
+    }
+    .rt-label-result-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 9px;
+      flex-wrap: wrap;
+    }
+    .rt-label-section-title {
+      margin-top: 16px;
+      font-weight: 800;
+      color: #e2e8f0;
+      font-size: 0.92rem;
+    }
 
     /* ── Note modal card ──────────────────────────────────────────────────── */
     .rt-note-modal-card {
@@ -625,6 +805,65 @@
       border-color: #fbbf24;
       color: #b45309;
     }
+    html.ss-theme-day .rt-label-btn {
+      background: #ecfdf5;
+      border-color: #86efac;
+      color: #047857;
+    }
+    html.ss-theme-day .rt-label-empty { color: #cbd5e1; }
+    html.ss-theme-day .btn-labels {
+      background: #eff6ff;
+      border-color: #bfdbfe;
+      color: #1d4ed8;
+    }
+    html.ss-theme-day .rt-label-drop {
+      background: #f8fafc;
+      border-color: #bfdbfe;
+      color: #334155;
+    }
+    html.ss-theme-day .rt-label-drop strong { color: #111827; }
+    html.ss-theme-day .rt-label-drop small { color: #64748b; }
+    html.ss-theme-day .rt-label-attached {
+      background: #ecfdf5;
+      border-color: #bbf7d0;
+      color: #047857;
+    }
+    html.ss-theme-day .rt-label-mini-btn {
+      background: #ffffff;
+      color: #334155;
+      border-color: #cbd5e1;
+    }
+    html.ss-theme-day .rt-label-inline-link { color: #334155; }
+    html.ss-theme-day .rt-label-mini-btn.danger {
+      background: #fef2f2;
+      color: #dc2626;
+      border-color: #fecaca;
+    }
+    html.ss-theme-day .rt-label-result {
+      background: #f8fafc;
+      border-color: #e2e8f0;
+      color: #334155;
+    }
+    html.ss-theme-day .rt-label-results.saved-list {
+      background: #fffbeb;
+      border-color: #fde68a;
+    }
+    html.ss-theme-day .rt-label-result.ok {
+      background: #ecfdf5;
+      border-color: #bbf7d0;
+      color: #047857;
+    }
+    html.ss-theme-day .rt-label-result.saved {
+      background: #fffbeb;
+      border-color: #fde68a;
+      color: #b45309;
+    }
+    html.ss-theme-day .rt-label-result.bad {
+      background: #fef2f2;
+      border-color: #fecaca;
+      color: #dc2626;
+    }
+    html.ss-theme-day .rt-label-section-title { color: #111827; }
     html.ss-theme-day .rt-note-context {
       background: #f8fafc;
       border-color: #e2e8f0;
@@ -1320,6 +1559,8 @@
       .rt-table td:nth-child(4) { min-width: 44px; text-align: center; }
       .rt-table thead th:nth-child(5),
       .rt-table td:nth-child(5) { min-width: 90px; text-align: center; }
+      .rt-table thead th:nth-child(6),
+      .rt-table td:nth-child(6) { min-width: 90px; text-align: center; }
       .table-wrap.has-more::after {
         content: '\2192';
         position: absolute;
@@ -1650,6 +1891,10 @@
                 <div class="header-subtitle">Live queue + completed orders</div>
             </div>
             <div class="header-controls">
+                <button id="labels-upload-btn" class="btn-labels" title="Upload shipping label PDFs">
+                    <i class="fas fa-tags"></i>
+                    <span>Labels</span>
+                </button>
                 <button id="refresh-orders-btn" class="btn-refresh" title="Refresh orders">
                     <i class="fas fa-arrows-rotate" style="font-size:0.88rem;"></i>
                 </button>
@@ -1684,12 +1929,13 @@
                                 <th style="text-align:center; width:60px;" data-i18n="loc">Loc</th>
                                 <th style="text-align:center; width:40px;">#</th>
                                 <th style="text-align:center; width:72px;">Note</th>
+                                <th style="text-align:center; width:72px;">Label</th>
                                 <th style="text-align:center; width:80px;" data-i18n="status">Status</th>
                             </tr>
                         </thead>
                         <tbody style="font-size:0.85rem;">
                             <tr class="loading-row">
-                                <td colspan="6" class="rt-empty">
+                                <td colspan="7" class="rt-empty">
                                     <i class="fas fa-spinner fa-spin"></i> <span data-i18n="loading_orders">Loading orders...</span>
                                 </td>
                             </tr>
@@ -1708,13 +1954,14 @@
                                 <th style="text-align:center; width:60px;" data-i18n="loc">Loc</th>
                                 <th style="text-align:center; width:40px;">#</th>
                                 <th style="text-align:center; width:72px;">Note</th>
+                                <th style="text-align:center; width:72px;">Label</th>
                                 <th style="text-align:left; width:160px;">Completed At</th>
                                 <th style="text-align:center; width:80px;" data-i18n="status">Status</th>
                             </tr>
                         </thead>
                         <tbody style="font-size:0.85rem;">
                             <tr class="loading-row">
-                                <td colspan="7" class="rt-empty">
+                                <td colspan="8" class="rt-empty">
                                     <i class="fas fa-spinner fa-spin"></i> <span data-i18n="loading_orders">Loading orders...</span>
                                 </td>
                             </tr>
@@ -2032,6 +2279,60 @@ function readyToShipOrderHasNote(order) {
     return !!String(order && order.ready_to_ship_note || '').trim();
 }
 
+function normalizeReadyToShipLabelPayload(label, fallbackOrderId) {
+    if (!label) return null;
+    const labelId = String(label.label_id || label.id || '').trim();
+    const filename = String(label.label_filename || label.ready_to_ship_label_filename || '').trim();
+    const original = String(label.label_original_filename || label.ready_to_ship_label_original_filename || label.filename || '').trim();
+    const uploadedAt = String(label.label_uploaded_at || label.ready_to_ship_label_uploaded_at || '').trim();
+    const sizeBytes = parseInt(label.label_size_bytes || label.ready_to_ship_label_size_bytes, 10) || 0;
+    const orderId = String(label.order_id || fallbackOrderId || '').trim();
+    if (!filename && !original && !labelId) return null;
+    let labelUrl = String(label.label_url || label.ready_to_ship_label_url || '').trim();
+    if (!labelUrl && orderId) {
+        labelUrl = labelId
+            ? `/api/ready-to-ship/label/${encodeURIComponent(orderId)}/file/${encodeURIComponent(labelId)}`
+            : `/api/ready-to-ship/label/${encodeURIComponent(orderId)}/file`;
+    }
+    return {
+        label_id: labelId,
+        id: labelId,
+        order_id: orderId,
+        label_filename: filename,
+        label_original_filename: original,
+        label_size_bytes: sizeBytes,
+        label_uploaded_at: uploadedAt,
+        label_url: labelUrl,
+        filename: original || filename || 'Label'
+    };
+}
+
+function readyToShipOrderLabels(order) {
+    const list = Array.isArray(order && order.ready_to_ship_labels) ? order.ready_to_ship_labels : [];
+    const normalized = list
+        .map(label => normalizeReadyToShipLabelPayload(label, order && order.id))
+        .filter(Boolean);
+    if (normalized.length) return normalized;
+    const legacy = normalizeReadyToShipLabelPayload({
+        label_id: order && order.ready_to_ship_label_id,
+        label_filename: order && order.ready_to_ship_label_filename,
+        label_original_filename: order && order.ready_to_ship_label_original_filename,
+        label_size_bytes: order && order.ready_to_ship_label_size_bytes,
+        label_uploaded_at: order && order.ready_to_ship_label_uploaded_at,
+        label_url: order && order.ready_to_ship_label_url
+    }, order && order.id);
+    return legacy ? [legacy] : [];
+}
+
+function readyToShipOrderHasLabel(order) {
+    return readyToShipOrderLabels(order).length > 0;
+}
+
+function readyToShipLabelName(order) {
+    const label = readyToShipOrderLabels(order)[0];
+    return label ? String(label.filename || label.label_original_filename || label.label_filename || '').trim() : '';
+}
+
 function renderReadyToShipNoteButton(order) {
     const hasNote = readyToShipOrderHasNote(order);
     const label = hasNote ? 'Open note' : 'Add note';
@@ -2047,9 +2348,29 @@ function tdNote(order) {
     return `<td class="rt-note-cell" data-order-id="${order.id}" style="text-align:center;">${renderReadyToShipNoteButton(order)}</td>`;
 }
 
+function renderReadyToShipLabelButton(order) {
+    const labels = readyToShipOrderLabels(order);
+    if (!labels.length) {
+        return '<span class="rt-label-empty" aria-label="No label">-</span>';
+    }
+    const primary = labels[0];
+    const uploadedAt = formatCompletedAt(primary && primary.label_uploaded_at);
+    const labelName = readyToShipLabelName(order);
+    const title = labels.length > 1
+        ? `${labels.length} labels attached`
+        : uploadedAt
+            ? `Print label (${uploadedAt})`
+            : 'Print label';
+    return `<button type="button" class="rt-label-btn" data-order-id="${order.id}" title="${esc(title)}" aria-label="${esc(title)}" data-label-name="${esc(labelName)}" data-label-count="${labels.length}"><i class="fas fa-print" aria-hidden="true"></i>${labels.length > 1 ? `<span class="rt-label-count-badge">${labels.length}</span>` : ''}</button>`;
+}
+
+function tdLabel(order) {
+    return `<td class="rt-label-cell" data-order-id="${order.id}" style="text-align:center;">${renderReadyToShipLabelButton(order)}</td>`;
+}
+
 function tdCompletedAt(order) {
     const completedAt = formatCompletedAt(order && order.isHandledDate);
-    return `<td class="sold-td-small rt-completed-at">${completedAt ? esc(completedAt) : '—'}</td>`;
+    return `<td class="sold-td-small rt-completed-at">${completedAt ? esc(completedAt) : '-'}</td>`;
 }
 
 function parseReadyToShipDate(value) {
@@ -2103,6 +2424,13 @@ function patchReadyToShipNoteCell(orderId) {
     });
 }
 
+function patchReadyToShipLabelCell(orderId) {
+    const order = OrderManager.getOrder(orderId);
+    document.querySelectorAll(`.rt-label-cell[data-order-id="${String(orderId)}"]`).forEach(cell => {
+        cell.innerHTML = renderReadyToShipLabelButton(order || { id: orderId });
+    });
+}
+
 function syncReadyToShipNoteState(orderId, payload) {
     const order = OrderManager.getOrder(orderId);
     if (!order) return;
@@ -2110,8 +2438,24 @@ function syncReadyToShipNoteState(orderId, payload) {
     order.ready_to_ship_note_created_at = String(payload && payload.ready_to_ship_note_created_at || '');
     order.ready_to_ship_note_updated_at = String(payload && payload.ready_to_ship_note_updated_at || '');
     order.has_ready_to_ship_note = !!String(order.ready_to_ship_note || '').trim();
+    order.ready_to_ship_label_filename = String(payload && payload.ready_to_ship_label_filename || '');
+    order.ready_to_ship_label_original_filename = String(payload && payload.ready_to_ship_label_original_filename || '');
+    order.ready_to_ship_label_size_bytes = parseInt(payload && payload.ready_to_ship_label_size_bytes, 10) || 0;
+    order.ready_to_ship_label_uploaded_at = String(payload && payload.ready_to_ship_label_uploaded_at || '');
+    order.ready_to_ship_label_url = String(payload && payload.ready_to_ship_label_url || '');
+    order.ready_to_ship_label_id = String(payload && payload.ready_to_ship_label_id || '');
+    order.ready_to_ship_labels = Array.isArray(payload && payload.ready_to_ship_labels)
+        ? payload.ready_to_ship_labels.map(label => normalizeReadyToShipLabelPayload(label, orderId)).filter(Boolean)
+        : readyToShipOrderLabels(order);
+    order.ready_to_ship_label_count = parseInt(payload && payload.ready_to_ship_label_count, 10) || order.ready_to_ship_labels.length;
+    order.has_ready_to_ship_label = readyToShipOrderLabels(order).length > 0;
     patchReadyToShipNoteCell(orderId);
+    patchReadyToShipLabelCell(orderId);
     OrderManager.saveToLocalStorage();
+}
+
+function syncReadyToShipLabelState(orderId, payload) {
+    syncReadyToShipNoteState(orderId, payload || {});
 }
 
 function notifyReadyToShipOrderChange(orderId) {
@@ -2123,6 +2467,255 @@ function notifyReadyToShipOrderChange(orderId) {
     try {
         localStorage.setItem('sold_orders_refresh', String(Date.now()));
     } catch (e) {}
+}
+
+function formatReadyToShipFileSize(bytes) {
+    const n = parseInt(bytes, 10) || 0;
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+    return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function setReadyToShipDropHandlers(dropZone, input, onFiles) {
+    if (!dropZone || !input || typeof onFiles !== 'function') return;
+
+    dropZone.addEventListener('click', () => input.click());
+    input.addEventListener('change', () => {
+        const files = Array.from(input.files || []);
+        if (files.length) onFiles(files);
+        input.value = '';
+    });
+
+    ['dragenter', 'dragover'].forEach(type => {
+        dropZone.addEventListener(type, (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dropZone.classList.add('is-dragover');
+        });
+    });
+    ['dragleave', 'dragend', 'drop'].forEach(type => {
+        dropZone.addEventListener(type, (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (type !== 'dragenter' && type !== 'dragover') dropZone.classList.remove('is-dragover');
+        });
+    });
+    dropZone.addEventListener('drop', (e) => {
+        const files = Array.from(e.dataTransfer && e.dataTransfer.files || []);
+        if (files.length) onFiles(files);
+    });
+}
+
+async function uploadReadyToShipLabelForOrder(orderId, file) {
+    if (!file) return null;
+    if (!/\.pdf$/i.test(file.name || '')) {
+        throw new Error('Only PDF label files are supported.');
+    }
+    const fd = new FormData();
+    fd.append('label', file);
+    const response = await fetch(`/api/ready-to-ship/label/${encodeURIComponent(orderId)}`, {
+        method: 'POST',
+        body: fd
+    });
+    const data = await response.json().catch(() => ({ success: false, error: 'Invalid server response' }));
+    if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Label upload failed');
+    }
+    syncReadyToShipLabelState(orderId, data);
+    notifyReadyToShipOrderChange(orderId);
+    return data;
+}
+
+async function deleteReadyToShipLabel(orderId, labelId = '') {
+    const cleanLabelId = String(labelId || '').trim();
+    const endpoint = cleanLabelId
+        ? `/api/ready-to-ship/label/${encodeURIComponent(orderId)}/${encodeURIComponent(cleanLabelId)}`
+        : `/api/ready-to-ship/label/${encodeURIComponent(orderId)}`;
+    const response = await fetch(endpoint, {
+        method: 'DELETE'
+    });
+    const data = await response.json().catch(() => ({ success: false, error: 'Invalid server response' }));
+    if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Label removal failed');
+    }
+    syncReadyToShipLabelState(orderId, data);
+    notifyReadyToShipOrderChange(orderId);
+    return data;
+}
+
+function openReadyToShipPdfPrintWindow(url) {
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+        window.open(url, '_blank');
+        return;
+    }
+    printWindow.document.open();
+    printWindow.document.write(`<!doctype html><html><head><title>Print Label</title><style>html,body,iframe{margin:0;width:100%;height:100%;border:0;}</style></head><body><iframe id="labelFrame" src="${esc(url)}"></iframe><script>const f=document.getElementById('labelFrame');f.onload=function(){setTimeout(function(){try{f.contentWindow.focus();f.contentWindow.print();}catch(e){window.print();}},700);};<\/script></body></html>`);
+    printWindow.document.close();
+}
+
+async function printReadyToShipLabel(orderId, labelId = '') {
+    try {
+        const cleanLabelId = String(labelId || '').trim();
+        const endpoint = cleanLabelId
+            ? `/api/ready-to-ship/label/${encodeURIComponent(orderId)}/print/${encodeURIComponent(cleanLabelId)}`
+            : `/api/ready-to-ship/label/${encodeURIComponent(orderId)}/print`;
+        const response = await fetch(endpoint, {
+            method: 'POST'
+        });
+        const data = await response.json().catch(() => ({ success: false, error: 'Invalid server response' }));
+        if (!response.ok || !data.success || !data.label_url) {
+            throw new Error(data.error || 'Label file not found');
+        }
+        const url = data.label_url + (data.label_url.includes('?') ? '&' : '?') + '_t=' + Date.now();
+        openReadyToShipPdfPrintWindow(url);
+    } catch (error) {
+        showToast('Failed to print label: ' + error.message, 'error');
+    }
+}
+
+async function fetchReadyToShipUnmatchedLabels() {
+    const response = await fetch('/api/ready-to-ship/labels/unmatched?_t=' + Date.now(), {
+        cache: 'no-store'
+    });
+    const data = await response.json().catch(() => ({ success: false, error: 'Invalid server response' }));
+    if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Failed to load unmatched labels');
+    }
+    return Array.isArray(data.labels) ? data.labels : [];
+}
+
+async function printReadyToShipUnmatchedLabel(labelId) {
+    try {
+        const response = await fetch(`/api/ready-to-ship/labels/unmatched/${encodeURIComponent(labelId)}/print`, {
+            method: 'POST'
+        });
+        const data = await response.json().catch(() => ({ success: false, error: 'Invalid server response' }));
+        if (!response.ok || !data.success || !data.label_url) {
+            throw new Error(data.error || 'Label file not found');
+        }
+        const url = data.label_url + (data.label_url.includes('?') ? '&' : '?') + '_t=' + Date.now();
+        openReadyToShipPdfPrintWindow(url);
+    } catch (error) {
+        showToast('Failed to print label: ' + error.message, 'error');
+    }
+}
+
+async function deleteReadyToShipUnmatchedLabel(labelId) {
+    const response = await fetch(`/api/ready-to-ship/labels/unmatched/${encodeURIComponent(labelId)}`, {
+        method: 'DELETE'
+    });
+    const data = await response.json().catch(() => ({ success: false, error: 'Invalid server response' }));
+    if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Label removal failed');
+    }
+    return data;
+}
+
+function renderReadyToShipAttachedLabels(order) {
+    const labels = readyToShipOrderLabels(order);
+    if (!labels.length) return '';
+    const rows = labels.map((label, index) => {
+        const labelId = String(label.label_id || label.id || '').trim();
+        const labelName = String(label.filename || label.label_original_filename || label.label_filename || `Label ${index + 1}`).trim();
+        const uploadedAt = formatCompletedAt(label.label_uploaded_at);
+        const size = formatReadyToShipFileSize(label.label_size_bytes);
+        const labelUrl = String(label.label_url || '').trim();
+        return `<div class="rt-label-attached" data-label-id="${esc(labelId)}">
+              <div class="rt-label-attached-name"><i class="fas fa-file-pdf"></i> ${esc(labelName || 'Ready to Ship label')}${uploadedAt ? ` <span style="opacity:.72;">${esc(uploadedAt)}</span>` : ''}${size !== '0 B' ? ` <span style="opacity:.72;">${esc(size)}</span>` : ''}</div>
+              <div class="rt-label-inline-actions">
+                  ${labelUrl ? `<a class="rt-label-mini-btn rt-label-inline-link" href="${esc(labelUrl)}" target="_blank" rel="noopener" title="Open label"><i class="fas fa-up-right-from-square"></i></a>` : ''}
+                  <button type="button" class="rt-label-mini-btn" data-role="print-order-label" data-label-id="${esc(labelId)}" title="Print label"><i class="fas fa-print"></i></button>
+                  <button type="button" class="rt-label-mini-btn danger" data-role="remove-order-label" data-label-id="${esc(labelId)}" title="Remove label"><i class="fas fa-trash"></i></button>
+              </div>
+           </div>`;
+    }).join('');
+    return `<div class="rt-label-attached-list">${rows}</div>`;
+}
+
+function renderReadyToShipNoteLabelBlock(order) {
+    const attached = renderReadyToShipAttachedLabels(order);
+    return `
+        <div class="rt-label-drop" data-role="note-label-drop">
+            <strong><i class="fas fa-file-pdf"></i> Drop label PDF here</strong>
+            <small>Attach one or more shipping labels to this Ready to Ship order.</small>
+        </div>
+        <input type="file" data-role="note-label-file" accept="application/pdf,.pdf" multiple style="display:none;">
+        ${attached}
+    `;
+}
+
+function wireReadyToShipAttachedLabelActions(host, orderId, options = {}) {
+    if (!host) return;
+    const setBusy = typeof options.setBusy === 'function' ? options.setBusy : () => {};
+    const meta = options.meta || null;
+    const onChanged = typeof options.onChanged === 'function' ? options.onChanged : () => {};
+    host.querySelectorAll('[data-role="print-order-label"]').forEach(btn => {
+        btn.onclick = () => printReadyToShipLabel(orderId, btn.getAttribute('data-label-id'));
+    });
+    host.querySelectorAll('[data-role="remove-order-label"]').forEach(btn => {
+        btn.onclick = async () => {
+            if (!window.confirm('Remove this label from the order?')) return;
+            setBusy(true);
+            if (meta) meta.textContent = 'Removing label...';
+            try {
+                await deleteReadyToShipLabel(orderId, btn.getAttribute('data-label-id'));
+                showToast('Label removed');
+                onChanged();
+            } catch (error) {
+                if (meta) meta.textContent = 'Label removal failed. Please try again.';
+                showToast('Failed to remove label: ' + error.message, 'error');
+            } finally {
+                setBusy(false);
+            }
+        };
+    });
+}
+
+function showReadyToShipOrderLabelsPopup(orderId) {
+    const order = OrderManager.getOrder(orderId);
+    if (!order) {
+        showToast('Order not found', 'error');
+        return;
+    }
+    const existing = document.getElementById('rt-order-labels-modal');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'rt-order-labels-modal';
+    overlay.className = 'order-popup-overlay';
+    overlay.onclick = (e) => { if (e.target === overlay) closeModal(); };
+
+    const popup = document.createElement('div');
+    popup.className = 'order-popup-card rt-note-modal-card';
+    const title = String(order.title || '').trim() || 'Untitled order';
+    const labels = readyToShipOrderLabels(order);
+    popup.innerHTML = `
+        <div class="popup-group-title" style="font-size:1.05rem;font-weight:800;margin-bottom:6px;">Attached Labels</div>
+        <div class="rt-note-context">
+            <strong>${esc(title)}</strong>
+            <small>${labels.length} ${labels.length === 1 ? 'label' : 'labels'} attached</small>
+        </div>
+        ${renderReadyToShipAttachedLabels(order) || '<div class="rt-label-result"><span>No labels attached.</span></div>'}
+        <div class="rt-note-actions">
+            <button type="button" class="rt-note-action secondary" data-role="close-order-labels">Close</button>
+        </div>
+    `;
+    overlay.appendChild(popup);
+    document.body.appendChild(overlay);
+
+    function closeModal() {
+        overlay.remove();
+    }
+
+    popup.querySelector('[data-role="close-order-labels"]').onclick = closeModal;
+    popup.onclick = (e) => e.stopPropagation();
+    wireReadyToShipAttachedLabelActions(popup, orderId, {
+        onChanged: () => {
+            closeModal();
+            showReadyToShipOrderLabelsPopup(orderId);
+        }
+    });
 }
 
 function showReadyToShipNotePopup(orderId) {
@@ -2161,6 +2754,7 @@ function showReadyToShipNotePopup(orderId) {
             <small>${esc(buyer || 'No buyer name')} | Order ${esc(orderRef)}</small>
         </div>
         <textarea class="rt-note-textarea" maxlength="2000" placeholder="Add a Ready to Ship note for this order...">${esc(existingNote)}</textarea>
+        ${renderReadyToShipNoteLabelBlock(order)}
         <div class="rt-note-meta">${esc(metaText)}</div>
         <div class="rt-note-actions">
             ${existingNote ? '<button type="button" class="rt-note-action danger" data-role="clear-note">Remove Note</button>' : ''}
@@ -2177,6 +2771,8 @@ function showReadyToShipNotePopup(orderId) {
     const cancelBtn = popup.querySelector('[data-role="cancel-note"]');
     const clearBtn = popup.querySelector('[data-role="clear-note"]');
     const meta = popup.querySelector('.rt-note-meta');
+    const noteLabelDrop = popup.querySelector('[data-role="note-label-drop"]');
+    const noteLabelInput = popup.querySelector('[data-role="note-label-file"]');
 
     function closeModal() {
         document.removeEventListener('keydown', onKeyDown);
@@ -2247,6 +2843,33 @@ function showReadyToShipNotePopup(orderId) {
             persistNote('');
         };
     }
+    setReadyToShipDropHandlers(noteLabelDrop, noteLabelInput, async (files) => {
+        const pdfFiles = Array.from(files || []).filter(f => /\.pdf$/i.test(f.name || ''));
+        if (!pdfFiles.length) return;
+        setBusy(true);
+        try {
+            for (let i = 0; i < pdfFiles.length; i++) {
+                if (meta) meta.textContent = `Uploading label ${i + 1} of ${pdfFiles.length}...`;
+                await uploadReadyToShipLabelForOrder(orderId, pdfFiles[i]);
+            }
+            closeModal();
+            showReadyToShipNotePopup(orderId);
+            showToast(pdfFiles.length === 1 ? 'Label attached' : `${pdfFiles.length} labels attached`);
+        } catch (error) {
+            if (meta) meta.textContent = 'Label upload failed. Please try again.';
+            showToast('Failed to attach label: ' + error.message, 'error');
+        } finally {
+            setBusy(false);
+        }
+    });
+    wireReadyToShipAttachedLabelActions(popup, orderId, {
+        setBusy,
+        meta,
+        onChanged: () => {
+            closeModal();
+            showReadyToShipNotePopup(orderId);
+        }
+    });
 
     requestAnimationFrame(() => {
         if (textarea) {
@@ -2254,6 +2877,211 @@ function showReadyToShipNotePopup(orderId) {
             textarea.setSelectionRange(textarea.value.length, textarea.value.length);
         }
     });
+}
+
+function wireReadyToShipUnmatchedResult(item, labelId, onDeleted) {
+    if (!item || !labelId) return;
+    const printBtn = item.querySelector('[data-role="print-unmatched-label"]');
+    const deleteBtn = item.querySelector('[data-role="delete-unmatched-label"]');
+    if (printBtn) {
+        printBtn.onclick = () => printReadyToShipUnmatchedLabel(labelId);
+    }
+    if (deleteBtn) {
+        deleteBtn.onclick = async () => {
+            if (!window.confirm('Delete this saved label?')) return;
+            deleteBtn.disabled = true;
+            try {
+                await deleteReadyToShipUnmatchedLabel(labelId);
+                item.remove();
+                if (typeof onDeleted === 'function') onDeleted(labelId);
+                showToast('Label deleted');
+            } catch (error) {
+                deleteBtn.disabled = false;
+                showToast('Failed to delete label: ' + error.message, 'error');
+            }
+        };
+    }
+}
+
+function appendReadyToShipLabelResult(host, result, fileName, options = {}) {
+    if (!host) return;
+    const item = document.createElement('div');
+    const ok = !!(result && result.success && result.matched);
+    const saved = !!(result && result.unmatched_label_id);
+    item.className = `rt-label-result ${ok ? 'ok' : saved ? 'saved' : 'bad'}`;
+    if (ok) {
+        const name = result.shipping_name || result.order_ref || `Order ${result.order_id}`;
+        item.innerHTML = `<strong><i class="fas fa-check"></i> ${esc(fileName || result.filename || 'Label')}</strong><br><span>Matched ${esc(name)}${result.score ? ` (${esc(result.score)} pts)` : ''}</span>`;
+    } else if (saved) {
+        const labelId = String(result.unmatched_label_id || result.id || '').trim();
+        const labelUrl = result.label_url || (labelId ? `/api/ready-to-ship/labels/unmatched/${encodeURIComponent(labelId)}/file` : '');
+        const uploadedAt = formatCompletedAt(result.label_uploaded_at || result.ready_to_ship_label_uploaded_at);
+        const size = formatReadyToShipFileSize(result.label_size_bytes || result.ready_to_ship_label_size_bytes);
+        const message = result && result.error ? result.error : 'No address match found; saved for manual printing.';
+        item.innerHTML = `
+            <strong><i class="fas fa-file-pdf"></i> ${esc(fileName || result.filename || result.label_original_filename || 'Label')}</strong><br>
+            <span>${esc(message)}${uploadedAt ? ` ${esc(uploadedAt)}` : ''}${size !== '0 B' ? ` ${esc(size)}` : ''}</span>
+            <div class="rt-label-result-actions">
+                ${labelUrl ? `<a class="rt-label-mini-btn rt-label-inline-link" href="${esc(labelUrl)}" target="_blank" rel="noopener"><i class="fas fa-up-right-from-square"></i> Open</a>` : ''}
+                <button type="button" class="rt-label-mini-btn" data-role="print-unmatched-label"><i class="fas fa-print"></i> Print</button>
+                <button type="button" class="rt-label-mini-btn danger" data-role="delete-unmatched-label"><i class="fas fa-trash"></i> Delete</button>
+            </div>
+        `;
+        wireReadyToShipUnmatchedResult(item, labelId, options.onDeleted);
+    } else {
+        const message = result && result.error ? result.error : 'No address match found';
+        item.innerHTML = `<strong><i class="fas fa-triangle-exclamation"></i> ${esc(fileName || result && result.filename || 'Label')}</strong><br><span>${esc(message)}</span>`;
+    }
+    if (options && options.prepend === false) {
+        host.appendChild(item);
+    } else {
+        host.prepend(item);
+    }
+}
+
+function renderReadyToShipUnmatchedLabels(host, labels, onDeleted) {
+    if (!host) return;
+    host.innerHTML = '';
+    const list = Array.isArray(labels) ? labels : [];
+    if (!list.length) {
+        const empty = document.createElement('div');
+        empty.className = 'rt-label-result';
+        empty.innerHTML = '<span>No saved unmatched labels.</span>';
+        host.appendChild(empty);
+        return;
+    }
+    list.forEach(label => {
+        appendReadyToShipLabelResult(
+            host,
+            Object.assign({ success: true, matched: false }, label),
+            label.filename || label.label_original_filename || 'Label',
+            { prepend: false, onDeleted }
+        );
+    });
+}
+
+async function uploadReadyToShipBulkLabelFile(file, days) {
+    const fd = new FormData();
+    fd.append('labels', file);
+    fd.append('days', String(days || OrderManager.currentDays || 2));
+    const response = await fetch('/api/ready-to-ship/labels/upload', {
+        method: 'POST',
+        body: fd
+    });
+    const data = await response.json().catch(() => ({ success: false, error: 'Invalid server response' }));
+    if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Label upload failed');
+    }
+    return data;
+}
+
+async function refreshReadyToShipAfterLabelUpload(days) {
+    OrderManager.clearCache();
+    await loadSoldOrders(days || OrderManager.currentDays || 2, true);
+    try {
+        const state = await fetchReadyToShipServerState(days || OrderManager.currentDays || 2);
+        updateReadyToShipPollBaseline(state);
+    } catch (e) {}
+}
+
+function showReadyToShipLabelsPopup() {
+    const existing = document.getElementById('rt-labels-modal');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'rt-labels-modal';
+    overlay.className = 'order-popup-overlay';
+    overlay.onclick = (e) => { if (e.target === overlay) closeModal(); };
+
+    const popup = document.createElement('div');
+    popup.className = 'order-popup-card rt-note-modal-card';
+    popup.innerHTML = `
+        <div class="popup-group-title" style="font-size:1.05rem;font-weight:800;margin-bottom:6px;">Ready to Ship Labels</div>
+        <div class="popup-muted" style="margin-bottom:14px;">Drop one or more PDF shipping labels. Matched labels attach automatically; labels without an address match stay saved here for manual printing.</div>
+        <div class="rt-label-drop" data-role="bulk-label-drop">
+            <strong><i class="fas fa-file-pdf"></i> Drop label PDFs here</strong>
+            <small>PDF only. Multiple files are okay.</small>
+        </div>
+        <input type="file" data-role="bulk-label-file" accept="application/pdf,.pdf" multiple style="display:none;">
+        <div class="rt-note-meta" data-role="bulk-label-status">Waiting for label PDFs.</div>
+        <div class="rt-label-section-title" data-role="saved-label-title">Saved unmatched labels</div>
+        <div class="rt-label-results saved-list" data-role="unmatched-label-results"></div>
+        <div class="rt-label-section-title">Latest upload results</div>
+        <div class="rt-label-results" data-role="bulk-label-results"></div>
+        <div class="rt-note-actions">
+            <button type="button" class="rt-note-action secondary" data-role="close-labels">Close</button>
+        </div>
+    `;
+
+    overlay.appendChild(popup);
+    document.body.appendChild(overlay);
+
+    const dropZone = popup.querySelector('[data-role="bulk-label-drop"]');
+    const input = popup.querySelector('[data-role="bulk-label-file"]');
+    const status = popup.querySelector('[data-role="bulk-label-status"]');
+    const resultsHost = popup.querySelector('[data-role="bulk-label-results"]');
+    const unmatchedHost = popup.querySelector('[data-role="unmatched-label-results"]');
+    const savedTitle = popup.querySelector('[data-role="saved-label-title"]');
+    const closeBtn = popup.querySelector('[data-role="close-labels"]');
+    let busy = false;
+
+    function closeModal() {
+        overlay.remove();
+    }
+
+    async function loadUnmatchedLabels() {
+        if (!unmatchedHost) return;
+        unmatchedHost.innerHTML = '<div class="rt-label-result"><span>Loading saved labels...</span></div>';
+        try {
+            const labels = await fetchReadyToShipUnmatchedLabels();
+            if (savedTitle) savedTitle.textContent = `Saved unmatched labels (${labels.length})`;
+            renderReadyToShipUnmatchedLabels(unmatchedHost, labels, () => loadUnmatchedLabels());
+        } catch (error) {
+            unmatchedHost.innerHTML = `<div class="rt-label-result bad"><span>${esc(error.message || 'Failed to load saved labels')}</span></div>`;
+        }
+    }
+
+    async function handleFiles(filesRaw) {
+        if (busy) return;
+        const files = Array.from(filesRaw || []).filter(f => /\.pdf$/i.test(f.name || ''));
+        if (!files.length) {
+            showToast('Drop PDF label files only', 'error');
+            return;
+        }
+
+        busy = true;
+        dropZone.style.pointerEvents = 'none';
+        const days = parseInt(document.getElementById('sold-orders-days')?.value || OrderManager.currentDays || 2, 10) || 2;
+        let matched = 0;
+        let unmatched = 0;
+
+        for (let i = 0; i < files.length; i++) {
+            const file = files[i];
+            if (status) status.textContent = `Uploading ${i + 1} of ${files.length}: ${file.name}`;
+            try {
+                const data = await uploadReadyToShipBulkLabelFile(file, days);
+                const result = (data.results || [])[0] || data;
+                if (result && result.matched) matched += 1;
+                else unmatched += 1;
+                appendReadyToShipLabelResult(resultsHost, result, file.name, { onDeleted: () => loadUnmatchedLabels() });
+                if (result && result.unmatched_label_id) {
+                    await loadUnmatchedLabels();
+                }
+                await refreshReadyToShipAfterLabelUpload(days);
+            } catch (error) {
+                unmatched += 1;
+                appendReadyToShipLabelResult(resultsHost, { success: false, matched: false, error: error.message }, file.name);
+            }
+        }
+
+        if (status) status.textContent = `Done. ${matched} matched, ${unmatched} saved or not matched.`;
+        busy = false;
+        dropZone.style.pointerEvents = '';
+    }
+
+    setReadyToShipDropHandlers(dropZone, input, handleFiles);
+    closeBtn.onclick = closeModal;
+    loadUnmatchedLabels();
 }
 
 // Create a single order row
@@ -2274,9 +3102,9 @@ function createOrderRow(order, isCompleted = false) {
         </button>`;
 
     tr.innerHTML = isCompleted
-        ? tdTitle(order) + tdInfo(order) + tdLocation(order) + tdQuantity(order) + tdNote(order) + tdCompletedAt(order) +
+        ? tdTitle(order) + tdInfo(order) + tdLocation(order) + tdQuantity(order) + tdNote(order) + tdLabel(order) + tdCompletedAt(order) +
             `<td style="text-align: center;">${buttonHtml}</td>`
-        : tdTitle(order) + tdInfo(order) + tdLocation(order) + tdQuantity(order) + tdNote(order) +
+        : tdTitle(order) + tdInfo(order) + tdLocation(order) + tdQuantity(order) + tdNote(order) + tdLabel(order) +
             `<td style="text-align: center;">${buttonHtml}</td>`;
 
     return tr;
@@ -2366,7 +3194,7 @@ function renderSoldOrders(orders, fromCache = false) {
     if (hasPending) {
         pendingTbody.appendChild(pendingFragment);
     } else {
-        pendingTbody.innerHTML = buildReadyToShipEmptyRow('No pending orders', 6, '<i class="fas fa-check-circle" style="font-size:2rem;display:block;margin-bottom:8px;color:#10b981;"></i>');
+        pendingTbody.innerHTML = buildReadyToShipEmptyRow('No pending orders', 7, '<i class="fas fa-check-circle" style="font-size:2rem;display:block;margin-bottom:8px;color:#10b981;"></i>');
     }
 
     // Clear and update completed table
@@ -2374,7 +3202,7 @@ function renderSoldOrders(orders, fromCache = false) {
     if (hasCompleted) {
         completedTbody.appendChild(completedFragment);
     } else {
-        completedTbody.innerHTML = buildReadyToShipEmptyRow('No completed orders yet', 7, '<i class="fas fa-inbox" style="font-size:2rem;display:block;margin-bottom:8px;"></i>');
+        completedTbody.innerHTML = buildReadyToShipEmptyRow('No completed orders yet', 8, '<i class="fas fa-inbox" style="font-size:2rem;display:block;margin-bottom:8px;"></i>');
     }
 
     updatePendingCount();
@@ -3111,8 +3939,8 @@ async function handleOrderStatusChange(orderId, isUndo) {
                 : document.querySelector('#completed-orders-table tbody');
             if (sourceTable.children.length === 0) {
                 sourceTable.innerHTML = updatedOrder.isHandled
-                    ? buildReadyToShipEmptyRow('No pending orders', 6)
-                    : buildReadyToShipEmptyRow('No completed orders yet', 7);
+                    ? buildReadyToShipEmptyRow('No pending orders', 7)
+                    : buildReadyToShipEmptyRow('No completed orders yet', 8);
             }
         }, 260);
 
@@ -3319,8 +4147,8 @@ async function fetchAndShowSoldOrders(days, forceRefresh = false) {
         // Show error state
         const pendingTbody = document.querySelector('#sold-orders-table tbody');
         const completedTbody = document.querySelector('#completed-orders-table tbody');
-        pendingTbody.innerHTML = '<tr><td colspan="6" class="rt-error">Failed to load orders. <a href="#" onclick="window.fetchAndShowSoldOrders(' + days + ', true); return false;">Retry</a></td></tr>';
-        completedTbody.innerHTML = buildReadyToShipEmptyRow('No completed orders yet', 7);
+        pendingTbody.innerHTML = '<tr><td colspan="7" class="rt-error">Failed to load orders. <a href="#" onclick="window.fetchAndShowSoldOrders(' + days + ', true); return false;">Retry</a></td></tr>';
+        completedTbody.innerHTML = buildReadyToShipEmptyRow('No completed orders yet', 8);
     } finally {
         OrderManager.isLoading = false;
     }
@@ -3391,6 +4219,20 @@ function setupEventDelegation() {
             e.preventDefault();
             e.stopPropagation();
             showReadyToShipNotePopup(noteBtn.getAttribute('data-order-id'));
+            return;
+        }
+
+        const labelBtn = e.target.closest('.rt-label-btn');
+        if (labelBtn) {
+            e.preventDefault();
+            e.stopPropagation();
+            const orderId = labelBtn.getAttribute('data-order-id');
+            const order = OrderManager.getOrder(orderId);
+            if (readyToShipOrderLabels(order).length > 1) {
+                showReadyToShipOrderLabelsPopup(orderId);
+            } else {
+                printReadyToShipLabel(orderId);
+            }
             return;
         }
 
@@ -3516,6 +4358,13 @@ window.addEventListener('DOMContentLoaded', async function() {
                     icon.style.color = '';
                 }, 800);
             }, Math.max(0, 800 - elapsed));
+        });
+    }
+
+    const labelsUploadBtn = document.getElementById('labels-upload-btn');
+    if (labelsUploadBtn) {
+        labelsUploadBtn.addEventListener('click', function() {
+            showReadyToShipLabelsPopup();
         });
     }
 
@@ -4034,10 +4883,14 @@ function renderReadyToShipOrderLocationHtml(loc, options = {}) {
                 const rawImage = location.image || location.code || '';
                 const locCode = esc(rawCode);
                 const qty = location.quantity || 1;
+                const warehouseNote = String(location.warehouse_note || '').trim();
 
                 content += `<div style="margin-left: 12px; margin-bottom: 8px;">`;
                 content += `<button type="button" class="popup-link rt-location-open" data-location-code="${esc(rawCode)}" data-preview-key="${esc(rawImage)}" data-preview-index="0" onclick="event.stopPropagation();event.preventDefault();openLocationMediaPreview(this.dataset.locationCode,this.dataset.previewKey,this.dataset.previewIndex);return false;" style="cursor:pointer;text-decoration:underline;font-weight:600;background:none;border:none;padding:0;color:#fff;">${locCode}</button>`;
                 content += ` <span class="popup-qty" style="font-size: 0.9rem;">(Qty: ${qty})</span>`;
+                if (warehouseNote) {
+                    content += `<div class="popup-muted" style="font-size:0.9rem;margin-top:4px;"><strong>Warehouse Note:</strong> ${esc(warehouseNote)}</div>`;
+                }
                 content += readyToShipLocationPreviewHtml(rawCode, rawImage);
                 content += `</div>`;
             });
@@ -4049,6 +4902,9 @@ function renderReadyToShipOrderLocationHtml(loc, options = {}) {
 
     const rawLoc = String(loc || '');
     content += `<div class="popup-loc-line" style="font-size: 0.98rem; margin-bottom: 12px; font-weight: 500;">Location: <button type="button" class="popup-link rt-location-open" data-location-code="${esc(rawLoc)}" data-preview-key="${esc(rawLoc)}" data-preview-index="0" onclick="event.stopPropagation();event.preventDefault();openLocationMediaPreview(this.dataset.locationCode,this.dataset.previewKey,this.dataset.previewIndex);return false;" style="cursor:pointer;text-decoration:underline;background:none;border:none;padding:0;color:#fff;font-weight:600;">${esc(rawLoc)}</button></div>`;
+    if (options && options.warehouseNote) {
+        content += `<div class="popup-muted" style="font-size:0.92rem;margin-bottom:12px;"><strong>Warehouse Note:</strong> ${esc(options.warehouseNote)}</div>`;
+    }
     content += readyToShipLocationPreviewHtml(rawLoc, rawLoc);
     return content;
 }
@@ -4156,9 +5012,9 @@ function showOrderPopup(order, options = {}) {
     }
 
     if (isLocMode) {
-        content += renderReadyToShipOrderLocationHtml(loc, { emptyMessage: 'No location photos available.' });
+        content += renderReadyToShipOrderLocationHtml(loc, { emptyMessage: 'No location photos available.', warehouseNote: order && order.warehouse_note });
     } else if (isTitleMode) {
-        content += renderReadyToShipOrderLocationHtml(loc);
+        content += renderReadyToShipOrderLocationHtml(loc, { warehouseNote: order && order.warehouse_note });
     }
 
     popup.innerHTML = content + `

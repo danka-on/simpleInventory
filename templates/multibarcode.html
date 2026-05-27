@@ -315,6 +315,7 @@
             align-items: center;
             gap: 10px;
             margin-left: 12px;
+            position: relative;
         }
 
         .suffix-editor {
@@ -378,6 +379,127 @@
         
         .barcode-item .delete-btn:active {
             transform: scale(0.95);
+        }
+
+        .barcode-item .print-label-btn {
+            background: rgba(37, 99, 235, 0.88);
+            border: none;
+            color: white;
+            min-width: 112px;
+            height: 36px;
+            border-radius: 999px;
+            cursor: pointer;
+            font-size: 0.82em;
+            font-weight: 800;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 7px;
+            margin: 0;
+            padding: 0 12px;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+
+        .barcode-item .print-label-btn:hover {
+            background: rgba(29, 78, 216, 0.95);
+            transform: scale(1.04);
+        }
+
+        .barcode-item .print-label-btn:active {
+            transform: scale(0.96);
+        }
+
+        .barcode-item .print-label-btn:disabled {
+            opacity: 0.65;
+            cursor: wait;
+            transform: none;
+        }
+
+        .item-gear-btn {
+            width: 40px;
+            height: 40px;
+            border: none;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.24);
+            color: currentColor;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.05rem;
+            margin: 0;
+            padding: 0;
+        }
+
+        .item-gear-btn:active {
+            transform: scale(0.96);
+        }
+
+        .item-gear-menu {
+            display: none;
+            position: fixed;
+            min-width: 230px;
+            max-width: min(280px, calc(100vw - 16px));
+            background: #fff;
+            color: #17202a;
+            border: 1px solid rgba(15, 23, 42, 0.12);
+            border-radius: 8px;
+            box-shadow: 0 12px 28px rgba(15, 23, 42, 0.2);
+            padding: 8px;
+            z-index: 100001;
+        }
+
+        .item-gear-menu.open {
+            display: block;
+        }
+
+        .item-gear-menu button {
+            width: 100%;
+            border: none;
+            background: transparent;
+            color: #17202a;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 9px 10px;
+            border-radius: 6px;
+            font-size: 0.94rem;
+            font-weight: 700;
+            margin: 0;
+            text-align: left;
+        }
+
+        .item-gear-menu button:hover {
+            background: #eef2f7;
+        }
+
+        .item-gear-menu button:disabled {
+            color: #94a3b8;
+            cursor: default;
+        }
+
+        .item-gear-menu button.danger {
+            color: #b91c1c;
+        }
+
+        @media (max-width: 430px) {
+            .barcode-item-controls {
+                gap: 8px;
+            }
+
+            .barcode-item .print-label-btn {
+                min-width: 36px;
+                width: 36px;
+                border-radius: 50%;
+                padding: 0;
+            }
+
+            .barcode-item .print-label-btn span {
+                display: none;
+            }
         }
         
         .empty-state {
@@ -705,6 +827,39 @@
             box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.16);
         }
 
+        .missing-title-note-btn {
+            width: 100%;
+            margin: -4px 0 10px;
+            padding: 11px 14px;
+            border-radius: 10px;
+            border: 1px solid #38bdf8;
+            background: #eff6ff;
+            color: #075985;
+            font-size: 0.95rem;
+            font-weight: 800;
+            cursor: pointer;
+            -webkit-appearance: none;
+            appearance: none;
+        }
+
+        .missing-title-note-input {
+            display: none;
+            width: 100%;
+            min-height: 72px;
+            margin: 0 0 14px;
+            padding: 11px 12px;
+            font-size: 0.95rem;
+            border: 2px solid #93c5fd;
+            border-radius: 10px;
+            box-sizing: border-box;
+            resize: vertical;
+            font-family: inherit;
+        }
+
+        .missing-title-note-input.is-visible {
+            display: block;
+        }
+
         .missing-title-keypad {
             display: none;
             flex-direction: column;
@@ -926,6 +1081,8 @@
             <h3 class="missing-title-heading">Missing Title/Image</h3>
             <div class="missing-title-code" id="missingTitleBarcodeText"></div>
             <input type="text" id="missingTitleInput" class="missing-title-input" maxlength="200" placeholder="Enter a warehouse title" autocomplete="off" autocapitalize="words" spellcheck="false" inputmode="text" enterkeyhint="done">
+            <button type="button" id="missingTitleNoteBtn" class="missing-title-note-btn">+ note</button>
+            <textarea id="missingTitleNoteInput" class="missing-title-note-input" maxlength="2000" placeholder="Warehouse note for this exact item"></textarea>
             <div id="missingTitlePhotoSection" class="missing-title-photo">
                 <input type="file" id="missingTitlePhotoInput" accept="image/*" capture="environment" style="display:none">
                 <button type="button" id="missingTitlePhotoBtn" class="missing-title-photo-btn">Photo Mode For Thumbnail</button>
@@ -994,8 +1151,8 @@
 
     <!-- ZXing Library -->
     <script src="https://unpkg.com/@zxing/library@0.19.1/umd/index.min.js"></script>
-    <script src="/static/barcode-entry-state.js?v=20260420a"></script>
-    <script src="/static/no-barcode-label.js?v=20260504c"></script>
+    <script src="/static/barcode-entry-state.js?v=20260505a"></script>
+    <script src="/static/no-barcode-label.js?v=20260505a"></script>
     
     <script>
         const barcodeEntryState = window.BarcodeEntryState;
@@ -1025,6 +1182,193 @@
         let selectedDeviceId = null;
         let barcodeScanQueue = Promise.resolve();
         const screeningCache = new Map();
+
+        function escapeHtml(value) {
+            return String(value == null ? '' : value).replace(/[&<>"']/g, ch => ({
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#39;'
+            }[ch]));
+        }
+
+        function labelDescriptionForBarcodeItem(item) {
+            const actualCode = barcodeItemActualCode(item);
+            const key = normalizeManualTitleKey(actualCode);
+            const baseKey = normalizeManualTitleKey(item && item.code || '');
+            const manualTitles = loadManualTitleOverrides();
+            const cachedItem = key && screeningCache && typeof screeningCache.get === 'function'
+                ? (screeningCache.get(key) || screeningCache.get(baseKey))
+                : null;
+            return String(
+                (key && manualTitles[key]) ||
+                (baseKey && manualTitles[baseKey]) ||
+                (cachedItem && cachedItem.title) ||
+                'Warehouse item'
+            ).replace(/\s+/g, ' ').trim();
+        }
+
+        function setPrintLabelButtonBusy(button, busy) {
+            if (!button) return;
+            if (busy) {
+                if (!button.dataset.originalHtml) button.dataset.originalHtml = button.innerHTML;
+                button.disabled = true;
+                button.innerHTML = '<i class="fas fa-spinner fa-spin"></i><span>Printing...</span>';
+                return;
+            }
+            button.disabled = false;
+            if (button.dataset.originalHtml) {
+                button.innerHTML = button.dataset.originalHtml;
+                delete button.dataset.originalHtml;
+            }
+        }
+
+        async function printExistingBarcodeLabel(code, description, button) {
+            const barcode = String(code || '').trim();
+            if (!barcode) return;
+            setPrintLabelButtonBusy(button, true);
+            try {
+                if (window.NoBarcodeLabelFlow && typeof window.NoBarcodeLabelFlow.printExistingLabel === 'function') {
+                    await window.NoBarcodeLabelFlow.printExistingLabel({ barcode, description });
+                } else {
+                    const response = await fetch('/api/printer/print-barcode', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            upc: barcode,
+                            item_description: String(description || '').trim() || 'Warehouse item',
+                            quantity: 1
+                        })
+                    });
+                    const data = await response.json().catch(() => ({}));
+                    if (!response.ok || !data.success) throw new Error(data.error || 'Print failed');
+                }
+            } catch (err) {
+                alert('Print failed: ' + ((err && err.message) || 'Unknown error'));
+            } finally {
+                setPrintLabelButtonBusy(button, false);
+            }
+        }
+
+        function printBarcodeItemLabel(index, button) {
+            const item = barcodeItems[index];
+            if (!item) return;
+            return printExistingBarcodeLabel(
+                barcodeItemActualCode(item),
+                labelDescriptionForBarcodeItem(item),
+                button
+            );
+        }
+        window.printBarcodeItemLabel = printBarcodeItemLabel;
+
+        function closeItemGearMenus() {
+            document.querySelectorAll('.item-gear-menu.open').forEach(menu => menu.classList.remove('open'));
+        }
+
+        function positionItemGearMenu(menu, trigger) {
+            if (!menu || !trigger) return;
+            menu.style.left = '8px';
+            menu.style.top = '8px';
+            menu.classList.add('open');
+            const triggerRect = trigger.getBoundingClientRect();
+            const menuRect = menu.getBoundingClientRect();
+            const margin = 8;
+            let left = Math.min(window.innerWidth - menuRect.width - margin, Math.max(margin, triggerRect.right - menuRect.width));
+            let top = triggerRect.bottom + margin;
+            if (top + menuRect.height > window.innerHeight - margin) {
+                top = triggerRect.top - menuRect.height - margin;
+            }
+            if (top < margin) top = Math.max(margin, window.innerHeight - menuRect.height - margin);
+            menu.style.left = `${Math.round(left)}px`;
+            menu.style.top = `${Math.round(top)}px`;
+        }
+
+        function toggleItemGearMenu(index, event) {
+            if (event) {
+                event.preventDefault();
+                event.stopPropagation();
+            }
+            const menu = document.querySelector(`.item-gear-menu[data-index="${index}"]`);
+            if (!menu) return;
+            const wasOpen = menu.classList.contains('open');
+            closeItemGearMenus();
+            if (!wasOpen) positionItemGearMenu(menu, event && event.currentTarget);
+        }
+        window.toggleItemGearMenu = toggleItemGearMenu;
+
+        function editWarehouseNote(index) {
+            if (!barcodeEntryState || typeof barcodeEntryState.setNote !== 'function') return;
+            const item = barcodeItems[index];
+            if (!item) return;
+            const next = window.prompt('Warehouse note for this exact item:', String(item.note || ''));
+            if (next === null) return;
+            barcodeItems = barcodeEntryState.setNote(barcodeItems, index, next);
+            persistBarcodeItems();
+            updateList();
+            barcodeInput.focus();
+        }
+        window.editWarehouseNote = editWarehouseNote;
+
+        async function editTitleThumbnail(index) {
+            const item = barcodeItems[index];
+            if (!item) return;
+            const actualCode = barcodeItemActualCode(item);
+            const key = normalizeManualTitleKey(actualCode);
+            const baseKey = normalizeManualTitleKey(item.code || '');
+            const manualTitles = loadManualTitleOverrides();
+            let cachedItem = screeningCache.get(key) || screeningCache.get(baseKey) || null;
+            if (!cachedItem) {
+                try {
+                    cachedItem = await fetchAddItemScreeningSingle(key || baseKey);
+                } catch (_) {
+                    cachedItem = null;
+                }
+            }
+            const existingTitle = String(manualTitles[key] || manualTitles[baseKey] || (cachedItem && cachedItem.title) || '').trim();
+            const existingImage = String(cachedItem && (cachedItem.image_url || cachedItem.image || cachedItem.thumbnail_url) || '').trim();
+            const result = await openMissingTitleModal(key || actualCode, {
+                barcode: key || actualCode,
+                existingTitle,
+                existingNote: String(item.note || ''),
+                missingImage: true,
+                existingImage
+            });
+            if (!result || result.action !== 'save') return;
+            const title = String(result.title || '').replace(/\s+/g, ' ').trim();
+            if (!title) return;
+            const warehouseNote = cleanMissingTitleWarehouseNote(result.note || '');
+            if (warehouseNote) {
+                barcodeItems = barcodeEntryState.setNote(barcodeItems, index, warehouseNote);
+                persistBarcodeItems();
+            }
+            if (result.photoData) {
+                try {
+                    const uploadResult = await uploadMissingTitleThumbnail(key || actualCode, title, result.photoData);
+                    if (uploadResult && uploadResult.image_url) {
+                        cachedItem = Object.assign({}, cachedItem || {}, { image_url: uploadResult.image_url });
+                    }
+                } catch (err) {
+                    console.error('Thumbnail save failed:', err);
+                    alert('Thumbnail was not saved: ' + (err && err.message ? err.message : 'unknown error'));
+                }
+            }
+            if (key) manualTitles[key] = title.slice(0, 200);
+            saveManualTitleOverrides(manualTitles);
+            if (key) screeningCache.set(key, Object.assign({}, cachedItem || {}, { title }));
+            updateList();
+            barcodeInput.focus();
+        }
+        window.editTitleThumbnail = editTitleThumbnail;
+
+        function adjustQuantity(index, delta) {
+            if (!barcodeEntryState || typeof barcodeEntryState.adjustQuantity !== 'function') return;
+            barcodeItems = barcodeEntryState.adjustQuantity(barcodeItems, index, delta);
+            persistBarcodeItems();
+            updateList();
+            barcodeInput.focus();
+        }
+        window.adjustQuantity = adjustQuantity;
         
         const barcodeInput = document.getElementById('barcodeInput');
         const barcodeListEl = document.getElementById('barcodeList');
@@ -1036,6 +1380,8 @@
         const missingTitleBarcodeText = document.getElementById('missingTitleBarcodeText');
         const missingTitleHint = document.getElementById('missingTitleHint');
         const missingTitleInput = document.getElementById('missingTitleInput');
+        const missingTitleNoteBtn = document.getElementById('missingTitleNoteBtn');
+        const missingTitleNoteInput = document.getElementById('missingTitleNoteInput');
         const missingTitlePhotoSection = document.getElementById('missingTitlePhotoSection');
         const missingTitlePhotoInput = document.getElementById('missingTitlePhotoInput');
         const missingTitlePhotoBtn = document.getElementById('missingTitlePhotoBtn');
@@ -1050,6 +1396,7 @@
         let missingTitleResumeCamera = false;
         let missingTitlePendingPhotoData = '';
         let missingTitleCurrentIssue = null;
+        const pendingMissingTitleNotes = {};
         
         // Check if shelf is still locked
         function isShelfLocked() {
@@ -1424,6 +1771,35 @@
             missingTitleInput.dispatchEvent(new Event('input', { bubbles: true }));
         }
 
+        function cleanMissingTitleWarehouseNote(value) {
+            return String(value || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim().slice(0, 2000);
+        }
+
+        function setMissingTitleNoteVisibility(show) {
+            if (!missingTitleNoteInput) return;
+            missingTitleNoteInput.classList.toggle('is-visible', !!show);
+            if (missingTitleNoteBtn) {
+                missingTitleNoteBtn.textContent = show ? 'Hide note' : '+ note';
+            }
+            if (show) {
+                window.setTimeout(() => {
+                    try { missingTitleNoteInput.focus({ preventScroll: true }); }
+                    catch (_) { try { missingTitleNoteInput.focus(); } catch (__) {} }
+                }, 0);
+            }
+        }
+
+        function resetMissingTitleNoteState(note = '') {
+            const clean = cleanMissingTitleWarehouseNote(note);
+            if (missingTitleNoteInput) {
+                missingTitleNoteInput.value = clean;
+                missingTitleNoteInput.classList.toggle('is-visible', !!clean);
+            }
+            if (missingTitleNoteBtn) {
+                missingTitleNoteBtn.textContent = clean ? 'Hide note' : '+ note';
+            }
+        }
+
         function resetMissingTitlePhotoState() {
             missingTitlePendingPhotoData = '';
             if (missingTitlePhotoInput) {
@@ -1436,6 +1812,17 @@
             if (missingTitlePhotoStatus) {
                 missingTitlePhotoStatus.textContent = 'Optional: capture a thumbnail while this item is already being fixed.';
             }
+        }
+
+        function showExistingMissingTitleThumbnail(imageUrl) {
+            const url = String(imageUrl || '').trim();
+            if (!url || !missingTitlePhotoPreview) return false;
+            missingTitlePhotoPreview.src = url;
+            missingTitlePhotoPreview.style.display = 'block';
+            if (missingTitlePhotoStatus) {
+                missingTitlePhotoStatus.textContent = 'Current thumbnail shown. Taking a new photo will replace it.';
+            }
+            return true;
         }
 
         function setMissingTitlePhotoVisibility(show) {
@@ -1539,6 +1926,7 @@
             missingTitleModalOpen = false;
             missingTitleCurrentIssue = null;
             resetMissingTitlePhotoState();
+            resetMissingTitleNoteState('');
             setMissingTitlePhotoVisibility(false);
             setMissingTitleKeypadVisibility(false);
             suspendBarcodeCaptureForMissingTitle(false);
@@ -1566,15 +1954,21 @@
             missingTitleCurrentIssue = Object.assign({
                 barcode: normalizeManualTitleKey(code),
                 existingTitle: '',
-                missingImage: false
+                existingNote: '',
+                missingImage: false,
+                existingImage: ''
             }, issue || {});
             const existingTitle = String(missingTitleCurrentIssue.existingTitle || '').replace(/\s+/g, ' ').trim();
+            const existingImage = String(missingTitleCurrentIssue.existingImage || missingTitleCurrentIssue.image_url || '').trim();
+            const existingNote = cleanMissingTitleWarehouseNote(missingTitleCurrentIssue.existingNote || missingTitleCurrentIssue.note || '');
             missingTitleBarcodeText.textContent = formatUpcDisplay(code);
             missingTitleInput.value = existingTitle;
             missingTitleInput.style.borderColor = '#f2c66d';
             missingTitleInput.style.boxShadow = '';
             resetMissingTitlePhotoState();
-            setMissingTitlePhotoVisibility(!!missingTitleCurrentIssue.missingImage);
+            resetMissingTitleNoteState(existingNote);
+            setMissingTitlePhotoVisibility(!!missingTitleCurrentIssue.missingImage || !!existingImage);
+            showExistingMissingTitleThumbnail(existingImage);
             missingTitleInput.readOnly = false;
             setMissingTitleKeypadVisibility(requiresMissingTitleKeyboardTap());
             missingTitleModal.style.display = 'flex';
@@ -1638,6 +2032,7 @@
             const modalResult = await openMissingTitleModal(code, {
                 barcode: key,
                 existingTitle: String(item.title || '').trim(),
+                existingNote: pendingMissingTitleNotes[key] || '',
                 missingImage: Boolean(item.missing_image)
             });
             if (!modalResult || (modalResult.action !== 'skip' && modalResult.action !== 'save')) return false;
@@ -1650,6 +2045,12 @@
 
             const value = String((modalResult && modalResult.title) || '').replace(/\s+/g, ' ').trim();
             if (!value) return false;
+            const warehouseNote = cleanMissingTitleWarehouseNote(modalResult.note || '');
+            if (warehouseNote) {
+                pendingMissingTitleNotes[key] = warehouseNote;
+            } else {
+                delete pendingMissingTitleNotes[key];
+            }
 
             if (modalResult.photoData) {
                 try {
@@ -1710,8 +2111,10 @@
             }
             
             const s = splitScannedBarcode(code);
+            const pendingNoteKey = normalizeManualTitleKey(code);
+            const pendingNote = cleanMissingTitleWarehouseNote(pendingMissingTitleNotes[pendingNoteKey] || '');
             if (s.suffix) {
-                // Suffix came directly from the scanner — insert directly so it's never stripped,
+                // Suffix came directly from the scanner - insert directly so it's never stripped,
                 // and track it so the row renders as a fixed scanned-suffix item.
                 const baseCode = s.base;
                 const suffixNum = parseInt(s.suffix, 10);
@@ -1719,7 +2122,7 @@
                 if (existingSuffix) {
                     existingSuffix.quantity = Math.max(1, parseInt(existingSuffix.quantity, 10) || 1) + 1;
                 } else {
-                    barcodeItems.push({ code: baseCode, suffix: suffixNum, quantity: 1 });
+                    barcodeItems.push({ code: baseCode, suffix: suffixNum, quantity: 1, note: pendingNote });
                 }
                 if (barcodeEntryState) {
                     barcodeItems = barcodeEntryState.normalizeEntries(barcodeItems);
@@ -1727,7 +2130,14 @@
                 scannedSuffixCodes.add(`${baseCode}-${suffixNum}`);
                 persistBarcodeItems();
             } else if (barcodeEntryState) {
-                barcodeItems = barcodeEntryState.addBaseScan(barcodeItems, code);
+                if (pendingNote) {
+                    barcodeItems = barcodeEntryState.normalizeEntries([
+                        ...barcodeItems,
+                        { code, suffix: 0, quantity: 1, note: pendingNote }
+                    ]);
+                } else {
+                    barcodeItems = barcodeEntryState.addBaseScan(barcodeItems, code);
+                }
                 persistBarcodeItems();
             } else {
                 const entryCode = s.base || code;
@@ -1735,9 +2145,10 @@
                 if (existingItem) {
                     existingItem.quantity++;
                 } else {
-                    barcodeItems.push({ code: entryCode, suffix: 0, quantity: 1 });
+                    barcodeItems.push({ code: entryCode, suffix: 0, quantity: 1, note: pendingNote });
                 }
             }
+            if (pendingNoteKey) delete pendingMissingTitleNotes[pendingNoteKey];
             playBeep();
             
             // Flash green
@@ -1795,6 +2206,12 @@
                 onClose: () => {
                     if (typeof suspendBarcodeCaptureForMissingTitle === 'function') suspendBarcodeCaptureForMissingTitle(false);
                 },
+                getReservedBarcodes: () => {
+                    if (!Array.isArray(barcodeItems)) return [];
+                    return barcodeItems
+                        .map(item => barcodeItemActualCode(item))
+                        .filter(Boolean);
+                },
                 onUseBarcode: (barcode) => {
                     queueBarcodeScan(barcode);
                 }
@@ -1817,7 +2234,17 @@
                     }
                     return;
                 }
-                closeMissingTitleModal({ action: 'save', title: value, photoData: missingTitlePendingPhotoData || '' });
+                closeMissingTitleModal({
+                    action: 'save',
+                    title: value,
+                    note: cleanMissingTitleWarehouseNote(missingTitleNoteInput && missingTitleNoteInput.value),
+                    photoData: missingTitlePendingPhotoData || ''
+                });
+            });
+        }
+        if (missingTitleNoteBtn && missingTitleNoteInput) {
+            missingTitleNoteBtn.addEventListener('click', () => {
+                setMissingTitleNoteVisibility(!missingTitleNoteInput.classList.contains('is-visible'));
             });
         }
 
@@ -1837,7 +2264,10 @@
                         missingTitlePhotoPreview.style.display = 'block';
                     }
                     if (missingTitlePhotoStatus) {
-                        missingTitlePhotoStatus.textContent = 'Thumbnail ready to save with this title.';
+                        const replacing = missingTitleCurrentIssue && (missingTitleCurrentIssue.existingImage || missingTitleCurrentIssue.image_url);
+                        missingTitlePhotoStatus.textContent = replacing
+                            ? 'New thumbnail ready. Complete will replace the current thumbnail.'
+                            : 'Thumbnail ready to save with this title.';
                     }
                 };
                 reader.onerror = () => {
@@ -1907,6 +2337,8 @@
             barcodeInput.focus();
         }
         window.adjustSuffix = adjustSuffix;
+
+        document.addEventListener('click', closeItemGearMenus);
         
         // Update the barcode list display
         function updateList() {
@@ -1927,33 +2359,59 @@
                     const metaLabel = item.suffix > 0
                         ? (isScannedSuffix ? `Scanned suffix - fixed · Qty ${qty}` : (qty > 1 ? `Suffix item · Qty ${qty}` : 'Singular suffix item'))
                         : `Qty ${item.quantity}`;
-                    const suffixControls = isScannedSuffix ? '' : `
-                            <div class="suffix-editor">
-                                <button class="suffix-btn" onclick="adjustSuffix(${index}, -1)" ${item.suffix > 0 ? '' : 'disabled'} title="Lower suffix">-</button>
-                                <span class="suffix-label">${formatSuffixLabel(item)}</span>
-                                <button class="suffix-btn" onclick="adjustSuffix(${index}, 1)" title="Raise suffix">+</button>
-                            </div>`;
+                    const lowerSuffixDisabled = isScannedSuffix || item.suffix <= 0;
+                    const raiseSuffixDisabled = isScannedSuffix;
                     const titleKey = normalizeManualTitleKey(barcodeItemActualCode(item));
-                    const cachedItem = screeningCache.get(titleKey);
-                    const rawTitle = manualTitles[titleKey] || (cachedItem && cachedItem.title ? String(cachedItem.title).trim() : '');
+                    const baseTitleKey = normalizeManualTitleKey(item.code || '');
+                    const cachedItem = screeningCache.get(titleKey) || screeningCache.get(baseTitleKey);
+                    const rawTitle = manualTitles[titleKey] || manualTitles[baseTitleKey] || (cachedItem && cachedItem.title ? String(cachedItem.title).trim() : '');
                     const titleHtml = rawTitle
-                        ? `<span class="barcode-item-title">${rawTitle.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</span>`
+                        ? `<span class="barcode-item-title">${escapeHtml(rawTitle)}</span>`
+                        : '';
+                    const noteHtml = item.note
+                        ? `<span class="barcode-item-title">Warehouse note: ${escapeHtml(item.note)}</span>`
                         : '';
                     return `
                     <div class="${rowClass}">
                         <div class="barcode-item-main">
                             <span class="barcode-text">${formatBarcodeEntry(item)}</span>
                             ${titleHtml}
+                            ${noteHtml}
                             <div class="barcode-item-meta">
                                 <span>${metaLabel}</span>
                                 ${item.suffix === 0 && item.quantity > 1 ? '<span>Use + to split one out as a suffix item</span>' : ''}
                             </div>
                         </div>
                         <div class="barcode-item-controls">
-                            ${suffixControls}
-                            <button class="delete-btn" onclick="removeBarcode(${index})" title="Remove one">
-                                <i class="fas fa-times"></i>
+                            <button class="item-gear-btn" onclick="toggleItemGearMenu(${index}, event)" title="Item options" aria-label="Item options">
+                                <i class="fas fa-gear"></i>
                             </button>
+                            <div class="item-gear-menu" data-index="${index}" onclick="event.stopPropagation()">
+                                <button type="button" onclick="printBarcodeItemLabel(${index}, this); closeItemGearMenus();">
+                                    <span><i class="fas fa-print"></i> Print label</span>
+                                </button>
+                                <button type="button" onclick="editWarehouseNote(${index}); closeItemGearMenus();">
+                                    <span><i class="fas fa-note-sticky"></i> Add note</span>
+                                </button>
+                                <button type="button" onclick="editTitleThumbnail(${index}); closeItemGearMenus();">
+                                    <span><i class="fas fa-image"></i> Edit title/thumbnail</span>
+                                </button>
+                                <button type="button" onclick="adjustSuffix(${index}, 1); closeItemGearMenus();" ${raiseSuffixDisabled ? 'disabled' : ''}>
+                                    <span>Base +</span><strong>${formatSuffixLabel(item)}</strong>
+                                </button>
+                                <button type="button" onclick="adjustSuffix(${index}, -1); closeItemGearMenus();" ${lowerSuffixDisabled ? 'disabled' : ''}>
+                                    <span>Base -</span><strong>${formatSuffixLabel(item)}</strong>
+                                </button>
+                                <button type="button" onclick="adjustQuantity(${index}, 1); closeItemGearMenus();">
+                                    <span>Quantity +</span><strong>${qty}</strong>
+                                </button>
+                                <button type="button" onclick="adjustQuantity(${index}, -1); closeItemGearMenus();">
+                                    <span>Quantity -</span><strong>${qty}</strong>
+                                </button>
+                                <button type="button" class="danger" onclick="removeBarcode(${index}); closeItemGearMenus();">
+                                    <span><i class="fas fa-times"></i> Remove one</span>
+                                </button>
+                            </div>
                         </div>
                     </div>`;
                 }).reverse().join('');

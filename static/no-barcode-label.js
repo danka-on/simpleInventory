@@ -203,6 +203,56 @@
         }
     }
 
+    async function printExistingLabel(options) {
+        options = options || {};
+        var barcode = String(options.barcode || '').trim();
+        if (!barcode) {
+            throw new Error('Barcode is required');
+        }
+        var description = String(options.description || '').trim() || 'Warehouse item';
+
+        var configResponse = await fetch('/api/printer/config');
+        var configData = await configResponse.json().catch(function () { return {}; });
+        var config = configData.config || {};
+
+        if (String(config.print_method || '').toLowerCase() === 'browser') {
+            printBarcodeBrowser({ upc: barcode, description: description }, config);
+            return true;
+        }
+
+        var response = await fetch('/api/printer/print-barcode', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ upc: barcode, item_description: description, quantity: 1 })
+        });
+        var data = await response.json().catch(function () {
+            return { success: false, error: 'Printer response invalid' };
+        });
+        if (!response.ok || !data || !data.success) {
+            throw new Error((data && data.error) || 'Print failed');
+        }
+        return true;
+    }
+
+    function reservedBarcodeList(modal) {
+        var reserved = [];
+        if (modal && modal.generatedBarcodes && typeof modal.generatedBarcodes.forEach === 'function') {
+            modal.generatedBarcodes.forEach(function (barcode) {
+                if (barcode) reserved.push(barcode);
+            });
+        }
+        if (modal && typeof modal.getReservedBarcodes === 'function') {
+            try {
+                var pageReserved = modal.getReservedBarcodes() || [];
+                pageReserved.forEach(function (barcode) {
+                    barcode = String(barcode || '').trim();
+                    if (barcode && reserved.indexOf(barcode) === -1) reserved.push(barcode);
+                });
+            } catch (_) {}
+        }
+        return reserved;
+    }
+
     async function generateBarcode(modal) {
         buttonBusy(modal.generateBtn, true, 'Generating...');
         setStatus(modal, 'Generating unique barcode...', '');
@@ -210,7 +260,7 @@
             var response = await fetch('/api/items-prep/generate-barcode', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({})
+                body: JSON.stringify({ exclude_barcodes: reservedBarcodeList(modal) })
             });
             var data = await response.json().catch(function () {
                 return { success: false, error: 'Generator response invalid' };
@@ -219,6 +269,7 @@
                 throw new Error((data && data.error) || 'Could not generate barcode');
             }
             modal.barcodeInput.value = String(data.barcode).trim();
+            modal.generatedBarcodes.add(modal.barcodeInput.value);
             setStatus(modal, 'Unique barcode ready.', 'ok');
             focusBarcodeInput(modal, true);
         } catch (error) {
@@ -297,6 +348,7 @@
     }
 
     window.NoBarcodeLabelFlow = {
+        printExistingLabel: printExistingLabel,
         init: function (options) {
             options = options || {};
             var modal = {
@@ -309,7 +361,9 @@
                 printBtn: byId(options.printButtonId || 'noBarcodePrintBtn'),
                 useBtn: byId(options.useButtonId || 'noBarcodeUseBtn'),
                 keypad: byId(options.keypadId || 'noBarcodeKeypad'),
-                status: byId(options.statusId || 'noBarcodeStatus')
+                status: byId(options.statusId || 'noBarcodeStatus'),
+                generatedBarcodes: new Set(),
+                getReservedBarcodes: typeof options.getReservedBarcodes === 'function' ? options.getReservedBarcodes : null
             };
             var focusTarget = typeof options.focusTarget === 'function' ? options.focusTarget() : options.focusTarget;
 
@@ -382,6 +436,7 @@
                         focusBarcodeInput(modal, true);
                         return;
                     }
+                    modal.generatedBarcodes.add(barcode);
                     if (typeof options.onUseBarcode === 'function') {
                         options.onUseBarcode(barcode);
                     }

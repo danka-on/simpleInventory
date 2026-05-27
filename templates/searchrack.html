@@ -1022,6 +1022,7 @@ function renderResults(results){
     const itemIdHeader = (hasEbayStore || hasAmazonStore) ? '<th>Item ID</th>' : '';
     const lotHeader = hasBol ? '<th>LOT #</th>' : '';
     const locationHeader = (!hasEbayStore && !hasAmazonStore && !hasBol && !hasReturns) ? '<th>Location</th>' : ''; // Show location for warehouse and sold
+    const warehouseNoteHeader = hasSearchRack ? '<th>Warehouse Note</th>' : '';
     const dateSoldHeader = hasSold ? '<th>Date Sold</th>' : '';
     const dateShippedHeader = hasSold ? '<th>Date Shipped</th>' : '';
     const invStatusHeader = hasSold ? '<th>Inv Status</th>' : '';
@@ -1036,7 +1037,7 @@ function renderResults(results){
         ? ''
         : `<th class="results-action-col${isMobile ? ' is-sticky' : ''}">Actions</th>`;
     
-    let html = `<table><thead><tr><th>Title</th><th>Barcode</th>${itemIdHeader}${lotHeader}${locationHeader}<th>Qty</th>${dateAddedHeader}${dateSoldHeader}${dateShippedHeader}${invStatusHeader}${storeHeader}${returnDateHeader}${refundAmountHeader}${originalShippingHeader}${returnShippingHeader}${totalReturnCostHeader}<th>DB</th>${actionsHeader}</tr></thead><tbody>`;
+    let html = `<table><thead><tr><th>Title</th><th>Barcode</th>${itemIdHeader}${lotHeader}${locationHeader}<th>Qty</th>${warehouseNoteHeader}${dateAddedHeader}${dateSoldHeader}${dateShippedHeader}${invStatusHeader}${storeHeader}${returnDateHeader}${refundAmountHeader}${originalShippingHeader}${returnShippingHeader}${totalReturnCostHeader}<th>DB</th>${actionsHeader}</tr></thead><tbody>`;
     let lastGroupBarcode = null;
     results.forEach((r, idx)=>{
     // Add visual separator between different duplicate groups
@@ -1125,9 +1126,13 @@ function renderResults(results){
         console.log('[QTY DEBUG]', 'barcode:', r.barcode, 'qtyValue after toIntLike:', qtyValue);
         const qty = esc(String(qtyValue))
         const historySearchValue = String(barcodeRaw || '').trim();
-        const qtyCellHtml = (dbRaw === 'searchRack')
-            ? `<a href="#" class="qty-history-link${qtyValue === 0 ? ' zero-qty-history-link' : ''}" data-history-search="${esc(historySearchValue)}" title="View barcode history" style="font-weight:700;text-decoration:underline;cursor:pointer;color:${qtyValue === 0 ? '#c0392b' : '#2980b9'};">${qty}</a>`
-            : qty
+    const qtyCellHtml = (dbRaw === 'searchRack')
+        ? `<a href="#" class="qty-history-link${qtyValue === 0 ? ' zero-qty-history-link' : ''}" data-history-search="${esc(historySearchValue)}" title="View barcode history" style="font-weight:700;text-decoration:underline;cursor:pointer;color:${qtyValue === 0 ? '#c0392b' : '#2980b9'};">${qty}</a>`
+        : qty
+    const warehouseNoteText = String(r.warehouse_note || (r.raw && (r.raw.WAREHOUSE_NOTE || r.raw.warehouse_note)) || '').trim();
+    const warehouseNoteCell = hasSearchRack
+        ? (dbRaw === 'searchRack' && warehouseNoteText ? `<td><div style="max-width:220px;white-space:pre-wrap;color:#7c2d12;font-weight:600;">${esc(warehouseNoteText)}</div></td>` : '<td></td>')
+        : '';
         const db = esc(dbRaw)
         let locDisplay = '';
         if(r.pictureposition) locDisplay = r.pictureposition;
@@ -1311,6 +1316,7 @@ function renderResults(results){
                 lotCell +
                 locationCell +
                 `<td>${qtyCellHtml}</td>`+
+                warehouseNoteCell +
                 dateCell +
                 dateSoldCell +
                 dateShippedCell +
@@ -1481,11 +1487,11 @@ function resultBarcodeValue(record) {
     const raw = record.raw || {};
     return String(
         record.barcode ||
-        raw.upc ||
-        raw.UPC ||
         raw.BARCODE ||
         raw.Barcode ||
         raw.barcode ||
+        raw.upc ||
+        raw.UPC ||
         raw.bar_code ||
         ''
     ).trim();

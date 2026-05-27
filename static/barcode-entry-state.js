@@ -32,11 +32,13 @@
 
         let quantity = parseInt(source.quantity, 10);
         if (!Number.isFinite(quantity) || quantity < 1) quantity = 1;
+        const note = String(source.note || source.warehouse_note || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim().slice(0, 2000);
 
         return {
             code,
             suffix,
-            quantity
+            quantity,
+            note
         };
     }
 
@@ -77,7 +79,7 @@
             if (!entry) return;
 
             if (entry.suffix <= 0) {
-                const existingBase = out.find(item => item.code === entry.code && item.suffix === 0);
+                const existingBase = out.find(item => item.code === entry.code && item.suffix === 0 && item.note === entry.note);
                 if (existingBase) {
                     existingBase.quantity += entry.quantity;
                 } else {
@@ -86,7 +88,7 @@
                 return;
             }
 
-            const existingSuffix = out.find(item => item.code === entry.code && item.suffix === entry.suffix);
+            const existingSuffix = out.find(item => item.code === entry.code && item.suffix === entry.suffix && item.note === entry.note);
             if (existingSuffix) {
                 existingSuffix.quantity += entry.quantity;
             } else {
@@ -137,7 +139,7 @@
                 entries.push({ code: split.code, suffix: split.suffix, quantity: 1 });
                 return;
             }
-            const existingBase = entries.find(entry => entry.code === split.code && entry.suffix === 0);
+            const existingBase = entries.find(entry => entry.code === split.code && entry.suffix === 0 && !entry.note);
             if (existingBase) {
                 existingBase.quantity += 1;
             } else {
@@ -213,11 +215,11 @@
                 return normalizeEntries(normalized);
             }
 
-            normalized.push({ code: normalizedCode, suffix: split.suffix, quantity: 1 });
+            normalized.push({ code: normalizedCode, suffix: split.suffix, quantity: 1, note: '' });
             return normalizeEntries(normalized);
         }
 
-        const existingBase = normalized.find(entry => entry.code === normalizedCode && entry.suffix === 0);
+        const existingBase = normalized.find(entry => entry.code === normalizedCode && entry.suffix === 0 && !entry.note);
         if (existingBase) {
             existingBase.quantity += 1;
         } else {
@@ -241,7 +243,8 @@
             normalized.push({
                 code: item.code,
                 suffix: nextAvailableSuffix(normalized, item.code, 1, -1),
-                quantity: 1
+                quantity: 1,
+                note: ''
             });
             return normalizeEntries(normalized);
         }
@@ -264,7 +267,7 @@
             return normalizeEntries(normalized);
         }
 
-        const baseEntry = normalized.find((entry, entryIndex) => entryIndex !== index && entry.code === item.code && entry.suffix === 0);
+        const baseEntry = normalized.find((entry, entryIndex) => entryIndex !== index && entry.code === item.code && entry.suffix === 0 && entry.note === item.note);
         if (baseEntry) {
             baseEntry.quantity += Math.max(1, parseInt(item.quantity, 10) || 1);
             normalized.splice(index, 1);
@@ -285,6 +288,29 @@
             item.quantity -= 1;
         } else {
             normalized.splice(index, 1);
+        }
+        return normalizeEntries(normalized);
+    }
+
+    function setNote(entries, index, note) {
+        const normalized = normalizeEntries(entries);
+        if (index < 0 || index >= normalized.length) return normalized;
+        normalized[index].note = String(note || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim().slice(0, 2000);
+        return normalizeEntries(normalized);
+    }
+
+    function adjustQuantity(entries, index, delta) {
+        const normalized = normalizeEntries(entries);
+        if (index < 0 || index >= normalized.length) return normalized;
+        const change = parseInt(delta, 10) || 0;
+        if (!change) return normalized;
+        const item = normalized[index];
+        const current = Math.max(1, parseInt(item.quantity, 10) || 1);
+        const next = current + change;
+        if (next <= 0) {
+            normalized.splice(index, 1);
+        } else {
+            item.quantity = next;
         }
         return normalizeEntries(normalized);
     }
@@ -311,6 +337,8 @@
         incrementSuffix,
         decrementSuffix,
         removeOne,
+        setNote,
+        adjustQuantity,
         nextAvailableSuffix,
         totalCount
     };

@@ -7,7 +7,7 @@ from flask_caching import Cache
 from flask_compress import Compress
 from werkzeug.exceptions import RequestEntityTooLarge
 from PIL import Image, ImageDraw, ImageFont, ImageOps
-import io, time, subprocess, os, requests, json, threading, sqlite3, sys, datetime, base64, gzip, hashlib, random, re
+import io, time, subprocess, os, requests, json, threading, sqlite3, sys, datetime, base64, gzip, hashlib, random, re, uuid
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import pytz
 import xml.etree.ElementTree as ET
@@ -356,11 +356,683 @@ def _ensure_ready_to_ship_notes_table(cur):
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             order_row_id INTEGER NOT NULL UNIQUE,
             note TEXT NOT NULL,
+            label_filename TEXT DEFAULT '',
+            label_original_filename TEXT DEFAULT '',
+            label_size_bytes INTEGER DEFAULT 0,
+            label_uploaded_at TEXT DEFAULT '',
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             updated_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+    cur.execute('PRAGMA table_info(ready_to_ship_notes)')
+    columns = {str(row[1]) for row in cur.fetchall()}
+    migrations = {
+        'label_filename': "ALTER TABLE ready_to_ship_notes ADD COLUMN label_filename TEXT DEFAULT ''",
+        'label_original_filename': "ALTER TABLE ready_to_ship_notes ADD COLUMN label_original_filename TEXT DEFAULT ''",
+        'label_size_bytes': "ALTER TABLE ready_to_ship_notes ADD COLUMN label_size_bytes INTEGER DEFAULT 0",
+        'label_uploaded_at': "ALTER TABLE ready_to_ship_notes ADD COLUMN label_uploaded_at TEXT DEFAULT ''",
+    }
+    for column, sql in migrations.items():
+        if column not in columns:
+            cur.execute(sql)
     cur.execute('CREATE INDEX IF NOT EXISTS idx_ready_to_ship_notes_order ON ready_to_ship_notes(order_row_id)')
+
+def _ensure_ready_to_ship_unmatched_labels_table(cur):
+    """Persist labels that could not be confidently matched to an order."""
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS ready_to_ship_unmatched_labels (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            label_filename TEXT NOT NULL,
+            label_original_filename TEXT DEFAULT '',
+            label_size_bytes INTEGER DEFAULT 0,
+            label_uploaded_at TEXT DEFAULT '',
+            extracted_text TEXT DEFAULT '',
+            match_error TEXT DEFAULT '',
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    cur.execute('PRAGMA table_info(ready_to_ship_unmatched_labels)')
+    columns = {str(row[1]) for row in cur.fetchall()}
+    migrations = {
+        'label_original_filename': "ALTER TABLE ready_to_ship_unmatched_labels ADD COLUMN label_original_filename TEXT DEFAULT ''",
+        'label_size_bytes': "ALTER TABLE ready_to_ship_unmatched_labels ADD COLUMN label_size_bytes INTEGER DEFAULT 0",
+        'label_uploaded_at': "ALTER TABLE ready_to_ship_unmatched_labels ADD COLUMN label_uploaded_at TEXT DEFAULT ''",
+        'extracted_text': "ALTER TABLE ready_to_ship_unmatched_labels ADD COLUMN extracted_text TEXT DEFAULT ''",
+        'match_error': "ALTER TABLE ready_to_ship_unmatched_labels ADD COLUMN match_error TEXT DEFAULT ''",
+        'updated_at': "ALTER TABLE ready_to_ship_unmatched_labels ADD COLUMN updated_at TEXT DEFAULT ''",
+    }
+    for column, sql in migrations.items():
+        if column not in columns:
+            cur.execute(sql)
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_ready_to_ship_unmatched_uploaded ON ready_to_ship_unmatched_labels(label_uploaded_at)')
+
+def _ensure_ready_to_ship_order_labels_table(cur):
+    """Persist one or more shipping labels attached to a Ready to Ship order."""
+    _ensure_ready_to_ship_notes_table(cur)
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS ready_to_ship_order_labels (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_row_id INTEGER NOT NULL,
+            label_filename TEXT NOT NULL,
+            label_original_filename TEXT DEFAULT '',
+            label_size_bytes INTEGER DEFAULT 0,
+            label_uploaded_at TEXT DEFAULT '',
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    cur.execute('PRAGMA table_info(ready_to_ship_order_labels)')
+    columns = {str(row[1]) for row in cur.fetchall()}
+    migrations = {
+        'label_original_filename': "ALTER TABLE ready_to_ship_order_labels ADD COLUMN label_original_filename TEXT DEFAULT ''",
+        'label_size_bytes': "ALTER TABLE ready_to_ship_order_labels ADD COLUMN label_size_bytes INTEGER DEFAULT 0",
+        'label_uploaded_at': "ALTER TABLE ready_to_ship_order_labels ADD COLUMN label_uploaded_at TEXT DEFAULT ''",
+        'updated_at': "ALTER TABLE ready_to_ship_order_labels ADD COLUMN updated_at TEXT DEFAULT ''",
+    }
+    for column, sql in migrations.items():
+        if column not in columns:
+            cur.execute(sql)
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_ready_to_ship_order_labels_order ON ready_to_ship_order_labels(order_row_id)')
+    cur.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_ready_to_ship_order_labels_file ON ready_to_ship_order_labels(order_row_id, label_filename)')
+    cur.execute('''
+        INSERT OR IGNORE INTO ready_to_ship_order_labels
+            (order_row_id, label_filename, label_original_filename, label_size_bytes, label_uploaded_at)
+        SELECT order_row_id, label_filename, label_original_filename, label_size_bytes, label_uploaded_at
+        FROM ready_to_ship_notes
+        WHERE COALESCE(TRIM(label_filename), '') <> ''
+    ''')
+
+def _ready_to_ship_row_value(row, key, default=''):
+    if not row:
+        return default
+    try:
+        if hasattr(row, 'keys') and key not in row.keys():
+            return default
+        value = row[key]
+        return default if value is None else value
+    except Exception:
+        try:
+            value = row.get(key, default)
+            return default if value is None else value
+        except Exception:
+            return default
+
+def _ready_to_ship_order_label_payload(row=None, order_id=None):
+    if not row:
+        return {}
+    label_id = _coerce_int(_ready_to_ship_row_value(row, 'id', 0), 0)
+    row_order_id = _coerce_int(_ready_to_ship_row_value(row, 'order_row_id', order_id or 0), 0)
+    order_id = row_order_id or _coerce_int(order_id, 0)
+    filename = str(_ready_to_ship_row_value(row, 'label_filename', '') or '').strip()
+    original = str(_ready_to_ship_row_value(row, 'label_original_filename', '') or '').strip()
+    uploaded_at = str(_ready_to_ship_row_value(row, 'label_uploaded_at', '') or '').strip()
+    size_raw = _ready_to_ship_row_value(row, 'label_size_bytes', 0)
+    try:
+        size_bytes = max(0, int(size_raw or 0))
+    except Exception:
+        size_bytes = 0
+    label_url = ''
+    if filename and order_id:
+        label_url = (
+            f"/api/ready-to-ship/label/{order_id}/file/{label_id}"
+            if label_id else
+            f"/api/ready-to-ship/label/{order_id}/file"
+        )
+    return {
+        'id': label_id,
+        'label_id': label_id,
+        'order_id': order_id,
+        'label_filename': filename,
+        'label_original_filename': original,
+        'label_size_bytes': size_bytes,
+        'label_uploaded_at': uploaded_at,
+        'label_url': label_url,
+        'filename': original or filename,
+        'saved': bool(filename)
+    }
+
+def _ready_to_ship_legacy_label_row(note_row=None):
+    filename = str(_ready_to_ship_row_value(note_row, 'label_filename', '') or '').strip()
+    if not filename:
+        return None
+    return {
+        'id': 0,
+        'order_row_id': _ready_to_ship_row_value(note_row, 'order_row_id', ''),
+        'label_filename': filename,
+        'label_original_filename': str(_ready_to_ship_row_value(note_row, 'label_original_filename', '') or '').strip(),
+        'label_size_bytes': _ready_to_ship_row_value(note_row, 'label_size_bytes', 0),
+        'label_uploaded_at': str(_ready_to_ship_row_value(note_row, 'label_uploaded_at', '') or '').strip()
+    }
+
+def _ready_to_ship_label_payload(note_row=None, label_rows=None):
+    order_id = _ready_to_ship_row_value(note_row, 'order_row_id', '')
+    rows = list(label_rows or [])
+    if not rows:
+        legacy_row = _ready_to_ship_legacy_label_row(note_row)
+        if legacy_row:
+            rows.append(legacy_row)
+    labels = [
+        payload for payload in (
+            _ready_to_ship_order_label_payload(row, order_id=order_id) for row in rows
+        )
+        if payload.get('label_filename')
+    ]
+    primary = labels[0] if labels else {}
+    filename = str(primary.get('label_filename') or '').strip()
+    original = str(primary.get('label_original_filename') or '').strip()
+    uploaded_at = str(primary.get('label_uploaded_at') or '').strip()
+    size_bytes = int(primary.get('label_size_bytes') or 0)
+    has_label = bool(filename)
+    label_url = str(primary.get('label_url') or '').strip()
+    return {
+        'ready_to_ship_label_filename': filename,
+        'ready_to_ship_label_original_filename': original,
+        'ready_to_ship_label_size_bytes': size_bytes,
+        'ready_to_ship_label_uploaded_at': uploaded_at,
+        'ready_to_ship_label_url': label_url,
+        'ready_to_ship_label_id': int(primary.get('label_id') or primary.get('id') or 0),
+        'ready_to_ship_labels': labels,
+        'ready_to_ship_label_count': len(labels),
+        'has_ready_to_ship_label': has_label
+    }
+
+def _ready_to_ship_unmatched_label_payload(row=None):
+    if not row:
+        return {}
+    label_id = _coerce_int(_ready_to_ship_row_value(row, 'id', 0), 0)
+    filename = str(_ready_to_ship_row_value(row, 'label_filename', '') or '').strip()
+    original = str(_ready_to_ship_row_value(row, 'label_original_filename', '') or '').strip()
+    uploaded_at = str(_ready_to_ship_row_value(row, 'label_uploaded_at', '') or '').strip()
+    match_error = str(_ready_to_ship_row_value(row, 'match_error', '') or '').strip()
+    try:
+        size_bytes = max(0, int(_ready_to_ship_row_value(row, 'label_size_bytes', 0) or 0))
+    except Exception:
+        size_bytes = 0
+    label_url = f"/api/ready-to-ship/labels/unmatched/{label_id}/file" if label_id and filename else ''
+    return {
+        'id': label_id,
+        'unmatched_label_id': label_id,
+        'label_filename': filename,
+        'label_original_filename': original,
+        'label_size_bytes': size_bytes,
+        'label_uploaded_at': uploaded_at,
+        'label_url': label_url,
+        'filename': original or filename,
+        'match_error': match_error,
+        'saved': bool(label_id and filename)
+    }
+
+def _ready_to_ship_label_dir():
+    path = BASE_DIR / 'debug_uploads' / 'ready_to_ship_labels'
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+def _ready_to_ship_label_path(filename):
+    safe_name = os.path.basename(str(filename or '').strip())
+    if not safe_name or safe_name != str(filename or '').strip() or not safe_name.lower().endswith('.pdf'):
+        return None
+    path = (_ready_to_ship_label_dir() / safe_name).resolve()
+    root = _ready_to_ship_label_dir().resolve()
+    try:
+        path.relative_to(root)
+    except Exception:
+        return None
+    return path
+
+def _ready_to_ship_delete_label_file(filename):
+    path = _ready_to_ship_label_path(filename)
+    if not path:
+        return
+    try:
+        if path.exists():
+            path.unlink()
+    except Exception as exc:
+        print(f"Warning: failed deleting Ready to Ship label {path}: {exc}")
+
+def _ready_to_ship_extract_pdf_text(pdf_path):
+    """Best-effort PDF text extraction for label-to-order matching."""
+    text_parts = []
+
+    try:
+        from pypdf import PdfReader
+        reader = PdfReader(str(pdf_path))
+        for page in reader.pages[:3]:
+            try:
+                text_parts.append(page.extract_text() or '')
+            except Exception:
+                pass
+    except Exception:
+        try:
+            from PyPDF2 import PdfReader
+            reader = PdfReader(str(pdf_path))
+            for page in reader.pages[:3]:
+                try:
+                    text_parts.append(page.extract_text() or '')
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    if not ''.join(text_parts).strip():
+        try:
+            import fitz
+            doc = fitz.open(str(pdf_path))
+            for page in list(doc)[:3]:
+                text_parts.append(page.get_text('text') or '')
+            doc.close()
+        except Exception:
+            pass
+
+    if not ''.join(text_parts).strip():
+        try:
+            result = subprocess.run(
+                ['pdftotext', '-layout', str(pdf_path), '-'],
+                capture_output=True,
+                text=True,
+                timeout=8
+            )
+            if result.returncode == 0 and result.stdout:
+                text_parts.append(result.stdout)
+        except Exception:
+            pass
+
+    if not ''.join(text_parts).strip():
+        try:
+            raw = Path(pdf_path).read_bytes()
+            decoded = raw.decode('latin-1', errors='ignore')
+            text_parts.append(' '.join(re.findall(r'[A-Za-z0-9][A-Za-z0-9 .,#/\-]{2,}', decoded)))
+        except Exception:
+            pass
+
+    return '\n'.join(part for part in text_parts if part).strip()
+
+def _ready_to_ship_match_norm(value):
+    return re.sub(r'\s+', ' ', re.sub(r'[^a-z0-9]+', ' ', str(value or '').lower())).strip()
+
+def _ready_to_ship_match_compact(value):
+    return re.sub(r'[^a-z0-9]+', '', str(value or '').lower())
+
+_READY_TO_SHIP_ADDRESS_TOKEN_ALIASES = {
+    'aly': 'alley', 'alley': 'alley',
+    'apt': 'apartment', 'apartment': 'apartment',
+    'ave': 'avenue', 'av': 'avenue', 'aven': 'avenue', 'avenue': 'avenue',
+    'blvd': 'boulevard', 'boul': 'boulevard', 'boulevard': 'boulevard',
+    'bldg': 'building', 'building': 'building',
+    'cir': 'circle', 'circle': 'circle',
+    'ct': 'court', 'court': 'court',
+    'ctr': 'center', 'center': 'center', 'centre': 'center',
+    'dr': 'drive', 'drive': 'drive',
+    'e': 'east', 'east': 'east',
+    'fl': 'floor', 'floor': 'floor',
+    'hwy': 'highway', 'highway': 'highway',
+    'ln': 'lane', 'lane': 'lane',
+    'n': 'north', 'north': 'north',
+    'pkwy': 'parkway', 'parkway': 'parkway',
+    'pl': 'place', 'place': 'place',
+    'rd': 'road', 'road': 'road',
+    'rm': 'room', 'room': 'room',
+    's': 'south', 'south': 'south',
+    'sq': 'square', 'square': 'square',
+    'st': 'street', 'str': 'street', 'street': 'street',
+    'ste': 'suite', 'suite': 'suite',
+    'ter': 'terrace', 'terrace': 'terrace',
+    'trl': 'trail', 'trail': 'trail',
+    'unit': 'unit',
+    'w': 'west', 'west': 'west',
+    'wy': 'way', 'way': 'way',
+}
+
+_READY_TO_SHIP_STREET_GENERIC_TOKENS = {
+    'alley', 'apartment', 'avenue', 'boulevard', 'building', 'circle',
+    'court', 'center', 'drive', 'east', 'floor', 'highway', 'lane',
+    'north', 'parkway', 'place', 'road', 'room', 'south', 'square',
+    'street', 'suite', 'terrace', 'trail', 'unit', 'west', 'way'
+}
+
+_READY_TO_SHIP_STATE_CODES = {
+    'alabama': 'al', 'alaska': 'ak', 'arizona': 'az', 'arkansas': 'ar',
+    'california': 'ca', 'colorado': 'co', 'connecticut': 'ct', 'delaware': 'de',
+    'district of columbia': 'dc', 'florida': 'fl', 'georgia': 'ga', 'hawaii': 'hi',
+    'idaho': 'id', 'illinois': 'il', 'indiana': 'in', 'iowa': 'ia',
+    'kansas': 'ks', 'kentucky': 'ky', 'louisiana': 'la', 'maine': 'me',
+    'maryland': 'md', 'massachusetts': 'ma', 'michigan': 'mi', 'minnesota': 'mn',
+    'mississippi': 'ms', 'missouri': 'mo', 'montana': 'mt', 'nebraska': 'ne',
+    'nevada': 'nv', 'new hampshire': 'nh', 'new jersey': 'nj', 'new mexico': 'nm',
+    'new york': 'ny', 'north carolina': 'nc', 'north dakota': 'nd', 'ohio': 'oh',
+    'oklahoma': 'ok', 'oregon': 'or', 'pennsylvania': 'pa', 'rhode island': 'ri',
+    'south carolina': 'sc', 'south dakota': 'sd', 'tennessee': 'tn', 'texas': 'tx',
+    'utah': 'ut', 'vermont': 'vt', 'virginia': 'va', 'washington': 'wa',
+    'west virginia': 'wv', 'wisconsin': 'wi', 'wyoming': 'wy'
+}
+_READY_TO_SHIP_STATE_NAMES = {code: name for name, code in _READY_TO_SHIP_STATE_CODES.items()}
+
+def _ready_to_ship_address_norm(value):
+    tokens = []
+    for token in _ready_to_ship_match_norm(value).split():
+        tokens.append(_READY_TO_SHIP_ADDRESS_TOKEN_ALIASES.get(token, token))
+    return ' '.join(tokens)
+
+def _ready_to_ship_state_variants(value):
+    norm = _ready_to_ship_match_norm(value)
+    if not norm:
+        return []
+    variants = {norm}
+    code = _READY_TO_SHIP_STATE_CODES.get(norm)
+    if code:
+        variants.add(code)
+    name = _READY_TO_SHIP_STATE_NAMES.get(norm)
+    if name:
+        variants.add(name)
+    return sorted(variants, key=len, reverse=True)
+
+def _ready_to_ship_insert_unmatched_label(cur, filename, original_filename, size_bytes, extracted_text='', match_error='No address match found'):
+    _ensure_ready_to_ship_unmatched_labels_table(cur)
+    now_iso = datetime.datetime.utcnow().replace(microsecond=0).isoformat() + 'Z'
+    cur.execute('''
+        INSERT INTO ready_to_ship_unmatched_labels
+            (label_filename, label_original_filename, label_size_bytes, label_uploaded_at, extracted_text, match_error)
+        VALUES (?, ?, ?, ?, ?, ?)
+    ''', (
+        filename,
+        original_filename,
+        int(size_bytes or 0),
+        now_iso,
+        str(extracted_text or '')[:20000],
+        str(match_error or '')[:500]
+    ))
+    return cur.execute('''
+        SELECT id, label_filename, label_original_filename, label_size_bytes, label_uploaded_at, match_error, created_at, updated_at
+        FROM ready_to_ship_unmatched_labels
+        WHERE id = ?
+    ''', (cur.lastrowid,)).fetchone()
+
+def _ready_to_ship_label_match_score(label_text, order_row):
+    hay = _ready_to_ship_match_norm(label_text)
+    hay_compact = _ready_to_ship_match_compact(label_text)
+    hay_tokens = set(hay.split())
+    hay_address = _ready_to_ship_address_norm(label_text)
+    hay_address_compact = _ready_to_ship_match_compact(hay_address)
+    hay_address_tokens = set(hay_address.split())
+    if not hay:
+        return 0, []
+
+    def val(*keys):
+        for key in keys:
+            raw = _ready_to_ship_row_value(order_row, key, '')
+            if str(raw or '').strip():
+                return str(raw or '').strip()
+        return ''
+
+    name = val('shipping_name', 'buyer_name', 'name')
+    street1 = val('shipping_street1', 'shipping_address1', 'street1', 'address1')
+    street2 = val('shipping_street2', 'shipping_address2', 'street2', 'address2')
+    city = val('shipping_city', 'city')
+    state = val('shipping_state', 'state')
+    postal = val('shipping_postal_code', 'shipping_zip', 'postal_code', 'zip')
+    country = val('shipping_country', 'country')
+    order_ref = val('order_id', 'legacy_order_id')
+    store = val('store')
+    is_amazon_order = _ready_to_ship_match_norm(store) == 'amazon'
+
+    score = 0
+    reasons = []
+
+    order_ref_compact = _ready_to_ship_match_compact(order_ref)
+    if order_ref_compact and len(order_ref_compact) >= 6 and order_ref_compact in hay_compact:
+        score += 50 if len(order_ref_compact) >= 10 else 30
+        reasons.append('order')
+
+    postal_digits = re.sub(r'\D+', '', postal)
+    postal_compact = _ready_to_ship_match_compact(postal)
+    if postal_digits or postal_compact:
+        variants = set()
+        if postal_compact:
+            variants.add(postal_compact)
+            if len(postal_compact) >= 5:
+                variants.add(postal_compact[:5])
+        if postal_digits:
+            variants.add(postal_digits)
+            if len(postal_digits) >= 5:
+                variants.add(postal_digits[:5])
+        if len(postal_digits) >= 5:
+            variants.add(postal_digits[:5])
+        if any(v and len(v) >= 3 and v in hay_compact for v in variants):
+            score += 34
+            reasons.append('postal')
+
+    street_norm = _ready_to_ship_address_norm(street1)
+    street_compact = _ready_to_ship_match_compact(street_norm)
+    if street_compact and street_compact in hay_address_compact:
+        score += 38
+        reasons.append('street')
+    elif street_norm:
+        street_tokens = street_norm.split()
+        words = [
+            w for w in street_tokens
+            if len(w) > 2 and not w.isdigit() and w not in _READY_TO_SHIP_STREET_GENERIC_TOKENS
+        ]
+        street_number = next((w for w in street_tokens if re.search(r'\d', w)), '')
+        word_hits = sum(1 for w in words if w in hay_address_tokens)
+        if street_number and street_number in hay_address and word_hits >= 1:
+            score += 32
+            reasons.append('street')
+        elif len(words) >= 2 and word_hits >= min(2, len(words)):
+            score += 20
+            reasons.append('street-ish')
+
+    if street2:
+        street2_norm = _ready_to_ship_address_norm(street2)
+        if street2_norm and street2_norm in hay_address:
+            score += 6
+            reasons.append('street2')
+
+    name_norm = _ready_to_ship_match_norm(name)
+    name_words = [w for w in name_norm.split() if len(w) > 1]
+    generic_name = name_norm in {'amazon buyer', 'ebay buyer', 'buyer', 'test customer'}
+    name_is_missing_or_generic = (not name_norm) or generic_name
+    if name_norm and not generic_name and _ready_to_ship_match_compact(name_norm) in hay_compact:
+        score += 22
+        reasons.append('name')
+    elif name_words and not generic_name:
+        name_hits = sum(1 for w in name_words if w in hay_tokens)
+        if name_hits >= min(2, len(name_words)):
+            score += 16
+            reasons.append('name')
+        elif len(name_words) >= 2 and name_words[-1] in hay_tokens:
+            score += 8
+            reasons.append('name-part')
+
+    city_norm = _ready_to_ship_match_norm(city)
+    city_tokens = [w for w in city_norm.split() if len(w) > 1]
+    if city_norm and (city_norm in hay or (city_tokens and all(w in hay_tokens for w in city_tokens))):
+        score += 10
+        reasons.append('city')
+
+    state_variants = _ready_to_ship_state_variants(state)
+    if state_variants and any(re.search(rf'\b{re.escape(v)}\b', hay) for v in state_variants):
+        score += 7
+        reasons.append('state')
+
+    country_norm = _ready_to_ship_match_norm(country)
+    if country_norm and country_norm in hay:
+        score += 3
+        reasons.append('country')
+
+    has_street_signal = 'street' in reasons or 'street-ish' in reasons
+    if (
+        is_amazon_order
+        and name_is_missing_or_generic
+        and 'postal' in reasons
+        and ('city' in reasons or 'state' in reasons)
+        and (not street_norm or has_street_signal)
+    ):
+        score += 8
+        reasons.append('amazon-address')
+
+    has_address_anchor = 'postal' in reasons and (
+        'street' in reasons or 'street-ish' in reasons or 'name' in reasons or 'name-part' in reasons or 'city' in reasons
+    )
+    has_street_name = 'street' in reasons and ('name' in reasons or 'name-part' in reasons)
+    has_order_anchor = 'order' in reasons and score >= 30
+    has_amazon_address_anchor = 'amazon-address' in reasons
+    if not (has_order_anchor or has_address_anchor or has_street_name or has_amazon_address_anchor or score >= 72):
+        return 0, reasons
+    return score, reasons
+
+def _ready_to_ship_find_label_match(cur, label_text, days=2):
+    try:
+        days_int = max(1, min(int(days or 2), 120))
+    except Exception:
+        days_int = 2
+
+    cur.execute('''
+        SELECT *
+        FROM orders
+        WHERE paid_time >= date('now', '-' || ? || ' days')
+        ORDER BY CASE WHEN COALESCE(TRIM(isHandled), '') = '1' THEN 1 ELSE 0 END,
+                 paid_time DESC,
+                 id DESC
+    ''', (days_int,))
+
+    best = None
+    for row in cur.fetchall():
+        score, reasons = _ready_to_ship_label_match_score(label_text, row)
+        if score <= 0:
+            continue
+        if best is None or score > best['score']:
+            best = {'order': row, 'score': score, 'reasons': reasons}
+
+    return best
+
+def _ready_to_ship_save_uploaded_label_file(file_storage):
+    from werkzeug.utils import secure_filename
+
+    original_name = secure_filename(file_storage.filename or 'label.pdf') or 'label.pdf'
+    if not original_name.lower().endswith('.pdf'):
+        raise ValueError('Only PDF label files are supported.')
+
+    data = file_storage.read()
+    if not data:
+        raise ValueError('PDF file is empty.')
+    if len(data) > 16 * 1024 * 1024:
+        raise ValueError('PDF file is too large (max 16 MB).')
+    if not data.lstrip().startswith(b'%PDF'):
+        raise ValueError('That file does not look like a PDF.')
+
+    filename = f"{datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex}.pdf"
+    path = _ready_to_ship_label_dir() / filename
+    path.write_bytes(data)
+    return filename, original_name, len(data), path
+
+def _ready_to_ship_get_note_row(cur, order_id):
+    return cur.execute('''
+        SELECT order_row_id, note, label_filename, label_original_filename, label_size_bytes, label_uploaded_at, created_at, updated_at
+        FROM ready_to_ship_notes
+        WHERE order_row_id = ?
+    ''', (order_id,)).fetchone()
+
+def _ready_to_ship_get_order_label_rows(cur, order_id):
+    _ensure_ready_to_ship_order_labels_table(cur)
+    return cur.execute('''
+        SELECT id, order_row_id, label_filename, label_original_filename, label_size_bytes, label_uploaded_at, created_at, updated_at
+        FROM ready_to_ship_order_labels
+        WHERE order_row_id = ?
+          AND COALESCE(TRIM(label_filename), '') <> ''
+        ORDER BY datetime(label_uploaded_at) DESC, id DESC
+    ''', (order_id,)).fetchall()
+
+def _ready_to_ship_sync_legacy_label_columns(cur, order_id):
+    _ensure_ready_to_ship_notes_table(cur)
+    latest = cur.execute('''
+        SELECT label_filename, label_original_filename, label_size_bytes, label_uploaded_at
+        FROM ready_to_ship_order_labels
+        WHERE order_row_id = ?
+          AND COALESCE(TRIM(label_filename), '') <> ''
+        ORDER BY datetime(label_uploaded_at) DESC, id DESC
+        LIMIT 1
+    ''', (order_id,)).fetchone()
+    existing = cur.execute('SELECT * FROM ready_to_ship_notes WHERE order_row_id = ?', (order_id,)).fetchone()
+    note_text = str(_ready_to_ship_row_value(existing, 'note', '') or '').strip() if existing else ''
+    if latest:
+        if existing:
+            cur.execute('''
+                UPDATE ready_to_ship_notes
+                SET label_filename = ?,
+                    label_original_filename = ?,
+                    label_size_bytes = ?,
+                    label_uploaded_at = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE order_row_id = ?
+            ''', (
+                str(_ready_to_ship_row_value(latest, 'label_filename', '') or '').strip(),
+                str(_ready_to_ship_row_value(latest, 'label_original_filename', '') or '').strip(),
+                int(_ready_to_ship_row_value(latest, 'label_size_bytes', 0) or 0),
+                str(_ready_to_ship_row_value(latest, 'label_uploaded_at', '') or '').strip(),
+                order_id
+            ))
+        else:
+            cur.execute('''
+                INSERT INTO ready_to_ship_notes
+                    (order_row_id, note, label_filename, label_original_filename, label_size_bytes, label_uploaded_at)
+                VALUES (?, '', ?, ?, ?, ?)
+            ''', (
+                order_id,
+                str(_ready_to_ship_row_value(latest, 'label_filename', '') or '').strip(),
+                str(_ready_to_ship_row_value(latest, 'label_original_filename', '') or '').strip(),
+                int(_ready_to_ship_row_value(latest, 'label_size_bytes', 0) or 0),
+                str(_ready_to_ship_row_value(latest, 'label_uploaded_at', '') or '').strip()
+            ))
+    elif existing:
+        if note_text:
+            cur.execute('''
+                UPDATE ready_to_ship_notes
+                SET label_filename = '',
+                    label_original_filename = '',
+                    label_size_bytes = 0,
+                    label_uploaded_at = '',
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE order_row_id = ?
+            ''', (order_id,))
+        else:
+            cur.execute('DELETE FROM ready_to_ship_notes WHERE order_row_id = ?', (order_id,))
+
+def _ready_to_ship_payload_for_order(cur, order_id):
+    _ensure_ready_to_ship_notes_table(cur)
+    _ensure_ready_to_ship_order_labels_table(cur)
+    note_row = _ready_to_ship_get_note_row(cur, order_id)
+    label_rows = _ready_to_ship_get_order_label_rows(cur, order_id)
+    return _ready_to_ship_note_payload(note_row, label_rows)
+
+def _ready_to_ship_attach_label(cur, order_id, filename, original_filename, size_bytes):
+    _ensure_ready_to_ship_order_labels_table(cur)
+    existing = cur.execute('SELECT * FROM ready_to_ship_notes WHERE order_row_id = ?', (order_id,)).fetchone()
+    now_iso = datetime.datetime.utcnow().replace(microsecond=0).isoformat() + 'Z'
+
+    if existing:
+        cur.execute('''
+            UPDATE ready_to_ship_notes
+            SET label_filename = ?,
+                label_original_filename = ?,
+                label_size_bytes = ?,
+                label_uploaded_at = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE order_row_id = ?
+        ''', (filename, original_filename, int(size_bytes or 0), now_iso, order_id))
+    else:
+        cur.execute('''
+            INSERT INTO ready_to_ship_notes
+                (order_row_id, note, label_filename, label_original_filename, label_size_bytes, label_uploaded_at)
+            VALUES (?, '', ?, ?, ?, ?)
+        ''', (order_id, filename, original_filename, int(size_bytes or 0), now_iso))
+
+    cur.execute('''
+        INSERT OR IGNORE INTO ready_to_ship_order_labels
+            (order_row_id, label_filename, label_original_filename, label_size_bytes, label_uploaded_at)
+        VALUES (?, ?, ?, ?, ?)
+    ''', (order_id, filename, original_filename, int(size_bytes or 0), now_iso))
+
+    return _ready_to_ship_get_note_row(cur, order_id)
 
 def _ensure_order_finder_matches_table(cur):
     """Persist the exact SEARCHRACK row chosen from finder.html for an order."""
@@ -378,25 +1050,29 @@ def _ensure_order_finder_matches_table(cur):
     cur.execute('CREATE INDEX IF NOT EXISTS idx_order_finder_matches_order ON order_finder_matches(order_row_id)')
     cur.execute('CREATE INDEX IF NOT EXISTS idx_order_finder_matches_searchrack ON order_finder_matches(searchrack_id)')
 
-def _ready_to_ship_note_payload(note_row=None):
+def _ready_to_ship_note_payload(note_row=None, label_rows=None):
     if not note_row:
-        return {
+        payload = {
             'ready_to_ship_note': '',
             'ready_to_ship_note_created_at': '',
             'ready_to_ship_note_updated_at': '',
             'has_ready_to_ship_note': False
         }
+        payload.update(_ready_to_ship_label_payload(None, label_rows))
+        return payload
 
-    note_text = str(note_row['note'] or '')
-    return {
+    note_text = str(_ready_to_ship_row_value(note_row, 'note', '') or '')
+    payload = {
         'ready_to_ship_note': note_text,
-        'ready_to_ship_note_created_at': str(note_row['created_at'] or ''),
-        'ready_to_ship_note_updated_at': str(note_row['updated_at'] or ''),
+        'ready_to_ship_note_created_at': str(_ready_to_ship_row_value(note_row, 'created_at', '') or ''),
+        'ready_to_ship_note_updated_at': str(_ready_to_ship_row_value(note_row, 'updated_at', '') or ''),
         'has_ready_to_ship_note': bool(note_text.strip())
     }
+    payload.update(_ready_to_ship_label_payload(note_row, label_rows))
+    return payload
 
-def _apply_ready_to_ship_note_payload(order_dict, note_row=None):
-    payload = _ready_to_ship_note_payload(note_row)
+def _apply_ready_to_ship_note_payload(order_dict, note_row=None, label_rows=None):
+    payload = _ready_to_ship_note_payload(note_row, label_rows)
     order_dict.update(payload)
     return order_dict
 
@@ -419,7 +1095,7 @@ def _load_ready_to_ship_note_lookup(cur, order_row_ids):
     _ensure_ready_to_ship_notes_table(cur)
     placeholders = ','.join('?' for _ in ids)
     rows = cur.execute(f'''
-        SELECT order_row_id, note, created_at, updated_at
+        SELECT order_row_id, note, label_filename, label_original_filename, label_size_bytes, label_uploaded_at, created_at, updated_at
         FROM ready_to_ship_notes
         WHERE order_row_id IN ({placeholders})
     ''', ids).fetchall()
@@ -428,6 +1104,40 @@ def _load_ready_to_ship_note_lookup(cur, order_row_ids):
     for row in rows:
         try:
             lookup[int(row['order_row_id'])] = row
+        except Exception:
+            continue
+    return lookup
+
+def _load_ready_to_ship_label_lookup(cur, order_row_ids):
+    ids = []
+    seen = set()
+    for raw_id in (order_row_ids or []):
+        try:
+            order_id = int(raw_id)
+        except Exception:
+            continue
+        if order_id in seen:
+            continue
+        seen.add(order_id)
+        ids.append(order_id)
+
+    if not ids:
+        return {}
+
+    _ensure_ready_to_ship_order_labels_table(cur)
+    placeholders = ','.join('?' for _ in ids)
+    rows = cur.execute(f'''
+        SELECT id, order_row_id, label_filename, label_original_filename, label_size_bytes, label_uploaded_at, created_at, updated_at
+        FROM ready_to_ship_order_labels
+        WHERE order_row_id IN ({placeholders})
+          AND COALESCE(TRIM(label_filename), '') <> ''
+        ORDER BY order_row_id, datetime(label_uploaded_at) DESC, id DESC
+    ''', ids).fetchall()
+
+    lookup = {}
+    for row in rows:
+        try:
+            lookup.setdefault(int(row['order_row_id']), []).append(row)
         except Exception:
             continue
     return lookup
@@ -596,6 +1306,7 @@ def _searchrack_matches_for_barcode(cur, barcode, schema=None, include_zero=Fals
             'quantity': qty,
             'item_position': item_position,
             'pictureposition': pictureposition,
+            'warehouse_note': str(row.get('WAREHOUSE_NOTE') or row.get('warehouse_note') or '').strip(),
             'location_code': location_label,
             'location_key': _sold_location_key(location_label),
             'location_preview': pictureposition or item_position or location_label
@@ -714,6 +1425,11 @@ def _ready_to_ship_searchrack_match_from_row(row, schema):
     title_col = schema.get('title_col')
     pos_col = schema.get('pos_col')
     pic_col = schema.get('pic_col')
+    note_col = None
+    for candidate in ('WAREHOUSE_NOTE', 'warehouse_note'):
+        if candidate in row_dict:
+            note_col = candidate
+            break
 
     raw_id = row_dict.get(id_col) if id_col else row_dict.get('_rowid_')
     try:
@@ -733,6 +1449,7 @@ def _ready_to_ship_searchrack_match_from_row(row, schema):
         'quantity': max(0, _coerce_int(row_dict.get(qty_col) if qty_col else None, 0)),
         'item_position': item_position,
         'pictureposition': pictureposition,
+        'warehouse_note': str(row_dict.get(note_col) or '').strip() if note_col else '',
         'location_code': location_label,
         'location_key': _sold_location_key(location_label),
         'location_preview': pictureposition or item_position or location_label
@@ -21478,6 +22195,13 @@ def item_prep_create_item_page():
 def generate_custom_barcode():
     """Generate auto-incremented 777 prefix barcode with duplicate protection"""
     try:
+        data = request.get_json(silent=True) or {}
+        excluded_barcodes = {
+            str(code or '').strip()
+            for code in (data.get('exclude_barcodes') or data.get('exclude') or [])
+            if str(code or '').strip()
+        }
+
         conn = sqlite3.connect('bol.db')
         cur = conn.cursor()
         
@@ -21547,7 +22271,7 @@ def generate_custom_barcode():
             cur.execute('SELECT upc FROM temp_items WHERE upc = ? COLLATE NOCASE', (new_barcode,))
             exists_temp = cur.fetchone()
             
-            if not exists_bol and not exists_temp:
+            if not exists_bol and not exists_temp and new_barcode not in excluded_barcodes:
                 # Barcode is unique, we're good!
                 return jsonify({'success': True, 'barcode': new_barcode.strip()})
             
@@ -27160,7 +27884,11 @@ def price_master_page():
 @app.route('/readytoship')
 def ready_to_ship_page():
     """Ready to Ship orders page."""
-    return render_template('ready_to_ship.html')
+    response = make_response(render_template('ready_to_ship.html'))
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
 
 @app.route('/api/ready-to-ship/prep-summaries', methods=['POST'])
 def ready_to_ship_prep_summaries():
@@ -34440,6 +35168,66 @@ def show_inventory():
 # inventory flow variables stored in Flask session to avoid race conditions
 # Keys: 'inv_same_position', 'inv_position_code', 'inv_barcode', 'inv_pictureposition_path'
 
+def _clean_warehouse_note(value):
+    return str(value or '').replace('\r\n', '\n').replace('\r', '\n').strip()[:2000]
+
+def _load_add_item_warehouse_notes(raw_value):
+    notes = {}
+    if not raw_value:
+        return notes
+    try:
+        parsed = json.loads(raw_value)
+    except Exception:
+        return notes
+    if not isinstance(parsed, dict):
+        return notes
+    for raw_key, raw_note in parsed.items():
+        key = _normalize_scanned_upc(raw_key)
+        note = _clean_warehouse_note(raw_note)
+        if key and note:
+            notes[key] = note
+    return notes
+
+def _warehouse_note_existing_suffixes(cur, base_barcode):
+    base = _normalize_scanned_upc(base_barcode)
+    if not base:
+        return set()
+    variants = {base}
+    stripped = _strip_leading_zeros_numeric(base)
+    if stripped:
+        variants.add(stripped)
+    if base.isdigit() and len(base) <= 13:
+        variants.add(base.zfill(12))
+        variants.add(base.zfill(13))
+    if stripped and stripped.isdigit() and len(stripped) <= 13:
+        variants.add(stripped.zfill(12))
+        variants.add(stripped.zfill(13))
+
+    used = set()
+    for variant in variants:
+        like = f"{variant}-%"
+        try:
+            cur.execute("SELECT BARCODE FROM SEARCHRACK WHERE BARCODE = ? COLLATE NOCASE OR BARCODE LIKE ? COLLATE NOCASE", (variant, like))
+        except Exception:
+            continue
+        for row in cur.fetchall():
+            raw = str(row[0] or '').strip()
+            if '-' not in raw:
+                continue
+            row_base, row_suffix = raw.rsplit('-', 1)
+            if not row_suffix.isdigit():
+                continue
+            if _strip_leading_zeros_numeric(row_base) == _strip_leading_zeros_numeric(base):
+                used.add(int(row_suffix))
+    return used
+
+def _next_warehouse_note_suffix(cur, base_barcode, reserved_suffixes):
+    used = _warehouse_note_existing_suffixes(cur, base_barcode) | set(reserved_suffixes or set())
+    suffix = 1
+    while suffix in used:
+        suffix += 1
+    return suffix
+
 
 
 
@@ -34450,6 +35238,7 @@ def additemtrue():
     form_position = request.form.get('item_position', '').strip()
     form_pictureposition = request.form.get('pictureposition', '').strip()
     raw_title_overrides = request.form.get('title_overrides', '').strip()
+    warehouse_notes = _load_add_item_warehouse_notes(request.form.get('warehouse_notes', '').strip())
 
     # Use form data if available, otherwise use session variables
     final_barcode = form_barcode or session.get('inv_barcode')
@@ -34498,17 +35287,39 @@ def additemtrue():
         # If picture position is set, store 'picture' in ITEM_POSITION
         item_position_to_store = 'picture' if final_pictureposition else final_position
         
-        # Add each barcode to SearchRack
+        labels_to_print = []
+        reserved_note_suffixes = {}
+        rack_conn_for_suffix = sqlite3.connect(str(BASE_DIR / 'searchRack.db'))
+        rack_cur_for_suffix = rack_conn_for_suffix.cursor()
         for barcode_item in barcodes:
             normalized_barcode = _normalize_scanned_upc(barcode_item)
             base_barcode = normalized_barcode.split('-', 1)[0] if normalized_barcode else ''
+            warehouse_note = (
+                warehouse_notes.get(normalized_barcode)
+                or warehouse_notes.get(base_barcode)
+                or ''
+            )
+            barcode_to_add = barcode_item
+            if warehouse_note and normalized_barcode and '-' not in normalized_barcode:
+                suffix_base_key = _strip_leading_zeros_numeric(base_barcode or normalized_barcode)
+                reserved = reserved_note_suffixes.setdefault(suffix_base_key, set())
+                next_suffix = _next_warehouse_note_suffix(rack_cur_for_suffix, base_barcode or normalized_barcode, reserved)
+                reserved.add(next_suffix)
+                barcode_to_add = f"{normalized_barcode}-{next_suffix}"
+                normalized_barcode = _normalize_scanned_upc(barcode_to_add)
+                labels_to_print.append({
+                    'barcode': barcode_to_add,
+                    'description': title_overrides.get(base_barcode) or title_overrides.get(normalized_barcode) or 'Warehouse item',
+                    'warehouse_note': warehouse_note
+                })
             title_override = (
                 title_overrides.get(normalized_barcode)
                 or title_overrides.get(base_barcode)
                 or None
             )
-            addToSearchRack(item_position_to_store, barcode_item, None, final_pictureposition, title_override)
-            print(f"Added to searchRack: position={item_position_to_store}, barcode={barcode_item}, pictureposition={final_pictureposition}")
+            addToSearchRack(item_position_to_store, barcode_to_add, None, final_pictureposition, title_override, warehouse_note)
+            print(f"Added to searchRack: position={item_position_to_store}, barcode={barcode_to_add}, pictureposition={final_pictureposition}")
+        rack_conn_for_suffix.close()
 
         # SearchRack writes should be visible immediately in /searchrack.
         _invalidate_searchrack_cache()
@@ -34527,7 +35338,7 @@ def additemtrue():
     # Check if this is a fetch request (multi-scan mode) or form submission
     if request.headers.get('Accept') == '*/*' or request.is_json or 'fetch' in request.headers.get('Sec-Fetch-Mode', ''):
         # Fetch request - return JSON success
-        return jsonify({'success': True, 'message': 'Item added successfully'})
+        return jsonify({'success': True, 'message': 'Item added successfully', 'labels_to_print': labels_to_print})
     
     # Traditional form submission - return HTML
     # Add script to clear sessionStorage after successful add
@@ -36275,6 +37086,7 @@ def sold_orders():
 
         order_row_ids = [order['id'] for order in orders]
         note_lookup = _load_ready_to_ship_note_lookup(sold_cur, order_row_ids)
+        label_lookup = _load_ready_to_ship_label_lookup(sold_cur, order_row_ids)
         finder_match_lookup = _load_order_finder_match_lookup(sold_cur, order_row_ids)
         for order in orders:
             order_dict = dict(order)
@@ -36292,7 +37104,11 @@ def sold_orders():
                 order_dict['finder_searchrack_id'] = _coerce_int(finder_match['searchrack_id'], 0) or ''
                 order_dict['finder_matched_barcode'] = str(finder_match['barcode'] or '').strip()
                 order_dict['finder_matched_location'] = str(finder_match['location'] or '').strip()
-            _apply_ready_to_ship_note_payload(order_dict, note_lookup.get(int(order['id'])))
+            _apply_ready_to_ship_note_payload(
+                order_dict,
+                note_lookup.get(int(order['id'])),
+                label_lookup.get(int(order['id']), [])
+            )
             prepared_orders.append(order_dict)
     finally:
         sold_conn.close()
@@ -36320,6 +37136,8 @@ def sold_orders():
                             order_dict['finder_matched_barcode'] = finder_match.get('barcode') or order_dict.get('barcode') or ''
                         if not str(order_dict.get('finder_matched_location') or '').strip():
                             order_dict['finder_matched_location'] = _ready_to_ship_match_display_location(finder_match)
+                        if finder_match.get('warehouse_note'):
+                            order_dict['warehouse_note'] = finder_match.get('warehouse_note') or ''
                         if not str(order_dict.get('stored_location') or '').strip() and order_dict.get('finder_matched_location'):
                             order_dict['stored_location'] = order_dict['finder_matched_location']
                             order_dict['location'] = order_dict['finder_matched_location']
@@ -36342,6 +37160,8 @@ def sold_orders():
                     if resolved_match:
                         order_dict['finder_searchrack_id'] = resolved_match.get('id') or ''
                         order_dict['finder_matched_barcode'] = resolved_match.get('barcode') or order_dict.get('barcode') or ''
+                        if resolved_match.get('warehouse_note'):
+                            order_dict['warehouse_note'] = resolved_match.get('warehouse_note') or ''
                         order_dict['finder_matched_location'] = (
                             _ready_to_ship_match_display_location(resolved_match)
                             or order_dict.get('stored_location')
@@ -36368,7 +37188,8 @@ def sold_orders():
                                 locations.append({
                                     'code': loc,
                                     'image': rack_row.get('pictureposition') if rack_row.get('pictureposition') and str(rack_row.get('pictureposition')).strip() else loc,
-                                    'quantity': rack_row.get('quantity') if rack_row.get('quantity') else 1
+                                    'quantity': rack_row.get('quantity') if rack_row.get('quantity') else 1,
+                                    'warehouse_note': rack_row.get('warehouse_note') or ''
                                 })
                         
                         # Store as JSON array if multiple locations, or single string for backward compatibility
@@ -36378,6 +37199,7 @@ def sold_orders():
                         elif len(locations) == 1:
                             order_dict['location'] = locations[0]['code']
                             order_dict['location_image'] = locations[0]['image']
+                            order_dict['warehouse_note'] = locations[0].get('warehouse_note') or ''
                 except sqlite3.Error as e:
                     # If searchRack query fails, just skip location lookup for this order
                     print(f"Warning: Failed to lookup location for barcode {order_dict['barcode']}: {e}")
@@ -36494,6 +37316,7 @@ def _ready_to_ship_poll_state(days):
         ''', (days,))
         rows = cur.fetchall()
         note_lookup = _load_ready_to_ship_note_lookup(cur, [row['id'] for row in rows])
+        label_lookup = _load_ready_to_ship_label_lookup(cur, [row['id'] for row in rows])
 
         pending_count = 0
         digest = hashlib.sha1()
@@ -36502,7 +37325,12 @@ def _ready_to_ship_poll_state(days):
             if not is_handled:
                 pending_count += 1
             note_row = note_lookup.get(int(row['id']))
-            note_payload = _ready_to_ship_note_payload(note_row)
+            label_rows = label_lookup.get(int(row['id']), [])
+            note_payload = _ready_to_ship_note_payload(note_row, label_rows)
+            label_digest = '|'.join(
+                f"{str(label.get('label_id') or label.get('id') or '').strip()}:{str(label.get('label_filename') or '').strip()}:{str(label.get('label_uploaded_at') or '').strip()}"
+                for label in (note_payload.get('ready_to_ship_labels') or [])
+            )
             digest.update(
                 (
                     f"{int(row['id'] or 0)}|"
@@ -36514,7 +37342,11 @@ def _ready_to_ship_poll_state(days):
                     f"{str(row['paid_time'] or '').strip()}|"
                     f"{str(row['shipped_time'] or '').strip()}|"
                     f"{str(note_payload['ready_to_ship_note'] or '').strip()}|"
-                    f"{str(note_payload['ready_to_ship_note_updated_at'] or '').strip()}\n"
+                    f"{str(note_payload['ready_to_ship_note_updated_at'] or '').strip()}|"
+                    f"{str(note_payload.get('ready_to_ship_label_filename') or '').strip()}|"
+                    f"{str(note_payload.get('ready_to_ship_label_uploaded_at') or '').strip()}|"
+                    f"{int(note_payload.get('ready_to_ship_label_count') or 0)}|"
+                    f"{label_digest}\n"
                 ).encode('utf-8', errors='ignore')
             )
 
@@ -36563,7 +37395,8 @@ def get_order():
         # Convert sqlite3.Row to dict
         order_dict = dict(order)
         note_lookup = _load_ready_to_ship_note_lookup(cur, [order_id])
-        _apply_ready_to_ship_note_payload(order_dict, note_lookup.get(int(order['id'])))
+        label_lookup = _load_ready_to_ship_label_lookup(cur, [order_id])
+        _apply_ready_to_ship_note_payload(order_dict, note_lookup.get(int(order['id'])), label_lookup.get(int(order['id']), []))
         effective_barcode = _effective_sold_order_barcode(order_dict, prefer_manual_override=True)
         if effective_barcode:
             order_dict['stored_barcode'] = str(order_dict.get('barcode') or '').strip()
@@ -36592,13 +37425,14 @@ def ready_to_ship_save_note(order_id):
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         _ensure_ready_to_ship_notes_table(cur)
+        _ensure_ready_to_ship_order_labels_table(cur)
 
         order = cur.execute('SELECT id FROM orders WHERE id = ?', (order_id,)).fetchone()
         if not order:
             return jsonify({'success': False, 'error': 'Order not found'}), 404
 
+        existing = cur.execute('SELECT * FROM ready_to_ship_notes WHERE order_row_id = ?', (order_id,)).fetchone()
         if note:
-            existing = cur.execute('SELECT id FROM ready_to_ship_notes WHERE order_row_id = ?', (order_id,)).fetchone()
             if existing:
                 cur.execute('''
                     UPDATE ready_to_ship_notes
@@ -36611,22 +37445,541 @@ def ready_to_ship_save_note(order_id):
                     VALUES (?, ?)
                 ''', (order_id, note))
         else:
-            cur.execute('DELETE FROM ready_to_ship_notes WHERE order_row_id = ?', (order_id,))
+            label_count_row = cur.execute(
+                "SELECT COUNT(*) AS c FROM ready_to_ship_order_labels WHERE order_row_id = ? AND COALESCE(TRIM(label_filename), '') <> ''",
+                (order_id,)
+            ).fetchone()
+            label_count = int(_ready_to_ship_row_value(label_count_row, 'c', 0) or 0)
+            if existing and (str(_ready_to_ship_row_value(existing, 'label_filename', '') or '').strip() or label_count > 0):
+                cur.execute('''
+                    UPDATE ready_to_ship_notes
+                    SET note = '', updated_at = CURRENT_TIMESTAMP
+                    WHERE order_row_id = ?
+                ''', (order_id,))
+            else:
+                cur.execute('DELETE FROM ready_to_ship_notes WHERE order_row_id = ?', (order_id,))
 
         conn.commit()
-        note_row = cur.execute('''
-            SELECT note, created_at, updated_at
-            FROM ready_to_ship_notes
-            WHERE order_row_id = ?
-        ''', (order_id,)).fetchone()
 
         _invalidate_ready_to_ship_cache()
 
-        payload = _ready_to_ship_note_payload(note_row)
+        payload = _ready_to_ship_payload_for_order(cur, order_id)
         payload['success'] = True
         return jsonify(payload)
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e, 'ready_to_ship:note')}), 500
+    finally:
+        try:
+            if conn is not None:
+                conn.close()
+        except Exception:
+            pass
+
+@app.route('/api/ready-to-ship/label/<int:order_id>', methods=['POST'])
+def ready_to_ship_upload_label(order_id):
+    conn = None
+    saved_filename = ''
+    try:
+        file_storage = request.files.get('label') or request.files.get('file')
+        if not file_storage:
+            return jsonify({'success': False, 'error': 'PDF label file is required.'}), 400
+
+        saved_filename, original_name, size_bytes, pdf_path = _ready_to_ship_save_uploaded_label_file(file_storage)
+
+        conn = sqlite3.connect('sold.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        _ensure_ready_to_ship_notes_table(cur)
+
+        order = cur.execute('SELECT id FROM orders WHERE id = ?', (order_id,)).fetchone()
+        if not order:
+            _ready_to_ship_delete_label_file(saved_filename)
+            saved_filename = ''
+            return jsonify({'success': False, 'error': 'Order not found'}), 404
+
+        _ready_to_ship_attach_label(cur, order_id, saved_filename, original_name, size_bytes)
+        conn.commit()
+        _invalidate_ready_to_ship_cache()
+
+        payload = _ready_to_ship_payload_for_order(cur, order_id)
+        payload['success'] = True
+        payload['order_id'] = order_id
+        return jsonify(payload)
+    except ValueError as e:
+        if saved_filename:
+            _ready_to_ship_delete_label_file(saved_filename)
+        return jsonify({'success': False, 'error': str(e)}), 400
+    except Exception as e:
+        if saved_filename:
+            _ready_to_ship_delete_label_file(saved_filename)
+        try:
+            if conn is not None:
+                conn.rollback()
+        except Exception:
+            pass
+        return jsonify({'success': False, 'error': _safe_error(e, 'ready_to_ship:label_upload')}), 500
+    finally:
+        try:
+            if conn is not None:
+                conn.close()
+        except Exception:
+            pass
+
+@app.route('/api/ready-to-ship/labels/upload', methods=['POST'])
+def ready_to_ship_upload_labels_bulk():
+    conn = None
+    try:
+        files = request.files.getlist('labels') or request.files.getlist('label') or request.files.getlist('file')
+        if not files:
+            return jsonify({'success': False, 'error': 'Drop at least one PDF label file.'}), 400
+
+        try:
+            days = max(1, min(int(request.form.get('days') or 2), 120))
+        except Exception:
+            days = 2
+
+        conn = sqlite3.connect('sold.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        _ensure_ready_to_ship_notes_table(cur)
+        _ensure_ready_to_ship_unmatched_labels_table(cur)
+
+        results = []
+        for file_storage in files:
+            saved_filename = ''
+            original_name = file_storage.filename or 'label.pdf'
+            try:
+                saved_filename, safe_original, size_bytes, pdf_path = _ready_to_ship_save_uploaded_label_file(file_storage)
+                extracted_text = _ready_to_ship_extract_pdf_text(pdf_path)
+                match = _ready_to_ship_find_label_match(cur, f"{extracted_text}\n{safe_original}", days=days)
+                if not match:
+                    unmatched_row = _ready_to_ship_insert_unmatched_label(
+                        cur,
+                        saved_filename,
+                        safe_original,
+                        size_bytes,
+                        extracted_text,
+                        'No address match found'
+                    )
+                    unmatched_payload = _ready_to_ship_unmatched_label_payload(unmatched_row)
+                    saved_filename = ''
+                    results.append({
+                        'success': True,
+                        'matched': False,
+                        'saved': True,
+                        'filename': original_name,
+                        'error': 'No address match found; saved for manual printing.',
+                        **unmatched_payload
+                    })
+                    continue
+
+                order_row = match['order']
+                order_id = int(order_row['id'])
+                _ready_to_ship_attach_label(cur, order_id, saved_filename, safe_original, size_bytes)
+                payload = _ready_to_ship_payload_for_order(cur, order_id)
+                payload.update({
+                    'success': True,
+                    'matched': True,
+                    'order_id': order_id,
+                    'order_ref': str(_ready_to_ship_row_value(order_row, 'order_id', '') or ''),
+                    'title': str(_ready_to_ship_row_value(order_row, 'title', '') or ''),
+                    'shipping_name': str(_ready_to_ship_row_value(order_row, 'shipping_name', '') or ''),
+                    'score': match['score'],
+                    'reasons': match['reasons'],
+                    'filename': safe_original
+                })
+                results.append(payload)
+            except ValueError as e:
+                if saved_filename:
+                    _ready_to_ship_delete_label_file(saved_filename)
+                results.append({
+                    'success': False,
+                    'matched': False,
+                    'filename': original_name,
+                    'error': str(e)
+                })
+            except Exception as e:
+                if saved_filename:
+                    _ready_to_ship_delete_label_file(saved_filename)
+                results.append({
+                    'success': False,
+                    'matched': False,
+                    'filename': original_name,
+                    'error': _safe_error(e, 'ready_to_ship:label_bulk_file')
+                })
+
+        conn.commit()
+        _invalidate_ready_to_ship_cache()
+        return jsonify({
+            'success': True,
+            'results': results,
+            'matched_count': sum(1 for r in results if r.get('matched')),
+            'unmatched_count': sum(1 for r in results if not r.get('matched'))
+        })
+    except Exception as e:
+        try:
+            if conn is not None:
+                conn.rollback()
+        except Exception:
+            pass
+        return jsonify({'success': False, 'error': _safe_error(e, 'ready_to_ship:labels_upload')}), 500
+    finally:
+        try:
+            if conn is not None:
+                conn.close()
+        except Exception:
+            pass
+
+@app.route('/api/ready-to-ship/labels/unmatched', methods=['GET'])
+def ready_to_ship_unmatched_labels():
+    conn = None
+    try:
+        conn = sqlite3.connect('sold.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        _ensure_ready_to_ship_unmatched_labels_table(cur)
+        rows = cur.execute('''
+            SELECT id, label_filename, label_original_filename, label_size_bytes, label_uploaded_at, match_error, created_at, updated_at
+            FROM ready_to_ship_unmatched_labels
+            ORDER BY datetime(label_uploaded_at) DESC, id DESC
+            LIMIT 100
+        ''').fetchall()
+        return jsonify({
+            'success': True,
+            'labels': [_ready_to_ship_unmatched_label_payload(row) for row in rows]
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'ready_to_ship:unmatched_labels')}), 500
+    finally:
+        try:
+            if conn is not None:
+                conn.close()
+        except Exception:
+            pass
+
+@app.route('/api/ready-to-ship/labels/unmatched/<int:label_id>', methods=['DELETE'])
+def ready_to_ship_delete_unmatched_label(label_id):
+    conn = None
+    try:
+        conn = sqlite3.connect('sold.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        _ensure_ready_to_ship_unmatched_labels_table(cur)
+        row = cur.execute('''
+            SELECT id, label_filename
+            FROM ready_to_ship_unmatched_labels
+            WHERE id = ?
+        ''', (label_id,)).fetchone()
+        if not row:
+            return jsonify({'success': False, 'error': 'Unmatched label not found'}), 404
+
+        filename = str(_ready_to_ship_row_value(row, 'label_filename', '') or '').strip()
+        cur.execute('DELETE FROM ready_to_ship_unmatched_labels WHERE id = ?', (label_id,))
+        conn.commit()
+        if filename:
+            _ready_to_ship_delete_label_file(filename)
+        return jsonify({'success': True, 'label_id': label_id, 'unmatched_label_id': label_id})
+    except Exception as e:
+        try:
+            if conn is not None:
+                conn.rollback()
+        except Exception:
+            pass
+        return jsonify({'success': False, 'error': _safe_error(e, 'ready_to_ship:unmatched_label_delete')}), 500
+    finally:
+        try:
+            if conn is not None:
+                conn.close()
+        except Exception:
+            pass
+
+@app.route('/api/ready-to-ship/labels/unmatched/<int:label_id>/file', methods=['GET'])
+def ready_to_ship_unmatched_label_file(label_id):
+    conn = None
+    try:
+        conn = sqlite3.connect('sold.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        _ensure_ready_to_ship_unmatched_labels_table(cur)
+        row = cur.execute('''
+            SELECT label_filename, label_original_filename
+            FROM ready_to_ship_unmatched_labels
+            WHERE id = ?
+        ''', (label_id,)).fetchone()
+        filename = str(_ready_to_ship_row_value(row, 'label_filename', '') or '').strip()
+        path = _ready_to_ship_label_path(filename)
+        if not path or not path.exists():
+            return jsonify({'success': False, 'error': 'Label file not found'}), 404
+        download_name = str(_ready_to_ship_row_value(row, 'label_original_filename', '') or '').strip() or f'ready_to_ship_unmatched_{label_id}.pdf'
+        return send_file(str(path), mimetype='application/pdf', as_attachment=False, download_name=download_name)
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'ready_to_ship:unmatched_label_file')}), 500
+    finally:
+        try:
+            if conn is not None:
+                conn.close()
+        except Exception:
+            pass
+
+@app.route('/api/ready-to-ship/labels/unmatched/<int:label_id>/print', methods=['POST'])
+def ready_to_ship_unmatched_label_print(label_id):
+    conn = None
+    try:
+        conn = sqlite3.connect('sold.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        _ensure_ready_to_ship_unmatched_labels_table(cur)
+        row = cur.execute('SELECT label_filename FROM ready_to_ship_unmatched_labels WHERE id = ?', (label_id,)).fetchone()
+        filename = str(_ready_to_ship_row_value(row, 'label_filename', '') or '').strip()
+        path = _ready_to_ship_label_path(filename)
+        if not path or not path.exists():
+            return jsonify({'success': False, 'error': 'Label file not found'}), 404
+        return jsonify({
+            'success': True,
+            'label_url': f'/api/ready-to-ship/labels/unmatched/{label_id}/file'
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'ready_to_ship:unmatched_label_print')}), 500
+    finally:
+        try:
+            if conn is not None:
+                conn.close()
+        except Exception:
+            pass
+
+@app.route('/api/ready-to-ship/label/<int:order_id>', methods=['DELETE'])
+def ready_to_ship_delete_label(order_id):
+    conn = None
+    try:
+        conn = sqlite3.connect('sold.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        _ensure_ready_to_ship_order_labels_table(cur)
+
+        existing = cur.execute('SELECT * FROM ready_to_ship_notes WHERE order_row_id = ?', (order_id,)).fetchone()
+        label_rows = cur.execute('''
+            SELECT id, label_filename
+            FROM ready_to_ship_order_labels
+            WHERE order_row_id = ?
+              AND COALESCE(TRIM(label_filename), '') <> ''
+        ''', (order_id,)).fetchall()
+        if not existing and not label_rows:
+            return jsonify({'success': False, 'error': 'No label is attached to this order.'}), 404
+
+        filenames = [
+            str(_ready_to_ship_row_value(row, 'label_filename', '') or '').strip()
+            for row in label_rows
+        ]
+        legacy_filename = str(_ready_to_ship_row_value(existing, 'label_filename', '') or '').strip() if existing else ''
+        if legacy_filename and legacy_filename not in filenames:
+            filenames.append(legacy_filename)
+        note_text = str(_ready_to_ship_row_value(existing, 'note', '') or '').strip()
+        cur.execute('DELETE FROM ready_to_ship_order_labels WHERE order_row_id = ?', (order_id,))
+        if note_text:
+            cur.execute('''
+                UPDATE ready_to_ship_notes
+                SET label_filename = '',
+                    label_original_filename = '',
+                    label_size_bytes = 0,
+                    label_uploaded_at = '',
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE order_row_id = ?
+            ''', (order_id,))
+        else:
+            cur.execute('DELETE FROM ready_to_ship_notes WHERE order_row_id = ?', (order_id,))
+
+        conn.commit()
+        for filename in filenames:
+            if filename:
+                _ready_to_ship_delete_label_file(filename)
+        _invalidate_ready_to_ship_cache()
+
+        payload = _ready_to_ship_payload_for_order(cur, order_id)
+        payload['success'] = True
+        payload['order_id'] = order_id
+        return jsonify(payload)
+    except Exception as e:
+        try:
+            if conn is not None:
+                conn.rollback()
+        except Exception:
+            pass
+        return jsonify({'success': False, 'error': _safe_error(e, 'ready_to_ship:label_delete')}), 500
+    finally:
+        try:
+            if conn is not None:
+                conn.close()
+        except Exception:
+            pass
+
+@app.route('/api/ready-to-ship/label/<int:order_id>/<int:label_id>', methods=['DELETE'])
+def ready_to_ship_delete_order_label(order_id, label_id):
+    conn = None
+    try:
+        conn = sqlite3.connect('sold.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        _ensure_ready_to_ship_order_labels_table(cur)
+
+        row = cur.execute('''
+            SELECT id, label_filename
+            FROM ready_to_ship_order_labels
+            WHERE id = ? AND order_row_id = ?
+        ''', (label_id, order_id)).fetchone()
+        if not row:
+            return jsonify({'success': False, 'error': 'Label not found'}), 404
+
+        filename = str(_ready_to_ship_row_value(row, 'label_filename', '') or '').strip()
+        cur.execute('DELETE FROM ready_to_ship_order_labels WHERE id = ? AND order_row_id = ?', (label_id, order_id))
+        _ready_to_ship_sync_legacy_label_columns(cur, order_id)
+        conn.commit()
+        if filename:
+            _ready_to_ship_delete_label_file(filename)
+        _invalidate_ready_to_ship_cache()
+
+        payload = _ready_to_ship_payload_for_order(cur, order_id)
+        payload['success'] = True
+        payload['order_id'] = order_id
+        payload['label_id'] = label_id
+        return jsonify(payload)
+    except Exception as e:
+        try:
+            if conn is not None:
+                conn.rollback()
+        except Exception:
+            pass
+        return jsonify({'success': False, 'error': _safe_error(e, 'ready_to_ship:order_label_delete')}), 500
+    finally:
+        try:
+            if conn is not None:
+                conn.close()
+        except Exception:
+            pass
+
+@app.route('/api/ready-to-ship/label/<int:order_id>/file', methods=['GET'])
+def ready_to_ship_label_file(order_id):
+    conn = None
+    try:
+        conn = sqlite3.connect('sold.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        _ensure_ready_to_ship_order_labels_table(cur)
+        row = cur.execute('''
+            SELECT id, label_filename, label_original_filename
+            FROM ready_to_ship_order_labels
+            WHERE order_row_id = ?
+              AND COALESCE(TRIM(label_filename), '') <> ''
+            ORDER BY datetime(label_uploaded_at) DESC, id DESC
+            LIMIT 1
+        ''', (order_id,)).fetchone()
+        if not row:
+            row = cur.execute('''
+                SELECT 0 AS id, label_filename, label_original_filename
+                FROM ready_to_ship_notes
+                WHERE order_row_id = ?
+            ''', (order_id,)).fetchone()
+        filename = str(_ready_to_ship_row_value(row, 'label_filename', '') or '').strip()
+        path = _ready_to_ship_label_path(filename)
+        if not path or not path.exists():
+            return jsonify({'success': False, 'error': 'Label file not found'}), 404
+        download_name = str(_ready_to_ship_row_value(row, 'label_original_filename', '') or '').strip() or f'ready_to_ship_{order_id}.pdf'
+        return send_file(str(path), mimetype='application/pdf', as_attachment=False, download_name=download_name)
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'ready_to_ship:label_file')}), 500
+    finally:
+        try:
+            if conn is not None:
+                conn.close()
+        except Exception:
+            pass
+
+@app.route('/api/ready-to-ship/label/<int:order_id>/file/<int:label_id>', methods=['GET'])
+def ready_to_ship_order_label_file(order_id, label_id):
+    conn = None
+    try:
+        conn = sqlite3.connect('sold.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        _ensure_ready_to_ship_order_labels_table(cur)
+        row = cur.execute('''
+            SELECT id, label_filename, label_original_filename
+            FROM ready_to_ship_order_labels
+            WHERE id = ? AND order_row_id = ?
+        ''', (label_id, order_id)).fetchone()
+        filename = str(_ready_to_ship_row_value(row, 'label_filename', '') or '').strip()
+        path = _ready_to_ship_label_path(filename)
+        if not path or not path.exists():
+            return jsonify({'success': False, 'error': 'Label file not found'}), 404
+        download_name = str(_ready_to_ship_row_value(row, 'label_original_filename', '') or '').strip() or f'ready_to_ship_{order_id}_{label_id}.pdf'
+        return send_file(str(path), mimetype='application/pdf', as_attachment=False, download_name=download_name)
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'ready_to_ship:order_label_file')}), 500
+    finally:
+        try:
+            if conn is not None:
+                conn.close()
+        except Exception:
+            pass
+
+@app.route('/api/ready-to-ship/label/<int:order_id>/print', methods=['POST'])
+def ready_to_ship_label_print(order_id):
+    conn = None
+    try:
+        conn = sqlite3.connect('sold.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        _ensure_ready_to_ship_order_labels_table(cur)
+        row = cur.execute('''
+            SELECT id, label_filename
+            FROM ready_to_ship_order_labels
+            WHERE order_row_id = ?
+              AND COALESCE(TRIM(label_filename), '') <> ''
+            ORDER BY datetime(label_uploaded_at) DESC, id DESC
+            LIMIT 1
+        ''', (order_id,)).fetchone()
+        if not row:
+            row = cur.execute('SELECT 0 AS id, label_filename FROM ready_to_ship_notes WHERE order_row_id = ?', (order_id,)).fetchone()
+        filename = str(_ready_to_ship_row_value(row, 'label_filename', '') or '').strip()
+        path = _ready_to_ship_label_path(filename)
+        if not path or not path.exists():
+            return jsonify({'success': False, 'error': 'Label file not found'}), 404
+        label_id = _coerce_int(_ready_to_ship_row_value(row, 'id', 0), 0)
+        return jsonify({
+            'success': True,
+            'label_url': f'/api/ready-to-ship/label/{order_id}/file/{label_id}' if label_id else f'/api/ready-to-ship/label/{order_id}/file'
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'ready_to_ship:label_print')}), 500
+    finally:
+        try:
+            if conn is not None:
+                conn.close()
+        except Exception:
+            pass
+
+@app.route('/api/ready-to-ship/label/<int:order_id>/print/<int:label_id>', methods=['POST'])
+def ready_to_ship_order_label_print(order_id, label_id):
+    conn = None
+    try:
+        conn = sqlite3.connect('sold.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        _ensure_ready_to_ship_order_labels_table(cur)
+        row = cur.execute('''
+            SELECT label_filename
+            FROM ready_to_ship_order_labels
+            WHERE id = ? AND order_row_id = ?
+        ''', (label_id, order_id)).fetchone()
+        filename = str(_ready_to_ship_row_value(row, 'label_filename', '') or '').strip()
+        path = _ready_to_ship_label_path(filename)
+        if not path or not path.exists():
+            return jsonify({'success': False, 'error': 'Label file not found'}), 404
+        return jsonify({
+            'success': True,
+            'label_url': f'/api/ready-to-ship/label/{order_id}/file/{label_id}'
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'ready_to_ship:order_label_print')}), 500
     finally:
         try:
             if conn is not None:
@@ -38798,8 +40151,11 @@ def searchrack_api():
                 + [f'%{q_stripped}%'] * 2
             )
 
+            cur.execute("PRAGMA table_info(SEARCHRACK)")
+            searchrack_cols = [r[1] for r in cur.fetchall()]
+            note_expr = 'WAREHOUSE_NOTE' if 'WAREHOUSE_NOTE' in searchrack_cols else "'' AS WAREHOUSE_NOTE"
             cur.execute(f'''
-                SELECT TITLE, BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION, QUANTITY, IMAGE, ITEMID
+                SELECT TITLE, BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION, QUANTITY, IMAGE, ITEMID, {note_expr}
                 FROM SEARCHRACK
                 WHERE ({title_sql}) OR ({barcode_sql}) OR ({position_sql})
             ''', params)
@@ -38813,6 +40169,7 @@ def searchrack_api():
                     'quantity': row[5],
                     'image': row[6],
                     'itemid': row[7],
+                    'warehouse_note': row[8],
                 })
         finally:
             conn.close()
@@ -39040,6 +40397,8 @@ def api_search_db(db_key):
                     cur_m.execute('ALTER TABLE SEARCHRACK ADD COLUMN CREATED_AT TEXT')
                 if 'CUSTOM_TITLE' not in cols_m:
                     cur_m.execute('ALTER TABLE SEARCHRACK ADD COLUMN CUSTOM_TITLE INTEGER DEFAULT 0')
+                if 'WAREHOUSE_NOTE' not in cols_m:
+                    cur_m.execute('ALTER TABLE SEARCHRACK ADD COLUMN WAREHOUSE_NOTE TEXT DEFAULT ""')
                 # Set CREATED_AT for any missing rows to current UTC so timestamps appear
                 import datetime as _dt
                 now_iso = _dt.datetime.now(_dt.UTC).isoformat()
@@ -39391,6 +40750,7 @@ def api_search_db(db_key):
                 'pictureposition': item.get('PICTUREPOSITION') or item.get('pictureposition') or item.get('picture_position') or '',
                 'item_position': item.get('ITEM_POSITION') or item.get('item_position') or item.get('position') or '',
                 'quantity': qty_raw,
+                'warehouse_note': item.get('WAREHOUSE_NOTE') or item.get('warehouse_note') or '',
                 # created_at available on SEARCHRACK rows populated by DBmanager
                 'created_at': item.get('CREATED_AT') or item.get('created_at') or '',
                 # store field for returns (amazon/ebay)

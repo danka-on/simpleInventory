@@ -183,6 +183,174 @@
         }
         .no-barcode-status.ok { color: #15803d; }
         .no-barcode-status.bad { color: #dc2626; }
+        .single-print-label-btn {
+            display: none;
+            width: 100%;
+            max-width: 360px;
+            border: none;
+            border-radius: 8px;
+            background: #2563eb;
+            color: #fff;
+            font-weight: 800;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            box-shadow: 0 3px 10px rgba(37, 99, 235, 0.22);
+        }
+        .single-print-label-btn.is-visible {
+            display: inline-flex;
+        }
+        .single-print-label-btn:disabled,
+        .barcode-row-print-btn:disabled {
+            opacity: 0.65;
+            cursor: wait;
+        }
+        .barcode-list-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: #2ecc71;
+            color: white;
+            padding: 15px 20px;
+            margin: 10px 0;
+            border-radius: 8px;
+            font-size: 1.08em;
+            font-weight: bold;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+        }
+        .single-barcode-card {
+            display: none;
+            width: 90%;
+            max-width: 400px;
+            box-sizing: border-box;
+        }
+        .single-barcode-card.is-visible {
+            display: flex;
+        }
+        .barcode-row-main {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            flex: 1;
+            min-width: 0;
+        }
+        .barcode-row-code {
+            font-family: monospace;
+            font-weight: 700;
+            min-width: 0;
+            overflow-wrap: anywhere;
+        }
+        .barcode-row-title {
+            font-family: sans-serif;
+            font-size: 0.78em;
+            font-weight: 400;
+            opacity: 0.82;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 100%;
+            display: block;
+        }
+        .barcode-row-meta {
+            font-family: sans-serif;
+            font-size: 0.82em;
+            font-weight: 600;
+            opacity: 0.95;
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .barcode-row-actions {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-left: 12px;
+            flex-shrink: 0;
+            position: relative;
+        }
+        .barcode-row-print-btn,
+        .barcode-row-remove-btn {
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            margin: 0;
+            padding: 7px 9px;
+            font-size: 0.92rem;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            min-height: 34px;
+        }
+        .barcode-row-print-btn {
+            background: #2563eb;
+        }
+        .barcode-row-remove-btn {
+            background: #e74c3c;
+        }
+        .barcode-gear-btn {
+            color: #fff;
+            border: none;
+            border-radius: 50%;
+            cursor: pointer;
+            margin: 0;
+            padding: 0;
+            width: 40px;
+            height: 40px;
+            background: rgba(255, 255, 255, 0.24);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.05rem;
+        }
+        .barcode-gear-menu {
+            display: none;
+            position: fixed;
+            min-width: 190px;
+            max-width: min(260px, calc(100vw - 16px));
+            background: #fff;
+            color: #17202a;
+            border: 1px solid rgba(15,23,42,0.12);
+            border-radius: 8px;
+            box-shadow: 0 12px 28px rgba(15,23,42,0.2);
+            padding: 8px;
+            z-index: 100001;
+        }
+        .barcode-gear-menu.open {
+            display: block;
+        }
+        .barcode-gear-menu button {
+            width: 100%;
+            border: none;
+            background: transparent;
+            color: #17202a;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 9px 10px;
+            border-radius: 6px;
+            font-size: 0.94rem;
+            font-weight: 700;
+            margin: 0;
+            text-align: left;
+        }
+        .barcode-gear-menu button:hover {
+            background: #eef2f7;
+        }
+        .barcode-gear-menu button:disabled {
+            color: #94a3b8;
+            cursor: default;
+        }
+        .barcode-gear-menu button.danger {
+            color: #b91c1c;
+        }
+        @media (max-width: 430px) {
+            .barcode-row-print-btn .print-label-text {
+                display: none;
+            }
+        }
         .no-barcode-keypad {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
@@ -368,6 +536,36 @@
             border-color: #f59e0b;
             box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.16);
         }
+        .missing-title-note-btn {
+            width: 100%;
+            margin: -4px 0 10px;
+            padding: 11px 14px;
+            border-radius: 10px;
+            border: 1px solid #38bdf8;
+            background: #eff6ff;
+            color: #075985;
+            font-size: 0.95rem;
+            font-weight: 800;
+            cursor: pointer;
+            -webkit-appearance: none;
+            appearance: none;
+        }
+        .missing-title-note-input {
+            display: none;
+            width: 100%;
+            min-height: 72px;
+            margin: 0 0 14px;
+            padding: 11px 12px;
+            font-size: 0.95rem;
+            border: 2px solid #93c5fd;
+            border-radius: 10px;
+            box-sizing: border-box;
+            resize: vertical;
+            font-family: inherit;
+        }
+        .missing-title-note-input.is-visible {
+            display: block;
+        }
         .missing-title-keypad {
             display: none;
             flex-direction: column;
@@ -540,8 +738,37 @@
         <span>No Barcode</span>
     </button>
     <form id="scan_form" action="/submitbarcode" method="POST">
-        <input name="scanned_result" type="text" id="scanned_result" placeholder="BARCODE will appear here" data-i18n="barcode_will_appear" style="font-weight: bold;" readonly>
+        <input name="scanned_result" type="text" id="scanned_result" placeholder="BARCODE will appear here" data-i18n="barcode_will_appear" style="font-weight: bold; display:none;" readonly>
     </form>
+    <button type="button" id="singlePrintLabelBtn" class="single-print-label-btn" title="Print label">
+        <i class="fas fa-print"></i>
+        <span>Print label</span>
+    </button>
+    <button type="button" id="singleWarehouseNoteBtn" class="single-print-label-btn" title="Add warehouse note">
+        <span>+ note</span>
+    </button>
+    <div id="singleBarcodeCard" class="barcode-list-row single-barcode-card">
+        <div class="barcode-row-main">
+            <span id="singleBarcodeCode" class="barcode-row-code"></span>
+            <span id="singleBarcodeTitle" class="barcode-row-title" style="display:none;"></span>
+            <span id="singleBarcodeNote" class="barcode-row-title" style="display:none;"></span>
+            <div id="singleBarcodeMeta" class="barcode-row-meta"></div>
+        </div>
+        <div class="barcode-row-actions">
+            <button type="button" id="singleGearBtn" class="barcode-gear-btn" style="display:none;" title="Item options" aria-label="Item options">
+                <i class="fas fa-gear"></i>
+            </button>
+            <div id="singleGearMenu" class="barcode-gear-menu" onclick="event.stopPropagation()">
+                <button type="button" data-single-action="print"><i class="fas fa-print"></i> Print label</button>
+                <button type="button" data-single-action="note"><i class="fas fa-note-sticky"></i> Add note</button>
+                <button type="button" data-single-action="edit-title"><i class="fas fa-image"></i> Edit title/thumbnail</button>
+                <button type="button" data-single-action="base-plus">Base +</button>
+                <button type="button" data-single-action="base-minus">Base -</button>
+                <button type="button" data-single-action="qty-plus">Quantity +</button>
+                <button type="button" data-single-action="qty-minus">Quantity -</button>
+            </div>
+        </div>
+    </div>
 
     <!-- Multi-barcode list (shown only when shelf is locked) -->
     <div id="multiBarcodeContainer" style="display:none; margin:20px auto; width:90%; max-width:400px; background:#fff; border-radius:12px; padding:20px; box-shadow:0 4px 12px rgba(0,0,0,0.15);">
@@ -606,6 +833,8 @@
             <h3 class="missing-title-heading">Missing Title/Image</h3>
             <div class="missing-title-code" id="missingTitleBarcodeText"></div>
             <input type="text" id="missingTitleInput" class="missing-title-input" maxlength="200" placeholder="Enter a warehouse title" autocomplete="off" autocapitalize="words" spellcheck="false" inputmode="text" enterkeyhint="done">
+            <button type="button" id="missingTitleNoteBtn" class="missing-title-note-btn">+ note</button>
+            <textarea id="missingTitleNoteInput" class="missing-title-note-input" maxlength="2000" placeholder="Warehouse note for this exact item"></textarea>
             <div id="missingTitlePhotoSection" class="missing-title-photo">
                 <input type="file" id="missingTitlePhotoInput" accept="image/*" capture="environment" style="display:none">
                 <button type="button" id="missingTitlePhotoBtn" class="missing-title-photo-btn">Photo Mode For Thumbnail</button>
@@ -672,12 +901,21 @@
         </div>
     </div>
 
-    <script src="/static/barcode-entry-state.js?v=20260420a"></script>
-    <script src="/static/no-barcode-label.js?v=20260504c"></script>
+    <script src="/static/barcode-entry-state.js?v=20260505a"></script>
+    <script src="/static/no-barcode-label.js?v=20260505a"></script>
     <script>
         // DOM Elements
         const scannedResultInput = document.getElementById('scanned_result');
         const barcodeInput = document.getElementById('barcodeTextInput');
+        const singlePrintLabelBtn = document.getElementById('singlePrintLabelBtn');
+        const singleWarehouseNoteBtn = document.getElementById('singleWarehouseNoteBtn');
+        const singleBarcodeCard = document.getElementById('singleBarcodeCard');
+        const singleBarcodeCode = document.getElementById('singleBarcodeCode');
+        const singleBarcodeTitle = document.getElementById('singleBarcodeTitle');
+        const singleBarcodeNote = document.getElementById('singleBarcodeNote');
+        const singleBarcodeMeta = document.getElementById('singleBarcodeMeta');
+        const singleGearBtn = document.getElementById('singleGearBtn');
+        const singleGearMenu = document.getElementById('singleGearMenu');
         const t = (key, fallback) => (window.i18n && window.i18n.t) ? window.i18n.t(key) : fallback;
         const invalidModal = document.getElementById('invalidModal');
         const invalidModalClose = document.getElementById('invalidModalClose');
@@ -685,6 +923,8 @@
         const missingTitleBarcodeText = document.getElementById('missingTitleBarcodeText');
         const missingTitleHint = document.getElementById('missingTitleHint');
         const missingTitleInput = document.getElementById('missingTitleInput');
+        const missingTitleNoteBtn = document.getElementById('missingTitleNoteBtn');
+        const missingTitleNoteInput = document.getElementById('missingTitleNoteInput');
         const missingTitlePhotoSection = document.getElementById('missingTitlePhotoSection');
         const missingTitlePhotoInput = document.getElementById('missingTitlePhotoInput');
         const missingTitlePhotoBtn = document.getElementById('missingTitlePhotoBtn');
@@ -704,9 +944,331 @@
         const SINGLE_SCAN_CAPTURE_MS = 700;
         let pendingSingleBarcode = '';
         let pendingSingleSuffix = 0;
+        let pendingSingleQuantity = 1;
         let pendingSingleSubmitTimer = null;
         let barcodeScanQueue = Promise.resolve();
         const screeningCache = new Map();
+
+        function escapeHtml(value) {
+            return String(value == null ? '' : value).replace(/[&<>"']/g, ch => ({
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#39;'
+            }[ch]));
+        }
+
+        function labelDescriptionForCode(code) {
+            const key = normalizeManualTitleKey(code);
+            const manualTitles = loadManualTitleOverrides();
+            const cachedItem = key && screeningCache && typeof screeningCache.get === 'function'
+                ? screeningCache.get(key)
+                : null;
+            return String(
+                (key && manualTitles[key]) ||
+                (cachedItem && cachedItem.title) ||
+                'Warehouse item'
+            ).replace(/\s+/g, ' ').trim();
+        }
+
+        function titleForBarcodeCode(code) {
+            const key = normalizeManualTitleKey(code);
+            const baseKey = normalizeManualTitleKey(splitScannedBarcode(code).base || code);
+            const manualTitles = loadManualTitleOverrides();
+            const cachedItem = (key && screeningCache.get(key)) || (baseKey && screeningCache.get(baseKey)) || null;
+            return String(
+                (key && manualTitles[key]) ||
+                (baseKey && manualTitles[baseKey]) ||
+                (cachedItem && cachedItem.title) ||
+                ''
+            ).replace(/\s+/g, ' ').trim();
+        }
+
+        function setPrintLabelButtonBusy(button, busy) {
+            if (!button) return;
+            if (busy) {
+                if (!button.dataset.originalHtml) button.dataset.originalHtml = button.innerHTML;
+                button.disabled = true;
+                button.innerHTML = '<i class="fas fa-spinner fa-spin"></i><span class="print-label-text">Printing...</span>';
+                return;
+            }
+            button.disabled = false;
+            if (button.dataset.originalHtml) {
+                button.innerHTML = button.dataset.originalHtml;
+                delete button.dataset.originalHtml;
+            }
+        }
+
+        async function printExistingBarcodeLabel(code, button) {
+            const barcode = String(code || '').trim();
+            if (!barcode) return;
+            setPrintLabelButtonBusy(button, true);
+            try {
+                const description = labelDescriptionForCode(barcode);
+                if (window.NoBarcodeLabelFlow && typeof window.NoBarcodeLabelFlow.printExistingLabel === 'function') {
+                    await window.NoBarcodeLabelFlow.printExistingLabel({ barcode, description });
+                } else {
+                    const response = await fetch('/api/printer/print-barcode', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ upc: barcode, item_description: description, quantity: 1 })
+                    });
+                    const data = await response.json().catch(() => ({}));
+                    if (!response.ok || !data.success) throw new Error(data.error || 'Print failed');
+                }
+            } catch (err) {
+                alert('Print failed: ' + ((err && err.message) || 'Unknown error'));
+            } finally {
+                setPrintLabelButtonBusy(button, false);
+            }
+        }
+
+        function showSinglePrintLabelButton(code) {
+            const barcode = String(code || '').trim();
+            if (!barcode) return;
+            if (singlePrintLabelBtn) {
+                singlePrintLabelBtn.dataset.code = barcode;
+                singlePrintLabelBtn.classList.remove('is-visible');
+            }
+            if (singleWarehouseNoteBtn) {
+                singleWarehouseNoteBtn.dataset.code = barcode;
+                singleWarehouseNoteBtn.classList.remove('is-visible');
+            }
+            if (singleGearBtn) {
+                singleGearBtn.dataset.code = barcode;
+                singleGearBtn.style.display = 'inline-flex';
+            }
+            renderSingleBarcodeCard(barcode);
+        }
+
+        function hideSinglePrintLabelButton() {
+            if (singlePrintLabelBtn) {
+                delete singlePrintLabelBtn.dataset.code;
+                singlePrintLabelBtn.classList.remove('is-visible');
+                setPrintLabelButtonBusy(singlePrintLabelBtn, false);
+            }
+            if (singleWarehouseNoteBtn) {
+                delete singleWarehouseNoteBtn.dataset.code;
+                singleWarehouseNoteBtn.classList.remove('is-visible');
+            }
+            if (singleGearBtn) {
+                delete singleGearBtn.dataset.code;
+                singleGearBtn.style.display = 'none';
+            }
+            if (singleBarcodeCard) singleBarcodeCard.classList.remove('is-visible');
+            if (singleBarcodeCode) singleBarcodeCode.textContent = '';
+            if (singleBarcodeTitle) {
+                singleBarcodeTitle.textContent = '';
+                singleBarcodeTitle.style.display = 'none';
+            }
+            if (singleBarcodeNote) {
+                singleBarcodeNote.textContent = '';
+                singleBarcodeNote.style.display = 'none';
+            }
+            if (singleBarcodeMeta) singleBarcodeMeta.innerHTML = '';
+            if (singleGearMenu) singleGearMenu.classList.remove('open');
+        }
+
+        function loadWarehouseNoteMap() {
+            try {
+                const parsed = JSON.parse(sessionStorage.getItem('barcode_warehouse_notes') || '{}');
+                return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+            } catch (_) { return {}; }
+        }
+
+        function saveWarehouseNoteForCode(code, note) {
+            const key = normalizeManualTitleKey(code);
+            if (!key) return;
+            const notes = loadWarehouseNoteMap();
+            const clean = String(note || '').replace(/\s+/g, ' ').trim().slice(0, 2000);
+            if (clean) notes[key] = clean;
+            else delete notes[key];
+            if (Object.keys(notes).length) sessionStorage.setItem('barcode_warehouse_notes', JSON.stringify(notes));
+            else sessionStorage.removeItem('barcode_warehouse_notes');
+        }
+
+        function getWarehouseNoteForCode(code) {
+            const key = normalizeManualTitleKey(code);
+            const notes = loadWarehouseNoteMap();
+            return key ? String(notes[key] || '') : '';
+        }
+
+        function renderSingleBarcodeCard(code) {
+            const barcode = String(code || '').trim();
+            if (!barcode || !singleBarcodeCard) return;
+            const title = titleForBarcodeCode(barcode);
+            const note = getWarehouseNoteForCode(barcode);
+            const suffixInfo = splitScannedBarcode(barcode);
+            const suffix = parseInt(suffixInfo.suffix, 10) || 0;
+            const suffixLabel = suffix > 0 ? `Suffix ${suffix}` : 'Base';
+            if (singleBarcodeCode) {
+                singleBarcodeCode.textContent = barcode;
+            }
+            if (singleBarcodeTitle) {
+                singleBarcodeTitle.textContent = title;
+                singleBarcodeTitle.style.display = title ? 'block' : 'none';
+            }
+            if (singleBarcodeNote) {
+                singleBarcodeNote.textContent = note ? `Warehouse note: ${note}` : '';
+                singleBarcodeNote.style.display = note ? 'block' : 'none';
+            }
+            if (singleBarcodeMeta) {
+                singleBarcodeMeta.innerHTML = `<span>${escapeHtml(suffixLabel)} &middot; Qty ${Math.max(1, pendingSingleQuantity)}</span>`;
+            }
+            singleBarcodeCard.classList.add('is-visible');
+        }
+
+        function editWarehouseNoteForCode(code) {
+            const key = String(code || '').trim();
+            if (!key) return;
+            const next = window.prompt('Warehouse note for this exact item:', getWarehouseNoteForCode(key));
+            if (next === null) return;
+            saveWarehouseNoteForCode(key, next);
+            updateBarcodeList();
+            updatePendingSingleDisplay();
+        }
+        window.editWarehouseNoteForCode = editWarehouseNoteForCode;
+
+        async function editTitleThumbnailForCode(code) {
+            const key = normalizeManualTitleKey(code);
+            if (!key) return false;
+            const manualTitles = loadManualTitleOverrides();
+            let cachedItem = screeningCache.get(key) || null;
+            if (!cachedItem) {
+                try {
+                    cachedItem = await fetchAddItemScreeningSingle(key);
+                } catch (_) {
+                    cachedItem = null;
+                }
+            }
+            const existingTitle = String(manualTitles[key] || (cachedItem && cachedItem.title) || '').trim();
+            const existingImage = String(cachedItem && (cachedItem.image_url || cachedItem.image || cachedItem.thumbnail_url) || '').trim();
+            const result = await openMissingTitleModal(key, {
+                barcode: key,
+                existingTitle,
+                existingNote: getWarehouseNoteForCode(key),
+                missingImage: true,
+                existingImage
+            });
+            if (!result || result.action !== 'save') return false;
+            const title = String(result.title || '').replace(/\s+/g, ' ').trim();
+            if (!title) return false;
+            const warehouseNote = cleanMissingTitleWarehouseNote(result.note || '');
+            if (warehouseNote) {
+                saveWarehouseNoteForCode(key, warehouseNote);
+            }
+            if (result.photoData) {
+                try {
+                    const uploadResult = await uploadMissingTitleThumbnail(key, title, result.photoData);
+                    if (uploadResult && uploadResult.image_url) {
+                        cachedItem = Object.assign({}, cachedItem || {}, { image_url: uploadResult.image_url });
+                    }
+                } catch (err) {
+                    console.error('Thumbnail save failed:', err);
+                    alert('Thumbnail was not saved: ' + (err && err.message ? err.message : 'unknown error'));
+                }
+            }
+            manualTitles[key] = title.slice(0, 200);
+            saveManualTitleOverrides(manualTitles);
+            screeningCache.set(key, Object.assign({}, cachedItem || {}, { title }));
+            updateBarcodeList();
+            updatePendingSingleDisplay();
+            return true;
+        }
+        window.editTitleThumbnailForCode = editTitleThumbnailForCode;
+
+        function closeBarcodeGearMenus() {
+            document.querySelectorAll('.barcode-gear-menu.open').forEach(menu => menu.classList.remove('open'));
+            if (singleGearMenu) singleGearMenu.classList.remove('open');
+        }
+
+        function positionBarcodeGearMenu(menu, trigger) {
+            if (!menu || !trigger) return;
+            menu.style.left = '8px';
+            menu.style.top = '8px';
+            menu.classList.add('open');
+            const triggerRect = trigger.getBoundingClientRect();
+            const menuRect = menu.getBoundingClientRect();
+            const margin = 8;
+            let left = Math.min(window.innerWidth - menuRect.width - margin, Math.max(margin, triggerRect.right - menuRect.width));
+            let top = triggerRect.bottom + margin;
+            if (top + menuRect.height > window.innerHeight - margin) {
+                top = triggerRect.top - menuRect.height - margin;
+            }
+            if (top < margin) top = Math.max(margin, window.innerHeight - menuRect.height - margin);
+            menu.style.left = `${Math.round(left)}px`;
+            menu.style.top = `${Math.round(top)}px`;
+        }
+
+        function toggleBarcodeGearMenu(index, event) {
+            if (event) {
+                event.preventDefault();
+                event.stopPropagation();
+            }
+            const menu = document.querySelector(`.barcode-gear-menu[data-index="${index}"]`);
+            if (!menu) return;
+            const wasOpen = menu.classList.contains('open');
+            closeBarcodeGearMenus();
+            if (!wasOpen) positionBarcodeGearMenu(menu, event && event.currentTarget);
+        }
+        window.closeBarcodeGearMenus = closeBarcodeGearMenus;
+        window.toggleBarcodeGearMenu = toggleBarcodeGearMenu;
+        document.addEventListener('click', closeBarcodeGearMenus);
+
+        function printBarcodeListLabel(index, button) {
+            const item = scannedBarcodeItems[index];
+            const code = barcodeListActualCode(item);
+            return printExistingBarcodeLabel(code, button);
+        }
+        window.printBarcodeListLabel = printBarcodeListLabel;
+
+        if (singlePrintLabelBtn) {
+            singlePrintLabelBtn.addEventListener('click', () => {
+                const code = singlePrintLabelBtn.dataset.code || currentSingleActualCode() || scannedResultInput.value;
+                printExistingBarcodeLabel(code, singlePrintLabelBtn);
+            });
+        }
+        if (singleWarehouseNoteBtn) {
+            singleWarehouseNoteBtn.addEventListener('click', () => {
+                const code = singleWarehouseNoteBtn.dataset.code || currentSingleActualCode() || scannedResultInput.value;
+                editWarehouseNoteForCode(code);
+            });
+        }
+        if (singleGearBtn && singleGearMenu) {
+            singleGearBtn.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                const wasOpen = singleGearMenu.classList.contains('open');
+                closeBarcodeGearMenus();
+                if (!wasOpen) positionBarcodeGearMenu(singleGearMenu, singleGearBtn);
+            });
+            singleGearMenu.querySelectorAll('[data-single-action]').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const action = btn.getAttribute('data-single-action');
+                    if (action === 'print') {
+                        printExistingBarcodeLabel(currentSingleActualCode(), btn);
+                    } else if (action === 'note') {
+                        editWarehouseNoteForCode(currentSingleActualCode());
+                    } else if (action === 'edit-title') {
+                        editTitleThumbnailForCode(currentSingleActualCode());
+                    } else if (action === 'base-plus') {
+                        pendingSingleSuffix = Math.max(1, pendingSingleSuffix + 1);
+                        updatePendingSingleDisplay();
+                    } else if (action === 'base-minus') {
+                        pendingSingleSuffix = Math.max(0, pendingSingleSuffix - 1);
+                        updatePendingSingleDisplay();
+                    } else if (action === 'qty-plus') {
+                        pendingSingleQuantity += 1;
+                        updatePendingSingleDisplay();
+                    } else if (action === 'qty-minus') {
+                        pendingSingleQuantity = Math.max(1, pendingSingleQuantity - 1);
+                        updatePendingSingleDisplay();
+                    }
+                    closeBarcodeGearMenus();
+                });
+            });
+        }
 
         // Macy barcode filtering
         let allowedUPCs = [];
@@ -1082,6 +1644,35 @@
             missingTitleInput.dispatchEvent(new Event('input', { bubbles: true }));
         }
 
+        function cleanMissingTitleWarehouseNote(value) {
+            return String(value || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim().slice(0, 2000);
+        }
+
+        function setMissingTitleNoteVisibility(show) {
+            if (!missingTitleNoteInput) return;
+            missingTitleNoteInput.classList.toggle('is-visible', !!show);
+            if (missingTitleNoteBtn) {
+                missingTitleNoteBtn.textContent = show ? 'Hide note' : '+ note';
+            }
+            if (show) {
+                window.setTimeout(() => {
+                    try { missingTitleNoteInput.focus({ preventScroll: true }); }
+                    catch (_) { try { missingTitleNoteInput.focus(); } catch (__) {} }
+                }, 0);
+            }
+        }
+
+        function resetMissingTitleNoteState(note = '') {
+            const clean = cleanMissingTitleWarehouseNote(note);
+            if (missingTitleNoteInput) {
+                missingTitleNoteInput.value = clean;
+                missingTitleNoteInput.classList.toggle('is-visible', !!clean);
+            }
+            if (missingTitleNoteBtn) {
+                missingTitleNoteBtn.textContent = clean ? 'Hide note' : '+ note';
+            }
+        }
+
         function resetMissingTitlePhotoState() {
             missingTitlePendingPhotoData = '';
             if (missingTitlePhotoInput) {
@@ -1094,6 +1685,17 @@
             if (missingTitlePhotoStatus) {
                 missingTitlePhotoStatus.textContent = 'Optional: capture a thumbnail while this item is already being fixed.';
             }
+        }
+
+        function showExistingMissingTitleThumbnail(imageUrl) {
+            const url = String(imageUrl || '').trim();
+            if (!url || !missingTitlePhotoPreview) return false;
+            missingTitlePhotoPreview.src = url;
+            missingTitlePhotoPreview.style.display = 'block';
+            if (missingTitlePhotoStatus) {
+                missingTitlePhotoStatus.textContent = 'Current thumbnail shown. Taking a new photo will replace it.';
+            }
+            return true;
         }
 
         function setMissingTitlePhotoVisibility(show) {
@@ -1139,6 +1741,7 @@
             missingTitleModalOpen = false;
             missingTitleCurrentIssue = null;
             resetMissingTitlePhotoState();
+            resetMissingTitleNoteState('');
             setMissingTitlePhotoVisibility(false);
             setMissingTitleKeypadVisibility(false);
             setMissingTitleScanPause(false);
@@ -1196,15 +1799,21 @@
             missingTitleCurrentIssue = Object.assign({
                 barcode: normalizeManualTitleKey(code),
                 existingTitle: '',
-                missingImage: false
+                existingNote: '',
+                missingImage: false,
+                existingImage: ''
             }, issue || {});
             const existingTitle = String(missingTitleCurrentIssue.existingTitle || '').replace(/\s+/g, ' ').trim();
+            const existingImage = String(missingTitleCurrentIssue.existingImage || missingTitleCurrentIssue.image_url || '').trim();
+            const existingNote = cleanMissingTitleWarehouseNote(missingTitleCurrentIssue.existingNote || missingTitleCurrentIssue.note || '');
             missingTitleBarcodeText.textContent = formatUpcDisplay(code);
             missingTitleInput.value = existingTitle;
             missingTitleInput.style.borderColor = '#f2c66d';
             missingTitleInput.style.boxShadow = '';
             resetMissingTitlePhotoState();
-            setMissingTitlePhotoVisibility(!!missingTitleCurrentIssue.missingImage);
+            resetMissingTitleNoteState(existingNote);
+            setMissingTitlePhotoVisibility(!!missingTitleCurrentIssue.missingImage || !!existingImage);
+            showExistingMissingTitleThumbnail(existingImage);
             missingTitleInput.readOnly = false;
             setMissingTitleKeypadVisibility(requiresMissingTitleKeyboardTap());
             missingTitleModal.style.display = 'flex';
@@ -1268,18 +1877,22 @@
             const modalResult = await openMissingTitleModal(code, {
                 barcode: key,
                 existingTitle: String(item.title || '').trim(),
+                existingNote: getWarehouseNoteForCode(key),
                 missingImage: Boolean(item.missing_image)
             });
             if (!modalResult || (modalResult.action !== 'skip' && modalResult.action !== 'save')) return false;
 
             if (modalResult.action === 'skip') {
-                skipped[key] = true;
-                saveSkippedManualTitles(skipped);
-                return true;
+                return false;
             }
 
             const value = String((modalResult && modalResult.title) || '').replace(/\s+/g, ' ').trim();
             if (!value) return false;
+            const warehouseNote = cleanMissingTitleWarehouseNote(modalResult.note || '');
+            if (warehouseNote) {
+                saveWarehouseNoteForCode(key, warehouseNote);
+                updatePendingSingleDisplay();
+            }
 
             if (modalResult.photoData) {
                 try {
@@ -1296,7 +1909,7 @@
                 delete skipped[key];
                 saveSkippedManualTitles(skipped);
             }
-            return true;
+            return false;
         }
 
         function clearPendingSingleSubmit() {
@@ -1309,19 +1922,26 @@
         function resetPendingSingleBarcode() {
             pendingSingleBarcode = '';
             pendingSingleSuffix = 0;
+            pendingSingleQuantity = 1;
             document.getElementById('scanned_result').value = '';
             scannedResultInput.style.background = '';
+            hideSinglePrintLabelButton();
         }
 
         function submitBarcodePayload(barcodeString) {
             const payload = String(barcodeString || '').trim();
             if (barcodeEntryState) {
-                const entries = barcodeEntryState.parseEntriesFromString(payload);
+                const existingEntries = barcodeEntryState.loadEntries();
+                const existingPayload = barcodeEntryState.serializeEntries(existingEntries);
+                const entries = existingPayload === payload && existingEntries.length
+                    ? existingEntries
+                    : barcodeEntryState.parseEntriesFromString(payload);
                 if (entries.length) {
                     barcodeEntryState.saveEntries(entries);
                 } else {
                     sessionStorage.removeItem('barcode');
                     sessionStorage.removeItem('barcode_entries');
+                    sessionStorage.removeItem('barcode_warehouse_notes');
                 }
             } else if (payload) {
                 sessionStorage.setItem('barcode', payload);
@@ -1346,8 +1966,11 @@
         function updatePendingSingleDisplay() {
             const finalCode = currentSingleActualCode();
             if (!finalCode) return;
-            document.getElementById('scanned_result').value = finalCode;
+            document.getElementById('scanned_result').value = pendingSingleQuantity > 1
+                ? `${finalCode} x${pendingSingleQuantity}`
+                : finalCode;
             scannedResultInput.style.background = '#e0ffe0';
+            showSinglePrintLabelButton(finalCode);
         }
 
         async function commitPendingSingleBarcode() {
@@ -1357,15 +1980,18 @@
 
             const ready = await ensureScannedBarcodeReadyForAdd(finalCode);
             if (!ready) {
-                resetPendingSingleBarcode();
+                updatePendingSingleDisplay();
                 if (barcodeInput) barcodeInput.focus();
                 return;
             }
 
             if (barcodeEntryState) {
-                barcodeEntryState.saveEntries(
-                    barcodeEntryState.parseEntriesFromString(finalCode)
-                );
+                barcodeEntryState.saveEntries([{
+                    code: splitScannedBarcode(finalCode).base,
+                    suffix: parseInt(splitScannedBarcode(finalCode).suffix, 10) || 0,
+                    quantity: pendingSingleQuantity,
+                    note: getWarehouseNoteForCode(finalCode)
+                }]);
             } else {
                 sessionStorage.setItem('barcode', finalCode);
             }
@@ -1379,7 +2005,7 @@
                 return;
             }
 
-            submitBarcodePayload(finalCode);
+            submitBarcodePayload(Array.from({ length: pendingSingleQuantity }, () => finalCode).join(','));
         }
 
         function queueSingleBarcode(code) {
@@ -1391,6 +2017,7 @@
             } else {
                 pendingSingleBarcode = normalized;
                 pendingSingleSuffix = 0;
+                pendingSingleQuantity = 1;
             }
 
             playBeep();
@@ -1453,7 +2080,7 @@
         }
         const missingTitleCloseBtn = document.getElementById('missingTitleCloseBtn');
         if (missingTitleCloseBtn) {
-            missingTitleCloseBtn.addEventListener('click', () => closeMissingTitleModal({ action: 'skip', title: '' }));
+            missingTitleCloseBtn.addEventListener('click', () => closeMissingTitleModal({ action: 'dismiss', title: '' }));
         }
         if (missingTitleSaveBtn) {
             missingTitleSaveBtn.addEventListener('click', () => {
@@ -1466,7 +2093,17 @@
                     }
                     return;
                 }
-                closeMissingTitleModal({ action: 'save', title: value, photoData: missingTitlePendingPhotoData || '' });
+                closeMissingTitleModal({
+                    action: 'save',
+                    title: value,
+                    note: cleanMissingTitleWarehouseNote(missingTitleNoteInput && missingTitleNoteInput.value),
+                    photoData: missingTitlePendingPhotoData || ''
+                });
+            });
+        }
+        if (missingTitleNoteBtn && missingTitleNoteInput) {
+            missingTitleNoteBtn.addEventListener('click', () => {
+                setMissingTitleNoteVisibility(!missingTitleNoteInput.classList.contains('is-visible'));
             });
         }
         if (missingTitlePhotoBtn && missingTitlePhotoInput) {
@@ -1485,7 +2122,10 @@
                         missingTitlePhotoPreview.style.display = 'block';
                     }
                     if (missingTitlePhotoStatus) {
-                        missingTitlePhotoStatus.textContent = 'Thumbnail ready to save with this title.';
+                        const replacing = missingTitleCurrentIssue && (missingTitleCurrentIssue.existingImage || missingTitleCurrentIssue.image_url);
+                        missingTitlePhotoStatus.textContent = replacing
+                            ? 'New thumbnail ready. Complete will replace the current thumbnail.'
+                            : 'Thumbnail ready to save with this title.';
                     }
                 };
                 reader.onerror = () => {
@@ -1541,9 +2181,35 @@
         }
 
         // Multi-barcode scanning state
-        let scannedBarcodes = [];
+        let scannedBarcodeItems = barcodeEntryState ? barcodeEntryState.loadEntries() : [];
         let autoSubmitTimer = null;
         let autoSubmitCountdown = null;
+
+        function barcodeListActualCode(item) {
+            if (!item) return '';
+            if (barcodeEntryState && typeof barcodeEntryState.actualCode === 'function') {
+                return barcodeEntryState.actualCode(item);
+            }
+            return String(item || '').trim();
+        }
+
+        function barcodeListDisplayCode(item) {
+            const code = barcodeListActualCode(item);
+            return formatUpcDisplay(code);
+        }
+
+        function persistScannedBarcodeItems() {
+            if (barcodeEntryState) {
+                scannedBarcodeItems = barcodeEntryState.saveEntries(scannedBarcodeItems);
+            }
+            return scannedBarcodeItems;
+        }
+
+        function scannedBarcodeTotalCount() {
+            return barcodeEntryState
+                ? barcodeEntryState.totalCount(scannedBarcodeItems)
+                : scannedBarcodeItems.length;
+        }
 
         function getAutoSubmitDelay() {
             // Get timer settings from localStorage (set in misc.html)
@@ -1568,12 +2234,15 @@
                 }
                 return;
             }
-            // Avoid duplicates
-            if (scannedBarcodes.includes(code)) {
+            if (barcodeEntryState) {
+                scannedBarcodeItems = barcodeEntryState.addBaseScan(scannedBarcodeItems, code);
+                persistScannedBarcodeItems();
+            } else if (!scannedBarcodeItems.includes(code)) {
+                scannedBarcodeItems.push(code);
+            } else {
                 playErrorBeep();
                 return;
             }
-            scannedBarcodes.push(code);
             playBeep();
             updateBarcodeList();
             resetAutoSubmitTimer();
@@ -1583,33 +2252,136 @@
             const listEl = document.getElementById('barcodeList');
             if (!listEl) return;
 
-            if (scannedBarcodes.length === 0) {
+            if (scannedBarcodeItems.length === 0) {
                 listEl.innerHTML = '<div style="color:#999; text-align:center; padding:12px;">' + t('no_barcodes_scanned', 'No barcodes scanned yet') + '</div>';
                 return;
             }
 
-            listEl.innerHTML = scannedBarcodes.map((code, idx) => `
-                <div style="display:flex; justify-content:space-between; align-items:center; padding:8px; background:#fff; margin-bottom:4px; border-radius:4px;">
-                    <span style="font-family:monospace; font-weight:600;">${formatUpcDisplay(code)}</span>
-                    <button onclick="removeBarcodeAt(${idx})" style="background:#e74c3c; color:#fff; border:none; padding:4px 8px; border-radius:4px; cursor:pointer;">X</button>
+            listEl.innerHTML = scannedBarcodeItems.map((item, idx) => {
+                const code = barcodeListActualCode(item);
+                const displayCode = barcodeListDisplayCode(item);
+                const qty = barcodeEntryState ? Math.max(1, parseInt(item.quantity, 10) || 1) : 1;
+                const suffix = barcodeEntryState ? Math.max(0, parseInt(item.suffix, 10) || 0) : 0;
+                const note = barcodeEntryState ? String(item.note || '').trim() : getWarehouseNoteForCode(code);
+                const suffixLabel = suffix > 0 ? `Suffix ${suffix}` : 'Base';
+                const rawTitle = titleForBarcodeCode(code);
+                const titleHtml = rawTitle
+                    ? `<span class="barcode-row-title">${escapeHtml(rawTitle)}</span>`
+                    : '';
+                const noteHtml = note
+                    ? `<span class="barcode-row-title">Warehouse note: ${escapeHtml(note)}</span>`
+                    : '';
+                return `
+                <div class="barcode-list-row">
+                    <div class="barcode-row-main">
+                        <span class="barcode-row-code">${escapeHtml(displayCode)}</span>
+                        ${titleHtml}
+                        ${noteHtml}
+                        <div class="barcode-row-meta">
+                            <span>${escapeHtml(suffixLabel)} &middot; Qty ${qty}</span>
+                        </div>
+                    </div>
+                    <div class="barcode-row-actions">
+                        <button type="button" class="barcode-gear-btn" onclick="toggleBarcodeGearMenu(${idx}, event)" title="Item options" aria-label="Item options for ${escapeHtml(displayCode)}">
+                            <i class="fas fa-gear"></i>
+                        </button>
+                        <div class="barcode-gear-menu" data-index="${idx}" onclick="event.stopPropagation()">
+                            <button type="button" onclick="printBarcodeListLabel(${idx}, this); closeBarcodeGearMenus();">
+                                <i class="fas fa-print"></i> Print label
+                            </button>
+                            <button type="button" onclick="editBarcodeListWarehouseNote(${idx}); closeBarcodeGearMenus();">
+                                <i class="fas fa-note-sticky"></i> Add note
+                            </button>
+                            <button type="button" onclick="editBarcodeListTitleThumbnail(${idx}); closeBarcodeGearMenus();">
+                                <i class="fas fa-image"></i> Edit title/thumbnail
+                            </button>
+                            <button type="button" onclick="adjustBarcodeListSuffix(${idx}, 1); closeBarcodeGearMenus();">
+                                Base + <strong>${escapeHtml(suffixLabel)}</strong>
+                            </button>
+                            <button type="button" onclick="adjustBarcodeListSuffix(${idx}, -1); closeBarcodeGearMenus();" ${suffix > 0 ? '' : 'disabled'}>
+                                Base - <strong>${escapeHtml(suffixLabel)}</strong>
+                            </button>
+                            <button type="button" onclick="adjustBarcodeListQuantity(${idx}, 1); closeBarcodeGearMenus();">
+                                Quantity + <strong>${qty}</strong>
+                            </button>
+                            <button type="button" onclick="adjustBarcodeListQuantity(${idx}, -1); closeBarcodeGearMenus();">
+                                Quantity - <strong>${qty}</strong>
+                            </button>
+                            <button type="button" class="danger" onclick="removeBarcodeAt(${idx}); closeBarcodeGearMenus();">
+                                <i class="fas fa-times"></i> Remove one
+                            </button>
+                        </div>
+                    </div>
                 </div>
-            `).join('');
+            `;
+            }).join('');
         }
 
         function removeBarcodeAt(idx) {
-            const removed = scannedBarcodes[idx];
-            scannedBarcodes.splice(idx, 1);
-            const removedKey = normalizeManualTitleKey(removed);
-            if (removedKey && !scannedBarcodes.some(code => normalizeManualTitleKey(code) === removedKey)) {
+            const removed = scannedBarcodeItems[idx];
+            const removedCode = barcodeListActualCode(removed);
+            if (barcodeEntryState) {
+                scannedBarcodeItems = barcodeEntryState.removeOne(scannedBarcodeItems, idx);
+                persistScannedBarcodeItems();
+            } else {
+                scannedBarcodeItems.splice(idx, 1);
+            }
+            const removedKey = normalizeManualTitleKey(removedCode);
+            saveWarehouseNoteForCode(removedKey, '');
+            if (removedKey && !scannedBarcodeItems.some(item => normalizeManualTitleKey(barcodeListActualCode(item)) === removedKey)) {
                 clearPendingManualTitleState(removedKey);
             }
             updateBarcodeList();
-            if (scannedBarcodes.length === 0) {
+            if (scannedBarcodeItems.length === 0) {
                 clearAutoSubmitTimer();
             } else {
                 resetAutoSubmitTimer();
             }
         }
+
+        function adjustBarcodeListSuffix(index, delta) {
+            if (!barcodeEntryState) return;
+            scannedBarcodeItems = delta > 0
+                ? barcodeEntryState.incrementSuffix(scannedBarcodeItems, index)
+                : barcodeEntryState.decrementSuffix(scannedBarcodeItems, index);
+            persistScannedBarcodeItems();
+            updateBarcodeList();
+            resetAutoSubmitTimer();
+        }
+        window.adjustBarcodeListSuffix = adjustBarcodeListSuffix;
+
+        function adjustBarcodeListQuantity(index, delta) {
+            if (!barcodeEntryState || typeof barcodeEntryState.adjustQuantity !== 'function') return;
+            scannedBarcodeItems = barcodeEntryState.adjustQuantity(scannedBarcodeItems, index, delta);
+            persistScannedBarcodeItems();
+            updateBarcodeList();
+            if (scannedBarcodeItems.length === 0) clearAutoSubmitTimer();
+            else resetAutoSubmitTimer();
+        }
+        window.adjustBarcodeListQuantity = adjustBarcodeListQuantity;
+
+        function editBarcodeListWarehouseNote(index) {
+            if (!barcodeEntryState || typeof barcodeEntryState.setNote !== 'function') {
+                editWarehouseNoteForCode(barcodeListActualCode(scannedBarcodeItems[index]));
+                return;
+            }
+            const item = scannedBarcodeItems[index];
+            if (!item) return;
+            const next = window.prompt('Warehouse note for this exact item:', String(item.note || ''));
+            if (next === null) return;
+            scannedBarcodeItems = barcodeEntryState.setNote(scannedBarcodeItems, index, next);
+            persistScannedBarcodeItems();
+            updateBarcodeList();
+            resetAutoSubmitTimer();
+        }
+        window.editBarcodeListWarehouseNote = editBarcodeListWarehouseNote;
+
+        function editBarcodeListTitleThumbnail(index) {
+            const item = scannedBarcodeItems[index];
+            const code = barcodeListActualCode(item);
+            editTitleThumbnailForCode(code);
+        }
+        window.editBarcodeListTitleThumbnail = editBarcodeListTitleThumbnail;
 
         function resetAutoSubmitTimer() {
             clearAutoSubmitTimer();
@@ -1647,8 +2419,13 @@
 
         function submitBarcodes() {
             clearAutoSubmitTimer();
-            if (scannedBarcodes.length === 0) return;
-            const barcodeString = scannedBarcodes.join(',');
+            if (scannedBarcodeItems.length === 0) return;
+            if (barcodeEntryState) {
+                scannedBarcodeItems = barcodeEntryState.saveEntries(scannedBarcodeItems);
+            }
+            const barcodeString = barcodeEntryState
+                ? barcodeEntryState.serializeEntries(scannedBarcodeItems)
+                : scannedBarcodeItems.join(',');
             submitBarcodePayload(barcodeString);
         }
 
@@ -1668,7 +2445,8 @@
                 container.style.display = 'none';
                 resultInput.placeholder = t('barcode_will_appear', 'BARCODE will appear here');
             }
-            scannedBarcodes = [];
+            scannedBarcodeItems = [];
+            if (barcodeEntryState) barcodeEntryState.saveEntries([]);
             clearAutoSubmitTimer();
         }
 
@@ -1689,6 +2467,18 @@
                 },
                 onClose: () => {
                     if (typeof setMissingTitleScanPause === 'function') setMissingTitleScanPause(false);
+                },
+                getReservedBarcodes: () => {
+                    const reserved = [];
+                    const singleCode = currentSingleActualCode();
+                    if (singleCode) reserved.push(singleCode);
+                    if (Array.isArray(scannedBarcodeItems)) {
+                        scannedBarcodeItems.forEach(item => {
+                            const code = barcodeListActualCode(item);
+                            if (code) reserved.push(code);
+                        });
+                    }
+                    return reserved;
                 },
                 onUseBarcode: (barcode) => {
                     queueBarcodeScan(barcode);
@@ -1823,6 +2613,7 @@
         sessionStorage.removeItem('item_position');
         sessionStorage.removeItem('barcode');
         sessionStorage.removeItem('barcode_entries');
+        sessionStorage.removeItem('barcode_warehouse_notes');
         sessionStorage.removeItem('additem_manual_titles');
         sessionStorage.removeItem('additem_manual_title_skips');
         sessionStorage.removeItem('pictureposition_path');

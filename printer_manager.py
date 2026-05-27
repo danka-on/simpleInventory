@@ -910,7 +910,24 @@ class PrinterManager:
             barcode_font_px = max(10, round(barcode_font_size_mm * px_per_mm))
             block_gap_px = max(2, round(1.4 * px_per_mm))
             text_gap_px = max(1, round(0.45 * px_per_mm))
-            is_numeric_standard = barcode_value.isdigit() and len(barcode_value) in (8, 12, 13)
+            def _upc_a_checksum_matches(value):
+                if not (value.isdigit() and len(value) == 12):
+                    return False
+                digits = [int(ch) for ch in value]
+                check = (10 - (((sum(digits[0:11:2]) * 3) + sum(digits[1:10:2])) % 10)) % 10
+                return check == digits[11]
+
+            def _ean_checksum_matches(value):
+                if not (value.isdigit() and len(value) in (8, 13)):
+                    return False
+                digits = [int(ch) for ch in value]
+                body = digits[:-1]
+                if len(value) == 8:
+                    weighted = sum((3 if idx % 2 == 0 else 1) * digit for idx, digit in enumerate(body))
+                else:
+                    weighted = sum((1 if idx % 2 == 0 else 3) * digit for idx, digit in enumerate(body))
+                check = (10 - (weighted % 10)) % 10
+                return check == digits[-1]
 
             def _crop_to_ink(image):
                 ink_box = ImageOps.invert(image.convert('L')).getbbox()
@@ -956,13 +973,16 @@ class PrinterManager:
                 return _crop_to_ink(img).convert('RGB')
 
             def _render_barcode_only():
-                if is_numeric_standard and len(clean_upc) == 12:
+                # Generated 777/custom labels are exact inventory identifiers, not UPC-A
+                # check-digit payloads. If a numeric code does not have a valid standard
+                # checksum, use Code128 so the scannable bars match the printed text.
+                if len(clean_upc) == 12 and _upc_a_checksum_matches(clean_upc):
                     barcode_class = barcode.get_barcode_class('upc')
                     barcode_payload = clean_upc
-                elif is_numeric_standard and len(clean_upc) == 13:
+                elif len(clean_upc) == 13 and _ean_checksum_matches(clean_upc):
                     barcode_class = barcode.get_barcode_class('ean13')
                     barcode_payload = clean_upc
-                elif is_numeric_standard and len(clean_upc) == 8:
+                elif len(clean_upc) == 8 and _ean_checksum_matches(clean_upc):
                     barcode_class = barcode.get_barcode_class('ean8')
                     barcode_payload = clean_upc
                 else:

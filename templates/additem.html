@@ -101,6 +101,7 @@
             align-items: center;
             gap: 10px;
             flex-shrink: 0;
+            position: relative;
         }
         .suffix-pill {
             display: flex;
@@ -149,6 +150,64 @@
             color: #fff;
             font-size: 0.95em;
             padding: 0;
+        }
+        .item-gear-btn {
+            width: 38px;
+            height: 38px;
+            border: none;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.24);
+            color: #fff;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1rem;
+            margin: 0;
+            padding: 0;
+        }
+        .item-gear-menu {
+            display: none;
+            position: fixed;
+            min-width: 230px;
+            max-width: min(280px, calc(100vw - 16px));
+            background: #fff;
+            color: #17202a;
+            border: 1px solid rgba(15,23,42,0.12);
+            border-radius: 8px;
+            box-shadow: 0 12px 28px rgba(15,23,42,0.2);
+            padding: 8px;
+            z-index: 100001;
+        }
+        .item-gear-menu.open {
+            display: block;
+        }
+        .item-gear-menu button {
+            width: 100%;
+            border: none;
+            background: transparent;
+            color: #17202a;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 9px 10px;
+            border-radius: 6px;
+            font-size: 0.94rem;
+            font-weight: 700;
+            margin: 0;
+            text-align: left;
+        }
+        .item-gear-menu button:hover {
+            background: #eef2f7;
+        }
+        .item-gear-menu button:disabled {
+            color: #94a3b8;
+            cursor: default;
+        }
+        .item-gear-menu button.danger {
+            color: #b91c1c;
         }
         .barcode-entry-manual-title {
             font-size: 0.78em;
@@ -294,6 +353,7 @@
         <input type="hidden" name="item_position" id="form_position" value="">
         <input type="hidden" name="pictureposition" id="form_pictureposition" value="">
         <input type="hidden" name="title_overrides" id="form_title_overrides" value="">
+        <input type="hidden" name="warehouse_notes" id="form_warehouse_notes" value="">
         <div style="display: flex; flex-direction: column; align-items: center; width: 100%; max-width: 350px; margin: 0 auto; gap: 0;">
             <!-- Timer display -->
             <div id="autoSubmitTimer" style="font-size:1.5em; color:#1976d2; margin-bottom: 12px; display:none;"></div>
@@ -315,7 +375,7 @@
             </div>
         </div>
     </form>
-    <script src="/static/barcode-entry-state.js?v=20260420a"></script>
+    <script src="/static/barcode-entry-state.js?v=20260505a"></script>
     <script>
     const barcodeEntryState = window.BarcodeEntryState;
     const MANUAL_TITLE_STORAGE_KEY = 'additem_manual_titles';
@@ -479,6 +539,26 @@
         return sessionStorage.getItem('barcode') || '';
     }
 
+    function getWarehouseNotesPayload() {
+        const payload = {};
+        getBarcodeEntries().forEach(entry => {
+            const note = String(entry && entry.note || '').replace(/\s+/g, ' ').trim();
+            const key = normalizeManualTitleKey(barcodeEntryActualCode(entry));
+            if (key && note) payload[key] = note.slice(0, 2000);
+        });
+        try {
+            const stored = JSON.parse(sessionStorage.getItem('barcode_warehouse_notes') || '{}');
+            if (stored && typeof stored === 'object' && !Array.isArray(stored)) {
+                Object.entries(stored).forEach(([rawKey, rawNote]) => {
+                    const key = normalizeManualTitleKey(rawKey);
+                    const note = String(rawNote || '').replace(/\s+/g, ' ').trim();
+                    if (key && note) payload[key] = note.slice(0, 2000);
+                });
+            }
+        } catch (_) {}
+        return payload;
+    }
+
     function syncAddItemFormFields() {
         const itemPosition = sessionStorage.getItem('item_position') || '';
         const picturePosition = sessionStorage.getItem('pictureposition_path') || '';
@@ -488,6 +568,10 @@
         document.getElementById('form_pictureposition').value = picturePosition;
         document.getElementById('form_title_overrides').value = Object.keys(titleOverrides).length
             ? JSON.stringify(titleOverrides)
+            : '';
+        const warehouseNotes = getWarehouseNotesPayload();
+        document.getElementById('form_warehouse_notes').value = Object.keys(warehouseNotes).length
+            ? JSON.stringify(warehouseNotes)
             : '';
     }
 
@@ -526,22 +610,46 @@
             const manualTitleHtml = manualTitle
                 ? `<div class="barcode-entry-manual-title">Warehouse title: ${escapeHtml(manualTitle)}</div>`
                 : '';
+            const noteText = String(item.note || '').trim();
+            const noteHtml = noteText
+                ? `<div class="barcode-entry-manual-title">Warehouse note: ${escapeHtml(noteText)}</div>`
+                : '';
+            const lowerSuffixDisabled = item.suffix <= 0;
             return `
                 <div class="barcode-entry-row">
                     <div class="barcode-entry-main">
                         <div class="barcode-entry-code">${escapeHtml(displayCode)}</div>
                         <div class="barcode-entry-meta">${escapeHtml(metaText)}</div>
                         ${manualTitleHtml}
+                        ${noteHtml}
                     </div>
                     <div class="barcode-entry-actions">
-                        <div class="suffix-pill">
-                            <button type="button" onclick="adjustAddItemSuffix(${index}, -1)" ${item.suffix > 0 ? '' : 'disabled'}>-</button>
-                            <span>${escapeHtml(suffixLabel)}</span>
-                            <button type="button" onclick="adjustAddItemSuffix(${index}, 1)">+</button>
-                        </div>
-                        <button type="button" class="barcode-remove-btn" onclick="removeAddItemBarcode(${index})" title="Remove one">
-                            <i class="fas fa-times"></i>
+                        <button type="button" class="item-gear-btn" onclick="toggleAddItemGearMenu(${index}, event)" title="Item options" aria-label="Item options">
+                            <i class="fas fa-gear"></i>
                         </button>
+                        <div class="item-gear-menu" data-index="${index}" onclick="event.stopPropagation()">
+                            <button type="button" onclick="printAddItemLabel(${index}, this); closeAddItemGearMenus();">
+                                <span><i class="fas fa-print"></i> Print label</span>
+                            </button>
+                            <button type="button" onclick="editAddItemWarehouseNote(${index}); closeAddItemGearMenus();">
+                                <span><i class="fas fa-note-sticky"></i> Add note</span>
+                            </button>
+                            <button type="button" onclick="adjustAddItemSuffix(${index}, 1); closeAddItemGearMenus();">
+                                <span>Base +</span><strong>${escapeHtml(suffixLabel)}</strong>
+                            </button>
+                            <button type="button" onclick="adjustAddItemSuffix(${index}, -1); closeAddItemGearMenus();" ${lowerSuffixDisabled ? 'disabled' : ''}>
+                                <span>Base -</span><strong>${escapeHtml(suffixLabel)}</strong>
+                            </button>
+                            <button type="button" onclick="adjustAddItemQuantity(${index}, 1); closeAddItemGearMenus();">
+                                <span>Quantity +</span><strong>${itemQty}</strong>
+                            </button>
+                            <button type="button" onclick="adjustAddItemQuantity(${index}, -1); closeAddItemGearMenus();">
+                                <span>Quantity -</span><strong>${itemQty}</strong>
+                            </button>
+                            <button type="button" class="danger" onclick="removeAddItemBarcode(${index}); closeAddItemGearMenus();">
+                                <span><i class="fas fa-times"></i> Remove one</span>
+                            </button>
+                        </div>
                     </div>
                 </div>
             `;
@@ -629,6 +737,11 @@
         persistBarcodeEntries(nextEntries);
     };
 
+    window.adjustAddItemQuantity = function(index, delta) {
+        if (!barcodeEntryState || typeof barcodeEntryState.adjustQuantity !== 'function') return;
+        persistBarcodeEntries(barcodeEntryState.adjustQuantity(getBarcodeEntries(), index, delta));
+    };
+
     window.removeAddItemBarcode = function(index) {
         if (!barcodeEntryState) return;
         const entries = getBarcodeEntries();
@@ -640,6 +753,76 @@
             clearPendingManualTitleState(removedKey);
         }
     };
+
+    window.editAddItemWarehouseNote = function(index) {
+        const entries = getBarcodeEntries();
+        const entry = entries[index];
+        if (!entry || !barcodeEntryState || typeof barcodeEntryState.setNote !== 'function') return;
+        const current = String(entry.note || '');
+        const next = window.prompt('Warehouse note for this exact item:', current);
+        if (next === null) return;
+        persistBarcodeEntries(barcodeEntryState.setNote(entries, index, next));
+    };
+
+    window.closeAddItemGearMenus = function() {
+        document.querySelectorAll('.item-gear-menu.open').forEach(menu => menu.classList.remove('open'));
+    };
+
+    function positionAddItemGearMenu(menu, trigger) {
+        if (!menu || !trigger) return;
+        menu.style.left = '8px';
+        menu.style.top = '8px';
+        menu.classList.add('open');
+        const triggerRect = trigger.getBoundingClientRect();
+        const menuRect = menu.getBoundingClientRect();
+        const margin = 8;
+        let left = Math.min(window.innerWidth - menuRect.width - margin, Math.max(margin, triggerRect.right - menuRect.width));
+        let top = triggerRect.bottom + margin;
+        if (top + menuRect.height > window.innerHeight - margin) {
+            top = triggerRect.top - menuRect.height - margin;
+        }
+        if (top < margin) top = Math.max(margin, window.innerHeight - menuRect.height - margin);
+        menu.style.left = `${Math.round(left)}px`;
+        menu.style.top = `${Math.round(top)}px`;
+    }
+
+    window.toggleAddItemGearMenu = function(index, event) {
+        if (event) {
+            event.preventDefault();
+            event.stopPropagation();
+        }
+        const menu = document.querySelector(`.item-gear-menu[data-index="${index}"]`);
+        if (!menu) return;
+        const wasOpen = menu.classList.contains('open');
+        closeAddItemGearMenus();
+        if (!wasOpen) positionAddItemGearMenu(menu, event && event.currentTarget);
+    };
+
+    window.printAddItemLabel = async function(index, button) {
+        const entry = getBarcodeEntries()[index];
+        const barcode = barcodeEntryActualCode(entry);
+        if (!barcode) return;
+        if (button) button.disabled = true;
+        try {
+            const response = await fetch('/api/printer/print-barcode', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    upc: barcode,
+                    item_description: getManualTitleOverride(barcode) || 'Warehouse item',
+                    quantity: 1
+                })
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok || !data.success) throw new Error(data.error || 'Print failed');
+        } catch (err) {
+            alert('Print failed: ' + ((err && err.message) || 'Unknown error'));
+        } finally {
+            if (button) button.disabled = false;
+        }
+    };
+
+    document.addEventListener('click', closeAddItemGearMenus);
 
     function getScreeningBarcodes() {
         const seen = new Set();
@@ -909,8 +1092,25 @@
             if (res.ok) {
                 const data = await res.json().catch(() => null);
                 if (data && data.success) {
+                    const labels = Array.isArray(data.labels_to_print) ? data.labels_to_print : [];
+                    for (const label of labels) {
+                        try {
+                            await fetch('/api/printer/print-barcode', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    upc: label.barcode,
+                                    item_description: label.description || 'Warehouse item',
+                                    quantity: 1
+                                })
+                            });
+                        } catch (printErr) {
+                            console.error('Warehouse note label print failed:', printErr);
+                        }
+                    }
                     sessionStorage.removeItem('barcode');
                     sessionStorage.removeItem('barcode_entries');
+                    sessionStorage.removeItem('barcode_warehouse_notes');
                     sessionStorage.removeItem('additem_manual_titles');
                     sessionStorage.removeItem('additem_manual_title_skips');
                     sessionStorage.removeItem('item_position');
@@ -1088,6 +1288,7 @@
         sessionStorage.removeItem('item_position');
         sessionStorage.removeItem('barcode');
         sessionStorage.removeItem('barcode_entries');
+        sessionStorage.removeItem('barcode_warehouse_notes');
         sessionStorage.removeItem('additem_manual_titles');
         sessionStorage.removeItem('additem_manual_title_skips');
         sessionStorage.removeItem('pictureposition_path');
@@ -1104,6 +1305,7 @@
         sessionStorage.removeItem('item_position');
         sessionStorage.removeItem('barcode');
         sessionStorage.removeItem('barcode_entries');
+        sessionStorage.removeItem('barcode_warehouse_notes');
         sessionStorage.removeItem('additem_manual_titles');
         sessionStorage.removeItem('additem_manual_title_skips');
         sessionStorage.removeItem('pictureposition_path');

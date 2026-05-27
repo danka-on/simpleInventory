@@ -453,7 +453,7 @@ def createEbayStoreDB():
         except sqlite3.Error as e:
             print("something went wrong with table ", e)
 
-def addToSearchRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITION=None, TITLE_OVERRIDE=None):
+def addToSearchRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITION=None, TITLE_OVERRIDE=None, WAREHOUSE_NOTE=None):
     """Add item directly to searchRack.db with enrichment from ebayStore.db and bol.db"""
     # Validate barcode and position before doing any DB work
     if not BARCODE or not str(BARCODE).strip():
@@ -508,6 +508,7 @@ def addToSearchRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITI
     position_norm = str(ITEM_POSITION).strip()
     has_picture = PICTUREPOSITION and str(PICTUREPOSITION).strip()
     has_suffix = '-' in barcode_norm
+    warehouse_note = str(WAREHOUSE_NOTE or '').replace('\r\n', '\n').replace('\r', '\n').strip()[:2000]
 
     with connect_db('searchRack.db') as conn:
         cursor = conn.cursor()
@@ -532,6 +533,8 @@ def addToSearchRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITI
                     cursor.execute('ALTER TABLE SEARCHRACK ADD COLUMN IMAGE TEXT')
                 if 'CUSTOM_TITLE' not in cols:
                     cursor.execute('ALTER TABLE SEARCHRACK ADD COLUMN CUSTOM_TITLE INTEGER DEFAULT 0')
+                if 'WAREHOUSE_NOTE' not in cols:
+                    cursor.execute('ALTER TABLE SEARCHRACK ADD COLUMN WAREHOUSE_NOTE TEXT DEFAULT ""')
                 conn.commit()
             except sqlite3.Error:
                 pass
@@ -546,7 +549,8 @@ def addToSearchRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITI
                     WHERE TRIM(BARCODE) = ? COLLATE NOCASE
                     AND TRIM(ITEM_POSITION) = ? COLLATE NOCASE
                     AND (PICTUREPOSITION IS NULL OR TRIM(PICTUREPOSITION) = '')
-                """, (barcode_norm, position_norm))
+                    AND TRIM(COALESCE(WAREHOUSE_NOTE, '')) = ?
+                """, (barcode_norm, position_norm, warehouse_note))
                 existing_same_location = cursor.fetchone()
             elif has_suffix:
                 cursor.execute("""
@@ -554,7 +558,8 @@ def addToSearchRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITI
                     WHERE TRIM(BARCODE) = ? COLLATE NOCASE
                     AND TRIM(ITEM_POSITION) = ? COLLATE NOCASE
                     AND TRIM(COALESCE(PICTUREPOSITION, '')) = ? COLLATE NOCASE
-                """, (barcode_norm, position_norm, str(PICTUREPOSITION).strip()))
+                    AND TRIM(COALESCE(WAREHOUSE_NOTE, '')) = ?
+                """, (barcode_norm, position_norm, str(PICTUREPOSITION).strip(), warehouse_note))
                 existing_same_location = cursor.fetchone()
 
             now_iso = datetime.datetime.now().isoformat()
@@ -570,17 +575,18 @@ def addToSearchRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITI
                         ITEMID = COALESCE(?, ITEMID),
                         IMAGE = COALESCE(?, IMAGE),
                         CUSTOM_TITLE = CASE WHEN ? = 1 THEN 1 ELSE COALESCE(CUSTOM_TITLE, 0) END,
+                        WAREHOUSE_NOTE = CASE WHEN ? != '' THEN ? ELSE COALESCE(WAREHOUSE_NOTE, '') END,
                         CREATED_AT = ?
                     WHERE ID = ?
-                """, (new_qty, title, itemid, image, custom_title, now_iso, existing_id))
+                """, (new_qty, title, itemid, image, custom_title, warehouse_note, warehouse_note, now_iso, existing_id))
                 action = f"incremented quantity to {new_qty} for barcode={barcode_norm}, position={position_norm}"
 
                 _log_rack_history(barcode_norm, title, 1, existing_id, existing_qty, new_qty, 'add_to_shelf', position_norm)
             else:
                 cursor.execute("""
-                    INSERT INTO SEARCHRACK (TITLE, BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION, ITEMID, QUANTITY, IMAGE, CUSTOM_TITLE, CREATED_AT)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (title, barcode_norm, position_norm, IMAGES, PICTUREPOSITION, itemid, 1, image, custom_title, now_iso))
+                    INSERT INTO SEARCHRACK (TITLE, BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION, ITEMID, QUANTITY, IMAGE, CUSTOM_TITLE, WAREHOUSE_NOTE, CREATED_AT)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (title, barcode_norm, position_norm, IMAGES, PICTUREPOSITION, itemid, 1, image, custom_title, warehouse_note, now_iso))
                 new_id = cursor.lastrowid
                 if has_picture:
                     action = f"added new picture position entry (always unique): barcode={barcode_norm}, picture={PICTUREPOSITION}"
