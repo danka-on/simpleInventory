@@ -284,7 +284,7 @@ def require_debug_mode(f):
     return decorated
 
 def _ensure_removed_items_table(cur):
-    """Create removed_items table if it doesn't exist. Call with an active cursor."""
+    """Create/migrate the durable rack-history table."""
     cur.execute('''
         CREATE TABLE IF NOT EXISTS removed_items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -298,21 +298,1137 @@ def _ensure_removed_items_table(cur):
             new_quantity INTEGER,
             removal_type TEXT,
             item_position TEXT,
-            undone_at TEXT
+            undone_at TEXT,
+            event_id TEXT,
+            source_row_json TEXT,
+            result_row_json TEXT,
+            from_position TEXT,
+            to_position TEXT,
+            inventory_row_deleted INTEGER DEFAULT 0,
+            event_status TEXT DEFAULT 'applied',
+            applied_at TEXT
         )
     ''')
-    # Migration: add undone_at column to existing tables that predate this field.
+    cur.execute("PRAGMA table_info(removed_items)")
+    existing = {str(row[1]).lower() for row in cur.fetchall()}
+    migrations = {
+        'order_id': 'TEXT',
+        'barcode': 'TEXT',
+        'title': 'TEXT',
+        'quantity_removed': 'INTEGER',
+        'removed_at': 'TEXT',
+        'searchrack_id': 'INTEGER',
+        'old_quantity': 'INTEGER',
+        'new_quantity': 'INTEGER',
+        'removal_type': 'TEXT',
+        'item_position': 'TEXT',
+        'undone_at': 'TEXT',
+        'event_id': 'TEXT',
+        'source_row_json': 'TEXT',
+        'result_row_json': 'TEXT',
+        'from_position': 'TEXT',
+        'to_position': 'TEXT',
+        'inventory_row_deleted': 'INTEGER DEFAULT 0',
+        'event_status': "TEXT DEFAULT 'applied'",
+        'applied_at': 'TEXT',
+    }
+    for column, definition in migrations.items():
+        if column not in existing:
+            cur.execute(f'ALTER TABLE removed_items ADD COLUMN "{column}" {definition}')
+
+    cur.execute('''
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_removed_items_event_id
+        ON removed_items(event_id)
+        WHERE event_id IS NOT NULL AND event_id != ''
+    ''')
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_removed_items_barcode ON removed_items(barcode)')
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_removed_items_searchrack_id ON removed_items(searchrack_id)')
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_removed_items_position ON removed_items(item_position)')
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_removed_items_removed_at ON removed_items(removed_at)')
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_removed_items_order_id ON removed_items(order_id)')
+
+
+def _ensure_legacy_removed_table(cur):
+    """Keep the retired removal log linked to its authoritative detailed event."""
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS removed (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT,
+            barcode TEXT,
+            qty INTEGER,
+            time_removed TEXT,
+            undone_at TEXT,
+            detail_history_id INTEGER,
+            source_location TEXT
+        )
+    ''')
+    cur.execute('PRAGMA table_info(removed)')
+    existing = {str(row[1]).lower() for row in cur.fetchall()}
+    if 'undone_at' not in existing:
+        cur.execute('ALTER TABLE removed ADD COLUMN undone_at TEXT')
+    if 'detail_history_id' not in existing:
+        cur.execute('ALTER TABLE removed ADD COLUMN detail_history_id INTEGER')
+    if 'source_location' not in existing:
+        cur.execute('ALTER TABLE removed ADD COLUMN source_location TEXT')
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_removed_detail_history_id ON removed(detail_history_id)')
+
+
+def _sqlite_ident(name):
+    return '"' + str(name).replace('"', '""') + '"'
+
+
+def _row_casefold_dict(row):
+    if row is None:
+        return {}
+    data = dict(row) if not isinstance(row, dict) else dict(row)
+    return {str(key).lower(): value for key, value in data.items()}
+
+
+def _searchrack_snapshot_location(snapshot):
+    data = _row_casefold_dict(snapshot)
+    item_position = str(data.get('item_position') or data.get('itemposition') or data.get('position') or '').strip()
+    picture_position = str(data.get('pictureposition') or data.get('picture_position') or '').strip()
+    if picture_position and item_position.lower() in ('', 'picture'):
+        return picture_position
+    return item_position or picture_position
+
+
+def _searchrack_snapshot_value(snapshot, *names, default=''):
+    data = _row_casefold_dict(snapshot)
+    for name in names:
+        value = data.get(str(name).lower())
+        if value is not None:
+            return value
+    return default
+
+
+def _ensure_searchrack_history_outbox(cur):
+    """Outbox lives beside SEARCHRACK so its snapshot and mutation are one WAL transaction."""
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS searchrack_history_outbox (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_id TEXT NOT NULL UNIQUE,
+            event_type TEXT NOT NULL,
+            captured_at TEXT NOT NULL,
+            searchrack_id INTEGER,
+            barcode TEXT,
+            title TEXT,
+            from_position TEXT,
+            to_position TEXT,
+            old_quantity INTEGER,
+            new_quantity INTEGER,
+            source_row_json TEXT,
+            result_row_json TEXT,
+            processed_at TEXT,
+            history_id INTEGER,
+            last_error TEXT
+        )
+    ''')
+    cur.execute('''
+        CREATE INDEX IF NOT EXISTS idx_searchrack_history_outbox_pending
+        ON searchrack_history_outbox(processed_at, id)
+    ''')
+
+
+def _ensure_searchrack_undo_claims(cur):
+    """Idempotency claims committed in the same transaction as inventory restoration."""
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS searchrack_undo_claims (
+            history_source TEXT NOT NULL,
+            history_id INTEGER NOT NULL,
+            claimed_at TEXT NOT NULL,
+            searchrack_id INTEGER,
+            restore_quantity INTEGER NOT NULL,
+            old_quantity INTEGER,
+            new_quantity INTEGER,
+            recreated INTEGER DEFAULT 0,
+            outbox_event_id TEXT,
+            PRIMARY KEY (history_source, history_id)
+        )
+    ''')
+    cur.execute('PRAGMA table_info(searchrack_undo_claims)')
+    existing = {str(row[1]).lower() for row in cur.fetchall()}
+    if 'outbox_event_id' not in existing:
+        cur.execute('ALTER TABLE searchrack_undo_claims ADD COLUMN outbox_event_id TEXT')
+
+
+def _searchrack_trigger_value(prefix, column, fallback='NULL'):
+    return f'{prefix}.{_sqlite_ident(column)}' if column else fallback
+
+
+def _searchrack_trigger_location(prefix, pos_col, pic_col):
+    pos = _searchrack_trigger_value(prefix, pos_col, "''")
+    pic = _searchrack_trigger_value(prefix, pic_col, "''")
+    return f'''(
+        CASE
+            WHEN LOWER(TRIM(COALESCE({pos}, ''))) IN ('', 'picture')
+                 AND TRIM(COALESCE({pic}, '')) != ''
+            THEN TRIM(COALESCE({pic}, ''))
+            ELSE COALESCE(NULLIF(TRIM(COALESCE({pos}, '')), ''), TRIM(COALESCE({pic}, '')), '')
+        END
+    )'''
+
+
+def _searchrack_trigger_snapshot(prefix, columns):
+    pairs = []
+    for column in columns:
+        label = "'" + str(column).replace("'", "''") + "'"
+        pairs.extend([label, f'{prefix}.{_sqlite_ident(column)}'])
+    return 'json_object(' + ', '.join(pairs) + ')'
+
+
+def _searchrack_trigger_integral_quantity(value_sql):
+    """SQLite expression accepting only integer-valued quantities, including legacy digit text."""
+    text_sql = f'TRIM(CAST({value_sql} AS TEXT))'
+    return f'''(
+        CASE
+            WHEN typeof({value_sql}) = 'integer' THEN 1
+            WHEN typeof({value_sql}) = 'real'
+                 AND {value_sql} = CAST({value_sql} AS INTEGER) THEN 1
+            WHEN typeof({value_sql}) = 'text'
+                 AND {text_sql} != ''
+                 AND (
+                     {text_sql} NOT GLOB '*[^0-9]*'
+                     OR (
+                         SUBSTR({text_sql}, 1, 1) IN ('-', '+')
+                         AND LENGTH({text_sql}) > 1
+                         AND SUBSTR({text_sql}, 2) NOT GLOB '*[^0-9]*'
+                     )
+                 ) THEN 1
+            ELSE 0
+        END
+    )'''
+
+
+def _install_searchrack_history_guard(conn):
+    """Install persistent triggers that prevent non-positive rows and capture every stock/location change."""
+    cur = conn.cursor()
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND LOWER(name)='searchrack'")
+    if not cur.fetchone():
+        return {'installed': False, 'reason': 'SEARCHRACK table not found'}
+
+    cur.execute("PRAGMA table_info('SEARCHRACK')")
+    columns = [row[1] for row in cur.fetchall()]
+    lower = {str(column).lower(): column for column in columns}
+    qty_col = lower.get('quantity') or lower.get('qty')
+    if not qty_col:
+        return {'installed': False, 'reason': 'SEARCHRACK quantity column not found'}
+
+    id_col = lower.get('id')
+    barcode_col = lower.get('barcode') or lower.get('upc')
+    title_col = lower.get('title')
+    pos_col = lower.get('item_position') or lower.get('itemposition') or lower.get('position')
+    pic_col = lower.get('pictureposition') or lower.get('picture_position')
+    _ensure_searchrack_history_outbox(cur)
+    _ensure_searchrack_undo_claims(cur)
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS searchrack_history_guard_meta (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )
+    ''')
+    conn.commit()
+
+    qty_new = _searchrack_trigger_value('NEW', qty_col, '0')
+    qty_old = _searchrack_trigger_value('OLD', qty_col, '0')
+    row_id_new = _searchrack_trigger_value('NEW', id_col, 'NEW.rowid')
+    row_id_old = _searchrack_trigger_value('OLD', id_col, 'OLD.rowid')
+    barcode_new = _searchrack_trigger_value('NEW', barcode_col, "''")
+    barcode_old = _searchrack_trigger_value('OLD', barcode_col, "''")
+    title_new = _searchrack_trigger_value('NEW', title_col, "''")
+    title_old = _searchrack_trigger_value('OLD', title_col, "''")
+    from_location = _searchrack_trigger_location('OLD', pos_col, pic_col)
+    to_location = _searchrack_trigger_location('NEW', pos_col, pic_col)
+    old_snapshot = _searchrack_trigger_snapshot('OLD', columns)
+    new_snapshot = _searchrack_trigger_snapshot('NEW', columns)
+
+    watched_columns = [qty_col]
+    for column in (pos_col, pic_col):
+        if column and column not in watched_columns:
+            watched_columns.append(column)
+    watched_sql = ', '.join(_sqlite_ident(column) for column in watched_columns)
+    changed_checks = [f'COALESCE(CAST({qty_new} AS INTEGER), 0) != COALESCE(CAST({qty_old} AS INTEGER), 0)']
+    if pos_col:
+        pos_new = _searchrack_trigger_value('NEW', pos_col, "''")
+        pos_old = _searchrack_trigger_value('OLD', pos_col, "''")
+        changed_checks.append(
+            f"TRIM(COALESCE({pos_new}, '')) != TRIM(COALESCE({pos_old}, ''))"
+        )
+    if pic_col:
+        pic_new = _searchrack_trigger_value('NEW', pic_col, "''")
+        pic_old = _searchrack_trigger_value('OLD', pic_col, "''")
+        changed_checks.append(
+            f"TRIM(COALESCE({pic_new}, '')) != TRIM(COALESCE({pic_old}, ''))"
+        )
+    changed_when = ' OR '.join(changed_checks)
+    integral_new = _searchrack_trigger_integral_quantity(qty_new)
+
+    validate_insert_sql = f'''
+        CREATE TRIGGER trg_searchrack_quantity_validate_insert_v3
+        BEFORE INSERT ON SEARCHRACK
+        WHEN {integral_new} = 0
+        BEGIN
+            SELECT RAISE(ABORT, 'SEARCHRACK quantity must be a finite whole number');
+        END
+    '''
+    validate_update_sql = f'''
+        CREATE TRIGGER trg_searchrack_quantity_validate_update_v3
+        BEFORE UPDATE OF {_sqlite_ident(qty_col)} ON SEARCHRACK
+        WHEN {integral_new} = 0
+        BEGIN
+            SELECT RAISE(ABORT, 'SEARCHRACK quantity must be a finite whole number');
+        END
+    '''
+    update_sql = f'''
+        CREATE TRIGGER trg_searchrack_history_update_v3
+        AFTER UPDATE OF {watched_sql} ON SEARCHRACK
+        WHEN {changed_when}
+        BEGIN
+            INSERT INTO searchrack_history_outbox (
+                event_id, event_type, captured_at, searchrack_id, barcode, title,
+                from_position, to_position, old_quantity, new_quantity,
+                source_row_json, result_row_json
+            ) VALUES (
+                lower(hex(randomblob(16))),
+                CASE
+                    WHEN COALESCE(CAST({qty_new} AS INTEGER), 0) <= 0 THEN 'depletion'
+                    WHEN COALESCE(CAST({qty_new} AS INTEGER), 0) != COALESCE(CAST({qty_old} AS INTEGER), 0) THEN 'quantity_change'
+                    ELSE 'location_change'
+                END,
+                strftime('%Y-%m-%dT%H:%M:%f', 'now', 'localtime'),
+                {row_id_old}, {barcode_old}, {title_old}, {from_location}, {to_location},
+                COALESCE(CAST({qty_old} AS INTEGER), 0), COALESCE(CAST({qty_new} AS INTEGER), 0),
+                {old_snapshot}, {new_snapshot}
+            );
+            DELETE FROM SEARCHRACK
+            WHERE rowid = NEW.rowid AND COALESCE(CAST({qty_new} AS INTEGER), 0) <= 0;
+        END
+    '''
+
+    insert_location = _searchrack_trigger_location('NEW', pos_col, pic_col)
+    insert_sql = f'''
+        CREATE TRIGGER trg_searchrack_history_insert_v3
+        AFTER INSERT ON SEARCHRACK
+        BEGIN
+            INSERT INTO searchrack_history_outbox (
+                event_id, event_type, captured_at, searchrack_id, barcode, title,
+                from_position, to_position, old_quantity, new_quantity,
+                source_row_json, result_row_json
+            ) VALUES (
+                lower(hex(randomblob(16))),
+                CASE WHEN COALESCE(CAST({qty_new} AS INTEGER), 0) <= 0
+                     THEN 'invalid_insert_cleanup' ELSE 'inventory_add' END,
+                strftime('%Y-%m-%dT%H:%M:%f', 'now', 'localtime'),
+                {row_id_new}, {barcode_new}, {title_new}, '', {insert_location},
+                0, COALESCE(CAST({qty_new} AS INTEGER), 0),
+                {new_snapshot}, {new_snapshot}
+            );
+            DELETE FROM SEARCHRACK
+            WHERE rowid = NEW.rowid AND COALESCE(CAST({qty_new} AS INTEGER), 0) <= 0;
+        END
+    '''
+
+    delete_location = _searchrack_trigger_location('OLD', pos_col, pic_col)
+    delete_sql = f'''
+        CREATE TRIGGER trg_searchrack_history_delete_v3
+        AFTER DELETE ON SEARCHRACK
+        WHEN NOT EXISTS (
+            SELECT 1
+            FROM searchrack_history_outbox
+            WHERE searchrack_id = {row_id_old}
+              AND processed_at IS NULL
+              AND event_type IN (
+                  'depletion', 'invalid_insert_cleanup',
+                  'legacy_zero_cleanup', 'invalid_quantity_cleanup'
+              )
+              AND (
+                  json(COALESCE(NULLIF(result_row_json, ''), '{{}}')) = json({old_snapshot})
+                  OR (
+                      event_type IN ('legacy_zero_cleanup', 'invalid_quantity_cleanup')
+                      AND json(COALESCE(NULLIF(source_row_json, ''), '{{}}')) = json({old_snapshot})
+                  )
+              )
+        )
+        BEGIN
+            INSERT INTO searchrack_history_outbox (
+                event_id, event_type, captured_at, searchrack_id, barcode, title,
+                from_position, to_position, old_quantity, new_quantity,
+                source_row_json, result_row_json
+            ) VALUES (
+                lower(hex(randomblob(16))), 'inventory_delete',
+                strftime('%Y-%m-%dT%H:%M:%f', 'now', 'localtime'),
+                {row_id_old}, {barcode_old}, {title_old}, {delete_location}, '',
+                COALESCE(CAST({qty_old} AS INTEGER), 0), 0, {old_snapshot}, NULL
+            );
+        END
+    '''
+
+    trigger_sql = [validate_insert_sql, validate_update_sql, update_sql, insert_sql, delete_sql]
+    fingerprint = hashlib.sha256('\n'.join(trigger_sql).encode('utf-8')).hexdigest()
+    current_names = {
+        'trg_searchrack_quantity_validate_insert_v3',
+        'trg_searchrack_quantity_validate_update_v3',
+        'trg_searchrack_history_update_v3',
+        'trg_searchrack_history_insert_v3',
+        'trg_searchrack_history_delete_v3',
+    }
+
+    # Trigger replacement is transactional, so there is never an unguarded write window.
+    cur.execute('BEGIN IMMEDIATE')
     try:
-        cur.execute("ALTER TABLE removed_items ADD COLUMN undone_at TEXT")
+        cur.execute("SELECT value FROM searchrack_history_guard_meta WHERE key = 'trigger_fingerprint'")
+        row = cur.fetchone()
+        saved_fingerprint = str(row[0] or '') if row else ''
+        placeholders = ','.join('?' for _ in current_names)
+        cur.execute(
+            f"SELECT name FROM sqlite_master WHERE type = 'trigger' AND name IN ({placeholders})",
+            tuple(sorted(current_names))
+        )
+        installed_names = {str(row[0]) for row in cur.fetchall()}
+
+        if saved_fingerprint != fingerprint or installed_names != current_names:
+            for version in ('v1', 'v2', 'v3'):
+                for kind in ('update', 'insert', 'delete'):
+                    cur.execute(
+                        f'DROP TRIGGER IF EXISTS {_sqlite_ident(f"trg_searchrack_history_{kind}_{version}")}'
+                    )
+            for name in (
+                'trg_searchrack_quantity_validate_insert_v3',
+                'trg_searchrack_quantity_validate_update_v3',
+            ):
+                cur.execute(f'DROP TRIGGER IF EXISTS {_sqlite_ident(name)}')
+            for sql in trigger_sql:
+                cur.execute(sql)
+            cur.execute('''
+                INSERT INTO searchrack_history_guard_meta(key, value)
+                VALUES ('trigger_fingerprint', ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            ''', (fingerprint,))
+        conn.commit()
     except Exception:
+        conn.rollback()
+        raise
+    return {'installed': True, 'qty_col': qty_col, 'id_col': id_col, 'columns': columns}
+
+
+def _strict_inventory_quantity(value):
+    if value is None or str(value).strip() == '':
+        return None
+    try:
+        parsed = Decimal(str(value).strip())
+        if not parsed.is_finite() or parsed != parsed.to_integral_value():
+            return None
+        return int(parsed)
+    except (InvalidOperation, ValueError, TypeError, OverflowError):
+        return None
+
+
+def _ensure_searchrack_snapshot_columns(conn):
+    """Ensure known inventory metadata is present before snapshot triggers are generated."""
+    cur = conn.cursor()
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND LOWER(name)='searchrack'")
+    if not cur.fetchone():
+        return False
+    cur.execute("PRAGMA table_info('SEARCHRACK')")
+    existing = {str(row[1]).lower() for row in cur.fetchall()}
+    migrations = {
+        'created_at': 'ALTER TABLE SEARCHRACK ADD COLUMN CREATED_AT TEXT',
+        'image': 'ALTER TABLE SEARCHRACK ADD COLUMN IMAGE TEXT',
+        'custom_title': 'ALTER TABLE SEARCHRACK ADD COLUMN CUSTOM_TITLE INTEGER DEFAULT 0',
+        'warehouse_note': 'ALTER TABLE SEARCHRACK ADD COLUMN WAREHOUSE_NOTE TEXT DEFAULT ""',
+    }
+    changed = False
+    for column, sql in migrations.items():
+        if column not in existing:
+            cur.execute(sql)
+            changed = True
+    conn.commit()
+    return changed
+
+
+def _capture_legacy_zero_searchrack_rows(conn, guard_info):
+    """Snapshot and remove pre-guard zero rows; normalize historical blank quantities to one."""
+    qty_col = guard_info.get('qty_col')
+    id_col = guard_info.get('id_col')
+    columns = list(guard_info.get('columns') or [])
+    if not qty_col or not columns:
+        return {'normalized': 0, 'deleted': 0}
+
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    _ensure_searchrack_history_outbox(cur)
+    conn.commit()
+    cur.execute('BEGIN IMMEDIATE')
+    cur.execute('SELECT rowid AS _guard_rowid_, * FROM SEARCHRACK')
+    rows = list(cur.fetchall())
+    normalized = 0
+    deleted = 0
+
+    for row in rows:
+        row_dict = dict(row)
+        raw_qty = row_dict.get(qty_col)
+        parsed_qty = _strict_inventory_quantity(raw_qty)
+        rowid = row_dict.get('_guard_rowid_')
+        searchrack_id = row_dict.get(id_col) if id_col else rowid
+
+        cleanup_event_type = 'legacy_zero_cleanup'
+        if parsed_qty is None:
+            if raw_qty is None or str(raw_qty).strip() == '':
+                cur.execute(
+                    f'UPDATE SEARCHRACK SET {_sqlite_ident(qty_col)} = 1 WHERE rowid = ?',
+                    (rowid,)
+                )
+                normalized += max(0, cur.rowcount)
+                continue
+            parsed_qty = 0
+            cleanup_event_type = 'invalid_quantity_cleanup'
+        if parsed_qty > 0:
+            continue
+
+        snapshot = {column: row_dict.get(column) for column in columns}
+        event_id = uuid.uuid4().hex
+        location = _searchrack_snapshot_location(snapshot)
+        cur.execute('''
+            INSERT OR IGNORE INTO searchrack_history_outbox (
+                event_id, event_type, captured_at, searchrack_id, barcode, title,
+                from_position, to_position, old_quantity, new_quantity,
+                source_row_json, result_row_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, '', ?, 0, ?, NULL)
+        ''', (
+            event_id,
+            cleanup_event_type,
+            datetime.datetime.now().isoformat(),
+            searchrack_id,
+            str(_searchrack_snapshot_value(snapshot, 'barcode', 'upc') or '').strip(),
+            str(_searchrack_snapshot_value(snapshot, 'title') or '').strip(),
+            location,
+            parsed_qty,
+            json.dumps(snapshot, ensure_ascii=False, default=str)
+        ))
+        cur.execute(
+            'DELETE FROM SEARCHRACK WHERE rowid = ?',
+            (rowid,)
+        )
+        deleted += max(0, cur.rowcount)
+
+    try:
+        cur.execute('DELETE FROM zero_qty_pending_deletion')
+    except sqlite3.Error:
         pass
+    conn.commit()
+    return {'normalized': normalized, 'deleted': deleted}
+
+
+def _history_timestamp(value):
+    text = str(value or '').strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.datetime.fromisoformat(text.replace('Z', '+00:00'))
+        if parsed.tzinfo is not None:
+            parsed = parsed.astimezone().replace(tzinfo=None)
+        return parsed
+    except Exception:
+        return None
+
+
+def _history_event_candidate(rem_cur, event):
+    searchrack_id = event.get('searchrack_id')
+    if searchrack_id is None:
+        return None
+    rem_cur.execute('''
+        SELECT *
+        FROM removed_items
+        WHERE searchrack_id = ?
+          AND COALESCE(event_id, '') = ''
+          AND COALESCE(event_status, 'applied') != 'superseded'
+        ORDER BY id DESC
+        LIMIT 30
+    ''', (searchrack_id,))
+    candidates = [dict(row) for row in rem_cur.fetchall()]
+    if not candidates:
+        return None
+
+    event_time = _history_timestamp(event.get('captured_at'))
+    event_barcode = str(event.get('barcode') or '').strip().lower()
+    event_from = str(event.get('from_position') or '').strip().lower()
+    event_to = str(event.get('to_position') or '').strip().lower()
+    event_old = _coerce_int(event.get('old_quantity'), 0)
+    event_new = _coerce_int(event.get('new_quantity'), 0)
+    event_type = str(event.get('event_type') or '')
+    best = None
+    best_score = -1
+
+    for candidate in candidates:
+        candidate_time = _history_timestamp(candidate.get('removed_at'))
+        if event_time is not None and candidate_time is not None:
+            seconds = abs((event_time - candidate_time).total_seconds())
+            if seconds > 600:
+                continue
+            time_score = 5 if seconds <= 120 else 2
+        else:
+            continue
+
+        score = time_score
+        candidate_old = _coerce_int(candidate.get('old_quantity'), 0)
+        candidate_new = _coerce_int(candidate.get('new_quantity'), 0)
+        if candidate_old == event_old and candidate_new == event_new:
+            score += 8
+        elif event_type == 'location_change':
+            score += 2
+
+        candidate_barcode = str(candidate.get('barcode') or '').strip().lower()
+        if event_barcode and candidate_barcode == event_barcode:
+            score += 3
+
+        candidate_position = str(candidate.get('item_position') or '').strip().lower()
+        if candidate_position and candidate_position in {event_from, event_to}:
+            score += 3
+
+        removal_type = str(candidate.get('removal_type') or '').lower()
+        if event_type == 'location_change' and ('location' in removal_type or 'shelf' in removal_type):
+            score += 4
+        if event_type == 'inventory_add' and candidate_old == 0 and candidate_new == event_new:
+            score += 4
+
+        if score > best_score:
+            best = candidate
+            best_score = score
+
+    return best if best_score >= 8 else None
+
+
+_searchrack_history_flush_lock = threading.Lock()
+
+
+def _flush_searchrack_history_outbox(limit=250, settle_seconds=0):
+    """Mirror durable SEARCHRACK events into rackhistory.db; retries are idempotent by event_id."""
+    if not _searchrack_history_flush_lock.acquire(blocking=False):
+        return 0
+    rack_conn = None
+    rem_conn = None
+    processed = 0
+    try:
+        rack_conn = sqlite3.connect(str(BASE_DIR / 'searchRack.db'), timeout=30.0)
+        rack_conn.row_factory = sqlite3.Row
+        rack_cur = rack_conn.cursor()
+        _ensure_searchrack_history_outbox(rack_cur)
+        rack_cur.execute('''
+            SELECT * FROM searchrack_history_outbox
+            WHERE processed_at IS NULL
+            ORDER BY CASE WHEN COALESCE(last_error, '') = '' THEN 0 ELSE 1 END, id
+            LIMIT ?
+        ''', (max(1, int(limit or 250)),))
+        events = [dict(row) for row in rack_cur.fetchall()]
+        settle_seconds = max(0.0, float(settle_seconds or 0))
+        if settle_seconds:
+            cutoff = datetime.datetime.now() - datetime.timedelta(seconds=settle_seconds)
+            settled_events = []
+            for event in events:
+                captured_at = _history_timestamp(event.get('captured_at'))
+                if captured_at is not None and captured_at > cutoff:
+                    break
+                settled_events.append(event)
+            events = settled_events
+        if not events:
+            rack_conn.commit()
+            return 0
+
+        rem_conn = sqlite3.connect(str(BASE_DIR / 'rackhistory.db'), timeout=30.0)
+        rem_conn.row_factory = sqlite3.Row
+        rem_cur = rem_conn.cursor()
+        _ensure_removed_items_table(rem_cur)
+        rem_conn.commit()
+
+        type_map = {
+            'legacy_zero_cleanup': 'legacy_zero_cleanup',
+            'invalid_quantity_cleanup': 'invalid_quantity_cleanup',
+            'invalid_insert_cleanup': 'invalid_zero_insert',
+            'depletion': 'inventory_depleted',
+            'quantity_change': 'quantity_adjustment',
+            'location_change': 'location_change',
+            'inventory_add': 'inventory_added',
+            'inventory_delete': 'inventory_deleted',
+        }
+
+        processed_marks = []
+        failed_event = None
+        event_savepoint_active = False
+        for event in events:
+            failed_event = event
+            rem_cur.execute('SAVEPOINT searchrack_history_event')
+            event_savepoint_active = True
+            event_id = str(event.get('event_id') or '').strip()
+            if not event_id:
+                raise ValueError('Rack-history outbox event has no event_id')
+            rem_cur.execute('SELECT id FROM removed_items WHERE event_id = ?', (event_id,))
+            existing_event = rem_cur.fetchone()
+            if existing_event:
+                history_id = existing_event['id']
+                rem_cur.execute('''
+                    UPDATE removed_items
+                    SET source_row_json = COALESCE(NULLIF(source_row_json, ''), ?),
+                        result_row_json = COALESCE(NULLIF(result_row_json, ''), ?),
+                        from_position = COALESCE(NULLIF(from_position, ''), ?),
+                        to_position = COALESCE(NULLIF(to_position, ''), ?),
+                        event_status = 'applied',
+                        applied_at = COALESCE(NULLIF(applied_at, ''), ?)
+                    WHERE id = ?
+                ''', (
+                    event.get('source_row_json'),
+                    event.get('result_row_json'),
+                    str(event.get('from_position') or '').strip(),
+                    str(event.get('to_position') or '').strip(),
+                    str(event.get('captured_at') or datetime.datetime.now().isoformat()),
+                    history_id,
+                ))
+            else:
+                candidate = _history_event_candidate(rem_cur, event)
+                old_qty = _coerce_int(event.get('old_quantity'), 0)
+                new_qty = _coerce_int(event.get('new_quantity'), 0)
+                event_type = str(event.get('event_type') or '')
+                actual_delta = abs(new_qty - old_qty)
+                if event_type == 'location_change':
+                    actual_delta = 0
+                deleted = 1 if event_type in (
+                    'legacy_zero_cleanup', 'invalid_quantity_cleanup',
+                    'invalid_insert_cleanup', 'depletion', 'inventory_delete'
+                ) else 0
+                from_position = str(event.get('from_position') or '').strip()
+                to_position = str(event.get('to_position') or '').strip()
+                effective_position = from_position or to_position
+                applied_at = str(event.get('captured_at') or datetime.datetime.now().isoformat())
+
+                if candidate:
+                    history_id = candidate['id']
+                    if event_type == 'location_change':
+                        rem_cur.execute('''
+                            UPDATE removed_items
+                            SET event_status = 'superseded'
+                            WHERE id != ?
+                              AND searchrack_id = ?
+                              AND COALESCE(removed_at, '') = COALESCE(?, '')
+                              AND COALESCE(removal_type, '') = COALESCE(?, '')
+                              AND COALESCE(barcode, '') = COALESCE(?, '')
+                              AND COALESCE(event_id, '') = ''
+                        ''', (
+                            history_id,
+                            event.get('searchrack_id'),
+                            candidate.get('removed_at'),
+                            candidate.get('removal_type'),
+                            candidate.get('barcode'),
+                        ))
+                    rem_cur.execute('''
+                        UPDATE removed_items
+                        SET event_id = ?, barcode = COALESCE(NULLIF(barcode, ''), ?),
+                            title = COALESCE(NULLIF(title, ''), ?), quantity_removed = ?,
+                            old_quantity = ?, new_quantity = ?,
+                            item_position = COALESCE(NULLIF(item_position, ''), ?),
+                            source_row_json = ?, result_row_json = ?,
+                            from_position = ?, to_position = ?,
+                            inventory_row_deleted = ?, event_status = 'applied', applied_at = ?
+                        WHERE id = ?
+                    ''', (
+                        event_id,
+                        str(event.get('barcode') or '').strip(),
+                        str(event.get('title') or '').strip(),
+                        actual_delta,
+                        old_qty,
+                        new_qty,
+                        effective_position,
+                        event.get('source_row_json'),
+                        event.get('result_row_json'),
+                        from_position,
+                        to_position,
+                        deleted,
+                        applied_at,
+                        history_id,
+                    ))
+                else:
+                    rem_cur.execute('''
+                        INSERT INTO removed_items (
+                            order_id, barcode, title, quantity_removed, removed_at,
+                            searchrack_id, old_quantity, new_quantity, removal_type,
+                            item_position, event_id, source_row_json, result_row_json,
+                            from_position, to_position, inventory_row_deleted,
+                            event_status, applied_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'applied', ?)
+                    ''', (
+                        None,
+                        str(event.get('barcode') or '').strip(),
+                        str(event.get('title') or '').strip(),
+                        actual_delta,
+                        applied_at,
+                        event.get('searchrack_id'),
+                        old_qty,
+                        new_qty,
+                        type_map.get(event_type, event_type or 'inventory_change'),
+                        effective_position,
+                        event_id,
+                        event.get('source_row_json'),
+                        event.get('result_row_json'),
+                        from_position,
+                        to_position,
+                        deleted,
+                        applied_at,
+                    ))
+                    history_id = rem_cur.lastrowid
+
+            rem_cur.execute('RELEASE SAVEPOINT searchrack_history_event')
+            event_savepoint_active = False
+            processed_marks.append((history_id, event['id']))
+
+        # One history fsync and one outbox fsync per batch keeps this inexpensive on the Pi.
+        rem_conn.commit()
+        processed_at = datetime.datetime.now().isoformat()
+        rack_cur.executemany('''
+            UPDATE searchrack_history_outbox
+            SET processed_at = ?, history_id = ?, last_error = NULL
+            WHERE id = ? AND processed_at IS NULL
+        ''', [(processed_at, history_id, event_id) for history_id, event_id in processed_marks])
+        rack_conn.commit()
+        processed = len(processed_marks)
+        return processed
+    except Exception as exc:
+        # Preserve earlier good events in the batch and move one bad event behind fresh work.
+        if event_savepoint_active and rem_conn is not None and rack_conn is not None:
+            try:
+                rem_cur.execute('ROLLBACK TO SAVEPOINT searchrack_history_event')
+                rem_cur.execute('RELEASE SAVEPOINT searchrack_history_event')
+                rem_conn.commit()
+                processed_at = datetime.datetime.now().isoformat()
+                if processed_marks:
+                    rack_cur.executemany('''
+                        UPDATE searchrack_history_outbox
+                        SET processed_at = ?, history_id = ?, last_error = NULL
+                        WHERE id = ? AND processed_at IS NULL
+                    ''', [
+                        (processed_at, history_id, outbox_id)
+                        for history_id, outbox_id in processed_marks
+                    ])
+                if failed_event is not None:
+                    rack_cur.execute('''
+                        UPDATE searchrack_history_outbox
+                        SET last_error = ?
+                        WHERE id = ? AND processed_at IS NULL
+                    ''', (str(exc)[:1000], failed_event.get('id')))
+                rack_conn.commit()
+                processed = len(processed_marks)
+                print(f'Warning: one rack-history event was deferred without blocking the batch: {exc}')
+                return processed
+            except Exception:
+                try:
+                    rem_conn.rollback()
+                except Exception:
+                    pass
+                try:
+                    rack_conn.rollback()
+                except Exception:
+                    pass
+        try:
+            if rem_conn is not None:
+                rem_conn.rollback()
+        except Exception:
+            pass
+        try:
+            if rack_conn is not None:
+                rack_conn.rollback()
+        except Exception:
+            pass
+        print(f'Warning: rack-history outbox flush deferred: {exc}')
+        return processed
+    finally:
+        if rem_conn is not None:
+            rem_conn.close()
+        if rack_conn is not None:
+            rack_conn.close()
+        _searchrack_history_flush_lock.release()
+
+
+def _initialize_searchrack_history_guard():
+    conn = None
+    try:
+        conn = sqlite3.connect(str(BASE_DIR / 'searchRack.db'), timeout=30.0)
+        _ensure_searchrack_snapshot_columns(conn)
+        guard = _install_searchrack_history_guard(conn)
+        if not guard.get('installed'):
+            return guard
+        cleanup = _capture_legacy_zero_searchrack_rows(conn, guard)
+        with sqlite3.connect(str(BASE_DIR / 'rackhistory.db'), timeout=30.0) as history_conn:
+            _ensure_removed_items_table(history_conn.cursor())
+        mirrored = _flush_searchrack_history_outbox()
+        if cleanup.get('normalized') or cleanup.get('deleted'):
+            try:
+                _invalidate_searchrack_cache()
+            except Exception:
+                pass
+        return {**guard, **cleanup, 'mirrored': mirrored}
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def _history_restore_quantity(history_row):
+    """Derive an undo amount from authoritative history, never from browser state."""
+    history = dict(history_row) if not isinstance(history_row, dict) else dict(history_row)
+    quantity_removed = max(0, _coerce_int(history.get('quantity_removed'), 0))
+    old_quantity = _coerce_int(history.get('old_quantity'), 0)
+    new_quantity = _coerce_int(history.get('new_quantity'), 0)
+    return max(quantity_removed, max(0, old_quantity - new_quantity))
+
+
+def _restore_searchrack_from_history(rack_cur, history_row, restore_quantity):
+    """Restore only to the archived barcode/location identity, recreating the row if needed."""
+    restore_quantity = max(0, _coerce_int(restore_quantity, 0))
+    if restore_quantity <= 0:
+        raise ValueError('Restore quantity must be positive')
+
+    history = dict(history_row) if not isinstance(history_row, dict) else dict(history_row)
+    try:
+        snapshot = json.loads(history.get('source_row_json') or '{}')
+        if not isinstance(snapshot, dict):
+            snapshot = {}
+    except Exception:
+        snapshot = {}
+
+    rack_cur.execute("PRAGMA table_info('SEARCHRACK')")
+    columns = [row[1] for row in rack_cur.fetchall()]
+    lower = {str(column).lower(): column for column in columns}
+    id_col = lower.get('id')
+    qty_col = lower.get('quantity') or lower.get('qty')
+    barcode_col = lower.get('barcode') or lower.get('upc')
+    title_col = lower.get('title')
+    pos_col = lower.get('item_position') or lower.get('itemposition') or lower.get('position')
+    pic_col = lower.get('pictureposition') or lower.get('picture_position')
+    if not qty_col:
+        raise RuntimeError('SEARCHRACK quantity column not found')
+
+    snapshot_folded = _row_casefold_dict(snapshot)
+    snapshot_barcode = snapshot_folded.get(str(barcode_col).lower()) if barcode_col else ''
+    barcode = str(snapshot_barcode or '').strip()
+    if not barcode:
+        barcode = str(history.get('barcode') or '').strip()
+    source_location = _searchrack_snapshot_location(snapshot) or str(
+        history.get('from_position') or history.get('item_position') or ''
+    ).strip()
+    barcode_key = barcode.casefold()
+    location_key = source_location.casefold()
+    sid = history.get('searchrack_id')
+    id_expr = _sqlite_ident(id_col) if id_col else 'rowid'
+    sid_reusable = sid not in (None, '')
+
+    if sid_reusable:
+        rack_cur.execute(
+            f'SELECT rowid AS _rowid_, * FROM SEARCHRACK WHERE {id_expr} = ?',
+            (sid,)
+        )
+        existing = rack_cur.fetchone()
+        if existing:
+            existing_dict = dict(existing)
+            existing_barcode = str(
+                _searchrack_snapshot_value(existing_dict, barcode_col or 'barcode', 'barcode', 'upc') or ''
+            ).strip().casefold()
+            existing_location = _searchrack_snapshot_location(existing_dict).casefold()
+            if barcode_key and existing_barcode == barcode_key and existing_location == location_key:
+                current_qty = max(0, _coerce_int(existing_dict.get(qty_col), 0))
+                new_qty = current_qty + restore_quantity
+                rack_cur.execute(
+                    f'UPDATE SEARCHRACK SET {_sqlite_ident(qty_col)} = ? WHERE {id_expr} = ?',
+                    (new_qty, sid)
+                )
+                return {
+                    'searchrack_id': existing_dict.get(id_col) if id_col else existing_dict.get('_rowid_'),
+                    'old_quantity': current_qty,
+                    'new_quantity': new_qty,
+                    'recreated': False,
+                }
+            # That numeric ID now belongs to another inventory identity; never overwrite it.
+            sid_reusable = False
+
+    if barcode_col and barcode:
+        rack_cur.execute(
+            f'''SELECT rowid AS _rowid_, * FROM SEARCHRACK
+                WHERE {_sqlite_ident(barcode_col)} = ? COLLATE NOCASE
+                  AND COALESCE(CAST({_sqlite_ident(qty_col)} AS INTEGER), 0) > 0''',
+            (barcode,)
+        )
+        for row in rack_cur.fetchall():
+            row_dict = dict(row)
+            if _searchrack_snapshot_location(row_dict).casefold() != location_key:
+                continue
+            row_id = row_dict.get(id_col) if id_col else row_dict.get('_rowid_')
+            current_qty = max(0, _coerce_int(row_dict.get(qty_col), 0))
+            new_qty = current_qty + restore_quantity
+            rack_cur.execute(
+                f'UPDATE SEARCHRACK SET {_sqlite_ident(qty_col)} = ? WHERE {id_expr} = ?',
+                (new_qty, row_id)
+            )
+            return {
+                'searchrack_id': row_id, 'old_quantity': current_qty,
+                'new_quantity': new_qty, 'recreated': False
+            }
+
+    values_by_column = {}
+    for column in columns:
+        if id_col and column.lower() == id_col.lower():
+            continue
+        values_by_column[column] = snapshot_folded.get(column.lower())
+    values_by_column[qty_col] = restore_quantity
+    if barcode_col:
+        values_by_column[barcode_col] = barcode
+    if title_col and not values_by_column.get(title_col):
+        values_by_column[title_col] = str(history.get('title') or '').strip()
+    if source_location and pos_col and not values_by_column.get(pos_col):
+        values_by_column[pos_col] = source_location
+    if pic_col and str(values_by_column.get(pos_col) or '').strip().lower() != 'picture':
+        values_by_column[pic_col] = values_by_column.get(pic_col) or ''
+
+    insert_columns = list(values_by_column.keys())
+    insert_values = [values_by_column[column] for column in insert_columns]
+    if id_col and sid_reusable:
+        insert_columns.insert(0, id_col)
+        insert_values.insert(0, sid)
+    placeholders = ','.join('?' for _ in insert_columns)
+    rack_cur.execute(
+        f'''INSERT INTO SEARCHRACK ({', '.join(_sqlite_ident(c) for c in insert_columns)})
+            VALUES ({placeholders})''',
+        tuple(insert_values)
+    )
+    new_id = sid if id_col and sid_reusable else rack_cur.lastrowid
+    return {
+        'searchrack_id': new_id, 'old_quantity': 0,
+        'new_quantity': restore_quantity, 'recreated': True
+    }
+
+
+def _restore_searchrack_with_undo_claim(
+    rack_cur, history_row, restore_quantity, *, history_source='removed_items'
+):
+    """Restore once; the claim and stock mutation share the SEARCHRACK transaction."""
+    history = dict(history_row) if not isinstance(history_row, dict) else dict(history_row)
+    history_id = _coerce_int(history.get('id'), 0)
+    if history_id <= 0:
+        raise ValueError('History event has no stable ID')
+    restore_quantity = max(0, _coerce_int(restore_quantity, 0))
+    if restore_quantity <= 0:
+        raise ValueError('History event has no positive quantity to restore')
+
+    _ensure_searchrack_undo_claims(rack_cur)
+    rack_cur.execute('''
+        SELECT searchrack_id, restore_quantity, old_quantity, new_quantity, recreated,
+               outbox_event_id
+        FROM searchrack_undo_claims
+        WHERE history_source = ? AND history_id = ?
+    ''', (history_source, history_id))
+    claimed = rack_cur.fetchone()
+    if claimed:
+        return {
+            'searchrack_id': claimed[0],
+            'restore_quantity': claimed[1],
+            'old_quantity': claimed[2],
+            'new_quantity': claimed[3],
+            'recreated': bool(claimed[4]),
+            'outbox_event_id': str(claimed[5] or '').strip(),
+            'already_claimed': True,
+        }
+
+    _ensure_searchrack_history_outbox(rack_cur)
+    rack_cur.execute('SELECT COALESCE(MAX(id), 0) FROM searchrack_history_outbox')
+    outbox_id_before = _coerce_int(rack_cur.fetchone()[0], 0)
+    restored = _restore_searchrack_from_history(rack_cur, history, restore_quantity)
+    rack_cur.execute('''
+        SELECT event_id
+        FROM searchrack_history_outbox
+        WHERE id > ? AND searchrack_id = ?
+        ORDER BY id DESC
+        LIMIT 1
+    ''', (outbox_id_before, restored['searchrack_id']))
+    outbox_row = rack_cur.fetchone()
+    outbox_event_id = str(outbox_row[0] or '').strip() if outbox_row else ''
+    rack_cur.execute('''
+        INSERT INTO searchrack_undo_claims (
+            history_source, history_id, claimed_at, searchrack_id,
+            restore_quantity, old_quantity, new_quantity, recreated, outbox_event_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (
+        history_source,
+        history_id,
+        datetime.datetime.now().isoformat(),
+        restored['searchrack_id'],
+        restore_quantity,
+        restored['old_quantity'],
+        restored['new_quantity'],
+        1 if restored['recreated'] else 0,
+        outbox_event_id,
+    ))
+    restored['restore_quantity'] = restore_quantity
+    restored['outbox_event_id'] = outbox_event_id
+    restored['already_claimed'] = False
+    return restored
+
+
+def _insert_inventory_undo_history(
+    history_cur, source_row, restored, removal_type, *, order_id=None, undone_at=None
+):
+    """Insert one idempotent forward audit row for a completed undo."""
+    source = dict(source_row) if not isinstance(source_row, dict) else dict(source_row)
+    history_id = _coerce_int(source.get('id'), 0)
+    if history_id <= 0:
+        raise ValueError('History event has no stable ID')
+    undone_at = undone_at or datetime.datetime.now().isoformat()
+    location = str(source.get('from_position') or source.get('item_position') or '').strip()
+    event_id = str(restored.get('outbox_event_id') or '').strip() or f'undo:removed_items:{history_id}'
+    history_cur.execute('''
+        INSERT OR IGNORE INTO removed_items (
+            order_id, barcode, title, quantity_removed, removed_at, searchrack_id,
+            old_quantity, new_quantity, removal_type, item_position,
+            event_id, from_position, to_position, inventory_row_deleted,
+            event_status, applied_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, 0, 'applied', ?)
+    ''', (
+        order_id,
+        str(source.get('barcode') or '').strip(),
+        str(source.get('title') or '').strip(),
+        max(0, _coerce_int(restored.get('restore_quantity'), 0)),
+        undone_at,
+        restored.get('searchrack_id'),
+        restored.get('old_quantity'),
+        restored.get('new_quantity'),
+        removal_type,
+        location,
+        event_id,
+        location,
+        undone_at,
+    ))
+    history_cur.execute('''
+        UPDATE removed_items
+        SET order_id = ?, barcode = ?, title = ?, quantity_removed = ?,
+            removed_at = ?, searchrack_id = ?, old_quantity = ?, new_quantity = ?,
+            removal_type = ?, item_position = ?, from_position = '', to_position = ?,
+            inventory_row_deleted = 0, event_status = 'applied', applied_at = ?
+        WHERE event_id = ?
+    ''', (
+        order_id,
+        str(source.get('barcode') or '').strip(),
+        str(source.get('title') or '').strip(),
+        max(0, _coerce_int(restored.get('restore_quantity'), 0)),
+        undone_at,
+        restored.get('searchrack_id'),
+        restored.get('old_quantity'),
+        restored.get('new_quantity'),
+        removal_type,
+        location,
+        location,
+        undone_at,
+        event_id,
+    ))
 
 def _mark_zero_qty_for_deletion_external(item_id):
-    """Legacy compatibility helper: keep zero-qty rows and clear stale delete queue entries."""
+    """Legacy compatibility helper; the database trigger now deletes depleted rows immediately."""
     _clear_zero_qty_pending_deletions(item_id)
 
 def _clear_zero_qty_pending_deletions(searchrack_id=None):
-    """Zero-qty rows are retained; remove any legacy pending-delete queue entries."""
+    """Remove obsolete delayed-deletion queue entries."""
     try:
         with db_connection('searchRack.db') as _conn:
             _cur = _conn.cursor()
@@ -1233,6 +2349,8 @@ def _searchrack_removal_schema(cur):
         'barcode_col': cols_lower.get('barcode') or cols_lower.get('upc'),
         'qty_col': cols_lower.get('quantity') or cols_lower.get('qty'),
         'title_col': cols_lower.get('title'),
+        'image_col': cols_lower.get('image') or cols_lower.get('images'),
+        'custom_title_col': cols_lower.get('custom_title'),
         'pos_col': cols_lower.get('item_position') or cols_lower.get('itemposition') or cols_lower.get('position'),
         'pic_col': cols_lower.get('pictureposition'),
         'created_col': cols_lower.get('created_at')
@@ -1244,6 +2362,8 @@ def _searchrack_matches_for_barcode(cur, barcode, schema=None, include_zero=Fals
     qty_col = schema.get('qty_col')
     id_col = schema.get('id_col')
     title_col = schema.get('title_col')
+    image_col = schema.get('image_col')
+    custom_title_col = schema.get('custom_title_col')
     pos_col = schema.get('pos_col')
     pic_col = schema.get('pic_col')
 
@@ -1273,16 +2393,18 @@ def _searchrack_matches_for_barcode(cur, barcode, schema=None, include_zero=Fals
     # where eBay/Amazon SKUs are suffixed but inventory was scanned under the base UPC.
     _target_base_key = target_key.split('-', 1)[0] if target_key and '-' in target_key else None
 
-    matches = []
+    exact_matches = []
+    exact_seen = False
+    fallback_matches = []
     for row in rows:
         raw_barcode = str(row.get(barcode_col) or '').strip()
         row_key = _sold_removal_barcode_key(raw_barcode)
-        if row_key != target_key:
-            # Accept base-barcode row as fallback for suffixed target
-            if _target_base_key and row_key == _target_base_key:
-                pass  # allowed
-            else:
-                continue
+        is_exact = row_key == target_key
+        is_base_fallback = bool(_target_base_key and row_key == _target_base_key)
+        if not is_exact and not is_base_fallback:
+            continue
+        if is_exact:
+            exact_seen = True
 
         qty = max(0, _coerce_int(row.get(qty_col) if qty_col else None, 0))
         if not include_zero and qty <= 0:
@@ -1299,10 +2421,12 @@ def _searchrack_matches_for_barcode(cur, barcode, schema=None, include_zero=Fals
         location_code = item_position or pictureposition
         location_label = _sold_location_label(location_code)
 
-        matches.append({
+        match = {
             'id': row_id,
             'barcode': raw_barcode,
             'title': str(row.get(title_col) or '').strip() if title_col else '',
+            'image': str(row.get(image_col) or '').strip() if image_col else '',
+            'custom_title': bool(_coerce_int(row.get(custom_title_col), 0)) if custom_title_col else False,
             'quantity': qty,
             'item_position': item_position,
             'pictureposition': pictureposition,
@@ -1310,8 +2434,13 @@ def _searchrack_matches_for_barcode(cur, barcode, schema=None, include_zero=Fals
             'location_code': location_label,
             'location_key': _sold_location_key(location_label),
             'location_preview': pictureposition or item_position or location_label
-        })
+        }
+        if is_exact:
+            exact_matches.append(match)
+        else:
+            fallback_matches.append(match)
 
+    matches = exact_matches if exact_seen else fallback_matches
     matches.sort(key=lambda m: (m.get('location_key') or '', int(m.get('id') or 0)))
     return matches
 
@@ -1423,6 +2552,8 @@ def _ready_to_ship_searchrack_match_from_row(row, schema):
     barcode_col = schema.get('barcode_col')
     qty_col = schema.get('qty_col')
     title_col = schema.get('title_col')
+    image_col = schema.get('image_col')
+    custom_title_col = schema.get('custom_title_col')
     pos_col = schema.get('pos_col')
     pic_col = schema.get('pic_col')
     note_col = None
@@ -1446,6 +2577,8 @@ def _ready_to_ship_searchrack_match_from_row(row, schema):
         'id': row_id,
         'barcode': str(row_dict.get(barcode_col) or '').strip() if barcode_col else '',
         'title': str(row_dict.get(title_col) or '').strip() if title_col else '',
+        'image': str(row_dict.get(image_col) or '').strip() if image_col else '',
+        'custom_title': bool(_coerce_int(row_dict.get(custom_title_col), 0)) if custom_title_col else False,
         'quantity': max(0, _coerce_int(row_dict.get(qty_col) if qty_col else None, 0)),
         'item_position': item_position,
         'pictureposition': pictureposition,
@@ -1454,6 +2587,39 @@ def _ready_to_ship_searchrack_match_from_row(row, schema):
         'location_key': _sold_location_key(location_label),
         'location_preview': pictureposition or item_position or location_label
     }
+
+
+def _ready_to_ship_rank_inventory_matches(matches, order):
+    """Prefer the same-barcode warehouse row whose custom identity matches the sold item."""
+    order_title = ' '.join(str((order or {}).get('title') or '').casefold().split())
+    order_image = str((order or {}).get('image') or (order or {}).get('image_url') or '').strip().casefold()
+
+    def _image_key(value):
+        raw = str(value or '').strip().casefold().split('?', 1)[0].rstrip('/')
+        return raw.rsplit('/', 1)[-1] if raw else ''
+
+    order_image_key = _image_key(order_image)
+
+    def _score(match):
+        match_title = ' '.join(str((match or {}).get('title') or '').casefold().split())
+        match_image = str((match or {}).get('image') or '').strip().casefold()
+        match_image_key = _image_key(match_image)
+        title_exact = bool(order_title and match_title and order_title == match_title)
+        image_exact = bool(
+            order_image and match_image
+            and (order_image == match_image or (order_image_key and order_image_key == match_image_key))
+        )
+        custom = bool((match or {}).get('custom_title'))
+        return (
+            1 if title_exact and image_exact else 0,
+            1 if title_exact else 0,
+            1 if image_exact else 0,
+            1 if custom and (title_exact or image_exact) else 0,
+            1 if custom else 0,
+            max(0, _coerce_int((match or {}).get('id'), 0)),
+        )
+
+    return sorted(list(matches or []), key=_score, reverse=True)
 
 def _ready_to_ship_match_display_location(match):
     item_position = str((match or {}).get('item_position') or '').strip()
@@ -1488,7 +2654,10 @@ def _ready_to_ship_searchrack_match_by_id(cur, searchrack_id, schema=None):
         return None
     if not row:
         return None
-    return _ready_to_ship_searchrack_match_from_row(row, schema)
+    match = _ready_to_ship_searchrack_match_from_row(row, schema)
+    if not match or max(0, _coerce_int(match.get('quantity'), 0)) <= 0:
+        return None
+    return match
 
 def _ready_to_ship_match_location_equals(match, location):
     wanted = _sold_location_key(location)
@@ -1525,7 +2694,7 @@ def _ready_to_ship_resolve_searchrack_location_match(cur, barcode, location, fal
             if variant_key:
                 candidate_keys.add(variant_key)
 
-        matches = _searchrack_matches_for_barcode(cur, candidate, schema=schema, include_zero=True)
+        matches = _searchrack_matches_for_barcode(cur, candidate, schema=schema, include_zero=False)
         if location:
             exact = next((m for m in matches if _ready_to_ship_match_location_equals(m, location)), None)
             if exact:
@@ -1537,7 +2706,7 @@ def _ready_to_ship_resolve_searchrack_location_match(cur, barcode, location, fal
         base_key = str(_normalize_upc_preserve_suffix_for_match(base_barcode) or '').strip().lower()
         if base_barcode and base_key and base_key != candidate_key and base_key not in seen_candidate_keys:
             seen_candidate_keys.add(base_key)
-            base_matches = _searchrack_matches_for_barcode(cur, base_barcode, schema=schema, include_zero=True)
+            base_matches = _searchrack_matches_for_barcode(cur, base_barcode, schema=schema, include_zero=False)
             if location:
                 exact = next((m for m in base_matches if _ready_to_ship_match_location_equals(m, location)), None)
                 if exact:
@@ -1872,6 +3041,8 @@ def _clear_searchrack_row_location(row_id):
         qty_col = cols_lower.get('quantity') or cols_lower.get('qty')
         pos_col = cols_lower.get('item_position') or cols_lower.get('itemposition') or cols_lower.get('position')
         pic_col = cols_lower.get('pictureposition')
+        if not qty_col:
+            return {'success': False, 'error': 'Inventory quantity column not found'}
 
         cur.execute(f"SELECT rowid AS _rowid_, * FROM SEARCHRACK WHERE {id_lookup_col} = ?", (row_id,))
         existing = cur.fetchone()
@@ -1912,14 +3083,15 @@ def _clear_searchrack_row_location(row_id):
 
         rem_cur.execute('''
             INSERT INTO removed_items
-            (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (order_id, barcode, title, quantity_removed, removed_at, searchrack_id,
+             old_quantity, new_quantity, removal_type, item_position, event_status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
         ''', (None, barcode, title, 1, now, row_id, current_qty, new_qty, 'locationcleared', source_location))
 
-        conn.commit()
         rem_conn.commit()
-        _invalidate_searchrack_cache()
+        conn.commit()
         try:
+            _invalidate_searchrack_cache()
             update_data_version()
         except Exception:
             pass
@@ -1954,12 +3126,9 @@ def _items_prep_delete_legacy_inventory_entry(*, upc, qty=1, row_ids=None):
     if not target_key:
         return {'success': False, 'error': 'Missing upc', 'status_code': 400}
 
-    try:
-        qty_n = int(qty or 1)
-    except Exception:
-        qty_n = 1
-    if qty_n < 1:
-        qty_n = 1
+    qty_n = _strict_inventory_quantity(qty if qty is not None else 1)
+    if qty_n is None or qty_n < 1:
+        return {'success': False, 'error': 'Quantity must be a positive whole number', 'status_code': 400}
 
     raw_ids = row_ids if isinstance(row_ids, (list, tuple)) else ([row_ids] if row_ids not in (None, '') else [])
     wanted_ids = []
@@ -2060,8 +3229,9 @@ def _items_prep_delete_legacy_inventory_entry(*, upc, qty=1, row_ids=None):
             )
             rem_cur.execute('''
                 INSERT INTO removed_items
-                (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (order_id, barcode, title, quantity_removed, removed_at, searchrack_id,
+                 old_quantity, new_quantity, removal_type, item_position, event_status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
             ''', (
                 None,
                 str(match.get('barcode') or upc).strip(),
@@ -2088,15 +3258,15 @@ def _items_prep_delete_legacy_inventory_entry(*, upc, qty=1, row_ids=None):
         if remaining > 0:
             raise RuntimeError('Inventory changed before all requested quantity could be removed')
 
-        rack_conn.commit()
         rem_conn.commit()
+        rack_conn.commit()
         for row_id in zero_qty_row_ids:
             try:
                 _clear_zero_qty_pending_deletions(row_id)
             except Exception:
                 pass
-        _invalidate_searchrack_cache()
         try:
+            _invalidate_searchrack_cache()
             update_data_version()
         except Exception:
             pass
@@ -2440,8 +3610,9 @@ def _apply_marketplace_removal_plan(plan, *, order_ref, barcode, title, removal_
             location_code = _sold_location_label(step.get('location_code') or item_position)
             rem_cur.execute('''
                 INSERT INTO removed_items
-                (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (order_id, barcode, title, quantity_removed, removed_at, searchrack_id,
+                 old_quantity, new_quantity, removal_type, item_position, event_status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
             ''', (
                 order_ref,
                 barcode,
@@ -2459,8 +3630,8 @@ def _apply_marketplace_removal_plan(plan, *, order_ref, barcode, title, removal_
             if location_code not in used_locations:
                 used_locations.append(location_code)
 
-        rack_conn.commit()
         rem_conn.commit()
+        rack_conn.commit()
         for row_id in touched_row_ids:
             _clear_zero_qty_pending_deletions(row_id)
         return {'removed': removed_units > 0, 'removed_units': removed_units, 'locations': used_locations}
@@ -3319,6 +4490,12 @@ def _invalidate_searchrack_cache():
     except Exception:
         pass
     try:
+        search_all_cache = globals().get('_search_all_cache')
+        if isinstance(search_all_cache, dict):
+            search_all_cache.clear()
+    except Exception:
+        pass
+    try:
         update_data_version()
     except Exception as e:
         print(f"Warning: data version update failed after searchRack update: {e}")
@@ -3778,6 +4955,13 @@ def add_no_cache_headers(response):
             response.headers['Expires'] = '0'
     except Exception:
         pass
+    if request.method in ('POST', 'PUT', 'PATCH', 'DELETE'):
+        try:
+            # Give route-specific history breadcrumbs time to commit before reconciliation.
+            _flush_searchrack_history_outbox(limit=25, settle_seconds=2)
+        except Exception:
+            # The durable outbox remains in searchRack.db and the background worker retries it.
+            pass
     return response
 # Increase upload limit to better accommodate multiple high-res photos
 app.config['MAX_CONTENT_LENGTH'] = 64 * 1024 * 1024  # 64 MB limit for uploads
@@ -10330,6 +11514,7 @@ def api_listingagent_upc_search():
                     MAX(IMAGE) AS image
                 FROM SEARCHRACK
                 WHERE BARCODE IS NOT NULL AND TRIM(BARCODE) != ''
+                  AND COALESCE(CAST(QUANTITY AS INTEGER), 0) > 0
                   AND (? = '' OR BARCODE LIKE ? OR TITLE LIKE ?)
                 GROUP BY TRIM(BARCODE)
                 ORDER BY MAX(CREATED_AT) DESC
@@ -10457,6 +11642,7 @@ def api_listingagent_upc_detail(upc):
                     SELECT ID, TITLE, ITEM_POSITION, PICTUREPOSITION, QUANTITY, IMAGE, IMAGES, ITEMID, CREATED_AT
                     FROM SEARCHRACK
                     WHERE TRIM(BARCODE) COLLATE NOCASE IN ({_inv_placeholders})
+                      AND COALESCE(CAST(QUANTITY AS INTEGER), 0) > 0
                     ORDER BY CREATED_AT DESC
                 ''', _inv_variants)
             else:
@@ -10466,6 +11652,7 @@ def api_listingagent_upc_detail(upc):
                     FROM SEARCHRACK
                     WHERE TRIM(BARCODE) COLLATE NOCASE IN ({_inv_placeholders})
                       AND TRIM(BARCODE) NOT LIKE '%-_%' COLLATE NOCASE
+                      AND COALESCE(CAST(QUANTITY AS INTEGER), 0) > 0
                     ORDER BY CREATED_AT DESC
                 ''', _inv_variants)
             rows = cur.fetchall()
@@ -10474,8 +11661,6 @@ def api_listingagent_upc_detail(upc):
             positions = []
             for r in rows:
                 qty = int(r['QUANTITY'] or 0) if r['QUANTITY'] is not None else 0
-                if qty <= 0:
-                    qty = 1
                 total_qty += qty
                 pos = (r['ITEM_POSITION'] or '').strip()
                 if pos:
@@ -14307,10 +15492,15 @@ def _amazon_normalize_condition_type(raw, default_condition='used_good'):
     if s.isdigit():
         code_map = {
             11: 'new_new',
-            1: 'used_good',
-            2: 'collectible_good',
-            3: 'refurbished_refurbished',
-            4: 'club_club',
+            1: 'used_like_new',
+            2: 'used_very_good',
+            3: 'used_good',
+            4: 'used_acceptable',
+            5: 'collectible_like_new',
+            6: 'collectible_very_good',
+            7: 'collectible_good',
+            8: 'collectible_acceptable',
+            10: 'refurbished_refurbished',
         }
         return code_map.get(int(s), default_condition)
 
@@ -17395,8 +18585,8 @@ def _start_server_metrics_history_thread():
 
 def collect_inventory_mismatches():
     """
-    Find items where store listings have quantity > 0 but searchRack has 0 quantity.
-    Only reports on items that exist in searchRack with 0 quantity (not missing items).
+    Find store listings with stock after their warehouse row reached a terminal history event.
+    SEARCHRACK contains active rows only, so rack history supplies the former zero-row signal.
     Also checks for duplicate barcodes in different locations.
     """
     issues = {
@@ -17406,9 +18596,10 @@ def collect_inventory_mismatches():
         'duplicate_locations': [],
         'timestamp': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     }
+    rack_conn = None
     
     try:
-        # Get searchRack items with 0 quantity
+        # Build active warehouse identities first; any active row cancels an older terminal event.
         rack_conn = sqlite3.connect('searchRack.db')
         rack_conn.row_factory = sqlite3.Row
         rack_cur = rack_conn.cursor()
@@ -17421,15 +18612,53 @@ def collect_inventory_mismatches():
         if not qty_col:
             return issues
         
-        # Get all items with 0 quantity and their barcodes
+        active_keys = set()
         rack_cur.execute(f'''
-            SELECT ITEMID as barcode, TITLE, {qty_col} as quantity 
-            FROM SEARCHRACK 
-            WHERE ITEMID IS NOT NULL 
-            AND TRIM(ITEMID) != ''
-            AND ({qty_col} = 0 OR {qty_col} IS NULL)
+            SELECT BARCODE, ITEMID
+            FROM SEARCHRACK
+            WHERE COALESCE(CAST({qty_col} AS INTEGER), 0) > 0
         ''')
-        zero_qty_items = {row['barcode'].strip().upper(): row['TITLE'] for row in rack_cur.fetchall() if row['barcode']}
+        for row in rack_cur.fetchall():
+            for value in (row['BARCODE'], row['ITEMID']):
+                key = str(value or '').strip().upper()
+                if key:
+                    active_keys.add(key)
+        rack_conn.close()
+        rack_conn = None
+
+        _flush_searchrack_history_outbox()
+        history_conn = sqlite3.connect('rackhistory.db')
+        history_conn.row_factory = sqlite3.Row
+        history_cur = history_conn.cursor()
+        _ensure_removed_items_table(history_cur)
+        history_cur.execute('''
+            SELECT barcode, title, source_row_json
+            FROM removed_items
+            WHERE COALESCE(old_quantity, 0) > 0
+              AND COALESCE(new_quantity, 0) <= 0
+              AND (undone_at IS NULL OR undone_at = '')
+              AND COALESCE(event_status, 'applied') = 'applied'
+            ORDER BY id DESC
+        ''')
+        zero_qty_items = {}
+        for row in history_cur.fetchall():
+            try:
+                snapshot = json.loads(row['source_row_json'] or '{}')
+                if not isinstance(snapshot, dict):
+                    snapshot = {}
+            except Exception:
+                snapshot = {}
+            folded = _row_casefold_dict(snapshot)
+            identities = {
+                str(row['barcode'] or '').strip().upper(),
+                str(folded.get('barcode') or '').strip().upper(),
+                str(folded.get('itemid') or '').strip().upper(),
+            }
+            title = str(row['title'] or folded.get('title') or '').strip()
+            for identity in identities:
+                if identity and identity not in active_keys:
+                    zero_qty_items.setdefault(identity, title)
+        history_conn.close()
         
         # Check eBay store for matching items with quantity > 0 (only if we have zero-qty items)
         if zero_qty_items:
@@ -17527,7 +18756,7 @@ def collect_inventory_mismatches():
                     AND BARCODE NOT LIKE '%-%'
                     AND ITEM_POSITION IS NOT NULL
                     AND TRIM(ITEM_POSITION) != ''
-                    AND ({qty_col} > 0 OR {qty_col} IS NULL)
+                    AND COALESCE(CAST({qty_col} AS INTEGER), 0) > 0
                     GROUP BY BARCODE
                     HAVING COUNT(DISTINCT ITEM_POSITION) > 1
                     ORDER BY location_count DESC, BARCODE
@@ -17546,12 +18775,14 @@ def collect_inventory_mismatches():
         except Exception as e:
             print(f"Error checking for duplicate locations: {e}")
         finally:
-            rack_conn.close()
+            if rack_conn is not None:
+                rack_conn.close()
         
     except Exception as e:
         print(f"Error collecting inventory mismatches: {e}")
     finally:
-        rack_conn.close()
+        if rack_conn is not None:
+            rack_conn.close()
     
     return issues
 
@@ -20664,21 +21895,38 @@ _zero_qty_deleter_started = False
 _automatic_removal_started = False
 
 def _purge_zero_qty_items():
-    """Legacy compatibility shim: retain zero-qty rows and clear stale delete queue entries."""
+    """Enforce active-stock-only SEARCHRACK and safely archive any legacy zero rows."""
     try:
-        _clear_zero_qty_pending_deletions()
-        print("ℹ️ Zero-qty auto deletion is disabled; zero-quantity rows remain in SEARCHRACK.")
+        summary = _initialize_searchrack_history_guard()
+        print(
+            "✅ Active inventory guard ready: "
+            f"normalized={summary.get('normalized', 0)}, "
+            f"removed_zero_rows={summary.get('deleted', 0)}, "
+            f"history_events_mirrored={summary.get('mirrored', 0)}"
+        )
+        return summary
     except Exception as e:
-        print(f"❌ Error disabling zero-qty cleanup queue: {e}")
+        print(f"❌ Error enforcing zero-quantity cleanup: {e}")
+        return {'installed': False, 'error': str(e)}
 
 def _start_zero_qty_deleter_thread():
-    """Zero-quantity rows are retained for history; no background deleter runs."""
+    """Install the guard and keep retrying any rack-history outbox events."""
     global _zero_qty_deleter_started
     if _zero_qty_deleter_started:
         return
     _zero_qty_deleter_started = True
     _purge_zero_qty_items()
-    print("ℹ️ Zero-quantity deletion worker disabled; rows stay at qty 0 until changed manually.")
+
+    def _outbox_runner():
+        while True:
+            try:
+                _flush_searchrack_history_outbox(limit=250, settle_seconds=2)
+            except Exception as flush_error:
+                print(f"Warning: rack-history outbox retry failed: {flush_error}")
+            time.sleep(60)
+
+    threading.Thread(target=_outbox_runner, daemon=True).start()
+    print("🚀 Active-inventory guard and rack-history outbox worker started")
 
 def _process_automatic_inventory_removals():
     """Automatic sold-order removal is disabled; Ready to Ship confirmation is authoritative."""
@@ -21045,8 +22293,9 @@ def _process_automatic_inventory_removals():
 
                         removed_cur.execute('''
                             INSERT INTO removed_items
-                            (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            (order_id, barcode, title, quantity_removed, removed_at, searchrack_id,
+                             old_quantity, new_quantity, removal_type, item_position, event_status)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
                         ''', (
                             order['order_id'],
                             barcode,
@@ -22191,9 +23440,94 @@ def item_prep_create_item_page():
     """Page for creating custom items with auto-generated 777 barcodes"""
     return render_template('item_prep_create_item.html')
 
+
+def _ensure_custom_item_registry(cur):
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS custom_item_registry (
+            upc TEXT PRIMARY KEY COLLATE NOCASE,
+            item_description TEXT NOT NULL DEFAULT '',
+            image_url TEXT NOT NULL DEFAULT '',
+            reserved_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_custom_item_registry_updated ON custom_item_registry(updated_at)')
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS custom_item_registry_meta (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )
+    ''')
+    migrated = cur.execute(
+        "SELECT value FROM custom_item_registry_meta WHERE key = 'legacy_backfill_v1'"
+    ).fetchone()
+    if migrated:
+        return
+
+    recovered = {}
+    try:
+        with sqlite3.connect(str(BASE_DIR / 'searchRack.db')) as rack_conn:
+            rack_conn.row_factory = sqlite3.Row
+            rack_cur = rack_conn.cursor()
+            rack_cur.execute('''
+                SELECT BARCODE, TITLE, COALESCE(IMAGE, '') AS IMAGE
+                FROM SEARCHRACK
+                WHERE BARCODE LIKE '777%'
+            ''')
+            for row in rack_cur.fetchall():
+                upc = str(row['BARCODE'] or '').strip()
+                if upc:
+                    recovered[upc] = (
+                        str(row['TITLE'] or '').strip(),
+                        str(row['IMAGE'] or '').strip()
+                    )
+    except Exception:
+        pass
+
+    try:
+        with sqlite3.connect(str(BASE_DIR / 'rackhistory.db')) as history_conn:
+            history_conn.row_factory = sqlite3.Row
+            history_cur = history_conn.cursor()
+            history_cur.execute('''
+                SELECT barcode, title, source_row_json
+                FROM removed_items
+                WHERE barcode LIKE '777%'
+                ORDER BY id ASC
+            ''')
+            for row in history_cur.fetchall():
+                upc = str(row['barcode'] or '').strip()
+                if not upc:
+                    continue
+                title = str(row['title'] or '').strip()
+                image = ''
+                try:
+                    snapshot = json.loads(row['source_row_json'] or '{}')
+                    if isinstance(snapshot, dict):
+                        title = str(snapshot.get('TITLE') or snapshot.get('title') or title).strip()
+                        image = str(snapshot.get('IMAGE') or snapshot.get('image') or '').strip()
+                except Exception:
+                    pass
+                previous = recovered.get(upc, ('', ''))
+                recovered[upc] = (title or previous[0], image or previous[1])
+    except Exception:
+        pass
+
+    for upc, (title, image) in recovered.items():
+        cur.execute('''
+            INSERT OR IGNORE INTO custom_item_registry (
+                upc, item_description, image_url, reserved_at, updated_at
+            ) VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ''', (upc, title, image))
+    cur.execute('''
+        INSERT OR REPLACE INTO custom_item_registry_meta (key, value)
+        VALUES ('legacy_backfill_v1', CURRENT_TIMESTAMP)
+    ''')
+
+
 @app.route('/api/items-prep/generate-barcode', methods=['POST'])
 def generate_custom_barcode():
     """Generate auto-incremented 777 prefix barcode with duplicate protection"""
+    conn = None
     try:
         data = request.get_json(silent=True) or {}
         excluded_barcodes = {
@@ -22204,6 +23538,7 @@ def generate_custom_barcode():
 
         conn = sqlite3.connect('bol.db')
         cur = conn.cursor()
+        cur.execute('BEGIN IMMEDIATE')
         
         # Create temp_items table if not exists
         cur.execute('''
@@ -22214,6 +23549,7 @@ def generate_custom_barcode():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+        _ensure_custom_item_registry(cur)
         
         # Get the highest 777 barcode from both tables
         cur.execute('''
@@ -22230,13 +23566,23 @@ def generate_custom_barcode():
             WHERE upc LIKE '777%' AND LENGTH(upc) = 12
         ''')
         temp_result = cur.fetchone()
+
+        cur.execute('''
+            SELECT MAX(CAST(upc AS INTEGER)) AS max_barcode
+            FROM custom_item_registry
+            WHERE upc LIKE '777%' AND LENGTH(upc) = 12
+        ''')
+        registry_result = cur.fetchone()
         
         # Get the highest barcode from both tables
         max_barcode = result[0] if result[0] else None
         temp_max = temp_result[0] if temp_result[0] else None
+        registry_max = registry_result[0] if registry_result and registry_result[0] else None
         
         if temp_max and (not max_barcode or temp_max > max_barcode):
             max_barcode = temp_max
+        if registry_max and (not max_barcode or registry_max > max_barcode):
+            max_barcode = registry_max
         
         # Generate new barcode with duplicate check
         attempts = 0
@@ -22270,9 +23616,18 @@ def generate_custom_barcode():
             
             cur.execute('SELECT upc FROM temp_items WHERE upc = ? COLLATE NOCASE', (new_barcode,))
             exists_temp = cur.fetchone()
+
+            cur.execute('SELECT upc FROM custom_item_registry WHERE upc = ? COLLATE NOCASE', (new_barcode,))
+            exists_registry = cur.fetchone()
             
-            if not exists_bol and not exists_temp and new_barcode not in excluded_barcodes:
-                # Barcode is unique, we're good!
+            if not exists_bol and not exists_temp and not exists_registry and new_barcode not in excluded_barcodes:
+                # Reserve immediately so a generated code is never issued again,
+                # even if the user leaves before adding it to active inventory.
+                cur.execute('''
+                    INSERT INTO custom_item_registry (upc, reserved_at, updated_at)
+                    VALUES (?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ''', (new_barcode,))
+                conn.commit()
                 return jsonify({'success': True, 'barcode': new_barcode.strip()})
             
             # Barcode exists, increment and try again
@@ -22286,11 +23641,13 @@ def generate_custom_barcode():
         print(f'Error generating barcode: {e}')
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
 
 @app.route('/api/items-prep/temp-item', methods=['POST'])
 def save_temp_item():
     """Save custom item directly to bol_items so it appears in Item Manager"""
+    conn = None
     try:
         data = request.get_json()
         upc = data.get('upc', '').strip()
@@ -22328,12 +23685,23 @@ def save_temp_item():
         # Insert directly into bol_items table
         conn = sqlite3.connect('bol.db')
         cur = conn.cursor()
+        _ensure_custom_item_registry(cur)
         
         # Check if item already exists
         cur.execute('SELECT upc FROM bol_items WHERE upc = ? COLLATE NOCASE', (upc_norm,))
         exists = cur.fetchone()
         
         web_image_path = f"/static/custom_items/{image_filename}"
+
+        cur.execute('''
+            INSERT INTO custom_item_registry (
+                upc, item_description, image_url, reserved_at, updated_at
+            ) VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ON CONFLICT(upc) DO UPDATE SET
+                item_description = excluded.item_description,
+                image_url = excluded.image_url,
+                updated_at = CURRENT_TIMESTAMP
+        ''', (upc_norm, item_description, web_image_path))
         
         if exists:
             # Update existing item
@@ -22363,7 +23731,40 @@ def save_temp_item():
         print(f'Error saving custom item: {e}')
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
+
+
+@app.route('/api/custom-item/identity', methods=['POST'])
+def save_custom_item_identity():
+    """Reserve a custom barcode and retain its title independently of active stock."""
+    conn = None
+    try:
+        data = request.get_json(silent=True) or {}
+        upc = _normalize_upc(data.get('upc'))
+        title = str(data.get('item_description') or data.get('title') or '').strip()[:200]
+        if not upc or not title:
+            return jsonify({'success': False, 'error': 'Barcode and title are required'}), 400
+
+        conn = sqlite3.connect('bol.db')
+        cur = conn.cursor()
+        _ensure_custom_item_registry(cur)
+        cur.execute('''
+            INSERT INTO custom_item_registry (
+                upc, item_description, reserved_at, updated_at
+            ) VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ON CONFLICT(upc) DO UPDATE SET
+                item_description = excluded.item_description,
+                updated_at = CURRENT_TIMESTAMP
+        ''', (upc, title))
+        conn.commit()
+        cache.delete_memoized(api_bol_lookup)
+        return jsonify({'success': True, 'upc': upc, 'item_description': title})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'custom_item:identity')}), 500
+    finally:
+        if conn is not None:
+            conn.close()
 
  
 
@@ -24074,7 +25475,6 @@ def api_items_prep_create_bad_entry():
         
         if not upc:
             return jsonify({'success': False, 'error': 'Missing upc'}), 400
-        
         # Strip leading zeros
         upc = _normalize_upc_preserve_suffix_for_match(upc)
         
@@ -24372,6 +25772,7 @@ def api_items_prep_create_return_entry():
     try:
         data = request.get_json() or {}
         upc = _strip_leading_zeros_numeric(_normalize_upc(data.get('upc')))
+        submission_id = str(data.get('submission_id') or '').strip()
         exception_note = (data.get('exception_note') or '').strip()
         try:
             qty = int(data.get('qty', 1))
@@ -24382,6 +25783,8 @@ def api_items_prep_create_return_entry():
         
         if not upc:
             return jsonify({'success': False, 'error': 'Missing upc'}), 400
+        if not submission_id or len(submission_id) > 128 or not re.fullmatch(r'[A-Za-z0-9._:-]+', submission_id):
+            return jsonify({'success': False, 'error': 'Missing or invalid submission_id'}), 400
         
         # Strip leading zeros
         upc = _normalize_upc_preserve_suffix_for_match(upc)
@@ -24399,6 +25802,32 @@ def api_items_prep_create_return_entry():
         conn = sqlite3.connect('bol.db', isolation_level='IMMEDIATE')
         cur = conn.cursor()
         _ensure_items_prep_tables()
+        cur.execute('BEGIN IMMEDIATE')
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS items_prep_submission_keys (
+                submission_id TEXT PRIMARY KEY,
+                action TEXT NOT NULL,
+                base_upc TEXT NOT NULL,
+                response_json TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+        ''')
+        cur.execute('''
+            SELECT action, base_upc, response_json
+            FROM items_prep_submission_keys
+            WHERE submission_id = ?
+            LIMIT 1
+        ''', (submission_id,))
+        prior_submission = cur.fetchone()
+        if prior_submission:
+            if prior_submission[0] != 'return' or prior_submission[1].casefold() != base_upc.casefold():
+                return jsonify({'success': False, 'error': 'submission_id was already used for another action'}), 409
+            try:
+                prior_payload = json.loads(prior_submission[2])
+            except Exception:
+                prior_payload = {'success': False, 'error': 'Stored submission result is invalid'}
+            prior_payload['idempotent_replay'] = True
+            return jsonify(prior_payload)
         requested_lot_norm = ''
         selected_lot = ''
         
@@ -24535,6 +25964,25 @@ def api_items_prep_create_return_entry():
                 }
             )
         
+        response_payload = {
+            'success': True,
+            'suffixed_upc': suffixed_upc,
+            'base_upc': base_upc,
+            'lot_number': selected_lot,
+            'requested_lot': requested_lot_norm,
+            'auto_assigned': False,
+            'auto_assign_reason': auto_assign_reason,
+            'forced_lot_override': False,
+            'continued_without_lot': True,
+            'unchecked_qty': new_unchecked,
+            'exception_overage': bool(exception_overage_applied),
+            'items_to_list_url': _items_prep_items_to_list_url(base_upc, '')
+        }
+        cur.execute('''
+            INSERT INTO items_prep_submission_keys
+                (submission_id, action, base_upc, response_json, created_at)
+            VALUES (?, 'return', ?, ?, ?)
+        ''', (submission_id, base_upc, json.dumps(response_payload, separators=(',', ':')), ts))
         conn.commit()
         
         print(
@@ -24577,20 +26025,7 @@ def api_items_prep_create_return_entry():
         except Exception:
             pass
 
-        return jsonify({
-            'success': True, 
-            'suffixed_upc': suffixed_upc, 
-            'base_upc': base_upc,
-            'lot_number': selected_lot,
-            'requested_lot': requested_lot_norm,
-            'auto_assigned': False,
-            'auto_assign_reason': auto_assign_reason,
-            'forced_lot_override': False,
-            'continued_without_lot': True,
-            'unchecked_qty': new_unchecked,
-            'exception_overage': bool(exception_overage_applied),
-            'items_to_list_url': _items_prep_items_to_list_url(base_upc, '')
-        })
+        return jsonify(response_payload)
         
     except Exception as e:
         import traceback
@@ -27587,12 +29022,16 @@ def api_items_prep_location_set():
                         IMAGES TEXT,
                         PICTUREPOSITION TEXT,
                         ITEMID TEXT,
-                        QUANTITY INTEGER,
+                        QUANTITY INTEGER DEFAULT 1,
                         CREATED_AT TEXT
                     )
                 ''')
                 # Check if entry exists
-                search_cur.execute('SELECT ID FROM SEARCHRACK WHERE BARCODE = ? COLLATE NOCASE', (upc,))
+                search_cur.execute('''
+                    SELECT ID FROM SEARCHRACK
+                    WHERE BARCODE = ? COLLATE NOCASE
+                      AND COALESCE(CAST(QUANTITY AS INTEGER), 0) > 0
+                ''', (upc,))
                 existing = search_cur.fetchone()
                 
                 if existing:
@@ -27601,12 +29040,14 @@ def api_items_prep_location_set():
                         UPDATE SEARCHRACK 
                         SET ITEM_POSITION = ?, PICTUREPOSITION = ?, TITLE = ?, CREATED_AT = ?
                         WHERE BARCODE = ? COLLATE NOCASE
+                          AND COALESCE(CAST(QUANTITY AS INTEGER), 0) > 0
                     ''', (location, pictureposition, title, ts, upc))
                 else:
                     # Insert new
                     search_cur.execute('''
-                        INSERT INTO SEARCHRACK (TITLE, BARCODE, ITEM_POSITION, PICTUREPOSITION, CREATED_AT)
-                        VALUES (?, ?, ?, ?, ?)
+                        INSERT INTO SEARCHRACK
+                        (TITLE, BARCODE, ITEM_POSITION, PICTUREPOSITION, QUANTITY, CREATED_AT)
+                        VALUES (?, ?, ?, ?, 1, ?)
                     ''', (title, upc, location, pictureposition, ts))
                 
                 search_conn.commit()
@@ -31655,6 +33096,7 @@ def api_listing_helper_scan():
                         SELECT rowid AS RID, {upc_col} AS UPC, {qty_col} AS QTY, {pos_expr}, {pic_expr}, {title_expr}, {img_expr}
                         FROM SEARCHRACK
                         WHERE {upc_col} IS NOT NULL AND {upc_col} != ""
+                          AND COALESCE(CAST({qty_col} AS INTEGER), 0) > 0
                     ''')
                     for row in sr_cur.fetchall():
                         try:
@@ -32302,6 +33744,7 @@ def api_fb_listings():
                     SELECT {upc_col} AS UPC, SUM({qty_col}) as total_qty
                     FROM SEARCHRACK
                     WHERE {upc_col} IS NOT NULL AND {upc_col} != ""
+                      AND COALESCE(CAST({qty_col} AS INTEGER), 0) > 0
                     GROUP BY {upc_col} COLLATE NOCASE
                 ''')
                 for row in sr_cur.fetchall():
@@ -33572,6 +35015,14 @@ def api_bol_items():
             if u:
                 page_upcs.add(str(u))
                 page_upcs.add(_normalize_upc(u))
+                # Return/bad rows use a suffixed UPC, while their original BOL
+                # LOT history remains attached to the base barcode.
+                upc_with_suffix = _normalize_upc(u)
+                if _is_items_to_list_suffixed_upc(upc_with_suffix):
+                    base_upc = upc_with_suffix.rsplit('-', 1)[0].strip()
+                    if base_upc:
+                        page_upcs.add(base_upc)
+                        page_upcs.add(_strip_leading_zeros_numeric(base_upc))
         try:
             if page_upcs:
                 _ensure_items_prep_tables()
@@ -33989,6 +35440,28 @@ def api_bol_items():
             upc_norm = _normalize_upc(upc_raw)
             row_lot_n = _normalize_lot_number(r.get('lot_number'))
             prep_lot_breakdown = list(prep_lot_breakdown_by_upc.get(upc_norm, []) or [])
+            if status == 'return' and _is_items_to_list_suffixed_upc(upc_norm):
+                return_base_upc = upc_norm.rsplit('-', 1)[0].strip()
+                return_base_candidates = (
+                    return_base_upc,
+                    _strip_leading_zeros_numeric(return_base_upc)
+                )
+                for return_base_key in return_base_candidates:
+                    base_breakdown = prep_lot_breakdown_by_upc.get(return_base_key, []) or []
+                    real_lot_breakdown = [
+                        dict(entry) for entry in base_breakdown
+                        if _normalize_lot_number(entry.get('lot_number'))
+                    ]
+                    if real_lot_breakdown:
+                        prep_lot_breakdown = real_lot_breakdown
+                        break
+                else:
+                    # Never present the return row's synthetic lotless prep
+                    # record as LOT history.
+                    prep_lot_breakdown = [
+                        dict(entry) for entry in prep_lot_breakdown
+                        if _normalize_lot_number(entry.get('lot_number'))
+                    ]
             prep_total_quantity = 0
             prep_current_lot_quantity = display_qty
             prep_breakdown_keys = set()
@@ -34017,6 +35490,12 @@ def api_bol_items():
                     matched_current_lot = True
             prep_total_quantity = max(prep_total_quantity, display_qty)
             prep_multi_lot = len(prep_breakdown_keys) > 1
+            if status == 'return':
+                # LOT rows describe where the base barcode appeared; the return
+                # quantity itself is not allocated back across those LOTS.
+                prep_total_quantity = display_qty
+                prep_current_lot_quantity = display_qty
+                prep_multi_lot = len(prep_breakdown_keys) > 1
 
             # Check if item has notes in items_prep_notes table
             has_notes = r.get('prep_note_count', 0) > 0
@@ -34039,9 +35518,9 @@ def api_bol_items():
                 'temporary': r.get('temporary'),
                 'quantity': display_qty,
                 'prep_current_lot': row_lot_n,
-                'prep_current_label': row_lot_n or 'LOTLESS',
+                'prep_current_label': row_lot_n or ('ALL LOTS' if status == 'return' else 'LOTLESS'),
                 'prep_lot_breakdown': prep_lot_breakdown,
-                'prep_lotless_present': bool(r.get('prep_lotless_present')),
+                'prep_lotless_present': bool(r.get('prep_lotless_present')) if status != 'return' else False,
                 'prep_total_quantity': prep_total_quantity,
                 'prep_current_lot_quantity': prep_current_lot_quantity,
                 'prep_multi_lot': prep_multi_lot,
@@ -35219,6 +36698,33 @@ def _warehouse_note_existing_suffixes(cur, base_barcode):
                 continue
             if _strip_leading_zeros_numeric(row_base) == _strip_leading_zeros_numeric(base):
                 used.add(int(row_suffix))
+
+    # Never recycle a suffix that belonged to a deleted warehouse row; its history remains addressable.
+    history_conn = None
+    try:
+        history_conn = sqlite3.connect(str(BASE_DIR / 'rackhistory.db'))
+        history_cur = history_conn.cursor()
+        _ensure_removed_items_table(history_cur)
+        for variant in variants:
+            history_cur.execute('''
+                SELECT DISTINCT barcode
+                FROM removed_items
+                WHERE barcode = ? COLLATE NOCASE OR barcode LIKE ? COLLATE NOCASE
+            ''', (variant, f'{variant}-%'))
+            for row in history_cur.fetchall():
+                raw = str(row[0] or '').strip()
+                if '-' not in raw:
+                    continue
+                row_base, row_suffix = raw.rsplit('-', 1)
+                if row_suffix.isdigit() and (
+                    _strip_leading_zeros_numeric(row_base) == _strip_leading_zeros_numeric(base)
+                ):
+                    used.add(int(row_suffix))
+    except Exception:
+        pass
+    finally:
+        if history_conn is not None:
+            history_conn.close()
     return used
 
 def _next_warehouse_note_suffix(cur, base_barcode, reserved_suffixes):
@@ -35474,7 +36980,7 @@ def position_diagnostic():
                         IMAGES TEXT,
                         PICTUREPOSITION TEXT,
                         ITEMID TEXT,
-                        QUANTITY INTEGER,
+                        QUANTITY INTEGER DEFAULT 1,
                         CREATED_AT TEXT
                     )
                 ''')
@@ -35500,8 +37006,9 @@ def position_diagnostic():
                         _ensure_removed_items_table(removed_cur)
                         removed_cur.execute('''
                             INSERT INTO removed_items 
-                            (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            (order_id, barcode, title, quantity_removed, removed_at, searchrack_id,
+                             old_quantity, new_quantity, removal_type, item_position, event_status)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
                         ''', (None, upc, title, 1, ts, new_id, 0, 1, 'add_to_shelf', pictureposition))
                         removed_conn.commit()
                         print(f"✅ Logged add-to-shelf (picture) to history")
@@ -35540,8 +37047,9 @@ def position_diagnostic():
                             _ensure_removed_items_table(removed_cur)
                             removed_cur.execute('''
                                 INSERT INTO removed_items 
-                                (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                (order_id, barcode, title, quantity_removed, removed_at, searchrack_id,
+                                 old_quantity, new_quantity, removal_type, item_position, event_status)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
                             ''', (None, upc, title, 1, ts, existing_id, existing_qty, new_qty, 'add_to_shelf', location))
                             removed_conn.commit()
                             print(f"✅ Logged add-to-shelf (update) to history")
@@ -35568,8 +37076,9 @@ def position_diagnostic():
                             _ensure_removed_items_table(removed_cur)
                             removed_cur.execute('''
                                 INSERT INTO removed_items 
-                                (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                (order_id, barcode, title, quantity_removed, removed_at, searchrack_id,
+                                 old_quantity, new_quantity, removal_type, item_position, event_status)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
                             ''', (None, upc, title, 1, ts, new_id, 0, 1, 'add_to_shelf', location))
                             removed_conn.commit()
                             print(f"✅ Logged add-to-shelf (insert) to history")
@@ -35719,6 +37228,27 @@ def _add_item_screening_lookup(barcode):
         return None
 
     try:
+        with db_connection('bol.db') as conn:
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            _ensure_custom_item_registry(cur)
+            row = _pick_row(cur, '''
+                SELECT item_description AS title, image_url
+                FROM custom_item_registry
+                WHERE LOWER(TRIM(upc)) = ?
+                LIMIT 1
+            ''')
+            if row:
+                title = str(row['title'] or '').strip()
+                image_url = str(row['image_url'] or '').strip()
+                if title:
+                    title_source = 'custom_registry'
+                if image_url:
+                    image_source = 'custom_registry'
+    except Exception:
+        pass
+
+    try:
         with db_connection('rawbol.db') as conn:
             conn.row_factory = sqlite3.Row
             cur = conn.cursor()
@@ -35860,8 +37390,8 @@ def _add_item_screening_lookup(barcode):
         'macy_found': macy_found,
         'macy_title': macy_title,
         'macy_image_url': macy_image_url,
-        'needs_manual_title': not macy_found,
-        'missing_image': not macy_found
+        'needs_manual_title': not bool(str(title or '').strip()),
+        'missing_image': not bool(str(image_url or '').strip())
     }
 
 
@@ -35952,6 +37482,39 @@ def get_high_res_image_url(url):
     return url
 
 
+_EBAY_CONDITION_ID_LABELS = {
+    '1000': 'New',
+    '1500': 'New other',
+    '1750': 'New with defects',
+    '2000': 'Certified refurbished',
+    '2010': 'Excellent refurbished',
+    '2020': 'Very good refurbished',
+    '2030': 'Good refurbished',
+    '2500': 'Seller refurbished',
+    '2750': 'Like new',
+    '3000': 'Used',
+    '4000': 'Used - Very Good',
+    '5000': 'Used - Good',
+    '6000': 'Used - Acceptable',
+    '7000': 'For parts or not working',
+}
+
+
+def _ebay_item_text_details(item_node, namespace):
+    """Extract listing condition and descriptions from a full eBay Item payload."""
+    def _text(path):
+        node = item_node.find(path, namespace)
+        return str(node.text or '').strip() if node is not None else ''
+
+    condition_id = _text('.//ebay:ConditionID')
+    condition_display = _text('.//ebay:ConditionDisplayName')
+    return {
+        'condition': condition_display or _EBAY_CONDITION_ID_LABELS.get(condition_id, condition_id),
+        'condition_description': _text('.//ebay:ConditionDescription'),
+        'description': _text('.//ebay:Description'),
+    }
+
+
 def orders():
     print("✅ Now running orders()...")
     headers = {
@@ -35970,33 +37533,33 @@ def orders():
     active_item_ids_seen = set()
     pages_processed = 0
     pages_successful = 0
-    # Ensure UPC and UPC_Processed columns exist
+    # GetMyeBaySelling no longer returns condition fields, so enrichment is
+    # completed through one-time GetItem lookups. Keep explicit processed flags
+    # so categories without a UPC or condition do not trigger calls forever.
+    conn = None
     try:
         conn = sqlite3.connect('ebayStore.db')
         cur = conn.cursor()
         cur.execute("PRAGMA table_info(INVENTORY)")
-        columns = [row[1] for row in cur.fetchall()]
-        if "UPC" not in columns:
-            cur.execute("ALTER TABLE INVENTORY ADD COLUMN UPC TEXT")
-        if "UPC_Processed" not in columns:
-            cur.execute("ALTER TABLE INVENTORY ADD COLUMN UPC_Processed INTEGER DEFAULT 0")
+        columns = {str(row[1]).lower() for row in cur.fetchall()}
+        enrichment_columns = {
+            'upc': 'UPC TEXT',
+            'upc_processed': 'UPC_Processed INTEGER DEFAULT 0',
+            'condition': 'Condition TEXT',
+            'conditiondescription': 'ConditionDescription TEXT',
+            'description': 'Description TEXT',
+            'condition_processed': 'Condition_Processed INTEGER DEFAULT 0',
+        }
+        for normalized_name, definition in enrichment_columns.items():
+            if normalized_name not in columns:
+                cur.execute(f'ALTER TABLE INVENTORY ADD COLUMN {definition}')
         conn.commit()
     except Exception as alter_e:
-        print(f"Failed to ensure UPC/UPC_Processed columns exist: {alter_e}")
+        print(f"Failed to ensure eBay enrichment columns exist: {alter_e}")
     finally:
-        conn.close()
-    # Query for missing UPCs and not processed
-    try:
-        conn = sqlite3.connect('ebayStore.db')
-        cur = conn.cursor()
-        cur.execute("SELECT ItemID FROM INVENTORY WHERE (UPC IS NULL OR UPC = '' OR UPC = 'null') AND (UPC_Processed IS NULL OR UPC_Processed = 0)")
-        item_ids_missing_upc = set(row[0] for row in cur.fetchall() if row[0])
-    except Exception as e:
-        print(f"Failed to get ItemIDs missing UPC: {e}")
-        item_ids_missing_upc = set()
-    finally:
-        conn.close()
-    processed_upc_ids = set()
+        if conn is not None:
+            conn.close()
+    processed_detail_ids = set()
     while page_number <= total_pages:
 
         xml_payload = f'''
@@ -36005,6 +37568,7 @@ def orders():
               <RequesterCredentials>
                 <eBayAuthToken>{os.getenv("EBAY_OLDAUTH_TOKEN")}</eBayAuthToken>
               </RequesterCredentials>
+              <DetailLevel>ReturnAll</DetailLevel>
               <ErrorLanguage>en_US</ErrorLanguage>
               <WarningLevel>High</WarningLevel>
               <ActiveList>
@@ -36090,6 +37654,10 @@ def orders():
                 URL = f"https://www.ebay.com/itm/{item_id_text}"
                 picture_url = item.find('.//ebay:PictureDetails/ebay:GalleryURL', ns)
                 high_res_url = get_high_res_image_url(picture_url.text) if picture_url is not None else "No image"
+                item_text_details = _ebay_item_text_details(item, ns)
+                condition_text = item_text_details['condition']
+                condition_description_text = item_text_details['condition_description']
+                description_text = item_text_details['description']
 
                 qty_total = _parse_int_text(quantity)
                 qty_available = _parse_int_text(quantity_available)
@@ -36114,7 +37682,10 @@ def orders():
                            List_State=list_state,
                            Sold_Date=sold_date.text if sold_date is not None else "None",
                            List_Date=list_date.text if list_date is not None else "None",
-                           URL=URL if URL is not None else "None")
+                           URL=URL if URL is not None else "None",
+                           condition=condition_text,
+                           description=description_text,
+                           condition_description=condition_description_text)
 
                 if list_state == "Active" and item_id_text not in [None, "", "N/A", "None"]:
                     active_item_ids_seen.add(item_id_text)
@@ -36157,25 +37728,34 @@ def orders():
             if item_id is not None and item_id.text not in [None, "N/A", "None", ""]:
                 all_item_ids.add(item_id.text)
 
-        # Ensure UPC column exists in ebayStore.db
+        # GetItem still returns the listing condition. Use it only for rows that
+        # have not already completed their UPC/condition enrichment.
+        to_lookup = []
         try:
-            conn = sqlite3.connect('ebayStore.db')
-            cur = conn.cursor()
-            cur.execute("PRAGMA table_info(INVENTORY)")
-            columns = [row[1] for row in cur.fetchall()]
-            if "UPC" not in columns:
-                cur.execute("ALTER TABLE INVENTORY ADD COLUMN UPC TEXT")
-                conn.commit()
-        except Exception as alter_e:
-            print(f"Failed to ensure UPC column exists: {alter_e}")
-        finally:
-            conn.close()
+            with connect_db('ebayStore.db') as lookup_conn:
+                lookup_cur = lookup_conn.cursor()
+                for eid in all_item_ids:
+                    if eid in processed_detail_ids:
+                        continue
+                    lookup_cur.execute('''
+                        SELECT UPC, UPC_Processed, Condition, Condition_Processed
+                        FROM INVENTORY
+                        WHERE ItemID = ?
+                        LIMIT 1
+                    ''', (eid,))
+                    detail_row = lookup_cur.fetchone()
+                    if not detail_row:
+                        continue
+                    stored_upc, upc_processed, stored_condition, condition_processed = detail_row
+                    missing_upc = not str(stored_upc or '').strip() or str(stored_upc or '').strip().lower() == 'null'
+                    missing_condition = not str(stored_condition or '').strip()
+                    if ((missing_upc and not int(upc_processed or 0))
+                            or (missing_condition and not int(condition_processed or 0))):
+                        to_lookup.append(eid)
+        except Exception as lookup_e:
+            print(f"Failed to identify eBay listings needing details: {lookup_e}")
 
-        # Only fetch UPCs for items that do not already have a UPC and not processed
-        # Filter only those in both all_item_ids and item_ids_missing_upc, and not already processed
-        to_lookup = [eid for eid in all_item_ids if eid in item_ids_missing_upc and eid not in processed_upc_ids]
         if to_lookup:
-            from DBmanager import connect_db
             with connect_db('ebayStore.db') as upc_conn:
                 upc_cur = upc_conn.cursor()
                 for eid in to_lookup:
@@ -36192,17 +37772,38 @@ def orders():
                     try:
                         getitem_resp = requests.post("https://api.ebay.com/ws/api.dll", headers=getitem_headers, data=getitem_xml, timeout=20)
                         getitem_root = ET.fromstring(getitem_resp.text)
+                        getitem_ack = getitem_root.find('ebay:Ack', ns)
+                        getitem_ack_text = str(getitem_ack.text or '').strip() if getitem_ack is not None else ''
+                        if getitem_ack_text not in ('Success', 'Warning'):
+                            error_node = getitem_root.find('.//ebay:LongMessage', ns)
+                            error_text = str(error_node.text or '').strip() if error_node is not None else 'Unknown eBay error'
+                            raise RuntimeError(f'GetItem returned {getitem_ack_text or "no acknowledgement"}: {error_text}')
+
                         product_details = getitem_root.find('.//{urn:ebay:apis:eBLBaseComponents}ProductListingDetails')
                         upc = None
                         if product_details is not None:
                             upc_elem = product_details.find('{urn:ebay:apis:eBLBaseComponents}UPC')
                             upc = upc_elem.text if upc_elem is not None else None
-                        print(f"Fetched UPC for ItemID {eid}: {upc}")
-                        upc_cur.execute("UPDATE INVENTORY SET UPC = ?, UPC_Processed = 1 WHERE ItemID = ?", (upc, eid))
-                        print(f"Updated UPC for ItemID {eid} in ebayStore.db and marked as processed")
-                        processed_upc_ids.add(eid)
+
+                        item_text_details = _ebay_item_text_details(getitem_root, ns)
+                        condition_text = item_text_details['condition']
+                        condition_description = item_text_details['condition_description']
+                        description_text = item_text_details['description']
+
+                        upc_cur.execute('''
+                            UPDATE INVENTORY
+                            SET UPC = COALESCE(NULLIF(?, ''), UPC),
+                                UPC_Processed = 1,
+                                Condition = COALESCE(NULLIF(?, ''), Condition),
+                                ConditionDescription = COALESCE(NULLIF(?, ''), ConditionDescription),
+                                Description = COALESCE(NULLIF(?, ''), Description),
+                                Condition_Processed = 1
+                            WHERE ItemID = ?
+                        ''', (upc, condition_text, condition_description, description_text, eid))
+                        print(f"Enriched eBay ItemID {eid}: UPC={upc or '-'}, Condition={condition_text or '-'}")
+                        processed_detail_ids.add(eid)
                     except Exception as e:
-                        print(f"Failed to fetch UPC for ItemID {eid}: {e}")
+                        print(f"Failed to enrich eBay ItemID {eid}: {e}")
 
         # Get total pages if first time
         if page_number == 1:
@@ -36392,6 +37993,9 @@ def get_ebay_orders(days=90):
                     'item_id': item_id,
                     'sku': sku_val,
                     'title': line_item.get('title'),
+                    'item_condition': line_item.get('condition') or line_item.get('conditionDisplayName'),
+                    'item_condition_description': line_item.get('conditionDescription') or line_item.get('conditionNote'),
+                    'item_description': line_item.get('description') or line_item.get('itemDescription'),
                     'quantity': quantity,
                     'price': unit_price,
                     'checkout_status': order_status,
@@ -37088,8 +38692,80 @@ def sold_orders():
         note_lookup = _load_ready_to_ship_note_lookup(sold_cur, order_row_ids)
         label_lookup = _load_ready_to_ship_label_lookup(sold_cur, order_row_ids)
         finder_match_lookup = _load_order_finder_match_lookup(sold_cur, order_row_ids)
+        amazon_listing_lookup = {}
+        amazon_store_conn = None
+        try:
+            amazon_store_conn = sqlite3.connect(str(BASE_DIR / 'amazonStore.db'))
+            amazon_store_conn.row_factory = sqlite3.Row
+            amazon_cols = {str(row[1]).lower() for row in amazon_store_conn.execute('PRAGMA table_info(ITEMS)').fetchall()}
+            condition_note_expr = 'CONDITION_NOTE' if 'condition_note' in amazon_cols else "'' AS CONDITION_NOTE"
+            for listing in amazon_store_conn.execute(f'SELECT ASIN, SKU, CONDITION, {condition_note_expr} FROM ITEMS'):
+                payload = {
+                    'condition': str(listing['CONDITION'] or '').strip(),
+                    'condition_description': str(listing['CONDITION_NOTE'] or '').strip()
+                }
+                for key in (listing['ASIN'], listing['SKU']):
+                    normalized_key = str(key or '').strip().lower()
+                    if normalized_key:
+                        amazon_listing_lookup[normalized_key] = payload
+        except Exception as e:
+            print(f"Warning: Could not load Amazon condition data for Ready to Ship: {e}")
+        finally:
+            if amazon_store_conn is not None:
+                amazon_store_conn.close()
+        ebay_listing_lookup = {}
+        ebay_store_conn = None
+        try:
+            ebay_store_conn = sqlite3.connect(str(BASE_DIR / 'ebayStore.db'))
+            ebay_store_conn.row_factory = sqlite3.Row
+            ebay_cols = {str(row[1]).lower() for row in ebay_store_conn.execute('PRAGMA table_info(INVENTORY)').fetchall()}
+            if 'condition' in ebay_cols or 'description' in ebay_cols or 'conditiondescription' in ebay_cols:
+                condition_expr = 'Condition' if 'condition' in ebay_cols else "'' AS Condition"
+                description_expr = 'Description' if 'description' in ebay_cols else "'' AS Description"
+                condition_description_expr = 'ConditionDescription' if 'conditiondescription' in ebay_cols else "'' AS ConditionDescription"
+                for listing in ebay_store_conn.execute(f'SELECT ItemID, SKU, {condition_expr}, {description_expr}, {condition_description_expr} FROM INVENTORY'):
+                    payload = {
+                        'condition': str(listing['Condition'] or '').strip(),
+                        'description': str(listing['Description'] or '').strip(),
+                        'condition_description': str(listing['ConditionDescription'] or '').strip()
+                    }
+                    for key in (listing['ItemID'], listing['SKU']):
+                        normalized_key = str(key or '').strip().lower()
+                        if normalized_key:
+                            ebay_listing_lookup[normalized_key] = payload
+        except Exception as e:
+            print(f"Warning: Could not load eBay condition/description data for Ready to Ship: {e}")
+        finally:
+            if ebay_store_conn is not None:
+                ebay_store_conn.close()
         for order in orders:
             order_dict = dict(order)
+            if str(order_dict.get('store') or '').strip().lower() == 'amazon':
+                for lookup_value in (order_dict.get('listing_asin'), order_dict.get('item_id'), order_dict.get('sku')):
+                    listing = amazon_listing_lookup.get(str(lookup_value or '').strip().lower())
+                    if not listing:
+                        continue
+                    if not str(order_dict.get('item_condition') or '').strip() and listing.get('condition'):
+                        order_dict['item_condition'] = listing['condition']
+                    if not str(order_dict.get('item_condition_description') or '').strip() and listing.get('condition_description'):
+                        order_dict['item_condition_description'] = listing['condition_description']
+                    break
+            if str(order_dict.get('store') or '').strip().lower() == 'ebay':
+                for lookup_value in (order_dict.get('listing_listing_id'), order_dict.get('item_id'), order_dict.get('sku')):
+                    listing = ebay_listing_lookup.get(str(lookup_value or '').strip().lower())
+                    if not listing:
+                        continue
+                    if not str(order_dict.get('item_condition') or '').strip() and listing.get('condition'):
+                        order_dict['item_condition'] = listing['condition']
+                    if not str(order_dict.get('item_description') or '').strip() and listing.get('description'):
+                        order_dict['item_description'] = listing['description']
+                    if not str(order_dict.get('item_condition_description') or '').strip() and listing.get('condition_description'):
+                        order_dict['item_condition_description'] = listing['condition_description']
+                    break
+            if str(order_dict.get('store') or '').strip().lower() == 'amazon':
+                raw_condition = str(order_dict.get('item_condition') or '').strip()
+                if raw_condition:
+                    order_dict['item_condition'] = _amazon_normalize_condition_type(raw_condition, raw_condition)
             stored_location = str(order_dict.get('location') or '').strip()
             order_dict['stored_location'] = stored_location
             order_dict['location_locked'] = bool(stored_location)
@@ -37180,6 +38856,13 @@ def sold_orders():
                             rack_rows = _searchrack_matches_for_barcode(rack_cur, base_barcode, include_zero=False)
                     
                     if rack_rows:
+                        rack_rows = _ready_to_ship_rank_inventory_matches(rack_rows, order_dict)
+                        preferred_match = rack_rows[0]
+                        order_dict['finder_searchrack_id'] = preferred_match.get('id') or ''
+                        order_dict['finder_matched_barcode'] = preferred_match.get('barcode') or order_dict.get('barcode') or ''
+                        order_dict['finder_matched_location'] = _ready_to_ship_match_display_location(preferred_match)
+                        if preferred_match.get('warehouse_note'):
+                            order_dict['warehouse_note'] = preferred_match.get('warehouse_note') or ''
                         # Collect all locations for this barcode
                         locations = []
                         for rack_row in rack_rows:
@@ -37650,6 +39333,99 @@ def ready_to_ship_unmatched_labels():
         })
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e, 'ready_to_ship:unmatched_labels')}), 500
+    finally:
+        try:
+            if conn is not None:
+                conn.close()
+        except Exception:
+            pass
+
+@app.route('/api/ready-to-ship/labels/all', methods=['DELETE'])
+def ready_to_ship_delete_all_labels():
+    """Manually purge every Ready to Ship label record and stored PDF."""
+    conn = None
+    try:
+        label_dir = _ready_to_ship_label_dir().resolve()
+        filenames = {
+            path.name
+            for path in label_dir.iterdir()
+            if path.is_file() and path.suffix.lower() == '.pdf'
+        }
+
+        conn = sqlite3.connect('sold.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        _ensure_ready_to_ship_order_labels_table(cur)
+        _ensure_ready_to_ship_unmatched_labels_table(cur)
+
+        attached_rows = cur.execute('''
+            SELECT label_filename
+            FROM ready_to_ship_order_labels
+            WHERE COALESCE(TRIM(label_filename), '') <> ''
+        ''').fetchall()
+        unmatched_rows = cur.execute('''
+            SELECT label_filename
+            FROM ready_to_ship_unmatched_labels
+            WHERE COALESCE(TRIM(label_filename), '') <> ''
+        ''').fetchall()
+        legacy_rows = cur.execute('''
+            SELECT label_filename
+            FROM ready_to_ship_notes
+            WHERE COALESCE(TRIM(label_filename), '') <> ''
+        ''').fetchall()
+
+        for row in [*attached_rows, *unmatched_rows, *legacy_rows]:
+            filename = str(_ready_to_ship_row_value(row, 'label_filename', '') or '').strip()
+            if filename:
+                filenames.add(filename)
+
+        cur.execute('DELETE FROM ready_to_ship_order_labels')
+        attached_deleted = max(0, int(cur.rowcount or 0))
+        cur.execute('DELETE FROM ready_to_ship_unmatched_labels')
+        unmatched_deleted = max(0, int(cur.rowcount or 0))
+        cur.execute('''
+            UPDATE ready_to_ship_notes
+            SET label_filename = '',
+                label_original_filename = '',
+                label_size_bytes = 0,
+                label_uploaded_at = '',
+                updated_at = CURRENT_TIMESTAMP
+            WHERE COALESCE(TRIM(label_filename), '') <> ''
+               OR COALESCE(TRIM(label_original_filename), '') <> ''
+               OR COALESCE(label_size_bytes, 0) <> 0
+               OR COALESCE(TRIM(label_uploaded_at), '') <> ''
+        ''')
+        cur.execute("DELETE FROM ready_to_ship_notes WHERE COALESCE(TRIM(note), '') = ''")
+        conn.commit()
+
+        files_deleted = 0
+        files_failed = 0
+        for filename in sorted(filenames):
+            path = _ready_to_ship_label_path(filename)
+            existed = bool(path and path.exists())
+            _ready_to_ship_delete_label_file(filename)
+            if existed:
+                if path and not path.exists():
+                    files_deleted += 1
+                else:
+                    files_failed += 1
+
+        _invalidate_ready_to_ship_cache()
+        return jsonify({
+            'success': True,
+            'attached_deleted': attached_deleted,
+            'unmatched_deleted': unmatched_deleted,
+            'records_deleted': attached_deleted + unmatched_deleted,
+            'files_deleted': files_deleted,
+            'files_failed': files_failed,
+        })
+    except Exception as e:
+        try:
+            if conn is not None:
+                conn.rollback()
+        except Exception:
+            pass
+        return jsonify({'success': False, 'error': _safe_error(e, 'ready_to_ship:labels_delete_all')}), 500
     finally:
         try:
             if conn is not None:
@@ -38379,13 +40155,16 @@ def mark_order_unhandled():
         now_iso = datetime.datetime.now().isoformat()
 
         # Look up the audit breadcrumbs for this order
+        _flush_searchrack_history_outbox()
         rh_conn = sqlite3.connect('rackhistory.db')
         rh_conn.row_factory = sqlite3.Row
         rh_cur = rh_conn.cursor()
         _ensure_removed_items_table(rh_cur)
 
         rh_cur.execute('''
-            SELECT id, searchrack_id, quantity_removed, barcode, title, item_position
+            SELECT id, searchrack_id, quantity_removed, barcode, title, item_position,
+                   old_quantity, new_quantity,
+                   source_row_json, from_position, to_position
             FROM removed_items
             WHERE order_id = ?
               AND removal_type = 'manual_handled'
@@ -38398,58 +40177,37 @@ def mark_order_unhandled():
             rack_conn = sqlite3.connect('searchRack.db')
             rack_conn.row_factory = sqlite3.Row
             rack_cur = rack_conn.cursor()
-            rack_schema = _searchrack_removal_schema(rack_cur)
-            id_col = rack_schema.get('id_col') or 'rowid'
-            qty_col = rack_schema.get('qty_col')
+            _ensure_searchrack_undo_claims(rack_cur)
+            rack_conn.commit()
+            rack_cur.execute('BEGIN IMMEDIATE')
             restored_row_ids = set()
+            restore_results = []
 
             for row in audit_rows:
-                sid = row['searchrack_id']
-                qty_to_restore = max(0, _coerce_int(row['quantity_removed'], 0))
+                qty_to_restore = _history_restore_quantity(row)
                 if qty_to_restore <= 0:
                     continue
 
-                rack_cur.execute(
-                    f'SELECT {qty_col} AS qty FROM SEARCHRACK WHERE {id_col} = ?', (sid,)
-                )
-                current_row = rack_cur.fetchone()
-                if current_row is None:
-                    # Row was deleted (zero-qty cleanup) — mark undone but skip restore
-                    rh_cur.execute(
-                        'UPDATE removed_items SET undone_at = ? WHERE id = ?', (now_iso, row['id'])
-                    )
-                    continue
-
-                current_qty = max(0, _coerce_int(current_row['qty'], 0))
-                restored_qty = current_qty + qty_to_restore
-                rack_cur.execute(
-                    f'UPDATE SEARCHRACK SET {qty_col} = ? WHERE {id_col} = ?', (restored_qty, sid)
-                )
-                rh_cur.execute(
-                    'UPDATE removed_items SET undone_at = ? WHERE id = ?', (now_iso, row['id'])
-                )
-                # Insert undo audit record so it shows in rack history
-                rh_cur.execute('''
-                    INSERT INTO removed_items
-                    (order_id, barcode, title, quantity_removed, removed_at, searchrack_id,
-                     old_quantity, new_quantity, removal_type, item_position)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
-                    order_ref,
-                    str(row['barcode'] or '').strip(),
-                    str(row['title'] or '').strip(),
-                    qty_to_restore,
-                    now_iso,
-                    sid,
-                    current_qty,
-                    restored_qty,
-                    'manual_handled_undo',
-                    str(row['item_position'] or '').strip()
-                ))
+                restored = _restore_searchrack_with_undo_claim(rack_cur, row, qty_to_restore)
+                sid = restored['searchrack_id']
+                restore_results.append((row, restored))
                 restored_count += 1
                 restored_row_ids.add(sid)
 
             rack_conn.commit()
+            for row, restored in restore_results:
+                rh_cur.execute(
+                    'UPDATE removed_items SET undone_at = ? WHERE id = ? AND (undone_at IS NULL OR undone_at = "")',
+                    (now_iso, row['id'])
+                )
+                _insert_inventory_undo_history(
+                    rh_cur,
+                    row,
+                    restored,
+                    'manual_handled_undo',
+                    order_id=order_ref,
+                    undone_at=now_iso,
+                )
             rh_conn.commit()
             for sid in restored_row_ids:
                 _clear_zero_qty_pending_deletions(sid)
@@ -38473,6 +40231,12 @@ def mark_order_unhandled():
 
         return jsonify({'success': True, 'restored': restored_count, 'handled_at': ''})
     except Exception as e:
+        for _c in (rh_conn, rack_conn, conn):
+            try:
+                if _c is not None:
+                    _c.rollback()
+            except Exception:
+                pass
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
     finally:
         for _c in (rh_conn, rack_conn, conn):
@@ -38528,6 +40292,13 @@ def repair_missing_removals():
     Repair orders marked as rackupdated=1 but have no removal record.
     Checks inventory and properly removes items that are still in stock.
     """
+    return jsonify({
+        'success': False,
+        'manual_mode': True,
+        'error': 'Automatic repair removals are disabled. Confirm inventory removals from Ready to Ship.',
+        'redirect_url': '/ready_to_ship'
+    }), 409
+
     from datetime import datetime
 
     try:
@@ -38769,11 +40540,11 @@ def remove_sold_now(order_id):
         searchrack_conn.row_factory = sqlite3.Row
         searchrack_cur = searchrack_conn.cursor()
 
-        matches = _searchrack_matches_for_barcode(searchrack_cur, barcode, include_zero=True)
+        matches = _searchrack_matches_for_barcode(searchrack_cur, barcode, include_zero=False)
         if not matches:
             base_barcode = _barcode_base_without_suffix(barcode)
             if base_barcode and _normalize_upc_preserve_suffix_for_match(base_barcode) != _normalize_upc_preserve_suffix_for_match(barcode):
-                matches = _searchrack_matches_for_barcode(searchrack_cur, base_barcode, include_zero=True)
+                matches = _searchrack_matches_for_barcode(searchrack_cur, base_barcode, include_zero=False)
         row = matches[0] if matches else None
 
         inventory_found = row is not None
@@ -39258,49 +41029,56 @@ def api_set_zero_qty_settings():
 
 @app.route('/api/zero_qty_pending', methods=['GET'])
 def api_get_zero_qty_pending():
-    _clear_zero_qty_pending_deletions()
+    summary = _purge_zero_qty_items()
     return jsonify({
         'success': True,
         'items': [],
-        'manual_mode': True,
-        'message': 'Zero-quantity items are retained in inventory for history tracking and are not queued for deletion.'
+        'manual_mode': False,
+        'immediate_cleanup': True,
+        'removed': summary.get('deleted', 0),
+        'mirrored': summary.get('mirrored', 0),
+        'message': 'Zero-quantity rows are archived to Rack History and removed from active inventory immediately.'
     })
 
 @app.route('/api/zero_qty_delete_now/<barcode>', methods=['POST'])
 def api_zero_qty_delete_now(barcode):
-    """Legacy endpoint: zero-qty rows are preserved for history."""
+    """Compatibility endpoint: run the immediate active-inventory cleanup."""
+    summary = _purge_zero_qty_items()
     return jsonify({
-        'success': False,
-        'manual_mode': True,
-        'error': 'Zero-quantity inventory rows are preserved for history and cannot be auto-deleted from this screen.'
-    }), 409
+        'success': bool(summary.get('installed')),
+        'removed': summary.get('deleted', 0),
+        'message': 'Zero-quantity cleanup completed; history snapshots were preserved.'
+    })
 
 @app.route('/api/zero_qty_cancel/<barcode>', methods=['POST'])
 def api_zero_qty_cancel(barcode):
-    """Legacy endpoint: zero-qty rows are preserved for history."""
+    """The retired delayed queue can no longer cancel immediate cleanup."""
     return jsonify({
         'success': False,
-        'manual_mode': True,
-        'error': 'Zero-quantity inventory rows are preserved for history and are not in a deletion queue.'
+        'immediate_cleanup': True,
+        'error': 'Zero-quantity cleanup is immediate and cannot be cancelled; use Rack History to restore an eligible removal.'
     }), 409
 
 @app.route('/api/zero_qty_allow/<barcode>', methods=['POST'])
 def api_zero_qty_allow(barcode):
-    """Legacy endpoint: zero-qty rows are preserved for history."""
+    """Compatibility endpoint for the retired delayed queue."""
     return jsonify({
-        'success': False,
-        'manual_mode': True,
-        'error': 'Zero-quantity inventory rows are preserved for history and are not in a deletion queue.'
-    }), 409
+        'success': True,
+        'immediate_cleanup': True,
+        'message': 'Immediate cleanup is already enabled.'
+    })
 
 @app.route('/api/zero_qty/trigger-purge', methods=['POST'])
 def api_trigger_zero_qty_purge():
-    """Legacy endpoint: zero-qty rows are preserved for history."""
-    _clear_zero_qty_pending_deletions()
+    """Run legacy-row cleanup now and mirror its durable snapshots to Rack History."""
+    summary = _purge_zero_qty_items()
     return jsonify({
-        'success': True,
-        'manual_mode': True,
-        'message': 'Zero-quantity auto deletion is disabled; zero-qty rows remain in inventory for history.'
+        'success': bool(summary.get('installed')),
+        'immediate_cleanup': True,
+        'removed': summary.get('deleted', 0),
+        'normalized': summary.get('normalized', 0),
+        'mirrored': summary.get('mirrored', 0),
+        'message': 'Zero-quantity rows were archived and removed from active inventory.'
     })
 
 # Inventory History endpoint
@@ -39316,10 +41094,14 @@ def api_inventory_history():
         total_count = 0
 
         # Get removal history from rackhistory.db (removed_items table has more detail)
+        rem_conn = None
         try:
+            _flush_searchrack_history_outbox()
             rem_conn = sqlite3.connect('rackhistory.db')
             rem_conn.row_factory = sqlite3.Row
             rem_cur = rem_conn.cursor()
+            _ensure_removed_items_table(rem_cur)
+            rem_conn.commit()
             
             # Check if removed_items table exists (more detailed than removed table)
             rem_cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='removed_items'")
@@ -39333,11 +41115,17 @@ def api_inventory_history():
                 
                 # Build query with optional search filter in SQL for better performance
                 params = []
-                where_clauses = []
+                where_clauses = ["COALESCE(event_status, 'applied') = 'applied'"]
 
                 if search:
-                    where_clauses.append("(LOWER(COALESCE(title, '')) LIKE ? OR LOWER(COALESCE(barcode, '')) LIKE ? OR LOWER(COALESCE(item_position, '')) LIKE ?)")
-                    params.extend([f'%{search}%', f'%{search}%', f'%{search}%'])
+                    where_clauses.append("""(
+                        LOWER(COALESCE(title, '')) LIKE ?
+                        OR LOWER(COALESCE(barcode, '')) LIKE ?
+                        OR LOWER(COALESCE(item_position, '')) LIKE ?
+                        OR LOWER(COALESCE(from_position, '')) LIKE ?
+                        OR LOWER(COALESCE(to_position, '')) LIKE ?
+                    )""")
+                    params.extend([f'%{search}%'] * 5)
 
                 if method_filter:
                     where_clauses.append("removal_type = ?")
@@ -39356,7 +41144,8 @@ def api_inventory_history():
                 query = '''
                     SELECT
                         id, order_id, barcode, title, quantity_removed,
-                        removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position
+                        removed_at, searchrack_id, old_quantity, new_quantity, removal_type,
+                        item_position, from_position, to_position, inventory_row_deleted
                     FROM removed_items
                 ''' + where_sql + ' ORDER BY removed_at DESC LIMIT 1000'
 
@@ -39365,7 +41154,12 @@ def api_inventory_history():
                 for row in rem_cur.fetchall():
                     title = row['title'] or 'Unknown'
                     barcode = row['barcode'] or ''
-                    location = row['item_position'] or ''
+                    from_position = row['from_position'] or row['item_position'] or ''
+                    to_position = row['to_position'] or ''
+                    if from_position and to_position and from_position.casefold() != to_position.casefold():
+                        location = f'{from_position} → {to_position}'
+                    else:
+                        location = to_position or from_position
 
                     # For manual_edit type, show as addition or removal based on qty_change
                     removal_type = row['removal_type'] or 'unknown'
@@ -39449,6 +41243,47 @@ def api_inventory_history():
                         else:
                             action = 'Changed'
                             source = 'Location Cleared'
+                    elif removal_type == 'finder_removal':
+                        action = 'Removed'
+                        source = 'Finder Removal'
+                    elif removal_type == 'finder_removal_undo':
+                        action = 'Restored'
+                        source = 'Finder Undo'
+                    elif removal_type == 'repair_removal':
+                        action = 'Removed'
+                        source = 'Sold Inventory Repair'
+                    elif removal_type == 'inventoryremoved':
+                        action = 'Removed'
+                        source = 'Move Location (Removed From Shelf)'
+                    elif removal_type == 'bulk_manifest_cleanup':
+                        action = 'Removed'
+                        source = 'Bulk Manifest Shelf Cleanup'
+                    elif removal_type in (
+                        'inventory_depleted', 'legacy_zero_cleanup',
+                        'invalid_quantity_cleanup', 'invalid_zero_insert'
+                    ):
+                        action = 'Removed'
+                        source = {
+                            'inventory_depleted': 'Inventory Depleted',
+                            'legacy_zero_cleanup': 'Legacy Zero-Quantity Cleanup',
+                            'invalid_quantity_cleanup': 'Invalid Quantity Cleanup',
+                            'invalid_zero_insert': 'Invalid Zero-Quantity Insert Cleanup'
+                        }[removal_type]
+                    elif removal_type == 'quantity_adjustment':
+                        action = 'Added' if qty_change > 0 else 'Removed'
+                        source = 'Inventory Quantity Adjustment'
+                    elif removal_type == 'location_change':
+                        action = 'Moved'
+                        source = 'Location Change'
+                    elif removal_type == 'inventory_added':
+                        action = 'Added'
+                        source = 'Inventory Added'
+                    elif removal_type == 'inventory_deleted':
+                        action = 'Removed'
+                        source = 'Inventory Row Deleted'
+                    elif removal_type == 'legacy_marketplace_removal':
+                        action = 'Removed'
+                        source = 'Marketplace Location Removal'
                     elif removal_type == 'automatic':
                         action = 'Removed'
                         source = 'Automatic Removal'
@@ -39463,6 +41298,8 @@ def api_inventory_history():
                         'title': title,
                         'barcode': barcode,
                         'location': location,
+                        'from_location': from_position,
+                        'to_location': to_position,
                         'quantity_change': qty_change,
                         'old_quantity': old_qty,
                         'new_quantity': new_qty,
@@ -39476,7 +41313,8 @@ def api_inventory_history():
         except Exception as e:
             print(f"Error reading removed_items: {e}")
         finally:
-            rem_conn.close()
+            if rem_conn is not None:
+                rem_conn.close()
         
         # Sort by timestamp (handle both UTC and local timestamps)
         def parse_timestamp_for_sort(ts):
@@ -39509,32 +41347,89 @@ def api_inventory_history():
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
 
 # Removed items: list and page
+def _find_legacy_removed_detail(rem_cur, legacy_row):
+    """Resolve a retired removal row to one authoritative snapshot-backed event."""
+    legacy = dict(legacy_row) if not isinstance(legacy_row, dict) else dict(legacy_row)
+    linked_id = _coerce_int(legacy.get('detail_history_id'), 0)
+    if linked_id > 0:
+        rem_cur.execute('''
+            SELECT * FROM removed_items
+            WHERE id = ?
+              AND COALESCE(source_row_json, '') != ''
+              AND (undone_at IS NULL OR undone_at = '')
+              AND COALESCE(event_status, 'applied') = 'applied'
+        ''', (linked_id,))
+        linked = rem_cur.fetchone()
+        if linked:
+            return linked, ''
+
+    barcode = str(legacy.get('barcode') or '').strip()
+    variants = sorted({
+        str(value).strip().casefold()
+        for value in _sold_removal_barcode_variants(barcode)
+        if str(value).strip()
+    })
+    if not variants:
+        return None, 'The legacy removal has no usable barcode.'
+    placeholders = ','.join('?' for _ in variants)
+    rem_cur.execute(f'''
+        SELECT * FROM removed_items
+        WHERE LOWER(TRIM(COALESCE(barcode, ''))) IN ({placeholders})
+          AND COALESCE(source_row_json, '') != ''
+          AND (undone_at IS NULL OR undone_at = '')
+          AND COALESCE(event_status, 'applied') = 'applied'
+          AND COALESCE(old_quantity, 0) > COALESCE(new_quantity, 0)
+        ORDER BY id DESC
+        LIMIT 100
+    ''', tuple(variants))
+
+    legacy_time = _history_timestamp(legacy.get('time_removed'))
+    legacy_qty = max(0, _coerce_int(legacy.get('qty'), 0))
+    source_location = str(legacy.get('source_location') or '').strip().casefold()
+    ranked = []
+    for candidate in rem_cur.fetchall():
+        candidate_dict = dict(candidate)
+        candidate_qty = _history_restore_quantity(candidate_dict)
+        if candidate_qty <= 0:
+            continue
+        if legacy_qty and candidate_qty != legacy_qty:
+            continue
+        candidate_location = str(
+            candidate_dict.get('from_position') or candidate_dict.get('item_position') or ''
+        ).strip().casefold()
+        if source_location and candidate_location != source_location:
+            continue
+        candidate_time = _history_timestamp(
+            candidate_dict.get('removed_at') or candidate_dict.get('applied_at')
+        )
+        if legacy_time is None or candidate_time is None:
+            continue
+        seconds = abs((candidate_time - legacy_time).total_seconds())
+        if seconds > 600:
+            continue
+        ranked.append((seconds, candidate))
+
+    ranked.sort(key=lambda item: item[0])
+    if not ranked:
+        return None, 'No matching snapshot-backed Rack History event was found.'
+    if len(ranked) > 1 and abs(ranked[1][0] - ranked[0][0]) < 1:
+        first = dict(ranked[0][1])
+        second = dict(ranked[1][1])
+        first_location = str(first.get('from_position') or first.get('item_position') or '').casefold()
+        second_location = str(second.get('from_position') or second.get('item_position') or '').casefold()
+        if first_location != second_location:
+            return None, 'Multiple shelves match this legacy removal; use Rack History to choose the exact event.'
+    return ranked[0][1], ''
+
+
 @app.route('/api/removed', methods=['GET'])
 def api_removed_list():
     try:
         conn = sqlite3.connect('rackhistory.db')
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
-        cur.execute('''
-            CREATE TABLE IF NOT EXISTS removed (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT,
-                barcode TEXT,
-                qty INTEGER,
-                time_removed TEXT,
-                undone_at TEXT
-            )
-        ''')
+        _ensure_legacy_removed_table(cur)
         conn.commit()
-        # Ensure undone_at exists for older databases
-        try:
-            cur.execute('PRAGMA table_info(removed)')
-            cols = [r[1] for r in cur.fetchall()]
-            if 'undone_at' not in cols:
-                cur.execute('ALTER TABLE removed ADD COLUMN undone_at TEXT')
-                conn.commit()
-        except Exception:
-            pass
 
         # Optional search filter
         q = (request.args.get('q') or '').strip()
@@ -39562,68 +41457,83 @@ def removed_page():
 
 @app.route('/api/removed/undo/<int:rem_id>', methods=['POST'])
 def api_removed_undo(rem_id: int):
-    """Undo a removal: increment searchRack quantity by qty for the barcode, and mark removed row undone."""
+    """Undo a legacy removal, recreating its SEARCHRACK row when a snapshot is available."""
+    rem_conn = None
+    rack_conn = None
     try:
+        _flush_searchrack_history_outbox()
         # Open rackhistory.db and fetch entry
         rem_conn = sqlite3.connect('rackhistory.db')
         rem_conn.row_factory = sqlite3.Row
         rem_cur = rem_conn.cursor()
-        # Ensure schema
-        rem_cur.execute('''
-            CREATE TABLE IF NOT EXISTS removed (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT,
-                barcode TEXT,
-                qty INTEGER,
-                time_removed TEXT,
-                undone_at TEXT
-            )
-        ''')
+        _ensure_removed_items_table(rem_cur)
+        _ensure_legacy_removed_table(rem_cur)
         rem_conn.commit()
-        rem_cur.execute('SELECT id, name, barcode, qty, time_removed, undone_at FROM removed WHERE id = ?', (rem_id,))
+        rem_cur.execute('''
+            SELECT id, name, barcode, qty, time_removed, undone_at,
+                   detail_history_id, source_location
+            FROM removed WHERE id = ?
+        ''', (rem_id,))
         row = rem_cur.fetchone()
         if not row:
             return jsonify({'success': False, 'error': 'Removed entry not found'}), 404
         if row['undone_at']:
             return jsonify({'success': False, 'error': 'Already undone'}), 400
 
-        barcode = (row['barcode'] or '').strip()
-        qty = int(row['qty'] or 0)
-        if not barcode or qty <= 0:
-            return jsonify({'success': False, 'error': 'Invalid removed entry data'}), 400
+        detail, detail_error = _find_legacy_removed_detail(rem_cur, row)
+        if not detail:
+            return jsonify({
+                'success': False,
+                'error': detail_error or 'No authoritative Rack History snapshot was found; inventory was not changed.'
+            }), 409
+        restore_quantity = _history_restore_quantity(detail)
+        if restore_quantity <= 0:
+            return jsonify({'success': False, 'error': 'The matched history event has no quantity to restore.'}), 409
 
-        # Update searchRack quantity by BARCODE (pad with leading zeros)
         rack_conn = sqlite3.connect('searchRack.db')
+        rack_conn.row_factory = sqlite3.Row
         rack_cur = rack_conn.cursor()
-        rack_cur.execute('PRAGMA table_info(SEARCHRACK)')
-        cols = [r[1] for r in rack_cur.fetchall()]
-        qty_col = 'QUANTITY' if 'QUANTITY' in cols else ('QTY' if 'QTY' in cols else None)
-        if not qty_col:
-            return jsonify({'success': False, 'error': 'No quantity column in SEARCHRACK'}), 500
-
-        barcode_padded = barcode.zfill(12) if barcode and barcode.isdigit() else barcode
-        rack_cur.execute(f'SELECT ID, {qty_col} FROM SEARCHRACK WHERE BARCODE = ? COLLATE NOCASE', (barcode_padded,))
-        found = rack_cur.fetchone()
-        if not found:
-            return jsonify({'success': False, 'error': 'No matching inventory found to restore'}), 404
-
-        rack_id = found[0]
-        current_qty = int(found[1] or 0)
-        new_qty = current_qty + qty
-        rack_cur.execute(f'UPDATE SEARCHRACK SET {qty_col} = ? WHERE ID = ?', (new_qty, rack_id))
+        _ensure_searchrack_undo_claims(rack_cur)
+        rack_conn.commit()
+        rack_cur.execute('BEGIN IMMEDIATE')
+        restored = _restore_searchrack_with_undo_claim(rack_cur, detail, restore_quantity)
         rack_conn.commit()
 
-        # Mark removed row undone
         import datetime as _dt
-        rem_cur.execute('UPDATE removed SET undone_at = ? WHERE id = ?', (_dt.datetime.now(_dt.UTC).isoformat() + 'Z', rem_id))
+        undone_at = _dt.datetime.now(_dt.UTC).isoformat().replace('+00:00', 'Z')
+        rem_cur.execute(
+            'UPDATE removed SET undone_at = ?, detail_history_id = ? WHERE id = ?',
+            (undone_at, detail['id'], rem_id)
+        )
+        rem_cur.execute(
+            'UPDATE removed_items SET undone_at = ? WHERE id = ? AND (undone_at IS NULL OR undone_at = "")',
+            (undone_at, detail['id'])
+        )
+        _insert_inventory_undo_history(
+            rem_cur, detail, restored, 'legacy_removed_undo', undone_at=undone_at
+        )
         rem_conn.commit()
 
-        return jsonify({'success': True, 'new_qty': new_qty})
+        return jsonify({
+            'success': True,
+            'new_qty': restored['new_quantity'],
+            'restored_units': restored['restore_quantity'],
+            'searchrack_id': restored['searchrack_id'],
+            'recreated': restored['recreated']
+        })
     except Exception as e:
+        for connection in (rem_conn, rack_conn):
+            try:
+                if connection is not None:
+                    connection.rollback()
+            except Exception:
+                pass
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
     finally:
-        rem_conn.close()
-        rack_conn.close()
+        if rem_conn is not None:
+            rem_conn.close()
+        if rack_conn is not None:
+            rack_conn.close()
 
 @app.route('/api/sold/remove-now/<int:order_id>', methods=['POST'])
 def api_sold_remove_now(order_id: int):
@@ -39784,7 +41694,8 @@ def api_finder():
         where, params = build_where('TITLE', 'BARCODE', words)
         cur.execute(f'''SELECT ID, TITLE, BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION, QUANTITY, IMAGE, ITEMID
                        FROM SEARCHRACK
-                       WHERE {where}
+                       WHERE ({where})
+                         AND COALESCE(CAST(QUANTITY AS INTEGER), 0) > 0
                        LIMIT 20''', params)
         for row in cur.fetchall():
             barcode_raw = row['BARCODE']
@@ -40014,9 +41925,13 @@ def api_finder_remove():
     data = request.get_json() or {}
     searchrack_id = data.get('searchrack_id')
     order_id = data.get('order_id')  # optional — sold order context
-    qty_to_remove = int(data.get('qty', 1))
+    qty_to_remove = _strict_inventory_quantity(data.get('qty', 1))
+    if qty_to_remove is None:
+        return jsonify({'ok': False, 'error': 'Invalid quantity'}), 400
     if not searchrack_id:
         return jsonify({'ok': False, 'error': 'Missing searchrack_id'}), 400
+    if qty_to_remove <= 0:
+        return jsonify({'ok': False, 'error': 'Quantity must be positive'}), 400
     if order_id:
         return jsonify({
             'ok': False,
@@ -40034,33 +41949,60 @@ def api_finder_remove():
             r_conn.close()
             return jsonify({'ok': False, 'error': 'Item not found'}), 404
         current_qty = int(row['QUANTITY'] or 0)
+        if current_qty <= 0:
+            r_conn.close()
+            return jsonify({'ok': False, 'error': 'Item has no active inventory'}), 409
+        if qty_to_remove > current_qty:
+            r_conn.close()
+            return jsonify({
+                'ok': False,
+                'error': f'Only {current_qty} unit(s) are available at this location'
+            }), 409
         new_qty = max(0, current_qty - qty_to_remove)
         r_cur.execute('UPDATE SEARCHRACK SET QUANTITY = ? WHERE ID = ?', (new_qty, searchrack_id))
         r_conn.commit()
 
-        # Log to rackhistory.db
-        rem_conn = sqlite3.connect(str(BASE_DIR / 'rackhistory.db'))
-        rem_cur = rem_conn.cursor()
-        rem_cur.execute('''
-            CREATE TABLE IF NOT EXISTS removed (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT, barcode TEXT, qty INTEGER,
-                time_removed TEXT, undone_at TEXT
-            )
-        ''')
-        rem_cur.execute(
-            'INSERT INTO removed (name, barcode, qty, time_removed) VALUES (?,?,?,?)',
-            (row['TITLE'] or '', row['BARCODE'] or '', qty_to_remove, _dt.datetime.now().isoformat())
-        )
-        _ensure_removed_items_table(rem_cur)
-        rem_cur.execute('''
-            INSERT INTO removed_items
-            (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (order_id or '', row['BARCODE'] or '', row['TITLE'] or '', qty_to_remove,
-              _dt.datetime.now().isoformat(), searchrack_id, current_qty, new_qty, 'finder_removal', row['ITEM_POSITION']))
-        rem_conn.commit()
-        rem_conn.close()
+        # The SEARCHRACK trigger already made a durable same-transaction snapshot.
+        # Add the legacy breadcrumb best-effort; a failure here must not invite a second removal.
+        rem_conn = None
+        try:
+            rem_conn = sqlite3.connect(str(BASE_DIR / 'rackhistory.db'))
+            rem_cur = rem_conn.cursor()
+            _ensure_removed_items_table(rem_cur)
+            _ensure_legacy_removed_table(rem_cur)
+            removed_at = _dt.datetime.now().isoformat()
+            rem_cur.execute('''
+                INSERT INTO removed_items
+                (order_id, barcode, title, quantity_removed, removed_at, searchrack_id,
+                 old_quantity, new_quantity, removal_type, item_position, event_status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+            ''', (
+                order_id or '', row['BARCODE'] or '', row['TITLE'] or '', qty_to_remove,
+                removed_at, searchrack_id, current_qty, new_qty, 'finder_removal', row['ITEM_POSITION']
+            ))
+            detail_history_id = rem_cur.lastrowid
+            rem_cur.execute('''
+                INSERT INTO removed (
+                    name, barcode, qty, time_removed, detail_history_id, source_location
+                ) VALUES (?, ?, ?, ?, ?, ?)
+            ''', (
+                row['TITLE'] or '', row['BARCODE'] or '', qty_to_remove, removed_at,
+                detail_history_id, row['ITEM_POSITION'] or ''
+            ))
+            rem_conn.commit()
+        except Exception as history_error:
+            try:
+                if rem_conn is not None:
+                    rem_conn.rollback()
+            except Exception:
+                pass
+            logger.warning('Finder removal history breadcrumb deferred: %s', history_error)
+        finally:
+            try:
+                if rem_conn is not None:
+                    rem_conn.close()
+            except Exception:
+                pass
 
         # If order context, mark order as rackupdated
         if order_id:
@@ -40077,30 +42019,90 @@ def api_finder_remove():
 
 @app.route('/api/finder/undo-remove', methods=['POST'])
 def api_finder_undo_remove():
-    """Undo a finder removal — restore quantity and optionally unmark the sold order."""
+    """Undo a finder removal, recreating a deleted terminal row from its snapshot."""
     data = request.get_json() or {}
     searchrack_id = data.get('searchrack_id')
-    old_qty = data.get('old_qty')
     order_id = data.get('order_id')
-    if not searchrack_id or old_qty is None:
-        return jsonify({'ok': False, 'error': 'Missing searchrack_id or old_qty'}), 400
+    if not searchrack_id:
+        return jsonify({'ok': False, 'error': 'Missing searchrack_id'}), 400
+
+    r_conn = None
+    h_conn = None
+    s_conn = None
     try:
+        _flush_searchrack_history_outbox()
+        h_conn = sqlite3.connect(str(BASE_DIR / 'rackhistory.db'))
+        h_conn.row_factory = sqlite3.Row
+        h_cur = h_conn.cursor()
+        _ensure_removed_items_table(h_cur)
+        h_cur.execute('''
+            SELECT * FROM removed_items
+            WHERE searchrack_id = ?
+              AND removal_type IN ('finder_removal', 'inventory_depleted')
+              AND (undone_at IS NULL OR undone_at = '')
+              AND COALESCE(event_status, 'applied') = 'applied'
+            ORDER BY id DESC
+            LIMIT 1
+        ''', (int(searchrack_id),))
+        history_row = h_cur.fetchone()
+        if not history_row:
+            return jsonify({'ok': False, 'error': 'Finder removal history was not found; inventory was not changed'}), 409
+        restore_quantity = _history_restore_quantity(history_row)
+        if restore_quantity <= 0:
+            return jsonify({'ok': False, 'error': 'Finder history has no quantity to restore'}), 409
+
         r_conn = sqlite3.connect(str(BASE_DIR / 'searchRack.db'))
+        r_conn.row_factory = sqlite3.Row
         r_cur = r_conn.cursor()
-        r_cur.execute('UPDATE SEARCHRACK SET QUANTITY = ? WHERE ID = ?', (int(old_qty), int(searchrack_id)))
+        _ensure_searchrack_undo_claims(r_cur)
         r_conn.commit()
-        r_conn.close()
+        r_cur.execute('BEGIN IMMEDIATE')
+        restored = _restore_searchrack_with_undo_claim(r_cur, history_row, restore_quantity)
+        r_conn.commit()
+
+        now_iso = datetime.datetime.now().isoformat()
+        h_cur.execute(
+            'UPDATE removed_items SET undone_at = ? WHERE id = ? AND (undone_at IS NULL OR undone_at = "")',
+            (now_iso, history_row['id'])
+        )
+        _insert_inventory_undo_history(
+            h_cur,
+            history_row,
+            restored,
+            'finder_removal_undo',
+            order_id=order_id or None,
+            undone_at=now_iso,
+        )
+        h_conn.commit()
 
         if order_id:
             s_conn = sqlite3.connect(str(BASE_DIR / 'sold.db'))
             s_cur = s_conn.cursor()
             s_cur.execute('UPDATE orders SET rackupdated = 0 WHERE id = ?', (order_id,))
             s_conn.commit()
-            s_conn.close()
 
-        return jsonify({'ok': True, 'restored_qty': int(old_qty)})
+        return jsonify({
+            'ok': True,
+            'restored_qty': restored['new_quantity'],
+            'restored_units': restored['restore_quantity'],
+            'searchrack_id': restored['searchrack_id'],
+            'recreated': restored['recreated']
+        })
     except Exception as e:
+        for connection in (s_conn, h_conn, r_conn):
+            try:
+                if connection is not None:
+                    connection.rollback()
+            except Exception:
+                pass
         return jsonify({'ok': False, 'error': _safe_error(e)}), 500
+    finally:
+        for connection in (s_conn, h_conn, r_conn):
+            try:
+                if connection is not None:
+                    connection.close()
+            except Exception:
+                pass
 
 @app.route('/cleanup')
 def cleanup_page():
@@ -40157,7 +42159,8 @@ def searchrack_api():
             cur.execute(f'''
                 SELECT TITLE, BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION, QUANTITY, IMAGE, ITEMID, {note_expr}
                 FROM SEARCHRACK
-                WHERE ({title_sql}) OR ({barcode_sql}) OR ({position_sql})
+                WHERE (({title_sql}) OR ({barcode_sql}) OR ({position_sql}))
+                  AND COALESCE(CAST(QUANTITY AS INTEGER), 0) > 0
             ''', params)
             for row in cur.fetchall():
                 results.append({
@@ -40239,7 +42242,7 @@ def view_all(db_type):
         conn = sqlite3.connect('searchRack.db')
         try:
             cur = conn.cursor()
-            cur.execute('SELECT * FROM SEARCHRACK')
+            cur.execute('SELECT * FROM SEARCHRACK WHERE COALESCE(CAST(QUANTITY AS INTEGER), 0) > 0')
             columns = [desc[0] for desc in cur.description]
             items = [dict(zip(columns, row)) for row in cur.fetchall()]
             title = 'All Inventory Items'
@@ -40286,6 +42289,15 @@ def update_item(db_type, item_id):
             normalized_data = {k.upper(): v for k, v in data.items()}
         else:
             normalized_data = data
+
+        if db_type == 'rack' and 'QUANTITY' in normalized_data:
+            parsed_quantity = _strict_inventory_quantity(normalized_data['QUANTITY'])
+            if parsed_quantity is None or parsed_quantity < 0:
+                return jsonify({
+                    'success': False,
+                    'error': 'Quantity must be a whole number of 0 or more; 0 archives and removes the row'
+                }), 400
+            normalized_data['QUANTITY'] = parsed_quantity
         
         tracker_upc_key = None
         tracker_prev_total = None
@@ -40307,25 +42319,11 @@ def update_item(db_type, item_id):
                     
                     print(f"📝 Manual edit detected: {title} (ID: {item_id}) - Qty change: {old_qty} → {new_qty} (change: {qty_change})")
                     
-                    if qty_change != 0:  # Only log if quantity actually changed
-                        from datetime import datetime
-                        now = datetime.now()
-                        
-                        removed_conn = sqlite3.connect('rackhistory.db')
-                        try:
-                            removed_cur = removed_conn.cursor()
-                            _ensure_removed_items_table(removed_cur)
-                            removed_cur.execute('''
-                            INSERT INTO removed_items 
-                            (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        ''', (None, barcode, title, abs(qty_change), now.isoformat(), item_id, old_qty, new_qty, 'manual_edit', item_location or ''))
-                            removed_conn.commit()
-                        finally:
-                            removed_conn.close()
-                        print(f"✅ Logged manual edit to history: {title}")
-                    else:
+                    if qty_change == 0:
                         print(f"⚠️ Quantity unchanged, not logging to history")
+                    else:
+                        # The SEARCHRACK trigger records this in the same transaction as the update.
+                        print(f"✅ Manual edit queued in durable rack-history outbox: {title}")
             except Exception as log_err:
                 print(f"❌ Error logging quantity change to removed_items: {log_err}")
                 import traceback
@@ -40393,17 +42391,23 @@ def api_search_db(db_key):
                 cur_m = conn_m.cursor()
                 cur_m.execute("PRAGMA table_info(SEARCHRACK)")
                 cols_m = [r[1] for r in cur_m.fetchall()]
+                schema_changed = False
                 if 'CREATED_AT' not in cols_m:
                     cur_m.execute('ALTER TABLE SEARCHRACK ADD COLUMN CREATED_AT TEXT')
+                    schema_changed = True
                 if 'CUSTOM_TITLE' not in cols_m:
                     cur_m.execute('ALTER TABLE SEARCHRACK ADD COLUMN CUSTOM_TITLE INTEGER DEFAULT 0')
+                    schema_changed = True
                 if 'WAREHOUSE_NOTE' not in cols_m:
                     cur_m.execute('ALTER TABLE SEARCHRACK ADD COLUMN WAREHOUSE_NOTE TEXT DEFAULT ""')
+                    schema_changed = True
                 # Set CREATED_AT for any missing rows to current UTC so timestamps appear
                 import datetime as _dt
                 now_iso = _dt.datetime.now(_dt.UTC).isoformat()
                 cur_m.execute("UPDATE SEARCHRACK SET CREATED_AT = ? WHERE CREATED_AT IS NULL OR TRIM(COALESCE(CREATED_AT,'')) = ''", (now_iso,))
                 conn_m.commit()
+                if schema_changed:
+                    _install_searchrack_history_guard(conn_m)
             except Exception:
                 # Don't block search if migration fails
                 pass
@@ -40582,9 +42586,23 @@ def api_search_db(db_key):
         if custom_only:
             custom_cond = "(COALESCE(CUSTOM_TITLE, 0) = 1 OR COALESCE(IMAGE, '') LIKE '/static/custom_items/%')"
             if where_clause:
-                where_clause += f' AND {custom_cond}'
+                # The text search is a series of OR expressions. Group all of
+                # them before applying custom_only so a title/barcode match
+                # cannot bypass the Custom Items filter through SQL precedence.
+                where_clause = f" WHERE ({where_clause[7:]}) AND {custom_cond}"
             else:
                 where_clause = f' WHERE {custom_cond}'
+
+        if db_key == 'searchRack':
+            active_qty_col = next((column for column in cols if column.lower() in ('quantity', 'qty')), None)
+            if active_qty_col:
+                active_condition = (
+                    f'COALESCE(CAST({_sqlite_ident(active_qty_col)} AS INTEGER), 0) > 0'
+                )
+                if where_clause:
+                    where_clause = f" WHERE ({where_clause[7:]}) AND {active_condition}"
+                else:
+                    where_clause = f' WHERE {active_condition}'
 
         # compute total matching count for pagination
         count_sql = f"SELECT COUNT(*) FROM {table} {where_clause}"
@@ -41208,6 +43226,14 @@ def api_search_all():
                     cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='items_prep_status'")
                     if cur.fetchone():
                         where_clause = f"({where_clause}) AND upc IN (SELECT upc FROM items_prep_status WHERE status IN ('good', 'bad'))"
+
+                if db_key == 'shelves':
+                    active_qty_col = next((c for c in cols if c.lower() in ('quantity', 'qty')), None)
+                    if active_qty_col:
+                        where_clause = (
+                            f"({where_clause}) AND "
+                            f"COALESCE(CAST({_sqlite_ident(active_qty_col)} AS INTEGER), 0) > 0"
+                        )
                 
                 # Get count and sample results
                 count_sql = f"SELECT COUNT(*) as count FROM {db_info['table']} WHERE {where_clause}"
@@ -41448,10 +43474,20 @@ def api_lookup_location():
         cur = conn.cursor()
         row = None
         if barcode:
-            cur.execute("SELECT * FROM SEARCHRACK WHERE BARCODE = ? COLLATE NOCASE LIMIT 1", (barcode,))
+            cur.execute('''
+                SELECT * FROM SEARCHRACK
+                WHERE BARCODE = ? COLLATE NOCASE
+                  AND COALESCE(CAST(QUANTITY AS INTEGER), 0) > 0
+                LIMIT 1
+            ''', (barcode,))
             row = cur.fetchone()
         if not row and item_id:
-            cur.execute("SELECT * FROM SEARCHRACK WHERE BARCODE = ? COLLATE NOCASE LIMIT 1", (item_id,))
+            cur.execute('''
+                SELECT * FROM SEARCHRACK
+                WHERE BARCODE = ? COLLATE NOCASE
+                  AND COALESCE(CAST(QUANTITY AS INTEGER), 0) > 0
+                LIMIT 1
+            ''', (item_id,))
             row = cur.fetchone()
         if not row:
             return jsonify({'found': False})
@@ -41755,6 +43791,15 @@ def api_update_row(db_key, item_id):
     }
     if db_key not in mapping:
         return jsonify({'error': 'Unknown db_key'}), 400
+    if db_key == 'searchRack':
+        quantity_key = next((key for key in data if key.lower() == 'quantity'), None)
+        if quantity_key is not None:
+            parsed_quantity = _strict_inventory_quantity(data.get(quantity_key))
+            if parsed_quantity is None or parsed_quantity < 0:
+                return jsonify({
+                    'error': 'Quantity must be a whole number of 0 or more; 0 archives and removes the row'
+                }), 400
+            data[quantity_key] = parsed_quantity
     db_path = mapping[db_key]
     try:
         table, pk = _get_table_and_pk(db_path)
@@ -41850,13 +43895,13 @@ def api_update_row(db_key, item_id):
                 finally:
                     removed_conn.close()
         
-        # If updating searchRack and quantity is being set to 0, mark for deletion
+        # The SEARCHRACK trigger snapshots and physically deletes a row that reaches zero.
         if db_key == 'searchRack' and 'quantity' in [k.lower() for k in data.keys()]:
             qty_value_raw = next((v for k, v in data.items() if k.lower() == 'quantity'), None)
             qty_value = _coerce_int(qty_value_raw, 0)
             if qty_value <= 0:
                 _clear_zero_qty_pending_deletions(item_id)
-                print(f"ℹ️ searchRack item {item_id} is staying at quantity 0 for history tracking")
+                print(f"✅ searchRack item {item_id} was archived to Rack History and removed at quantity 0")
                 conn.commit()
             elif qty_value > 0:
                 _clear_zero_qty_pending_deletions(item_id)
@@ -42203,7 +44248,12 @@ def api_list_shelves():
             try:
                 conn = sqlite3.connect(sdb_path)
                 cur = conn.cursor()
-                cur.execute("SELECT LOWER(TRIM(ITEM_POSITION)) as pos, COUNT(*) FROM SEARCHRACK GROUP BY LOWER(TRIM(ITEM_POSITION))")
+                cur.execute('''
+                    SELECT LOWER(TRIM(ITEM_POSITION)) AS pos, COUNT(*)
+                    FROM SEARCHRACK
+                    WHERE COALESCE(CAST(QUANTITY AS INTEGER), 0) > 0
+                    GROUP BY LOWER(TRIM(ITEM_POSITION))
+                ''')
                 for pos, cnt in cur.fetchall():
                     counts_map[pos] = cnt
             except Exception:
@@ -42279,7 +44329,11 @@ def api_shelf_counts():
             sconn = sqlite3.connect('searchRack.db')
             scur = sconn.cursor()
             for code in codes:
-                scur.execute("SELECT COUNT(*) FROM SEARCHRACK WHERE LOWER(TRIM(ITEM_POSITION)) = LOWER(TRIM(?))", (code,))
+                scur.execute('''
+                    SELECT COUNT(*) FROM SEARCHRACK
+                    WHERE LOWER(TRIM(ITEM_POSITION)) = LOWER(TRIM(?))
+                      AND COALESCE(CAST(QUANTITY AS INTEGER), 0) > 0
+                ''', (code,))
                 r = scur.fetchone()
                 result[code] = {'searchrack': r[0] if r else 0}
         except Exception:
@@ -42625,9 +44679,6 @@ def api_delete_shelf():
             row = cur.fetchone()
             if row:
                 code_to_delete = row[0]
-                # Delete shelf from database
-                cur.execute('DELETE FROM shelves WHERE id = ?', (shelf_id,))
-                print(f"[DELETE_SHELF] Deleted shelf ID {shelf_id} from DB")
             else:
                 print(f"[DELETE_SHELF] Shelf ID {shelf_id} not found in DB")
                 return jsonify({'success': False, 'error': 'Shelf not found'}), 404
@@ -42638,13 +44689,37 @@ def api_delete_shelf():
             if row:
                 shelf_id = row[0]
                 code_to_delete = row[1] # Use the actual name from DB
-                # Delete shelf from database
-                cur.execute('DELETE FROM shelves WHERE id = ?', (shelf_id,))
-                print(f"[DELETE_SHELF] Deleted shelf '{code_to_delete}' (ID {shelf_id}) from DB")
             else:
                 # Shelf not in DB, but we have the code, so we can try to delete the file
                 code_to_delete = shelf_code
                 print(f"[DELETE_SHELF] Shelf '{shelf_code}' not found in DB, proceeding to file deletion")
+
+        if code_to_delete:
+            cur.execute('''
+                SELECT COUNT(*), COALESCE(SUM(CAST(QUANTITY AS INTEGER)), 0)
+                FROM SEARCHRACK
+                WHERE COALESCE(CAST(QUANTITY AS INTEGER), 0) > 0
+                  AND (
+                      LOWER(TRIM(COALESCE(ITEM_POSITION, ''))) = LOWER(TRIM(?))
+                      OR LOWER(TRIM(COALESCE(PICTUREPOSITION, ''))) = LOWER(TRIM(?))
+                  )
+            ''', (code_to_delete, code_to_delete))
+            active_count, active_units = cur.fetchone()
+            if active_count:
+                conn.rollback()
+                return jsonify({
+                    'success': False,
+                    'error': (
+                        f'Shelf {code_to_delete} still contains {int(active_units or 0)} active unit(s). '
+                        'Move or remove those items before deleting the shelf.'
+                    ),
+                    'active_items': int(active_count or 0),
+                    'active_units': int(active_units or 0)
+                }), 409
+
+        if shelf_id:
+            cur.execute('DELETE FROM shelves WHERE id = ?', (shelf_id,))
+            print(f"[DELETE_SHELF] Deleted shelf '{code_to_delete}' (ID {shelf_id}) from DB")
         
         conn.commit()
         
@@ -42731,7 +44806,9 @@ def api_location_hierarchy():
                 COALESCE(SUM(CAST(sr.QUANTITY as INTEGER)), 0) as total_quantity
             FROM shelf_groups g
             LEFT JOIN shelves s ON s.group_id = g.id
-            LEFT JOIN SEARCHRACK sr ON LOWER(TRIM(sr.ITEM_POSITION)) = LOWER(TRIM(s.shelf_name))
+            LEFT JOIN SEARCHRACK sr
+              ON LOWER(TRIM(sr.ITEM_POSITION)) = LOWER(TRIM(s.shelf_name))
+             AND COALESCE(CAST(sr.QUANTITY AS INTEGER), 0) > 0
             WHERE g.name != 'Default Group' OR g.name IS NULL
             GROUP BY g.id, s.id
             ORDER BY s.shelf_name
@@ -42916,6 +44993,8 @@ def api_movelocation_lookup():
             WHERE {barcode_col} IS NOT NULL
               AND TRIM({barcode_col}) != ''
         '''
+        if qty_col:
+            base_sql += f' AND COALESCE(CAST({_sqlite_ident(qty_col)} AS INTEGER), 0) > 0'
 
         variants = sorted(v.lower() for v in _movelocation_barcode_variants(barcode_raw))
         candidate_rows = []
@@ -43052,26 +45131,35 @@ def api_movelocation_lookup_shelf():
 
         if not barcode_col:
             return jsonify({'success': False, 'error': 'SEARCHRACK barcode column not found'}), 500
+        if not qty_col:
+            return jsonify({'success': False, 'error': 'SEARCHRACK quantity column not found'}), 500
         if not pos_col and not pic_col:
             return jsonify({'success': False, 'error': 'SEARCHRACK location columns not found'}), 500
+        active_clause = (
+            f'COALESCE(CAST({_sqlite_ident(qty_col)} AS INTEGER), 0) > 0'
+            if qty_col else '1 = 1'
+        )
 
         if pos_col and pic_col:
             cur.execute(f'''
                 SELECT rowid AS _rowid_, *
                 FROM SEARCHRACK
                 WHERE LOWER(TRIM(COALESCE(NULLIF({pos_col}, ''), NULLIF({pic_col}, '')))) = ?
+                  AND {active_clause}
             ''', (shelf_norm,))
         elif pos_col:
             cur.execute(f'''
                 SELECT rowid AS _rowid_, *
                 FROM SEARCHRACK
                 WHERE LOWER(TRIM({pos_col})) = ?
+                  AND {active_clause}
             ''', (shelf_norm,))
         else:
             cur.execute(f'''
                 SELECT rowid AS _rowid_, *
                 FROM SEARCHRACK
                 WHERE LOWER(TRIM({pic_col})) = ?
+                  AND {active_clause}
             ''', (shelf_norm,))
 
         matched_rows = [dict(r) for r in cur.fetchall()]
@@ -43285,11 +45373,12 @@ def api_movelocation_execute():
                 barcode_raw = row_result['barcode']
                 from_location = row_result['from_location']
                 raw_from_locations = (raw_item or {}).get('from_locations')
-                try:
-                    requested_qty = int((raw_item or {}).get('quantity') or 1)
-                except Exception:
-                    requested_qty = 1
-                requested_qty = max(1, requested_qty)
+                requested_qty = _strict_inventory_quantity((raw_item or {}).get('quantity', 1))
+                if requested_qty is None or requested_qty <= 0:
+                    row_result['error'] = 'Quantity must be a positive whole number'
+                    skipped_items += 1
+                    item_results.append(row_result)
+                    continue
                 row_result['requested_qty'] = requested_qty
 
                 barcode_key = _movelocation_barcode_key(barcode_raw)
@@ -43408,8 +45497,8 @@ def api_movelocation_execute():
                                 # Partial remove: just decrement qty at source, no locationless ghost row
                                 rem_cur.execute('''
                                     INSERT INTO removed_items
-                                    (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                    (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position, event_status)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
                                 ''', (None, barcode_val, title_val, take_qty, now, row_id, row_qty, new_qty, removal_type, source_location))
                             else:
                                 # Partial move: insert a new row at the destination
@@ -43433,17 +45522,17 @@ def api_movelocation_execute():
 
                                 rem_cur.execute('''
                                     INSERT INTO removed_items
-                                    (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                    (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position, event_status)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
                                 ''', (None, barcode_val, title_val, take_qty, now, row_id, row_qty, new_qty, removal_type, source_location))
                                 rem_cur.execute('''
                                     INSERT INTO removed_items
-                                    (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                    (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position, event_status)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
                                 ''', (None, barcode_val, title_val, take_qty, now, new_id, 0, take_qty, removal_type, target_location_for_logs))
                         else:
                             if clear_location:
-                                # Full remove: zero out qty and clear location so the row is dead stock
+                                # Full remove: the zero-quantity trigger snapshots and deletes this row.
                                 if qty_col and pos_col and pic_col:
                                     cur.execute(
                                         f"UPDATE SEARCHRACK SET {qty_col} = 0, {pos_col} = '', {pic_col} = '' WHERE {id_lookup_col} = ?",
@@ -43481,8 +45570,8 @@ def api_movelocation_execute():
                                     )
                                 rem_cur.execute('''
                                     INSERT INTO removed_items
-                                    (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                    (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position, event_status)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
                                 ''', (None, barcode_val, title_val, take_qty, now, row_id, take_qty, 0, removal_type, source_location))
                             else:
                                 # Full move: update location in-place
@@ -43503,13 +45592,13 @@ def api_movelocation_execute():
                                     )
                                 rem_cur.execute('''
                                     INSERT INTO removed_items
-                                    (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                    (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position, event_status)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
                                 ''', (None, barcode_val, title_val, take_qty, now, row_id, take_qty, 0, removal_type, source_location))
                                 rem_cur.execute('''
                                     INSERT INTO removed_items
-                                    (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                    (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position, event_status)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
                                 ''', (None, barcode_val, title_val, take_qty, now, row_id, 0, take_qty, removal_type, target_location_for_logs))
 
                         move_target_qty -= take_qty
@@ -43536,14 +45625,18 @@ def api_movelocation_execute():
             except Exception as row_err:
                 row_result['error'] = _safe_error(row_err)
                 skipped_items += 1
+                raise RuntimeError(f'Move-location item {idx + 1} failed; all inventory changes were rolled back') from row_err
 
             item_results.append(row_result)
 
-        conn.commit()
         rem_conn.commit()
+        conn.commit()
         if moved_units > 0:
-            update_data_version()
-            _invalidate_searchrack_cache()
+            try:
+                update_data_version()
+                _invalidate_searchrack_cache()
+            except Exception as cache_error:
+                logger.warning('Move-location cache refresh deferred: %s', cache_error)
 
         if moved_units <= 0:
             return jsonify({
@@ -43565,6 +45658,12 @@ def api_movelocation_execute():
             'clear_location': clear_location
         })
     except Exception as e:
+        for connection in (rem_conn, conn):
+            try:
+                if connection is not None:
+                    connection.rollback()
+            except Exception:
+                pass
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
     finally:
         try:
@@ -43646,10 +45745,17 @@ def api_movelocation_bulk_cleanup():
             }
             try:
                 barcode_raw = row_result['barcode']
-                requested_qty = max(
-                    1,
-                    _coerce_int((raw_item or {}).get('quantity') if (raw_item or {}).get('quantity') is not None else (raw_item or {}).get('qty'), 1)
+                raw_requested_qty = (
+                    (raw_item or {}).get('quantity')
+                    if (raw_item or {}).get('quantity') is not None
+                    else (raw_item or {}).get('qty', 1)
                 )
+                requested_qty = _strict_inventory_quantity(raw_requested_qty)
+                if requested_qty is None or requested_qty <= 0:
+                    row_result['error'] = 'Quantity must be a positive whole number'
+                    skipped_items += 1
+                    item_results.append(row_result)
+                    continue
                 requested_units += requested_qty
                 row_result['requested_qty'] = requested_qty
 
@@ -43761,8 +45867,8 @@ def api_movelocation_bulk_cleanup():
 
                         rem_cur.execute('''
                             INSERT INTO removed_items
-                            (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position, event_status)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
                         ''', (
                             order_ref,
                             str(match_row.get('barcode') or barcode_raw),
@@ -43801,34 +45907,43 @@ def api_movelocation_bulk_cleanup():
             except Exception as row_err:
                 row_result['error'] = _safe_error(row_err, 'movelocation_bulk_cleanup_row')
                 skipped_items += 1
+                raise RuntimeError(f'Bulk cleanup item {idx + 1} failed; all inventory changes were rolled back') from row_err
 
             item_results.append(row_result)
 
-        conn.commit()
         rem_conn.commit()
+        conn.commit()
         if removed_units > 0:
-            update_data_version()
-            _invalidate_searchrack_cache()
+            try:
+                update_data_version()
+                _invalidate_searchrack_cache()
+            except Exception as cache_error:
+                logger.warning('Bulk cleanup cache refresh deferred: %s', cache_error)
 
         cleanup_status = ''
+        cleanup_status_error = ''
         if manifest_ids:
             cleanup_status = 'cleanup_complete' if removed_units >= requested_units and skipped_items == 0 else ('cleanup_partial' if removed_units > 0 else '')
             if cleanup_status:
                 cleanup_note = f'Removed {removed_units}/{requested_units} unit(s) via move-location bulk cleanup'
-                with db_connection('marketplace.db') as m_conn:
-                    m_cur = m_conn.cursor()
-                    _ensure_bulk_manifest_tables(m_cur)
-                    placeholders = ','.join('?' for _ in manifest_ids)
-                    params = [cleanup_status, now_iso, cleanup_note, now_iso]
-                    params.extend(manifest_ids)
-                    m_cur.execute(f'''
-                        UPDATE bulk_manifests
-                        SET status = ?,
-                            cleanup_at = ?,
-                            cleanup_note = ?,
-                            updated_at = ?
-                        WHERE id IN ({placeholders})
-                    ''', tuple(params))
+                try:
+                    with db_connection('marketplace.db') as m_conn:
+                        m_cur = m_conn.cursor()
+                        _ensure_bulk_manifest_tables(m_cur)
+                        placeholders = ','.join('?' for _ in manifest_ids)
+                        params = [cleanup_status, now_iso, cleanup_note, now_iso]
+                        params.extend(manifest_ids)
+                        m_cur.execute(f'''
+                            UPDATE bulk_manifests
+                            SET status = ?,
+                                cleanup_at = ?,
+                                cleanup_note = ?,
+                                updated_at = ?
+                            WHERE id IN ({placeholders})
+                        ''', tuple(params))
+                except Exception as status_error:
+                    cleanup_status_error = 'Inventory was updated, but the manifest status refresh was deferred.'
+                    logger.warning('Bulk manifest status refresh deferred: %s', status_error)
 
         if removed_units <= 0:
             return jsonify({
@@ -43842,7 +45957,8 @@ def api_movelocation_bulk_cleanup():
                 'skipped_items': skipped_items,
                 'item_results': item_results,
                 'manifest_ids': manifest_ids,
-                'manifest_cleanup_status': cleanup_status
+                'manifest_cleanup_status': cleanup_status,
+                'warning': cleanup_status_error,
             }), 400
 
         return jsonify({
@@ -43855,9 +45971,16 @@ def api_movelocation_bulk_cleanup():
             'skipped_items': skipped_items,
             'item_results': item_results,
             'manifest_ids': manifest_ids,
-            'manifest_cleanup_status': cleanup_status
+            'manifest_cleanup_status': cleanup_status,
+            'warning': cleanup_status_error,
         })
     except Exception as e:
+        for connection in (rem_conn, conn):
+            try:
+                if connection is not None:
+                    connection.rollback()
+            except Exception:
+                pass
         return jsonify({'success': False, 'error': _safe_error(e, 'movelocation_bulk_cleanup')}), 500
     finally:
         try:
@@ -43887,6 +46010,7 @@ def api_location_items():
             SELECT ID, TITLE, BARCODE, QUANTITY, IMAGE, IMAGES
             FROM SEARCHRACK
             WHERE LOWER(TRIM(ITEM_POSITION)) = LOWER(TRIM(?))
+              AND COALESCE(CAST(QUANTITY AS INTEGER), 0) > 0
             ORDER BY TITLE
         ''', (location,))
         items = []
@@ -43940,6 +46064,8 @@ def api_move_location():
 
     moved = 0
     skipped = 0
+    conn = None
+    rem_conn = None
 
     try:
         conn = sqlite3.connect('searchRack.db')
@@ -43974,11 +46100,9 @@ def api_move_location():
         def _parse_qty(row_dict):
             for qc in ['QUANTITY', 'Quantity', 'quantity', 'Qty', 'QTY']:
                 if qc in row_dict and row_dict.get(qc) is not None:
-                    try:
-                        return int(row_dict.get(qc))
-                    except Exception:
-                        return 1
-            return 1
+                    parsed = _strict_inventory_quantity(row_dict.get(qc))
+                    return parsed if parsed is not None else 0
+            return 0
 
         def _find_qty_col():
             for qc in ['QUANTITY', 'Quantity', 'quantity', 'Qty', 'QTY']:
@@ -43990,6 +46114,8 @@ def api_move_location():
 
         from datetime import datetime
         qty_col_name = _find_qty_col()
+        if not qty_col_name:
+            return jsonify({'success': False, 'error': 'SEARCHRACK quantity column not found'}), 500
         for raw_entry in item_ids:
             try:
                 move_qty = None
@@ -44016,10 +46142,10 @@ def api_move_location():
                 barcode = row_dict.get('BARCODE') or row_dict.get('barcode') or ''
                 title = row_dict.get('TITLE') or row_dict.get('title') or ''
                 qty = _parse_qty(row_dict)
-                try:
-                    move_qty_int = int(move_qty) if move_qty is not None else qty
-                except Exception:
-                    move_qty_int = qty
+                move_qty_int = _strict_inventory_quantity(move_qty) if move_qty is not None else qty
+                if move_qty_int is None:
+                    skipped += 1
+                    continue
                 if move_qty_int < 1 or move_qty_int > qty:
                     skipped += 1
                     continue
@@ -44049,14 +46175,16 @@ def api_move_location():
                     # Log as a location move (removed from old + added to new)
                     rem_cur.execute('''
                         INSERT INTO removed_items
-                        (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        (order_id, barcode, title, quantity_removed, removed_at, searchrack_id,
+                         old_quantity, new_quantity, removal_type, item_position, event_status)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
                     ''', (None, barcode, title, move_qty_int, now, raw_id, qty, new_qty, 'locationmoved', from_location))
 
                     rem_cur.execute('''
                         INSERT INTO removed_items
-                        (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        (order_id, barcode, title, quantity_removed, removed_at, searchrack_id,
+                         old_quantity, new_quantity, removal_type, item_position, event_status)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
                     ''', (None, barcode, title, move_qty_int, now, new_id, 0, move_qty_int, 'locationmoved', to_location))
                 else:
                     # Full move: update row location (clear pictureposition if present)
@@ -44068,28 +46196,41 @@ def api_move_location():
                     # Log as a location move (removed from old + added to new)
                     rem_cur.execute('''
                         INSERT INTO removed_items
-                        (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        (order_id, barcode, title, quantity_removed, removed_at, searchrack_id,
+                         old_quantity, new_quantity, removal_type, item_position, event_status)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
                     ''', (None, barcode, title, qty, now, raw_id, qty, 0, 'locationmoved', from_location))
 
                     rem_cur.execute('''
                         INSERT INTO removed_items
-                        (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        (order_id, barcode, title, quantity_removed, removed_at, searchrack_id,
+                         old_quantity, new_quantity, removal_type, item_position, event_status)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
                     ''', (None, barcode, title, qty, now, raw_id, 0, qty, 'locationmoved', to_location))
 
                 moved += 1
-            except Exception:
+            except Exception as row_error:
                 skipped += 1
+                raise RuntimeError('Legacy move-location failed; all inventory changes were rolled back') from row_error
 
-        conn.commit()
         rem_conn.commit()
+        conn.commit()
 
         # Update data version for cache invalidation
-        update_data_version()
+        try:
+            update_data_version()
+            _invalidate_searchrack_cache()
+        except Exception as cache_error:
+            logger.warning('Legacy move-location cache refresh deferred: %s', cache_error)
 
         return jsonify({'success': True, 'moved': moved, 'skipped': skipped})
     except Exception as e:
+        for connection in (rem_conn, conn):
+            try:
+                if connection is not None:
+                    connection.rollback()
+            except Exception:
+                pass
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
     finally:
         try:
@@ -44260,6 +46401,7 @@ def api_location_duplicates():
             AND BARCODE NOT LIKE '%-%'
             AND ITEM_POSITION IS NOT NULL
             AND TRIM(ITEM_POSITION) != ''
+            AND COALESCE(CAST({qty_col} AS INTEGER), 0) > 0
             GROUP BY BARCODE
             HAVING COUNT(DISTINCT ITEM_POSITION) > 1
             ORDER BY BARCODE
@@ -45785,38 +47927,120 @@ def api_marketplace_sale():
 
 @app.route('/api/marketplace/decrement', methods=['POST'])
 def api_marketplace_decrement():
-    """Decrement inventory in searchRack.db for a specific location."""
+    """Decrement the legacy rack table and remove its row when it is depleted."""
+    rack_conn = None
+    history_conn = None
+    event_id = None
     try:
         data = request.get_json() or {}
         barcode = data.get('barcode', '').strip()
         area_code = data.get('area_code', '').strip()
-        quantity = int(data.get('quantity', 1))
+        quantity = _strict_inventory_quantity(data.get('quantity', 1))
+        if quantity is None:
+            return jsonify({'success': False, 'error': 'Invalid quantity'}), 400
         
         if not barcode or not area_code:
             return jsonify({'success': False, 'error': 'Missing barcode or area_code'}), 400
+        if quantity <= 0:
+            return jsonify({'success': False, 'error': 'Quantity must be positive'}), 400
         
         rack_conn = sqlite3.connect('searchRack.db')
+        rack_conn.row_factory = sqlite3.Row
         rack_cur = rack_conn.cursor()
         
-        rack_cur.execute('SELECT quantity FROM rack WHERE barcode = ? COLLATE NOCASE AND area_code = ?',
+        rack_cur.execute('SELECT rowid AS _rowid_, * FROM rack WHERE barcode = ? COLLATE NOCASE AND area_code = ?',
                         (barcode, area_code))
         row = rack_cur.fetchone()
         
         if not row:
             return jsonify({'success': False, 'error': 'Item not found in this location'}), 404
         
-        current_qty = row[0]
-        new_qty = max(0, current_qty - quantity)
+        snapshot = dict(row)
+        current_qty = max(0, _coerce_int(snapshot.get('quantity'), 0))
+        if current_qty <= 0:
+            return jsonify({'success': False, 'error': 'Item has no active inventory'}), 409
+        if quantity > current_qty:
+            return jsonify({
+                'success': False,
+                'error': f'Only {current_qty} unit(s) are available in this location'
+            }), 409
+        new_qty = current_qty - quantity
+
+        event_id = uuid.uuid4().hex
+        now_iso = datetime.datetime.now().isoformat()
+        history_conn = sqlite3.connect('rackhistory.db')
+        history_cur = history_conn.cursor()
+        _ensure_removed_items_table(history_cur)
+        history_cur.execute('''
+            INSERT INTO removed_items (
+                order_id, barcode, title, quantity_removed, removed_at,
+                searchrack_id, old_quantity, new_quantity, removal_type,
+                item_position, event_id, source_row_json, from_position,
+                to_position, inventory_row_deleted, event_status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, 'pending')
+        ''', (
+            None,
+            barcode,
+            str(snapshot.get('title') or snapshot.get('name') or '').strip(),
+            quantity,
+            now_iso,
+            snapshot.get('_rowid_'),
+            current_qty,
+            new_qty,
+            'legacy_marketplace_removal',
+            area_code,
+            event_id,
+            json.dumps(snapshot, ensure_ascii=False, default=str),
+            area_code,
+            1 if new_qty <= 0 else 0,
+        ))
+        history_conn.commit()
         
-        rack_cur.execute('UPDATE rack SET quantity = ? WHERE barcode = ? COLLATE NOCASE AND area_code = ?',
-                        (new_qty, barcode, area_code))
+        if new_qty <= 0:
+            rack_cur.execute(
+                'DELETE FROM rack WHERE rowid = ? AND quantity = ?',
+                (snapshot.get('_rowid_'), current_qty)
+            )
+        else:
+            rack_cur.execute(
+                'UPDATE rack SET quantity = ? WHERE rowid = ? AND quantity = ?',
+                (new_qty, snapshot.get('_rowid_'), current_qty)
+            )
+        if rack_cur.rowcount != 1:
+            raise RuntimeError('Inventory changed before the decrement could be applied')
         rack_conn.commit()
+
+        history_warning = ''
+        try:
+            history_cur.execute('''
+                UPDATE removed_items
+                SET event_status = 'applied', applied_at = ?
+                WHERE event_id = ?
+            ''', (datetime.datetime.now().isoformat(), event_id))
+            history_conn.commit()
+        except Exception as history_error:
+            history_warning = 'Inventory was updated; Rack History finalization will be retried.'
+            logger.warning('Legacy marketplace history finalization deferred: %s', history_error)
         
-        return jsonify({'success': True, 'new_quantity': new_qty})
+        return jsonify({
+            'success': True,
+            'new_quantity': new_qty,
+            'row_deleted': new_qty <= 0,
+            'warning': history_warning,
+        })
     except Exception as e:
+        for connection in (history_conn, rack_conn):
+            try:
+                if connection is not None:
+                    connection.rollback()
+            except Exception:
+                pass
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
     finally:
-        rack_conn.close()
+        if rack_conn is not None:
+            rack_conn.close()
+        if history_conn is not None:
+            history_conn.close()
 
 @app.route('/api/marketplace/sales', methods=['GET'])
 def api_marketplace_sales():
@@ -47570,13 +49794,17 @@ def delayed_start():
 try:
     ensure_lifecycle_tables()
     ensure_shelf_groups_table()
+    inventory_guard_status = _initialize_searchrack_history_guard()
+    if not inventory_guard_status.get('installed'):
+        print(f"⚠️ Active inventory guard not installed: {inventory_guard_status.get('reason', 'unknown reason')}")
     print("✅ Database initialization completed")
 except Exception as e:
     print(f"❌ Database initialization failed: {e}")
 
-# Start background services in a separate thread to not block import
-# This ensures they run regardless of whether app is run directly or via Gunicorn
-threading.Thread(target=delayed_start, daemon=True).start()
+# Start background services in a separate thread to not block import.
+# Tests and one-off maintenance checks can opt out without changing production behavior.
+if os.getenv('DISABLE_BACKGROUND_SERVICES', '').strip().lower() not in ('1', 'true', 'yes'):
+    threading.Thread(target=delayed_start, daemon=True).start()
 
 @app.route('/api/duplicate_shelf', methods=['POST'])
 def api_duplicate_shelf():

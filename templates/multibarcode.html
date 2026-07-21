@@ -485,6 +485,79 @@
             color: #b91c1c;
         }
 
+        .warehouse-note-modal {
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 100002;
+            background: rgba(0, 0, 0, 0.58);
+            align-items: center;
+            justify-content: center;
+            padding: 18px;
+        }
+
+        .warehouse-note-card {
+            width: min(460px, 94vw);
+            background: #fff;
+            color: #17202a;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 18px 40px rgba(0, 0, 0, 0.3);
+        }
+
+        .warehouse-note-card h3 {
+            margin: 0 0 6px;
+        }
+
+        .warehouse-note-barcode {
+            margin-bottom: 12px;
+            color: #64748b;
+            font-family: monospace;
+            font-weight: 700;
+        }
+
+        .warehouse-note-input {
+            width: 100%;
+            min-height: 120px;
+            box-sizing: border-box;
+            padding: 12px;
+            border: 2px solid #cbd5e1;
+            border-radius: 9px;
+            font: inherit;
+            resize: vertical;
+        }
+
+        .warehouse-note-input:focus {
+            outline: none;
+            border-color: #2563eb;
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+        }
+
+        .warehouse-note-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            margin-top: 14px;
+        }
+
+        .warehouse-note-actions button {
+            border: none;
+            border-radius: 8px;
+            padding: 10px 16px;
+            font-weight: 800;
+            cursor: pointer;
+        }
+
+        .warehouse-note-cancel {
+            background: #e2e8f0;
+            color: #334155;
+        }
+
+        .warehouse-note-save {
+            background: #16a34a;
+            color: #fff;
+        }
+
         @media (max-width: 430px) {
             .barcode-item-controls {
                 gap: 8px;
@@ -758,15 +831,6 @@
             color: #b45309;
         }
 
-        .missing-title-hint {
-            display: none;
-            margin: -4px 0 12px;
-            text-align: center;
-            color: #92400e;
-            font-size: 0.82rem;
-            font-weight: 700;
-            line-height: 1.35;
-        }
 
         .missing-title-photo {
             display: none;
@@ -860,116 +924,6 @@
             display: block;
         }
 
-        .missing-title-keypad {
-            display: none;
-            flex-direction: column;
-            gap: 10px;
-            margin: 0 0 14px;
-        }
-
-        .missing-title-keypad-row {
-            display: grid;
-            gap: 5px;
-            width: 100%;
-            align-items: stretch;
-        }
-
-        .missing-title-keypad-row.ten {
-            grid-template-columns: repeat(10, minmax(0, 1fr));
-        }
-
-        .missing-title-keypad-row.nine {
-            grid-template-columns: repeat(9, minmax(0, 1fr));
-            width: 92%;
-            margin: 0 auto;
-        }
-
-        .missing-title-keypad-row.seven {
-            grid-template-columns: repeat(7, minmax(0, 1fr));
-            width: 78%;
-            margin: 0 auto;
-        }
-
-        .missing-title-keypad-row.eight {
-            grid-template-columns: repeat(8, minmax(0, 1fr));
-            width: 88%;
-            margin: 0 auto;
-        }
-
-        .missing-title-keypad-key {
-            height: 38px;
-            border: 1px solid #f2c66d;
-            border-radius: 9px;
-            background: #fff;
-            color: #7c2d12;
-            font-size: 0.8rem;
-            font-weight: 800;
-            cursor: pointer;
-            -webkit-appearance: none;
-            appearance: none;
-            padding: 0;
-            line-height: 1;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            min-width: 0;
-            white-space: nowrap;
-            overflow: hidden;
-        }
-
-        .missing-title-keypad-key:active {
-            transform: translateY(1px);
-            background: #fff7ed;
-        }
-
-        .missing-title-keypad-key.action {
-            background: #fff7ed;
-            color: #92400e;
-        }
-
-        .missing-title-keypad-key.wide {
-            grid-column: span 3;
-        }
-        .missing-title-keypad-row.num-row {
-            border-bottom: 2px solid #f2c66d;
-            padding-bottom: 6px;
-            margin-bottom: 2px;
-        }
-        .missing-title-keypad-row.num-row .missing-title-keypad-key {
-            background: #fef3c7;
-        }
-        .missing-title-keypad-row.num-row .missing-title-keypad-key:active {
-            background: #fde68a;
-        }
-
-        @media (max-width: 430px) {
-            .missing-title-keypad {
-                gap: 8px;
-            }
-
-            .missing-title-keypad-row {
-                gap: 4px;
-            }
-
-            .missing-title-keypad-row.nine {
-                width: 94%;
-            }
-
-            .missing-title-keypad-row.seven {
-                width: 82%;
-            }
-
-            .missing-title-keypad-row.eight {
-                width: 90%;
-            }
-
-            .missing-title-keypad-key {
-                height: 36px;
-                border-radius: 8px;
-                font-size: 0.75rem;
-            }
-        }
-
         .missing-title-actions {
             display: flex;
             flex-wrap: wrap;
@@ -1004,7 +958,7 @@
     
     <div class="scan-container">
         <div class="input-container">
-            <input type="text" id="barcodeInput" placeholder="Scan barcode..." autofocus autocomplete="off">
+            <input type="text" id="barcodeInput" placeholder="Scan barcode..." autofocus autocomplete="off" data-scanner-keyboard="off">
             <button type="button" id="noBarcodeBtn" class="no-barcode-open-btn">
                 <i class="fas fa-barcode"></i>
                 <span>No Barcode</span>
@@ -1041,14 +995,14 @@
     </div>
     
     <!-- Hidden input for external scanner -->
-    <input type="text" id="scannerInput" autocomplete="off" />
+    <input type="text" id="scannerInput" autocomplete="off" data-scanner-keyboard="off" />
 
     <div id="noBarcodeModal" class="no-barcode-modal">
         <div class="no-barcode-card">
             <button type="button" id="noBarcodeCloseBtn" class="no-barcode-close-btn" aria-label="Close">&#x2715;</button>
             <h3>No Barcode</h3>
             <label for="noBarcodeInput">Barcode</label>
-            <input type="text" id="noBarcodeInput" placeholder="Enter barcode or generate one" autocomplete="off" autocapitalize="off" spellcheck="false">
+            <input type="text" id="noBarcodeInput" placeholder="Enter barcode or generate one" autocomplete="off" autocapitalize="off" spellcheck="false" data-scanner-keyboard="off">
             <div id="noBarcodeKeypad" class="no-barcode-keypad" aria-label="Barcode number pad">
                 <button type="button" data-no-barcode-key="1">1</button>
                 <button type="button" data-no-barcode-key="2">2</button>
@@ -1064,7 +1018,7 @@
                 <button type="button" class="no-barcode-key-action" data-no-barcode-action="backspace">Back</button>
             </div>
             <label for="noBarcodeDescriptionInput">Label title</label>
-            <input type="text" id="noBarcodeDescriptionInput" placeholder="No barcode item" autocomplete="off" autocapitalize="words" spellcheck="false">
+            <input type="text" id="noBarcodeDescriptionInput" placeholder="No barcode item" autocomplete="off" autocapitalize="words" spellcheck="false" data-scanner-keyboard="on">
             <div class="no-barcode-actions">
                 <button type="button" id="noBarcodeGenerateBtn" class="no-barcode-generate">Generate Unique</button>
                 <button type="button" id="noBarcodeUseBtn" class="no-barcode-use">Add Item</button>
@@ -1080,7 +1034,7 @@
             <div class="missing-title-icon"><i class="fas fa-wave-square"></i></div>
             <h3 class="missing-title-heading">Missing Title/Image</h3>
             <div class="missing-title-code" id="missingTitleBarcodeText"></div>
-            <input type="text" id="missingTitleInput" class="missing-title-input" maxlength="200" placeholder="Enter a warehouse title" autocomplete="off" autocapitalize="words" spellcheck="false" inputmode="text" enterkeyhint="done">
+            <input type="text" id="missingTitleInput" class="missing-title-input" maxlength="200" placeholder="Enter a warehouse title" autocomplete="off" autocapitalize="words" spellcheck="false" inputmode="text" enterkeyhint="done" data-scanner-keyboard="on">
             <button type="button" id="missingTitleNoteBtn" class="missing-title-note-btn">+ note</button>
             <textarea id="missingTitleNoteInput" class="missing-title-note-input" maxlength="2000" placeholder="Warehouse note for this exact item"></textarea>
             <div id="missingTitlePhotoSection" class="missing-title-photo">
@@ -1089,62 +1043,22 @@
                 <div id="missingTitlePhotoStatus" class="missing-title-photo-status">Optional: capture a thumbnail while this item is already being fixed.</div>
                 <img id="missingTitlePhotoPreview" class="missing-title-photo-preview" alt="Thumbnail preview">
             </div>
-            <div id="missingTitleKeypad" class="missing-title-keypad" aria-hidden="true">
-                <div class="missing-title-keypad-row ten num-row">
-                    <button type="button" class="missing-title-keypad-key" data-title-key="1">1</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="2">2</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="3">3</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="4">4</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="5">5</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="6">6</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="7">7</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="8">8</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="9">9</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="0">0</button>
-                </div>
-                <div class="missing-title-keypad-row ten">
-                    <button type="button" class="missing-title-keypad-key" data-title-key="q">Q</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="w">W</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="e">E</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="r">R</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="t">T</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="y">Y</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="u">U</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="i">I</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="o">O</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="p">P</button>
-                </div>
-                <div class="missing-title-keypad-row nine">
-                    <button type="button" class="missing-title-keypad-key" data-title-key="a">A</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="s">S</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="d">D</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="f">F</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="g">G</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="h">H</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="j">J</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="k">K</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="l">L</button>
-                </div>
-                <div class="missing-title-keypad-row seven">
-                    <button type="button" class="missing-title-keypad-key" data-title-key="z">Z</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="x">X</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="c">C</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="v">V</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="b">B</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="n">N</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="m">M</button>
-                </div>
-                <div class="missing-title-keypad-row eight">
-                    <button type="button" class="missing-title-keypad-key" data-title-key="-">-</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="&amp;">&amp;</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="'">&#39;</button>
-                    <button type="button" class="missing-title-keypad-key action wide" data-title-key=" ">Space</button>
-                    <button type="button" class="missing-title-keypad-key action" data-title-action="backspace">⌫</button>
-                    <button type="button" class="missing-title-keypad-key action" data-title-action="clear">Clear</button>
-                </div>
-            </div>
             <div class="missing-title-actions">
                 <button type="button" id="missingTitleSaveBtn" class="missing-title-btn save">Complete</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="warehouseNoteModal" class="warehouse-note-modal" aria-hidden="true">
+        <div class="warehouse-note-card" role="dialog" aria-modal="true" aria-labelledby="warehouseNoteHeading">
+            <h3 id="warehouseNoteHeading">Warehouse note</h3>
+            <div id="warehouseNoteBarcode" class="warehouse-note-barcode"></div>
+            <textarea id="warehouseNoteInput" class="warehouse-note-input" maxlength="2000"
+                placeholder="Custom note for this exact warehouse item"
+                autocapitalize="sentences" spellcheck="true" data-scanner-keyboard="on"></textarea>
+            <div class="warehouse-note-actions">
+                <button type="button" id="warehouseNoteCancelBtn" class="warehouse-note-cancel">Cancel</button>
+                <button type="button" id="warehouseNoteSaveBtn" class="warehouse-note-save">Save note</button>
             </div>
         </div>
     </div>
@@ -1152,7 +1066,8 @@
     <!-- ZXing Library -->
     <script src="https://unpkg.com/@zxing/library@0.19.1/umd/index.min.js"></script>
     <script src="/static/barcode-entry-state.js?v=20260505a"></script>
-    <script src="/static/no-barcode-label.js?v=20260505a"></script>
+    <script src="/static/no-barcode-label.js?v=20260716b"></script>
+    <script src="/static/ios-scanner-keyboard.js?v=20260716a"></script>
     
     <script>
         const barcodeEntryState = window.BarcodeEntryState;
@@ -1263,11 +1178,23 @@
         window.printBarcodeItemLabel = printBarcodeItemLabel;
 
         function closeItemGearMenus() {
-            document.querySelectorAll('.item-gear-menu.open').forEach(menu => menu.classList.remove('open'));
+            document.querySelectorAll('.item-gear-menu.open').forEach(menu => {
+                menu.classList.remove('open');
+                const index = menu.getAttribute('data-index');
+                const host = document.querySelector(`.barcode-item-controls[data-index="${index}"]`);
+                if (host) {
+                    host.appendChild(menu);
+                    menu.style.left = '';
+                    menu.style.top = '';
+                } else if (menu.parentElement === document.body) {
+                    menu.remove();
+                }
+            });
         }
 
         function positionItemGearMenu(menu, trigger) {
             if (!menu || !trigger) return;
+            document.body.appendChild(menu);
             menu.style.left = '8px';
             menu.style.top = '8px';
             menu.classList.add('open');
@@ -1301,12 +1228,19 @@
             if (!barcodeEntryState || typeof barcodeEntryState.setNote !== 'function') return;
             const item = barcodeItems[index];
             if (!item) return;
-            const next = window.prompt('Warehouse note for this exact item:', String(item.note || ''));
-            if (next === null) return;
-            barcodeItems = barcodeEntryState.setNote(barcodeItems, index, next);
-            persistBarcodeItems();
-            updateList();
-            barcodeInput.focus();
+            warehouseNoteEditingIndex = index;
+            warehouseNoteBarcode.textContent = formatBarcodeEntry(item);
+            warehouseNoteInput.value = cleanMissingTitleWarehouseNote(item.note || '');
+            warehouseNoteModal.style.display = 'flex';
+            warehouseNoteModal.setAttribute('aria-hidden', 'false');
+            suspendBarcodeCaptureForMissingTitle(true);
+            window.setTimeout(() => {
+                try { warehouseNoteInput.focus({ preventScroll: true }); }
+                catch (_) { warehouseNoteInput.focus(); }
+                try {
+                    warehouseNoteInput.setSelectionRange(warehouseNoteInput.value.length, warehouseNoteInput.value.length);
+                } catch (_) {}
+            }, 0);
         }
         window.editWarehouseNote = editWarehouseNote;
 
@@ -1378,7 +1312,6 @@
         const readerDiv = document.getElementById('reader');
         const missingTitleModal = document.getElementById('missingTitleModal');
         const missingTitleBarcodeText = document.getElementById('missingTitleBarcodeText');
-        const missingTitleHint = document.getElementById('missingTitleHint');
         const missingTitleInput = document.getElementById('missingTitleInput');
         const missingTitleNoteBtn = document.getElementById('missingTitleNoteBtn');
         const missingTitleNoteInput = document.getElementById('missingTitleNoteInput');
@@ -1387,15 +1320,20 @@
         const missingTitlePhotoBtn = document.getElementById('missingTitlePhotoBtn');
         const missingTitlePhotoStatus = document.getElementById('missingTitlePhotoStatus');
         const missingTitlePhotoPreview = document.getElementById('missingTitlePhotoPreview');
-        const missingTitleKeypad = document.getElementById('missingTitleKeypad');
         const missingTitleSkipBtn = document.getElementById('missingTitleSkipBtn');
         const missingTitleSaveBtn = document.getElementById('missingTitleSaveBtn');
+        const warehouseNoteModal = document.getElementById('warehouseNoteModal');
+        const warehouseNoteBarcode = document.getElementById('warehouseNoteBarcode');
+        const warehouseNoteInput = document.getElementById('warehouseNoteInput');
+        const warehouseNoteCancelBtn = document.getElementById('warehouseNoteCancelBtn');
+        const warehouseNoteSaveBtn = document.getElementById('warehouseNoteSaveBtn');
         const MANUAL_TITLE_SKIP_STORAGE_KEY = 'additem_manual_title_skips';
         let missingTitleModalOpen = false;
         let missingTitleModalResolver = null;
         let missingTitleResumeCamera = false;
         let missingTitlePendingPhotoData = '';
         let missingTitleCurrentIssue = null;
+        let warehouseNoteEditingIndex = -1;
         const pendingMissingTitleNotes = {};
         
         // Check if shelf is still locked
@@ -1681,11 +1619,6 @@
             return scannerMode === 'handheld' || deviceType === 'Desktop' || deviceType === 'iPad' || deviceType === 'Android Tablet';
         }
 
-        function requiresMissingTitleKeyboardTap() {
-            const deviceType = getDeviceType();
-            return deviceType === 'Mobile' || deviceType === 'iPad';
-        }
-
         function tryShowVirtualKeyboard() {
             try {
                 if (navigator.virtualKeyboard && typeof navigator.virtualKeyboard.show === 'function') {
@@ -1694,85 +1627,32 @@
             } catch (_) {}
         }
 
-        function setMissingTitleKeypadVisibility(show) {
-            const shouldShow = !!show;
-            if (missingTitleHint) {
-                missingTitleHint.style.display = shouldShow ? 'block' : 'none';
-            }
-            if (missingTitleKeypad) {
-                missingTitleKeypad.style.display = shouldShow ? 'flex' : 'none';
-                missingTitleKeypad.setAttribute('aria-hidden', shouldShow ? 'false' : 'true');
-            }
-        }
-
-        function normalizeMissingTitleInsertedChar(char) {
-            const text = String(char || '');
-            if (!/^[a-z]$/i.test(text) || !missingTitleInput) return text;
-            const value = String(missingTitleInput.value || '');
-            const start = typeof missingTitleInput.selectionStart === 'number'
-                ? missingTitleInput.selectionStart
-                : value.length;
-            const prev = start > 0 ? value.charAt(start - 1) : '';
-            return !prev || /[\s\-&(\/]/.test(prev) ? text.toUpperCase() : text.toLowerCase();
-        }
-
-        function insertMissingTitleText(char) {
-            if (!missingTitleInput) return;
-            const rawChar = String(char || '');
-            if (!rawChar) return;
-            const value = String(missingTitleInput.value || '');
-            const start = typeof missingTitleInput.selectionStart === 'number'
-                ? missingTitleInput.selectionStart
-                : value.length;
-            const end = typeof missingTitleInput.selectionEnd === 'number'
-                ? missingTitleInput.selectionEnd
-                : value.length;
-            const insertChar = normalizeMissingTitleInsertedChar(rawChar);
-            const next = (value.slice(0, start) + insertChar + value.slice(end)).slice(0, 200);
-            missingTitleInput.value = next;
-            const caret = Math.min(start + insertChar.length, next.length);
-            try {
-                missingTitleInput.setSelectionRange(caret, caret);
-            } catch (_) {}
-            missingTitleInput.dispatchEvent(new Event('input', { bubbles: true }));
-        }
-
-        function backspaceMissingTitleText() {
-            if (!missingTitleInput) return;
-            const value = String(missingTitleInput.value || '');
-            const start = typeof missingTitleInput.selectionStart === 'number'
-                ? missingTitleInput.selectionStart
-                : value.length;
-            const end = typeof missingTitleInput.selectionEnd === 'number'
-                ? missingTitleInput.selectionEnd
-                : value.length;
-            if (!value) return;
-            let next = value;
-            let caret = start;
-            if (start !== end) {
-                next = value.slice(0, start) + value.slice(end);
-            } else if (start > 0) {
-                next = value.slice(0, start - 1) + value.slice(end);
-                caret = start - 1;
-            }
-            missingTitleInput.value = next;
-            try {
-                missingTitleInput.setSelectionRange(caret, caret);
-            } catch (_) {}
-            missingTitleInput.dispatchEvent(new Event('input', { bubbles: true }));
-        }
-
-        function clearMissingTitleText() {
-            if (!missingTitleInput) return;
-            missingTitleInput.value = '';
-            try {
-                missingTitleInput.setSelectionRange(0, 0);
-            } catch (_) {}
-            missingTitleInput.dispatchEvent(new Event('input', { bubbles: true }));
-        }
-
         function cleanMissingTitleWarehouseNote(value) {
             return String(value || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim().slice(0, 2000);
+        }
+
+        function closeWarehouseNoteModal() {
+            warehouseNoteEditingIndex = -1;
+            warehouseNoteModal.style.display = 'none';
+            warehouseNoteModal.setAttribute('aria-hidden', 'true');
+            suspendBarcodeCaptureForMissingTitle(false);
+            barcodeInput.focus();
+        }
+
+        function saveWarehouseNoteModal() {
+            const index = warehouseNoteEditingIndex;
+            if (index < 0 || index >= barcodeItems.length) {
+                closeWarehouseNoteModal();
+                return;
+            }
+            barcodeItems = barcodeEntryState.setNote(
+                barcodeItems,
+                index,
+                cleanMissingTitleWarehouseNote(warehouseNoteInput.value)
+            );
+            persistBarcodeItems();
+            updateList();
+            closeWarehouseNoteModal();
         }
 
         function setMissingTitleNoteVisibility(show) {
@@ -1928,7 +1808,6 @@
             resetMissingTitlePhotoState();
             resetMissingTitleNoteState('');
             setMissingTitlePhotoVisibility(false);
-            setMissingTitleKeypadVisibility(false);
             suspendBarcodeCaptureForMissingTitle(false);
             const resolver = missingTitleModalResolver;
             missingTitleModalResolver = null;
@@ -1970,7 +1849,6 @@
             setMissingTitlePhotoVisibility(!!missingTitleCurrentIssue.missingImage || !!existingImage);
             showExistingMissingTitleThumbnail(existingImage);
             missingTitleInput.readOnly = false;
-            setMissingTitleKeypadVisibility(requiresMissingTitleKeyboardTap());
             missingTitleModal.style.display = 'flex';
             missingTitleModalOpen = true;
             suspendBarcodeCaptureForMissingTitle(true);
@@ -2023,7 +1901,7 @@
             let item = null;
             try {
                 item = await fetchAddItemScreeningSingle(key);
-                if (!item || (!item.needs_manual_title && !item.missing_image)) return true;
+                if (!item || !item.needs_manual_title) return true;
             } catch (err) {
                 console.error('Barcode screening failed; requiring manual item data:', err);
                 item = { needs_manual_title: true, missing_image: true, title: '' };
@@ -2234,6 +2112,14 @@
                     }
                     return;
                 }
+                const issueKey = normalizeManualTitleKey(
+                    missingTitleCurrentIssue && missingTitleCurrentIssue.barcode
+                );
+                if (issueKey) {
+                    const overrides = loadManualTitleOverrides();
+                    overrides[issueKey] = value.slice(0, 200);
+                    saveManualTitleOverrides(overrides);
+                }
                 closeMissingTitleModal({
                     action: 'save',
                     title: value,
@@ -2247,6 +2133,18 @@
                 setMissingTitleNoteVisibility(!missingTitleNoteInput.classList.contains('is-visible'));
             });
         }
+
+        warehouseNoteCancelBtn.addEventListener('click', closeWarehouseNoteModal);
+        warehouseNoteSaveBtn.addEventListener('click', saveWarehouseNoteModal);
+        warehouseNoteModal.addEventListener('click', (e) => {
+            if (e.target === warehouseNoteModal) closeWarehouseNoteModal();
+        });
+        warehouseNoteInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                closeWarehouseNoteModal();
+            }
+        });
 
         if (missingTitlePhotoBtn && missingTitlePhotoInput) {
             missingTitlePhotoBtn.addEventListener('click', (e) => {
@@ -2294,27 +2192,6 @@
                     focusMissingTitleEntry(true);
                 }
             });
-        }
-
-        if (missingTitleKeypad) {
-            const handleMissingTitleKeypadPress = (e) => {
-                const btn = e.target.closest('[data-title-key], [data-title-action]');
-                if (!btn) return;
-                e.preventDefault();
-                e.stopPropagation();
-                const action = btn.getAttribute('data-title-action');
-                if (action === 'backspace') {
-                    backspaceMissingTitleText();
-                    return;
-                }
-                if (action === 'clear') {
-                    clearMissingTitleText();
-                    return;
-                }
-                const key = btn.getAttribute('data-title-key');
-                if (key) insertMissingTitleText(key);
-            };
-            missingTitleKeypad.addEventListener('click', handleMissingTitleKeypadPress);
         }
 
         if (missingTitleModal) {
@@ -2382,7 +2259,7 @@
                                 ${item.suffix === 0 && item.quantity > 1 ? '<span>Use + to split one out as a suffix item</span>' : ''}
                             </div>
                         </div>
-                        <div class="barcode-item-controls">
+                        <div class="barcode-item-controls" data-index="${index}">
                             <button class="item-gear-btn" onclick="toggleItemGearMenu(${index}, event)" title="Item options" aria-label="Item options">
                                 <i class="fas fa-gear"></i>
                             </button>
@@ -2512,21 +2389,41 @@
         }
 
         // Submit barcodes function for the Done button
-        function submitBarcodes() {
+        let barcodeSubmissionInFlight = false;
+
+        async function submitBarcodes() {
+            if (barcodeSubmissionInFlight) return;
             if (barcodeItems.length === 0) return;
+            barcodeSubmissionInFlight = true;
+            doneButton.disabled = true;
 
-            const barcodesString = barcodeEntryState
-                ? barcodeEntryState.serializeEntries(barcodeItems)
-                : barcodeItems.map(item => item.suffix > 0 ? `${item.code}-${item.suffix}` : item.code).join(',');
+            try {
+                await barcodeScanQueue;
+                if (missingTitleModalOpen) {
+                    barcodeSubmissionInFlight = false;
+                    doneButton.disabled = false;
+                    focusMissingTitleEntry(true);
+                    return;
+                }
 
-            // Save to sessionStorage so additem.html can read barcodes after navigation
-            if (barcodeEntryState) {
-                barcodeItems = barcodeEntryState.saveEntries(barcodeItems);
-            } else {
-                sessionStorage.setItem('barcode', barcodesString);
+                const barcodesString = barcodeEntryState
+                    ? barcodeEntryState.serializeEntries(barcodeItems)
+                    : barcodeItems.map(item => item.suffix > 0 ? `${item.code}-${item.suffix}` : item.code).join(',');
+
+                // Save to sessionStorage so additem.html can read barcodes after navigation
+                if (barcodeEntryState) {
+                    barcodeItems = barcodeEntryState.saveEntries(barcodeItems);
+                } else {
+                    sessionStorage.setItem('barcode', barcodesString);
+                }
+
+                postBarcodeSubmission(barcodesString);
+            } catch (err) {
+                barcodeSubmissionInFlight = false;
+                doneButton.disabled = false;
+                console.error('Unable to finish barcode submission:', err);
+                alert('The barcode list is still processing. Please try Done again.');
             }
-
-            postBarcodeSubmission(barcodesString);
         }
         
         // Done button handler

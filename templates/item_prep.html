@@ -2675,9 +2675,13 @@
       // Create a suffixed entry, then continue through diagnostic return flow
       try {
         const hasVoiceNote = hasQuickVoiceNote();
+        const returnSubmissionId = (window.crypto && typeof window.crypto.randomUUID === 'function')
+          ? window.crypto.randomUUID()
+          : `return-${Date.now()}-${Math.random().toString(36).slice(2)}`;
         let data = await postWithLotFallback('/api/items_prep/create_return_entry', {
           upc: currentUpc,
-          qty: currentQty
+          qty: currentQty,
+          submission_id: returnSubmissionId
         });
         
         if (data.success && data.suffixed_upc) {

@@ -707,7 +707,7 @@ async function printSubmittedSuffixLabel(upc, description){
     function activeRowStatus(){
       return isBadFlow
         ? 'bad'
-        : (isReturnFlow ? ((statusInput.value || '') === 'good' ? 'good' : 'return') : (statusInput.value || ''));
+        : (statusInput.value || '');
     }
 
     function setVoiceHint(text, isError=false){
@@ -1525,6 +1525,14 @@ async function printSubmittedSuffixLabel(upc, description){
     document.getElementById('completeBtn').onclick = async ()=>{
       // Check if button is disabled
       if(document.getElementById('completeBtn').disabled) return;
+
+      // A return can be completed without choosing a status. Confirm that this
+      // intentionally means the item passed inspection; otherwise leave the
+      // form untouched so a status bubble can be selected.
+      if(isReturnFlow && !activeRowStatus()){
+        if(!confirm('this item is all GOOD?')) return;
+        updateStatusBubbles('good');
+      }
       
       // Show loading overlay
       showPageLoading();
@@ -1783,7 +1791,6 @@ async function printSubmittedSuffixLabel(upc, description){
     function resolveSelectedStatus(selectedStatus){
       const normalized = String(selectedStatus || '').trim().toLowerCase();
       if(isBadFlow) return 'bad';
-      if(isReturnFlow && normalized !== 'good') return 'return';
       return normalized;
     }
 
@@ -1845,8 +1852,8 @@ async function printSubmittedSuffixLabel(upc, description){
         updateDoneButtonState();
       });
     }
-    if(isForcedDiagnosticFlow){
-      updateStatusBubbles(isReturnFlow ? 'return' : 'bad');
+    if(isBadFlow){
+      updateStatusBubbles('bad');
       if(statusBubbleWrap){
         statusBubbleWrap.style.display = 'none';
       }
@@ -1872,7 +1879,8 @@ async function printSubmittedSuffixLabel(upc, description){
       
       // For "good" status, allow saving without a reason (defect is optional)
       // For non-good statuses (bad/return), require a reason
-      const canSave = (currentStatus === 'good') || hasReason;
+      // A return with no selection is confirmed as ALL GOOD when submitted.
+      const canSave = (currentStatus === 'good') || (isReturnFlow && !currentStatus) || hasReason;
       
       if(canSave){
         doneBtn.disabled = false;

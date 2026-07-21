@@ -517,6 +517,16 @@ class AmazonManager:
                         asin = item.get('ASIN')
                         sku = item.get('SellerSKU')
                         title = item.get('Title')
+                        item_description = item.get('ItemDescription') or item.get('Description') or ''
+                        condition_id = str(item.get('ConditionId') or item.get('Condition') or '').strip()
+                        condition_subtype = str(item.get('ConditionSubtypeId') or '').strip()
+                        if condition_id and condition_subtype and condition_id.casefold() != condition_subtype.casefold():
+                            item_condition = f'{condition_id} - {condition_subtype}'
+                        else:
+                            item_condition = condition_id or condition_subtype
+                        item_condition_description = str(
+                            item.get('ConditionNote') or item.get('conditionNote') or ''
+                        ).strip()
                         quantity = item.get('QuantityOrdered', 1)
                         price = float(item.get('ItemPrice', {}).get('Amount', 0))
 
@@ -566,7 +576,13 @@ class AmazonManager:
                         try:
                             with connect_db('amazonStore.db') as store_conn:
                                 store_cur = store_conn.cursor()
-                                store_cur.execute('SELECT UPC, IMAGE FROM ITEMS WHERE ASIN = ? OR SKU = ?', (asin, sku))
+                                store_cur.execute('PRAGMA table_info(ITEMS)')
+                                store_columns = {str(row[1]).upper() for row in store_cur.fetchall()}
+                                condition_note_column = 'CONDITION_NOTE' if 'CONDITION_NOTE' in store_columns else 'NULL'
+                                store_cur.execute(
+                                    f'SELECT UPC, IMAGE, CONDITION, {condition_note_column} FROM ITEMS WHERE ASIN = ? OR SKU = ?',
+                                    (asin, sku)
+                                )
                                 result = store_cur.fetchone()
                                 if result:
                                     potential_barcode = result[0]
@@ -577,6 +593,10 @@ class AmazonManager:
                                     # Get image from amazonStore if available
                                     if result[1] and str(result[1]).lower() not in ['none', 'null', '']:
                                         image = result[1]
+                                    if not item_condition and len(result) > 2 and result[2]:
+                                        item_condition = str(result[2]).strip()
+                                    if not item_condition_description and len(result) > 3 and result[3]:
+                                        item_condition_description = str(result[3]).strip()
                         except Exception:
                             pass
 
@@ -668,13 +688,17 @@ class AmazonManager:
                                     listing_listing_id = COALESCE(?, listing_listing_id),
                                     listing_offer_id = COALESCE(?, listing_offer_id),
                                     listing_sku = COALESCE(?, listing_sku),
-                                    listing_asin = COALESCE(?, listing_asin)
+                                    listing_asin = COALESCE(?, listing_asin),
+                                    item_condition = COALESCE(NULLIF(?, ''), item_condition),
+                                    item_condition_description = COALESCE(NULLIF(?, ''), item_condition_description),
+                                    item_description = COALESCE(NULLIF(?, ''), item_description)
                                 WHERE order_id = ?
                             ''', (final_barcode, title, quantity, price, shipped_time, purchase_date, image,
                                   shipping_name, shipping_city, shipping_state, shipping_postal, shipping_country,
                                   shipping_cost, seller_fee, taxes, final_sku,
                                   source_upc, source_base_upc, listing_trace_id, listing_trace_created_at,
                                   listing_trace_source, listing_listing_id, listing_offer_id, listing_sku, listing_asin,
+                                  item_condition, item_condition_description, item_description,
                                   amazon_order_id))
                         else:
                             # Insert new order
@@ -684,13 +708,13 @@ class AmazonManager:
                                  shipping_name, shipping_city, shipping_state, shipping_postal_code, shipping_country,
                                  shipping_cost, seller_fee, taxes, source_upc, source_base_upc, listing_trace_id,
                                  listing_trace_created_at, listing_trace_source, listing_listing_id, listing_offer_id,
-                                 listing_sku, listing_asin)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                 listing_sku, listing_asin, item_condition, item_condition_description, item_description)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                             ''', (amazon_order_id, asin, sku, final_trace_barcode, title, quantity, price, shipped_time, purchase_date, image, 'amazon',
                                   shipping_name, shipping_city, shipping_state, shipping_postal, shipping_country,
                                   shipping_cost, seller_fee, taxes, source_upc, source_base_upc, listing_trace_id,
                                   listing_trace_created_at, listing_trace_source, listing_listing_id, listing_offer_id,
-                                  listing_sku, listing_asin))
+                                  listing_sku, listing_asin, item_condition, item_condition_description, item_description))
                             synced_count += 1
 
                     conn.commit()
@@ -864,6 +888,7 @@ class AmazonManager:
                     'upc': row.get('product-id', ''),  # This is the UPC/barcode
                     'product_id_type': row.get('product-id-type', ''),
                     'condition': row.get('item-condition', ''),
+                    'condition_note': row.get('condition-note', '') or row.get('item-note', ''),
                     'fulfillment_channel': row.get('fulfillment-channel', ''),
                 }
                 listings.append(listing)
@@ -904,12 +929,17 @@ class AmazonManager:
                     IMAGE TEXT,
                     UPC TEXT,
                     CONDITION TEXT,
+                    CONDITION_NOTE TEXT,
                     FULFILLMENT_CHANNEL TEXT,
                     LAST_UPDATED TEXT,
                     upc_fetch_attempted INTEGER DEFAULT 0,
                     upc_last_fetch_date TEXT
                 )
             ''')
+            cur.execute('PRAGMA table_info(ITEMS)')
+            item_columns = {str(row[1]).upper() for row in cur.fetchall()}
+            if 'CONDITION_NOTE' not in item_columns:
+                cur.execute('ALTER TABLE ITEMS ADD COLUMN CONDITION_NOTE TEXT')
 
             # Create sync metadata table to track quota usage
             cur.execute('''
@@ -962,6 +992,7 @@ class AmazonManager:
                 try:
                     asin = listing.get('asin', '').strip()
                     sku = listing.get('sku', '').strip()
+                    condition_note = str(listing.get('condition_note') or '').strip()
 
                     if not asin:
                         continue
@@ -1050,12 +1081,14 @@ class AmazonManager:
                             UPDATE ITEMS
                             SET SKU = ?, TITLE = ?, PRICE = ?, QUANTITY = ?,
                                 STATUS = ?, IMAGE = ?, UPC = ?, CONDITION = ?,
+                                CONDITION_NOTE = COALESCE(NULLIF(?, ''), CONDITION_NOTE),
                                 FULFILLMENT_CHANNEL = ?, LAST_UPDATED = ?
                             WHERE ASIN = ?
                         ''', (
                             sku, listing.get('title', ''), price, quantity,
                             listing.get('status', ''), image_url,
                             upc, listing.get('condition', ''),
+                            condition_note,
                             listing.get('fulfillment_channel', ''), current_time,
                             asin
                         ))
@@ -1063,12 +1096,13 @@ class AmazonManager:
                     else:
                         cur.execute('''
                             INSERT INTO ITEMS
-                            (ASIN, SKU, TITLE, PRICE, QUANTITY, STATUS, IMAGE, UPC, CONDITION, FULFILLMENT_CHANNEL, LAST_UPDATED)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            (ASIN, SKU, TITLE, PRICE, QUANTITY, STATUS, IMAGE, UPC, CONDITION, CONDITION_NOTE, FULFILLMENT_CHANNEL, LAST_UPDATED)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ''', (
                             asin, sku, listing.get('title', ''), price, quantity,
                             listing.get('status', ''), image_url,
                             upc, listing.get('condition', ''),
+                            condition_note,
                             listing.get('fulfillment_channel', ''), current_time
                         ))
                         synced_count += 1

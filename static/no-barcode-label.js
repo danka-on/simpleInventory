@@ -279,6 +279,22 @@
         }
     }
 
+    async function persistCustomIdentity(modal, barcode) {
+        var description = String(modal.descriptionInput && modal.descriptionInput.value || '').trim() || 'No barcode item';
+        var response = await fetch('/api/custom-item/identity', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ upc: barcode, item_description: description })
+        });
+        var data = await response.json().catch(function () {
+            return { success: false, error: 'Custom item response invalid' };
+        });
+        if (!response.ok || !data || !data.success) {
+            throw new Error((data && data.error) || 'Could not save custom item identity');
+        }
+        return data;
+    }
+
     function insertBarcodeText(modal, text) {
         if (!modal || !modal.barcodeInput) return;
         var raw = String(text || '').replace(/\D+/g, '');
@@ -427,6 +443,13 @@
                 modal.useBtn.addEventListener('click', async function () {
                     var barcode = validateBarcode(modal);
                     if (!barcode) return;
+                    try {
+                        await persistCustomIdentity(modal, barcode);
+                    } catch (error) {
+                        setStatus(modal, (error && error.message) || 'Could not save custom item.', 'bad');
+                        focusBarcodeInput(modal, true);
+                        return;
+                    }
                     var printed = await printBarcode(modal, {
                         barcode: barcode,
                         busyButton: modal.useBtn,

@@ -316,7 +316,18 @@ def resolve_barcode_from_marketplace_sku(sku, *, platform=None, item_id=None, fa
     for db_name, query, params in search_plan:
         mapped = _lookup_first_value(db_name, query, params)
         if mapped:
-            return str(mapped).strip()
+            mapped_val = str(mapped).strip()
+            if fallback_key:
+                mapped_key = _normalize_marketplace_upc(mapped_val)
+                fallback_base = fallback_key.split('-', 1)[0]
+                mapped_base = mapped_key.split('-', 1)[0] if mapped_key else ''
+                if mapped_key and (mapped_key == fallback_key or mapped_base == fallback_base):
+                    return mapped_val
+                # Generic or stale marketplace SKUs can point at an unrelated UPC.
+                # If the sold order already has a barcode, keep it instead of
+                # replacing it with an incompatible SKU lookup.
+                continue
+            return mapped_val
 
     for candidate in candidate_upcs:
         if _upc_exists_in_local_sources(candidate):
@@ -378,6 +389,9 @@ def ensure_sold_orders_schema(cur, conn, default_store='ebay'):
             ('listing_offer_id', 'TEXT'),
             ('listing_sku', 'TEXT'),
             ('listing_asin', 'TEXT'),
+            ('item_condition', 'TEXT'),
+            ('item_condition_description', 'TEXT'),
+            ('item_description', 'TEXT'),
         ]:
             if col_name not in cols:
                 cur.execute(f'ALTER TABLE orders ADD COLUMN {col_name} {col_def}')
@@ -402,14 +416,23 @@ def _log_rack_history(barcode, title, quantity_removed, searchrack_id, old_qty, 
                     old_quantity INTEGER,
                     new_quantity INTEGER,
                     removal_type TEXT,
-                    item_position TEXT
+                    item_position TEXT,
+                    event_status TEXT DEFAULT 'applied'
                 )
             ''')
+            rem_cur.execute('PRAGMA table_info(removed_items)')
+            history_columns = {str(row[1]).lower() for row in rem_cur.fetchall()}
+            if 'event_status' not in history_columns:
+                rem_cur.execute("ALTER TABLE removed_items ADD COLUMN event_status TEXT DEFAULT 'applied'")
             rem_cur.execute('''
                 INSERT INTO removed_items
-                (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (None, barcode, title, quantity_removed, datetime.datetime.now().isoformat(), searchrack_id, old_qty, new_qty, removal_type, position))
+                (order_id, barcode, title, quantity_removed, removed_at, searchrack_id,
+                 old_quantity, new_quantity, removal_type, item_position, event_status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+            ''', (
+                None, barcode, title, quantity_removed, datetime.datetime.now().isoformat(),
+                searchrack_id, old_qty, new_qty, removal_type, position
+            ))
     except Exception as log_err:
         print(f"Error logging to rack history: {log_err}")
 
@@ -499,8 +522,31 @@ def addToSearchRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITI
         except Exception as e:
             print(f"Warning: Could not lookup in bol.db: {e}")
 
+    # Durable custom-item identity survives removal from active inventory and
+    # cleanup of working bol_items rows.
+    if not title or not image:
+        try:
+            with connect_db('bol.db') as bol_conn:
+                bol_conn.row_factory = sqlite3.Row
+                bol_cur = bol_conn.cursor()
+                bol_cur.execute('''
+                    SELECT item_description, image_url
+                    FROM custom_item_registry
+                    WHERE upc = ? COLLATE NOCASE
+                    LIMIT 1
+                ''', (BARCODE,))
+                custom_row = bol_cur.fetchone()
+                if custom_row:
+                    if not title:
+                        title = custom_row['item_description']
+                    if not image:
+                        image = custom_row['image_url']
+                    itemid = itemid or BARCODE
+        except Exception as e:
+            print(f"Warning: Could not lookup custom item registry: {e}")
+
     custom_title = 0
-    if not title and TITLE_OVERRIDE and str(TITLE_OVERRIDE).strip():
+    if TITLE_OVERRIDE and str(TITLE_OVERRIDE).strip():
         title = str(TITLE_OVERRIDE).strip()
         custom_title = 1
 
@@ -521,7 +567,7 @@ def addToSearchRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITI
                 IMAGES TEXT,
                 PICTUREPOSITION TEXT,
                 ITEMID TEXT,
-                QUANTITY INTEGER,
+                QUANTITY INTEGER DEFAULT 1,
                 CREATED_AT TEXT
             )''')
 
@@ -550,6 +596,7 @@ def addToSearchRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITI
                     AND TRIM(ITEM_POSITION) = ? COLLATE NOCASE
                     AND (PICTUREPOSITION IS NULL OR TRIM(PICTUREPOSITION) = '')
                     AND TRIM(COALESCE(WAREHOUSE_NOTE, '')) = ?
+                    AND COALESCE(CAST(QUANTITY AS INTEGER), 0) > 0
                 """, (barcode_norm, position_norm, warehouse_note))
                 existing_same_location = cursor.fetchone()
             elif has_suffix:
@@ -559,6 +606,7 @@ def addToSearchRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITI
                     AND TRIM(ITEM_POSITION) = ? COLLATE NOCASE
                     AND TRIM(COALESCE(PICTUREPOSITION, '')) = ? COLLATE NOCASE
                     AND TRIM(COALESCE(WAREHOUSE_NOTE, '')) = ?
+                    AND COALESCE(CAST(QUANTITY AS INTEGER), 0) > 0
                 """, (barcode_norm, position_norm, str(PICTUREPOSITION).strip(), warehouse_note))
                 existing_same_location = cursor.fetchone()
 
@@ -599,7 +647,7 @@ def addToSearchRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITI
         except sqlite3.Error as e:
             print("Error in addToSearchRack:", e)
 
-def ebayStoreDB(title, item_id, sku=None, price=None, quantity=None, image=None, List_State=None, Sold_Date=None, List_Date=None, URL=None):
+def ebayStoreDB(title, item_id, sku=None, price=None, quantity=None, image=None, List_State=None, Sold_Date=None, List_Date=None, URL=None, condition=None, description=None, condition_description=None):
     with connect_db('ebayStore.db') as conn:
         cursor = conn.cursor()
         cursor.execute('''CREATE TABLE IF NOT EXISTS INVENTORY (
@@ -607,6 +655,13 @@ def ebayStoreDB(title, item_id, sku=None, price=None, quantity=None, image=None,
             Price TEXT, Quantity TEXT, Image TEXT, URL TEXT,
             List_State TEXT, Sold_Date TEXT, List_Date TEXT, isFound TEXT
         )''')
+        existing_cols = {str(row[1]).lower() for row in cursor.execute('PRAGMA table_info(INVENTORY)').fetchall()}
+        if 'condition' not in existing_cols:
+            cursor.execute('ALTER TABLE INVENTORY ADD COLUMN Condition TEXT')
+        if 'description' not in existing_cols:
+            cursor.execute('ALTER TABLE INVENTORY ADD COLUMN Description TEXT')
+        if 'conditiondescription' not in existing_cols:
+            cursor.execute('ALTER TABLE INVENTORY ADD COLUMN ConditionDescription TEXT')
         cursor.execute("SELECT ID FROM INVENTORY WHERE ItemID = ?", (item_id,))
         existing = cursor.fetchone()
         if existing is not None:
@@ -621,16 +676,19 @@ def ebayStoreDB(title, item_id, sku=None, price=None, quantity=None, image=None,
                         URL = ?,
                         List_State = ?,
                         Sold_Date = ?,
-                        List_Date = ?
+                        List_Date = ?,
+                        Condition = COALESCE(NULLIF(?, ''), Condition),
+                        Description = COALESCE(NULLIF(?, ''), Description),
+                        ConditionDescription = COALESCE(NULLIF(?, ''), ConditionDescription)
                     WHERE ItemID = ?
-                """, (title, sku, price, quantity, image, URL, List_State, Sold_Date, List_Date, item_id))
+                """, (title, sku, price, quantity, image, URL, List_State, Sold_Date, List_Date, condition, description, condition_description, item_id))
                 print(f"Updated existing eBay listing {item_id}")
             except sqlite3.Error as e:
                 print("something went wrong during eBay update", e)
             return
         try:
-            cursor.execute("INSERT INTO INVENTORY (Title, ItemID, SKU, Price, Quantity, Image, List_State, Sold_Date, List_Date, URL) VALUES (?,?,?,?,?,?,?,?,?,?)",
-                           (title, item_id, sku, price, quantity, image, List_State, Sold_Date, List_Date, URL))
+            cursor.execute("INSERT INTO INVENTORY (Title, ItemID, SKU, Price, Quantity, Image, List_State, Sold_Date, List_Date, URL, Condition, Description, ConditionDescription) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                           (title, item_id, sku, price, quantity, image, List_State, Sold_Date, List_Date, URL, condition, description, condition_description))
             print(f"Added {title} successfully")
         except sqlite3.Error as e:
             print("something went wrong", e)
@@ -731,6 +789,11 @@ def store_ebay_order(order):
 
         sku_raw = str(order.get('sku') or '').strip()
         sku_val = sku_raw if _is_meaningful_marketplace_text(sku_raw) else None
+        item_condition_description_val = next((
+            str(order.get(key)).strip()
+            for key in ('item_condition_description', 'condition_description', 'condition_note')
+            if order.get(key) is not None and str(order.get(key)).strip()
+        ), None)
 
         # Get barcode (UPC) from ebayStore.db using item_id
         barcode_raw = str(order.get('barcode') or '').strip()
@@ -820,7 +883,13 @@ def store_ebay_order(order):
             try:
                 with connect_db('searchRack.db') as rack_conn:
                     rack_cur = rack_conn.cursor()
-                    rack_cur.execute('SELECT ITEM_POSITION, PICTUREPOSITION FROM SEARCHRACK WHERE BARCODE = ?', (order.get('item_id'),))
+                    rack_cur.execute('''
+                        SELECT ITEM_POSITION, PICTUREPOSITION
+                        FROM SEARCHRACK
+                        WHERE BARCODE = ?
+                          AND COALESCE(CAST(QUANTITY AS INTEGER), 0) > 0
+                        LIMIT 1
+                    ''', (order.get('item_id'),))
                     r = rack_cur.fetchone()
                     if r:
                         item_pos = r[0]
@@ -917,7 +986,10 @@ def store_ebay_order(order):
                 listing_listing_id = COALESCE(?, listing_listing_id),
                 listing_offer_id = COALESCE(?, listing_offer_id),
                 listing_sku = COALESCE(?, listing_sku),
-                listing_asin = COALESCE(?, listing_asin)
+                listing_asin = COALESCE(?, listing_asin),
+                item_condition = COALESCE(?, item_condition),
+                item_condition_description = COALESCE(?, item_condition_description),
+                item_description = COALESCE(?, item_description)
                 WHERE id = ?''',
                 (
                     order.get('checkout_status'),
@@ -950,6 +1022,9 @@ def store_ebay_order(order):
                     listing_offer_id_val,
                     listing_sku_val,
                     listing_asin_val,
+                    order.get('item_condition') or order.get('condition'),
+                    item_condition_description_val,
+                    order.get('item_description') or order.get('description'),
                     existing[0]
                 )
             )
@@ -957,8 +1032,8 @@ def store_ebay_order(order):
 
         # If not a duplicate, proceed with INSERT
         cur.execute('''INSERT INTO orders (
-            order_id, item_id, sku, title, quantity, price, checkout_status, shipping_name, shipping_street1, shipping_street2, shipping_city, shipping_state, shipping_postal_code, shipping_country, paid_time, shipped_time, seller_fee, taxes, fees, image, isHandled, isHandledDate, location, barcode, store, shipping_cost, lot_number, source_upc, source_base_upc, listing_trace_id, listing_trace_created_at, listing_trace_source, listing_listing_id, listing_offer_id, listing_sku, listing_asin
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+            order_id, item_id, sku, title, quantity, price, checkout_status, shipping_name, shipping_street1, shipping_street2, shipping_city, shipping_state, shipping_postal_code, shipping_country, paid_time, shipped_time, seller_fee, taxes, fees, image, isHandled, isHandledDate, location, barcode, store, shipping_cost, lot_number, source_upc, source_base_upc, listing_trace_id, listing_trace_created_at, listing_trace_source, listing_listing_id, listing_offer_id, listing_sku, listing_asin, item_condition, item_condition_description, item_description
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
             (
                 order.get('order_id'),
                 order.get('item_id'),
@@ -995,7 +1070,10 @@ def store_ebay_order(order):
                 listing_listing_id_val,
                 listing_offer_id_val,
                 listing_sku_val,
-                listing_asin_val
+                listing_asin_val,
+                order.get('item_condition') or order.get('condition'),
+                item_condition_description_val,
+                order.get('item_description') or order.get('description')
             )
         )
 
@@ -1055,7 +1133,7 @@ def enrich_searchrack_db(batch_size=500, do_backup=True):
             if 'ITEMID' not in cols:
                 s_cur.execute('ALTER TABLE SEARCHRACK ADD COLUMN ITEMID TEXT')
             if 'QUANTITY' not in cols:
-                s_cur.execute('ALTER TABLE SEARCHRACK ADD COLUMN QUANTITY INTEGER')
+                s_cur.execute('ALTER TABLE SEARCHRACK ADD COLUMN QUANTITY INTEGER DEFAULT 1')
             if 'IMAGE' not in cols and 'IMAGES' not in cols:
                 s_cur.execute('ALTER TABLE SEARCHRACK ADD COLUMN IMAGE TEXT')
             s_conn.commit()
@@ -1426,7 +1504,10 @@ def process_sold_orders_inventory_reduction():
                 sold_qty = order['quantity'] or 1
 
                 try:
-                    rack_cur.execute(f"SELECT ID, {qty_col} FROM SEARCHRACK WHERE ITEMID = ? COLLATE NOCASE", (barcode,))
+                    rack_cur.execute(
+                        f"SELECT ID, {qty_col} FROM SEARCHRACK WHERE ITEMID = ? COLLATE NOCASE AND COALESCE(CAST({qty_col} AS INTEGER), 0) > 0",
+                        (barcode,)
+                    )
                     rack_item = rack_cur.fetchone()
 
                     if rack_item:

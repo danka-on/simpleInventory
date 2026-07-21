@@ -287,13 +287,13 @@
         </section>
 
         <section class="settings-card" id="section-zero-qty">
-            <h2>Zero-Quantity Retention</h2>
-            <p class="desc">Items that hit quantity 0 stay in SearchRack so you can keep barcode/location history and jump into rack history later.</p>
+            <h2>Zero-Quantity Archival</h2>
+            <p class="desc">SearchRack contains active stock only. When quantity reaches 0, the removal and last shelf location are saved to Rack History before the active row is removed.</p>
             <label class="check-row">
                 <input type="checkbox" id="showZeroQtyPending" disabled>
-                <span>Legacy zero-quantity queue (inactive)</span>
+                <span>Legacy delayed-deletion queue (retired)</span>
             </label>
-            <label for="zeroQtyInterval">Legacy deletion interval (inactive)</label>
+            <label for="zeroQtyInterval">Legacy deletion delay (retired)</label>
             <select id="zeroQtyInterval" disabled>
                 <option value="1">1 minute (testing)</option>
                 <option value="60">1 hour</option>
@@ -307,7 +307,7 @@
             </div>
             <div id="zeroQtyStatus" class="status-line"></div>
             <div id="zeroQtyPendingContainer" style="display:none;margin-top:16px;">
-                <h3 style="margin-top:0;color:#e74c3c;">Zero-Quantity Retention Status</h3>
+                <h3 style="margin-top:0;color:#e74c3c;">Legacy Zero-Quantity Rows</h3>
                 <div id="zeroQtyPendingList" style="font-size:0.95em;"></div>
             </div>
         </section>
@@ -452,7 +452,7 @@
         // On page load, always show saved settings and grace period
         document.addEventListener('DOMContentLoaded', function(){ loadThemeSettings(); loadSettings(); loadGrace(); loadZeroQtySettings(); loadCacheSettings(); });
         
-        // Zero-Quantity Deletion Settings
+        // Zero-Quantity Archival Status
         async function loadZeroQtySettings() {
             try {
                 const r = await fetch('/api/zero_qty_settings');
@@ -466,15 +466,15 @@
             }
             const el = document.getElementById('zeroQtyStatus');
             el.style.display = '';
-            el.style.color = '#2563eb';
-            el.textContent = 'Zero-quantity items are retained for history and are not auto-deleted.';
+            el.style.color = '#1b5e20';
+            el.textContent = 'Active: zero-quantity items are archived to Rack History and removed from SearchRack immediately.';
         }
         
         async function saveZeroQtySettings() {
             const el = document.getElementById('zeroQtyStatus');
             el.style.display = '';
-            el.style.color = '#2563eb';
-            el.textContent = 'Zero-quantity items are retained for history and are not auto-deleted.';
+            el.style.color = '#1b5e20';
+            el.textContent = 'The delayed-deletion settings are retired. Zero-quantity items are archived and removed immediately.';
         }
         
         async function loadZeroQtyPending() {
@@ -492,9 +492,9 @@
                 const container = document.getElementById('zeroQtyPendingContainer');
                 const listEl = document.getElementById('zeroQtyPendingList');
                 
-                if (!j.success || j.manual_mode || !j.items || j.items.length === 0) {
+                if (!j.success || !j.items || j.items.length === 0) {
                     container.style.display = 'block';
-                    listEl.innerHTML = '<div style="color:#999;padding:12px;text-align:center;">Zero-quantity items stay in SearchRack for history. Open SearchRack to inspect them.</div>';
+                    listEl.innerHTML = '<div style="color:#999;padding:12px;text-align:center;">No legacy zero-quantity rows detected. Completed removals remain searchable in Rack History.</div>';
                     return;
                 }
                 
@@ -502,25 +502,6 @@
                 
                 let html = '';
                 j.items.forEach(item => {
-                    const deleteAt = new Date(item.delete_at);
-                    const now = new Date();
-                    const msRemaining = deleteAt - now;
-                    const hoursRemaining = Math.max(0, msRemaining / (1000 * 60 * 60));
-                    
-                    let timeDisplay;
-                    if (hoursRemaining < 0.017) { // less than 1 minute
-                        timeDisplay = '<span style="color:#e74c3c;font-weight:bold;">Deleting soon...</span>';
-                    } else if (hoursRemaining < 1) {
-                        const mins = Math.ceil(hoursRemaining * 60);
-                        timeDisplay = `<span style="color:#ff9800;">${mins} minute${mins !== 1 ? 's' : ''}</span>`;
-                    } else if (hoursRemaining < 24) {
-                        const hrs = hoursRemaining.toFixed(1);
-                        timeDisplay = `<span style="color:#2196F3;">${hrs} hours</span>`;
-                    } else {
-                        const days = (hoursRemaining / 24).toFixed(1);
-                        timeDisplay = `<span style="color:#4caf50;">${days} days</span>`;
-                    }
-                    
                     html += `
                         <div style="border:1px solid #ddd;border-radius:6px;padding:12px;margin-bottom:10px;background:#fafafa;">
                             <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px;">
@@ -530,12 +511,12 @@
                                     <div style="color:#666;font-size:0.9em;">Quantity: ${item.quantity || 0}</div>
                                 </div>
                                 <button onclick="deleteZeroQtyItemNow(${item.searchrack_id})" 
-                                        style="background:#e74c3c;color:#fff;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-size:0.9em;">
-                                    Delete Now
+                                        style="background:#2563eb;color:#fff;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-size:0.9em;">
+                                    Review
                                 </button>
                             </div>
-                            <div style="font-size:0.9em;color:#555;">
-                                ⏳ Will be deleted in ${timeDisplay}
+                            <div style="font-size:0.9em;color:#c92a2a;font-weight:600;">
+                                Legacy row detected in active inventory
                             </div>
                         </div>
                     `;
@@ -562,8 +543,8 @@
         async function scanZeroQtyNow() {
             const el = document.getElementById('zeroQtyStatus');
             el.style.display = '';
-            el.style.color = '#2563eb';
-            el.textContent = 'Zero-quantity auto deletion is disabled. Use SearchRack or Rack History instead.';
+            el.style.color = '#1b5e20';
+            el.textContent = 'Zero-quantity rows are archived to Rack History and removed from SearchRack immediately.';
         }
         
         // Watch checkbox changes

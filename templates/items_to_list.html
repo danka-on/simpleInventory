@@ -2236,16 +2236,18 @@ function render(results){
     const qty = Number.isFinite(qtyRaw) ? qtyRaw : 0;
     const prepQtyWithoutWarehouse = qty > 0 && whAvail <= 0;
     const prepBreakdown = Array.isArray(r.prep_lot_breakdown)
-      ? r.prep_lot_breakdown.filter(entry => entry && typeof entry === 'object')
+      ? r.prep_lot_breakdown.filter(entry => entry && typeof entry === 'object' && (
+          status !== 'return' || String(entry.lot_label || entry.lot_number || '').trim().toUpperCase() !== 'LOTLESS'
+        ))
       : [];
     const prepBreakdownEncoded = encodeURIComponent(JSON.stringify(prepBreakdown));
-    const prepHasLotless = Number(r.prep_lotless_present) === 1 || prepBreakdown.some(entry => String(entry.lot_label || '').trim().toUpperCase() === 'LOTLESS');
+    const prepHasLotless = status !== 'return' && (Number(r.prep_lotless_present) === 1 || prepBreakdown.some(entry => String(entry.lot_label || '').trim().toUpperCase() === 'LOTLESS'));
     const prepLotsCount = prepBreakdown.filter(entry => String(entry.lot_label || entry.lot_number || '').trim().toUpperCase() !== 'LOTLESS').length;
     const prepTotalQtyRaw = Number(r.prep_total_quantity);
     const prepTotalQty = Number.isFinite(prepTotalQtyRaw) ? prepTotalQtyRaw : qty;
     const prepCurrentQtyRaw = Number(r.prep_current_lot_quantity);
     const prepCurrentQty = Number.isFinite(prepCurrentQtyRaw) ? prepCurrentQtyRaw : qty;
-    const prepCurrentLabel = String(r.prep_current_label || r.lot_number || '').trim() || 'LOTLESS';
+    const prepCurrentLabel = String(r.prep_current_label || r.lot_number || '').trim() || (status === 'return' ? 'ALL LOTS' : 'LOTLESS');
     const prepMultiLot = Number(r.prep_multi_lot) === 1 || r.prep_multi_lot === true || prepTotalQty > prepCurrentQty;
     const prepBtnTitle = [
       'Click to view prep by LOT',

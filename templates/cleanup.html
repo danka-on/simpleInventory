@@ -52,20 +52,20 @@
         </div>
     </div>
 
-    <!-- Zero quantity retention section -->
+    <!-- Zero quantity archival section -->
     <div class="section">
         <div class="section-header">
             <div class="section-title">
-                🗂️ Zero-Quantity Retention
+                🗂️ Zero-Quantity Archival
                 <span id="zero-qty-grace-info" class="grace-info"></span>
             </div>
             <div class="action-buttons">
-                <button id="run-zero-qty-now-btn" class="btn" style="background:#2563eb; color:white;">Open SearchRack</button>
+                <button id="run-zero-qty-now-btn" class="btn" style="background:#2563eb; color:white;">Open Rack History</button>
                 <button id="refresh-zero-qty-btn" class="btn" style="background:#f0f0f0;">Refresh</button>
             </div>
         </div>
-        <div class="info-box" style="background:#ffe5e5;border-left-color:#ff6b6b;color:#c92a2a">
-            🗑️ Items that reach quantity 0 stay in inventory so you keep the barcode, location trail, and removal history. Use the zero quantity link in SearchRack to jump into rack history.
+        <div class="info-box" style="background:#e8f5e9;border-left-color:#28a745;color:#1b5e20">
+            ✅ SearchRack contains active stock only. When an item reaches quantity 0, its removal and last shelf location are saved to Rack History before the active inventory row is removed.
         </div>
         <div id="zero-qty-container">
             <div id="zero-qty-loading" class="empty-state">Loading...</div>
@@ -179,10 +179,10 @@ async function triggerAutomaticRemoval(){
     window.location.href = '/ready_to_ship';
 }
 
-// ===== Zero Quantity Pending Deletions =====
+// ===== Zero Quantity Archival Status =====
 
 async function fetchZeroQtyPending(){
-    console.log('Fetching zero-qty pending deletions...');
+    console.log('Fetching zero-quantity archival status...');
     const container = document.getElementById('zero-qty-container');
     try{
         const resp = await fetch('/api/zero_qty_pending');
@@ -193,24 +193,22 @@ async function fetchZeroQtyPending(){
         const graceInfoEl = document.getElementById('zero-qty-grace-info');
         if (graceInfoEl) graceInfoEl.textContent = '';
 
-        if(j.manual_mode){
-            container.innerHTML = `
-                <div class="empty-state">
-                    Zero-quantity auto deletion is disabled. Zero-qty rows stay in SearchRack for history.
-                    <div style="margin-top:12px;">
-                        <a href="/searchrack?db=searchRack" class="btn" style="display:inline-block;background:#2563eb;color:white;text-decoration:none;">Open SearchRack</a>
-                    </div>
-                </div>`;
-        } else if(j.success && j.items && j.items.length > 0){
-            console.log(`Found ${j.items.length} zero-qty pending deletions`);
+        if(j.success && j.items && j.items.length > 0){
+            console.log(`Found ${j.items.length} legacy zero-quantity rows`);
             displayZeroQtyPending(j.items);
         } else {
-            console.log('No zero-qty pending deletions to display');
-            container.innerHTML = '<div class="empty-state">No zero-quantity deletions are pending because zero-qty items are retained for history.</div>';
+            console.log('No legacy zero-quantity rows to display');
+            container.innerHTML = `
+                <div class="empty-state">
+                    Active inventory is clean: no zero-quantity rows are waiting in SearchRack. Completed removals remain searchable in Rack History.
+                    <div style="margin-top:12px;">
+                        <a href="/searchrack?db=searchRack&open_history=1" class="btn" style="display:inline-block;background:#28a745;color:white;text-decoration:none;">Open Rack History</a>
+                    </div>
+                </div>`;
         }
     }catch(err){
         console.error('Error fetching zero-qty pending:', err);
-        container.innerHTML = '<div class="empty-state" style="color:#e74c3c">Error loading zero-quantity items</div>';
+        container.innerHTML = '<div class="empty-state" style="color:#e74c3c">Unable to verify zero-quantity archival status</div>';
     }
 }
 
@@ -219,32 +217,20 @@ function displayZeroQtyPending(items){
     const container = document.getElementById('zero-qty-container');
     
     if(!items || items.length === 0){
-        container.innerHTML = '<div class="empty-state">No zero-quantity deletions are pending because zero-qty items are retained for history.</div>';
+        container.innerHTML = '<div class="empty-state">Active inventory is clean. Completed removals remain searchable in Rack History.</div>';
         return;
     }
     
-    console.log('Building HTML for', items.length, 'zero-qty items');
+    console.log('Building HTML for', items.length, 'legacy zero-quantity rows');
     let html = '<div class="table-container">';
     html += '<table>';
-    html += '<thead><tr><th>Barcode</th><th>Title</th><th>Position</th><th>Status</th><th>Action</th></tr></thead>';
+    html += '<thead><tr><th>Barcode</th><th>Title</th><th>Last Position</th><th>Status</th><th>Action</th></tr></thead>';
     html += '<tbody>';
     
     items.forEach(item => {
-        const isCancelled = item.deletion_cancelled === 1;
-        const statusText = isCancelled ? '❌ Cancelled' : 
-                          item.is_eligible ? '⚠️ Ready to delete' : 
-                          `⏰ ${item.hours_remaining}h remaining`;
-        const statusColor = isCancelled ? '#dc3545' : 
-                           item.is_eligible ? '#ff6b6b' : '#c92a2a';
-        
-        let actionBtn = '';
-        if (isCancelled) {
-            actionBtn = `<button class="btn" style="padding:6px 10px; font-size:0.9rem; background:#28a745; color:white;" onclick="allowZeroQtyDeletion('${esc(item.barcode)}')">Re-enable</button>`;
-        } else {
-            const cancelBtn = `<button class="btn" style="padding:6px 10px; font-size:0.9rem; background:#dc3545; color:white;" onclick="cancelZeroQtyDeletion('${esc(item.barcode)}')">Cancel</button>`;
-            const deleteNowBtn = !item.is_eligible ? ` <button class="btn" style="padding:6px 10px; font-size:0.9rem; background:#6f42c1; color:white;" onclick="deleteZeroQtyNow('${esc(item.barcode)}')">Delete now</button>` : '';
-            actionBtn = cancelBtn + deleteNowBtn;
-        }
+        const statusText = '⚠️ Legacy row requires review';
+        const statusColor = '#c92a2a';
+        const actionBtn = `<button class="btn" style="padding:6px 10px; font-size:0.9rem; background:#2563eb; color:white;" onclick="deleteZeroQtyNow('${esc(item.barcode)}')">View History</button>`;
         
         html += `<tr>
             <td>${esc(item.barcode || '')}</td>
@@ -273,7 +259,7 @@ async function deleteZeroQtyNow(barcode){
 }
 
 async function triggerZeroQtyPurge(){
-    window.location.href = '/searchrack?db=searchRack';
+    window.location.href = '/searchrack?db=searchRack&open_history=1';
 }
 
 // Attach event handlers

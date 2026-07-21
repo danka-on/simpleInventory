@@ -1794,11 +1794,11 @@ function onEdit(db, id){
                   `<div class=\"form-row\"><label>Item ID</label><input id=\"edit_itemid\" value=\"${esc(itemid)}\" readonly style=\"background:#f0f0f0\" title=\"Read-only: eBay/Amazon listing ID\"></div>`+
                   `<div class=\"form-row\"><label>Quantity</label><input id=\"edit_qty\" type=\"number\" min=\"1\" value=\"${esc(qty)}\"></div>`;
     } else if(db === 'searchRack'){
-        // For searchRack (inventory): title, barcode, location, qty (NO item_id, allow 0 qty)
+        // For searchRack (active inventory): setting qty to 0 archives the row, then removes it.
         content = `<div class=\"form-row\"><label>Title</label><input id=\"edit_title\" value=\"${esc(title)}\"></div>`+
                   `<div class=\"form-row\"><label>Barcode</label><input id=\"edit_barcode\" value=\"${esc(barcode)}\"></div>`+
                   `<div class=\"form-row\"><label>Location</label><input id=\"edit_location\" value=\"${esc(location)}\" placeholder=\"e.g., Gr5s4\"></div>`+
-                  `<div class=\"form-row\"><label>Qty</label><input id=\"edit_qty\" type=\"number\" min=\"0\" value=\"${esc(qty)}\"></div>`;
+                  `<div class=\"form-row\"><label>Qty</label><input id=\"edit_qty\" type=\"number\" min=\"0\" value=\"${esc(qty)}\"><small style=\"display:block;margin-top:5px;color:#666;\">Set to 0 to save the removal in Rack History and remove this row from active inventory.</small></div>`;
     } else {
         // For other databases: title, barcode, itemid, qty
         content = `<div class=\"form-row\"><label>Title</label><input id=\"edit_title\" value=\"${esc(title)}\"></div>`+
@@ -2185,14 +2185,14 @@ async function loadHistory() {
             const qtySign = item.quantity_change > 0 ? '+' : '';
             
             html += '<tr>';
-            html += `<td style="padding:8px;border:1px solid #ddd;white-space:nowrap;">${date}</td>`;
-            html += `<td style="padding:8px;border:1px solid #ddd;">${item.action}</td>`;
-            html += `<td style="padding:8px;border:1px solid #ddd;">${item.title}</td>`;
+            html += `<td style="padding:8px;border:1px solid #ddd;white-space:nowrap;">${esc(date)}</td>`;
+            html += `<td style="padding:8px;border:1px solid #ddd;">${esc(item.action || '')}</td>`;
+            html += `<td style="padding:8px;border:1px solid #ddd;">${esc(item.title || '')}</td>`;
             html += `<td style="padding:8px;border:1px solid #ddd;">${esc(formatUpcDisplay(item.barcode))}</td>`;
-            html += `<td style="padding:8px;border:1px solid #ddd;">${item.location || ''}</td>`;
+            html += `<td style="padding:8px;border:1px solid #ddd;">${esc(item.location || '')}</td>`;
             html += `<td style="padding:8px;border:1px solid #ddd;color:${qtyColor};font-weight:bold;">${qtySign}${item.quantity_change} (${item.old_quantity}→${item.new_quantity})</td>`;
-            html += `<td style="padding:8px;border:1px solid #ddd;">${item.method}</td>`;
-            html += `<td style="padding:8px;border:1px solid #ddd;">${item.source}</td>`;
+            html += `<td style="padding:8px;border:1px solid #ddd;">${esc(item.method || '')}</td>`;
+            html += `<td style="padding:8px;border:1px solid #ddd;">${esc(item.source || '')}</td>`;
             html += '</tr>';
         });
         

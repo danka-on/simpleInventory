@@ -205,6 +205,24 @@
             opacity: 0.65;
             cursor: wait;
         }
+
+        .single-manual-add-btn {
+            display: flex;
+            margin: 12px auto;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            background: #2ecc71;
+            color: #fff;
+            font-size: 1.1em;
+            font-weight: 700;
+            cursor: pointer;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .single-manual-add-btn:disabled { opacity: .65; cursor: wait; }
         .barcode-list-row {
             display: flex;
             align-items: center;
@@ -474,15 +492,6 @@
             font-weight: 800;
             color: #b45309;
         }
-        .missing-title-hint {
-            display: none;
-            margin: -4px 0 12px;
-            text-align: center;
-            color: #92400e;
-            font-size: 0.82rem;
-            font-weight: 700;
-            line-height: 1.35;
-        }
         .missing-title-photo {
             display: none;
             margin: 0 0 14px;
@@ -566,103 +575,6 @@
         .missing-title-note-input.is-visible {
             display: block;
         }
-        .missing-title-keypad {
-            display: none;
-            flex-direction: column;
-            gap: 10px;
-            margin: 0 0 14px;
-        }
-        .missing-title-keypad-row {
-            display: grid;
-            gap: 5px;
-            width: 100%;
-            align-items: stretch;
-        }
-        .missing-title-keypad-row.ten {
-            grid-template-columns: repeat(10, minmax(0, 1fr));
-        }
-        .missing-title-keypad-row.nine {
-            grid-template-columns: repeat(9, minmax(0, 1fr));
-            width: 92%;
-            margin: 0 auto;
-        }
-        .missing-title-keypad-row.seven {
-            grid-template-columns: repeat(7, minmax(0, 1fr));
-            width: 78%;
-            margin: 0 auto;
-        }
-        .missing-title-keypad-row.eight {
-            grid-template-columns: repeat(8, minmax(0, 1fr));
-            width: 88%;
-            margin: 0 auto;
-        }
-        .missing-title-keypad-key {
-            height: 38px;
-            border: 1px solid #f2c66d;
-            border-radius: 9px;
-            background: #fff;
-            color: #7c2d12;
-            font-size: 0.8rem;
-            font-weight: 800;
-            cursor: pointer;
-            -webkit-appearance: none;
-            appearance: none;
-            padding: 0;
-            line-height: 1;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            min-width: 0;
-            white-space: nowrap;
-            overflow: hidden;
-        }
-        .missing-title-keypad-key:active {
-            transform: translateY(1px);
-            background: #fff7ed;
-        }
-        .missing-title-keypad-key.action {
-            background: #fff7ed;
-            color: #92400e;
-        }
-        .missing-title-keypad-key.wide {
-            grid-column: span 3;
-        }
-        .missing-title-keypad-key.xwide {
-            grid-column: span 4;
-        }
-        .missing-title-keypad-row.num-row {
-            border-bottom: 2px solid #f2c66d;
-            padding-bottom: 6px;
-            margin-bottom: 2px;
-        }
-        .missing-title-keypad-row.num-row .missing-title-keypad-key {
-            background: #fef3c7;
-        }
-        .missing-title-keypad-row.num-row .missing-title-keypad-key:active {
-            background: #fde68a;
-        }
-        @media (max-width: 430px) {
-            .missing-title-keypad {
-                gap: 8px;
-            }
-            .missing-title-keypad-row {
-                gap: 4px;
-            }
-            .missing-title-keypad-row.nine {
-                width: 94%;
-            }
-            .missing-title-keypad-row.seven {
-                width: 82%;
-            }
-            .missing-title-keypad-row.eight {
-                width: 90%;
-            }
-            .missing-title-keypad-key {
-                height: 36px;
-                border-radius: 8px;
-                font-size: 0.75rem;
-            }
-        }
         .missing-title-actions {
             display: flex;
             flex-wrap: wrap;
@@ -732,7 +644,7 @@
     </div>
 
     <!-- Barcode Text Input (primary input) -->
-    <input type="text" id="barcodeTextInput" name="barcodeTextInput" placeholder="Scan or enter barcode" data-i18n="scan_or_enter_barcode" autocomplete="off" autocapitalize="off" spellcheck="false" />
+    <input type="text" id="barcodeTextInput" name="barcodeTextInput" placeholder="Scan or enter barcode" data-i18n="scan_or_enter_barcode" autocomplete="off" autocapitalize="off" spellcheck="false" data-scanner-keyboard="off" />
     <button type="button" id="noBarcodeBtn" class="no-barcode-open-btn">
         <i class="fas fa-barcode"></i>
         <span>No Barcode</span>
@@ -746,6 +658,10 @@
     </button>
     <button type="button" id="singleWarehouseNoteBtn" class="single-print-label-btn" title="Add warehouse note">
         <span>+ note</span>
+    </button>
+    <button type="button" id="singleManualAddBtn" class="single-manual-add-btn" disabled>
+        <i class="fas fa-plus-circle"></i>
+        <span>Add Item</span>
     </button>
     <div id="singleBarcodeCard" class="barcode-list-row single-barcode-card">
         <div class="barcode-row-main">
@@ -800,7 +716,7 @@
             <button type="button" id="noBarcodeCloseBtn" class="no-barcode-close-btn" aria-label="Close">&#x2715;</button>
             <h3>No Barcode</h3>
             <label for="noBarcodeInput">Barcode</label>
-            <input type="text" id="noBarcodeInput" placeholder="Enter barcode or generate one" autocomplete="off" autocapitalize="off" spellcheck="false">
+            <input type="text" id="noBarcodeInput" placeholder="Enter barcode or generate one" autocomplete="off" autocapitalize="off" spellcheck="false" data-scanner-keyboard="off">
             <div id="noBarcodeKeypad" class="no-barcode-keypad" aria-label="Barcode number pad">
                 <button type="button" data-no-barcode-key="1">1</button>
                 <button type="button" data-no-barcode-key="2">2</button>
@@ -816,7 +732,7 @@
                 <button type="button" class="no-barcode-key-action" data-no-barcode-action="backspace">Back</button>
             </div>
             <label for="noBarcodeDescriptionInput">Label title</label>
-            <input type="text" id="noBarcodeDescriptionInput" placeholder="No barcode item" autocomplete="off" autocapitalize="words" spellcheck="false">
+            <input type="text" id="noBarcodeDescriptionInput" placeholder="No barcode item" autocomplete="off" autocapitalize="words" spellcheck="false" data-scanner-keyboard="on">
             <div class="no-barcode-actions">
                 <button type="button" id="noBarcodeGenerateBtn" class="no-barcode-generate">Generate Unique</button>
                 <button type="button" id="noBarcodeUseBtn" class="no-barcode-use">Add Item</button>
@@ -832,7 +748,7 @@
             <div class="missing-title-icon"><i class="fas fa-wave-square"></i></div>
             <h3 class="missing-title-heading">Missing Title/Image</h3>
             <div class="missing-title-code" id="missingTitleBarcodeText"></div>
-            <input type="text" id="missingTitleInput" class="missing-title-input" maxlength="200" placeholder="Enter a warehouse title" autocomplete="off" autocapitalize="words" spellcheck="false" inputmode="text" enterkeyhint="done">
+            <input type="text" id="missingTitleInput" class="missing-title-input" maxlength="200" placeholder="Enter a warehouse title" autocomplete="off" autocapitalize="words" spellcheck="false" inputmode="text" enterkeyhint="done" data-scanner-keyboard="on">
             <button type="button" id="missingTitleNoteBtn" class="missing-title-note-btn">+ note</button>
             <textarea id="missingTitleNoteInput" class="missing-title-note-input" maxlength="2000" placeholder="Warehouse note for this exact item"></textarea>
             <div id="missingTitlePhotoSection" class="missing-title-photo">
@@ -841,60 +757,6 @@
                 <div id="missingTitlePhotoStatus" class="missing-title-photo-status">Optional: capture a thumbnail while this item is already being fixed.</div>
                 <img id="missingTitlePhotoPreview" class="missing-title-photo-preview" alt="Thumbnail preview">
             </div>
-            <div id="missingTitleKeypad" class="missing-title-keypad" aria-hidden="true">
-                <div class="missing-title-keypad-row ten num-row">
-                    <button type="button" class="missing-title-keypad-key" data-title-key="1">1</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="2">2</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="3">3</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="4">4</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="5">5</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="6">6</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="7">7</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="8">8</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="9">9</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="0">0</button>
-                </div>
-                <div class="missing-title-keypad-row ten">
-                    <button type="button" class="missing-title-keypad-key" data-title-key="q">Q</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="w">W</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="e">E</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="r">R</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="t">T</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="y">Y</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="u">U</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="i">I</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="o">O</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="p">P</button>
-                </div>
-                <div class="missing-title-keypad-row nine">
-                    <button type="button" class="missing-title-keypad-key" data-title-key="a">A</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="s">S</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="d">D</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="f">F</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="g">G</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="h">H</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="j">J</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="k">K</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="l">L</button>
-                </div>
-                <div class="missing-title-keypad-row seven">
-                    <button type="button" class="missing-title-keypad-key" data-title-key="z">Z</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="x">X</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="c">C</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="v">V</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="b">B</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="n">N</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="m">M</button>
-                </div>
-                <div class="missing-title-keypad-row eight">
-                    <button type="button" class="missing-title-keypad-key" data-title-key="-">-</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="&amp;">&amp;</button>
-                    <button type="button" class="missing-title-keypad-key" data-title-key="'">&#39;</button>
-                    <button type="button" class="missing-title-keypad-key action wide" data-title-key=" ">Space</button>
-                    <button type="button" class="missing-title-keypad-key action" data-title-action="backspace">⌫</button>
-                    <button type="button" class="missing-title-keypad-key action" data-title-action="clear">Clear</button>
-                </div>
-            </div>
             <div class="missing-title-actions">
                 <button type="button" id="missingTitleSaveBtn" class="missing-title-btn save">Complete</button>
             </div>
@@ -902,13 +764,14 @@
     </div>
 
     <script src="/static/barcode-entry-state.js?v=20260505a"></script>
-    <script src="/static/no-barcode-label.js?v=20260505a"></script>
+    <script src="/static/no-barcode-label.js?v=20260716b"></script>
     <script>
         // DOM Elements
         const scannedResultInput = document.getElementById('scanned_result');
         const barcodeInput = document.getElementById('barcodeTextInput');
         const singlePrintLabelBtn = document.getElementById('singlePrintLabelBtn');
         const singleWarehouseNoteBtn = document.getElementById('singleWarehouseNoteBtn');
+        const singleManualAddBtn = document.getElementById('singleManualAddBtn');
         const singleBarcodeCard = document.getElementById('singleBarcodeCard');
         const singleBarcodeCode = document.getElementById('singleBarcodeCode');
         const singleBarcodeTitle = document.getElementById('singleBarcodeTitle');
@@ -921,7 +784,6 @@
         const invalidModalClose = document.getElementById('invalidModalClose');
         const missingTitleModal = document.getElementById('missingTitleModal');
         const missingTitleBarcodeText = document.getElementById('missingTitleBarcodeText');
-        const missingTitleHint = document.getElementById('missingTitleHint');
         const missingTitleInput = document.getElementById('missingTitleInput');
         const missingTitleNoteBtn = document.getElementById('missingTitleNoteBtn');
         const missingTitleNoteInput = document.getElementById('missingTitleNoteInput');
@@ -930,7 +792,6 @@
         const missingTitlePhotoBtn = document.getElementById('missingTitlePhotoBtn');
         const missingTitlePhotoStatus = document.getElementById('missingTitlePhotoStatus');
         const missingTitlePhotoPreview = document.getElementById('missingTitlePhotoPreview');
-        const missingTitleKeypad = document.getElementById('missingTitleKeypad');
         const missingTitleSkipBtn = document.getElementById('missingTitleSkipBtn');
         const missingTitleSaveBtn = document.getElementById('missingTitleSaveBtn');
         const barcodeEntryState = window.BarcodeEntryState;
@@ -946,6 +807,7 @@
         let pendingSingleSuffix = 0;
         let pendingSingleQuantity = 1;
         let pendingSingleSubmitTimer = null;
+        let singleCommitInFlight = false;
         let barcodeScanQueue = Promise.resolve();
         const screeningCache = new Map();
 
@@ -1239,6 +1101,10 @@
             singleGearBtn.addEventListener('click', (event) => {
                 event.preventDefault();
                 event.stopPropagation();
+                // Opening item options means the user intends to review/edit.
+                // Pause the single-scan auto-forward so it cannot navigate away
+                // while the gear menu or title/thumbnail editor is in use.
+                clearPendingSingleSubmit();
                 const wasOpen = singleGearMenu.classList.contains('open');
                 closeBarcodeGearMenus();
                 if (!wasOpen) positionBarcodeGearMenu(singleGearMenu, singleGearBtn);
@@ -1554,94 +1420,12 @@
             if (navigator.vibrate) navigator.vibrate([90, 60, 90, 60, 130]);
         }
 
-        function requiresMissingTitleKeyboardTap() {
-            const ua = navigator.userAgent || '';
-            return /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && 'ontouchend' in document);
-        }
-
         function tryShowVirtualKeyboard() {
             try {
                 if (navigator.virtualKeyboard && typeof navigator.virtualKeyboard.show === 'function') {
                     navigator.virtualKeyboard.show();
                 }
             } catch (_) {}
-        }
-
-        function setMissingTitleKeypadVisibility(show) {
-            const shouldShow = !!show;
-            if (missingTitleHint) {
-                missingTitleHint.style.display = shouldShow ? 'block' : 'none';
-            }
-            if (missingTitleKeypad) {
-                missingTitleKeypad.style.display = shouldShow ? 'flex' : 'none';
-                missingTitleKeypad.setAttribute('aria-hidden', shouldShow ? 'false' : 'true');
-            }
-        }
-
-        function normalizeMissingTitleInsertedChar(char) {
-            const text = String(char || '');
-            if (!/^[a-z]$/i.test(text) || !missingTitleInput) return text;
-            const value = String(missingTitleInput.value || '');
-            const start = typeof missingTitleInput.selectionStart === 'number'
-                ? missingTitleInput.selectionStart
-                : value.length;
-            const prev = start > 0 ? value.charAt(start - 1) : '';
-            return !prev || /[\s\-&(\/]/.test(prev) ? text.toUpperCase() : text.toLowerCase();
-        }
-
-        function insertMissingTitleText(char) {
-            if (!missingTitleInput) return;
-            const rawChar = String(char || '');
-            if (!rawChar) return;
-            const value = String(missingTitleInput.value || '');
-            const start = typeof missingTitleInput.selectionStart === 'number'
-                ? missingTitleInput.selectionStart
-                : value.length;
-            const end = typeof missingTitleInput.selectionEnd === 'number'
-                ? missingTitleInput.selectionEnd
-                : value.length;
-            const insertChar = normalizeMissingTitleInsertedChar(rawChar);
-            const next = (value.slice(0, start) + insertChar + value.slice(end)).slice(0, 200);
-            missingTitleInput.value = next;
-            const caret = Math.min(start + insertChar.length, next.length);
-            try {
-                missingTitleInput.setSelectionRange(caret, caret);
-            } catch (_) {}
-            missingTitleInput.dispatchEvent(new Event('input', { bubbles: true }));
-        }
-
-        function backspaceMissingTitleText() {
-            if (!missingTitleInput) return;
-            const value = String(missingTitleInput.value || '');
-            const start = typeof missingTitleInput.selectionStart === 'number'
-                ? missingTitleInput.selectionStart
-                : value.length;
-            const end = typeof missingTitleInput.selectionEnd === 'number'
-                ? missingTitleInput.selectionEnd
-                : value.length;
-            if (!value) return;
-            let next = value;
-            let caret = start;
-            if (start !== end) {
-                next = value.slice(0, start) + value.slice(end);
-            } else if (start > 0) {
-                next = value.slice(0, start - 1) + value.slice(end);
-                caret = start - 1;
-            }
-            missingTitleInput.value = next;
-            try {
-                missingTitleInput.setSelectionRange(caret, caret);
-            } catch (_) {}
-            missingTitleInput.dispatchEvent(new Event('input', { bubbles: true }));
-        }
-
-        function clearMissingTitleText() {
-            if (!missingTitleInput) return;
-            missingTitleInput.value = '';
-            try {
-                missingTitleInput.setSelectionRange(0, 0);
-            } catch (_) {}
-            missingTitleInput.dispatchEvent(new Event('input', { bubbles: true }));
         }
 
         function cleanMissingTitleWarehouseNote(value) {
@@ -1815,7 +1599,6 @@
             setMissingTitlePhotoVisibility(!!missingTitleCurrentIssue.missingImage || !!existingImage);
             showExistingMissingTitleThumbnail(existingImage);
             missingTitleInput.readOnly = false;
-            setMissingTitleKeypadVisibility(requiresMissingTitleKeyboardTap());
             missingTitleModal.style.display = 'flex';
             missingTitleModalOpen = true;
             setMissingTitleScanPause(true);
@@ -1909,7 +1692,9 @@
                 delete skipped[key];
                 saveSkippedManualTitles(skipped);
             }
-            return false;
+            // Match /multibarcode: once required custom data is saved, this
+            // barcode is ready to continue through /submitbarcode immediately.
+            return true;
         }
 
         function clearPendingSingleSubmit() {
@@ -1926,6 +1711,9 @@
             document.getElementById('scanned_result').value = '';
             scannedResultInput.style.background = '';
             hideSinglePrintLabelButton();
+            if (singleManualAddBtn) {
+                singleManualAddBtn.disabled = true;
+            }
         }
 
         function submitBarcodePayload(barcodeString) {
@@ -1971,41 +1759,49 @@
                 : finalCode;
             scannedResultInput.style.background = '#e0ffe0';
             showSinglePrintLabelButton(finalCode);
+            if (singleManualAddBtn) singleManualAddBtn.disabled = false;
         }
 
         async function commitPendingSingleBarcode() {
+            if (singleCommitInFlight) return;
             clearPendingSingleSubmit();
             const finalCode = currentSingleActualCode();
             if (!finalCode) return;
+            singleCommitInFlight = true;
 
-            const ready = await ensureScannedBarcodeReadyForAdd(finalCode);
-            if (!ready) {
-                updatePendingSingleDisplay();
-                if (barcodeInput) barcodeInput.focus();
-                return;
+            try {
+                const ready = await ensureScannedBarcodeReadyForAdd(finalCode);
+                if (!ready) {
+                    updatePendingSingleDisplay();
+                    if (singleManualAddBtn) singleManualAddBtn.disabled = false;
+                    if (barcodeInput) barcodeInput.focus();
+                    return;
+                }
+
+                if (barcodeEntryState) {
+                    barcodeEntryState.saveEntries([{
+                        code: splitScannedBarcode(finalCode).base,
+                        suffix: parseInt(splitScannedBarcode(finalCode).suffix, 10) || 0,
+                        quantity: pendingSingleQuantity,
+                        note: getWarehouseNoteForCode(finalCode)
+                    }]);
+                } else {
+                    sessionStorage.setItem('barcode', finalCode);
+                }
+                document.getElementById('scanned_result').value = finalCode;
+
+                const urlParams = new URLSearchParams(window.location.search);
+                const returnTo = urlParams.get('return');
+
+                if (returnTo === 'marketplace') {
+                    window.location.href = '/marketplace-sale?scanned=true';
+                    return;
+                }
+
+                submitBarcodePayload(Array.from({ length: pendingSingleQuantity }, () => finalCode).join(','));
+            } finally {
+                singleCommitInFlight = false;
             }
-
-            if (barcodeEntryState) {
-                barcodeEntryState.saveEntries([{
-                    code: splitScannedBarcode(finalCode).base,
-                    suffix: parseInt(splitScannedBarcode(finalCode).suffix, 10) || 0,
-                    quantity: pendingSingleQuantity,
-                    note: getWarehouseNoteForCode(finalCode)
-                }]);
-            } else {
-                sessionStorage.setItem('barcode', finalCode);
-            }
-            document.getElementById('scanned_result').value = finalCode;
-
-            const urlParams = new URLSearchParams(window.location.search);
-            const returnTo = urlParams.get('return');
-
-            if (returnTo === 'marketplace') {
-                window.location.href = '/marketplace-sale?scanned=true';
-                return;
-            }
-
-            submitBarcodePayload(Array.from({ length: pendingSingleQuantity }, () => finalCode).join(','));
         }
 
         function queueSingleBarcode(code) {
@@ -2029,6 +1825,22 @@
                     resetPendingSingleBarcode();
                 });
             }, SINGLE_SCAN_CAPTURE_MS);
+        }
+
+
+        if (singleManualAddBtn) {
+            singleManualAddBtn.addEventListener('click', async () => {
+                if (!currentSingleActualCode() || singleManualAddBtn.disabled) return;
+                singleManualAddBtn.disabled = true;
+                try {
+                    await commitPendingSingleBarcode();
+                } catch (err) {
+                    console.error('Manual add failed:', err);
+                    alert('Item could not be added. Please try again.');
+                } finally {
+                    singleManualAddBtn.disabled = false;
+                }
+            });
         }
 
         // Handle barcode input for manual or scanner input
@@ -2151,26 +1963,6 @@
                     focusMissingTitleEntry(true);
                 }
             });
-        }
-        if (missingTitleKeypad) {
-            const handleMissingTitleKeypadPress = (e) => {
-                const btn = e.target.closest('[data-title-key], [data-title-action]');
-                if (!btn) return;
-                e.preventDefault();
-                e.stopPropagation();
-                const action = btn.getAttribute('data-title-action');
-                if (action === 'backspace') {
-                    backspaceMissingTitleText();
-                    return;
-                }
-                if (action === 'clear') {
-                    clearMissingTitleText();
-                    return;
-                }
-                const key = btn.getAttribute('data-title-key');
-                if (key) insertMissingTitleText(key);
-            };
-            missingTitleKeypad.addEventListener('click', handleMissingTitleKeypadPress);
         }
         if (missingTitleModal) {
             missingTitleModal.addEventListener('click', (e) => {

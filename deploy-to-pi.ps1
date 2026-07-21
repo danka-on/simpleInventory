@@ -25,6 +25,7 @@ scp -i $SshKey .\templates\multibarcode.html "${User}@${HostName}:$RemotePath/te
 scp -i $SshKey .\templates\items_to_list.html "${User}@${HostName}:$RemotePath/templates/"
 scp -i $SshKey .\templates\shelfmanager.html "${User}@${HostName}:$RemotePath/templates/"
 scp -i $SshKey .\templates\tools.html "${User}@${HostName}:$RemotePath/templates/"
+scp -i $SshKey .\templates\cleanup.html "${User}@${HostName}:$RemotePath/templates/"
 scp -i $SshKey .\templates\misc.html "${User}@${HostName}:$RemotePath/templates/"
 scp -i $SshKey .\templates\item_prep.html "${User}@${HostName}:$RemotePath/templates/"
 scp -i $SshKey .\templates\listingagent.html "${User}@${HostName}:$RemotePath/templates/"
@@ -36,6 +37,7 @@ scp -i $SshKey .\templates\searchrack.html "${User}@${HostName}:$RemotePath/temp
 # Transfer static files
 Write-Host "Transferring static assets..." -ForegroundColor Yellow
 scp -i $SshKey .\static\i18n.js "${User}@${HostName}:$RemotePath/static/"
+scp -i $SshKey .\static\ios-scanner-keyboard.js "${User}@${HostName}:$RemotePath/static/"
 scp -i $SshKey .\static\location-preview.js "${User}@${HostName}:$RemotePath/static/"
 scp -i $SshKey .\static\barcode-entry-state.js "${User}@${HostName}:$RemotePath/static/"
 scp -i $SshKey .\static\shelf-creator.css "${User}@${HostName}:$RemotePath/static/"

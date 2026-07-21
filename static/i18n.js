@@ -393,7 +393,7 @@ const translations = {
   back_to_search: { en: 'Back to Search', lt: 'Grįžti į paiešką' },
   pending_auto_removals: { en: 'Pending Automatic Inventory Removals', lt: 'Laukiantys automatiniai inventoriaus pašalinimai' },
   run_now: { en: 'Run Now', lt: 'Paleisti dabar' },
-  pending_zero_qty: { en: 'Pending Zero-Quantity Deletions', lt: 'Laukiantys nulinio kiekio ištrinimai' },
+  pending_zero_qty: { en: 'Zero-Quantity Archival', lt: 'Nulinio kiekio archyvavimas' },
   order: { en: 'Order', lt: 'Užsakymas' },
   barcode: { en: 'Barcode', lt: 'Brūkšninis kodas' },
   qty: { en: 'Qty', lt: 'Kiekis' },
@@ -1534,10 +1534,23 @@ function updateToggleUI() {
   }
 }
 
+function loadIOSScannerKeyboard() {
+  const ua = navigator.userAgent || '';
+  const isIOS = /iPhone|iPad|iPod/.test(ua)
+    || (/Macintosh/.test(ua) && ('ontouchend' in document || navigator.maxTouchPoints > 1));
+  if (!isIOS || window.IOSScannerKeyboard || document.querySelector('script[data-ios-scanner-keyboard]')) return;
+  const script = document.createElement('script');
+  script.src = '/static/ios-scanner-keyboard.js?v=20260715a';
+  script.defer = true;
+  script.setAttribute('data-ios-scanner-keyboard', '1');
+  document.head.appendChild(script);
+}
+
 // Auto-init
 function _i18nInit(){
   createTopBanner();
   applyTranslations();
+  loadIOSScannerKeyboard();
 }
 if(document.readyState === 'loading'){
   document.addEventListener('DOMContentLoaded', _i18nInit);

@@ -542,7 +542,7 @@
     function getWarehouseNotesPayload() {
         const payload = {};
         getBarcodeEntries().forEach(entry => {
-            const note = String(entry && entry.note || '').replace(/\s+/g, ' ').trim();
+            const note = String(entry && entry.note || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
             const key = normalizeManualTitleKey(barcodeEntryActualCode(entry));
             if (key && note) payload[key] = note.slice(0, 2000);
         });
@@ -551,7 +551,7 @@
             if (stored && typeof stored === 'object' && !Array.isArray(stored)) {
                 Object.entries(stored).forEach(([rawKey, rawNote]) => {
                     const key = normalizeManualTitleKey(rawKey);
-                    const note = String(rawNote || '').replace(/\s+/g, ' ').trim();
+                    const note = String(rawNote || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
                     if (key && note) payload[key] = note.slice(0, 2000);
                 });
             }
@@ -1048,6 +1048,13 @@
         }
 
         const currentOverrides = loadManualTitleOverrides();
+        const allTitlesAlreadySaved = barcodes.every(barcode => {
+            const key = normalizeManualTitleKey(barcode);
+            return Boolean(key && currentOverrides[key]);
+        });
+        if (allTitlesAlreadySaved) {
+            return { continueSubmit: true };
+        }
         const screeningItems = await fetchAddItemScreening(barcodes);
         const issues = [];
 
@@ -1058,15 +1065,15 @@
                 item = screeningItems[Object.keys(screeningItems)[0]] || {};
             }
             const savedManualTitle = currentOverrides[key] || '';
-            const missingFromMacyBol = item.macy_found === false || Boolean(item.needs_manual_title);
-            if (!missingFromMacyBol || savedManualTitle) {
+            const needsManualTitle = Boolean(item.needs_manual_title) || !String(item.title || '').trim();
+            if (!needsManualTitle || savedManualTitle) {
                 return;
             }
             issues.push({
                 barcode: key || barcode,
-                missingFromMacyBol,
+                missingFromMacyBol: item.macy_found === false,
                 needsManualTitle: true,
-                missingImage: true,
+                missingImage: Boolean(item.missing_image),
                 existingTitle: String(item.title || '').trim(),
                 savedManualTitle
             });
@@ -1093,21 +1100,31 @@
                 const data = await res.json().catch(() => null);
                 if (data && data.success) {
                     const labels = Array.isArray(data.labels_to_print) ? data.labels_to_print : [];
-                    for (const label of labels) {
+                    // Inventory is already saved at this point. Never let a slow
+                    // or disconnected printer trap the user on /submitbarcode.
+                    await Promise.allSettled(labels.map(async (label) => {
+                        const controller = new AbortController();
+                        const timeout = setTimeout(() => controller.abort(), 6000);
                         try {
-                            await fetch('/api/printer/print-barcode', {
+                            const printResponse = await fetch('/api/printer/print-barcode', {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({
                                     upc: label.barcode,
                                     item_description: label.description || 'Warehouse item',
                                     quantity: 1
-                                })
+                                }),
+                                signal: controller.signal
                             });
+                            if (!printResponse.ok) {
+                                throw new Error(`Printer returned ${printResponse.status}`);
+                            }
                         } catch (printErr) {
                             console.error('Warehouse note label print failed:', printErr);
+                        } finally {
+                            clearTimeout(timeout);
                         }
-                    }
+                    }));
                     sessionStorage.removeItem('barcode');
                     sessionStorage.removeItem('barcode_entries');
                     sessionStorage.removeItem('barcode_warehouse_notes');
@@ -1148,8 +1165,17 @@
                 screening = await screenAddItemSubmission();
             } catch (screenErr) {
                 console.error('Add item screening failed:', screenErr);
-                alert('Could not verify Macy/BOL item data. Please try Add Item again.');
-                return;
+                const barcodes = getScreeningBarcodes();
+                const savedTitles = loadManualTitleOverrides();
+                const canContinue = barcodes.length > 0 && barcodes.every(barcode => {
+                    const key = normalizeManualTitleKey(barcode);
+                    return Boolean(key && savedTitles[key]);
+                });
+                if (!canContinue) {
+                    alert('Could not verify item data. Please try Add Item again.');
+                    return;
+                }
+                screening = { continueSubmit: true };
             }
             if (!screening || screening.continueSubmit === false) {
                 return;
