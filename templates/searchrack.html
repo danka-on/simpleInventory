@@ -112,6 +112,15 @@
     .location-card-count{font-size:0.9rem;color:#666}
     .location-card-quantity{font-size:1.2rem;font-weight:700;color:#0066cc;margin-top:4px}
     .breadcrumb-separator{margin:0 8px;color:#999}
+    .shelf-typeahead{display:flex;flex-direction:column;gap:8px;margin-bottom:10px}
+    .shelf-typeahead input{width:100%;box-sizing:border-box;font-size:1rem}
+    .shelf-suggestions{display:none;gap:7px;flex-wrap:wrap;padding:9px;border:1px solid #d7e0e8;border-radius:8px;background:#f7fafc}
+    .shelf-suggestions.visible{display:flex}
+    .shelf-suggestion{margin:0;padding:7px 11px;border:1px solid #9fc5e8;border-radius:999px;background:#fff;color:#24557a;font-size:.9rem;font-weight:700;cursor:pointer}
+    .shelf-suggestion:hover,.shelf-suggestion:focus{background:#2d98da;border-color:#2d98da;color:#fff;outline:none}
+    html.ss-theme-night #shelf-type-input{background:#0f172a;color:#e2e8f0;border-color:#334155}
+    html.ss-theme-night .shelf-suggestions{background:#111c30;border-color:#334155}
+    html.ss-theme-night .shelf-suggestion{background:#1e293b;color:#bae6fd;border-color:#475569}
 
     /* Scrollable results table — prevents page-level horizontal overflow */
     #results { overflow-x: auto; -webkit-overflow-scrolling: touch; }
@@ -416,8 +425,12 @@
         <!-- Shelf Selector and Image Preview (shown when location is selected) -->
         <div id="shelf-selector-container" style="display:none; margin-top:16px;">
             <div style="display:flex; gap:16px; align-items:flex-start;">
-                <div style="flex:0 0 250px;">
+                <div style="flex:0 0 300px;">
                     <label style="display:block; margin-bottom:8px; font-weight:600; color:#333;">Select Shelf:</label>
+                    <div class="shelf-typeahead">
+                        <input id="shelf-type-input" type="text" placeholder="Type a shelf code…" autocomplete="off" autocapitalize="off" spellcheck="false">
+                        <div id="shelf-suggestions" class="shelf-suggestions" aria-label="Available shelf suggestions"></div>
+                    </div>
                     <select id="shelf-selector" style="width:100%; padding:10px; font-size:1rem; border:1px solid #ddd; border-radius:6px;">
                         <option value="">-- Select a shelf --</option>
                     </select>
@@ -1023,6 +1036,7 @@ function renderResults(results){
     const lotHeader = hasBol ? '<th>LOT #</th>' : '';
     const locationHeader = (!hasEbayStore && !hasAmazonStore && !hasBol && !hasReturns) ? '<th>Location</th>' : ''; // Show location for warehouse and sold
     const warehouseNoteHeader = hasSearchRack ? '<th>Warehouse Note</th>' : '';
+    const itemPrepHeader = hasSearchRack ? '<th>Item Prep</th>' : '';
     const dateSoldHeader = hasSold ? '<th>Date Sold</th>' : '';
     const dateShippedHeader = hasSold ? '<th>Date Shipped</th>' : '';
     const invStatusHeader = hasSold ? '<th>Inv Status</th>' : '';
@@ -1037,7 +1051,7 @@ function renderResults(results){
         ? ''
         : `<th class="results-action-col${isMobile ? ' is-sticky' : ''}">Actions</th>`;
     
-    let html = `<table><thead><tr><th>Title</th><th>Barcode</th>${itemIdHeader}${lotHeader}${locationHeader}<th>Qty</th>${warehouseNoteHeader}${dateAddedHeader}${dateSoldHeader}${dateShippedHeader}${invStatusHeader}${storeHeader}${returnDateHeader}${refundAmountHeader}${originalShippingHeader}${returnShippingHeader}${totalReturnCostHeader}<th>DB</th>${actionsHeader}</tr></thead><tbody>`;
+    let html = `<table><thead><tr><th>Title</th><th>Barcode</th>${itemIdHeader}${lotHeader}${locationHeader}<th>Qty</th>${warehouseNoteHeader}${itemPrepHeader}${dateAddedHeader}${dateSoldHeader}${dateShippedHeader}${invStatusHeader}${storeHeader}${returnDateHeader}${refundAmountHeader}${originalShippingHeader}${returnShippingHeader}${totalReturnCostHeader}<th>DB</th>${actionsHeader}</tr></thead><tbody>`;
     let lastGroupBarcode = null;
     results.forEach((r, idx)=>{
     // Add visual separator between different duplicate groups
@@ -1054,6 +1068,15 @@ function renderResults(results){
         (r.raw && (r.raw.Title || r.raw.title || r.raw.TITLE || r.raw.item_description || r.raw.DESCRIPTION || r.raw.description)) ||
         ''
     )
+    const databaseTitle = String(r.database_title || '').trim();
+    const customTitle = String(r.custom_title || '').trim();
+    const hasTitleConflict = dbRaw === 'searchRack' && databaseTitle && customTitle && databaseTitle.toLowerCase() !== customTitle.toLowerCase();
+    const titleDisplay = hasTitleConflict
+        ? `<div style="display:flex;flex-direction:column;gap:4px;">
+             <a href="#" class="title-link" data-src="${esc(dbRaw)}" data-id="${r.id}" data-image="${esc(r.image || '')}" data-title="${esc(customTitle)}">${esc(customTitle)}</a>
+             <div style="font-size:.82rem;color:#64748b;line-height:1.25;"><strong>Database:</strong> ${esc(databaseTitle)}</div>
+           </div>`
+        : `<a href="#" class="title-link" data-src="${esc(dbRaw)}" data-id="${r.id}" data-image="${esc(r.image || '')}" data-title="${title}">${title}</a>`;
     // Build thumbnail: prefer explicit item image; if missing, try IMAGES first URL; only fallback to pictureposition for non-archived rows
     // If barcode has a -suffix, strip it for image lookup
     const barcodeRaw = r.barcode || (r.raw && (r.raw.upc || r.raw.UPC || r.raw.Barcode || r.raw.barcode)) || '';
@@ -1130,8 +1153,19 @@ function renderResults(results){
         ? `<a href="#" class="qty-history-link${qtyValue === 0 ? ' zero-qty-history-link' : ''}" data-history-search="${esc(historySearchValue)}" title="View barcode history" style="font-weight:700;text-decoration:underline;cursor:pointer;color:${qtyValue === 0 ? '#c0392b' : '#2980b9'};">${qty}</a>`
         : qty
     const warehouseNoteText = String(r.warehouse_note || (r.raw && (r.raw.WAREHOUSE_NOTE || r.raw.warehouse_note)) || '').trim();
+    const itemPrepSummary = r.item_prep_summary || {};
+    const hasItemPrep = dbRaw === 'searchRack' && String(barcodeRaw || '').includes('-') && !!itemPrepSummary.has_content;
+    const warehouseNoteButton = warehouseNoteText
+        ? `<button type="button" class="warehouse-note-open" data-note="${esc(warehouseNoteText)}" data-barcode="${barcodeRawEsc}" style="border:1px solid #f59e0b;background:#fffbeb;color:#92400e;border-radius:7px;padding:5px 8px;font-weight:700;cursor:pointer;">Warehouse Note</button>`
+        : '';
+    const itemPrepButton = hasItemPrep
+        ? `<button type="button" class="item-prep-open" data-barcode="${barcodeRawEsc}" style="border:1px solid #7c3aed;background:#f5f3ff;color:#5b21b6;border-radius:7px;padding:5px 8px;font-weight:700;cursor:pointer;">Item Prep</button>`
+        : '';
     const warehouseNoteCell = hasSearchRack
-        ? (dbRaw === 'searchRack' && warehouseNoteText ? `<td><div style="max-width:220px;white-space:pre-wrap;color:#7c2d12;font-weight:600;">${esc(warehouseNoteText)}</div></td>` : '<td></td>')
+        ? (dbRaw === 'searchRack' && warehouseNoteButton ? `<td>${warehouseNoteButton}</td>` : '<td></td>')
+        : '';
+    const itemPrepCell = hasSearchRack
+        ? (dbRaw === 'searchRack' && itemPrepButton ? `<td>${itemPrepButton}</td>` : '<td></td>')
         : '';
         const db = esc(dbRaw)
         let locDisplay = '';
@@ -1310,13 +1344,14 @@ function renderResults(results){
         ).toFixed(2)}</td>` : '<td></td>') : '';
     
     html += `<tr data-src="${db}" data-id="${r.id}" data-qty="${qty}"${r.is_duplicate_group ? ' style="background:#fff3cd;"' : ''}>`+
-        `<td><div class="title-cell"><img class="thumb" src="${thumb}" onerror="this.src='${missingThumb(48,48,'No Img')}'"><div><a href="#" class="title-link" data-src="${db}" data-id="${r.id}" data-image="${img}" data-title="${title}">${title}</a>${deletedInfo}${createdInfo}${r.is_duplicate_group && r.group_index === 0 ? `<div style="font-size:0.85rem; color:#856404; margin-top:4px;">🔄 <strong>Duplicate Locations</strong> (${r.group_size} locations, ${r.group_total_qty} total qty)</div>` : ''}${r.is_duplicate_group && r.other_locations ? `<div style="font-size:0.8rem; color:#666; margin-top:2px;">Also in: ${esc(r.other_locations)}</div>` : ''}</div></div></td>`+
+        `<td><div class="title-cell"><img class="thumb" src="${thumb}" onerror="this.src='${missingThumb(48,48,'No Img')}'"><div>${titleDisplay}${deletedInfo}${createdInfo}${r.is_duplicate_group && r.group_index === 0 ? `<div style="font-size:0.85rem; color:#856404; margin-top:4px;">🔄 <strong>Duplicate Locations</strong> (${r.group_size} locations, ${r.group_total_qty} total qty)</div>` : ''}${r.is_duplicate_group && r.other_locations ? `<div style="font-size:0.8rem; color:#666; margin-top:2px;">Also in: ${esc(r.other_locations)}</div>` : ''}</div></div></td>`+
                 `<td>${barcodeCell}</td>`+
                 itemIdCell +
                 lotCell +
                 locationCell +
                 `<td>${qtyCellHtml}</td>`+
                 warehouseNoteCell +
+                itemPrepCell +
                 dateCell +
                 dateSoldCell +
                 dateShippedCell +
@@ -1340,6 +1375,14 @@ function renderResults(results){
     document.querySelectorAll('.qty-history-link').forEach(el=> el.addEventListener('click', (e)=>{
         e.preventDefault();
         openHistoryModalWithSearch(el.getAttribute('data-history-search') || '', '');
+    }));
+    document.querySelectorAll('.warehouse-note-open').forEach(el=> el.addEventListener('click', (e)=>{
+        e.preventDefault();
+        showWarehouseNoteModal(el.getAttribute('data-note') || '', el.getAttribute('data-barcode') || '');
+    }));
+    document.querySelectorAll('.item-prep-open').forEach(el=> el.addEventListener('click', (e)=>{
+        e.preventDefault();
+        showSuffixedItemPrepModal(el.getAttribute('data-barcode') || '');
     }));
     highlightWarehouseMatchRow();
     // double-click to open archive action when in archived list
@@ -1766,6 +1809,68 @@ function onViewLotDetails(e){
 }
 
 function showViewModal(html){ document.getElementById('viewContent').innerHTML = html; const m=document.getElementById('viewModal'); m.style.display='flex'; }
+
+function showWarehouseNoteModal(note, barcode){
+    showViewModal(`<div style="min-width:min(520px,82vw);"><h3 style="margin-top:0;">Warehouse Note</h3><div class="small-muted" style="margin-bottom:10px;">${esc(formatUpcDisplay(barcode || ''))}</div><div style="white-space:pre-wrap;text-align:left;line-height:1.55;background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:14px;color:#78350f;">${esc(note || '')}</div></div>`);
+}
+
+function renderSuffixedItemPrepContext(data){
+    const statusEntries = Array.isArray(data.status_entries) ? data.status_entries : [];
+    const notes = Array.isArray(data.notes) ? data.notes : [];
+    const images = Array.isArray(data.images) ? data.images : [];
+    const voiceNotes = Array.isArray(data.voice_notes) ? data.voice_notes : [];
+    const textBlocks = [];
+
+    statusEntries.forEach(entry => {
+        const reason = String(entry.reason || '').trim();
+        const note = String(entry.note || '').trim();
+        if (!reason && !note) return;
+        const label = String(entry.status || '').trim();
+        textBlocks.push(`<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:9px;padding:10px;text-align:left;">
+            ${label ? `<div style="font-size:.78rem;font-weight:800;text-transform:uppercase;color:#9a3412;margin-bottom:5px;">${esc(label)}</div>` : ''}
+            ${reason ? `<div><strong>Reason:</strong> ${esc(reason)}</div>` : ''}
+            ${note ? `<div style="white-space:pre-wrap;margin-top:${reason ? '6px' : '0'};">${esc(note)}</div>` : ''}
+        </div>`);
+    });
+    notes.forEach(note => {
+        textBlocks.push(`<div style="background:#f8fafc;border:1px solid #cbd5e1;border-radius:9px;padding:10px;text-align:left;white-space:pre-wrap;">${esc(note.note || '')}</div>`);
+    });
+
+    const imageHtml = images.map(image => {
+        const url = String(image.image_url || '').trim();
+        const rotation = Number(image.rotation || 0);
+        return `<a href="${esc(url)}" target="_blank" rel="noopener" style="display:block;width:132px;height:110px;border:1px solid #cbd5e1;border-radius:9px;overflow:hidden;background:#f8fafc;">
+            <img src="${esc(url)}" alt="Item prep photo" style="width:100%;height:100%;object-fit:cover;transform:rotate(${rotation}deg);" onerror="this.style.display='none'">
+        </a>`;
+    }).join('');
+
+    const audioHtml = voiceNotes.map((voice, index) => {
+        const url = String(voice.audio_url || '').trim();
+        return `<div style="text-align:left;background:#f5f3ff;border:1px solid #ddd6fe;border-radius:9px;padding:9px;"><div style="font-size:.78rem;font-weight:800;color:#5b21b6;margin-bottom:5px;">Voice note ${index + 1}</div><audio controls preload="metadata" src="${esc(url)}" style="width:100%;"></audio></div>`;
+    }).join('');
+
+    return `<div style="min-width:min(620px,84vw);max-width:760px;">
+        <h3 style="margin-top:0;">Item Prep</h3>
+        <div class="small-muted" style="margin-bottom:12px;">${esc(formatUpcDisplay(data.barcode || ''))}</div>
+        ${textBlocks.length ? `<div style="display:grid;gap:8px;margin-bottom:14px;">${textBlocks.join('')}</div>` : ''}
+        ${images.length ? `<h4 style="text-align:left;margin:12px 0 7px;">Pictures</h4><div style="display:flex;flex-wrap:wrap;gap:9px;">${imageHtml}</div>` : ''}
+        ${voiceNotes.length ? `<h4 style="text-align:left;margin:14px 0 7px;">Voice Notes</h4><div style="display:grid;gap:8px;">${audioHtml}</div>` : ''}
+        ${!textBlocks.length && !images.length && !voiceNotes.length ? '<div class="small-muted">No item-prep content found.</div>' : ''}
+    </div>`;
+}
+
+async function showSuffixedItemPrepModal(barcode){
+    if(!barcode) return;
+    showViewModal('<div class="small-muted">Loading item-prep notes and media…</div>');
+    try{
+        const response = await fetch(`/api/warehouse/item-prep/${encodeURIComponent(barcode)}?_t=${Date.now()}`, {cache:'no-store'});
+        const data = await response.json();
+        if(!response.ok || !data.success) throw new Error(data.error || 'Unable to load item-prep content');
+        showViewModal(renderSuffixedItemPrepContext(data));
+    }catch(error){
+        showViewModal(`<div><h3>Item Prep</h3><div class="small-muted">${esc(error.message || 'Unable to load item-prep content')}</div></div>`);
+    }
+}
 document.getElementById('closeView').addEventListener('click', ()=>document.getElementById('viewModal').style.display='none');
 
 function onEdit(db, id){
@@ -2309,6 +2414,53 @@ function renderLocationGroups(container) {
 }
 
 // Render shelf selector dropdown for a location
+function locationCodeParts(code) {
+    return String(code || '').trim().toLowerCase().match(/[a-z]+|\d+|[^a-z\d]+/g) || [];
+}
+
+function compareLocationCodes(a, b) {
+    const left = locationCodeParts(a);
+    const right = locationCodeParts(b);
+    const length = Math.max(left.length, right.length);
+    for (let i = 0; i < length; i += 1) {
+        if (left[i] === undefined) return -1;
+        if (right[i] === undefined) return 1;
+        if (left[i] === right[i]) continue;
+        const leftNumber = /^\d+$/.test(left[i]);
+        const rightNumber = /^\d+$/.test(right[i]);
+        if (leftNumber && rightNumber) {
+            const difference = Number(left[i]) - Number(right[i]);
+            if (difference) return difference;
+            continue;
+        }
+        return left[i].localeCompare(right[i]);
+    }
+    return String(a || '').localeCompare(String(b || ''));
+}
+
+function renderShelfSuggestions(shelves, rawValue) {
+    const suggestions = document.getElementById('shelf-suggestions');
+    if (!suggestions) return;
+    const query = String(rawValue || '').trim().toLowerCase();
+    suggestions.innerHTML = '';
+    if (!query) {
+        suggestions.classList.remove('visible');
+        return;
+    }
+    const matches = shelves
+        .filter(shelf => String(shelf.code || '').toLowerCase().startsWith(query))
+        .slice(0, 12);
+    matches.forEach(shelf => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'shelf-suggestion';
+        button.textContent = shelf.code;
+        button.addEventListener('click', () => selectShelf(shelf.code));
+        suggestions.appendChild(button);
+    });
+    suggestions.classList.toggle('visible', matches.length > 0);
+}
+
 function renderShelfSelector(locationId) {
     const location = _locationData.find(l => l.id === locationId);
     if (!location) {
@@ -2316,10 +2468,11 @@ function renderShelfSelector(locationId) {
     }
     
     const selector = document.getElementById('shelf-selector');
+    const typeInput = document.getElementById('shelf-type-input');
     const preview = document.getElementById('shelf-image-preview');
     
-    // Sort shelves by quantity descending
-    const sortedShelves = [...location.shelves].sort((a, b) => b.quantity - a.quantity);
+    // Keep related location/rack/shelf/bin codes together in numeric hierarchy order.
+    const sortedShelves = [...location.shelves].sort((a, b) => compareLocationCodes(a.code, b.code));
     
     // Populate dropdown
     let html = '<option value="">-- Select a shelf --</option>';
@@ -2328,6 +2481,18 @@ function renderShelfSelector(locationId) {
         html += `<option value="${esc(shelf.code)}" ${selected}>${esc(shelf.code)} (${shelf.quantity} items)</option>`;
     });
     selector.innerHTML = html;
+    if (typeInput) {
+        typeInput.value = _selectedShelf || '';
+        renderShelfSuggestions(sortedShelves, '');
+        typeInput.oninput = () => renderShelfSuggestions(sortedShelves, typeInput.value);
+        typeInput.onkeydown = (event) => {
+            if (event.key !== 'Enter') return;
+            event.preventDefault();
+            const typed = typeInput.value.trim().toLowerCase();
+            const exact = sortedShelves.find(shelf => String(shelf.code || '').toLowerCase() === typed);
+            if (exact) selectShelf(exact.code);
+        };
+    }
     
     // Update preview if shelf is already selected
     if (_selectedShelf) {
@@ -2524,6 +2689,15 @@ function selectLocation(locationId) {
 // Select a shelf and filter results
 function selectShelf(shelfCode) {
     _selectedShelf = shelfCode;
+    const selector = document.getElementById('shelf-selector');
+    const typeInput = document.getElementById('shelf-type-input');
+    const suggestions = document.getElementById('shelf-suggestions');
+    if (selector) selector.value = shelfCode;
+    if (typeInput) typeInput.value = shelfCode;
+    if (suggestions) {
+        suggestions.innerHTML = '';
+        suggestions.classList.remove('visible');
+    }
     updateShelfPreview(shelfCode);
     
     // Clear location group filter and search for specific shelf

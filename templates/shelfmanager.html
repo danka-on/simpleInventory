@@ -5,7 +5,7 @@
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.ico') }}">
     <title>Shelf Manager - Sweet Shelves</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
-    <link rel="stylesheet" href="{{ url_for('static', filename='shelf-creator.css') }}?v=6">
+    <link rel="stylesheet" href="{{ url_for('static', filename='shelf-creator.css') }}?v=7">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 </head>
 <body>
@@ -38,8 +38,8 @@
                 <div class="action-right">
                     <div id="sort-controls" style="display:none; align-items:center; gap:5px;">
                         <select id="shelf-sort" style="padding:6px;border-radius:6px;border:1px solid #ddd;">
-                            <option value="created" selected>Created (newest)</option>
-                            <option value="name">Name (A-Z)</option>
+                            <option value="name" selected>Name (natural order)</option>
+                            <option value="created">Created (newest)</option>
                             <option value="items">Items (desc)</option>
                         </select>
                         <button id="apply-sort-btn" class="btn btn-primary" style="padding:6px 10px;">Sort</button>
@@ -52,6 +52,17 @@
                     </button>
                 </div>
             </div>
+            <div class="shelf-search-bar" role="search">
+                <i class="fas fa-search" aria-hidden="true"></i>
+                <input id="shelf-search-input" type="search"
+                       placeholder="Search shelf code or location group…"
+                       autocomplete="off" autocapitalize="off" spellcheck="false"
+                       aria-label="Search shelves and location groups">
+                <button class="btn btn-secondary" id="clear-shelf-search-btn" type="button" style="display:none;">
+                    <i class="fas fa-times"></i> Clear
+                </button>
+            </div>
+            <div id="shelf-search-summary" class="shelf-search-summary" aria-live="polite"></div>
             <div id="shelf-list" class="shelf-grid">
                 <div class="loading">
                     <i class="fas fa-spinner fa-spin"></i> Loading...
@@ -69,7 +80,7 @@
                     <input type="text" id="shelf-code" placeholder="e.g., gr1s1, or2s3" autocomplete="off">
                     <div id="code-validation" class="validation-message"></div>
                 </div>
-                <div class="form-group" style="margin-top:-6px;">
+                <div class="form-group" id="original-only-group" style="margin-top:-6px;">
                     <label style="display:flex;align-items:center;gap:10px;font-weight:600;cursor:pointer;">
                         <input type="checkbox" id="original-only" style="width:18px;height:18px;">
                         <span>Original</span>
@@ -98,12 +109,12 @@
                     </div>
                 </div>
                 
-                <!-- Upload Section (Desktop) -->
+                <!-- Gallery / file upload -->
                 <div id="upload-section" style="display: none;">
                     <div class="upload-area" id="upload-area">
                         <i class="fas fa-cloud-upload-alt" style="font-size: 3rem; color: var(--primary); margin-bottom: 10px;"></i>
-                        <p>Click to upload PNG image</p>
-                        <input type="file" id="file-input" accept=".png,image/png" style="display: none;">
+                        <p>Click to choose an image</p>
+                        <input type="file" id="file-input" accept="image/*" style="display: none;">
                     </div>
                 </div>
                 
@@ -130,6 +141,9 @@
                     <button class="btn btn-primary" id="start-camera-btn" style="display: none;">
                         <i class="fas fa-camera"></i> Take Photo
                     </button>
+                    <button class="btn btn-primary" id="gallery-btn">
+                        <i class="fas fa-images"></i> Choose from Gallery
+                    </button>
                     <button class="btn btn-success" id="save-btn" disabled>
                         <i class="fas fa-save"></i> Save Shelf
                     </button>
@@ -155,11 +169,11 @@
                 <button class="btn btn-secondary" id="duplicate-shelf-btn">
                     <i class="fas fa-copy"></i> Duplicate
                 </button>
-                <button class="btn btn-danger" id="delete-shelf-btn">
-                    <i class="fas fa-trash"></i> Delete
-                </button>
                 <button class="btn btn-warning" id="clear-inventory-btn" title="Clear all items linked to this shelf">
                     <i class="fas fa-broom"></i> Clear All Inventory
+                </button>
+                <button class="btn btn-danger" id="delete-shelf-btn">
+                    <i class="fas fa-trash"></i> Delete
                 </button>
             </div>
         </div>
@@ -197,7 +211,7 @@
         </div>
     </div>
     
-    <script src="{{ url_for('static', filename='shelf-creator.js') }}?v=10"></script>
+    <script src="{{ url_for('static', filename='shelf-creator.js') }}?v=15"></script>
     <script src="/static/i18n.js"></script>
 </body>
 </html>

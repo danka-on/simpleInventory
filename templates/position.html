@@ -62,7 +62,37 @@
         width: 100%;
         max-width: 420px;
         display: flex;
+        flex-direction: column;
         gap: 10px;
+    }
+    .location-suggestions {
+        display: none;
+        width: 100%;
+        gap: 7px;
+        flex-wrap: wrap;
+        padding: 9px;
+        border: 1px solid #d7e0e8;
+        border-radius: 10px;
+        background: #f7fafc;
+        box-sizing: border-box;
+    }
+    .location-suggestions.visible { display: flex; }
+    .location-option {
+        margin: 0;
+        padding: 7px 11px;
+        border: 1px solid #9fc5e8;
+        border-radius: 999px;
+        background: #fff;
+        color: #24557a;
+        font-size: .95rem;
+        font-weight: 700;
+        cursor: pointer;
+    }
+    .location-option:hover, .location-option:focus {
+        background: #2d98da;
+        border-color: #2d98da;
+        color: #fff;
+        outline: none;
     }
     .section {
         width: 100%;
@@ -246,6 +276,8 @@
         border: 1px solid rgba(255,255,255,0.12);
         -webkit-text-fill-color: #e2e8f0;
     }
+    html.ss-theme-night .location-suggestions{background:#111c30;border-color:#334155}
+    html.ss-theme-night .location-option{background:#1e293b;color:#bae6fd;border-color:#475569}
 
     </style>
 </head>
@@ -261,6 +293,7 @@
             </h1>
             <div class="scan-bar" style="margin-bottom: 10px;">
                 <input type="text" id="qrTextInput" name="qrTextInput" data-i18n="scan_or_enter_qr" placeholder="Scan or enter QR LOCATION code" style="flex: 1; font-size:1.2em; padding:10px; display:none;" autocomplete="off" />
+                <div id="locationSuggestions" class="location-suggestions" aria-label="Available location suggestions"></div>
             </div>
         </div>
 
@@ -463,6 +496,7 @@
                 if (data.success) {
                     validShelves = data.codes.map(c => c.toLowerCase());
                     console.log('Loaded valid shelves:', validShelves);
+                    renderLocationSuggestions(document.getElementById('qrTextInput').value);
                 }
             })
             .catch(err => console.error('Error loading valid shelves:', err));
@@ -525,13 +559,42 @@
 
     // Optionally, handle QR code input for iPad/tablet
     var qrInput = document.getElementById('qrTextInput');
+    var locationSuggestions = document.getElementById('locationSuggestions');
     var debounceTimer = null;
+
+    function renderLocationSuggestions(rawValue) {
+        if (!locationSuggestions) return;
+        const prefix = String(rawValue || '').trim().toLowerCase();
+        if (!prefix) {
+            locationSuggestions.innerHTML = '';
+            locationSuggestions.classList.remove('visible');
+            return;
+        }
+        const matches = validShelves
+            .filter(code => code.startsWith(prefix))
+            .slice(0, 12);
+        locationSuggestions.innerHTML = '';
+        matches.forEach(code => {
+            const option = document.createElement('button');
+            option.type = 'button';
+            option.className = 'location-option';
+            option.textContent = code.toUpperCase();
+            option.addEventListener('click', () => {
+                qrInput.value = code;
+                renderLocationSuggestions('');
+                qrInput.dispatchEvent(new Event('input', { bubbles: true }));
+            });
+            locationSuggestions.appendChild(option);
+        });
+        locationSuggestions.classList.toggle('visible', matches.length > 0);
+    }
 
     if (qrInput) {
         qrInput.addEventListener('input', function() {
             var inputEl = this;
             var code = inputEl.value.trim();
             var flashMsg = document.getElementById('flashMsg');
+            renderLocationSuggestions(code);
             
             // Clear any pending validation
             if (debounceTimer) clearTimeout(debounceTimer);
@@ -550,6 +613,7 @@
                 if (!isValid && code.match(/^(gr[1-5]|or[1-3])s[2-6]$/i)) isValid = true;
 
                 if (isValid) {
+                    renderLocationSuggestions('');
                     const posCode = code;
                     document.getElementById('scanned_result').value = posCode;
                     sessionStorage.setItem('item_position', posCode);
@@ -588,8 +652,9 @@
                     // Auto-clear the input after processing
                     inputEl.value = '';
                 } else {
+                    const isValidPrefix = validShelves.some(shelf => shelf.startsWith(code.toLowerCase()));
                     // Only show error if it's a substantial input (e.g. > 3 chars)
-                    if (code.length > 3) {
+                    if (code.length > 3 && !isValidPrefix) {
                         if (flashMsg) flashMsg.style.display = 'none';
                         showInvalidModal();
                         // Play error beep

@@ -1903,8 +1903,8 @@
                 item = await fetchAddItemScreeningSingle(key);
                 if (!item || !item.needs_manual_title) return true;
             } catch (err) {
-                console.error('Barcode screening failed; requiring manual item data:', err);
-                item = { needs_manual_title: true, missing_image: true, title: '' };
+                console.error('Barcode screening failed; continuing without a manual-title prompt:', err);
+                return true;
             }
 
             const modalResult = await openMissingTitleModal(code, {

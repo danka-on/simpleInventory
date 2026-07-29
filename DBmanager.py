@@ -66,6 +66,14 @@ def _marketplace_upc_variants(value):
         padded = base.zfill(12) if len(base) <= 12 else base
         add(f'{stripped}-{suffix}' if suffix else stripped)
         add(f'{padded}-{suffix}' if suffix else padded)
+        if suffix:
+            # Product metadata is normally stored under the base UPC even
+            # when an individual warehouse unit has a -suffix.
+            add(base)
+            add(stripped)
+            add(padded)
+            if len(stripped) <= 12:
+                add(stripped.zfill(13))
 
     return out
 
@@ -491,14 +499,24 @@ def addToSearchRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITI
     itemid = None
     quantity = None
     image = None
+    barcode_variants = _marketplace_upc_variants(BARCODE)
+
+    def _lookup_by_upc(cur, sql):
+        for candidate in barcode_variants:
+            row = cur.execute(sql, (candidate,)).fetchone()
+            if row:
+                return row
+        return None
 
     # First try ebayStore.db
     try:
         with connect_db('ebayStore.db') as ebay_conn:
             ebay_conn.row_factory = sqlite3.Row
             ebay_cur = ebay_conn.cursor()
-            ebay_cur.execute("SELECT Title, ItemID, Quantity, Image FROM INVENTORY WHERE UPC = ? COLLATE NOCASE LIMIT 1", (BARCODE,))
-            ebay_row = ebay_cur.fetchone()
+            ebay_row = _lookup_by_upc(
+                ebay_cur,
+                "SELECT Title, ItemID, Quantity, Image FROM INVENTORY WHERE UPC = ? COLLATE NOCASE LIMIT 1"
+            )
             if ebay_row:
                 title = ebay_row['Title']
                 itemid = ebay_row['ItemID']
@@ -513,8 +531,10 @@ def addToSearchRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITI
             with connect_db('bol.db') as bol_conn:
                 bol_conn.row_factory = sqlite3.Row
                 bol_cur = bol_conn.cursor()
-                bol_cur.execute('SELECT item_description, image_url FROM bol_items WHERE upc = ? COLLATE NOCASE LIMIT 1', (BARCODE,))
-                bol_row = bol_cur.fetchone()
+                bol_row = _lookup_by_upc(
+                    bol_cur,
+                    'SELECT item_description, image_url FROM bol_items WHERE upc = ? COLLATE NOCASE LIMIT 1'
+                )
                 if bol_row:
                     title = bol_row['item_description']
                     image = bol_row['image_url']
@@ -529,13 +549,12 @@ def addToSearchRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITI
             with connect_db('bol.db') as bol_conn:
                 bol_conn.row_factory = sqlite3.Row
                 bol_cur = bol_conn.cursor()
-                bol_cur.execute('''
+                custom_row = _lookup_by_upc(bol_cur, '''
                     SELECT item_description, image_url
                     FROM custom_item_registry
                     WHERE upc = ? COLLATE NOCASE
                     LIMIT 1
-                ''', (BARCODE,))
-                custom_row = bol_cur.fetchone()
+                ''')
                 if custom_row:
                     if not title:
                         title = custom_row['item_description']
@@ -544,6 +563,29 @@ def addToSearchRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITI
                     itemid = itemid or BARCODE
         except Exception as e:
             print(f"Warning: Could not lookup custom item registry: {e}")
+
+    # Raw BOL is the durable source for many catalog titles after bol_items
+    # has been cleared or rebuilt.
+    if not title or not image:
+        try:
+            with connect_db('rawbol.db') as raw_conn:
+                raw_conn.row_factory = sqlite3.Row
+                raw_cur = raw_conn.cursor()
+                raw_row = _lookup_by_upc(raw_cur, '''
+                    SELECT item_description, image_url
+                    FROM raw_bol_items
+                    WHERE upc = ? COLLATE NOCASE
+                    ORDER BY rowid DESC
+                    LIMIT 1
+                ''')
+                if raw_row:
+                    if not title:
+                        title = raw_row['item_description']
+                    if not image:
+                        image = raw_row['image_url']
+                    itemid = itemid or str(BARCODE).split('-', 1)[0]
+        except Exception as e:
+            print(f"Warning: Could not lookup in rawbol.db: {e}")
 
     custom_title = 0
     if TITLE_OVERRIDE and str(TITLE_OVERRIDE).strip():
@@ -672,7 +714,7 @@ def ebayStoreDB(title, item_id, sku=None, price=None, quantity=None, image=None,
                         SKU = ?,
                         Price = ?,
                         Quantity = ?,
-                        Image = ?,
+                        Image = COALESCE(NULLIF(TRIM(?), ''), Image),
                         URL = ?,
                         List_State = ?,
                         Sold_Date = ?,
@@ -789,6 +831,10 @@ def store_ebay_order(order):
 
         sku_raw = str(order.get('sku') or '').strip()
         sku_val = sku_raw if _is_meaningful_marketplace_text(sku_raw) else None
+        listing_item_id = (
+            str(order.get('listing_item_id') or '').strip()
+            or str(order.get('item_id') or '').strip()
+        )
         item_condition_description_val = next((
             str(order.get(key)).strip()
             for key in ('item_condition_description', 'condition_description', 'condition_note')
@@ -798,11 +844,11 @@ def store_ebay_order(order):
         # Get barcode (UPC) from ebayStore.db using item_id
         barcode_raw = str(order.get('barcode') or '').strip()
         barcode_val = barcode_raw if _is_meaningful_marketplace_text(barcode_raw) else None
-        if not barcode_val and order.get('item_id'):
+        if not barcode_val and listing_item_id:
             try:
                 with connect_db('ebayStore.db') as ebay_conn:
                     ebay_cur = ebay_conn.cursor()
-                    ebay_cur.execute('SELECT UPC, SKU FROM INVENTORY WHERE ItemID = ?', (order.get('item_id'),))
+                    ebay_cur.execute('SELECT UPC, SKU FROM INVENTORY WHERE ItemID = ?', (listing_item_id,))
                     row = ebay_cur.fetchone()
                     if row:
                         if row[0]:
@@ -817,7 +863,7 @@ def store_ebay_order(order):
         resolved_barcode = resolve_barcode_from_marketplace_sku(
             sku_val,
             platform='ebay',
-            item_id=order.get('item_id'),
+            item_id=listing_item_id,
             fallback_barcode=barcode_val
         )
         if resolved_barcode:
@@ -826,14 +872,16 @@ def store_ebay_order(order):
         # Enrich title, image, and lot_number
         title_val = order.get('title')
         image_val = order.get('image')
+        if not _is_meaningful_marketplace_text(image_val) or str(image_val).strip().lower() == 'nan':
+            image_val = None
         lot_number_val = None
 
         # First try to get image from ebayStore.db using item_id
-        if not image_val and order.get('item_id'):
+        if not image_val and listing_item_id:
             try:
                 with connect_db('ebayStore.db') as ebay_conn:
                     ebay_cur = ebay_conn.cursor()
-                    ebay_cur.execute('SELECT Image FROM INVENTORY WHERE ItemID = ?', (order.get('item_id'),))
+                    ebay_cur.execute('SELECT Image FROM INVENTORY WHERE ItemID = ?', (listing_item_id,))
                     row = ebay_cur.fetchone()
                     if row and row[0]:
                         image_val = row[0]
@@ -879,7 +927,7 @@ def store_ebay_order(order):
 
         # Prepare location
         location_val = order.get('location')
-        if not location_val and order.get('item_id'):
+        if not location_val and listing_item_id:
             try:
                 with connect_db('searchRack.db') as rack_conn:
                     rack_cur = rack_conn.cursor()
@@ -889,7 +937,7 @@ def store_ebay_order(order):
                         WHERE BARCODE = ?
                           AND COALESCE(CAST(QUANTITY AS INTEGER), 0) > 0
                         LIMIT 1
-                    ''', (order.get('item_id'),))
+                    ''', (listing_item_id,))
                     r = rack_cur.fetchone()
                     if r:
                         item_pos = r[0]
@@ -903,7 +951,7 @@ def store_ebay_order(order):
 
         trace_row = resolve_listing_trace_from_marketplace_sale(
             platform='ebay',
-            item_id=order.get('item_id'),
+            item_id=listing_item_id,
             sku=sku_val
         ) or {}
         source_upc_val = str(trace_row.get('upc') or '').strip() or None
@@ -915,7 +963,7 @@ def store_ebay_order(order):
         listing_trace_id_val = trace_row.get('id')
         listing_trace_created_at_val = str(trace_row.get('created_at') or '').strip() or None
         listing_trace_source_val = str(trace_row.get('source') or '').strip() or None
-        listing_listing_id_val = str(trace_row.get('listing_id') or '').strip() or None
+        listing_listing_id_val = str(trace_row.get('listing_id') or listing_item_id or '').strip() or None
         listing_offer_id_val = str(trace_row.get('offer_id') or '').strip() or None
         listing_sku_val = str(trace_row.get('sku') or '').strip() or None
         listing_asin_val = str(trace_row.get('asin') or '').strip() or None
@@ -939,6 +987,25 @@ def store_ebay_order(order):
                 (order_id_val, item_id_val)
             )
             existing = cur.fetchone()
+            if (
+                not existing
+                and listing_item_id
+                and str(item_id_val).strip() != listing_item_id
+            ):
+                # Adopt rows written by the older importer, which keyed eBay
+                # lines by legacy listing ID instead of lineItemId.
+                cur.execute(
+                    '''
+                    SELECT id
+                    FROM orders
+                    WHERE COALESCE(order_id, '') = COALESCE(?, '')
+                      AND COALESCE(item_id, '') = COALESCE(?, '')
+                    ORDER BY id DESC
+                    LIMIT 1
+                    ''',
+                    (order_id_val, listing_item_id)
+                )
+                existing = cur.fetchone()
         else:
             cur.execute(
                 '''
@@ -957,6 +1024,7 @@ def store_ebay_order(order):
             existing = cur.fetchone()
         if existing:
             cur.execute('''UPDATE orders SET
+                item_id = COALESCE(?, item_id),
                 checkout_status = COALESCE(?, checkout_status),
                 shipping_name = COALESCE(?, shipping_name),
                 shipping_street1 = COALESCE(?, shipping_street1),
@@ -973,7 +1041,7 @@ def store_ebay_order(order):
                 price = COALESCE(?, price),
                 seller_fee = COALESCE(?, seller_fee),
                 taxes = COALESCE(?, taxes),
-                image = COALESCE(?, image),
+                image = COALESCE(NULLIF(TRIM(?), ''), image),
                 barcode = COALESCE(?, barcode),
                 location = COALESCE(?, location),
                 shipping_cost = COALESCE(?, shipping_cost),
@@ -992,6 +1060,7 @@ def store_ebay_order(order):
                 item_description = COALESCE(?, item_description)
                 WHERE id = ?''',
                 (
+                    item_id_val,
                     order.get('checkout_status'),
                     order.get('shipping_name'),
                     order.get('shipping_street1'),

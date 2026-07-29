@@ -299,6 +299,27 @@
     .rt-table tbody tr.rt-row-traced:hover {
       background: linear-gradient(90deg, rgba(245, 158, 11, 0.24), rgba(250, 204, 21, 0.12));
     }
+    .rt-table tbody tr.rt-row-has-note {
+      background: rgba(234, 179, 8, 0.24);
+      box-shadow: inset 4px 0 0 #facc15;
+    }
+    .rt-table tbody tr.rt-row-has-note:hover {
+      background: rgba(234, 179, 8, 0.32);
+    }
+    .rt-table tbody tr.rt-row-multi-qty {
+      background: rgba(248, 113, 113, 0.2);
+      box-shadow: inset 4px 0 0 #f87171;
+    }
+    .rt-table tbody tr.rt-row-multi-qty:hover {
+      background: rgba(248, 113, 113, 0.28);
+    }
+    .rt-table tbody tr.rt-row-has-note.rt-row-multi-qty {
+      background: rgba(192, 132, 252, 0.24);
+      box-shadow: inset 4px 0 0 #c084fc;
+    }
+    .rt-table tbody tr.rt-row-has-note.rt-row-multi-qty:hover {
+      background: rgba(192, 132, 252, 0.32);
+    }
 
     /* Sold table cell styling */
     .sold-td-small {
@@ -1596,6 +1617,28 @@
       body { padding: 10px; }
       .header h1 { font-size: 1.25rem; }
       .rt-table { min-width: 520px; }
+      /* Keep the desktop table order intact, but put LOC directly after
+         Title in the horizontally scrolling mobile layout. */
+      .rt-table thead tr.rt-order-header,
+      .rt-table tbody tr.rt-order-row {
+        display: flex;
+        width: max-content;
+        min-width: 100%;
+      }
+      .rt-table thead tr.rt-order-header > th,
+      .rt-table tbody tr.rt-order-row > td {
+        flex: 0 0 auto;
+      }
+      .rt-table tr.rt-order-header > :nth-child(1),
+      .rt-table tr.rt-order-row > :nth-child(1) { order: 1; }
+      .rt-table tr.rt-order-header > :nth-child(4),
+      .rt-table tr.rt-order-row > :nth-child(4) { order: 2; }
+      .rt-table tr.rt-order-header > :nth-child(3),
+      .rt-table tr.rt-order-row > :nth-child(3) { order: 3; }
+      .rt-table tr.rt-order-header > :nth-child(2),
+      .rt-table tr.rt-order-row > :nth-child(2) { order: 4; }
+      .rt-table tr.rt-order-header > :nth-child(n+5),
+      .rt-table tr.rt-order-row > :nth-child(n+5) { order: 5; }
       .rt-table thead th { padding: 10px 8px; }
       .rt-table tbody td { padding: 10px 8px; }
       .rt-table thead th:nth-child(1),
@@ -1605,9 +1648,9 @@
       .rt-table thead th:nth-child(3),
       .rt-table td:nth-child(3) { min-width: 90px; text-align: center; }
       .rt-table thead th:nth-child(4),
-      .rt-table td:nth-child(4) { min-width: 44px; text-align: center; }
+      .rt-table td:nth-child(4) { min-width: 90px; text-align: center; }
       .rt-table thead th:nth-child(5),
-      .rt-table td:nth-child(5) { min-width: 90px; text-align: center; }
+      .rt-table td:nth-child(5) { min-width: 44px; text-align: center; }
       .rt-table thead th:nth-child(6),
       .rt-table td:nth-child(6) { min-width: 90px; text-align: center; }
       .table-wrap.has-more::after {
@@ -1675,6 +1718,27 @@
     }
     html.ss-theme-day .rt-table tbody tr.rt-row-traced:hover {
       background: linear-gradient(90deg, rgba(245, 158, 11, 0.22), rgba(250, 204, 21, 0.1));
+    }
+    html.ss-theme-day .rt-table tbody tr.rt-row-has-note {
+      background: #fef3c7;
+      box-shadow: inset 4px 0 0 #eab308;
+    }
+    html.ss-theme-day .rt-table tbody tr.rt-row-has-note:hover {
+      background: #fde68a;
+    }
+    html.ss-theme-day .rt-table tbody tr.rt-row-multi-qty {
+      background: #fee2e2;
+      box-shadow: inset 4px 0 0 #ef4444;
+    }
+    html.ss-theme-day .rt-table tbody tr.rt-row-multi-qty:hover {
+      background: #fecaca;
+    }
+    html.ss-theme-day .rt-table tbody tr.rt-row-has-note.rt-row-multi-qty {
+      background: #f3e8ff;
+      box-shadow: inset 4px 0 0 #a855f7;
+    }
+    html.ss-theme-day .rt-table tbody tr.rt-row-has-note.rt-row-multi-qty:hover {
+      background: #e9d5ff;
     }
     html.ss-theme-day .sold-td-small a { color: #2563eb; }
     html.ss-theme-day .sold-td-small a:hover { color: #1d4ed8; }
@@ -1972,7 +2036,7 @@
                 <div class="table-wrap rt-table-wrap">
                     <table id="sold-orders-table" class="rt-table">
                         <thead>
-                            <tr>
+                            <tr class="rt-order-header">
                                 <th style="text-align:left;" data-i18n="title">Title</th>
                                 <th style="text-align:left;" data-i18n="info">Info</th>
                                 <th style="text-align:center; width:100px;">Condition</th>
@@ -1998,7 +2062,7 @@
                 <div class="table-wrap rt-table-wrap">
                     <table id="completed-orders-table" class="rt-table">
                         <thead>
-                            <tr>
+                            <tr class="rt-order-header">
                                 <th style="text-align:left;" data-i18n="title">Title</th>
                                 <th style="text-align:left;" data-i18n="info">Info</th>
                                 <th style="text-align:center; width:100px;">Condition</th>
@@ -2030,6 +2094,29 @@
 (function() {
 'use strict';
 
+const READY_TO_SHIP_MISSING_THUMB = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48"><rect width="100%" height="100%" fill="#1e293b"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#475569" font-size="8">No Img</text></svg>');
+
+function readyToShipUsableImage(value) {
+    const image = String(value || '').trim();
+    return image && !/^(?:nan|none|null|undefined|n\/?a)$/i.test(image);
+}
+
+function handleReadyToShipImageError(img) {
+    if (!img) return;
+    const originalSrc = String(img.dataset.originalSrc || '').trim();
+    const retryCount = Number.parseInt(img.dataset.retryCount || '0', 10) || 0;
+    if (originalSrc && retryCount < 1) {
+        img.dataset.retryCount = String(retryCount + 1);
+        img.removeAttribute('src');
+        window.setTimeout(() => {
+            if (img.isConnected) img.src = originalSrc;
+        }, 700);
+        return;
+    }
+    img.onerror = null;
+    img.src = img.dataset.fallbackSrc || READY_TO_SHIP_MISSING_THUMB;
+}
+
 // Global state management with localStorage caching
 const OrderManager = {
     orders: new Map(),
@@ -2043,7 +2130,24 @@ const OrderManager = {
     // Add or update order in cache (normalize ID to string)
     setOrder(order) {
         const id = String(order.id);
-        this.orders.set(id, { ...order, id });
+        const previous = this.orders.get(id) || {};
+        const merged = { ...previous, ...order, id };
+        const incomingImage = readyToShipUsableImage(order.image)
+            ? String(order.image).trim()
+            : (readyToShipUsableImage(order.image_url) ? String(order.image_url).trim() : '');
+        const previousImage = readyToShipUsableImage(previous.image)
+            ? String(previous.image).trim()
+            : (readyToShipUsableImage(previous.image_url) ? String(previous.image_url).trim() : '');
+
+        if (!incomingImage && previousImage) {
+            merged.image = previousImage;
+            if (!readyToShipUsableImage(merged.image_url)) merged.image_url = previousImage;
+        } else if (incomingImage && !readyToShipUsableImage(merged.image)) {
+            merged.image = incomingImage;
+        }
+
+        this.orders.set(id, merged);
+        return merged;
     },
 
     // Get order from cache (normalize ID to string)
@@ -2223,11 +2327,11 @@ function renderReadyToShipMetaBadges(order) {
 
 function tdTitle(order) {
     const fullTitle = esc(order.title || '');
-    const imgSrc = esc(order.image || order.image_url || '');
-    const missingDataUrlThumb = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48"><rect width="100%" height="100%" fill="#1e293b"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#475569" font-size="8">No Img</text></svg>');
+    const imageValue = readyToShipUsableImage(order.image) ? order.image : order.image_url;
+    const imgSrc = readyToShipUsableImage(imageValue) ? esc(imageValue) : '';
     const thumbHtml = imgSrc
-        ? `<img src="${imgSrc}" style="width:44px;height:44px;object-fit:cover;border-radius:8px;margin-right:10px;vertical-align:middle;border:1px solid rgba(255,255,255,0.08);" onerror="this.src='${missingDataUrlThumb}'" loading="lazy">`
-        : `<img src='${missingDataUrlThumb}' style="width:44px;height:44px;object-fit:cover;border-radius:8px;margin-right:10px;vertical-align:middle;border:1px solid rgba(255,255,255,0.08);">`;
+        ? `<img src="${imgSrc}" data-original-src="${imgSrc}" onerror="handleReadyToShipImageError(this)" style="width:44px;height:44px;object-fit:cover;border-radius:8px;margin-right:10px;vertical-align:middle;border:1px solid rgba(255,255,255,0.08);" loading="lazy">`
+        : `<img src="${esc(READY_TO_SHIP_MISSING_THUMB)}" style="width:44px;height:44px;object-fit:cover;border-radius:8px;margin-right:10px;vertical-align:middle;border:1px solid rgba(255,255,255,0.08);">`;
     return `<td class='sold-td-small'><div class="rt-title-wrap">${thumbHtml}<div class="rt-title-copy"><a href="#" class="order-title-link rt-title-link" data-order-id="${order.id}">${fullTitle}</a><div class="rt-prep-flag-slot" data-order-id="${order.id}">${renderReadyToShipMetaBadges(order)}</div></div></div></td>`;
 }
 
@@ -2368,13 +2472,40 @@ function readyToShipLocationCellHtml(order, innerHtml, extraAttrs = '') {
     return `<td class='sold-td-small' ${extraAttrs}><span class="rt-loc-cell-wrap">${innerHtml}${gear}</span></td>`;
 }
 
+function readyToShipSuffixMatchHtml(order) {
+    const suggested = !!order.location_match_suggested;
+    const matchedBarcode = String(order.location_match_barcode || order.finder_matched_barcode || '').trim();
+    const variations = Array.isArray(order.suffix_variations) ? order.suffix_variations : [];
+    let html = '';
+
+    if (suggested) {
+        const suggestionLabel = order.location_match_source === 'store_listing_fallback'
+            ? 'STORE MATCH'
+            : 'SUGGESTED';
+        html += `<div style="margin-top:4px;color:#c4b5fd;font-size:0.66rem;font-weight:800;line-height:1.2;">${suggestionLabel} · ${esc(formatUpcDisplay(matchedBarcode))}</div>`;
+    }
+    if (variations.length) {
+        const rows = variations.map(item => {
+            const locations = Array.isArray(item.locations) ? item.locations.filter(Boolean).join(', ') : '';
+            const quantity = Number.parseInt(item.quantity || 0, 10) || 0;
+            return `<div style="padding:3px 0;border-top:1px solid rgba(148,163,184,0.14);"><strong>${esc(formatUpcDisplay(item.barcode || ''))}</strong>${quantity ? ` · ${quantity} available` : ''}${locations ? `<br><span style="color:#94a3b8;">${esc(locations)}</span>` : ''}</div>`;
+        }).join('');
+        html += `<details style="margin-top:3px;font-size:0.64rem;color:#a5b4fc;line-height:1.25;"><summary style="cursor:pointer;white-space:nowrap;">${variations.length} other suffix ${variations.length === 1 ? 'option' : 'options'}</summary><div style="margin-top:3px;text-align:left;min-width:145px;">${rows}</div></details>`;
+    }
+    return html;
+}
+
 function tdLocation(order) {
     const missingDataUrl = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="120" height="80"><rect width="100%" height="100%" fill="#1e293b"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#475569" font-size="12">Image missing</text></svg>');
+    const suffixMeta = readyToShipSuffixMatchHtml(order);
+    const suggestionStyle = order.location_match_suggested
+        ? `style="background:rgba(124,58,237,0.13);box-shadow:inset 3px 0 0 #8b5cf6;"`
+        : '';
 
     // Check if multiple locations exist
     if (order.locations && Array.isArray(order.locations) && order.locations.length > 1) {
         const locationCodes = order.locations.map(loc => esc(loc.code)).join(', ');
-        return readyToShipLocationCellHtml(order, `<a href="#" class="order-loc-link" data-order-id="${order.id}" style="color:#fbbf24;font-weight:bold;">${locationCodes}</a>`);
+        return readyToShipLocationCellHtml(order, `<div><a href="#" class="order-loc-link" data-order-id="${order.id}" style="color:#fbbf24;font-weight:bold;">${locationCodes}</a>${suffixMeta}</div>`, suggestionStyle);
     }
 
     // Single location (legacy or single result)
@@ -2382,7 +2513,7 @@ function tdLocation(order) {
 
     if (locationText.match(/\.(jpg|jpeg|png)$/i)) {
         const thumb = `/static/pictureposition/${locationText}`;
-        return readyToShipLocationCellHtml(order, `<a href="#" class="order-loc-link" data-order-id="${order.id}"><img src="${thumb}" style="max-width:60px;max-height:60px;border-radius:8px;border:1px solid rgba(255,255,255,0.08);" onerror="this.src='${missingDataUrl}'" loading="lazy"></a>`);
+        return readyToShipLocationCellHtml(order, `<div><a href="#" class="order-loc-link" data-order-id="${order.id}"><img src="${thumb}" style="max-width:60px;max-height:60px;border-radius:8px;border:1px solid rgba(255,255,255,0.08);" onerror="this.src='${missingDataUrl}'" loading="lazy"></a>${suffixMeta}</div>`, suggestionStyle);
     }
 
     if (!locationText) {
@@ -2392,7 +2523,7 @@ function tdLocation(order) {
         return `<td class='sold-td-small' style="color:#475569;font-style:italic;">-</td>`;
     }
 
-    return readyToShipLocationCellHtml(order, `<a href="#" class="order-loc-link" data-order-id="${order.id}">${locationText}</a>`);
+    return readyToShipLocationCellHtml(order, `<div><a href="#" class="order-loc-link" data-order-id="${order.id}">${locationText}</a>${suffixMeta}</div>`, suggestionStyle);
 }
 
 function tdQuantity(order) {
@@ -2582,6 +2713,11 @@ function syncReadyToShipNoteState(orderId, payload) {
         : readyToShipOrderLabels(order);
     order.ready_to_ship_label_count = parseInt(payload && payload.ready_to_ship_label_count, 10) || order.ready_to_ship_labels.length;
     order.has_ready_to_ship_label = readyToShipOrderLabels(order).length > 0;
+    document.querySelectorAll('.rt-order-row').forEach(row => {
+        if (String(row.dataset.orderId || '') === String(orderId)) {
+            row.classList.toggle('rt-row-has-note', order.has_ready_to_ship_note);
+        }
+    });
     patchReadyToShipNoteCell(orderId);
     patchReadyToShipLabelCell(orderId);
     OrderManager.saveToLocalStorage();
@@ -3292,10 +3428,17 @@ function showReadyToShipLabelsPopup() {
 // Create a single order row
 function createOrderRow(order, isCompleted = false) {
     const tr = document.createElement('tr');
+    tr.classList.add('rt-order-row');
     tr.dataset.orderId = order.id;
     tr.style.transition = 'all 0.3s ease';
     if (isExactTracedSuffixedOrder(order)) {
         tr.classList.add('rt-row-traced');
+    }
+    if (readyToShipOrderHasNote(order)) {
+        tr.classList.add('rt-row-has-note');
+    }
+    if ((parseInt(order.quantity, 10) || 0) > 1) {
+        tr.classList.add('rt-row-multi-qty');
     }
 
     const buttonHtml = isCompleted
@@ -3376,11 +3519,11 @@ function renderSoldOrders(orders, fromCache = false) {
     const completedOrders = [];
 
     dedupedOrders.forEach(order => {
-        OrderManager.setOrder(order);
-        if (order.isHandled) {
-            completedOrders.push(order);
+        const storedOrder = OrderManager.setOrder(order);
+        if (storedOrder.isHandled) {
+            completedOrders.push(storedOrder);
         } else {
-            pendingOrders.push(order);
+            pendingOrders.push(storedOrder);
         }
     });
 
@@ -3643,7 +3786,12 @@ function readyToShipLocationPreviewHtml(locationCode, previewKey) {
 }
 
 async function fetchOrderLocationOptions(orderId) {
-    const response = await fetch(`/api/ready-to-ship/location-options/${encodeURIComponent(orderId)}?_t=${Date.now()}`, {
+    const params = new URLSearchParams({ _t: String(Date.now()) });
+    const order = OrderManager.getOrder(orderId);
+    if (order && order.location_match_suggested && order.location_match_barcode) {
+        params.set('matched_barcode', String(order.location_match_barcode));
+    }
+    const response = await fetch(`/api/ready-to-ship/location-options/${encodeURIComponent(orderId)}?${params.toString()}`, {
         cache: 'no-store'
     });
     const data = await response.json();
@@ -4093,7 +4241,14 @@ async function handleOrderStatusChange(orderId, isUndo) {
 
         // Update server
         const endpoint = isUndo ? '/mark-order-unhandled' : '/mark-order-handled';
-        const payload = isUndo ? { id: orderId } : { id: orderId, allocations: locationAllocations, skip_inventory: skipInventory };
+        const payload = isUndo
+            ? { id: orderId }
+            : {
+                id: orderId,
+                allocations: locationAllocations,
+                skip_inventory: skipInventory,
+                matched_barcode: order.location_match_suggested ? (order.location_match_barcode || '') : ''
+            };
         const response = await fetch(endpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -5177,7 +5332,8 @@ function showOrderPopup(order, options = {}) {
 
     const missingDataUrlPopup = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="360" height="220"><rect width="100%" height="100%" fill="#1e293b"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#475569" font-size="18">Image missing</text></svg>');
     const title = order && order.title ? order.title : '';
-    const imageUrl = order ? (order.image || order.image_url) : '';
+    const imageValue = order && readyToShipUsableImage(order.image) ? order.image : (order ? order.image_url : '');
+    const imageUrl = readyToShipUsableImage(imageValue) ? imageValue : '';
     const buyer = order && order.shipping_name ? order.shipping_name : '';
     const address = order ? [order.shipping_street1, order.shipping_street2, order.shipping_city, order.shipping_state, order.shipping_postal_code, order.shipping_country].filter(Boolean).join(' ') : '';
     const price = order && order.price ? `$${parseFloat(order.price).toFixed(2)}` : '';
@@ -5251,7 +5407,7 @@ function showOrderPopup(order, options = {}) {
         content += `
             <div style="display:flex;justify-content:center;margin:14px 0 4px;">
                 <button type="button" class="rt-prep-image-link rt-product-image-thumb" data-image-url="${esc(imageUrl)}" data-image-alt="${esc(title || 'Product image')}" data-image-rotation="0" title="Click to enlarge product image" aria-label="Enlarge product image" style="width:140px;height:112px;flex:0 0 140px;">
-                    <img src="${esc(imageUrl)}" alt="${esc(title || 'Product image')}" loading="lazy">
+                    <img src="${esc(imageUrl)}" data-original-src="${esc(imageUrl)}" data-fallback-src="${esc(missingDataUrlPopup)}" onerror="handleReadyToShipImageError(this)" alt="${esc(title || 'Product image')}" loading="lazy">
                 </button>
             </div>
             <div class="popup-muted" style="font-size:0.78rem;margin-bottom:10px;">Click thumbnail to enlarge</div>

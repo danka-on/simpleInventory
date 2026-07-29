@@ -25,6 +25,12 @@
     .search-input:focus { outline: none; border-color: #3498db; }
     .search-btn { padding: 14px 28px; background: #3498db; color: white; border: none; border-radius: 8px; font-size: 16px; cursor: pointer; }
     .search-btn:hover { background: #2980b9; }
+    .custom-items-filter {
+      display: flex; align-items: center; gap: 7px; width: fit-content; margin-top: 12px;
+      padding: 7px 12px; border: 2px solid #16a34a; border-radius: 7px;
+      background: #f0fdf4; color: #15803d; font-size: 0.9rem; font-weight: 700; cursor: pointer;
+    }
+    .custom-items-filter input { width: 17px; height: 17px; accent-color: #16a34a; cursor: pointer; }
 
     .panels { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
     @media (max-width: 700px) { .panels { grid-template-columns: 1fr; } }
@@ -126,6 +132,28 @@
       border-radius: 6px; font-size: 0.9rem; cursor: pointer; font-weight: 600;
     }
 
+    .prep-overlay {
+      display: none; position: fixed; inset: 0; background: rgba(15,23,42,0.72);
+      z-index: 10003; align-items: center; justify-content: center; padding: 18px;
+    }
+    .prep-overlay.show { display: flex; }
+    .prep-popup {
+      position: relative; background: #fff; border-radius: 14px; padding: 20px;
+      width: min(720px, 96vw); max-height: 84vh; overflow-y: auto;
+      box-shadow: 0 18px 50px rgba(0,0,0,0.35);
+    }
+    .prep-popup h3 { color: #5b21b6; margin-bottom: 5px; }
+    .prep-popup-close {
+      position: absolute; right: 12px; top: 10px; border: 0; background: #eef2f7;
+      width: 34px; height: 34px; border-radius: 50%; cursor: pointer; font-size: 1.2rem;
+    }
+    .prep-action-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .prep-open-btn, .warehouse-note-open-btn {
+      border-radius: 7px; padding: 5px 8px; font-size: .76rem; font-weight: 700; cursor: pointer;
+    }
+    .prep-open-btn { border: 1px solid #8b5cf6; background: #f5f3ff; color: #5b21b6; }
+    .warehouse-note-open-btn { border: 1px solid #f59e0b; background: #fffbeb; color: #92400e; }
+
     .empty-state { text-align: center; padding: 30px; color: #95a5a6; font-size: 0.9rem; }
     .loading { text-align: center; padding: 30px; color: #95a5a6; }
     .spinner { border: 3px solid #f3f3f3; border-top: 3px solid #3498db; border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; margin: 0 auto 10px; }
@@ -216,6 +244,9 @@
       color: #e2e8f0;
     }
     html.ss-theme-night .search-input::placeholder { color: #94a3b8; }
+    html.ss-theme-night .custom-items-filter { background: rgba(22,163,74,.14); color: #86efac; }
+    html.ss-theme-night .prep-popup { background: #111827; color: #e5e7eb; }
+    html.ss-theme-night .prep-popup-close { background: #334155; color: #f8fafc; }
     html.ss-theme-night .panel-body { background: #111827; }
     html.ss-theme-night .result-card {
       background: #111827;
@@ -274,6 +305,10 @@
         <input type="text" class="search-input" id="searchInput" data-i18n="search_by_title" placeholder="Search by title, barcode, UPC..." autofocus>
         <button class="search-btn" id="searchBtn" data-i18n="search">Search</button>
       </div>
+      <label class="custom-items-filter">
+        <input type="checkbox" id="customItemsOnly">
+        <span>Custom Items</span>
+      </label>
     </div>
 
     <div class="token-bar" id="tokenBar">
@@ -316,6 +351,13 @@
       </div>
     </div>
 
+    <div class="prep-overlay" id="prepOverlay" onclick="closePrepPopup()">
+      <div class="prep-popup" onclick="event.stopPropagation()">
+        <button type="button" class="prep-popup-close" onclick="closePrepPopup()" aria-label="Close">×</button>
+        <div id="prepPopupContent"></div>
+      </div>
+    </div>
+
     <div class="panels">
       <div class="panel panel-warehouse">
         <div class="panel-header"><span data-i18n="warehouse_searchrack">Warehouse (searchRack)</span> <span class="count" id="warehouseCount">0</span></div>
@@ -339,6 +381,10 @@ const orderTitle = params.get('title') || '';
 const orderBarcode = params.get('barcode') || '';
 const orderImage = params.get('image') || '';
 const returnTo = params.get('return') || params.get('return_to') || params.get('from') || '';
+const listingStore = params.get('listing_store') || '';
+const listingKey = params.get('listing_key') || '';
+const listingId = params.get('listing_id') || '';
+const isListingMatch = !!(listingStore && listingKey);
 
 const backLink = document.getElementById('backLink');
 if (backLink) {
@@ -350,13 +396,18 @@ let tokens = [];
 
 const searchInput = document.getElementById('searchInput');
 const searchBtn = document.getElementById('searchBtn');
+const customItemsOnly = document.getElementById('customItemsOnly');
 
 // Show order context if we have info
 if (orderTitle) {
   document.getElementById('orderContext').style.display = 'flex';
   document.getElementById('orderTitle').textContent = orderTitle;
   if (orderBarcode) document.getElementById('orderBarcode').textContent = 'UPC: ' + formatUpcDisplay(orderBarcode);
-  if (orderId) document.getElementById('orderIdDisplay').textContent = ' | Order #' + orderId;
+  if (orderId) {
+    document.getElementById('orderIdDisplay').textContent = ' | Order #' + orderId;
+  } else if (isListingMatch) {
+    document.getElementById('orderIdDisplay').textContent = ` | ${listingStore.toUpperCase()} listing`;
+  }
 
   // Set order image if provided, otherwise try to fetch from rawbol using barcode
   const orderImgEl = document.getElementById('orderImg');
@@ -385,17 +436,19 @@ if (orderTitle) {
   // Build token chips from title words (all start inactive for manual use)
   // Filter out punctuation, filler words, and numbers
   const fillerWords = new Set(['a', 'an', 'the', 'for', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'of', 'with', 'by', 'from', 'as', 'is', 'it', 'its', 'be', 'are', 'was', 'were', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'must', 'shall', 'can', 'this', 'that', 'these', 'those', 'am', 'if', 'then', 'so', 'up', 'out', 'no', 'not', 'only', 'own', 'into', 'over', 'after', 'before', 'between', 'under', 'again', 'further', 'once']);
-  const words = orderTitle.split(/[\s,]+/)  // Split by whitespace OR commas (handles "14.29,White" -> ["14.29", "White"])
-    .map(w => w.replace(/[.\-()]+/g, '').trim())  // Remove periods, hyphens, parentheses
+  const words = (orderTitle.match(/\d+(?:\.\d+)?|[^\W\d_]+/gu) || [])
+    // Split mixed terms at number/letter boundaries:
+    // "3piece", "3pc", and "3-pc" all become separate "3" + word bubbles.
+    .map(w => w.trim())
     .filter(w => w.length > 0)
-    .filter(w => !fillerWords.has(w.toLowerCase()))  // Remove filler words
-    .filter(w => !/^\d+$/.test(w));  // Remove pure numbers (e.g., "1429" from "14.29")
+    .filter(w => !fillerWords.has(w.toLowerCase()));
   tokens = words.map(w => ({word: w, active: false}));
   renderTokens();
 }
 
 searchBtn.addEventListener('click', () => doSearch());
 searchInput.addEventListener('keyup', (e) => { if (e.key === 'Enter') doSearch(); });
+customItemsOnly.addEventListener('change', () => doSearch());
 
 function renderTokens() {
   const bar = document.getElementById('tokenBar');
@@ -477,7 +530,8 @@ const missingImg = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="
 
 async function doSearch(overrideQuery) {
   const q = (overrideQuery || searchInput.value).trim();
-  if (!q) return;
+  const customOnly = customItemsOnly.checked;
+  if (!q && !customOnly) return;
 
   document.getElementById('warehouseResults').innerHTML = '<div class="loading"><div class="spinner"></div>' + t('searching') + '</div>';
   document.getElementById('rawbolResults').innerHTML = '<div class="loading"><div class="spinner"></div>' + t('searching') + '</div>';
@@ -486,7 +540,7 @@ async function doSearch(overrideQuery) {
     const resp = await fetch('/api/finder', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({q: q})
+      body: JSON.stringify({q: q, custom_only: customOnly})
     });
     const data = await resp.json();
     renderWarehouse(data.searchrack || []);
@@ -522,12 +576,21 @@ function renderWarehouse(items) {
     const locBadgeHtml = loc
       ? `<span class="loc-badge" style="cursor:pointer;" data-loc="${locAttr}" data-pic="${picPosEsc}" onclick="showLocPopup(this.dataset.loc, this.dataset.pic)">${loc}</span>`
       : '';
-    // Show "Match" button if we have an order_id (from ready-to-ship), otherwise "Remove"
-    const actionBtn = orderId
+    // Match either a sold order or a persistent store listing; otherwise remove.
+    const actionBtn = (orderId || isListingMatch)
       ? `<button class="search-rack-btn" data-idx="${idx}" data-searchrack-id="${attrEsc(item.id)}" data-barcode="${attrEsc(item.barcode)}" data-location="${locAttr}" onclick="handleMatchFromButton(this)">${t('match') || 'Match'}</button>`
       : `<button class="remove-btn" data-idx="${idx}" onclick="handleRemove(${item.id}, '${esc(item.barcode)}', this)">${t('remove')}</button>`;
 
     const itemTitle = item.title || '';
+    const warehouseNote = String(item.warehouse_note || '').trim();
+    const prepSummary = item.item_prep_summary || {};
+    const hasPrep = String(item.barcode || '').includes('-') && !!prepSummary.has_content;
+    const noteActions = (warehouseNote || hasPrep)
+      ? `<div class="prep-action-row">
+          ${warehouseNote ? `<button type="button" class="warehouse-note-open-btn" data-note="${attrEsc(warehouseNote)}" data-barcode="${attrEsc(item.barcode)}">Warehouse Note</button>` : ''}
+          ${hasPrep ? `<button type="button" class="prep-open-btn" data-barcode="${attrEsc(item.barcode)}">Item Prep</button>` : ''}
+        </div>`
+      : '';
     return `<div class="result-card" id="wh-card-${item.id}">
       <img src="${esc(imgSrc)}" onerror="this.src='${missingImg}'" class="clickable-thumb" data-title="${esc(itemTitle)}" style="cursor:pointer">
       <div class="details">
@@ -537,10 +600,70 @@ function renderWarehouse(items) {
           <span class="qty-display" data-id="${item.id}">Qty: ${item.quantity || '?'}</span>
         </div>
         ${locBadgeHtml}
+        ${noteActions}
       </div>
       ${actionBtn}
     </div>`;
   }).join('');
+}
+
+function closePrepPopup() {
+  document.getElementById('prepOverlay').classList.remove('show');
+}
+
+function showPrepPopupHtml(html) {
+  document.getElementById('prepPopupContent').innerHTML = html;
+  document.getElementById('prepOverlay').classList.add('show');
+}
+
+function showFinderWarehouseNote(note, barcode) {
+  showPrepPopupHtml(`<h3>Warehouse Note</h3><div style="font-size:.8rem;color:#64748b;margin-bottom:12px;">${esc(formatUpcDisplay(barcode || ''))}</div><div style="white-space:pre-wrap;line-height:1.55;background:#fffbeb;border:1px solid #fde68a;color:#78350f;border-radius:10px;padding:13px;">${esc(note || '')}</div>`);
+}
+
+function renderFinderItemPrep(data) {
+  const statusEntries = Array.isArray(data.status_entries) ? data.status_entries : [];
+  const notes = Array.isArray(data.notes) ? data.notes : [];
+  const images = Array.isArray(data.images) ? data.images : [];
+  const voiceNotes = Array.isArray(data.voice_notes) ? data.voice_notes : [];
+  const textHtml = [];
+
+  statusEntries.forEach(entry => {
+    const reason = String(entry.reason || '').trim();
+    const note = String(entry.note || '').trim();
+    if (!reason && !note) return;
+    textHtml.push(`<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:9px;padding:10px;line-height:1.45;">
+      ${entry.status ? `<div style="font-size:.75rem;font-weight:800;text-transform:uppercase;color:#9a3412;margin-bottom:5px;">${esc(entry.status)}</div>` : ''}
+      ${reason ? `<div><strong>Reason:</strong> ${esc(reason)}</div>` : ''}
+      ${note ? `<div style="white-space:pre-wrap;margin-top:${reason ? '5px' : '0'};">${esc(note)}</div>` : ''}
+    </div>`);
+  });
+  notes.forEach(note => textHtml.push(`<div style="white-space:pre-wrap;background:#f8fafc;border:1px solid #cbd5e1;border-radius:9px;padding:10px;">${esc(note.note || '')}</div>`));
+
+  const imageHtml = images.map(image => {
+    const url = String(image.image_url || '').trim();
+    const rotation = Number(image.rotation || 0);
+    return `<img src="${esc(url)}" class="clickable-thumb" data-title="Item prep photo" style="width:132px;height:110px;object-fit:cover;border-radius:9px;border:1px solid #cbd5e1;cursor:pointer;transform:rotate(${rotation}deg);" onclick="closePrepPopup();showImgPopup(this.src,'Item prep photo')" onerror="this.style.display='none'">`;
+  }).join('');
+  const audioHtml = voiceNotes.map((voice, index) => `<div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:9px;padding:9px;"><div style="font-size:.76rem;font-weight:800;color:#5b21b6;margin-bottom:5px;">Voice note ${index + 1}</div><audio controls preload="metadata" src="${esc(voice.audio_url || '')}" style="width:100%;"></audio></div>`).join('');
+
+  return `<h3>Item Prep</h3>
+    <div style="font-size:.8rem;color:#64748b;margin-bottom:12px;">${esc(formatUpcDisplay(data.barcode || ''))}</div>
+    ${textHtml.length ? `<div style="display:grid;gap:8px;">${textHtml.join('')}</div>` : ''}
+    ${images.length ? `<h4 style="margin:14px 0 7px;">Pictures</h4><div style="display:flex;flex-wrap:wrap;gap:9px;">${imageHtml}</div>` : ''}
+    ${voiceNotes.length ? `<h4 style="margin:14px 0 7px;">Voice Notes</h4><div style="display:grid;gap:8px;">${audioHtml}</div>` : ''}
+    ${!textHtml.length && !images.length && !voiceNotes.length ? '<div style="color:#64748b;">No item-prep content found.</div>' : ''}`;
+}
+
+async function showFinderItemPrep(barcode) {
+  showPrepPopupHtml('<div class="loading">Loading item-prep notes and media…</div>');
+  try {
+    const response = await fetch(`/api/warehouse/item-prep/${encodeURIComponent(barcode)}?_t=${Date.now()}`, {cache:'no-store'});
+    const data = await response.json();
+    if (!response.ok || !data.success) throw new Error(data.error || 'Unable to load item-prep content');
+    showPrepPopupHtml(renderFinderItemPrep(data));
+  } catch (error) {
+    showPrepPopupHtml(`<h3>Item Prep</h3><div style="color:#c0392b;">${esc(error.message || 'Unable to load item-prep content')}</div>`);
+  }
 }
 
 function renderRawbol(items) {
@@ -579,6 +702,10 @@ function searchWarehouse(upc) {
 
 // Delegated click handler for thumbnail images and truncated titles
 document.addEventListener('click', (e) => {
+  const prepBtn = e.target.closest('.prep-open-btn');
+  if (prepBtn) { e.preventDefault(); e.stopPropagation(); showFinderItemPrep(prepBtn.dataset.barcode || ''); return; }
+  const warehouseNoteBtn = e.target.closest('.warehouse-note-open-btn');
+  if (warehouseNoteBtn) { e.preventDefault(); e.stopPropagation(); showFinderWarehouseNote(warehouseNoteBtn.dataset.note || '', warehouseNoteBtn.dataset.barcode || ''); return; }
   const thumb = e.target.closest('.clickable-thumb');
   if (thumb) { showImgPopup(thumb.src, thumb.dataset.title || ''); return; }
   const titleDiv = e.target.closest('.clickable-title');
@@ -748,25 +875,41 @@ function handleMatchFromButton(btnEl) {
 
 // Match barcode and location to sold order (when accessed from ready-to-ship)
 async function handleMatch(searchrackId, barcode, location, btnEl) {
-  if (!orderId) {
-    alert('No order ID - cannot match');
+  if (!orderId && !isListingMatch) {
+    alert('No order or store listing context - cannot match');
     return;
   }
 
   try {
-    const resp = await fetch(`/api/sold/match-barcode/${orderId}`, {
+    const endpoint = orderId
+      ? `/api/sold/match-barcode/${orderId}`
+      : '/api/listing-helper/inventory-match';
+    const payload = orderId
+      ? {barcode: barcode, location: location, searchrack_id: searchrackId}
+      : {
+          store: listingStore,
+          listing_key: listingKey,
+          listing_id: listingId,
+          marketplace_barcode: orderBarcode,
+          listing_title: orderTitle,
+          searchrack_id: searchrackId
+        };
+    const resp = await fetch(endpoint, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({barcode: barcode, location: location, searchrack_id: searchrackId})
+      body: JSON.stringify(payload)
     });
     const data = await resp.json();
 
     if (data.success) {
-      const savedLocation = data.new_location || location || '';
-      const savedSearchrackId = data.searchrack_id || searchrackId;
+      const savedMatch = data.match || {};
+      const savedLocation = data.new_location || savedMatch.inventory_location || location || '';
+      const savedSearchrackId = data.searchrack_id || savedMatch.searchrack_id || searchrackId;
       // Store for undo
       _lastMatch = {
+        mode: orderId ? 'order' : 'listing',
         order_id: orderId,
+        old_match: data.old_match || null,
         old_barcode: data.old_barcode,
         old_location: data.old_location,
         old_searchrack_id: data.old_searchrack_id || '',
@@ -792,7 +935,8 @@ async function handleMatch(searchrackId, barcode, location, btnEl) {
       // Show success banner with undo button
       const banner = document.getElementById('successBanner');
       const locText = savedLocation ? ` | Loc: ${savedLocation}` : '';
-      banner.innerHTML = `${t('barcode_matched') || 'Matched!'} UPC: ${formatUpcDisplay(barcode)}${locText}
+      const matchLabel = isListingMatch ? 'Store listing fallback saved!' : (t('barcode_matched') || 'Matched!');
+      banner.innerHTML = `${matchLabel} UPC: ${formatUpcDisplay(barcode)}${locText}
         <button class="undo-btn" onclick="undoMatch()">${t('undo') || 'Undo'}</button>`;
       banner.style.display = 'block';
       banner.style.background = '#4caf50';
@@ -812,14 +956,31 @@ async function undoMatch() {
   if (!_lastMatch) return;
 
   try {
-    const resp = await fetch(`/api/sold/match-barcode/${_lastMatch.order_id}`, {
+    const isListingUndo = _lastMatch.mode === 'listing';
+    const oldListingMatch = _lastMatch.old_match || null;
+    const endpoint = isListingUndo
+      ? '/api/listing-helper/inventory-match'
+      : `/api/sold/match-barcode/${_lastMatch.order_id}`;
+    const payload = isListingUndo
+      ? (oldListingMatch
+          ? {
+              store: listingStore,
+              listing_key: listingKey,
+              listing_id: oldListingMatch.listing_id || listingId,
+              marketplace_barcode: oldListingMatch.marketplace_barcode || orderBarcode,
+              listing_title: oldListingMatch.listing_title || orderTitle,
+              searchrack_id: oldListingMatch.searchrack_id
+            }
+          : {store: listingStore, listing_key: listingKey, clear: true})
+      : {
+          barcode: _lastMatch.old_barcode || '',
+          location: _lastMatch.old_location || '',
+          searchrack_id: _lastMatch.old_searchrack_id || null
+        };
+    const resp = await fetch(endpoint, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        barcode: _lastMatch.old_barcode || '',
-        location: _lastMatch.old_location || '',
-        searchrack_id: _lastMatch.old_searchrack_id || null
-      })
+      body: JSON.stringify(payload)
     });
     const data = await resp.json();
 

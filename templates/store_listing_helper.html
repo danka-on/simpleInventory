@@ -407,6 +407,24 @@
       text-decoration: underline;
       color: #93c5fd;
     }
+    .listing-match-link {
+      flex-shrink: 0;
+      border: 1px solid rgba(139,92,246,0.55);
+      background: rgba(124,58,237,0.14);
+      color: #c4b5fd;
+      padding: 5px 9px;
+      border-radius: 7px;
+      font-size: 0.7rem;
+      font-weight: 800;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    .listing-match-link:hover { background: rgba(124,58,237,0.28); color:#ede9fe; }
+    .listing-match-link.saved {
+      border-color: rgba(16,185,129,0.55);
+      background: rgba(16,185,129,0.13);
+      color: #6ee7b7;
+    }
 
     /* Card footer: actions */
     .alert-footer {
@@ -636,6 +654,10 @@
         <i class="fas fa-balance-scale-right" style="margin-right:6px"></i><span data-i18n="quantity_alert">Quantity Alert</span>
         <span class="badge badge-yellow" id="badge-quantity-alert" style="display:none">0</span>
       </button>
+      <button class="tab" data-tab="listing_matches">
+        <i class="fas fa-link" style="margin-right:6px"></i><span>Inventory Matches</span>
+        <span class="badge badge-yellow" id="badge-listing-matches" style="display:none">0</span>
+      </button>
       <button class="tab" data-tab="dismissed">
         <i class="fas fa-check-circle" style="margin-right:6px"></i><span data-i18n="marked_fixed">Marked Fixed</span>
         <span class="badge badge-gray" id="badge-dismissed" style="display:none">0</span>
@@ -650,6 +672,7 @@
     <div class="tab-content active" id="content-no_warehouse"></div>
     <div class="tab-content" id="content-no_listings"></div>
     <div class="tab-content" id="content-quantity_alert"></div>
+    <div class="tab-content" id="content-listing_matches"></div>
     <div class="tab-content" id="content-dismissed"></div>
   </div>
 </div>
@@ -820,12 +843,14 @@ async function scanAlerts(forceRefresh = false) {
     updateBadge('badge-no-warehouse', counts.no_warehouse);
     updateBadge('badge-no-listings', counts.no_listings);
     updateBadge('badge-quantity-alert', counts.quantity_alert);
+    updateBadge('badge-listing-matches', counts.listing_matches);
     syncGlobalAlertsBadge(counts);
 
     // Render alerts
     renderNoWarehouse(alertsData.no_warehouse || []);
     renderNoListings(alertsData.no_listings || []);
     renderQuantityAlert(alertsData.quantity_alert || []);
+    renderListingMatches(alertsData.listing_matches || []);
 
   } catch (e) {
     alert(t('error_scanning') + ': ' + e.message);
@@ -875,6 +900,22 @@ function updateBadge(id, count) {
 }
 
 function renderListings(listings) {
+  function finderUrl(l) {
+    const store = String((l && l.store) || '').trim().toLowerCase();
+    const listingKey = String((l && (l.listing_key || l.listing_id)) || '').trim();
+    if (!store || !listingKey) return '';
+    const finderParams = new URLSearchParams({
+      listing_store: store,
+      listing_key: listingKey,
+      listing_id: String((l && l.listing_id) || ''),
+      title: String((l && l.title) || ''),
+      barcode: String((l && l.upc) || ''),
+      image: String((l && l.image) || ''),
+      return: window.location.pathname + window.location.search
+    });
+    return `/finder?${finderParams.toString()}`;
+  }
+
   function listingUrl(l) {
     const raw = String((l && l.url) || '').trim();
     if (raw && /^https?:\/\//i.test(raw)) return raw;
@@ -907,6 +948,8 @@ function renderListings(listings) {
 
   return listings.map((l, idx) => {
     const href = listingUrl(l);
+    const finderHref = finderUrl(l);
+    const savedMatch = l.inventory_match || null;
     const title = esc(l.title || t('untitled'));
     const titleHtml = href
       ? `<a class="listing-title-link" href="${esc(href)}" target="_blank" rel="noopener">${title}</a>`
@@ -918,6 +961,7 @@ function renderListings(listings) {
         <span class="store-badge ${l.store}">${esc(storeLabel(l.store))}</span>
         <span class="listing-qty">×${l.qty}</span>
         <span class="listing-title" title="${title}">${titleHtml}</span>
+        ${finderHref ? `<a class="listing-match-link${savedMatch ? ' saved' : ''}" href="${esc(finderHref)}">${savedMatch ? `<i class="fas fa-link"></i> ${esc(savedMatch.location || savedMatch.barcode || 'Matched')}` : '<i class="fas fa-search-location"></i> Match inventory'}</a>` : ''}
       </div>
     `;
   }).join('');
@@ -1070,6 +1114,23 @@ function renderQuantityAlert(alerts) {
     </div>
   `;
   }).join('');
+}
+
+function renderListingMatches(listings) {
+  const el = document.getElementById('content-listing_matches');
+  if (!el) return;
+  if (!listings.length) {
+    el.innerHTML = `<div class="empty-state"><span class="icon"><i class="fas fa-check-circle"></i></span><p>Every active store listing has an exact warehouse barcode match.</p></div>`;
+    return;
+  }
+  el.innerHTML = `
+    <div style="padding:16px 20px 4px;color:#94a3b8;font-size:0.82rem;line-height:1.5;">
+      Active listings without an exact warehouse UPC appear here. Saved matches remain visible so they can be changed.
+    </div>
+    <div class="alert-listings-section" style="padding-bottom:20px;">
+      <div class="listing-list">${renderListings(listings)}</div>
+    </div>
+  `;
 }
 
 function formatDismissedAt(raw) {

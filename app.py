@@ -2444,6 +2444,106 @@ def _searchrack_matches_for_barcode(cur, barcode, schema=None, include_zero=Fals
     matches.sort(key=lambda m: (m.get('location_key') or '', int(m.get('id') or 0)))
     return matches
 
+
+def _ready_to_ship_suffix_inventory_matches(cur, barcode, schema=None):
+    """Return available SEARCHRACK rows whose barcode is a suffix variant."""
+    schema = schema or _searchrack_removal_schema(cur)
+    barcode_col = schema.get('barcode_col')
+    base_barcode = _barcode_base_without_suffix(barcode)
+    target_base_key = _sold_removal_barcode_key(base_barcode).split('-', 1)[0]
+    if not barcode_col or not target_base_key:
+        return []
+
+    base_variants = {
+        str(value or '').strip().lower()
+        for value in _sold_removal_barcode_variants(base_barcode)
+        if value and '-' not in str(value)
+    }
+    if not base_variants:
+        return []
+
+    where_bits = [f"LOWER(TRIM({barcode_col})) LIKE ?" for _ in base_variants]
+    params = tuple(f"{value}-%" for value in sorted(base_variants))
+    cur.execute(f'''
+        SELECT DISTINCT TRIM({barcode_col}) AS barcode
+        FROM SEARCHRACK
+        WHERE {barcode_col} IS NOT NULL
+          AND ({' OR '.join(where_bits)})
+    ''', params)
+
+    matches = []
+    seen_ids = set()
+    for row in cur.fetchall():
+        candidate_barcode = str(row['barcode'] or '').strip()
+        candidate_base_key = _sold_removal_barcode_key(
+            _barcode_base_without_suffix(candidate_barcode)
+        ).split('-', 1)[0]
+        if candidate_base_key != target_base_key:
+            continue
+        for match in _searchrack_matches_for_barcode(
+            cur, candidate_barcode, schema=schema, include_zero=False
+        ):
+            match_id = _coerce_int(match.get('id'), 0)
+            if match_id and match_id not in seen_ids:
+                seen_ids.add(match_id)
+                matches.append(match)
+
+    matches.sort(key=lambda match: (
+        _sold_removal_barcode_key(match.get('barcode')),
+        match.get('location_key') or '',
+        _coerce_int(match.get('id'), 0)
+    ))
+    return matches
+
+
+def _ready_to_ship_condition_is_new(order):
+    raw = str((order or {}).get('item_condition') or (order or {}).get('condition') or '').strip()
+    normalized = re.sub(r'[^a-z0-9]+', '_', raw.lower()).strip('_')
+    return normalized in {'11', '1000', 'new_new', 'new', 'brand_new'}
+
+
+def _ready_to_ship_valid_suffix_suggestion(order_barcode, suggested_barcode):
+    order_key = _sold_removal_barcode_key(order_barcode)
+    suggested_key = _sold_removal_barcode_key(suggested_barcode)
+    if not order_key or not suggested_key or '-' not in suggested_key:
+        return False
+    return order_key.split('-', 1)[0] == suggested_key.split('-', 1)[0]
+
+
+def _ready_to_ship_valid_requested_match(order, suggested_barcode):
+    suggested = str(suggested_barcode or '').strip()
+    order_barcode = _effective_sold_order_barcode(order, prefer_manual_override=True)
+    if _ready_to_ship_valid_suffix_suggestion(order_barcode, suggested):
+        return True
+    mapping = _listing_inventory_match_for_order(order)
+    mapped_barcode = str((mapping or {}).get('inventory_barcode') or '').strip()
+    return bool(
+        suggested
+        and mapped_barcode
+        and _sold_removal_barcode_key(suggested) == _sold_removal_barcode_key(mapped_barcode)
+    )
+
+
+def _ready_to_ship_suffix_alternatives(matches, selected_barcode=''):
+    selected_key = _sold_removal_barcode_key(selected_barcode)
+    grouped = {}
+    for match in matches or []:
+        barcode = str((match or {}).get('barcode') or '').strip()
+        barcode_key = _sold_removal_barcode_key(barcode)
+        if not barcode_key or barcode_key == selected_key:
+            continue
+        bucket = grouped.setdefault(barcode_key, {
+            'barcode': barcode,
+            'quantity': 0,
+            'locations': []
+        })
+        bucket['quantity'] += max(0, _coerce_int((match or {}).get('quantity'), 0))
+        location = _ready_to_ship_match_display_location(match)
+        if location and location not in bucket['locations']:
+            bucket['locations'].append(location)
+    return sorted(grouped.values(), key=lambda item: _sold_removal_barcode_key(item.get('barcode')))
+
+
 def _searchrack_matches_for_removal_context(cur, barcode, *, fallback_barcodes=None, preferred_location=''):
     """Find removable inventory using the same fallbacks as Ready to Ship location lookup."""
     schema = _searchrack_removal_schema(cur)
@@ -3693,6 +3793,23 @@ def _ensure_listing_alerts_tables():
             )
         ''')
         cur.execute('CREATE INDEX IF NOT EXISTS idx_ebay_listing_health_checked_at ON ebay_listing_health_cache(checked_at)')
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS listing_inventory_matches (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                store TEXT NOT NULL,
+                listing_key TEXT NOT NULL COLLATE NOCASE,
+                listing_id TEXT,
+                marketplace_barcode TEXT,
+                listing_title TEXT,
+                searchrack_id INTEGER NOT NULL,
+                inventory_barcode TEXT NOT NULL,
+                inventory_location TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(store, listing_key)
+            )
+        ''')
+        cur.execute('CREATE INDEX IF NOT EXISTS idx_listing_inventory_match_rack ON listing_inventory_matches(searchrack_id)')
         conn.commit()
         conn.close()
     except Exception as e:
@@ -3705,6 +3822,69 @@ def _listing_alert_upc_key(raw_upc):
         return ''
     normalized = _strip_leading_zeros_numeric(upc)
     return (normalized or upc).lower()
+
+
+def _normalize_store_listing_identity(store, listing_key):
+    normalized_store = str(store or '').strip().lower()
+    normalized_key = str(listing_key or '').strip()
+    if normalized_store not in {'ebay', 'amazon', 'facebook'} or not normalized_key:
+        return '', ''
+    prefix = f'{normalized_store}:'
+    if normalized_key.lower().startswith(prefix):
+        normalized_key = normalized_key[len(prefix):].strip()
+    return normalized_store, normalized_key
+
+
+def _store_listing_order_identity_candidates(order):
+    store = str(_sold_order_value(order, 'store', '') or '').strip().lower()
+    values = []
+    if store == 'ebay':
+        values = [
+            _sold_order_value(order, 'listing_listing_id', ''),
+            _sold_order_value(order, 'item_id', ''),
+            _sold_order_value(order, 'listing_sku', ''),
+            _sold_order_value(order, 'sku', '')
+        ]
+    elif store == 'amazon':
+        values = [
+            _sold_order_value(order, 'listing_sku', ''),
+            _sold_order_value(order, 'sku', ''),
+            _sold_order_value(order, 'listing_asin', ''),
+            _sold_order_value(order, 'item_id', '')
+        ]
+
+    out = []
+    for value in values:
+        _, key = _normalize_store_listing_identity(store, value)
+        key_lower = key.lower()
+        if key and key_lower not in out:
+            out.append(key_lower)
+    return store, out
+
+
+def _load_listing_inventory_match_lookup():
+    _ensure_listing_alerts_tables()
+    lookup = {}
+    try:
+        with sqlite3.connect(str(BASE_DIR / 'listing_alerts.db')) as conn:
+            conn.row_factory = sqlite3.Row
+            for row in conn.execute('SELECT * FROM listing_inventory_matches'):
+                store, key = _normalize_store_listing_identity(row['store'], row['listing_key'])
+                if store and key:
+                    lookup[(store, key.lower())] = dict(row)
+    except Exception as e:
+        print(f'Warning: Could not load store-listing inventory matches: {e}')
+    return lookup
+
+
+def _listing_inventory_match_for_order(order, lookup=None):
+    mapping_lookup = lookup if lookup is not None else _load_listing_inventory_match_lookup()
+    store, candidates = _store_listing_order_identity_candidates(order)
+    for candidate in candidates:
+        match = mapping_lookup.get((store, candidate))
+        if match:
+            return match
+    return None
 
 def _listing_alert_base_upc_key(raw_upc):
     """Normalize base UPC (strip -suffix + leading zeros) for broader matching."""
@@ -3746,6 +3926,48 @@ def _parse_iso_utc_naive(raw):
         return dt
     except Exception:
         return None
+
+
+def _sold_order_sale_datetime(order):
+    """Return the best available timestamp identifying this specific sale."""
+    for field in ('paid_time', 'sold_date', 'sale_date', 'created_at'):
+        try:
+            value = order.get(field) if isinstance(order, dict) else order[field]
+        except Exception:
+            value = None
+        parsed = _parse_iso_utc_naive(value)
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _sold_removal_event_is_current(order, removal):
+    """Reject barcode history that predates the sold-order occurrence."""
+    sold_at = _sold_order_sale_datetime(order)
+    if sold_at is None:
+        return True
+    try:
+        removed_value = removal.get('removed_at') if isinstance(removal, dict) else removal['removed_at']
+    except Exception:
+        removed_value = None
+    removed_text = str(removed_value or '').strip()
+    removed_at = None
+    if removed_text:
+        try:
+            parsed_removed = datetime.datetime.fromisoformat(removed_text.replace('Z', '+00:00'))
+            if parsed_removed.tzinfo is None:
+                # Rack-history events are written with datetime.now(), so their
+                # otherwise-naive timestamps are local warehouse time.
+                try:
+                    from zoneinfo import ZoneInfo
+                    parsed_removed = parsed_removed.replace(tzinfo=ZoneInfo('America/New_York'))
+                except Exception:
+                    parsed_removed = parsed_removed.replace(tzinfo=datetime.datetime.now().astimezone().tzinfo)
+            removed_at = parsed_removed.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+        except Exception:
+            removed_at = None
+    return removed_at is not None and removed_at >= sold_at
+
 
 def _probe_ebay_listing_live(item_id, url=''):
     """
@@ -3896,6 +4118,40 @@ def _effective_sold_order_barcode(order, prefer_manual_override=False):
         return str(resolved or barcode).strip()
     except Exception:
         return barcode
+
+
+def _ready_to_ship_image_value(value):
+    """Return a usable image reference, or an empty string for missing values."""
+    image = str(value or '').strip()
+    if not image or image.lower() in {'nan', 'none', 'null', 'undefined', 'n/a', 'na'}:
+        return ''
+    return image
+
+
+def _ready_to_ship_rawbol_image(rawbol_cur, values):
+    """Find the newest Raw BOL image matching any form of an order barcode."""
+    candidates = []
+    seen = set()
+    for value in values:
+        for candidate in _sold_removal_barcode_variants(value):
+            normalized = str(candidate or '').strip().lower()
+            if normalized and normalized not in seen:
+                seen.add(normalized)
+                candidates.append(normalized)
+    if not candidates:
+        return ''
+
+    placeholders = ','.join('?' for _ in candidates)
+    row = rawbol_cur.execute(f'''
+        SELECT image_url
+        FROM raw_bol_items
+        WHERE LOWER(TRIM(COALESCE(upc, ''))) IN ({placeholders})
+          AND TRIM(COALESCE(image_url, '')) != ''
+        ORDER BY rowid DESC
+        LIMIT 1
+    ''', candidates).fetchone()
+    return _ready_to_ship_image_value(row[0] if row else '')
+
 
 def _is_exact_traced_suffixed_sold_order(order):
     source_upc = str(_sold_order_value(order, 'source_upc', '') or '').strip()
@@ -4636,6 +4892,41 @@ def _add_unique_path(candidates, path):
         candidates.append(path)
 
 
+_SHELF_CODE_INPUT_RE = _re.compile(r'^[A-Za-z0-9][A-Za-z0-9 ._-]{0,79}$')
+
+
+def _validate_shelf_code_input(value, *, required=True):
+    code = str(value or '').strip()
+    if not code:
+        return ('', 'Shelf code is required') if required else ('', '')
+    if not _SHELF_CODE_INPUT_RE.fullmatch(code):
+        return '', (
+            'Shelf code must start with a letter or number and contain only '
+            'letters, numbers, spaces, dots, underscores, or hyphens.'
+        )
+    return code, ''
+
+
+def _safe_shelf_lookup_code(value):
+    code = str(value or '').strip()
+    if not code or '\x00' in code or '/' in code or '\\' in code:
+        return ''
+    if any(part == '..' for part in Path(code).parts):
+        return ''
+    return code
+
+
+def _shelf_code_exists(cur, code, *, exclude_code=''):
+    params = [str(code or '').strip()]
+    sql = 'SELECT id, shelf_name FROM shelves WHERE LOWER(TRIM(shelf_name)) = LOWER(TRIM(?))'
+    if exclude_code:
+        sql += ' AND LOWER(TRIM(shelf_name)) != LOWER(TRIM(?))'
+        params.append(str(exclude_code).strip())
+    sql += ' ORDER BY id LIMIT 1'
+    cur.execute(sql, params)
+    return cur.fetchone()
+
+
 def _preview_base_path_for_code(code):
     normalized = (code or '').strip().lower()
     if not normalized:
@@ -4681,7 +4972,7 @@ def _original_shelf_image_path_for_code(code):
 
 
 def _shelf_original_path_candidates(code):
-    raw = str(code or '').strip()
+    raw = _safe_shelf_lookup_code(code)
     if not raw:
         return []
     variants = []
@@ -4725,6 +5016,31 @@ def _truthy_form_value(value):
     return str(value or '').strip().lower() in ('1', 'true', 'yes', 'on')
 
 
+def _save_uploaded_shelf_png(upload, target_path):
+    """Decode an uploaded image and atomically write a real PNG."""
+    import uuid
+    target = Path(target_path)
+    temp_path = target.with_name(f'.{target.name}.upload-{uuid.uuid4().hex}')
+    try:
+        upload.stream.seek(0)
+        with Image.open(upload.stream) as source:
+            source.load()
+            if source.width * source.height > 50_000_000:
+                raise ValueError('Shelf image is too large')
+            rendered = ImageOps.exif_transpose(source)
+            if rendered.mode not in ('RGB', 'RGBA'):
+                rendered = rendered.convert('RGBA' if 'transparency' in rendered.info else 'RGB')
+            target.parent.mkdir(parents=True, exist_ok=True)
+            rendered.save(str(temp_path), format='PNG')
+        os.replace(str(temp_path), str(target))
+    except ValueError:
+        temp_path.unlink(missing_ok=True)
+        raise
+    except Exception as exc:
+        temp_path.unlink(missing_ok=True)
+        raise ValueError('The uploaded file is not a valid image') from exc
+
+
 def _preferred_shelf_display_dir(code):
     normalized = (code or '').strip()
     if not normalized:
@@ -4737,7 +5053,7 @@ def _preferred_shelf_display_dir(code):
 
 
 def _shelf_display_path_candidates(code):
-    raw = str(code or '').strip()
+    raw = _safe_shelf_lookup_code(code)
     if not raw:
         return []
     variants = []
@@ -4776,6 +5092,75 @@ def _shelf_display_path_candidates(code):
             if path not in candidates:
                 candidates.append(path)
     return candidates
+
+
+def _shelf_exact_display_path_candidates(code):
+    raw = _safe_shelf_lookup_code(code)
+    if not raw:
+        return []
+    variants = []
+    for value in (raw, raw.lower(), raw.upper()):
+        if value and value not in variants:
+            variants.append(value)
+    directories = []
+    for directory in (
+        _preferred_shelf_display_dir(raw),
+        _SHELF_ROOT_DIR,
+        _OFFICE_SHELF_PICS_DIR,
+        _GARAGE_SHELF_PICS_DIR,
+        _HALLWAY_SHELF_PICS_DIR,
+        _MISC_SHELF_PICS_DIR,
+        _LEGACY_OFFICE_SHELF_PICS_DIR,
+        _LEGACY_GARAGE_SHELF_PICS_DIR,
+        _LEGACY_HALLWAY_SHELF_PICS_DIR,
+        _LEGACY_MISC_SHELF_PICS_DIR,
+        _LEGACY_OFFICE_MAP_DIR,
+        _LEGACY_GARAGE_MAP_DIR,
+        _LEGACY_HALLWAY_MAP_DIR,
+        _LEGACY_MISC_MAP_DIR,
+    ):
+        if directory not in directories:
+            directories.append(directory)
+    return [directory / f'{value}.png' for directory in directories for value in variants]
+
+
+def _resolve_exact_shelf_display_path(code, existing_only=False):
+    for candidate in _shelf_exact_display_path_candidates(code):
+        if candidate.exists():
+            return candidate
+    if existing_only:
+        return None
+    raw = _safe_shelf_lookup_code(code)
+    return (_preferred_shelf_display_dir(raw) / f'{raw}.png') if raw else None
+
+
+def _shelf_exact_original_path_candidates(code):
+    raw = _safe_shelf_lookup_code(code)
+    if not raw:
+        return []
+    variants = []
+    for value in (raw, raw.lower(), raw.upper()):
+        if value and value not in variants:
+            variants.append(value)
+    directories = []
+    preferred_area = _shelf_area_for_code(raw)
+    for area in (preferred_area, 'office', 'garage', 'hallway', 'misc'):
+        directory = _area_storage_dir(area, 'originals') if area else None
+        if directory is not None and directory not in directories:
+            directories.append(directory)
+    if _LEGACY_SHELF_ORIGINALS_DIR not in directories:
+        directories.append(_LEGACY_SHELF_ORIGINALS_DIR)
+    return [directory / f'{value}.png' for directory in directories for value in variants]
+
+
+def _resolve_exact_shelf_original_path(code, existing_only=False):
+    for candidate in _shelf_exact_original_path_candidates(code):
+        if candidate.exists():
+            return candidate
+    if existing_only:
+        return None
+    raw = _safe_shelf_lookup_code(code)
+    return _original_shelf_image_path_for_code(raw) if raw else None
 
 
 def _resolve_shelf_display_path(code, existing_only=False):
@@ -17384,12 +17769,23 @@ def _api_status_probe():
 
     try:
         amazon = AmazonManager()
-        if not amazon.test_connection():
-            status['amazon'] = 'expired'
-            status['details']['amazon'] = 'Amazon SP-API connection test failed.'
+        amazon_result = amazon.connection_status()
+        amazon_state = str(amazon_result.get('status') or 'issue').strip().lower()
+        if amazon_state != 'ok':
+            status['amazon'] = amazon_state if amazon_state in ('expired', 'issue') else 'issue'
+            status['details']['amazon'] = str(
+                amazon_result.get('message') or 'Amazon SP-API connection test failed.'
+            ).strip()
     except Exception as e:
         err_str = str(e).lower()
-        if 'unauthorized' in err_str or 'invalid_grant' in err_str or 'access denied' in err_str or 'token' in err_str or 'expired' in err_str:
+        if (
+            'unauthorized' in err_str
+            or 'invalid_grant' in err_str
+            or 'access denied' in err_str
+            or 'invalid access token' in err_str
+            or 'invalid refresh token' in err_str
+            or 'http 401' in err_str
+        ):
             status['amazon'] = 'expired'
         else:
             status['amazon'] = 'issue'
@@ -17397,7 +17793,6 @@ def _api_status_probe():
 
     reminders = []
     for issue in (
-        _api_credential_age_issue('Amazon LWA', BASE_DIR / 'amazon_credentials.json'),
         _api_credential_age_issue('eBay OAuth', BASE_DIR / 'tokens.json')
     ):
         if issue:
@@ -17405,19 +17800,53 @@ def _api_status_probe():
     status['reminders'] = reminders
     return status
 
-def _collect_api_issue_alert():
+_API_ALERT_CONFIRMATION_LOCK = threading.Lock()
+_API_ALERT_CONFIRMATION_STATE = {
+    'ebay': {'signature': '', 'count': 0},
+    'amazon': {'signature': '', 'count': 0},
+}
+
+
+def _api_alert_failure_is_confirmed(platform, state, message, required_count=2):
+    """Require repeated failures of the same type before an automated text alert."""
+    platform_key = str(platform or '').strip().lower()
+    state_key = str(state or '').strip().lower()
+    signature = state_key
+    with _API_ALERT_CONFIRMATION_LOCK:
+        entry = _API_ALERT_CONFIRMATION_STATE.setdefault(
+            platform_key,
+            {'signature': '', 'count': 0}
+        )
+        if state_key == 'ok':
+            entry['signature'] = ''
+            entry['count'] = 0
+            return False
+        if entry.get('signature') == signature:
+            entry['count'] = int(entry.get('count') or 0) + 1
+        else:
+            entry['signature'] = signature
+            entry['count'] = 1
+        return entry['count'] >= max(1, int(required_count or 1))
+
+
+def _collect_api_issue_alert(require_confirmation=False):
     probe = _api_status_probe()
     issues = []
     for platform in ('ebay', 'amazon'):
         state = str(probe.get(platform) or 'ok').strip().lower()
-        if state != 'ok':
-            detail = str((probe.get('details') or {}).get(platform) or '').strip()
-            label = 'eBay' if platform == 'ebay' else 'Amazon'
-            issues.append({
-                'platform': label,
-                'status': state,
-                'message': detail or f'{label} API status is {state}.'
-            })
+        detail = str((probe.get('details') or {}).get(platform) or '').strip()
+        if require_confirmation:
+            confirmed = _api_alert_failure_is_confirmed(platform, state, detail)
+            if state != 'ok' and not confirmed:
+                continue
+        if state == 'ok':
+            continue
+        label = 'eBay' if platform == 'ebay' else 'Amazon'
+        issues.append({
+            'platform': label,
+            'status': state,
+            'message': detail or f'{label} API status is {state}.'
+        })
     for reminder in probe.get('reminders') or []:
         issues.append({
             'platform': reminder.get('label') or 'Token',
@@ -17774,7 +18203,7 @@ def telegram_alert_worker():
                     result = _telegram_send_alert_to_recipients(alert_type, _build_text, recipients=relevant)
                     sent_any = sent_any or bool(result.get('sent'))
                 elif alert_type == 'api_issue':
-                    alert = _collect_api_issue_alert()
+                    alert = _collect_api_issue_alert(require_confirmation=True)
                     if not alert.get('has_issues'):
                         continue
 
@@ -20283,6 +20712,259 @@ def _build_ready_to_ship_prep_context(cur, barcode, include_details=True, max_no
         'entries': entries if include_details else []
     }
     return payload
+
+
+def _suffixed_item_prep_variants(barcode):
+    normalized = _normalize_upc_preserve_suffix_for_match(barcode)
+    if not _is_items_to_list_suffixed_upc(normalized):
+        return []
+    variants = []
+    for candidate in _items_to_list_upc_search_variants(str(barcode or '').strip()):
+        value = str(candidate or '').strip()
+        if value and value.casefold() not in {v.casefold() for v in variants}:
+            variants.append(value)
+    if normalized and normalized.casefold() not in {v.casefold() for v in variants}:
+        variants.append(normalized)
+    base, suffix = normalized.rsplit('-', 1)
+    if base.isdigit():
+        stripped_base = base.lstrip('0') or '0'
+        for width in (8, 11, 12, 13, 14):
+            if len(stripped_base) < width:
+                candidate = f'{stripped_base.zfill(width)}-{suffix}'
+                if candidate.casefold() not in {v.casefold() for v in variants}:
+                    variants.append(candidate)
+    return variants
+
+
+def _empty_suffixed_item_prep_summary(barcode=''):
+    return {
+        'barcode': _normalize_upc_preserve_suffix_for_match(barcode),
+        'has_content': False,
+        'note_count': 0,
+        'reason_count': 0,
+        'image_count': 0,
+        'voice_note_count': 0
+    }
+
+
+def _load_suffixed_item_prep_summary_lookup(barcodes):
+    targets = {}
+    variants = set()
+    for barcode in barcodes or []:
+        normalized = _normalize_upc_preserve_suffix_for_match(barcode)
+        if not _is_items_to_list_suffixed_upc(normalized):
+            continue
+        targets.setdefault(normalized, _empty_suffixed_item_prep_summary(normalized))
+        variants.update(v.casefold() for v in _suffixed_item_prep_variants(barcode))
+
+    if not targets or not variants:
+        return targets
+
+    conn = get_db_connection('bol.db')
+    cur = conn.cursor()
+    variant_list = sorted(variants)
+
+    def iter_rows(select_sql):
+        for start in range(0, len(variant_list), 300):
+            chunk = variant_list[start:start + 300]
+            placeholders = ','.join('?' for _ in chunk)
+            try:
+                cur.execute(
+                    select_sql.format(placeholders=placeholders),
+                    tuple(chunk)
+                )
+                yield from cur.fetchall()
+            except sqlite3.Error:
+                continue
+
+    def summary_for_row(row):
+        key = _normalize_upc_preserve_suffix_for_match(row['upc'])
+        return targets.get(key)
+
+    for row in iter_rows('''
+        SELECT upc, COALESCE(note, '') AS note, COALESCE(reason, '') AS reason
+        FROM items_prep_status
+        WHERE LOWER(TRIM(COALESCE(upc, ''))) IN ({placeholders})
+    '''):
+        summary = summary_for_row(row)
+        if not summary:
+            continue
+        if str(row['note'] or '').strip():
+            summary['note_count'] += 1
+        if str(row['reason'] or '').strip():
+            summary['reason_count'] += 1
+
+    for row in iter_rows('''
+        SELECT upc
+        FROM items_prep_notes
+        WHERE LOWER(TRIM(COALESCE(upc, ''))) IN ({placeholders})
+          AND TRIM(COALESCE(note, '')) != ''
+    '''):
+        summary = summary_for_row(row)
+        if summary:
+            summary['note_count'] += 1
+
+    for row in iter_rows('''
+        SELECT upc
+        FROM items_prep_images
+        WHERE LOWER(TRIM(COALESCE(upc, ''))) IN ({placeholders})
+          AND (deleted_at IS NULL OR TRIM(COALESCE(deleted_at, '')) = '')
+          AND TRIM(COALESCE(image_path, '')) != ''
+    '''):
+        summary = summary_for_row(row)
+        if summary:
+            summary['image_count'] += 1
+
+    for row in iter_rows('''
+        SELECT upc
+        FROM items_prep_media
+        WHERE LOWER(TRIM(COALESCE(upc, ''))) IN ({placeholders})
+          AND LOWER(TRIM(COALESCE(media_type, ''))) = 'audio'
+          AND TRIM(COALESCE(file_path, '')) != ''
+    '''):
+        summary = summary_for_row(row)
+        if summary:
+            summary['voice_note_count'] += 1
+
+    for summary in targets.values():
+        summary['has_content'] = any(
+            int(summary.get(key) or 0) > 0
+            for key in ('note_count', 'reason_count', 'image_count', 'voice_note_count')
+        )
+    return targets
+
+
+def _build_suffixed_item_prep_context(cur, barcode):
+    normalized = _normalize_upc_preserve_suffix_for_match(barcode)
+    summary = _empty_suffixed_item_prep_summary(normalized)
+    payload = {
+        'barcode': normalized,
+        'has_content': False,
+        'summary': summary,
+        'status_entries': [],
+        'notes': [],
+        'images': [],
+        'voice_notes': []
+    }
+    variants = _suffixed_item_prep_variants(barcode)
+    if not variants:
+        return payload
+
+    placeholders = ','.join('?' for _ in variants)
+    lower_variants = tuple(v.casefold() for v in variants)
+    seen_note_text = set()
+
+    try:
+        cur.execute(f'''
+            SELECT id, upc, COALESCE(status, '') AS status,
+                   COALESCE(reason, '') AS reason, COALESCE(note, '') AS note,
+                   COALESCE(updated_at, '') AS updated_at
+            FROM items_prep_status
+            WHERE LOWER(TRIM(COALESCE(upc, ''))) IN ({placeholders})
+            ORDER BY updated_at DESC, id DESC
+        ''', lower_variants)
+        for row in cur.fetchall():
+            item = dict(row)
+            if str(item.get('reason') or '').strip():
+                summary['reason_count'] += 1
+            note_text = str(item.get('note') or '').strip()
+            if note_text:
+                if note_text.casefold() in seen_note_text:
+                    item['note'] = ''
+                else:
+                    seen_note_text.add(note_text.casefold())
+                    summary['note_count'] += 1
+            payload['status_entries'].append(item)
+    except sqlite3.Error:
+        pass
+
+    try:
+        cur.execute(f'''
+            SELECT id, upc, COALESCE(row_status, '') AS row_status,
+                   COALESCE(note, '') AS note, COALESCE(created_at, '') AS created_at
+            FROM items_prep_notes
+            WHERE LOWER(TRIM(COALESCE(upc, ''))) IN ({placeholders})
+              AND TRIM(COALESCE(note, '')) != ''
+            ORDER BY created_at DESC, id DESC
+        ''', lower_variants)
+        for row in cur.fetchall():
+            item = dict(row)
+            note_text = str(item.get('note') or '').strip()
+            if not note_text or note_text.casefold() in seen_note_text:
+                continue
+            seen_note_text.add(note_text.casefold())
+            payload['notes'].append(item)
+        summary['note_count'] += len(payload['notes'])
+    except sqlite3.Error:
+        pass
+
+    try:
+        cur.execute(f'''
+            SELECT id, upc, COALESCE(row_status, '') AS row_status,
+                   COALESCE(image_path, '') AS image_path,
+                   COALESCE(created_at, '') AS created_at,
+                   COALESCE(rotation, 0) AS rotation
+            FROM items_prep_images
+            WHERE LOWER(TRIM(COALESCE(upc, ''))) IN ({placeholders})
+              AND (deleted_at IS NULL OR TRIM(COALESCE(deleted_at, '')) = '')
+              AND TRIM(COALESCE(image_path, '')) != ''
+            ORDER BY created_at DESC, id DESC
+        ''', lower_variants)
+        for row in cur.fetchall():
+            item = dict(row)
+            image_path = str(item.get('image_path') or '').strip()
+            item['image_url'] = (
+                image_path
+                if image_path.startswith(('http://', 'https://', '/'))
+                else f'/static/{image_path}'
+            )
+            payload['images'].append(item)
+        summary['image_count'] = len(payload['images'])
+    except sqlite3.Error:
+        pass
+
+    try:
+        cur.execute(f'''
+            SELECT id, upc, COALESCE(row_status, '') AS row_status,
+                   COALESCE(file_path, '') AS file_path,
+                   COALESCE(mime_type, '') AS mime_type,
+                   COALESCE(created_at, '') AS created_at
+            FROM items_prep_media
+            WHERE LOWER(TRIM(COALESCE(upc, ''))) IN ({placeholders})
+              AND LOWER(TRIM(COALESCE(media_type, ''))) = 'audio'
+              AND TRIM(COALESCE(file_path, '')) != ''
+            ORDER BY created_at DESC, id DESC
+        ''', lower_variants)
+        for row in cur.fetchall():
+            item = dict(row)
+            file_path = str(item.get('file_path') or '').strip()
+            item['audio_url'] = (
+                file_path
+                if file_path.startswith(('http://', 'https://', '/'))
+                else f'/static/{file_path}'
+            )
+            payload['voice_notes'].append(item)
+        summary['voice_note_count'] = len(payload['voice_notes'])
+    except sqlite3.Error:
+        pass
+
+    summary['has_content'] = any(
+        int(summary.get(key) or 0) > 0
+        for key in ('note_count', 'reason_count', 'image_count', 'voice_note_count')
+    )
+    payload['has_content'] = summary['has_content']
+    return payload
+
+
+@app.route('/api/warehouse/item-prep/<path:barcode>', methods=['GET'])
+def api_warehouse_item_prep_context(barcode):
+    try:
+        with db_connection('bol.db') as conn:
+            context = _build_suffixed_item_prep_context(conn.cursor(), barcode)
+        return jsonify({'success': True, **context})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'warehouse item prep')}), 500
+
 
 def _listing_source_label(value):
     norm = _normalize_listing_source(value, default='system')
@@ -32898,7 +33580,8 @@ def api_listing_helper_scan():
         'no_warehouse': [],      # Listings with UPC not in warehouse
         'quantity_alert': [],    # Any single listing qty > total warehouse qty
         'no_listings': [],       # Warehouse stock with no active listing on any store
-        'sync_overdue': []       # Sync manager overdue beyond configured interval
+        'sync_overdue': [],      # Sync manager overdue beyond configured interval
+        'listing_matches': []    # Listings needing or already using a manual inventory match
     }
 
     try:
@@ -33368,6 +34051,7 @@ def api_listing_helper_scan():
                         ebay_listings[upc_key].append({
                             'id': row_id,
                             'listing_id': f"ebay:{listing_id}",
+                            'listing_key': str(row['ItemID'] or listing_id),
                             'item_id': row['ItemID'],
                             'title': row['Title'],
                             'qty': _safe_int(row['Quantity'], 1),
@@ -33425,7 +34109,7 @@ def api_listing_helper_scan():
                 am_conn.row_factory = sqlite3.Row
                 am_cur = am_conn.cursor()
                 am_cur.execute('''
-                    SELECT ID, ASIN, TITLE, UPC, QUANTITY, IMAGE
+                    SELECT ID, ASIN, SKU, TITLE, UPC, QUANTITY, IMAGE
                     FROM ITEMS
                     WHERE UPC IS NOT NULL AND UPC != ""
                       AND (QUANTITY > 0 OR QUANTITY IS NULL)
@@ -33439,10 +34123,12 @@ def api_listing_helper_scan():
                         if upc_key not in amazon_listings:
                             amazon_listings[upc_key] = []
                         row_id = _row_id(row)
-                        listing_id = row['ASIN'] if row['ASIN'] else f"amazon_row:{row_id}"
+                        listing_key = row['SKU'] or row['ASIN'] or f"amazon_row:{row_id}"
                         amazon_listings[upc_key].append({
                             'id': row_id,
-                            'listing_id': f"amazon:{listing_id}",
+                            'listing_id': f"amazon:{listing_key}",
+                            'listing_key': str(listing_key),
+                            'sku': row['SKU'],
                             'asin': row['ASIN'],
                             'title': row['TITLE'],
                             'qty': _safe_int(row['QUANTITY'], 1),
@@ -33481,6 +34167,7 @@ def api_listing_helper_scan():
                         facebook_listings[upc_key].append({
                             'id': row_id,
                             'listing_id': f"facebook:{listing_id}",
+                            'listing_key': listing_id,
                             'title': row['title'],
                             'qty': _safe_int(row['qty'], 1),
                             'image': row['image'],
@@ -33494,6 +34181,32 @@ def api_listing_helper_scan():
         def make_hash(alert_type, upc, listing_ids, event_token=''):
             data = f"{alert_type}:{upc.lower()}:{','.join(sorted(str(x) for x in listing_ids))}:{event_token or ''}"
             return hashlib.md5(data.encode('utf-8')).hexdigest()
+
+        listing_match_lookup = _load_listing_inventory_match_lookup()
+        for listing_map in (ebay_listings, amazon_listings, facebook_listings):
+            for listed_upc_key, listing_rows in listing_map.items():
+                for listing_row in listing_rows:
+                    store, listing_key = _normalize_store_listing_identity(
+                        listing_row.get('store'),
+                        listing_row.get('listing_key') or listing_row.get('listing_id')
+                    )
+                    listing_row['listing_key'] = listing_key
+                    saved_match = listing_match_lookup.get((store, listing_key.lower())) if store and listing_key else None
+                    if saved_match:
+                        listing_row['inventory_match'] = {
+                            'searchrack_id': saved_match.get('searchrack_id'),
+                            'barcode': saved_match.get('inventory_barcode'),
+                            'location': saved_match.get('inventory_location')
+                        }
+                    if int(warehouse_stock.get(listed_upc_key, 0) or 0) <= 0 or saved_match:
+                        alerts['listing_matches'].append(listing_row)
+
+        alerts['listing_matches'].sort(key=lambda listing: (
+            0 if listing.get('inventory_match') else 1,
+            str(listing.get('store') or ''),
+            str(listing.get('title') or '').lower(),
+            str(listing.get('listing_key') or '').lower()
+        ))
 
         all_upcs = set(ebay_listings.keys()) | set(amazon_listings.keys()) | set(facebook_listings.keys())
         listed_base_upcs = set()
@@ -33624,6 +34337,7 @@ def api_listing_helper_scan():
             'no_warehouse': len(alerts['no_warehouse']),
             'no_listings': len(alerts['no_listings']),
             'quantity_alert': len(alerts['quantity_alert']),
+            'listing_matches': len(alerts['listing_matches']),
             'sync_overdue': int((alerts['sync_overdue'][0] or {}).get('overdue_count') or 0) if alerts['sync_overdue'] else 0
         }
         counts['total'] = counts['no_warehouse'] + counts['no_listings'] + counts['quantity_alert'] + counts['sync_overdue']
@@ -33634,6 +34348,94 @@ def api_listing_helper_scan():
 
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e, 'listing-helper-scan')}), 500
+
+
+@app.route('/api/listing-helper/inventory-match', methods=['POST'])
+def api_listing_helper_inventory_match():
+    """Persist or clear a store-listing fallback to one exact warehouse row."""
+    data = request.get_json() or {}
+    store, listing_key = _normalize_store_listing_identity(
+        data.get('store'), data.get('listing_key') or data.get('listing_id')
+    )
+    if not store or not listing_key:
+        return jsonify({'success': False, 'error': 'Valid store and listing key are required'}), 400
+
+    _ensure_listing_alerts_tables()
+    clear_match = bool(data.get('clear'))
+    try:
+        with sqlite3.connect(str(BASE_DIR / 'listing_alerts.db')) as match_conn:
+            match_conn.row_factory = sqlite3.Row
+            match_cur = match_conn.cursor()
+            previous = match_cur.execute(
+                'SELECT * FROM listing_inventory_matches WHERE store = ? AND LOWER(listing_key) = LOWER(?)',
+                (store, listing_key)
+            ).fetchone()
+
+            if clear_match:
+                match_cur.execute(
+                    'DELETE FROM listing_inventory_matches WHERE store = ? AND LOWER(listing_key) = LOWER(?)',
+                    (store, listing_key)
+                )
+                match_conn.commit()
+                _listing_helper_scan_cache_clear()
+                return jsonify({
+                    'success': True,
+                    'cleared': True,
+                    'old_match': dict(previous) if previous else None
+                })
+
+            searchrack_id = _coerce_int(data.get('searchrack_id'), 0)
+            if searchrack_id <= 0:
+                return jsonify({'success': False, 'error': 'A warehouse item is required'}), 400
+
+            with sqlite3.connect(str(BASE_DIR / 'searchRack.db')) as rack_conn:
+                rack_conn.row_factory = sqlite3.Row
+                rack_match = _ready_to_ship_searchrack_match_by_id(rack_conn.cursor(), searchrack_id)
+            if not rack_match or _coerce_int(rack_match.get('quantity'), 0) <= 0:
+                return jsonify({'success': False, 'error': 'The selected warehouse item is unavailable'}), 409
+
+            inventory_barcode = str(rack_match.get('barcode') or '').strip()
+            inventory_location = _ready_to_ship_match_display_location(rack_match)
+            match_cur.execute('''
+                INSERT INTO listing_inventory_matches (
+                    store, listing_key, listing_id, marketplace_barcode,
+                    listing_title, searchrack_id, inventory_barcode,
+                    inventory_location, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(store, listing_key) DO UPDATE SET
+                    listing_id = excluded.listing_id,
+                    marketplace_barcode = excluded.marketplace_barcode,
+                    listing_title = excluded.listing_title,
+                    searchrack_id = excluded.searchrack_id,
+                    inventory_barcode = excluded.inventory_barcode,
+                    inventory_location = excluded.inventory_location,
+                    updated_at = CURRENT_TIMESTAMP
+            ''', (
+                store,
+                listing_key,
+                str(data.get('listing_id') or '').strip(),
+                str(data.get('marketplace_barcode') or '').strip(),
+                str(data.get('listing_title') or '').strip(),
+                searchrack_id,
+                inventory_barcode,
+                inventory_location
+            ))
+            match_conn.commit()
+            saved = match_cur.execute(
+                'SELECT * FROM listing_inventory_matches WHERE store = ? AND listing_key = ?',
+                (store, listing_key)
+            ).fetchone()
+
+        _listing_helper_scan_cache_clear()
+        return jsonify({
+            'success': True,
+            'match': dict(saved) if saved else None,
+            'old_match': dict(previous) if previous else None
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'listing-helper:inventory-match')}), 500
+
 
 @app.route('/api/listing-helper/dismiss', methods=['POST'])
 def api_listing_helper_dismiss():
@@ -37210,6 +38012,11 @@ def _add_item_screening_lookup(barcode):
             if stripped_base.isdigit() and len(stripped_base) <= 12:
                 _add_macy_variant(f'{stripped_base.zfill(12)}-{suffix_part}')
                 _add_macy_variant(f'{stripped_base.zfill(13)}-{suffix_part}')
+        # Prefer an exact suffixed raw-BOL row, then fall back to the base UPC.
+        # A suffix identifies an individual warehouse unit; product metadata
+        # normally lives on the unsuffixed catalog/BOL barcode.
+        for variant in variants:
+            _add_macy_variant(variant)
     else:
         macy_variants = list(variants)
     title = ''
@@ -37245,6 +38052,29 @@ def _add_item_screening_lookup(barcode):
                     title_source = 'custom_registry'
                 if image_url:
                     image_source = 'custom_registry'
+
+            if not title or not image_url:
+                try:
+                    bol_row = _pick_row(cur, '''
+                        SELECT item_description AS title, image_url
+                        FROM bol_items
+                        WHERE upc IS NOT NULL
+                          AND TRIM(upc) != ''
+                          AND LOWER(TRIM(upc)) = ?
+                        ORDER BY rowid DESC
+                        LIMIT 1
+                    ''')
+                except Exception:
+                    bol_row = None
+                if bol_row:
+                    if not title:
+                        title = str(bol_row['title'] or '').strip()
+                        if title:
+                            title_source = 'bol'
+                    if not image_url:
+                        image_url = str(bol_row['image_url'] or '').strip()
+                        if image_url:
+                            image_source = 'bol'
     except Exception:
         pass
 
@@ -37263,13 +38093,13 @@ def _add_item_screening_lookup(barcode):
             ''', macy_variants)
             if row:
                 macy_found = True
-                title = str(row['item_description'] or '').strip()
-                image_url = str(row['image_url'] or '').strip()
-                macy_title = title
-                macy_image_url = image_url
-                if title:
+                macy_title = str(row['item_description'] or '').strip()
+                macy_image_url = str(row['image_url'] or '').strip()
+                if macy_title:
+                    title = macy_title
                     title_source = 'rawbol'
-                if image_url:
+                if macy_image_url:
+                    image_url = macy_image_url
                     image_source = 'rawbol'
     except Exception:
         pass
@@ -37981,7 +38811,11 @@ def get_ebay_orders(days=90):
                                 line_tax = None
 
                 legacy_item_id = str(line_item.get('legacyItemId') or '').strip()
-                item_id = legacy_item_id or str(line_item.get('lineItemId') or '').strip() or None
+                line_item_id = str(line_item.get('lineItemId') or '').strip()
+                # lineItemId uniquely identifies a line within an eBay order.
+                # legacyItemId identifies the listing and can be shared by
+                # multiple lines (for example, different variations).
+                item_id = line_item_id or legacy_item_id or None
                 sku_val = (
                     str(line_item.get('sku') or '').strip()
                     or str(line_item.get('sellerInventoryReference') or '').strip()
@@ -37991,6 +38825,7 @@ def get_ebay_orders(days=90):
                 store_ebay_order({
                     'order_id': order_id,
                     'item_id': item_id,
+                    'listing_item_id': legacy_item_id or item_id,
                     'sku': sku_val,
                     'title': line_item.get('title'),
                     'item_condition': line_item.get('condition') or line_item.get('conditionDisplayName'),
@@ -38562,6 +39397,7 @@ def sync_amazon_orders():
         # Process inventory reduction after fetching sold orders
         from DBmanager import process_sold_orders_inventory_reduction
         process_sold_orders_inventory_reduction()
+        _invalidate_ready_to_ship_cache()
         
         return jsonify({'success': True, 'orders_synced': count})
     except Exception as e:
@@ -38587,6 +39423,22 @@ def sync_amazon_listings():
         import traceback
         traceback.print_exc()
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
+
+
+@app.route('/api/amazon/repair-titles', methods=['POST'])
+def repair_amazon_listing_titles():
+    """Backfill blank Amazon listing titles without overwriting valid titles."""
+    if not AMAZON_AVAILABLE:
+        return jsonify({'success': False, 'error': 'Amazon integration not available'}), 500
+    try:
+        data = request.get_json(silent=True) or {}
+        max_catalog_items = max(0, min(100, int(data.get('max_catalog_items', 25))))
+        amazon = AmazonManager()
+        result = amazon.repair_missing_listing_titles(max_catalog_items=max_catalog_items)
+        _listing_helper_scan_cache_clear()
+        return jsonify({'success': True, **result})
+    except Exception as e:
+        return jsonify({'success': False, 'error': _safe_error(e, 'amazon title repair')}), 500
 
 
 @app.route('/api/amazon/orders', methods=['GET'])
@@ -38638,6 +39490,7 @@ def sold_orders():
     # Get orders from sold.db
     sold_conn = sqlite3.connect(str(BASE_DIR / 'sold.db'), timeout=30.0)
     prepared_orders = []
+    rawbol_conn = None
     try:
         sold_conn.row_factory = sqlite3.Row
         sold_cur = sold_conn.cursor()
@@ -38699,12 +39552,15 @@ def sold_orders():
             amazon_store_conn.row_factory = sqlite3.Row
             amazon_cols = {str(row[1]).lower() for row in amazon_store_conn.execute('PRAGMA table_info(ITEMS)').fetchall()}
             condition_note_expr = 'CONDITION_NOTE' if 'condition_note' in amazon_cols else "'' AS CONDITION_NOTE"
-            for listing in amazon_store_conn.execute(f'SELECT ASIN, SKU, CONDITION, {condition_note_expr} FROM ITEMS'):
+            image_expr = 'IMAGE' if 'image' in amazon_cols else "'' AS IMAGE"
+            upc_expr = 'UPC' if 'upc' in amazon_cols else "'' AS UPC"
+            for listing in amazon_store_conn.execute(f'SELECT ASIN, SKU, {upc_expr}, CONDITION, {condition_note_expr}, {image_expr} FROM ITEMS'):
                 payload = {
                     'condition': str(listing['CONDITION'] or '').strip(),
-                    'condition_description': str(listing['CONDITION_NOTE'] or '').strip()
+                    'condition_description': str(listing['CONDITION_NOTE'] or '').strip(),
+                    'image': _ready_to_ship_image_value(listing['IMAGE'])
                 }
-                for key in (listing['ASIN'], listing['SKU']):
+                for key in (listing['ASIN'], listing['SKU'], listing['UPC']):
                     normalized_key = str(key or '').strip().lower()
                     if normalized_key:
                         amazon_listing_lookup[normalized_key] = payload
@@ -38719,17 +39575,20 @@ def sold_orders():
             ebay_store_conn = sqlite3.connect(str(BASE_DIR / 'ebayStore.db'))
             ebay_store_conn.row_factory = sqlite3.Row
             ebay_cols = {str(row[1]).lower() for row in ebay_store_conn.execute('PRAGMA table_info(INVENTORY)').fetchall()}
-            if 'condition' in ebay_cols or 'description' in ebay_cols or 'conditiondescription' in ebay_cols:
+            if 'condition' in ebay_cols or 'description' in ebay_cols or 'conditiondescription' in ebay_cols or 'image' in ebay_cols:
                 condition_expr = 'Condition' if 'condition' in ebay_cols else "'' AS Condition"
                 description_expr = 'Description' if 'description' in ebay_cols else "'' AS Description"
                 condition_description_expr = 'ConditionDescription' if 'conditiondescription' in ebay_cols else "'' AS ConditionDescription"
-                for listing in ebay_store_conn.execute(f'SELECT ItemID, SKU, {condition_expr}, {description_expr}, {condition_description_expr} FROM INVENTORY'):
+                image_expr = 'Image' if 'image' in ebay_cols else "'' AS Image"
+                upc_expr = 'UPC' if 'upc' in ebay_cols else "'' AS UPC"
+                for listing in ebay_store_conn.execute(f'SELECT ItemID, SKU, {upc_expr}, {condition_expr}, {description_expr}, {condition_description_expr}, {image_expr} FROM INVENTORY'):
                     payload = {
                         'condition': str(listing['Condition'] or '').strip(),
                         'description': str(listing['Description'] or '').strip(),
-                        'condition_description': str(listing['ConditionDescription'] or '').strip()
+                        'condition_description': str(listing['ConditionDescription'] or '').strip(),
+                        'image': _ready_to_ship_image_value(listing['Image'])
                     }
-                    for key in (listing['ItemID'], listing['SKU']):
+                    for key in (listing['ItemID'], listing['SKU'], listing['UPC']):
                         normalized_key = str(key or '').strip().lower()
                         if normalized_key:
                             ebay_listing_lookup[normalized_key] = payload
@@ -38738,8 +39597,21 @@ def sold_orders():
         finally:
             if ebay_store_conn is not None:
                 ebay_store_conn.close()
+        rawbol_cur = None
+        image_backfills = 0
+        try:
+            rawbol_conn = sqlite3.connect(str(BASE_DIR / 'rawbol.db'))
+            rawbol_cur = rawbol_conn.cursor()
+            rawbol_cur.execute('SELECT 1 FROM raw_bol_items LIMIT 1')
+        except Exception as e:
+            print(f"Warning: Could not open Raw BOL image fallback for Ready to Ship: {e}")
+            if rawbol_conn is not None:
+                rawbol_conn.close()
+            rawbol_conn = None
+            rawbol_cur = None
         for order in orders:
             order_dict = dict(order)
+            stored_image = _ready_to_ship_image_value(order_dict.get('image'))
             if str(order_dict.get('store') or '').strip().lower() == 'amazon':
                 for lookup_value in (order_dict.get('listing_asin'), order_dict.get('item_id'), order_dict.get('sku')):
                     listing = amazon_listing_lookup.get(str(lookup_value or '').strip().lower())
@@ -38749,7 +39621,34 @@ def sold_orders():
                         order_dict['item_condition'] = listing['condition']
                     if not str(order_dict.get('item_condition_description') or '').strip() and listing.get('condition_description'):
                         order_dict['item_condition_description'] = listing['condition_description']
+                    if not _ready_to_ship_image_value(order_dict.get('image')) and listing.get('image'):
+                        order_dict['image'] = listing['image']
                     break
+            if not _ready_to_ship_image_value(order_dict.get('image')):
+                image_lookup_values = (
+                    order_dict.get('item_id'),
+                    order_dict.get('sku'),
+                    order_dict.get('barcode'),
+                    order_dict.get('source_upc'),
+                    order_dict.get('source_base_upc')
+                )
+                image_lookup_keys = []
+                for lookup_value in image_lookup_values:
+                    direct_key = str(lookup_value or '').strip().lower()
+                    if direct_key and direct_key not in image_lookup_keys:
+                        image_lookup_keys.append(direct_key)
+                    for variant in _sold_removal_barcode_variants(lookup_value):
+                        variant_key = str(variant or '').strip().lower()
+                        if variant_key and variant_key not in image_lookup_keys:
+                            image_lookup_keys.append(variant_key)
+                for listing_lookup in (amazon_listing_lookup, ebay_listing_lookup):
+                    for lookup_key in image_lookup_keys:
+                        listing = listing_lookup.get(lookup_key)
+                        if listing and listing.get('image'):
+                            order_dict['image'] = listing['image']
+                            break
+                    if _ready_to_ship_image_value(order_dict.get('image')):
+                        break
             if str(order_dict.get('store') or '').strip().lower() == 'ebay':
                 for lookup_value in (order_dict.get('listing_listing_id'), order_dict.get('item_id'), order_dict.get('sku')):
                     listing = ebay_listing_lookup.get(str(lookup_value or '').strip().lower())
@@ -38761,7 +39660,29 @@ def sold_orders():
                         order_dict['item_description'] = listing['description']
                     if not str(order_dict.get('item_condition_description') or '').strip() and listing.get('condition_description'):
                         order_dict['item_condition_description'] = listing['condition_description']
+                    if not _ready_to_ship_image_value(order_dict.get('image')) and listing.get('image'):
+                        order_dict['image'] = listing['image']
                     break
+            if not _ready_to_ship_image_value(order_dict.get('image')) and rawbol_cur is not None:
+                fallback_image = _ready_to_ship_rawbol_image(rawbol_cur, (
+                    order_dict.get('barcode'),
+                    order_dict.get('source_upc'),
+                    order_dict.get('source_base_upc'),
+                    order_dict.get('sku')
+                ))
+                if fallback_image:
+                    order_dict['image'] = fallback_image
+            repaired_image = _ready_to_ship_image_value(order_dict.get('image'))
+            if not stored_image and repaired_image:
+                sold_cur.execute('''
+                    UPDATE orders
+                    SET image = ?
+                    WHERE id = ?
+                      AND LOWER(TRIM(COALESCE(image, ''))) IN (
+                          '', 'nan', 'none', 'null', 'undefined', 'n/a', 'na'
+                      )
+                ''', (repaired_image, order_dict.get('id')))
+                image_backfills += sold_cur.rowcount
             if str(order_dict.get('store') or '').strip().lower() == 'amazon':
                 raw_condition = str(order_dict.get('item_condition') or '').strip()
                 if raw_condition:
@@ -38786,7 +39707,15 @@ def sold_orders():
                 label_lookup.get(int(order['id']), [])
             )
             prepared_orders.append(order_dict)
+        if rawbol_conn is not None:
+            rawbol_conn.close()
+            rawbol_conn = None
+        if image_backfills:
+            sold_conn.commit()
+            print(f"[sold_orders] Repaired {image_backfills} missing image(s) from marketplace/Raw BOL data")
     finally:
+        if rawbol_conn is not None:
+            rawbol_conn.close()
         sold_conn.close()
     
     # Enrich with location from searchRack.db
@@ -38796,6 +39725,7 @@ def sold_orders():
         rack_conn = sqlite3.connect(str(BASE_DIR / 'searchRack.db'), timeout=30.0)
         rack_conn.row_factory = sqlite3.Row
         rack_cur = rack_conn.cursor()
+        listing_inventory_match_lookup = _load_listing_inventory_match_lookup()
         
         for order_dict in prepared_orders:
             effective_barcode = _effective_sold_order_barcode(order_dict, prefer_manual_override=True)
@@ -38849,17 +39779,50 @@ def sold_orders():
             # If location is empty and barcode exists, look it up in searchRack
             if (not order_dict.get('location') or order_dict.get('location', '').strip() == '') and order_dict.get('barcode'):
                 try:
-                    rack_rows = _searchrack_matches_for_barcode(rack_cur, order_dict['barcode'], include_zero=False)
-                    if not rack_rows:
+                    rack_schema = _searchrack_removal_schema(rack_cur)
+                    exact_rack_rows = _searchrack_matches_for_barcode(
+                        rack_cur, order_dict['barcode'], schema=rack_schema, include_zero=False
+                    )
+                    suffix_rack_rows = _ready_to_ship_suffix_inventory_matches(
+                        rack_cur, order_dict['barcode'], schema=rack_schema
+                    )
+                    sold_barcode_key = _sold_removal_barcode_key(order_dict['barcode'])
+                    sold_barcode_has_suffix = '-' in sold_barcode_key
+                    condition_is_new = _ready_to_ship_condition_is_new(order_dict)
+                    suggestion_match = False
+
+                    if not condition_is_new and not sold_barcode_has_suffix and suffix_rack_rows:
+                        rack_rows = suffix_rack_rows
+                        suggestion_match = True
+                    else:
+                        rack_rows = exact_rack_rows
+
+                    if not rack_rows and not suffix_rack_rows:
                         base_barcode = _barcode_base_without_suffix(order_dict['barcode'])
                         if base_barcode and _normalize_upc_preserve_suffix_for_match(base_barcode) != _normalize_upc_preserve_suffix_for_match(order_dict['barcode']):
-                            rack_rows = _searchrack_matches_for_barcode(rack_cur, base_barcode, include_zero=False)
+                            rack_rows = _searchrack_matches_for_barcode(
+                                rack_cur, base_barcode, schema=rack_schema, include_zero=False
+                            )
+                    if not rack_rows and suffix_rack_rows:
+                        rack_rows = suffix_rack_rows
+                        suggestion_match = True
                     
                     if rack_rows:
                         rack_rows = _ready_to_ship_rank_inventory_matches(rack_rows, order_dict)
                         preferred_match = rack_rows[0]
+                        preferred_barcode = preferred_match.get('barcode') or order_dict.get('barcode') or ''
+                        order_dict['location_match_suggested'] = bool(suggestion_match)
+                        order_dict['location_match_barcode'] = preferred_barcode
+                        order_dict['suffix_variations'] = _ready_to_ship_suffix_alternatives(
+                            suffix_rack_rows, preferred_barcode
+                        )
+                        preferred_barcode_key = _sold_removal_barcode_key(preferred_barcode)
+                        rack_rows = [
+                            match for match in rack_rows
+                            if _sold_removal_barcode_key(match.get('barcode')) == preferred_barcode_key
+                        ]
                         order_dict['finder_searchrack_id'] = preferred_match.get('id') or ''
-                        order_dict['finder_matched_barcode'] = preferred_match.get('barcode') or order_dict.get('barcode') or ''
+                        order_dict['finder_matched_barcode'] = preferred_barcode
                         order_dict['finder_matched_location'] = _ready_to_ship_match_display_location(preferred_match)
                         if preferred_match.get('warehouse_note'):
                             order_dict['warehouse_note'] = preferred_match.get('warehouse_note') or ''
@@ -38886,6 +39849,39 @@ def sold_orders():
                 except sqlite3.Error as e:
                     # If searchRack query fails, just skip location lookup for this order
                     print(f"Warning: Failed to lookup location for barcode {order_dict['barcode']}: {e}")
+
+            # Store-listing Finder mappings are intentionally a fallback: only
+            # use one when the marketplace barcode produced no live location.
+            if not str(order_dict.get('location') or '').strip():
+                listing_mapping = _listing_inventory_match_for_order(
+                    order_dict, listing_inventory_match_lookup
+                )
+                if listing_mapping:
+                    try:
+                        mapped_match = _ready_to_ship_searchrack_match_by_id(
+                            rack_cur, listing_mapping.get('searchrack_id')
+                        )
+                        if mapped_match and _coerce_int(mapped_match.get('quantity'), 0) > 0:
+                            mapped_location = _ready_to_ship_match_display_location(mapped_match)
+                            mapped_barcode = str(mapped_match.get('barcode') or '').strip()
+                            if mapped_location and mapped_barcode:
+                                order_dict['location'] = mapped_location
+                                order_dict['location_image'] = (
+                                    mapped_match.get('pictureposition') or mapped_location
+                                )
+                                order_dict['warehouse_note'] = mapped_match.get('warehouse_note') or ''
+                                order_dict['finder_searchrack_id'] = mapped_match.get('id') or ''
+                                order_dict['finder_matched_barcode'] = mapped_barcode
+                                order_dict['finder_matched_location'] = mapped_location
+                                order_dict['location_match_suggested'] = True
+                                order_dict['location_match_barcode'] = mapped_barcode
+                                order_dict['location_match_source'] = 'store_listing_fallback'
+                                order_dict['listing_inventory_match_id'] = listing_mapping.get('id') or ''
+                    except Exception as mapping_error:
+                        print(
+                            f"Warning: Store-listing fallback failed for sold order "
+                            f"{order_dict.get('id')}: {mapping_error}"
+                        )
 
             # If still no location, flag for manual search via Finder page
             if not order_dict.get('location') or order_dict.get('location', '').strip() == '':
@@ -39773,12 +40769,23 @@ def ready_to_ship_location_options(order_id):
         sold_cur = sold_conn.cursor()
         _ensure_order_removal_allocations_table(sold_cur)
 
-        sold_cur.execute('SELECT id, order_id, item_id, sku, store, barcode, source_upc, quantity, title, location FROM orders WHERE id = ?', (order_id,))
+        sold_cur.execute('''
+            SELECT id, order_id, item_id, sku, store, barcode, source_upc,
+                   quantity, title, location, listing_listing_id, listing_sku,
+                   listing_asin
+            FROM orders WHERE id = ?
+        ''', (order_id,))
         order = sold_cur.fetchone()
         if not order:
             return jsonify({'success': False, 'error': 'Order not found'}), 404
 
         barcode = _effective_sold_order_barcode(order, prefer_manual_override=True)
+        suggested_barcode = str(request.args.get('matched_barcode') or '').strip()
+        valid_fallback_barcode = (
+            suggested_barcode
+            if _ready_to_ship_valid_requested_match(order, suggested_barcode)
+            else ''
+        )
         sold_qty = max(1, _coerce_int(order['quantity'], 1))
         existing_allocations = _load_order_removal_allocations(sold_cur, order_id)
 
@@ -39810,6 +40817,13 @@ def ready_to_ship_location_options(order_id):
             fallback_barcodes=fallback_barcodes,
             preferred_location=str(order['location'] or '').strip()
         )
+        if not matches and valid_fallback_barcode:
+            barcode = valid_fallback_barcode
+            matches = _searchrack_matches_for_removal_context(
+                rack_cur,
+                barcode,
+                preferred_location=str(order['location'] or '').strip()
+            )
 
         location_groups = _group_searchrack_matches_by_location(matches)
         locations = [
@@ -39893,6 +40907,7 @@ def mark_order_handled():
     order_id = data.get('id')
     incoming_allocations = data.get('allocations')
     skip_inventory = bool(data.get('skip_inventory'))
+    suggested_barcode = str(data.get('matched_barcode') or '').strip()
 
     if not order_id:
         return jsonify({'success': False, 'error': 'Missing order id'}), 400
@@ -39909,7 +40924,8 @@ def mark_order_handled():
         _ensure_order_processing_claim_column(cur)
 
         cur.execute(
-            'SELECT id, order_id, item_id, sku, store, barcode, source_upc, quantity, title, location, rackupdated, rackupdated_claimed_at, isHandled '
+            'SELECT id, order_id, item_id, sku, store, barcode, source_upc, quantity, title, location, '
+            'listing_listing_id, listing_sku, listing_asin, rackupdated, rackupdated_claimed_at, isHandled '
             'FROM orders WHERE id = ?',
             (order_id,)
         )
@@ -39962,6 +40978,11 @@ def mark_order_handled():
             }), 409
 
         barcode = _effective_sold_order_barcode(order, prefer_manual_override=True)
+        valid_fallback_barcode = (
+            suggested_barcode
+            if _ready_to_ship_valid_requested_match(order, suggested_barcode)
+            else ''
+        )
         sold_qty = max(1, _coerce_int(order['quantity'], 1))
         order_ref = (order['order_id'] or '').strip()
         title = (order['title'] or '').strip()
@@ -40015,6 +41036,14 @@ def mark_order_handled():
             fallback_barcodes=fallback_barcodes,
             preferred_location=str(order['location'] or '').strip()
         )
+        if plan.get('success', True) and not plan.get('can_fulfill') and valid_fallback_barcode:
+            barcode = valid_fallback_barcode
+            plan = _build_marketplace_removal_plan(
+                barcode,
+                sold_qty,
+                allocations=normalized_allocations if incoming_allocations is not None else None,
+                preferred_location=str(order['location'] or '').strip()
+            )
         if not plan.get('success', True):
             return _release_claim({
                 'success': False,
@@ -40483,16 +41512,39 @@ def get_sold_removal_history(order_id):
         # Search by order_id or barcode
         history_cur.execute('''
             SELECT * FROM removed_items
-            WHERE order_id = ? OR (barcode = ? AND barcode != '')
+            WHERE (order_id = ? OR (barcode = ? AND barcode != ''))
+              AND removal_type IN (
+                  'automatic',
+                  'automatic_allocated',
+                  'repair_removal',
+                  'manual_sold_removal',
+                  'manual_immediate',
+                  'manual_sold_selection',
+                  'manual_handled',
+                  'finder_removal'
+              )
+              AND COALESCE(old_quantity, 0) > COALESCE(new_quantity, 0)
+              AND (undone_at IS NULL OR undone_at = '')
             ORDER BY removed_at DESC
         ''', (order_id_str, barcode))
-        history_rows = [dict(r) for r in history_cur.fetchall()]
+        history_rows = [
+            dict(row)
+            for row in history_cur.fetchall()
+            if _sold_removal_event_is_current(order_dict, dict(row))
+        ]
         history_conn.close()
 
         return jsonify({
             'success': True,
             'order': order_dict,
-            'history': history_rows
+            'history': history_rows,
+            'sold_at': str(
+                order_dict.get('paid_time')
+                or order_dict.get('sold_date')
+                or order_dict.get('sale_date')
+                or order_dict.get('created_at')
+                or ''
+            )
         })
     except Exception as e:
         import traceback
@@ -41655,18 +42707,53 @@ def finder_page():
     response.headers['Expires'] = '0'
     return response
 
+
+def _finder_barcode_search_variants(value):
+    """Return padded/stripped barcode forms while preserving an item suffix."""
+    raw = _normalize_upc(value)
+    if not raw:
+        return []
+
+    variants = []
+
+    def add(candidate):
+        candidate = str(candidate or '').strip()
+        if candidate and candidate not in variants:
+            variants.append(candidate)
+
+    add(raw)
+    normalized = _normalize_upc_preserve_suffix_for_match(raw)
+    add(normalized)
+
+    if normalized and '-' in normalized:
+        base, suffix = normalized.split('-', 1)
+    else:
+        base, suffix = normalized, ''
+
+    if base and base.isdigit():
+        stripped_base = base.lstrip('0') or '0'
+        add(f'{stripped_base}-{suffix}' if suffix else stripped_base)
+        for width in (8, 11, 12, 13, 14):
+            if len(stripped_base) < width:
+                padded_base = stripped_base.zfill(width)
+                add(f'{padded_base}-{suffix}' if suffix else padded_base)
+
+    return variants
+
+
 @app.route('/api/finder', methods=['POST'])
 def api_finder():
     """Search searchRack and rawbol databases for item location."""
     data = request.get_json() or {}
     q = data.get('q', '').strip()
-    if not q:
+    custom_only = bool(data.get('custom_only'))
+    if not q and not custom_only:
         return jsonify({'searchrack': [], 'rawbol': []})
 
     q_stripped = _strip_leading_zeros_numeric(q)
     # Split into words for multi-word fuzzy matching
     words = [w for w in q_stripped.split() if len(w) >= 2]
-    if not words:
+    if not words and q_stripped:
         words = [q_stripped]
 
     searchrack_results = []
@@ -41680,10 +42767,13 @@ def api_finder():
         title_parts = [f"{title_col} LIKE ? COLLATE NOCASE" for _ in words]
         clauses.append('(' + ' AND '.join(title_parts) + ')')
         params.extend(f'%{w}%' for w in words)
-        # OR barcode matches any word
+        # OR barcode matches any word. Include padded/stripped forms so an exact
+        # suffixed scan still finds the row when its stored base UPC uses a
+        # different leading-zero format.
         for w in words:
-            clauses.append(f"{barcode_col} LIKE ? COLLATE NOCASE")
-            params.append(f'%{w}%')
+            for barcode_variant in _finder_barcode_search_variants(w):
+                clauses.append(f"{barcode_col} LIKE ? COLLATE NOCASE")
+                params.append(f'%{barcode_variant}%')
         return ' OR '.join(clauses), params
 
     # Search searchRack.db
@@ -41691,12 +42781,21 @@ def api_finder():
         conn = sqlite3.connect(str(BASE_DIR / 'searchRack.db'))
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
-        where, params = build_where('TITLE', 'BARCODE', words)
-        cur.execute(f'''SELECT ID, TITLE, BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION, QUANTITY, IMAGE, ITEMID
+        params = []
+        conditions = ['COALESCE(CAST(QUANTITY AS INTEGER), 0) > 0']
+        if words:
+            where, params = build_where('TITLE', 'BARCODE', words)
+            conditions.insert(0, f'({where})')
+        if custom_only:
+            conditions.append(
+                "(COALESCE(CUSTOM_TITLE, 0) = 1 "
+                "OR COALESCE(IMAGE, '') LIKE '/static/custom_items/%')"
+            )
+        cur.execute(f'''SELECT ID, TITLE, BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION, QUANTITY, IMAGE, ITEMID,
+                              COALESCE(WAREHOUSE_NOTE, '') AS WAREHOUSE_NOTE
                        FROM SEARCHRACK
-                       WHERE ({where})
-                         AND COALESCE(CAST(QUANTITY AS INTEGER), 0) > 0
-                       LIMIT 20''', params)
+                       WHERE {' AND '.join(conditions)}
+                       ORDER BY TITLE COLLATE NOCASE, ID''', params)
         for row in cur.fetchall():
             barcode_raw = row['BARCODE']
             searchrack_results.append({
@@ -41709,10 +42808,26 @@ def api_finder():
                 'quantity': row['QUANTITY'],
                 'image': row['IMAGE'],
                 'itemid': row['ITEMID'],
+                'warehouse_note': row['WAREHOUSE_NOTE'],
             })
         conn.close()
     except Exception as e:
         print(f"Finder searchRack error: {e}")
+
+    if searchrack_results:
+        prep_lookup = _load_suffixed_item_prep_summary_lookup(
+            row.get('barcode') for row in searchrack_results
+        )
+        for row in searchrack_results:
+            prep_key = _normalize_upc_preserve_suffix_for_match(row.get('barcode'))
+            row['item_prep_summary'] = prep_lookup.get(
+                prep_key,
+                _empty_suffixed_item_prep_summary(prep_key)
+            )
+
+    # Custom-only mode is specifically a warehouse inventory search.
+    if custom_only:
+        return jsonify({'searchrack': searchrack_results, 'rawbol': []})
 
     # Search rawbol.db (aligned with /searchrack Macy BOL behavior)
     try:
@@ -42699,7 +43814,7 @@ def api_search_db(db_key):
                 barcode_val = item.get('BARCODE') or item.get('barcode') or item.get('Barcode') or ''
 
             # bol.db normalization: different column names (item_description, upc, image_url)
-            title_val = item.get('Title') or item.get('title') or item.get('name') or item.get('Name') or ''
+            title_val = item.get('Title') or item.get('title') or item.get('TITLE') or item.get('name') or item.get('Name') or ''
             if db_key == 'sold':
                 image_val = item.get('image') or item.get('Image') or item.get('IMAGE') or item.get('image_url') or item.get('images') or ''
             elif db_key == 'amazonStore':
@@ -42769,6 +43884,7 @@ def api_search_db(db_key):
                 'item_position': item.get('ITEM_POSITION') or item.get('item_position') or item.get('position') or '',
                 'quantity': qty_raw,
                 'warehouse_note': item.get('WAREHOUSE_NOTE') or item.get('warehouse_note') or '',
+                'is_custom_title': bool(_coerce_int(item.get('CUSTOM_TITLE') if item.get('CUSTOM_TITLE') is not None else item.get('custom_title'), 0)) if db_key == 'searchRack' else False,
                 # created_at available on SEARCHRACK rows populated by DBmanager
                 'created_at': item.get('CREATED_AT') or item.get('created_at') or '',
                 # store field for returns (amazon/ebay)
@@ -42783,6 +43899,12 @@ def api_search_db(db_key):
                     base_barcode = _strip_leading_zeros_numeric(base_barcode)
                     cached = _enrichment_cache.get(base_barcode, {})
                     if cached:
+                        cached_title = str(cached.get('title') or '').strip()
+                        current_title = str(item_out.get('title') or '').strip()
+                        if item_out.get('is_custom_title'):
+                            item_out['custom_title'] = current_title
+                            if cached_title and cached_title.casefold() != current_title.casefold():
+                                item_out['database_title'] = cached_title
                         item_out['title'] = item_out.get('title') or cached.get('title')
                         item_out['image'] = item_out.get('image') or cached.get('image')
                         item_out['item_id'] = item_out.get('item_id') or cached.get('item_id')
@@ -42891,7 +44013,7 @@ def api_search_db(db_key):
                                 hist_conn = sqlite3.connect('rackhistory.db')
                                 hist_cur = hist_conn.cursor()
                                 hist_cur.execute("""
-                                    SELECT 1
+                                    SELECT removed_at
                                     FROM removed_items
                                     WHERE (
                                         (? != '' AND COALESCE(order_id, '') = ?)
@@ -42910,14 +44032,17 @@ def api_search_db(db_key):
                                     )
                                     AND COALESCE(old_quantity, 0) > COALESCE(new_quantity, 0)
                                     AND (undone_at IS NULL OR undone_at = '')
-                                    LIMIT 1
                                 """, (order_id_val, order_id_val, barcode_val, barcode_val))
-                                has_removal_record = hist_cur.fetchone() is not None
+                                has_removal_record = any(
+                                    _sold_removal_event_is_current(item, {'removed_at': row[0]})
+                                    for row in hist_cur.fetchall()
+                                )
                                 hist_conn.close()
                             except Exception:
                                 pass
 
-                        if rackupdated_val == 1 or has_removal_record:
+                        sale_time_known = _sold_order_sale_datetime(item) is not None
+                        if has_removal_record or (rackupdated_val == 1 and not sale_time_known):
                             item_out['inv_status'] = 'COMPLETE'
                         else:
                             item_out['inv_status'] = 'NOT_REMOVED'
@@ -43072,6 +44197,16 @@ def api_search_db(db_key):
             results = list(merged.values())
             # adjust total_count to reflect merged items count
             total_count = len(results)
+
+            prep_lookup = _load_suffixed_item_prep_summary_lookup(
+                row.get('barcode') for row in results
+            )
+            for row in results:
+                prep_key = _normalize_upc_preserve_suffix_for_match(row.get('barcode'))
+                row['item_prep_summary'] = prep_lookup.get(
+                    prep_key,
+                    _empty_suffixed_item_prep_summary(prep_key)
+                )
 
         # If client requested debug info, return table/schema/samples plus normalized results
         if data.get('debug'):
@@ -43931,27 +45066,27 @@ def api_update_row(db_key, item_id):
 def api_check_shelf_code():
     """Check if a shelf code already exists"""
     data = request.get_json() or {}
-    code = (data.get('code') or '').strip()
+    code, code_error = _validate_shelf_code_input(data.get('code'))
     
-    if not code:
-        return jsonify({'exists': False, 'reason': 'No code provided'}), 200
+    if code_error:
+        return jsonify({'exists': True, 'valid': False, 'reason': code_error}), 200
     
+    conn = None
     try:
         conn = sqlite3.connect('searchRack.db')
         cur = conn.cursor()
-        
-        # Check if shelf_name already exists
-        cur.execute('SELECT shelf_name FROM shelves WHERE shelf_name = ?', (code,))
-        result = cur.fetchone()
+        result = _shelf_code_exists(cur, code)
         
         if result:
             return jsonify({
                 'exists': True,
+                'valid': False,
                 'reason': f'Shelf "{code}" already exists'
             }), 200
         else:
             return jsonify({
                 'exists': False,
+                'valid': True,
                 'reason': 'Code available'
             }), 200
             
@@ -43959,7 +45094,8 @@ def api_check_shelf_code():
         print(f"Error checking shelf code: {e}")
         return jsonify({'exists': False, 'reason': 'Error checking code'}), 500
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
 
 
 @app.route('/api/create_shelf', methods=['POST'])
@@ -43971,14 +45107,22 @@ def api_create_shelf():
     notes = (data.get('notes') or '').strip()
     group_id = data.get('group_id', 1)  # Default to group 1
     
-    if not shelf_name:
-        return jsonify({'success': False, 'error': 'Shelf name is required'}), 400
+    shelf_name, code_error = _validate_shelf_code_input(shelf_name)
+    if code_error:
+        return jsonify({'success': False, 'error': code_error}), 400
     
+    conn = None
     try:
         ensure_shelf_groups_table()
         # Store shelves in a simple table in searchRack.db
         conn = sqlite3.connect('searchRack.db')
         cur = conn.cursor()
+        cur.execute('BEGIN IMMEDIATE')
+        if _shelf_code_exists(cur, shelf_name):
+            return jsonify({'success': False, 'error': f'Shelf "{shelf_name}" already exists'}), 409
+        cur.execute('SELECT id FROM shelf_groups WHERE id = ?', (group_id,))
+        if not cur.fetchone():
+            return jsonify({'success': False, 'error': 'Selected group does not exist'}), 404
         
         # Insert the new shelf with group_id
         cur.execute('''
@@ -43998,7 +45142,8 @@ def api_create_shelf():
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
 
 
 @app.route('/api/update_shelf', methods=['POST'])
@@ -44006,310 +45151,305 @@ def api_update_shelf():
     """Update an existing shelf image and/or rename the shelf code.
     Expects form-data: old_code (required), new_code (optional), image (optional file)
     """
+    conn = None
+    file_snapshots = {}
+    affected_paths = set()
     try:
-        old_code = (request.form.get('old_code') or '').strip()
-        new_code = (request.form.get('new_code') or '').strip()
-
+        old_code = _safe_shelf_lookup_code(request.form.get('old_code'))
+        requested_new_code = str(request.form.get('new_code') or '').strip()
         if not old_code:
-            return jsonify({'success': False, 'error': 'old_code is required'}), 400
+            return jsonify({'success': False, 'error': 'A valid old_code is required'}), 400
+        if requested_new_code:
+            target_code, code_error = _validate_shelf_code_input(requested_new_code)
+            if code_error:
+                return jsonify({'success': False, 'error': code_error}), 400
+        else:
+            target_code = old_code
 
-        old_path = _resolve_shelf_display_path(old_code, existing_only=True)
-        old_orig_path = _resolve_shelf_original_path(old_code, existing_only=True)
-        target_code = new_code if new_code else old_code
-        original_only = _truthy_form_value(request.form.get('original_only'))
-        target_display_path = _resolve_shelf_display_path(target_code, existing_only=False)
-        existing_target_display_path = _resolve_shelf_display_path(target_code, existing_only=True)
-
-        # If image provided, overwrite or write to new path
         file = request.files.get('image')
-        saved_display_file = False
-        if file:
-            should_save_display = (not original_only) or (existing_target_display_path is None and old_path is None)
-            if should_save_display and target_display_path is not None:
-                target_display_path.parent.mkdir(parents=True, exist_ok=True)
-                file.save(str(target_display_path))
-                _sync_preview_base_image(target_code, target_display_path)
-                saved_display_file = True
-            
-        # If original image provided, save it
         orig_file = request.files.get('original_image')
-        saved_original_file = False
-        if orig_file:
-            target_orig_path = _resolve_shelf_original_path(target_code, existing_only=False)
-            if target_orig_path is not None:
-                target_orig_path.parent.mkdir(parents=True, exist_ok=True)
-                orig_file.save(str(target_orig_path))
-                # Only sync original→base when no cropped display was saved; otherwise
-                # the display (potentially cropped) is already the base.
-                if not saved_display_file:
-                    _sync_original_to_preview_base(target_code)
-                saved_original_file = True
+        for upload in (file, orig_file):
+            if upload and upload.filename and not str(upload.mimetype or '').casefold().startswith('image/'):
+                return jsonify({'success': False, 'error': 'Only image uploads are allowed'}), 400
 
-        # If renaming requested and file exists, rename on disk
-        if new_code and new_code != old_code:
-            new_path = _resolve_shelf_display_path(new_code, existing_only=False)
-            # If image was uploaded we already saved to new_path; otherwise rename existing file
-            if new_path is not None and not new_path.exists() and old_path is not None and old_path.exists():
-                new_path.parent.mkdir(parents=True, exist_ok=True)
-                os.rename(str(old_path), str(new_path))
-            elif new_path is not None and new_path.exists() and old_path is not None and old_path.exists() and old_path != new_path:
-                # New file created by upload, remove old file to prevent duplication
-                try:
-                    os.remove(str(old_path))
-                except Exception as e:
-                    print(f"Error removing old shelf file: {e}")
-            
-            # Rename original if it exists and wasn't just uploaded
-            new_orig_path = _resolve_shelf_original_path(new_code, existing_only=False)
-            if old_orig_path is not None and new_orig_path is not None and not new_orig_path.exists() and old_orig_path.exists():
-                os.rename(str(old_orig_path), str(new_orig_path))
-            elif old_orig_path is not None and new_orig_path is not None and new_orig_path.exists() and old_orig_path.exists():
-                # New original created by upload, remove old original
-                try:
-                    os.remove(str(old_orig_path))
-                except Exception as e:
-                    print(f"Error removing old original file: {e}")
+        ensure_shelf_groups_table()
+        conn = sqlite3.connect('searchRack.db', timeout=30.0)
+        cur = conn.cursor()
+        cur.execute('BEGIN IMMEDIATE')
+        existing_row = _shelf_code_exists(cur, old_code)
+        if requested_new_code and _shelf_code_exists(cur, target_code, exclude_code=old_code):
+            conn.rollback()
+            return jsonify({'success': False, 'error': f'Shelf "{target_code}" already exists'}), 409
 
-            # Cascade rename into searchRack.db (SEARCHRACK.ITEM_POSITION)
+        old_path = _resolve_exact_shelf_display_path(old_code, existing_only=True)
+        old_orig_path = _resolve_exact_shelf_original_path(old_code, existing_only=True)
+        target_path = _resolve_exact_shelf_display_path(target_code, existing_only=False)
+        target_orig_path = _resolve_exact_shelf_original_path(target_code, existing_only=False)
+        if target_path is None or target_orig_path is None:
+            conn.rollback()
+            return jsonify({'success': False, 'error': 'Could not resolve safe shelf image paths'}), 400
+        if requested_new_code and target_path.exists() and target_path != old_path:
+            conn.rollback()
+            return jsonify({'success': False, 'error': f'An image already exists for shelf "{target_code}"'}), 409
+        if requested_new_code and target_orig_path.exists() and target_orig_path != old_orig_path:
+            conn.rollback()
+            return jsonify({'success': False, 'error': f'An original image already exists for shelf "{target_code}"'}), 409
+
+        for path in (old_path, old_orig_path, target_path, target_orig_path):
+            if path is None:
+                continue
+            affected_paths.add(path)
+            if path.exists():
+                file_snapshots[path] = path.read_bytes()
+
+        if existing_row:
+            cur.execute(
+                'UPDATE shelves SET shelf_name = ? WHERE id = ?',
+                (target_code, existing_row[0])
+            )
+        else:
+            cur.execute(
+                'INSERT INTO shelves (shelf_name, group_id, created_at) VALUES (?, 1, CURRENT_TIMESTAMP)',
+                (target_code,)
+            )
+
+        if target_code.casefold() != old_code.casefold():
+            cur.execute('''
+                UPDATE SEARCHRACK
+                SET ITEM_POSITION = CASE
+                        WHEN LOWER(TRIM(COALESCE(ITEM_POSITION, ''))) = LOWER(TRIM(?)) THEN ?
+                        ELSE ITEM_POSITION
+                    END,
+                    PICTUREPOSITION = CASE
+                        WHEN LOWER(TRIM(COALESCE(PICTUREPOSITION, ''))) = LOWER(TRIM(?)) THEN ?
+                        ELSE PICTUREPOSITION
+                    END
+                WHERE LOWER(TRIM(COALESCE(ITEM_POSITION, ''))) = LOWER(TRIM(?))
+                   OR LOWER(TRIM(COALESCE(PICTUREPOSITION, ''))) = LOWER(TRIM(?))
+            ''', (old_code, target_code, old_code, target_code, old_code, old_code))
+
+        original_only = _truthy_form_value(request.form.get('original_only'))
+        saved_display = False
+        if file and file.filename and (not original_only or old_path is None):
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            _save_uploaded_shelf_png(file, target_path)
+            saved_display = True
+        elif target_code.casefold() != old_code.casefold() and old_path and old_path.exists():
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(str(old_path), str(target_path))
+
+        if orig_file and orig_file.filename:
+            target_orig_path.parent.mkdir(parents=True, exist_ok=True)
+            _save_uploaded_shelf_png(orig_file, target_orig_path)
+        elif target_code.casefold() != old_code.casefold() and old_orig_path and old_orig_path.exists():
+            target_orig_path.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(str(old_orig_path), str(target_orig_path))
+
+        if target_code.casefold() != old_code.casefold():
+            if saved_display and old_path and old_path.exists() and old_path != target_path:
+                old_path.unlink()
+            if orig_file and orig_file.filename and old_orig_path and old_orig_path.exists() and old_orig_path != target_orig_path:
+                old_orig_path.unlink()
+
+        conn.commit()
+        try:
+            if saved_display and target_path.exists():
+                _sync_preview_base_image(target_code, target_path)
+            elif target_orig_path.exists():
+                _sync_original_to_preview_base(target_code)
+            if target_code.casefold() != old_code.casefold():
+                _delete_preview_base_image(old_code)
+        except Exception as preview_error:
+            print(f'Warning: shelf preview sync failed for {target_code}: {preview_error}')
+        _invalidate_searchrack_cache()
+        return jsonify({'success': True, 'code': target_code})
+    except Exception as e:
+        if conn is not None:
             try:
-                # Update searchRack.db
-                with db_connection('searchRack.db', row_factory=False) as sconn:
-                    scur = sconn.cursor()
-                    scur.execute("UPDATE SEARCHRACK SET ITEM_POSITION = ? WHERE LOWER(TRIM(ITEM_POSITION)) = LOWER(TRIM(?))", (new_code, old_code))
-                    s_updated = scur.rowcount
-
-                    # Also update the shelves table to maintain metadata link
-                    scur.execute("UPDATE shelves SET shelf_name = ? WHERE shelf_name = ?", (new_code, old_code))
-            except Exception:
-                s_updated = None
-
-            # Log rename cascade results
-            try:
-                with open('clear_shelf.log', 'a', encoding='utf-8') as lf:
-                    lf.write(f"SHELF_RENAME: {time.strftime('%Y-%m-%d %H:%M:%S')} {old_code} -> {new_code} searchRack_updated={s_updated}\n")
+                conn.rollback()
             except Exception:
                 pass
-            if saved_display_file or saved_original_file:
-                _delete_preview_base_image(old_code)
-            else:
-                _rename_preview_base_image(old_code, new_code)
-
-        return jsonify({'success': True})
-    except Exception as e:
-        return jsonify({'success': False, 'error': _safe_error(e)}), 500
+        for path in affected_paths:
+            try:
+                if path in file_snapshots:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(file_snapshots[path])
+                elif path.exists():
+                    path.unlink()
+            except Exception as restore_error:
+                print(f'Failed to restore shelf file {path}: {restore_error}')
+        status = 400 if isinstance(e, ValueError) else 500
+        return jsonify({'success': False, 'error': _safe_error(e)}), status
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 @app.route('/api/clear_shelf_inventory/<code>', methods=['POST'])
 def api_clear_shelf_inventory(code):
-    """Clear ITEM_POSITION (or similar) in rack.db for any rows matching the shelf code.
-    Returns count of rows updated.
-    """
+    """Clear an exact shelf code from current and legacy inventory locations."""
+    conn = None
+    sconn = None
     try:
-        # Log incoming request for debugging
-        try:
-            with open('clear_shelf.log', 'a', encoding='utf-8') as lf:
-                lf.write(f"CLEAR_REQUEST: {time.strftime('%Y-%m-%d %H:%M:%S')} code={repr(code)}\n")
-        except Exception:
-            pass
-
-        code = (code or '').strip()
+        code = _safe_shelf_lookup_code(code)
         if not code:
-            return jsonify({'success': False, 'error': 'code required'}), 400
+            return jsonify({'success': False, 'error': 'A valid shelf code is required'}), 400
 
-        db_path = 'rack.db'
-        conn = sqlite3.connect(db_path)
-        cur = conn.cursor()
+        sconn = sqlite3.connect('searchRack.db', timeout=30.0)
+        scur = sconn.cursor()
+        scur.execute('BEGIN IMMEDIATE')
+        scur.execute('''
+            UPDATE SEARCHRACK
+            SET ITEM_POSITION = CASE
+                    WHEN LOWER(TRIM(COALESCE(ITEM_POSITION, ''))) = LOWER(TRIM(?)) THEN ''
+                    ELSE ITEM_POSITION
+                END,
+                PICTUREPOSITION = CASE
+                    WHEN LOWER(TRIM(COALESCE(PICTUREPOSITION, ''))) = LOWER(TRIM(?)) THEN ''
+                    ELSE PICTUREPOSITION
+                END
+            WHERE LOWER(TRIM(COALESCE(ITEM_POSITION, ''))) = LOWER(TRIM(?))
+               OR LOWER(TRIM(COALESCE(PICTUREPOSITION, ''))) = LOWER(TRIM(?))
+        ''', (code, code, code, code))
+        search_updated = scur.rowcount
+        sconn.commit()
 
-        # Determine which table holds inventory rows (try common names)
-        cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
-        tables = [r[0] for r in cur.fetchall()]
-        table_name = None
-        for candidate in ('items', 'INVENTORY', 'inventory'):
-            if candidate in tables:
-                table_name = candidate
-                break
-        # fallback: pick a table that looks like inventory
-        if not table_name:
-            for t in tables:
-                if 'item' in t.lower() or 'invent' in t.lower():
-                    table_name = t
-                    break
-
-        if not table_name:
-            return jsonify({'success': False, 'error': 'No inventory-like table found in rack.db'}), 400
-
-        # Find likely location columns in the chosen table
-        cur.execute(f"PRAGMA table_info({table_name})")
-        cols = [r[1] for r in cur.fetchall()]
-        loc_cols = [c for c in cols if c.lower() in ('item_position','itemposition','position','location')]
-        if not loc_cols:
-            # fallback: try common column name substrings
-            loc_cols = [c for c in cols if 'position' in c.lower() or 'location' in c.lower()]
-
-        updated = 0
-        if loc_cols:
-            # Use case-insensitive, trimmed comparison to increase match robustness
-            for col in loc_cols:
-                sql = f"UPDATE {table_name} SET {col} = '' WHERE LOWER(TRIM({col})) = LOWER(TRIM(?))"
-                cur.execute(sql, (code,))
-                updated += cur.rowcount
-            try:
-                with open('clear_shelf.log', 'a', encoding='utf-8') as lf:
-                    lf.write(f"CLEAR_SQL: table={table_name} loc_cols={loc_cols} code={repr(code)} updated={updated}\n")
-            except Exception:
-                pass
-            try:
-                with open('clear_shelf.log', 'a', encoding='utf-8') as lf:
-                    lf.write(f"CLEAR_RESULT: updated={updated}, loc_cols={loc_cols}\n")
-            except Exception:
-                pass
-        else:
-            # Nothing to update
-            return jsonify({'success': False, 'error': 'No location column found in items table'}), 400
-
-        conn.commit()
-
-        # Also clear searchRack.db ITEM_POSITION if present
-        search_updated = 0
+        # Legacy rack.db is best-effort compatibility; searchRack.db is the
+        # authoritative warehouse database.
+        legacy_updated = 0
         try:
-            sconn = sqlite3.connect('searchRack.db')
-            scur = sconn.cursor()
-            # Check for SEARCHRACK table and ITEM_POSITION column
-            scur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='SEARCHRACK'")
-            if scur.fetchone():
-                scur.execute("PRAGMA table_info(SEARCHRACK)")
-                scols = [r[1] for r in scur.fetchall()]
-                if 'ITEM_POSITION' in scols:
-                    scur.execute("UPDATE SEARCHRACK SET ITEM_POSITION = '' WHERE LOWER(TRIM(ITEM_POSITION)) = LOWER(TRIM(?))", (code,))
-                    search_updated = scur.rowcount
-                    sconn.commit()
-        except Exception as e:
-            try:
-                with open('clear_shelf.log', 'a', encoding='utf-8') as lf:
-                    lf.write(f"CLEAR_SEARCH_ERROR: {time.strftime('%Y-%m-%d %H:%M:%S')} error={e}\n")
-            except Exception:
-                pass
-        finally:
-            sconn.close()
+            conn = sqlite3.connect('rack.db', timeout=10.0)
+            cur = conn.cursor()
+            cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            tables = [str(row[0]) for row in cur.fetchall()]
+            table_name = next(
+                (name for name in tables if name.casefold() in ('items', 'inventory')),
+                None
+            )
+            if table_name:
+                cur.execute(f'PRAGMA table_info({_sqlite_ident(table_name)})')
+                columns = [str(row[1]) for row in cur.fetchall()]
+                location_columns = [
+                    column for column in columns
+                    if column.casefold() in ('item_position', 'itemposition', 'position', 'location', 'pictureposition')
+                ]
+                for column in location_columns:
+                    cur.execute(
+                        f'''UPDATE {_sqlite_ident(table_name)}
+                            SET {_sqlite_ident(column)} = ''
+                            WHERE LOWER(TRIM(COALESCE({_sqlite_ident(column)}, ''))) = LOWER(TRIM(?))''',
+                        (code,)
+                    )
+                    legacy_updated += cur.rowcount
+                conn.commit()
+        except Exception as legacy_error:
+            print(f'Warning: legacy rack.db shelf clear failed for {code}: {legacy_error}')
 
-        # Log final counts
-        try:
-            with open('clear_shelf.log', 'a', encoding='utf-8') as lf:
-                lf.write(f"CLEAR_FINAL: code={repr(code)} inventory_updated={updated} searchrack_updated={search_updated}\n")
-        except Exception:
-            pass
-
-        return jsonify({'success': True, 'updated': updated, 'search_updated': search_updated})
+        _invalidate_searchrack_cache()
+        return jsonify({
+            'success': True,
+            'updated': search_updated,
+            'search_updated': search_updated,
+            'legacy_updated': legacy_updated
+        })
     except Exception as e:
+        if sconn is not None:
+            try:
+                sconn.rollback()
+            except Exception:
+                pass
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
+        if sconn is not None:
+            sconn.close()
 
 
 @app.route('/api/list_shelves', methods=['GET'])
 def api_list_shelves():
-    """Return list of shelf images from the resolved shelf image folders as JSON."""
+    """Return the union of shelf metadata and exact shelf image files."""
     try:
         sort = (request.args.get('sort') or 'created').lower()
         results = []
-        codes = []
         files = _iter_shelf_display_files()
-        if files:
-            codes = [path.stem for path in files]
-            normalized_codes = [code.lower().strip() for code in codes if code]
+        file_map = {path.stem.casefold().strip(): path for path in files if path.stem.strip()}
+        metadata_map = {}
+        counts_map = {}
 
-            # Query created_at and group_id from searchRack.db.shelves
-            created_map = {}
-            group_map = {}
-            # counts map from searchRack.db.SEARCHRACK (ITEM_POSITION)
-            counts_map = {}
-            sdb_path = os.path.join(app.root_path, 'searchRack.db')
-            # Query created_at and group_id; ignore if table missing
-            try:
-                conn = sqlite3.connect(sdb_path)
-                cur = conn.cursor()
-                if normalized_codes:
-                    placeholders = ','.join('?' for _ in normalized_codes)
-                    cur.execute(
-                        f"SELECT shelf_name, created_at, group_id FROM shelves WHERE LOWER(TRIM(shelf_name)) IN ({placeholders})",
-                        tuple(normalized_codes),
-                    )
-                    for r in cur.fetchall():
-                        key = str(r[0] or '').lower().strip()
-                        if key:
-                            created_map[key] = r[1]
-                            group_map[key] = r[2]
-            except Exception:
-                created_map = {}
-                group_map = {}
-            finally:
-                conn.close()
-            # Query counts; handle missing table separately
-            try:
-                conn = sqlite3.connect(sdb_path)
-                cur = conn.cursor()
-                cur.execute('''
-                    SELECT LOWER(TRIM(ITEM_POSITION)) AS pos, COUNT(*)
-                    FROM SEARCHRACK
-                    WHERE COALESCE(CAST(QUANTITY AS INTEGER), 0) > 0
-                    GROUP BY LOWER(TRIM(ITEM_POSITION))
-                ''')
-                for pos, cnt in cur.fetchall():
-                    counts_map[pos] = cnt
-            except Exception:
-                counts_map = {}
-            finally:
-                conn.close()
+        ensure_shelf_groups_table()
+        with db_connection('searchRack.db') as conn:
+            cur = conn.cursor()
+            cur.execute('SELECT shelf_name, created_at, group_id FROM shelves ORDER BY id')
+            for row in cur.fetchall():
+                code = str(row['shelf_name'] or '').strip()
+                if code and code.casefold() not in metadata_map:
+                    metadata_map[code.casefold()] = {
+                        'code': code,
+                        'created_at': row['created_at'],
+                        'group_id': row['group_id']
+                    }
 
-            for path in files:
-                code = path.stem
-                fname = path.name
+            # Count physical units once per distinct location key on each row.
+            cur.execute('''
+                SELECT ITEM_POSITION, PICTUREPOSITION,
+                       COALESCE(CAST(QUANTITY AS INTEGER), 0) AS quantity
+                FROM SEARCHRACK
+                WHERE COALESCE(CAST(QUANTITY AS INTEGER), 0) > 0
+            ''')
+            for row in cur.fetchall():
+                qty = max(0, _coerce_int(row['quantity'], 0))
+                keys = {
+                    str(row['ITEM_POSITION'] or '').strip().casefold(),
+                    str(row['PICTUREPOSITION'] or '').strip().casefold()
+                }
+                for key in keys:
+                    if key:
+                        counts_map[key] = counts_map.get(key, 0) + qty
+
+        for normalized_code in sorted(set(file_map) | set(metadata_map)):
+            path = file_map.get(normalized_code)
+            metadata = metadata_map.get(normalized_code, {})
+            code = str(metadata.get('code') or (path.stem if path else '')).strip()
+            if not code:
+                continue
+            mtime = 0
+            cache_version = ''
+            if path is not None:
                 try:
                     stat_info = path.stat()
                     mtime = stat_info.st_mtime
                     cache_version = str(getattr(stat_info, 'st_mtime_ns', int(mtime * 1000000000)))
                 except Exception:
-                    mtime = 0
                     cache_version = str(int(time.time() * 1000000000))
-                url = url_for('shelf_image', code=code)
-                normalized_code = code.lower().strip()
-                count = counts_map.get(normalized_code, 0)
-                # Default to group 1 (Ungrouped) if not set
-                group_id = group_map.get(normalized_code, 1)
-                results.append({
-                    'code': code, 
-                    'filename': fname, 
-                    'url': url, 
-                    'lastModified': int(mtime), 
-                    'cacheVersion': cache_version,
-                    'created_at': created_map.get(normalized_code), 
-                    'count': int(count),
-                    'group_id': group_id
-                })
+            results.append({
+                'code': code,
+                'filename': path.name if path else '',
+                'url': url_for('shelf_image', code=code) if path else '',
+                'has_image': bool(path),
+                'lastModified': int(mtime),
+                'cacheVersion': cache_version,
+                'created_at': metadata.get('created_at'),
+                'count': int(counts_map.get(normalized_code, 0)),
+                'group_id': metadata.get('group_id') or 1
+            })
 
-            # Apply server-side sorting
-            if sort == 'items':
-                results.sort(key=lambda x: x.get('count', 0), reverse=True)
-            elif sort == 'created':
-                # Sort by created_at desc; fallback to lastModified desc
-                def created_key(x):
-                    ca = x.get('created_at')
-                    # If created_at exists, use it. Ensure consistent format (replace T with space)
-                    if ca:
-                        return str(ca).replace('T', ' ')
-                    
-                    # Fallback to lastModified
-                    try:
-                        ts = x.get('lastModified', 0)
-                        # Use space separator to match SQLite default
-                        return datetime.datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S')
-                    except Exception:
-                        return '1970-01-01 00:00:00'
-                
-                results.sort(key=created_key, reverse=True)
-            else:
-                # name
-                results.sort(key=lambda x: (x.get('code') or '').lower())
+        if sort == 'items':
+            results.sort(key=lambda x: x.get('count', 0), reverse=True)
+        elif sort == 'created':
+            def created_key(item):
+                created_at = item.get('created_at')
+                if created_at:
+                    return str(created_at).replace('T', ' ')
+                try:
+                    return datetime.datetime.fromtimestamp(
+                        item.get('lastModified', 0)
+                    ).strftime('%Y-%m-%d %H:%M:%S')
+                except Exception:
+                    return '1970-01-01 00:00:00'
+            results.sort(key=created_key, reverse=True)
+        else:
+            results.sort(key=lambda x: (x.get('code') or '').casefold())
         return jsonify({'success': True, 'shelves': results})
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
@@ -44317,7 +45457,8 @@ def api_list_shelves():
 
 @app.route('/api/shelf_counts', methods=['POST'])
 def api_shelf_counts():
-    """Return a map of shelf_code -> counts of items referencing that shelf from both SEARCHRACK and INVENTORY."""
+    """Return physical-unit counts for shelf codes across both location columns."""
+    sconn = None
     try:
         codes = request.get_json() or {}
         codes = codes.get('codes', []) if isinstance(codes, dict) else codes
@@ -44325,26 +45466,27 @@ def api_shelf_counts():
             return jsonify({'success': False, 'error': 'codes must be a list'}), 400
 
         result = {}
-        try:
-            sconn = sqlite3.connect('searchRack.db')
-            scur = sconn.cursor()
-            for code in codes:
-                scur.execute('''
-                    SELECT COUNT(*) FROM SEARCHRACK
-                    WHERE LOWER(TRIM(ITEM_POSITION)) = LOWER(TRIM(?))
-                      AND COALESCE(CAST(QUANTITY AS INTEGER), 0) > 0
-                ''', (code,))
-                r = scur.fetchone()
-                result[code] = {'searchrack': r[0] if r else 0}
-        except Exception:
-            for code in codes:
-                result[code] = {'searchrack': 0}
-        finally:
-            sconn.close()
+        sconn = sqlite3.connect('searchRack.db')
+        scur = sconn.cursor()
+        for code in codes:
+            scur.execute('''
+                SELECT COALESCE(SUM(COALESCE(CAST(QUANTITY AS INTEGER), 0)), 0)
+                FROM SEARCHRACK
+                WHERE COALESCE(CAST(QUANTITY AS INTEGER), 0) > 0
+                  AND (
+                    LOWER(TRIM(COALESCE(ITEM_POSITION, ''))) = LOWER(TRIM(?))
+                    OR LOWER(TRIM(COALESCE(PICTUREPOSITION, ''))) = LOWER(TRIM(?))
+                  )
+            ''', (code, code))
+            row = scur.fetchone()
+            result[code] = {'searchrack': int(row[0] or 0) if row else 0}
 
         return jsonify({'success': True, 'counts': result})
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
+    finally:
+        if sconn is not None:
+            sconn.close()
 
 
 # ============================================================================
@@ -44436,6 +45578,7 @@ def ensure_shelf_groups_table():
 @app.route('/api/groups', methods=['GET'])
 def api_get_groups():
     """Get all shelf groups with shelf counts"""
+    conn = None
     try:
         ensure_shelf_groups_table()
         conn = sqlite3.connect('searchRack.db')
@@ -44448,7 +45591,11 @@ def api_get_groups():
                 g.id,
                 g.name,
                 g.created_at,
-                COUNT(s.id) as shelf_count
+                COUNT(CASE WHEN s.id = (
+                    SELECT MIN(s2.id)
+                    FROM shelves s2
+                    WHERE LOWER(TRIM(s2.shelf_name)) = LOWER(TRIM(s.shelf_name))
+                ) THEN 1 END) as shelf_count
             FROM shelf_groups g
             LEFT JOIN shelves s ON s.group_id = g.id
             GROUP BY g.id
@@ -44462,21 +45609,32 @@ def api_get_groups():
         print(f'[api_get_groups] Error: {e}')
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
 
 @app.route('/api/create_group', methods=['POST'])
 def api_create_group():
     """Create a new shelf group"""
+    conn = None
     try:
         data = request.get_json() or {}
         name = (data.get('name') or '').strip()
         
         if not name:
             return jsonify({'success': False, 'error': 'Group name is required'}), 400
+        if len(name) > 80:
+            return jsonify({'success': False, 'error': 'Group name must be 80 characters or fewer'}), 400
         
         ensure_shelf_groups_table()
         conn = sqlite3.connect('searchRack.db')
         cur = conn.cursor()
+        cur.execute('BEGIN IMMEDIATE')
+        cur.execute(
+            'SELECT id FROM shelf_groups WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1',
+            (name,)
+        )
+        if cur.fetchone():
+            return jsonify({'success': False, 'error': 'A group with that name already exists'}), 409
         
         cur.execute('INSERT INTO shelf_groups (name) VALUES (?)', (name,))
         group_id = cur.lastrowid
@@ -44491,19 +45649,24 @@ def api_create_group():
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
 
 @app.route('/api/delete_group', methods=['POST'])
 def api_delete_group():
     """Delete a shelf group and move its shelves to Default Group (id=1)"""
+    conn = None
     try:
         data = request.get_json() or {}
-        group_id = data.get('group_id')
+        try:
+            group_id = int(data.get('group_id'))
+        except (TypeError, ValueError):
+            group_id = 0
         
         if not group_id:
             return jsonify({'success': False, 'error': 'group_id is required'}), 400
         
-        if int(group_id) == 1:
+        if group_id == 1:
             return jsonify({'success': False, 'error': 'Cannot delete Default Group'}), 400
         
         ensure_shelf_groups_table()
@@ -44516,6 +45679,9 @@ def api_delete_group():
         
         # Delete the group
         cur.execute('DELETE FROM shelf_groups WHERE id = ?', (group_id,))
+        if cur.rowcount == 0:
+            conn.rollback()
+            return jsonify({'success': False, 'error': 'Group not found'}), 404
         
         conn.commit()
         
@@ -44527,18 +45693,34 @@ def api_delete_group():
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
 
 @app.route('/api/move_shelves', methods=['POST'])
 def api_move_shelves():
     """Move shelves to a different group. Accepts shelf_codes (list of shelf names) and group_id (or target_group_id)."""
+    conn = None
     try:
         data = request.get_json() or {}
         shelf_codes = data.get('shelf_codes', [])
         target_group_id = data.get('group_id') or data.get('target_group_id')
         
-        if not shelf_codes or target_group_id is None:
+        if not isinstance(shelf_codes, list) or not shelf_codes or target_group_id is None:
             return jsonify({'success': False, 'error': 'shelf_codes and group_id are required'}), 400
+        try:
+            target_group_id = int(target_group_id)
+        except (TypeError, ValueError):
+            return jsonify({'success': False, 'error': 'group_id must be an integer'}), 400
+        normalized_codes = []
+        seen_codes = set()
+        for value in shelf_codes:
+            code = _safe_shelf_lookup_code(value)
+            if not code:
+                return jsonify({'success': False, 'error': 'Every shelf code must be valid'}), 400
+            key = code.casefold()
+            if key not in seen_codes:
+                normalized_codes.append(code)
+                seen_codes.add(key)
         
         ensure_shelf_groups_table()
         conn = sqlite3.connect('searchRack.db')
@@ -44550,18 +45732,25 @@ def api_move_shelves():
             return jsonify({'success': False, 'error': 'Target group does not exist'}), 404
         
         # For each shelf code, ensure it exists in the shelves table (create if missing)
-        for code in shelf_codes:
-            cur.execute('SELECT id FROM shelves WHERE shelf_name = ? COLLATE NOCASE', (code,))
-            if not cur.fetchone():
+        moved_count = 0
+        for code in normalized_codes:
+            cur.execute(
+                'SELECT id FROM shelves WHERE LOWER(TRIM(shelf_name)) = LOWER(TRIM(?)) LIMIT 1',
+                (code,)
+            )
+            row = cur.fetchone()
+            if not row:
                 # Shelf doesn't exist in table, create it
                 cur.execute('INSERT INTO shelves (shelf_name, group_id) VALUES (?, ?)', (code, target_group_id))
                 print(f'[MOVE_SHELVES] Created missing shelf entry for {code}')
-        
-        # Now update all shelves to the target group
-        placeholders = ','.join('?' for _ in shelf_codes)
-        cur.execute(f'UPDATE shelves SET group_id = ? WHERE shelf_name IN ({placeholders}) COLLATE NOCASE', 
-                   [target_group_id] + shelf_codes)
-        moved_count = cur.rowcount
+                moved_count += 1
+            else:
+                cur.execute(
+                    'UPDATE shelves SET group_id = ? '
+                    'WHERE LOWER(TRIM(shelf_name)) = LOWER(TRIM(?))',
+                    (target_group_id, code)
+                )
+                moved_count += 1
         
         conn.commit()
         
@@ -44571,13 +45760,21 @@ def api_move_shelves():
             'message': f'{moved_count} shelf(es) moved successfully'
         })
     except Exception as e:
+        if conn is not None:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
 
 @app.route('/api/upload_shelf', methods=['POST'])
 def api_upload_shelf():
     """Upload a shelf image and associate it with a group"""
+    conn = None
+    created_paths = []
     try:
         group_id = request.form.get('group_id', 1)  # Default to group 1
         try:
@@ -44591,60 +45788,64 @@ def api_upload_shelf():
         file = request.files['image']
         if not file.filename:
             return jsonify({'success': False, 'error': 'Empty filename'}), 400
+        if not str(file.mimetype or '').casefold().startswith('image/'):
+            return jsonify({'success': False, 'error': 'Only image uploads are allowed'}), 400
         
         # Use provided code or generate a unique shelf code
-        shelf_code = request.form.get('code')
-        if not shelf_code:
+        requested_code = request.form.get('code')
+        if not requested_code:
             import uuid
-            shelf_code = str(uuid.uuid4())[:8].upper()
-        
-        # Sanitize shelf_code to be safe for filenames
-        import re
-        shelf_code = re.sub(r'[<>:"/\\|?*]', '_', shelf_code)
-        
-        # Save the image
-        _SHELF_ROOT_DIR.mkdir(parents=True, exist_ok=True)
+            requested_code = str(uuid.uuid4())[:8].upper()
+        shelf_code, code_error = _validate_shelf_code_input(requested_code)
+        if code_error:
+            return jsonify({'success': False, 'error': code_error}), 400
+
         original_only = _truthy_form_value(request.form.get('original_only'))
-        target_display_path = _resolve_shelf_display_path(shelf_code, existing_only=False)
-        existing_display_path = _resolve_shelf_display_path(shelf_code, existing_only=True)
-        should_save_display = (not original_only) or (existing_display_path is None)
-        if should_save_display and target_display_path is not None:
-            target_display_path.parent.mkdir(parents=True, exist_ok=True)
-            file.save(str(target_display_path))
-            _sync_preview_base_image(shelf_code, target_display_path)
-        
-        # Save original image if provided
-        saved_display_file = should_save_display and target_display_path is not None
-        if 'original_image' in request.files:
-            orig_file = request.files['original_image']
-            if orig_file.filename:
-                orig_path = _resolve_shelf_original_path(shelf_code, existing_only=False)
-                if orig_path is not None:
-                    orig_path.parent.mkdir(parents=True, exist_ok=True)
-                    orig_file.save(str(orig_path))
-                    # Only sync original→base when no cropped display was saved; otherwise
-                    # the display (potentially cropped) is already the base.
-                    if not saved_display_file:
-                        _sync_original_to_preview_base(shelf_code)
-
-        # Create or update shelf entry in database
         ensure_shelf_groups_table()
-        with db_connection('searchRack.db', row_factory=False) as conn:
-            cur = conn.cursor()
+        conn = sqlite3.connect('searchRack.db', timeout=30.0)
+        cur = conn.cursor()
+        cur.execute('BEGIN IMMEDIATE')
+        if _shelf_code_exists(cur, shelf_code):
+            conn.rollback()
+            return jsonify({'success': False, 'error': f'Shelf "{shelf_code}" already exists'}), 409
+        cur.execute('SELECT id FROM shelf_groups WHERE id = ?', (group_id,))
+        if not cur.fetchone():
+            conn.rollback()
+            return jsonify({'success': False, 'error': 'Selected group does not exist'}), 404
 
-            # Check if shelf already exists
-            cur.execute('SELECT id FROM shelves WHERE shelf_name = ?', (shelf_code,))
-            existing_row = cur.fetchone()
+        target_display_path = _resolve_exact_shelf_display_path(shelf_code, existing_only=False)
+        orig_path = _resolve_exact_shelf_original_path(shelf_code, existing_only=False)
+        if target_display_path is None or orig_path is None:
+            conn.rollback()
+            return jsonify({'success': False, 'error': 'Could not resolve safe shelf image paths'}), 400
+        if any(path.exists() for path in _shelf_exact_display_path_candidates(shelf_code)):
+            conn.rollback()
+            return jsonify({'success': False, 'error': f'An image already exists for shelf "{shelf_code}"'}), 409
 
-            if existing_row:
-                # Update existing shelf's group
-                cur.execute('UPDATE shelves SET group_id = ? WHERE id = ?', (group_id, existing_row[0]))
-            else:
-                # Insert new shelf
-                cur.execute('''
-                    INSERT INTO shelves (shelf_name, group_id, created_at)
-                    VALUES (?, ?, CURRENT_TIMESTAMP)
-                ''', (shelf_code, group_id))
+        cur.execute('''
+            INSERT INTO shelves (shelf_name, group_id, created_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+        ''', (shelf_code, group_id))
+
+        target_display_path.parent.mkdir(parents=True, exist_ok=True)
+        _save_uploaded_shelf_png(file, target_display_path)
+        created_paths.append(target_display_path)
+        orig_file = request.files.get('original_image')
+        if orig_file and orig_file.filename:
+            if not str(orig_file.mimetype or '').casefold().startswith('image/'):
+                raise ValueError('Only image uploads are allowed')
+            orig_path.parent.mkdir(parents=True, exist_ok=True)
+            _save_uploaded_shelf_png(orig_file, orig_path)
+            created_paths.append(orig_path)
+
+        conn.commit()
+        try:
+            if not original_only or target_display_path.exists():
+                _sync_preview_base_image(shelf_code, target_display_path)
+            elif orig_path.exists():
+                _sync_original_to_preview_base(shelf_code)
+        except Exception as preview_error:
+            print(f'Warning: shelf preview sync failed for {shelf_code}: {preview_error}')
         
         return jsonify({
             'success': True,
@@ -44652,122 +45853,138 @@ def api_upload_shelf():
             'message': f'Shelf {shelf_code} uploaded successfully'
         })
     except Exception as e:
-        return jsonify({'success': False, 'error': _safe_error(e)}), 500
+        if conn is not None:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        for path in created_paths:
+            try:
+                path.unlink(missing_ok=True)
+            except Exception:
+                pass
+        status = 400 if isinstance(e, ValueError) else 500
+        return jsonify({'success': False, 'error': _safe_error(e)}), status
+    finally:
+        if conn is not None:
+            conn.close()
 
 @app.route('/api/delete_shelf', methods=['POST'])
 def api_delete_shelf():
-    """Delete a shelf and its associated files"""
+    """Delete an empty shelf, staging exact files until the DB commit succeeds."""
+    conn = None
+    staged_paths = []
     try:
         data = request.get_json() or {}
         shelf_id = data.get('shelf_id')
-        shelf_code = data.get('code')
-        
-        print(f"[DELETE_SHELF] Request received for id={shelf_id}, code={shelf_code}")
+        shelf_code = _safe_shelf_lookup_code(data.get('code'))
 
         if not shelf_id and not shelf_code:
             return jsonify({'success': False, 'error': 'shelf_id or code is required'}), 400
-        
-        # Use a timeout for the connection
-        conn = sqlite3.connect('searchRack.db', timeout=10.0)
+
+        conn = sqlite3.connect('searchRack.db', timeout=30.0)
         cur = conn.cursor()
-        
+        cur.execute('BEGIN IMMEDIATE')
         code_to_delete = None
-        
-        # Get shelf info
+
         if shelf_id:
             cur.execute('SELECT shelf_name FROM shelves WHERE id = ?', (shelf_id,))
             row = cur.fetchone()
             if row:
                 code_to_delete = row[0]
             else:
-                print(f"[DELETE_SHELF] Shelf ID {shelf_id} not found in DB")
+                conn.rollback()
                 return jsonify({'success': False, 'error': 'Shelf not found'}), 404
         else:
-            # Try case-insensitive match first
-            cur.execute('SELECT id, shelf_name FROM shelves WHERE shelf_name = ? COLLATE NOCASE', (shelf_code,))
+            cur.execute(
+                'SELECT id, shelf_name FROM shelves WHERE LOWER(TRIM(shelf_name)) = LOWER(TRIM(?)) LIMIT 1',
+                (shelf_code,)
+            )
             row = cur.fetchone()
             if row:
                 shelf_id = row[0]
-                code_to_delete = row[1] # Use the actual name from DB
+                code_to_delete = row[1]
             else:
-                # Shelf not in DB, but we have the code, so we can try to delete the file
                 code_to_delete = shelf_code
-                print(f"[DELETE_SHELF] Shelf '{shelf_code}' not found in DB, proceeding to file deletion")
 
-        if code_to_delete:
-            cur.execute('''
-                SELECT COUNT(*), COALESCE(SUM(CAST(QUANTITY AS INTEGER)), 0)
-                FROM SEARCHRACK
-                WHERE COALESCE(CAST(QUANTITY AS INTEGER), 0) > 0
-                  AND (
-                      LOWER(TRIM(COALESCE(ITEM_POSITION, ''))) = LOWER(TRIM(?))
-                      OR LOWER(TRIM(COALESCE(PICTUREPOSITION, ''))) = LOWER(TRIM(?))
-                  )
-            ''', (code_to_delete, code_to_delete))
-            active_count, active_units = cur.fetchone()
-            if active_count:
-                conn.rollback()
-                return jsonify({
-                    'success': False,
-                    'error': (
-                        f'Shelf {code_to_delete} still contains {int(active_units or 0)} active unit(s). '
-                        'Move or remove those items before deleting the shelf.'
-                    ),
-                    'active_items': int(active_count or 0),
-                    'active_units': int(active_units or 0)
-                }), 409
+        cur.execute('''
+            SELECT COUNT(*), COALESCE(SUM(COALESCE(CAST(QUANTITY AS INTEGER), 0)), 0)
+            FROM SEARCHRACK
+            WHERE COALESCE(CAST(QUANTITY AS INTEGER), 0) > 0
+              AND (
+                  LOWER(TRIM(COALESCE(ITEM_POSITION, ''))) = LOWER(TRIM(?))
+                  OR LOWER(TRIM(COALESCE(PICTUREPOSITION, ''))) = LOWER(TRIM(?))
+              )
+        ''', (code_to_delete, code_to_delete))
+        active_count, active_units = cur.fetchone()
+        if active_count:
+            conn.rollback()
+            return jsonify({
+                'success': False,
+                'error': (
+                    f'Shelf {code_to_delete} still contains {int(active_units or 0)} active unit(s). '
+                    'Move or remove those items before deleting the shelf.'
+                ),
+                'active_items': int(active_count or 0),
+                'active_units': int(active_units or 0)
+            }), 409
+
+        # Rename exact shelf files to hidden recovery names before changing the
+        # database. This avoids both ghost records and irreversible partial deletes.
+        import uuid
+        exact_paths = (
+            _shelf_exact_display_path_candidates(code_to_delete)
+            + _shelf_exact_original_path_candidates(code_to_delete)
+        )
+        preview_path = _preview_base_path_for_code(code_to_delete)
+        if preview_path is not None:
+            exact_paths.append(preview_path)
+        seen_paths = set()
+        for path in exact_paths:
+            if path in seen_paths or not path.exists():
+                continue
+            seen_paths.add(path)
+            staged = path.with_name(f'.{path.name}.delete-{uuid.uuid4().hex}')
+            os.replace(str(path), str(staged))
+            staged_paths.append((path, staged))
 
         if shelf_id:
             cur.execute('DELETE FROM shelves WHERE id = ?', (shelf_id,))
-            print(f"[DELETE_SHELF] Deleted shelf '{code_to_delete}' (ID {shelf_id}) from DB")
-        
         conn.commit()
-        
-        # Delete shelf image file
-        if code_to_delete:
-            shelf_file = _resolve_shelf_display_path(code_to_delete, existing_only=True)
-            orig_file = _resolve_shelf_original_path(code_to_delete, existing_only=True)
-            
-            if shelf_file is not None and shelf_file.exists():
-                try:
-                    os.remove(str(shelf_file))
-                    print(f"[DELETE_SHELF] Deleted file: {shelf_file}")
-                except Exception as e:
-                    print(f"[DELETE_SHELF] Error deleting file {shelf_file}: {e}")
-            
-            if orig_file is not None and orig_file.exists():
-                try:
-                    os.remove(str(orig_file))
-                    print(f"[DELETE_SHELF] Deleted original file: {orig_file}")
-                except Exception as e:
-                    print(f"[DELETE_SHELF] Error deleting original file {orig_file}: {e}")
-            _delete_preview_base_image(code_to_delete)
-            
-            if shelf_file is None or not shelf_file.exists():
-                print(f"[DELETE_SHELF] File for {code_to_delete} not found in resolved location, trying all candidates")
-                for candidate in _shelf_display_path_candidates(code_to_delete):
-                    if candidate.exists():
-                        try:
-                            os.remove(str(candidate))
-                            print(f"[DELETE_SHELF] Deleted file (candidate match): {candidate}")
-                        except Exception as e:
-                            print(f"[DELETE_SHELF] Error deleting file {candidate}: {e}")
-        
+        cleanup_warnings = []
+        for _, staged in staged_paths:
+            try:
+                staged.unlink(missing_ok=True)
+            except Exception as cleanup_error:
+                cleanup_warnings.append(str(cleanup_error))
+        _invalidate_searchrack_cache()
         return jsonify({
             'success': True,
-            'message': f'Shelf {code_to_delete} deleted successfully'
+            'message': f'Shelf {code_to_delete} deleted successfully',
+            'cleanup_pending': bool(cleanup_warnings)
         })
     except Exception as e:
-        print(f"[DELETE_SHELF] Error: {e}")
-        import traceback
-        traceback.print_exc()
+        if conn is not None:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        for original, staged in reversed(staged_paths):
+            try:
+                if staged.exists():
+                    original.parent.mkdir(parents=True, exist_ok=True)
+                    os.replace(str(staged), str(original))
+            except Exception as restore_error:
+                print(f'Failed to restore staged shelf file {staged}: {restore_error}')
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
 
 @app.route('/api/valid_shelves', methods=['GET'])
 def api_valid_shelves():
     """Get list of valid shelf codes from the database"""
+    conn = None
     try:
         ensure_shelf_groups_table()
         conn = sqlite3.connect('searchRack.db')
@@ -44784,11 +46001,13 @@ def api_valid_shelves():
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e), 'codes': []}), 500
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
 
 @app.route('/api/location_hierarchy', methods=['GET'])
 def api_location_hierarchy():
     """Get location hierarchy with item counts for searchRack inventory"""
+    conn = None
     try:
         ensure_shelf_groups_table()
         conn = sqlite3.connect('searchRack.db')
@@ -44807,7 +46026,10 @@ def api_location_hierarchy():
             FROM shelf_groups g
             LEFT JOIN shelves s ON s.group_id = g.id
             LEFT JOIN SEARCHRACK sr
-              ON LOWER(TRIM(sr.ITEM_POSITION)) = LOWER(TRIM(s.shelf_name))
+              ON (
+                    LOWER(TRIM(COALESCE(sr.ITEM_POSITION, ''))) = LOWER(TRIM(s.shelf_name))
+                    OR LOWER(TRIM(COALESCE(sr.PICTUREPOSITION, ''))) = LOWER(TRIM(s.shelf_name))
+                 )
              AND COALESCE(CAST(sr.QUANTITY AS INTEGER), 0) > 0
             WHERE g.name != 'Default Group' OR g.name IS NULL
             GROUP BY g.id, s.id
@@ -44855,7 +46077,8 @@ def api_location_hierarchy():
         traceback.print_exc()
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
 
 
 def _movelocation_barcode_key(value):
@@ -49808,76 +51031,94 @@ if os.getenv('DISABLE_BACKGROUND_SERVICES', '').strip().lower() not in ('1', 'tr
 
 @app.route('/api/duplicate_shelf', methods=['POST'])
 def api_duplicate_shelf():
-    """Duplicate a shelf including its image and database entry"""
+    """Duplicate shelf metadata plus its display and clean original images."""
+    conn = None
+    created_paths = []
     try:
         data = request.get_json() or {}
-        code = data.get('code')
+        code = _safe_shelf_lookup_code(data.get('code'))
         
         if not code:
-            return jsonify({'success': False, 'error': 'Code is required'}), 400
+            return jsonify({'success': False, 'error': 'A valid code is required'}), 400
 
-        conn = sqlite3.connect('searchRack.db')
+        conn = sqlite3.connect('searchRack.db', timeout=30.0)
         cur = conn.cursor()
+        cur.execute('BEGIN IMMEDIATE')
         
-        # Get source shelf
-        cur.execute('SELECT id, shelf_name, group_id FROM shelves WHERE shelf_name = ?', (code,))
+        cur.execute(
+            'SELECT id, shelf_name, group_id FROM shelves '
+            'WHERE LOWER(TRIM(shelf_name)) = LOWER(TRIM(?)) LIMIT 1',
+            (code,)
+        )
         row = cur.fetchone()
-        
         if not row:
-            # Try case insensitive
-            cur.execute('SELECT id, shelf_name, group_id FROM shelves WHERE shelf_name = ? COLLATE NOCASE', (code,))
-            row = cur.fetchone()
-            
-        if not row:
+            conn.rollback()
             return jsonify({'success': False, 'error': 'Shelf not found'}), 404
             
-        source_id, source_name, group_id = row
-        
-        # Determine new name
+        _, source_name, group_id = row
         import re
         import shutil
-        
-        # Check if name ends with dupeN
-        match = re.search(r'dupe(\d+)$', source_name)
+
+        match = re.search(r'dupe(\d+)$', source_name, re.IGNORECASE)
         if match:
-            number_part = match.group(1)
             base_name_prefix = source_name[:match.start()]
-            counter = int(number_part) + 1
-            new_name = f"{base_name_prefix}dupe{counter}"
+            counter = int(match.group(1)) + 1
         else:
             base_name_prefix = source_name
             counter = 1
-            new_name = f"{source_name}dupe{counter}"
-            
-        # Verify uniqueness loop
+
         while True:
-            cur.execute('SELECT id FROM shelves WHERE shelf_name = ?', (new_name,))
-            if not cur.fetchone():
+            suffix = f'dupe{counter}'
+            new_name = f'{base_name_prefix[:max(1, 80 - len(suffix))]}{suffix}'
+            _, code_error = _validate_shelf_code_input(new_name)
+            if code_error:
+                conn.rollback()
+                return jsonify({'success': False, 'error': code_error}), 400
+            target_images_exist = any(
+                path.exists()
+                for path in (
+                    _shelf_exact_display_path_candidates(new_name)
+                    + _shelf_exact_original_path_candidates(new_name)
+                )
+            )
+            if not _shelf_code_exists(cur, new_name) and not target_images_exist:
                 break
             counter += 1
-            new_name = f"{base_name_prefix}dupe{counter}"
-        
-        # Copy file
-        src_path = _resolve_shelf_display_path(source_name, existing_only=True)
-        dst_path = _resolve_shelf_display_path(new_name, existing_only=False)
-        
+
+        src_path = _resolve_exact_shelf_display_path(source_name, existing_only=True)
+        dst_path = _resolve_exact_shelf_display_path(new_name, existing_only=False)
         if src_path is None or not src_path.exists():
+            conn.rollback()
             return jsonify({'success': False, 'error': 'Source image not found'}), 404
-             
-        try:
-            dst_path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(str(src_path), str(dst_path))
-            # Update timestamp to now so it sorts correctly as newest
-            os.utime(str(dst_path), None)
-        except Exception as e:
-            return jsonify({'success': False, 'error': _safe_error(e, 'Failed to copy image')}), 500
-        
-        # Insert into DB
-        cur.execute('INSERT INTO shelves (shelf_name, group_id, created_at) VALUES (?, ?, CURRENT_TIMESTAMP)', 
-                   (new_name, group_id))
-        
+        if dst_path is None:
+            conn.rollback()
+            return jsonify({'success': False, 'error': 'Could not resolve a safe destination'}), 400
+
+        cur.execute(
+            'INSERT INTO shelves (shelf_name, group_id, created_at) VALUES (?, ?, CURRENT_TIMESTAMP)',
+            (new_name, group_id or 1)
+        )
+        dst_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(str(src_path), str(dst_path))
+        os.utime(str(dst_path), None)
+        created_paths.append(dst_path)
+
+        src_orig = _resolve_exact_shelf_original_path(source_name, existing_only=True)
+        dst_orig = _resolve_exact_shelf_original_path(new_name, existing_only=False)
+        if src_orig is not None and src_orig.exists() and dst_orig is not None:
+            dst_orig.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(str(src_orig), str(dst_orig))
+            os.utime(str(dst_orig), None)
+            created_paths.append(dst_orig)
+
         conn.commit()
-        
+        try:
+            if dst_orig is not None and dst_orig.exists():
+                _sync_preview_base_image(new_name, dst_orig)
+            else:
+                _sync_preview_base_image(new_name, dst_path)
+        except Exception as preview_error:
+            print(f'Warning: duplicated shelf preview sync failed for {new_name}: {preview_error}')
         return jsonify({
             'success': True, 
             'new_code': new_name,
@@ -49885,9 +51126,20 @@ def api_duplicate_shelf():
         })
         
     except Exception as e:
+        if conn is not None:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        for path in created_paths:
+            try:
+                path.unlink(missing_ok=True)
+            except Exception:
+                pass
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
 
 # --- Cache Management System ---
 CACHE_CONFIG_FILE = BASE_DIR / 'cache_config.json'

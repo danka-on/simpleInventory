@@ -180,12 +180,8 @@
     <div class="card">
       <div class="card-body scan-section">
         <div class="input-row">
-          <input id="barcodeInput" type="text" placeholder="Scan barcode + Enter" autocomplete="off" autocapitalize="off" spellcheck="false">
-          <button id="scanBtn" class="btn btn-blue" type="button">Add</button>
-        </div>
-        <div class="input-row">
-          <input id="shelfInput" type="text" placeholder="Scan shelf code to load all items" autocomplete="off" autocapitalize="off" spellcheck="false">
-          <button id="loadShelfBtn" class="btn btn-ghost" type="button">Load Shelf</button>
+          <input id="scanInput" type="text" placeholder="Scan item barcode or shelf code + Enter" autocomplete="off" autocapitalize="off" spellcheck="false">
+          <button id="scanBtn" class="btn btn-blue" type="button">Scan</button>
         </div>
         <div id="statusBar" class="status-bar" role="status"></div>
       </div>
@@ -298,10 +294,8 @@
   <script src="/static/location-preview.js?v=20260317a"></script>
   <script>
     /* ─── refs ─── */
-    const barcodeInput   = document.getElementById('barcodeInput');
+    const barcodeInput   = document.getElementById('scanInput');
     const scanBtn        = document.getElementById('scanBtn');
-    const shelfInput     = document.getElementById('shelfInput');
-    const loadShelfBtn   = document.getElementById('loadShelfBtn');
     const statusBar      = document.getElementById('statusBar');
     const queueBody      = document.getElementById('queueBody');
     const queueCount     = document.getElementById('queueCount');
@@ -716,13 +710,13 @@
         const msg = `"${shelf}" is not a recognised shelf code.`;
         showMsg('Invalid Shelf', msg, 'red');
         setStatus('err', msg);
-        shelfInput.focus();
+        barcodeInput.focus();
         return;
       }
       if(queue.length && !confirm(`Replace current queue with all items from shelf "${shelf}"?`)){
-        shelfInput.focus(); return;
+        barcodeInput.focus(); return;
       }
-      busy=true; loadShelfBtn.disabled=true;
+      busy=true; scanBtn.disabled=true;
       setStatus('neutral',`Loading items from shelf ${shelf}…`);
       try{
         const r = await fetch('/api/movelocation_lookup_shelf?shelf='+encodeURIComponent(shelf));
@@ -763,9 +757,16 @@
         showMsg('Shelf Error', err.message||'Shelf lookup failed', 'red');
         setStatus('err', err.message||'Shelf lookup failed');
       }finally{
-        busy=false; loadShelfBtn.disabled=false;
-        shelfInput.value=''; barcodeInput.focus();
+        busy=false; scanBtn.disabled=false;
+        barcodeInput.value=''; barcodeInput.focus();
       }
+    }
+
+    function processScan(){
+      const code = barcodeInput.value.trim();
+      if(!code || busy) return;
+      if(isValidShelf(code)) loadShelf(code);
+      else lookupAndAdd(code);
     }
 
     /* ─── Move flow ─── */
@@ -871,10 +872,8 @@
     }
 
     /* ─── event wiring ─── */
-    barcodeInput.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); const c=barcodeInput.value.trim(); if(c) lookupAndAdd(c); }});
-    scanBtn.addEventListener('click', ()=>{ const c=barcodeInput.value.trim(); if(c) lookupAndAdd(c); });
-    shelfInput.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); const s=shelfInput.value.trim(); if(s) loadShelf(s); }});
-    loadShelfBtn.addEventListener('click', ()=>{ const s=shelfInput.value.trim(); if(s) loadShelf(s); });
+    barcodeInput.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); processScan(); }});
+    scanBtn.addEventListener('click', processScan);
 
     moveBtn.addEventListener('click', openDestModal);
     destInput.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); submitMove(); }});

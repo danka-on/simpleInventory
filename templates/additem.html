@@ -1160,30 +1160,6 @@
 
         try {
             syncAddItemFormFields();
-            let screening;
-            try {
-                screening = await screenAddItemSubmission();
-            } catch (screenErr) {
-                console.error('Add item screening failed:', screenErr);
-                const barcodes = getScreeningBarcodes();
-                const savedTitles = loadManualTitleOverrides();
-                const canContinue = barcodes.length > 0 && barcodes.every(barcode => {
-                    const key = normalizeManualTitleKey(barcode);
-                    return Boolean(key && savedTitles[key]);
-                });
-                if (!canContinue) {
-                    alert('Could not verify item data. Please try Add Item again.');
-                    return;
-                }
-                screening = { continueSubmit: true };
-            }
-            if (!screening || screening.continueSubmit === false) {
-                return;
-            }
-            if (screening.manualTitles) {
-                mergeManualTitleOverrides(screening.manualTitles);
-                syncAddItemFormFields();
-            }
             await submitAddItemForm(form);
         } catch (err) {
             console.error('Add item submit failed, retrying native form submit:', err);

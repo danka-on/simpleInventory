@@ -40,8 +40,28 @@ const state = {
     saveRequestToken: 0,
     saveAbortController: null,
     saveTimeoutId: null,
-    defaultSaveBtnHtml: ''
+    defaultSaveBtnHtml: '',
+    validationRequestToken: 0,
+    codeValid: false,
+    editSourceIsClean: true,
+    shelfSearchQuery: ''
 };
+
+const MISSING_SHELF_IMAGE = 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="500" viewBox="0 0 800 500">' +
+    '<rect width="800" height="500" fill="#eef1f5"/><path d="M300 180h200v140H300z" fill="none" stroke="#9aa4b2" stroke-width="14"/>' +
+    '<path d="M330 250l55-45 55 55 35-30 55 55" fill="none" stroke="#9aa4b2" stroke-width="14"/>' +
+    '<text x="400" y="380" text-anchor="middle" font-family="sans-serif" font-size="34" fill="#657080">Image missing — edit to replace</text></svg>'
+);
+
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+}
 
 // ============================================================================
 // STEP 1: LIST VIEW FUNCTIONALITY
@@ -121,8 +141,56 @@ function resetSaveButtonUI() {
     saveBtn.disabled = true;
 }
 
+function updateShelfFormActionVisibility() {
+    const editor = document.getElementById('editor-container');
+    const editorReady = !!(
+        state.currentImage
+        && editor
+        && editor.classList.contains('active')
+        && editor.style.display !== 'none'
+    );
+    const replaceBtn = document.getElementById('replace-image-btn');
+    const galleryBtn = document.getElementById('gallery-btn');
+    const startCameraBtn = document.getElementById('start-camera-btn');
+    const redrawBtn = document.getElementById('redraw-rect-btn');
+    const hint = document.querySelector('.editor-hint');
+    const originalOnlyGroup = document.getElementById('original-only-group');
+
+    if (replaceBtn) replaceBtn.style.display = editorReady ? 'inline-flex' : 'none';
+    if (galleryBtn) galleryBtn.style.display = editorReady ? 'none' : 'inline-flex';
+    if (startCameraBtn && editorReady) startCameraBtn.style.display = 'none';
+    const canRedraw = editorReady && (!state.isEditing || state.editSourceIsClean);
+    if (redrawBtn) redrawBtn.style.display = canRedraw ? 'inline-flex' : 'none';
+    if (hint && editorReady) {
+        hint.textContent = canRedraw
+            ? 'Drag to draw a rectangle around the shelf area'
+            : 'Clean original unavailable. Replace the image to draw a new box.';
+    }
+    if (originalOnlyGroup) {
+        originalOnlyGroup.style.display = (!state.isEditing || state.editSourceIsClean) ? 'block' : 'none';
+    }
+}
+
+function resetSelectionActionVisibility() {
+    const selectBtn = document.getElementById('select-mode-btn');
+    const selectAllBtn = document.getElementById('select-all-btn');
+    const printBtn = document.getElementById('print-qr-btn');
+    const moveBtn = document.getElementById('move-group-btn');
+    const deleteBtn = document.getElementById('delete-selected-btn');
+
+    if (selectBtn) {
+        selectBtn.innerHTML = '<i class="fas fa-check-square"></i> Select';
+        selectBtn.classList.remove('btn-warning');
+        selectBtn.classList.add('btn-secondary');
+    }
+    if (selectAllBtn) selectAllBtn.style.display = 'none';
+    if (printBtn) printBtn.style.display = 'none';
+    if (moveBtn) moveBtn.style.display = 'none';
+    if (deleteBtn) deleteBtn.style.display = 'none';
+}
+
 function getShelfImageUrl(shelf, extraVersion = '') {
-    if (!shelf || !shelf.url) return '';
+    if (!shelf || !shelf.url || shelf.has_image === false) return MISSING_SHELF_IMAGE;
     const baseUrl = String(shelf.url);
     const params = new URLSearchParams();
     const cacheVersion = String((shelf.cacheVersion ?? shelf.lastModified ?? '') || '').trim();
@@ -148,9 +216,17 @@ async function parseJsonResponse(response) {
  * Load groups and shelves
  */
 function loadData() {
-    Promise.all([
-        fetch('/api/groups').then(r => r.json()),
-        fetch('/api/list_shelves').then(r => r.json())
+    return Promise.all([
+        fetch('/api/groups').then(async r => {
+            const data = await parseJsonResponse(r);
+            if (!r.ok || !data.success) throw new Error(data.error || 'Failed to load groups');
+            return data;
+        }),
+        fetch('/api/list_shelves').then(async r => {
+            const data = await parseJsonResponse(r);
+            if (!r.ok || !data.success) throw new Error(data.error || 'Failed to load shelves');
+            return data;
+        })
     ]).then(([groupsData, shelvesData]) => {
         if (groupsData.success) state.groups = groupsData.groups;
         if (shelvesData.success) state.shelves = shelvesData.shelves;
@@ -190,6 +266,16 @@ function setupEventListeners() {
     if (redrawBtn) redrawBtn.addEventListener('click', resetRect);
 
     document.getElementById('start-camera-btn').addEventListener('click', startCapture);
+    const galleryBtn = document.getElementById('gallery-btn');
+    const fileInput = document.getElementById('file-input');
+    if (galleryBtn && fileInput) {
+        galleryBtn.addEventListener('click', () => {
+            stopCamera();
+            fileInput.value = '';
+            fileInput.click();
+        });
+        fileInput.addEventListener('change', handleFileSelect);
+    }
     
     // Camera controls
     document.getElementById('capture-btn').addEventListener('click', capturePhoto);
@@ -251,6 +337,29 @@ function setupEventListeners() {
         e.preventDefault();
         renderShelves(); // Re-render with sort
     });
+
+    const shelfSearchInput = document.getElementById('shelf-search-input');
+    const clearShelfSearchBtn = document.getElementById('clear-shelf-search-btn');
+    if (shelfSearchInput) {
+        shelfSearchInput.addEventListener('input', () => {
+            state.shelfSearchQuery = shelfSearchInput.value.trim();
+            if (clearShelfSearchBtn) {
+                clearShelfSearchBtn.style.display = state.shelfSearchQuery ? 'inline-flex' : 'none';
+            }
+            renderMain();
+        });
+    }
+    if (clearShelfSearchBtn) {
+        clearShelfSearchBtn.addEventListener('click', () => {
+            state.shelfSearchQuery = '';
+            if (shelfSearchInput) {
+                shelfSearchInput.value = '';
+                shelfSearchInput.focus();
+            }
+            clearShelfSearchBtn.style.display = 'none';
+            renderMain();
+        });
+    }
 }
 
 /**
@@ -266,6 +375,9 @@ function renderMain() {
     
     if (state.currentGroupId === null) {
         // Show Groups
+        state.selectMode = false;
+        state.selectedShelves.clear();
+        resetSelectionActionVisibility();
         title.textContent = 'Groups';
         backText.textContent = 'Exit';
         backBtn.onclick = () => window.location.href = '/tools';
@@ -274,13 +386,14 @@ function renderMain() {
         renderGroups();
     } else {
         // Show Shelves in Group
+        if (!state.selectMode) resetSelectionActionVisibility();
         const group = state.groups.find(g => g.id === state.currentGroupId);
         title.textContent = group ? group.name : 'Unknown Group';
         backText.textContent = 'Groups';
         backBtn.onclick = (e) => {
             e.preventDefault();
             e.stopPropagation();
-            window.location.href = '/shelfmanager';
+            handleBackClick();
         };
         sortControls.style.display = 'flex';
         selectBtn.style.display = 'inline-block';
@@ -288,17 +401,96 @@ function renderMain() {
     }
 }
 
+function locationCodeParts(code) {
+    return String(code || '').trim().toLowerCase().match(/[a-z]+|\d+|[^a-z\d]+/g) || [];
+}
+
+function compareLocationCodes(a, b) {
+    const left = locationCodeParts(a);
+    const right = locationCodeParts(b);
+    const length = Math.max(left.length, right.length);
+    for (let index = 0; index < length; index += 1) {
+        if (left[index] === undefined) return -1;
+        if (right[index] === undefined) return 1;
+        if (left[index] === right[index]) continue;
+        const leftIsNumber = /^\d+$/.test(left[index]);
+        const rightIsNumber = /^\d+$/.test(right[index]);
+        if (leftIsNumber && rightIsNumber) {
+            const difference = Number(left[index]) - Number(right[index]);
+            if (difference) return difference;
+            continue;
+        }
+        return left[index].localeCompare(right[index]);
+    }
+    return String(a || '').localeCompare(String(b || ''));
+}
+
+function normalizedShelfSearchTerms() {
+    return String(state.shelfSearchQuery || '')
+        .toLocaleLowerCase()
+        .split(/\s+/)
+        .filter(Boolean);
+}
+
+function shelfMatchesSearch(shelf, group) {
+    const terms = normalizedShelfSearchTerms();
+    if (!terms.length) return true;
+    const haystack = `${shelf?.code || ''} ${group?.name || ''}`.toLocaleLowerCase();
+    return terms.every(term => haystack.includes(term));
+}
+
+function setShelfSearchSummary(message = '') {
+    const summary = document.getElementById('shelf-search-summary');
+    if (summary) summary.textContent = message;
+}
+
+function shelfCountLabel(count) {
+    return `${count} ${count === 1 ? 'shelf' : 'shelves'}`;
+}
+
+function shelfCardHtml(shelf) {
+    const isSelected = state.selectedShelves.has(shelf.code);
+    const classes = ['shelf-item'];
+    if (isSelected) classes.push('selected');
+    if (state.selectMode) classes.push('selecting');
+    if (shelf.has_image === false) classes.push('missing-image');
+    const countVal = typeof shelf.count !== 'undefined' ? shelf.count : 0;
+    return `
+        <div class="${classes.join(' ')}" data-code="${escapeHtml(shelf.code)}">
+            <span class="shelf-count" title="View items">${countVal}</span>
+            <img src="${escapeHtml(getShelfImageUrl(shelf))}" alt="${escapeHtml(shelf.code)}" loading="lazy">
+            <div class="shelf-code">${escapeHtml(shelf.code)}</div>
+        </div>
+    `;
+}
+
+function attachShelfCardHandlers(container) {
+    container.querySelectorAll('.shelf-item[data-code]').forEach(card => {
+        card.addEventListener('click', event => handleShelfClick(event, card.dataset.code));
+        const count = card.querySelector('.shelf-count');
+        if (count) count.addEventListener('click', event => onCountClick(event, card.dataset.code));
+    });
+}
+
 /**
  * Render Groups List
  */
 function renderGroups() {
     const container = document.getElementById('shelf-list');
+    const terms = normalizedShelfSearchTerms();
+
+    if (terms.length) {
+        renderGroupedShelfSearch(container);
+        return;
+    }
+    container.className = 'shelf-grid';
+    setShelfSearchSummary('');
     
     // Sort groups: non-default first, then default (id=1) last
     const sortedGroups = state.groups.slice().sort((a, b) => {
         if (a.id === 1) return 1;  // Default group goes last
         if (b.id === 1) return -1; // Default group goes last
-        return a.id - b.id;
+        return compareLocationCodes(a.name, b.name);
     });
     
     container.innerHTML = sortedGroups.map(g => {
@@ -316,16 +508,63 @@ function renderGroups() {
         const totalItems = shelvesInGroup.reduce((sum, shelf) => sum + (shelf.count || 0), 0);
         
         return `
-        <div class="shelf-item group-card" onclick="handleGroupClick(${g.id})">
+        <div class="shelf-item group-card" data-group-id="${Number(g.id)}">
             <div class="group-icon">
                 <i class="fas ${isDefaultGroup ? 'fa-box-open' : 'fa-folder'}"></i>
             </div>
-            <div class="shelf-code">${g.name}</div>
+            <div class="shelf-code">${escapeHtml(g.name)}</div>
             <div class="group-count">${shelfCount} shelves • ${totalItems} items</div>
             ${!isDefaultGroup ? `<button class="delete-group-btn" onclick="deleteGroup(event, ${g.id})"><i class="fas fa-trash"></i></button>` : ''}
         </div>
         `;
     }).join('');
+    container.querySelectorAll('.group-card').forEach(card => {
+        card.addEventListener('click', () => handleGroupClick(Number(card.dataset.groupId)));
+    });
+}
+
+function renderGroupedShelfSearch(container) {
+    const sections = [];
+    let totalMatches = 0;
+    const sortedGroups = state.groups.slice().sort((a, b) => {
+        if (a.id === 1) return 1;
+        if (b.id === 1) return -1;
+        return compareLocationCodes(a.name, b.name);
+    });
+
+    sortedGroups.forEach(group => {
+        const shelves = state.shelves
+            .filter(shelf => shelf.group_id === group.id && shelfMatchesSearch(shelf, group))
+            .sort((a, b) => compareLocationCodes(a.code, b.code));
+        if (!shelves.length) return;
+        totalMatches += shelves.length;
+        sections.push(`
+            <section class="shelf-search-section">
+                <div class="shelf-search-section-header">
+                    <strong><i class="fas fa-folder"></i> ${escapeHtml(group.name)}</strong>
+                    <span>${shelfCountLabel(shelves.length)}</span>
+                </div>
+                <div class="shelf-grid">${shelves.map(shelfCardHtml).join('')}</div>
+            </section>
+        `);
+    });
+
+    container.className = 'shelf-search-results';
+    if (!sections.length) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-search"></i>
+                <p>No shelves match “${escapeHtml(state.shelfSearchQuery)}”.</p>
+            </div>
+        `;
+        setShelfSearchSummary('0 matching shelves');
+        return;
+    }
+    container.innerHTML = sections.join('');
+    attachShelfCardHandlers(container);
+    setShelfSearchSummary(
+        `${shelfCountLabel(totalMatches)} matching in ${sections.length} location group${sections.length === 1 ? '' : 's'}`
+    );
 }
 
 /**
@@ -337,11 +576,14 @@ function renderShelves() {
     const sortBy = sortSel ? sortSel.value : 'name';
     
     // Filter shelves by group
-    let shelves = state.shelves.filter(s => s.group_id === state.currentGroupId);
+    const group = state.groups.find(item => item.id === state.currentGroupId);
+    const allGroupShelves = state.shelves.filter(s => s.group_id === state.currentGroupId);
+    let shelves = allGroupShelves.filter(shelf => shelfMatchesSearch(shelf, group));
+    container.className = 'shelf-grid';
     
     // Sort shelves
     shelves.sort((a, b) => {
-        if (sortBy === 'name') return a.code.localeCompare(b.code);
+        if (sortBy === 'name') return compareLocationCodes(a.code, b.code);
         if (sortBy === 'items') return (b.count || 0) - (a.count || 0);
         if (sortBy === 'created') {
             // created_at is string "YYYY-MM-DD HH:MM:SS", lastModified is seconds
@@ -358,31 +600,21 @@ function renderShelves() {
     });
     
     if (shelves.length === 0) {
+        const searching = normalizedShelfSearchTerms().length > 0;
         container.innerHTML = `
             <div class="empty-state">
-                <i class="fas fa-box-open"></i>
-                <p>No shelves in this group. Click + to add one!</p>
+                <i class="fas ${searching ? 'fa-search' : 'fa-box-open'}"></i>
+                <p>${searching ? `No shelves match “${escapeHtml(state.shelfSearchQuery)}” in this location.` : 'No shelves in this group. Click + to add one!'}</p>
             </div>
         `;
+        setShelfSearchSummary(searching ? `0 of ${allGroupShelves.length} shelves` : '');
         return;
     }
     
-    container.innerHTML = shelves.map(shelf => {
-        const isSelected = state.selectedShelves.has(shelf.code);
-        const classes = ['shelf-item'];
-        if (isSelected) classes.push('selected');
-        if (state.selectMode) classes.push('selecting');
-        const countVal = (typeof shelf.count !== 'undefined' ? shelf.count : 0);
-        
-        return `
-       <div class="${classes.join(' ')}" 
-           data-code="${shelf.code}"
-           onclick="handleShelfClick(event,'${shelf.code}')">
-            <span class="shelf-count" data-code="${shelf.code}" title="View items" onclick="onCountClick(event,'${shelf.code}')">${countVal}</span>
-            <img src="${getShelfImageUrl(shelf)}" alt="${shelf.code}" loading="lazy">
-            <div class="shelf-code">${shelf.code}</div>
-        </div>
-    `}).join('');
+    container.innerHTML = shelves.map(shelfCardHtml).join('');
+    attachShelfCardHandlers(container);
+    const searching = normalizedShelfSearchTerms().length > 0;
+    setShelfSearchSummary(searching ? `${shelves.length} of ${allGroupShelves.length} shelves` : '');
     
     updatePrintButton();
 }
@@ -436,7 +668,11 @@ function createGroup() {
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({name})
     })
-    .then(r => r.json())
+    .then(async r => {
+        const data = await parseJsonResponse(r);
+        if (!r.ok) throw new Error(data.error || 'Failed to create group');
+        return data;
+    })
     .then(data => {
         if (data.success) {
             document.getElementById('create-group-modal').classList.remove('active');
@@ -444,7 +680,8 @@ function createGroup() {
         } else {
             showError(data.error);
         }
-    });
+    })
+    .catch(err => showError(err.message));
 }
 
 /**
@@ -452,17 +689,26 @@ function createGroup() {
  */
 function deleteGroup(e, groupId) {
     e.stopPropagation();
-    if (!confirm('Delete this group? Shelves inside will be moved to "Ungrouped".')) return;
+    if (!confirm('Delete this group? Shelves inside will be moved to "Default Group".')) return;
     
-    fetch(`/api/delete_group/${groupId}`, {method: 'POST'})
-    .then(r => r.json())
+    fetch('/api/delete_group', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({group_id: groupId})
+    })
+    .then(async r => {
+        const data = await parseJsonResponse(r);
+        if (!r.ok) throw new Error(data.error || 'Failed to delete group');
+        return data;
+    })
     .then(data => {
         if (data.success) {
             loadData();
         } else {
             showError(data.error);
         }
-    });
+    })
+    .catch(err => showError(err.message));
 }
 
 /**
@@ -472,8 +718,13 @@ function showMoveModal() {
     if (state.selectedShelves.size === 0) return;
     
     const select = document.getElementById('move-group-select');
-    select.innerHTML = state.groups.map(g => 
-        `<option value="${g.id}" ${g.id === state.currentGroupId ? 'disabled' : ''}>${g.name}</option>`
+    const targets = state.groups.filter(g => g.id !== state.currentGroupId);
+    if (!targets.length) {
+        showError('Create another group before moving shelves.');
+        return;
+    }
+    select.innerHTML = targets.map(g =>
+        `<option value="${Number(g.id)}">${escapeHtml(g.name)}</option>`
     ).join('');
     
     document.getElementById('move-count').textContent = state.selectedShelves.size;
@@ -495,7 +746,11 @@ function moveShelves() {
             group_id: groupId
         })
     })
-    .then(r => r.json())
+    .then(async r => {
+        const data = await parseJsonResponse(r);
+        if (!r.ok) throw new Error(data.error || 'Failed to move shelves');
+        return data;
+    })
     .then(data => {
         if (data.success) {
             document.getElementById('move-group-modal').classList.remove('active');
@@ -505,7 +760,8 @@ function moveShelves() {
         } else {
             showError(data.error);
         }
-    });
+    })
+    .catch(err => showError(err.message));
 }
 
 /**
@@ -608,7 +864,10 @@ function updatePrintButton() {
  * Select all shelves in current group
  */
 function selectAllShelves() {
-    const shelves = state.shelves.filter(s => s.group_id === state.currentGroupId);
+    const group = state.groups.find(item => item.id === state.currentGroupId);
+    const shelves = state.shelves.filter(
+        shelf => shelf.group_id === state.currentGroupId && shelfMatchesSearch(shelf, group)
+    );
     shelves.forEach(s => state.selectedShelves.add(s.code));
     renderShelves();
     updatePrintButton();
@@ -617,7 +876,7 @@ function selectAllShelves() {
 /**
  * Delete selected shelves
  */
-function deleteSelectedShelves() {
+async function deleteSelectedShelves() {
     if (state.selectedShelves.size === 0) return;
     
     const count = state.selectedShelves.size;
@@ -626,33 +885,37 @@ function deleteSelectedShelves() {
     }
     
     const shelves = Array.from(state.selectedShelves);
-    let completed = 0;
-    
-    shelves.forEach(code => {
-        fetch('/api/delete_shelf', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ code: code })
-        })
-        .then(r => r.json())
-        .then(data => {
-            completed++;
-            if (completed === shelves.length) {
-                state.selectedShelves.clear();
-                state.selectMode = false;
-                loadData();
+    const deleteBtn = document.getElementById('delete-selected-btn');
+    deleteBtn.disabled = true;
+    const failed = [];
+    let deleted = 0;
+
+    for (const code of shelves) {
+        try {
+            const response = await fetch('/api/delete_shelf', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({code})
+            });
+            const data = await parseJsonResponse(response);
+            if (!response.ok || !data.success) {
+                throw new Error(data.error || `Delete failed (${response.status})`);
             }
-        })
-        .catch(err => {
-            console.error('Delete failed:', err);
-            completed++;
-            if (completed === shelves.length) {
-                state.selectedShelves.clear();
-                state.selectMode = false;
-                loadData();
-            }
-        });
-    });
+            deleted += 1;
+            state.selectedShelves.delete(code);
+        } catch (err) {
+            failed.push(`${code}: ${err.message}`);
+        }
+    }
+
+    deleteBtn.disabled = false;
+    if (failed.length) {
+        showError(`${deleted} deleted; ${failed.length} could not be deleted. ${failed.join(' | ')}`);
+    } else {
+        showSuccess(`${deleted} shelf${deleted === 1 ? '' : 'es'} deleted.`);
+        state.selectMode = false;
+    }
+    await loadData();
 }
 
 /**
@@ -669,6 +932,11 @@ function enlargeShelf(code) {
     }
     
     document.getElementById('modal-image').src = getShelfImageUrl(shelf);
+    const hasInventory = (parseInt(shelf.count, 10) || 0) > 0;
+    const viewItemsBtn = document.getElementById('view-items-btn');
+    const clearInventoryBtn = document.getElementById('clear-inventory-btn');
+    if (viewItemsBtn) viewItemsBtn.style.display = hasInventory ? 'inline-flex' : 'none';
+    if (clearInventoryBtn) clearInventoryBtn.style.display = hasInventory ? 'inline-flex' : 'none';
     document.getElementById('image-modal').classList.add('active');
 }
 
@@ -698,17 +966,25 @@ function editShelf() {
 
     // Prepare editor
     state.isEditing = true;
+    state.currentShelfCode = code;
+    state.codeValid = true;
+    state.validationRequestToken += 1;
     document.getElementById('form-title').textContent = `Edit Shelf: ${code}`;
     document.getElementById('shelf-code').value = code;
     const originalOnlyCheckbox = document.getElementById('original-only');
     if (originalOnlyCheckbox) originalOnlyCheckbox.checked = false;
     state.currentImage = null;
+    state.editSourceIsClean = true;
     state.rectX = 0;
     state.rectY = 0;
     state.rectW = 0;
     state.rectH = 0;
     state.rectRotation = 0;
     updateSaveButton();
+    ['replace-image-btn', 'gallery-btn', 'start-camera-btn'].forEach(id => {
+        const button = document.getElementById(id);
+        if (button) button.style.display = 'none';
+    });
     
     // Mark code as valid immediately since we are editing
     const input = document.getElementById('shelf-code');
@@ -716,57 +992,41 @@ function editShelf() {
     input.classList.remove('invalid');
     document.getElementById('code-validation').textContent = '';
 
-    // Load image into canvas
-    const imageToken = state.imageLoadToken;
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    
-    img.onload = () => {
-        if (imageToken !== state.imageLoadToken) {
-            console.log('Ignoring stale edit image load for:', code);
-            return;
-        }
-
-        const canvas = document.getElementById('editor-canvas');
-        const ctx = canvas.getContext('2d');
-        canvas.width = img.width;
-        canvas.height = img.height;
-        ctx.clearRect(0,0,canvas.width, canvas.height);
-        ctx.drawImage(img, 0, 0);
-        // store current image and reset any rectangle
-        state.canvas = canvas;
-        state.ctx = ctx;
-        state.currentImage = img;
-        state.rectX = 0; state.rectY = 0; state.rectW = 0; state.rectH = 0;
-        state.rectRotation = 0;
-        
-        // Show editor, hide other sections
-        document.getElementById('camera-section').style.display = 'none';
-        document.getElementById('upload-section').style.display = 'none';
-        const editorContainer = document.getElementById('editor-container');
-        editorContainer.classList.add('active');
-        editorContainer.style.display = 'block';
-        
-        // Show replace image button
-        const replaceBtn = document.getElementById('replace-image-btn');
-        if (replaceBtn) replaceBtn.style.display = 'inline-block';
-        
-        updateSaveButton();
-    };
-    
-    img.onerror = () => {
-        if (imageToken !== state.imageLoadToken) return;
-        showError('Failed to load shelf image into editor');
-    };
-    
-    // Load standard image (with baked-in rectangle)
-    console.log('Loading standard image for editing');
-    img.src = getShelfImageUrl(shelf, Date.now());
-
-    // Show add/edit view
+    // A metadata-only shelf is still editable: take the user directly to the
+    // replacement controls instead of leaving a broken image editor.
     closeModal();
     document.getElementById('list-view').classList.remove('active');
     document.getElementById('add-view').classList.add('active');
+    if (shelf.has_image === false || !shelf.url) {
+        replaceImage();
+        return;
+    }
+
+    // Prefer the clean original so drawing a replacement rectangle never
+    // bakes a second box over the existing display image.
+    const imageToken = state.imageLoadToken;
+    const cleanCandidates = buildOriginalImageCandidates(code);
+    const sources = cleanCandidates.map(src => ({src: `${src}?_=${Date.now()}`, clean: true}));
+    sources.push({src: getShelfImageUrl(shelf, Date.now()), clean: false});
+    const trySource = (index) => {
+        if (imageToken !== state.imageLoadToken) return;
+        if (index >= sources.length) {
+            showError('Failed to load this shelf image. Use Replace Image to repair it.');
+            replaceImage();
+            return;
+        }
+        const source = sources[index];
+        const probe = new Image();
+        probe.crossOrigin = 'anonymous';
+        probe.onload = () => {
+            if (imageToken !== state.imageLoadToken) return;
+            state.editSourceIsClean = source.clean;
+            loadImageToEditor(source.src, imageToken);
+        };
+        probe.onerror = () => trySource(index + 1);
+        probe.src = source.src;
+    };
+    trySource(0);
 }
 
 /**
@@ -779,6 +1039,7 @@ function replaceImage() {
     stopCamera();
     resetCameraPreviewUI();
     state.currentImage = null;
+    state.editSourceIsClean = true;
     state.rectX = 0;
     state.rectY = 0;
     state.rectW = 0;
@@ -791,23 +1052,12 @@ function replaceImage() {
     editorContainer.classList.remove('active');
     editorContainer.style.display = 'none';
     
-    // Hide replace button
-    document.getElementById('replace-image-btn').style.display = 'none';
-    
-    // Show appropriate input method
-    const forceCamera = true; // Consistent with showAddView
-    
-    if (state.isMobile || forceCamera) {
-        document.getElementById('camera-section').style.display = 'block';
-        document.getElementById('upload-section').style.display = 'none';
-        document.getElementById('start-camera-btn').style.display = 'block';
-        // Start camera immediately
-        startCapture();
-    } else {
-        document.getElementById('camera-section').style.display = 'none';
-        document.getElementById('upload-section').style.display = 'block';
-        document.getElementById('start-camera-btn').style.display = 'none';
-    }
+    // Present explicit choices. Replacing an image must not request camera
+    // permission until the user presses Take Photo.
+    document.getElementById('camera-section').style.display = 'block';
+    document.getElementById('upload-section').style.display = 'none';
+    document.getElementById('start-camera-btn').style.display = 'inline-flex';
+    updateShelfFormActionVisibility();
 }
 
 /**
@@ -857,10 +1107,7 @@ function showAddView() {
     resetForm();
     
     // Show appropriate input method
-    // Force camera mode for testing if requested, otherwise detect mobile
-    const forceCamera = true; // Set to true to test camera on desktop
-    
-    if (state.isMobile || forceCamera) {
+    if (state.isMobile) {
         document.getElementById('camera-section').style.display = 'block';
         document.getElementById('upload-section').style.display = 'none';
         document.getElementById('start-camera-btn').style.display = 'block';
@@ -870,6 +1117,7 @@ function showAddView() {
         document.getElementById('start-camera-btn').style.display = 'none';
         setupUploadArea();
     }
+    updateShelfFormActionVisibility();
     
     // Focus on shelf code input
     setTimeout(() => {
@@ -905,10 +1153,9 @@ function resetForm() {
     if (originalOnlyCheckbox) originalOnlyCheckbox.checked = false;
     document.getElementById('code-validation').textContent = '';
     document.getElementById('shelf-code').classList.remove('valid', 'invalid');
+    state.validationRequestToken += 1;
+    state.codeValid = false;
     resetSaveButtonUI();
-    
-    const replaceBtn = document.getElementById('replace-image-btn');
-    if (replaceBtn) replaceBtn.style.display = 'none';
     
     const editorContainer = document.getElementById('editor-container');
     editorContainer.classList.remove('active');
@@ -916,9 +1163,11 @@ function resetForm() {
     
     resetCameraPreviewUI();
     state.currentImage = null;
+    state.editSourceIsClean = true;
     state.rectX = state.rectY = state.rectW = state.rectH = 0;
     state.rectRotation = 0;
     state.isEditing = false;
+    updateShelfFormActionVisibility();
 }
 
 /**
@@ -933,6 +1182,8 @@ function setupCodeValidation() {
         const code = input.value.trim();
         
         if (!code) {
+            state.validationRequestToken += 1;
+            state.codeValid = false;
             document.getElementById('code-validation').textContent = '';
             input.classList.remove('valid', 'invalid');
             updateSaveButton();
@@ -949,12 +1200,14 @@ function setupCodeValidation() {
  * Validate shelf code against API
  */
 function validateCode(code) {
+    const requestToken = ++state.validationRequestToken;
     // If editing and code hasn't changed, it's valid
-    if (state.isEditing && code === state.currentShelfCode) {
+    if (state.isEditing && code.toLocaleLowerCase() === state.currentShelfCode.toLocaleLowerCase()) {
         const input = document.getElementById('shelf-code');
         const msgEl = document.getElementById('code-validation');
         input.classList.remove('invalid');
         input.classList.add('valid');
+        state.codeValid = true;
         msgEl.className = 'validation-message success';
         msgEl.innerHTML = '<i class="fas fa-check-circle"></i> Code valid (current)';
         updateSaveButton();
@@ -966,17 +1219,24 @@ function validateCode(code) {
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({code})
     })
-    .then(r => r.json())
+    .then(async r => {
+        const data = await parseJsonResponse(r);
+        if (!r.ok) throw new Error(data.error || data.reason || 'Unable to validate code');
+        return data;
+    })
     .then(data => {
         const input = document.getElementById('shelf-code');
         const msgEl = document.getElementById('code-validation');
+        if (requestToken !== state.validationRequestToken || input.value.trim() !== code) return;
         
-        if (data.exists) {
+        if (data.exists || data.valid === false) {
+            state.codeValid = false;
             input.classList.remove('valid');
             input.classList.add('invalid');
             msgEl.className = 'validation-message error';
             msgEl.innerHTML = `<i class="fas fa-times-circle"></i> ${data.reason}`;
         } else {
+            state.codeValid = true;
             input.classList.remove('invalid');
             input.classList.add('valid');
             msgEl.className = 'validation-message success';
@@ -987,6 +1247,14 @@ function validateCode(code) {
     })
     .catch(err => {
         console.error('Validation error:', err);
+        const input = document.getElementById('shelf-code');
+        if (requestToken !== state.validationRequestToken || input.value.trim() !== code) return;
+        state.codeValid = false;
+        input.classList.remove('valid');
+        input.classList.add('invalid');
+        const msgEl = document.getElementById('code-validation');
+        msgEl.className = 'validation-message error';
+        msgEl.textContent = 'Unable to validate code. Please try again.';
         updateSaveButton();
     });
 }
@@ -997,13 +1265,10 @@ function validateCode(code) {
 function updateSaveButton() {
     const codeInput = document.getElementById('shelf-code');
     const code = codeInput.value.trim();
-    const codeValid = codeInput.classList.contains('valid');
+    const codeValid = state.codeValid && codeInput.classList.contains('valid');
     const hasImage = state.currentImage !== null;
     
-    // Allow save if code is present and image is present
-    // We relax the 'valid' check slightly to allow saving if the user insists, 
-    // but ideally it should be valid.
-    const canSave = code && hasImage; 
+    const canSave = Boolean(code && codeValid && hasImage);
     
     const saveBtn = document.getElementById('save-btn');
     saveBtn.disabled = state.isSaving || !canSave;
@@ -1024,7 +1289,6 @@ function setupUploadArea() {
     const fileInput = document.getElementById('file-input');
     
     uploadArea.onclick = () => fileInput.click();
-    fileInput.onchange = handleFileSelect;
 }
 
 /**
@@ -1036,13 +1300,14 @@ function handleFileSelect(event) {
     
     console.log('File selected:', file.name, file.type);
     
-    if (!file.type.match('image/png')) {
-        showError('Only PNG images are accepted');
+    if (!file.type.match(/^image\//)) {
+        showError('Please choose an image file');
         return;
     }
     
     const reader = new FileReader();
     reader.onload = (e) => {
+        state.editSourceIsClean = true;
         loadImageToEditor(e.target.result);
     };
     reader.readAsDataURL(file);
@@ -1127,6 +1392,10 @@ function capturePhoto() {
     const video = document.getElementById('camera-video');
     const preview = document.getElementById('camera-preview');
     const ctx = preview.getContext('2d');
+    if (!video.videoWidth || !video.videoHeight) {
+        showError('The camera is not ready yet. Wait a moment and try again.');
+        return;
+    }
     
     // Set canvas size to match video
     preview.width = video.videoWidth;
@@ -1234,10 +1503,8 @@ function stopCamera() {
  */
 function buildOriginalImageCandidates(code) {
     const raw = String(code || '').trim();
-    const compact = raw.replace(/\s+/g, '');
-    const lower = compact.toLowerCase();
-    const upper = compact.toUpperCase();
-    const binStripped = compact.replace(/b\d+$/i, '');
+    const lower = raw.toLowerCase();
+    const upper = raw.toUpperCase();
     const candidates = [];
     const add = (src) => {
         if (src && !candidates.includes(src)) candidates.push(src);
@@ -1246,19 +1513,9 @@ function buildOriginalImageCandidates(code) {
     add(`/shelf-original/${encodeURIComponent(lower)}.png`);
     add(`/shelf-original/${encodeURIComponent(upper)}.png`);
     add(`/shelf-original/${encodeURIComponent(raw)}.png`);
-    if (binStripped && binStripped !== compact) {
-        add(`/shelf-original/${encodeURIComponent(binStripped.toLowerCase())}.png`);
-        add(`/shelf-original/${encodeURIComponent(binStripped.toUpperCase())}.png`);
-        add(`/shelf-original/${encodeURIComponent(binStripped)}.png`);
-    }
     add(`/shelf-base/${encodeURIComponent(lower)}.png`);
     add(`/shelf-base/${encodeURIComponent(upper)}.png`);
     add(`/shelf-base/${encodeURIComponent(raw)}.png`);
-    if (binStripped && binStripped !== compact) {
-        add(`/shelf-base/${encodeURIComponent(binStripped.toLowerCase())}.png`);
-        add(`/shelf-base/${encodeURIComponent(binStripped.toUpperCase())}.png`);
-        add(`/shelf-base/${encodeURIComponent(binStripped)}.png`);
-    }
 
     return candidates;
 }
@@ -1279,6 +1536,8 @@ function resetRect() {
             if (index >= originalUrls.length) {
                 if (imageToken !== state.imageLoadToken) return;
                 console.log('No original image found, sticking with current image');
+                state.editSourceIsClean = false;
+                updateShelfFormActionVisibility();
                 redrawCanvas();
                 return;
             }
@@ -1289,6 +1548,8 @@ function resetRect() {
                 if (imageToken !== state.imageLoadToken) return;
                 console.log('Loaded original clean image for redraw');
                 state.currentImage = img;
+                state.editSourceIsClean = true;
+                updateShelfFormActionVisibility();
                 redrawCanvas();
             };
             img.onerror = () => {
@@ -1470,6 +1731,7 @@ function redrawCanvas(hideHandles = false) {
  */
 function startAction(x, y) {
     console.log('Action start at:', x, y);
+    if (state.isEditing && !state.editSourceIsClean) return;
     
     // Only check for existing rectangle handles if we have a valid rectangle
     const hasValidRect = state.rectW !== 0 && state.rectH !== 0 && 
@@ -1652,7 +1914,7 @@ function loadImageToEditor(dataUrl, imageToken = state.imageLoadToken) {
         }
         
         // Set canvas size to fit the image
-        const maxWidth = 600;
+        const maxWidth = 1200;
         const scale = Math.min(1, maxWidth / img.width);
         const canvasWidth = img.width * scale;
         const canvasHeight = img.height * scale;
@@ -1671,15 +1933,15 @@ function loadImageToEditor(dataUrl, imageToken = state.imageLoadToken) {
         const editorContainer = document.getElementById('editor-container');
         editorContainer.style.display = 'block'; // Force display block
         editorContainer.classList.add('active');
+        document.getElementById('camera-section').style.display = 'none';
+        document.getElementById('upload-section').style.display = 'none';
         
         // Scroll to editor
         setTimeout(() => {
             editorContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }, 100);
         
-        // Show replace image button if present
-        const replaceBtn = document.getElementById('replace-image-btn');
-        if (replaceBtn) replaceBtn.style.display = 'inline-block';
+        updateShelfFormActionVisibility();
         
         // Ensure canvas is visible and has crosshair cursor
         state.canvas.style.display = 'block';
@@ -1727,8 +1989,10 @@ function saveShelf() {
         isEditing: state.isEditing
     });
     
-    if (!code || !hasImage) {
-        const msg = !code ? 'Please provide a shelf code' : 'Please provide an image';
+    if (!code || !hasImage || !state.codeValid) {
+        const msg = !code
+            ? 'Please provide a shelf code'
+            : (!hasImage ? 'Please provide an image' : 'Please wait for a valid shelf code');
         console.error('Save blocked:', msg);
         showError(msg);
         return;
@@ -1797,6 +2061,7 @@ function saveShelf() {
     const getOriginalBlob = () => {
         return new Promise(resolve => {
             if (!state.currentImage) return resolve(null);
+            if (state.isEditing && !state.editSourceIsClean) return resolve(null);
             try {
                 const tempCanvas = document.createElement('canvas');
                 const targetWidth = Math.max(1, Math.round(state.canvas?.width || state.currentImage.width || 0));
@@ -1942,7 +2207,11 @@ function deleteShelf() {
         },
         body: JSON.stringify({ code: code })
     })
-    .then(r => r.json())
+    .then(async r => {
+        const data = await parseJsonResponse(r);
+        if (!r.ok) throw new Error(data.error || 'Failed to delete shelf');
+        return data;
+    })
     .then(data => {
         if (data.success) {
             showSuccess('Shelf deleted');
@@ -1990,7 +2259,11 @@ function duplicateShelf() {
         },
         body: JSON.stringify({ code: code })
     })
-    .then(r => r.json())
+    .then(async r => {
+        const data = await parseJsonResponse(r);
+        if (!r.ok) throw new Error(data.error || 'Failed to duplicate shelf');
+        return data;
+    })
     .then(data => {
         if (data.success) {
             showSuccess(`Duplicated as ${data.new_code}`);
@@ -2028,11 +2301,12 @@ function printQRCodes() {
     
     // Load QRCode library if needed
     const loadLib = () => {
-        return new Promise((resolve) => {
+        return new Promise((resolve, reject) => {
             if (window.QRCode) return resolve();
             const script = document.createElement('script');
             script.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js';
             script.onload = resolve;
+            script.onerror = () => reject(new Error('QR code library could not be loaded'));
             document.head.appendChild(script);
         });
     };
@@ -2153,7 +2427,7 @@ function printQRCodes() {
         setTimeout(() => {
             window.print();
         }, 1000);
-    });
+    }).catch(err => showError(err.message));
 }
 
 // ============================================================================

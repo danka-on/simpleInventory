@@ -1,0 +1,1283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sweet Shelves — Commercialization Plan</title>
+  <style>
+    :root {
+      --navy: #13233d;
+      --blue: #2563a9;
+      --sky: #eaf3fb;
+      --teal: #16847a;
+      --green: #2e7d59;
+      --amber: #b36b12;
+      --red: #a23b3b;
+      --ink: #1d2735;
+      --muted: #5e6b7a;
+      --line: #d8e0e8;
+      --paper: #ffffff;
+      --soft: #f5f7fa;
+    }
+
+    @page {
+      size: Letter;
+      margin: 0.58in 0.58in 0.62in;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      color: var(--ink);
+      background: var(--paper);
+      font-family: "Segoe UI", Arial, sans-serif;
+      font-size: 9.4pt;
+      line-height: 1.42;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+
+    body { counter-reset: section; }
+
+    a { color: var(--blue); text-decoration: none; }
+    p { margin: 0 0 8px; }
+    ul, ol { margin: 5px 0 9px 20px; padding: 0; }
+    li { margin: 0 0 4px; }
+    strong { color: var(--navy); }
+
+    h1, h2, h3, h4 {
+      color: var(--navy);
+      margin: 0;
+      line-height: 1.16;
+      page-break-after: avoid;
+    }
+
+    h1 { font-size: 28pt; letter-spacing: -0.7px; }
+    h2 {
+      font-size: 17pt;
+      margin: 0 0 12px;
+      padding-bottom: 6px;
+      border-bottom: 2px solid var(--blue);
+    }
+    h3 { font-size: 11.5pt; margin: 12px 0 6px; }
+    h4 { font-size: 9.8pt; margin: 9px 0 4px; }
+
+    .cover {
+      min-height: 9.1in;
+      padding: 0.35in 0.12in 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      page-break-after: always;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .cover::before {
+      content: "";
+      position: absolute;
+      width: 5.8in;
+      height: 5.8in;
+      border-radius: 50%;
+      right: -3.2in;
+      top: -2.1in;
+      background: linear-gradient(135deg, #d8ebfb, #e8f6f1);
+      z-index: 0;
+    }
+
+    .cover-top, .cover-bottom { position: relative; z-index: 1; }
+    .eyebrow {
+      display: inline-block;
+      color: var(--blue);
+      font-size: 9.5pt;
+      font-weight: 800;
+      letter-spacing: 1.8px;
+      text-transform: uppercase;
+      margin-bottom: 24px;
+    }
+
+    .cover-subtitle {
+      font-size: 15pt;
+      line-height: 1.34;
+      color: var(--muted);
+      max-width: 6.4in;
+      margin-top: 16px;
+    }
+
+    .positioning {
+      margin-top: 30px;
+      border-left: 5px solid var(--teal);
+      background: #f0f8f7;
+      padding: 14px 17px;
+      max-width: 6.35in;
+      border-radius: 0 9px 9px 0;
+      font-size: 13pt;
+      line-height: 1.35;
+      color: var(--navy);
+      font-weight: 650;
+    }
+
+    .cover-meta {
+      border-top: 1px solid var(--line);
+      padding-top: 15px;
+      color: var(--muted);
+      display: flex;
+      justify-content: space-between;
+      gap: 20px;
+      font-size: 9pt;
+    }
+
+    .page {
+      page-break-before: always;
+      position: relative;
+    }
+
+    .section-label {
+      color: var(--blue);
+      font-size: 8pt;
+      letter-spacing: 1.4px;
+      font-weight: 800;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+
+    .lead {
+      color: #344154;
+      font-size: 11pt;
+      line-height: 1.48;
+      margin-bottom: 12px;
+    }
+
+    .decision {
+      background: linear-gradient(135deg, #eef6fd, #f3faf8);
+      border: 1px solid #cfe1ef;
+      border-radius: 11px;
+      padding: 14px 16px;
+      margin: 10px 0 14px;
+    }
+
+    .decision .big {
+      font-size: 14pt;
+      font-weight: 800;
+      color: var(--navy);
+      margin-bottom: 5px;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 11px;
+      margin: 9px 0 12px;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 9px;
+      margin: 9px 0 12px;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      padding: 11px 12px;
+      background: var(--paper);
+      break-inside: avoid;
+    }
+
+    .card.soft { background: var(--soft); }
+    .card.blue { background: #f0f6fc; border-color: #c9dff0; }
+    .card.green { background: #f1f8f5; border-color: #cce3d8; }
+    .card.amber { background: #fff8ed; border-color: #ead3ad; }
+    .card.red { background: #fff4f4; border-color: #e8c9c9; }
+
+    .card-title {
+      font-size: 10pt;
+      font-weight: 800;
+      color: var(--navy);
+      margin-bottom: 5px;
+    }
+
+    .score {
+      text-align: center;
+      padding: 11px 8px;
+    }
+
+    .score-value {
+      font-size: 21pt;
+      line-height: 1;
+      font-weight: 850;
+      color: var(--blue);
+      margin-bottom: 5px;
+    }
+
+    .score-label {
+      color: var(--muted);
+      font-size: 8.4pt;
+      font-weight: 700;
+    }
+
+    .callout {
+      border-left: 4px solid var(--blue);
+      background: var(--sky);
+      padding: 10px 12px;
+      margin: 10px 0;
+      border-radius: 0 7px 7px 0;
+      break-inside: avoid;
+    }
+
+    .callout.green { border-left-color: var(--green); background: #eff8f3; }
+    .callout.amber { border-left-color: var(--amber); background: #fff7e9; }
+    .callout.red { border-left-color: var(--red); background: #fff1f1; }
+
+    .quote {
+      font-size: 12.5pt;
+      line-height: 1.38;
+      color: var(--navy);
+      font-weight: 700;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 8px 0 13px;
+      font-size: 8.7pt;
+      break-inside: avoid;
+    }
+
+    th {
+      background: var(--navy);
+      color: white;
+      text-align: left;
+      padding: 7px 8px;
+      font-weight: 700;
+    }
+
+    td {
+      border-bottom: 1px solid var(--line);
+      padding: 7px 8px;
+      vertical-align: top;
+    }
+
+    tr:nth-child(even) td { background: #f7f9fb; }
+    .num { text-align: right; white-space: nowrap; }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 7px;
+      align-items: stretch;
+      margin: 10px 0 14px;
+    }
+
+    .flow-step {
+      position: relative;
+      padding: 10px 8px;
+      background: #f3f7fb;
+      border: 1px solid #cfdae5;
+      border-radius: 8px;
+      text-align: center;
+      font-size: 8.5pt;
+      font-weight: 700;
+      color: var(--navy);
+    }
+
+    .flow-step:not(:last-child)::after {
+      content: "›";
+      position: absolute;
+      right: -8px;
+      top: 50%;
+      transform: translateY(-52%);
+      width: 14px;
+      height: 20px;
+      color: var(--blue);
+      font-size: 18pt;
+      z-index: 2;
+    }
+
+    .step-list {
+      list-style: none;
+      counter-reset: steps;
+      margin-left: 0;
+    }
+
+    .step-list li {
+      counter-increment: steps;
+      position: relative;
+      padding: 0 0 9px 34px;
+      min-height: 27px;
+    }
+
+    .step-list li::before {
+      content: counter(steps);
+      position: absolute;
+      left: 0;
+      top: -1px;
+      width: 23px;
+      height: 23px;
+      border-radius: 50%;
+      background: var(--blue);
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 8pt;
+      font-weight: 800;
+    }
+
+    .checklist {
+      list-style: none;
+      margin-left: 0;
+    }
+
+    .checklist li {
+      position: relative;
+      padding-left: 20px;
+      margin-bottom: 5px;
+    }
+
+    .checklist li::before {
+      content: "✓";
+      position: absolute;
+      left: 0;
+      color: var(--green);
+      font-weight: 900;
+    }
+
+    .no-list {
+      list-style: none;
+      margin-left: 0;
+    }
+
+    .no-list li {
+      position: relative;
+      padding-left: 20px;
+    }
+
+    .no-list li::before {
+      content: "×";
+      position: absolute;
+      left: 0;
+      color: var(--red);
+      font-weight: 900;
+    }
+
+    .script {
+      white-space: pre-wrap;
+      background: #17243a;
+      color: #edf4fb;
+      padding: 12px 14px;
+      border-radius: 8px;
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 8.2pt;
+      line-height: 1.45;
+      margin: 8px 0 12px;
+      break-inside: avoid;
+    }
+
+    .metric {
+      display: flex;
+      justify-content: space-between;
+      border-bottom: 1px dotted #c9d2dc;
+      gap: 12px;
+      padding: 5px 0;
+    }
+
+    .metric:last-child { border-bottom: 0; }
+    .metric-value { font-weight: 800; color: var(--navy); text-align: right; }
+
+    .timeline {
+      display: grid;
+      grid-template-columns: 0.85fr 2.4fr;
+      gap: 0;
+      margin: 8px 0 12px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      overflow: hidden;
+    }
+
+    .timeline > div {
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .timeline > div:nth-last-child(-n+2) { border-bottom: 0; }
+    .timeline-phase {
+      background: #edf4fa;
+      color: var(--navy);
+      font-weight: 800;
+    }
+
+    .small { font-size: 8pt; color: var(--muted); }
+    .muted { color: var(--muted); }
+    .nowrap { white-space: nowrap; }
+    .break-before { page-break-before: always; }
+    .avoid { break-inside: avoid; }
+
+    .compact-page {
+      font-size: 8.45pt;
+      line-height: 1.30;
+    }
+
+    .compact-page h2 { margin-bottom: 8px; padding-bottom: 4px; }
+    .compact-page h3 { margin: 7px 0 4px; }
+    .compact-page .lead { font-size: 9.8pt; line-height: 1.34; margin-bottom: 7px; }
+    .compact-page .grid-2,
+    .compact-page .grid-3 { gap: 7px; margin: 6px 0 8px; }
+    .compact-page .card { padding: 8px 9px; }
+    .compact-page .callout { padding: 7px 9px; margin: 6px 0; }
+    .compact-page table { margin: 5px 0 8px; font-size: 8pt; }
+    .compact-page th,
+    .compact-page td { padding: 5px 6px; }
+    .compact-page ul,
+    .compact-page ol { margin-top: 3px; margin-bottom: 5px; }
+    .compact-page li { margin-bottom: 2px; }
+    .compact-page .script {
+      padding: 8px 10px;
+      font-size: 7.65pt;
+      line-height: 1.27;
+      margin: 5px 0 7px;
+    }
+
+    .sources {
+      font-size: 7.7pt;
+      color: var(--muted);
+      line-height: 1.38;
+    }
+
+    .sources li { margin-bottom: 5px; }
+
+    .footer-note {
+      margin-top: 14px;
+      border-top: 1px solid var(--line);
+      padding-top: 7px;
+      font-size: 7.5pt;
+      color: #778393;
+    }
+  </style>
+</head>
+<body>
+
+  <section class="cover">
+    <div class="cover-top">
+      <div class="eyebrow">Working Commercialization Plan</div>
+      <h1>Sweet Shelves</h1>
+      <div class="cover-subtitle">
+        A remote, managed warehouse-in-a-box for liquidation, returns,
+        surplus, and marketplace resellers.
+      </div>
+      <div class="positioning">
+        “Receive a mixed pallet, identify and scan every item to a shelf,
+        and find each sold unit without searching the warehouse.”
+      </div>
+    </div>
+    <div class="cover-bottom">
+      <div class="cover-meta">
+        <div>
+          <strong>Business model:</strong><br>
+          Productized remote installation + recurring software/support
+        </div>
+        <div>
+          <strong>Prepared:</strong><br>
+          July 28, 2026
+        </div>
+        <div>
+          <strong>Status:</strong><br>
+          Pilot strategy
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-label">01 — Executive decision</div>
+    <h2>What This Can Become</h2>
+
+    <div class="decision">
+      <div class="big">Commercially viable in a focused niche—not as a general inventory platform.</div>
+      <p>
+        Sweet Shelves should be positioned as a scan-first operating system for small
+        warehouses that receive messy, mixed, partially identified inventory and resell it
+        through marketplaces. It should not attempt to out-feature broad systems such as
+        Zoho Inventory, inFlow, Fishbowl, Finale, or Linnworks.
+      </p>
+    </div>
+
+    <div class="grid-3">
+      <div class="card score">
+        <div class="score-value">8/10</div>
+        <div class="score-label">Niche product potential</div>
+      </div>
+      <div class="card score">
+        <div class="score-value">3/10</div>
+        <div class="score-label">Current commercial readiness</div>
+      </div>
+      <div class="card score">
+        <div class="score-value">2/10</div>
+        <div class="score-label">Generic-market competitiveness</div>
+      </div>
+    </div>
+
+    <div class="callout green">
+      <div class="quote">
+        The opportunity is not “another inventory app.” It is a specialized workflow
+        for inventory that does not arrive cleanly cataloged.
+      </div>
+    </div>
+
+    <h3>The narrow thesis</h3>
+    <p>
+      Generic inventory systems usually assume stable SKUs, clean catalogs, conventional
+      purchasing, and predictable stock. Sweet Shelves begins where those assumptions fail:
+      incomplete manifests, duplicate UPCs, suffixed individual units, mixed condition,
+      inconsistent marketplace data, and physical shelves that workers must navigate quickly.
+    </p>
+
+    <div class="flow">
+      <div class="flow-step">Manifest / BOL arrives</div>
+      <div class="flow-step">Scan and recover identity</div>
+      <div class="flow-step">Place on photographed shelf</div>
+      <div class="flow-step">Find, remove, and ship sale</div>
+    </div>
+
+    <h3>Founder-fit decision</h3>
+    <p>
+      The preferred route is a <strong>productized warehouse-automation service</strong>.
+      This preserves the enjoyable loop: observe a real operational problem, configure or
+      improve the system, watch people use it, and build the next practical improvement.
+      It avoids requiring the founder to become a mass-market SaaS salesperson.
+    </p>
+
+    <div class="grid-2">
+      <div class="card green">
+        <div class="card-title">Recommended</div>
+        <ul class="checklist">
+          <li>A few high-value managed installations</li>
+          <li>Remote onboarding and configuration</li>
+          <li>One configurable core product</li>
+          <li>Recurring updates, backups, and support</li>
+          <li>Paid custom work when appropriate</li>
+        </ul>
+      </div>
+      <div class="card red">
+        <div class="card-title">Not recommended initially</div>
+        <ul class="no-list">
+          <li>Open-signup, multi-tenant SaaS launch</li>
+          <li>Competing broadly on generic features</li>
+          <li>Free custom implementations</li>
+          <li>A different code fork for every customer</li>
+          <li>Paid advertising before direct validation</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="footer-note">
+      Core conclusion: pursue a contained paid-pilot experiment; do not commit to a broad startup
+      before external customers demonstrate willingness to pay and sustained usage.
+    </div>
+  </section>
+
+  <section class="page">
+    <div class="section-label">02 — Product and differentiation</div>
+    <h2>What Is Already Valuable</h2>
+
+    <p class="lead">
+      The product’s value comes from accumulated operational knowledge—not merely its feature count.
+      Sweet Shelves already encodes a real warehouse’s exceptions, reconciliation rules, and scan behavior.
+    </p>
+
+    <div class="grid-2">
+      <div class="card blue">
+        <div class="card-title">Receiving and identification</div>
+        <ul>
+          <li>BOL/manifest import and processing</li>
+          <li>Barcode-first receiving</li>
+          <li>Fallback title and thumbnail recovery</li>
+          <li>Handling incomplete and conflicting data</li>
+          <li>Custom warehouse titles and notes</li>
+        </ul>
+      </div>
+      <div class="card blue">
+        <div class="card-title">Physical warehouse execution</div>
+        <ul>
+          <li>Shelf QR/location creation</li>
+          <li>Photographed shelves and visual maps</li>
+          <li>Item movement and removal workflows</li>
+          <li>Suffix-aware individual unit handling</li>
+          <li>Scanner-optimized screens</li>
+        </ul>
+      </div>
+      <div class="card blue">
+        <div class="card-title">Marketplace operations</div>
+        <ul>
+          <li>Amazon and eBay data integration</li>
+          <li>Sold-order inventory reconciliation</li>
+          <li>Ready-to-ship location lookup</li>
+          <li>Listing, return, and status visibility</li>
+          <li>Cross-database enrichment and repair</li>
+        </ul>
+      </div>
+      <div class="card blue">
+        <div class="card-title">Warehouse support infrastructure</div>
+        <ul>
+          <li>Thermal barcode label printing</li>
+          <li>Inventory history and undo concepts</li>
+          <li>Search across operational databases</li>
+          <li>Backups and Pi-based deployment</li>
+          <li>Mobile/browser accessibility</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3>The defensible wedge</h3>
+    <div class="callout">
+      <div class="quote">
+        “Warehouse receiving, location, and fulfillment software built specifically
+        for liquidation and marketplace resellers.”
+      </div>
+    </div>
+
+    <p>
+      Individual features can be copied. The more defensible asset is the full
+      <strong>BOL-to-shelf-to-sale workflow</strong>, including how the system behaves when
+      product information is incomplete, the same base UPC represents multiple units, or
+      marketplace records disagree.
+    </p>
+
+    <h3>What the moat could become</h3>
+    <ul>
+      <li><strong>Workflow depth:</strong> faster exception handling than general inventory software.</li>
+      <li><strong>Operational data:</strong> better mappings between manifests, UPC variants, marketplace records, and warehouse identity.</li>
+      <li><strong>Implementation expertise:</strong> knowing how to configure a mixed-inventory reseller warehouse remotely.</li>
+      <li><strong>Distribution relationships:</strong> referrals from liquidation suppliers, auction operators, and reseller communities.</li>
+      <li><strong>Trust and reliability:</strong> proven recovery, audit, backup, and reconciliation behavior.</li>
+    </ul>
+
+    <h3>Important distinction</h3>
+    <p>
+      The code alone is unlikely to command a price proportional to the development time.
+      Commercial value increases when the software has outside users, recurring revenue,
+      documented outcomes, proprietary mappings, and a repeatable installation process.
+      Even two or three paying external warehouses would materially improve its value.
+    </p>
+  </section>
+
+  <section class="page compact-page">
+    <div class="section-label">03 — Market and customer</div>
+    <h2>A Modest but Credible Market</h2>
+
+    <p class="lead">
+      The exact niche is probably not enormous. It does not need to be enormous to support
+      a profitable owner-operated business.
+    </p>
+
+    <div class="grid-3">
+      <div class="card soft">
+        <div class="card-title">$849.9B</div>
+        <p>Projected U.S. retail returns in 2025, according to NRF.</p>
+      </div>
+      <div class="card soft">
+        <div class="card-title">Hundreds of thousands</div>
+        <p>Registered liquidation buyers reported across B-Stock’s ecosystem.</p>
+      </div>
+      <div class="card soft">
+        <div class="card-title">75,000+</div>
+        <p>Independent Amazon sellers exceeding $1M in 2025 sales.</p>
+      </div>
+    </div>
+
+    <div class="callout amber">
+      <strong>Do not treat these headline numbers as the addressable market.</strong>
+      Most participants are too small, do not operate warehouses, have insufficient pain,
+      or already use another system. These figures only demonstrate that a substantial
+      returns/resale ecosystem exists.
+    </div>
+
+    <h3>Ideal customer profile</h3>
+    <table>
+      <tr><th>Characteristic</th><th>Strong fit</th><th>Weak fit</th></tr>
+      <tr><td>Operation</td><td>Pallet, truckload, return, surplus, salvage, open-box</td><td>Clean wholesale catalog</td></tr>
+      <tr><td>Team</td><td>2–20 people handling inventory</td><td>Solo seller with a small closet</td></tr>
+      <tr><td>Facility</td><td>Dedicated warehouse or substantial storage</td><td>No stable physical locations</td></tr>
+      <tr><td>Channels</td><td>Amazon, eBay, Shopify, Whatnot, multiple channels</td><td>One low-volume local channel</td></tr>
+      <tr><td>Pain</td><td>Lost items, overselling, slow receiving, bad manifests</td><td>No measurable inventory errors</td></tr>
+      <tr><td>Data</td><td>Mixed, incomplete, inconsistent, unit-specific</td><td>Stable SKU catalog with clean ERP data</td></tr>
+    </table>
+
+    <h3>Initial target vertical</h3>
+    <p>
+      Begin with <strong>1–20-person liquidation and marketplace-reseller warehouses</strong>.
+      Do not broaden until the same installation and workflow succeeds repeatedly.
+    </p>
+
+    <h3>Adjacent expansion opportunities</h3>
+    <div class="grid-2">
+      <div class="card">
+        <ul>
+          <li>Returned-goods processors</li>
+          <li>Auction and estate-liquidation warehouses</li>
+          <li>Used electronics operations</li>
+          <li>Surplus and salvage businesses</li>
+        </ul>
+      </div>
+      <div class="card">
+        <ul>
+          <li>Donation and thrift warehouses</li>
+          <li>Consignment warehouses</li>
+          <li>Open-box retailers</li>
+          <li>Small recommerce operators</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3>Competitive reality</h3>
+    <table>
+      <tr><th>Competitor class</th><th>Strength</th><th>Sweet Shelves response</th></tr>
+      <tr><td>Zoho / Sortly</td><td>Polish, price, easy onboarding, general features</td><td>Do not compete generically; win on messy resale workflow</td></tr>
+      <tr><td>inFlow / Fishbowl</td><td>Mature warehouse and order operations</td><td>Be faster and more specialized for the chosen customer</td></tr>
+      <tr><td>Finale / Linnworks / Sellercloud</td><td>Scale, integrations, omnichannel depth</td><td>Serve smaller operators below enterprise complexity and price</td></tr>
+      <tr><td>Listing tools</td><td>Cross-listing, images, reseller awareness</td><td>Integrate or partner; own the physical warehouse workflow</td></tr>
+    </table>
+  </section>
+
+  <section class="page">
+    <div class="section-label">04 — Offer and economics</div>
+    <h2>The Remote Warehouse-in-a-Box</h2>
+
+    <div class="callout green">
+      <div class="quote">
+        “I remotely configure a complete barcode inventory system for liquidation
+        and marketplace-reseller warehouses.”
+      </div>
+    </div>
+
+    <h3>Founding design-partner offer</h3>
+    <div class="grid-2">
+      <div class="card green">
+        <div class="card-title">Remote setup includes</div>
+        <ul class="checklist">
+          <li>Preconfigured inventory server</li>
+          <li>First manifest/BOL import</li>
+          <li>Shelf-code structure and printable labels</li>
+          <li>Scanner and printer configuration</li>
+          <li>Amazon/eBay configuration where applicable</li>
+          <li>Two remote training sessions</li>
+          <li>Guided first receiving session</li>
+          <li>30 days of implementation support</li>
+        </ul>
+      </div>
+      <div class="card blue">
+        <div class="card-title">Initial commercial terms to test</div>
+        <div class="metric"><span>Remote setup</span><span class="metric-value">$1,000–$1,500</span></div>
+        <div class="metric"><span>Software/support</span><span class="metric-value">$149/month</span></div>
+        <div class="metric"><span>Hardware</span><span class="metric-value">At cost or separate</span></div>
+        <div class="metric"><span>Custom development</span><span class="metric-value">Quoted separately</span></div>
+        <div class="metric"><span>Pilot duration</span><span class="metric-value">30–60 days</span></div>
+      </div>
+    </div>
+
+    <p class="small">
+      Pricing is a hypothesis to test, not a final rate card. Early customers should pay enough
+      to validate real willingness while receiving unusually direct founder support.
+    </p>
+
+    <h3>Illustrative recurring revenue</h3>
+    <table>
+      <tr><th>Active warehouses</th><th class="num">Monthly at $149</th><th class="num">Annual recurring revenue</th></tr>
+      <tr><td>5</td><td class="num">$745</td><td class="num">$8,940</td></tr>
+      <tr><td>25</td><td class="num">$3,725</td><td class="num">$44,700</td></tr>
+      <tr><td>50</td><td class="num">$7,450</td><td class="num">$89,400</td></tr>
+      <tr><td>100</td><td class="num">$14,900</td><td class="num">$178,800</td></tr>
+      <tr><td>250</td><td class="num">$37,250</td><td class="num">$447,000</td></tr>
+    </table>
+
+    <p>
+      Setup revenue provides meaningful economics before a large subscriber base. Five
+      installations at $3,000 would produce $15,000 in setup revenue; the exact setup price
+      can rise after the implementation process becomes proven.
+    </p>
+
+    <h3>Business model guardrails</h3>
+    <ul>
+      <li><strong>One core:</strong> customer differences become settings, mappings, or optional modules—not permanent forks.</li>
+      <li><strong>Defined support:</strong> specify hours, response expectations, and what counts as custom work.</li>
+      <li><strong>Supported hardware:</strong> maintain a short scanner, printer, and server list.</li>
+      <li><strong>Scheduled releases:</strong> avoid untested customer-specific hotfixes wherever possible.</li>
+      <li><strong>Paid customization:</strong> only generalize features that strengthen the core product.</li>
+    </ul>
+  </section>
+
+  <section class="page">
+    <div class="section-label">05 — Remote delivery playbook</div>
+    <h2>How Installation Works Without Travel</h2>
+
+    <p class="lead">
+      The customer supplies the hands inside the warehouse; Sweet Shelves supplies the
+      system, configuration, guidance, and remote technical support.
+    </p>
+
+    <ol class="step-list">
+      <li><strong>Qualification call.</strong> Confirm facility, team, volume, marketplaces, manifest format, equipment, and measurable pain.</li>
+      <li><strong>Phone video walkthrough.</strong> The owner shows receiving, storage, packing, network access, printer area, and employee movement.</li>
+      <li><strong>Sample-data review.</strong> Receive a sanitized manifest and representative barcodes before installation.</li>
+      <li><strong>Preconfigure the instance.</strong> Create an isolated customer deployment with organization, timezone, import mapping, and initial settings.</li>
+      <li><strong>Ship or install hardware.</strong> Mail a configured mini-PC/Pi or install on approved customer hardware.</li>
+      <li><strong>Build the location structure.</strong> Guide the customer through shelf naming, photos, maps, QR labels, and physical label placement.</li>
+      <li><strong>Connect peripherals.</strong> Configure the supported scanner and thermal printer remotely.</li>
+      <li><strong>Connect marketplaces.</strong> Establish customer-owned Amazon/eBay credentials through a secure, isolated process.</li>
+      <li><strong>Train the team.</strong> Conduct role-based remote training using their actual inventory.</li>
+      <li><strong>Attend first receiving session.</strong> Remain on video while the customer processes a real manifest and pallet.</li>
+      <li><strong>Stabilization period.</strong> Monitor backups, errors, reconciliation, and employee questions for 30 days.</li>
+    </ol>
+
+    <h3>Deployment shape for the first customers</h3>
+    <div class="grid-3">
+      <div class="card blue">
+        <div class="card-title">Customer A</div>
+        <p>Isolated device<br>Isolated database<br>Own credentials</p>
+      </div>
+      <div class="card blue">
+        <div class="card-title">Customer B</div>
+        <p>Isolated device<br>Isolated database<br>Own credentials</p>
+      </div>
+      <div class="card blue">
+        <div class="card-title">Customer C</div>
+        <p>Isolated device<br>Isolated database<br>Own credentials</p>
+      </div>
+    </div>
+
+    <p>
+      This appliance-style model fits the current architecture better than immediately
+      rebuilding everything as multi-tenant cloud software. It provides natural data separation
+      and a faster route to paid pilots.
+    </p>
+
+    <h3>When physical assistance is required</h3>
+    <p>
+      The customer can hire a local IT contractor for networking, mounting, or hardware installation.
+      Optional founder travel may be offered later at a rate that fully covers time and cost, but it
+      should not be the default delivery model.
+    </p>
+
+    <div class="callout amber">
+      <strong>Security boundary:</strong> never place customer devices directly into a shared personal
+      remote-access network. Each customer requires isolated credentials, explicit support access,
+      encrypted transport, and a clear revocation process.
+    </div>
+  </section>
+
+  <section class="page compact-page">
+    <div class="section-label">06 — Customer acquisition</div>
+    <h2>Finding the First Design Partners</h2>
+
+    <p class="lead">
+      Initial customer acquisition should be direct and relationship-driven. Paid advertising
+      should wait until a repeatable sales conversation and paid conversion already exist.
+    </p>
+
+    <h3>Channels in priority order</h3>
+    <table>
+      <tr><th>Channel</th><th>Action</th><th>Why it matters</th></tr>
+      <tr><td>Existing suppliers</td><td>Ask for introductions to established buyers with warehouses</td><td>Highest trust and customer concentration</td></tr>
+      <tr><td>Google Maps</td><td>Search liquidation, pallet, bin, surplus, auction, and returns warehouses</td><td>Finds physical operators, not hobby sellers</td></tr>
+      <tr><td>High-volume eBay sellers</td><td>Use public business websites and profiles for outreach</td><td>Visible operational scale and marketplace pain</td></tr>
+      <tr><td>Industry communities</td><td>Contribute workflow knowledge before inviting interviews</td><td>Direct access to pain language and peer referrals</td></tr>
+      <tr><td>Service partners</td><td>Printer dealers, consultants, bookkeepers, listing services</td><td>Referral leverage without broad advertising</td></tr>
+      <tr><td>Industry events</td><td>Attend and schedule demos; do not buy an early booth</td><td>Dense conversations with qualified operators</td></tr>
+    </table>
+
+    <h3>Useful prospect searches</h3>
+    <div class="grid-2">
+      <div class="card soft">
+        <code>liquidation warehouse</code><br>
+        <code>pallet liquidation</code><br>
+        <code>bin store</code><br>
+        <code>returns warehouse</code><br>
+        <code>wholesale liquidation</code>
+      </div>
+      <div class="card soft">
+        <code>online auction warehouse</code><br>
+        <code>estate auction company</code><br>
+        <code>surplus store</code><br>
+        <code>eBay consignment</code><br>
+        <code>used appliance warehouse</code>
+      </div>
+    </div>
+
+    <h3>Initial outreach message</h3>
+    <div class="script">Subject: Question about your pallet inventory workflow
+
+Hi [Name],
+
+I operate a resale warehouse and built a barcode system after struggling
+with incomplete manifests and locating individually stored items.
+
+It imports pallet/BOL data, identifies scanned products, assigns them to
+photographed shelf locations, and helps locate Amazon/eBay orders later.
+
+I’m looking for a few warehouse operators willing to show me how they
+currently receive and organize a pallet. I’m not asking you to switch
+systems on the first call.
+
+Would you be open to a 20-minute conversation next week?
+
+Thanks,
+[Name]</div>
+
+    <h3>Discovery questions</h3>
+    <div class="grid-2">
+      <div class="card">
+        <ul>
+          <li>Walk me through the last pallet you received.</li>
+          <li>How long did receiving take?</li>
+          <li>How do you assign physical locations?</li>
+          <li>What happens when the manifest is wrong?</li>
+          <li>How often can’t you find something that sold?</li>
+        </ul>
+      </div>
+      <div class="card">
+        <ul>
+          <li>How are Amazon/eBay quantities reconciled?</li>
+          <li>What does an inventory mistake cost?</li>
+          <li>Who besides you handles inventory?</li>
+          <li>What software have you tried?</li>
+          <li>What would solving this be worth monthly?</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="callout">
+      Ask prospects to demonstrate their current process. Compliments and “I would use this”
+      are weak evidence. A paid setup deposit is strong evidence.
+    </div>
+  </section>
+
+  <section class="page">
+    <div class="section-label">07 — Validation</div>
+    <h2>Proving Demand Before Overbuilding</h2>
+
+    <h3>Minimum sales assets</h3>
+    <ul class="checklist">
+      <li>A one-page website naming the exact customer and outcome</li>
+      <li>A 60–90 second scan-to-shelf-to-sale demonstration</li>
+      <li>Five clear screenshots</li>
+      <li>A scheduling link</li>
+      <li>A written founding-customer offer</li>
+      <li>A short qualification and onboarding questionnaire</li>
+    </ul>
+
+    <h3>Thirty-day validation target</h3>
+    <div class="grid-3">
+      <div class="card score">
+        <div class="score-value">50</div>
+        <div class="score-label">Qualified businesses researched</div>
+      </div>
+      <div class="card score">
+        <div class="score-value">10</div>
+        <div class="score-label">Discovery conversations</div>
+      </div>
+      <div class="card score">
+        <div class="score-value">5</div>
+        <div class="score-label">Live demonstrations</div>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="card green">
+        <div class="card-title">Go signal</div>
+        <p>
+          Two paid pilots in the first focused outreach cycle, progressing toward
+          three to five customers who continue using the system without constant intervention.
+        </p>
+      </div>
+      <div class="card red">
+        <div class="card-title">Pause or reposition signal</div>
+        <p>
+          After 25 genuinely qualified conversations, fewer than three operators will pay
+          for a pilot or the problem is consistently described as low priority.
+        </p>
+      </div>
+    </div>
+
+    <h3>What to measure during a pilot</h3>
+    <table>
+      <tr><th>Outcome</th><th>Baseline</th><th>After Sweet Shelves</th></tr>
+      <tr><td>Time to receive a manifest/pallet</td><td>Record current labor hours</td><td>Measure actual reduction</td></tr>
+      <tr><td>Time to locate a sold item</td><td>Average or sampled search time</td><td>Median scan/search result</td></tr>
+      <tr><td>Lost or unlocated items</td><td>Count per month</td><td>Count during pilot</td></tr>
+      <tr><td>Oversells/inventory discrepancies</td><td>Count and approximate cost</td><td>Count and approximate cost</td></tr>
+      <tr><td>Employee training time</td><td>Current process</td><td>Time to independent operation</td></tr>
+      <tr><td>Support dependence</td><td>N/A</td><td>Founder minutes per customer/week</td></tr>
+    </table>
+
+    <div class="callout amber">
+      The most important commercial question is not “Do they like it?” It is
+      “Does it save enough labor or prevent enough mistakes that paying is obvious?”
+    </div>
+  </section>
+
+  <section class="page">
+    <div class="section-label">08 — Product readiness</div>
+    <h2>Turning the Internal Tool Into a Customer Edition</h2>
+
+    <p class="lead">
+      The first pilot does not require a complete SaaS rebuild. It does require the product
+      to be secure, recoverable, installable, diagnosable, and safe to update.
+    </p>
+
+    <h3>Remote-installation edition: required foundation</h3>
+    <table>
+      <tr><th>Priority</th><th>Capability</th><th>Definition of ready</th></tr>
+      <tr><td>P0</td><td>Sanitized package</td><td>No personal databases, tokens, credentials, logs, or warehouse media</td></tr>
+      <tr><td>P0</td><td>Authentication</td><td>Initial admin account, strong password, session security, role baseline</td></tr>
+      <tr><td>P0</td><td>Customer configuration</td><td>Organization, timezone, paths, credentials, printers, and integrations outside source code</td></tr>
+      <tr><td>P0</td><td>Backup and restore</td><td>Automated encrypted backups and a tested one-command restore</td></tr>
+      <tr><td>P0</td><td>Secure support access</td><td>Isolated per customer, revocable, logged, and consent-based</td></tr>
+      <tr><td>P1</td><td>Versioned migrations</td><td>Every schema change applied safely and repeatably</td></tr>
+      <tr><td>P1</td><td>Updates and rollback</td><td>Known version, safe install, health check, reversible release</td></tr>
+      <tr><td>P1</td><td>Diagnostics</td><td>Customer can generate a sanitized support bundle</td></tr>
+      <tr><td>P1</td><td>Background jobs</td><td>Marketplace sync retries, visible failure state, and idempotency</td></tr>
+      <tr><td>P1</td><td>Critical-flow tests</td><td>Receiving, suffixes, moves, removals, sales reconciliation, restore</td></tr>
+      <tr><td>P2</td><td>First-run onboarding</td><td>Guided organization, location, scanner, printer, and manifest setup</td></tr>
+      <tr><td>P2</td><td>Consistent UX</td><td>Stable terminology and scanner behavior across core flows</td></tr>
+    </table>
+
+    <h3>Current technical risks to address</h3>
+    <div class="grid-2">
+      <div class="card amber">
+        <div class="card-title">Architecture and reliability</div>
+        <ul>
+          <li>Large monolithic application surface</li>
+          <li>Many coupled templates and inline scripts</li>
+          <li>Multiple SQLite databases and ad hoc schema evolution</li>
+          <li>Limited automated regression protection</li>
+          <li>External API variability and silent fallback behavior</li>
+        </ul>
+      </div>
+      <div class="card amber">
+        <div class="card-title">Commercial operations</div>
+        <ul>
+          <li>Authentication and permissions</li>
+          <li>Customer credential isolation</li>
+          <li>Install/update process</li>
+          <li>Monitoring and incident diagnosis</li>
+          <li>Support limits, billing, terms, and data responsibilities</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3>Development principle</h3>
+    <p>
+      Do not stop all feature work, but require new work to satisfy one of three tests:
+      it closes a paid pilot, removes repeated support work, or improves reliability/security.
+      Everything else waits.
+    </p>
+  </section>
+
+  <section class="page">
+    <div class="section-label">09 — Risk management</div>
+    <h2>Commercial Risks and Mitigations</h2>
+
+    <table>
+      <tr><th>Risk</th><th>Why it matters</th><th>Mitigation</th></tr>
+      <tr>
+        <td>Market is too narrow</td>
+        <td>Insufficient customers for a standalone business</td>
+        <td>Paid validation before major rebuild; expand only to adjacent messy-inventory verticals</td>
+      </tr>
+      <tr>
+        <td>Customers resist change</td>
+        <td>Many operators tolerate spreadsheets and memory</td>
+        <td>Sell measured labor/error reduction and include hands-on onboarding</td>
+      </tr>
+      <tr>
+        <td>Founder dislikes sales</td>
+        <td>Inconsistent pipeline and burnout</td>
+        <td>Use referrals, supplier partnerships, a few high-value installs, and eventually a commercial partner</td>
+      </tr>
+      <tr>
+        <td>Customization becomes unbounded</td>
+        <td>Every customer creates a separate product</td>
+        <td>One core, configurable mappings, paid scoped projects, strict support boundaries</td>
+      </tr>
+      <tr>
+        <td>Customer data loss</td>
+        <td>Operational and reputational damage</td>
+        <td>Automated backups, restore drills, transaction discipline, and release rollback</td>
+      </tr>
+      <tr>
+        <td>Marketplace API changes</td>
+        <td>Titles, images, quantities, or orders become incomplete</td>
+        <td>Visible sync status, retries, preservation of existing good data, local fallback sources</td>
+      </tr>
+      <tr>
+        <td>Security incident</td>
+        <td>Credentials, order data, or remote access exposed</td>
+        <td>Per-customer secrets, least privilege, isolated access, encryption, logging, revocation</td>
+      </tr>
+      <tr>
+        <td>Support consumes all build time</td>
+        <td>Service becomes low-margin and unenjoyable</td>
+        <td>Track support minutes, build diagnostics, standardize hardware, charge for custom work</td>
+      </tr>
+    </table>
+
+    <h3>Founder boundaries</h3>
+    <div class="grid-2">
+      <div class="card green">
+        <div class="card-title">Protect the enjoyable work</div>
+        <ul class="checklist">
+          <li>Work with customers whose operations are interesting</li>
+          <li>Price setup so implementation time is respected</li>
+          <li>Schedule support windows</li>
+          <li>Turn repeated questions into product improvements</li>
+          <li>Decline poor-fit customers</li>
+        </ul>
+      </div>
+      <div class="card red">
+        <div class="card-title">Avoid accidental obligations</div>
+        <ul class="no-list">
+          <li>Unlimited on-call support</li>
+          <li>Promises before technical validation</li>
+          <li>Unsupported hardware combinations</li>
+          <li>Unpaid customer-specific development</li>
+          <li>Travel that is not priced appropriately</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="callout green">
+      A useful internal tool is already an asset. Commercialization should add value and
+      enjoyment—not invalidate the tool’s success if the market test is modest.
+    </div>
+  </section>
+
+  <section class="page">
+    <div class="section-label">10 — Execution plan</div>
+    <h2>A Practical 90-Day Path</h2>
+
+    <div class="timeline">
+      <div class="timeline-phase">Days 1–15<br>Define</div>
+      <div>
+        Finalize the ideal customer, founding offer, support boundary, supported hardware,
+        and one-page positioning. Record the short demonstration. Conduct a customer-readiness
+        audit focused on secrets, data, installation, backup, and remote access.
+      </div>
+      <div class="timeline-phase">Days 16–35<br>Harden</div>
+      <div>
+        Build the sanitized deployment package, initial administrator setup, per-customer
+        configuration, backup/restore, version marker, health check, and safe remote-support method.
+        Write the first onboarding runbook.
+      </div>
+      <div class="timeline-phase">Days 36–55<br>Discover</div>
+      <div>
+        Research 50 qualified operators. Request supplier introductions. Conduct ten workflow
+        conversations and five demonstrations. Refine language around measurable receiving,
+        locating, and discrepancy costs.
+      </div>
+      <div class="timeline-phase">Days 56–75<br>Pilot</div>
+      <div>
+        Close and remotely install the first paid design partner. Attend the first receiving
+        session, record support time, and fix only critical or repeatable issues.
+      </div>
+      <div class="timeline-phase">Days 76–90<br>Decide</div>
+      <div>
+        Review usage, customer outcomes, support load, willingness to continue paying, and
+        repeatability. Decide whether to pursue customers two through five, reposition, partner,
+        or keep Sweet Shelves as a private operating advantage.
+      </div>
+    </div>
+
+    <h3>Weekly operating dashboard</h3>
+    <div class="grid-2">
+      <div class="card">
+        <div class="metric"><span>Qualified prospects added</span><span class="metric-value">Target 10–15</span></div>
+        <div class="metric"><span>Personalized outreach sent</span><span class="metric-value">Target 10–15</span></div>
+        <div class="metric"><span>Discovery calls completed</span><span class="metric-value">Target 2–3</span></div>
+        <div class="metric"><span>Demonstrations completed</span><span class="metric-value">Target 1+</span></div>
+      </div>
+      <div class="card">
+        <div class="metric"><span>Pilot deposits</span><span class="metric-value">Primary signal</span></div>
+        <div class="metric"><span>Support minutes/customer</span><span class="metric-value">Track weekly</span></div>
+        <div class="metric"><span>Critical errors</span><span class="metric-value">Target downward</span></div>
+        <div class="metric"><span>Measured customer savings</span><span class="metric-value">Document</span></div>
+      </div>
+    </div>
+
+    <h3>Immediate next project</h3>
+    <div class="decision">
+      <div class="big">Customer-readiness audit and remote-deployment plan</div>
+      <p>
+        Inventory everything currently tied to the founder’s warehouse, databases, credentials,
+        Pi, paths, hardware, and operating assumptions. Convert that audit into a prioritized
+        implementation plan before accepting the first external warehouse.
+      </p>
+    </div>
+
+    <h3>Final perspective</h3>
+    <p>
+      Sweet Shelves does not need to become a massive SaaS company to justify the time invested.
+      A handful of paid installations can create revenue, external validation, stronger software,
+      and an asset with value beyond its source code. The recommended strategy preserves the
+      founder’s identity as a builder while adding a contained, testable commercial layer.
+    </p>
+  </section>
+
+  <section class="page">
+    <div class="section-label">Appendix A</div>
+    <h2>Reference Sources</h2>
+
+    <ol class="sources">
+      <li>
+        National Retail Federation, “2025 Retail Returns Landscape” —
+        projected $849.9 billion in returns and a 19.3% online return rate.<br>
+        <a href="https://nrf.com/research/2025-retail-returns-landscape">https://nrf.com/research/2025-retail-returns-landscape</a>
+      </li>
+      <li>
+        B-Stock, “How to Buy Liquidation Merchandise” — describes hundreds of thousands
+        of registered buyers across 130 countries and 65+ marketplaces.<br>
+        <a href="https://bstock.com/blog/how-to-buy-liquidation/">https://bstock.com/blog/how-to-buy-liquidation/</a>
+      </li>
+      <li>
+        Amazon, independent seller statistics — more than 75,000 independent sellers
+        surpassed $1 million in 2025 sales.<br>
+        <a href="https://sell.amazon.com/blog/amazon-stats">https://sell.amazon.com/blog/amazon-stats</a>
+      </li>
+      <li>
+        Zoho Inventory pricing and feature comparison.<br>
+        <a href="https://www.zoho.com/us/inventory/pricing/">https://www.zoho.com/us/inventory/pricing/</a>
+      </li>
+      <li>
+        inFlow Inventory pricing and barcode inventory capabilities.<br>
+        <a href="https://www.inflowinventory.com/software-pricing-inflow">https://www.inflowinventory.com/software-pricing-inflow</a><br>
+        <a href="https://www.inflowinventory.com/features/barcode-software">https://www.inflowinventory.com/features/barcode-software</a>
+      </li>
+      <li>
+        Descartes Finale pricing, integrations, and mobile barcode scanning.<br>
+        <a href="https://www.finaleinventory.com/pricing/">https://www.finaleinventory.com/pricing/</a>
+      </li>
+      <li>
+        Sortly pricing and inventory positioning.<br>
+        <a href="https://www.sortly.com/pricing/">https://www.sortly.com/pricing/</a>
+      </li>
+      <li>
+        eBay Open: On the Road — 2026 seller events.<br>
+        <a href="https://www.ebay.com/sellercenter/ebay-for-business/ebay-open">https://www.ebay.com/sellercenter/ebay-for-business/ebay-open</a>
+      </li>
+      <li>
+        ASD Market Week 2026 dates and wholesale event information.<br>
+        <a href="https://asdonline.com/about/dates-hours/">https://asdonline.com/about/dates-hours/</a>
+      </li>
+    </ol>
+
+    <div class="footer-note">
+      This document is a working strategy derived from product inspection, operational context,
+      and current public market information. Pricing and revenue examples are planning hypotheses,
+      not guarantees or financial advice. Validate them through paid customer behavior.
+    </div>
+  </section>
+
+</body>
+</html>

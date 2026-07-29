@@ -515,6 +515,11 @@ class AmazonManager:
 
                     for item in items:
                         asin = item.get('ASIN')
+                        # AmazonOrderId identifies the shipment/order, while
+                        # OrderItemId identifies one distinct line in it.  A
+                        # multi-item order must therefore be stored by both.
+                        amazon_order_item_id = str(item.get('OrderItemId') or '').strip()
+                        item_row_id = amazon_order_item_id or str(asin or item.get('SellerSKU') or '').strip()
                         sku = item.get('SellerSKU')
                         title = item.get('Title')
                         item_description = item.get('ItemDescription') or item.get('Description') or ''
@@ -657,9 +662,33 @@ class AmazonManager:
                         listing_sku = str(trace_row.get('sku') or '').strip() or None
                         listing_asin = str(trace_row.get('asin') or '').strip() or None
 
-                        # Check if order already exists
-                        cur.execute('SELECT id, barcode, sku FROM orders WHERE order_id = ?', (amazon_order_id,))
+                        # Match one marketplace line, not the whole Amazon
+                        # order. Older rows used ASIN as item_id; adopt those
+                        # rows on the next sync so the repair does not create a
+                        # duplicate before inserting the other missing lines.
+                        cur.execute(
+                            '''
+                            SELECT id, barcode, sku
+                            FROM orders
+                            WHERE order_id = ? AND item_id = ?
+                            ORDER BY id DESC
+                            LIMIT 1
+                            ''',
+                            (amazon_order_id, item_row_id)
+                        )
                         existing = cur.fetchone()
+                        if not existing and amazon_order_item_id and asin:
+                            cur.execute(
+                                '''
+                                SELECT id, barcode, sku
+                                FROM orders
+                                WHERE order_id = ? AND item_id = ?
+                                ORDER BY id DESC
+                                LIMIT 1
+                                ''',
+                                (amazon_order_id, asin)
+                            )
+                            existing = cur.fetchone()
 
                         if existing:
                             existing_barcode = existing[1]
@@ -675,8 +704,10 @@ class AmazonManager:
                             # Update existing order
                             cur.execute('''
                                 UPDATE orders
-                                SET barcode = ?, title = ?, quantity = ?, price = ?,
-                                    shipped_time = ?, paid_time = ?, image = ?, store = 'amazon',
+                                SET item_id = ?, barcode = ?, title = ?, quantity = ?, price = ?,
+                                    shipped_time = ?, paid_time = ?,
+                                    image = COALESCE(NULLIF(TRIM(?), ''), image),
+                                    store = 'amazon',
                                     shipping_name = ?, shipping_city = ?, shipping_state = ?,
                                     shipping_postal_code = ?, shipping_country = ?,
                                     shipping_cost = ?, seller_fee = ?, taxes = ?, sku = ?,
@@ -692,14 +723,14 @@ class AmazonManager:
                                     item_condition = COALESCE(NULLIF(?, ''), item_condition),
                                     item_condition_description = COALESCE(NULLIF(?, ''), item_condition_description),
                                     item_description = COALESCE(NULLIF(?, ''), item_description)
-                                WHERE order_id = ?
-                            ''', (final_barcode, title, quantity, price, shipped_time, purchase_date, image,
+                                WHERE id = ?
+                            ''', (item_row_id, final_barcode, title, quantity, price, shipped_time, purchase_date, image,
                                   shipping_name, shipping_city, shipping_state, shipping_postal, shipping_country,
                                   shipping_cost, seller_fee, taxes, final_sku,
                                   source_upc, source_base_upc, listing_trace_id, listing_trace_created_at,
                                   listing_trace_source, listing_listing_id, listing_offer_id, listing_sku, listing_asin,
                                   item_condition, item_condition_description, item_description,
-                                  amazon_order_id))
+                                  existing[0]))
                         else:
                             # Insert new order
                             cur.execute('''
@@ -710,7 +741,7 @@ class AmazonManager:
                                  listing_trace_created_at, listing_trace_source, listing_listing_id, listing_offer_id,
                                  listing_sku, listing_asin, item_condition, item_condition_description, item_description)
                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            ''', (amazon_order_id, asin, sku, final_trace_barcode, title, quantity, price, shipped_time, purchase_date, image, 'amazon',
+                            ''', (amazon_order_id, item_row_id, sku, final_trace_barcode, title, quantity, price, shipped_time, purchase_date, image, 'amazon',
                                   shipping_name, shipping_city, shipping_state, shipping_postal, shipping_country,
                                   shipping_cost, seller_fee, taxes, source_upc, source_base_upc, listing_trace_id,
                                   listing_trace_created_at, listing_trace_source, listing_listing_id, listing_offer_id,
@@ -876,11 +907,24 @@ class AmazonManager:
             # Parse TSV
             reader = csv.DictReader(io.StringIO(report_data), delimiter='\t')
             
-            for row in reader:
+            for raw_row in reader:
+                # Amazon report headers can vary slightly by report version and
+                # may include a UTF-8 BOM. Normalize them before field lookup.
+                row = {
+                    str(key or '').lstrip('\ufeff').strip().lower().replace('_', '-'): value
+                    for key, value in raw_row.items()
+                }
+                report_title = (
+                    row.get('item-name')
+                    or row.get('product-name')
+                    or row.get('item-description')
+                    or row.get('title')
+                    or ''
+                )
                 listing = {
                     'asin': row.get('asin1', ''),
                     'sku': row.get('seller-sku', ''),
-                    'title': row.get('item-name', ''),
+                    'title': report_title,
                     'price': row.get('price', ''),
                     'quantity': row.get('quantity', ''),
                     'status': row.get('status', ''),
@@ -900,6 +944,169 @@ class AmazonManager:
             import traceback
             traceback.print_exc()
             return []
+
+    @staticmethod
+    def _catalog_title(catalog_data):
+        """Extract a display title from a Catalog Items API payload."""
+        if not isinstance(catalog_data, dict):
+            return ''
+        summaries = catalog_data.get('summaries') or []
+        if isinstance(summaries, dict):
+            summaries = [summaries]
+        for summary in summaries:
+            if not isinstance(summary, dict):
+                continue
+            title = str(
+                summary.get('itemName')
+                or summary.get('item_name')
+                or summary.get('title')
+                or ''
+            ).strip()
+            if title:
+                return title
+        return ''
+
+    @staticmethod
+    def _upc_title_variants(value):
+        raw = str(value or '').strip()
+        if not raw:
+            return []
+        variants = []
+
+        def add(candidate):
+            candidate = str(candidate or '').strip()
+            if candidate and candidate not in variants:
+                variants.append(candidate)
+
+        add(raw)
+        base = raw.split('-', 1)[0].strip()
+        add(base)
+        if base.isdigit():
+            stripped = base.lstrip('0') or '0'
+            add(stripped)
+            if len(stripped) <= 12:
+                add(stripped.zfill(12))
+                add(stripped.zfill(13))
+        return variants
+
+    def _lookup_local_listing_title(self, upc='', asin='', sku=''):
+        """Recover an Amazon title from durable local databases."""
+        variants = self._upc_title_variants(upc)
+
+        def first_upc_title(db_name, query):
+            try:
+                with connect_db(db_name) as lookup_conn:
+                    lookup_cur = lookup_conn.cursor()
+                    for candidate in variants:
+                        row = lookup_cur.execute(query, (candidate,)).fetchone()
+                        title = str(row[0] or '').strip() if row else ''
+                        if title:
+                            return title
+            except Exception:
+                pass
+            return ''
+
+        for db_name, query in (
+            ('rawbol.db', '''
+                SELECT item_description FROM raw_bol_items
+                WHERE TRIM(upc) = ? COLLATE NOCASE
+                  AND TRIM(COALESCE(item_description, '')) != ''
+                ORDER BY rowid DESC LIMIT 1
+            '''),
+            ('bol.db', '''
+                SELECT item_description FROM bol_items
+                WHERE TRIM(upc) = ? COLLATE NOCASE
+                  AND TRIM(COALESCE(item_description, '')) != ''
+                ORDER BY rowid DESC LIMIT 1
+            '''),
+            ('bol.db', '''
+                SELECT item_description FROM custom_item_registry
+                WHERE TRIM(upc) = ? COLLATE NOCASE
+                  AND TRIM(COALESCE(item_description, '')) != ''
+                ORDER BY rowid DESC LIMIT 1
+            '''),
+            ('searchRack.db', '''
+                SELECT TITLE FROM SEARCHRACK
+                WHERE TRIM(BARCODE) = ? COLLATE NOCASE
+                  AND TRIM(COALESCE(TITLE, '')) != ''
+                ORDER BY ID DESC LIMIT 1
+            '''),
+            ('ebayStore.db', '''
+                SELECT Title FROM INVENTORY
+                WHERE TRIM(UPC) = ? COLLATE NOCASE
+                  AND TRIM(COALESCE(Title, '')) != ''
+                ORDER BY ID DESC LIMIT 1
+            '''),
+        ):
+            title = first_upc_title(db_name, query)
+            if title:
+                return title
+
+        try:
+            with connect_db('sold.db') as sold_conn:
+                sold_cur = sold_conn.cursor()
+                for field, value in (('item_id', asin), ('sku', sku)):
+                    value = str(value or '').strip()
+                    if not value:
+                        continue
+                    row = sold_cur.execute(f'''
+                        SELECT title FROM orders
+                        WHERE TRIM({field}) = ? COLLATE NOCASE
+                          AND LOWER(TRIM(COALESCE(store, ''))) = 'amazon'
+                          AND TRIM(COALESCE(title, '')) != ''
+                        ORDER BY id DESC LIMIT 1
+                    ''', (value,)).fetchone()
+                    if row and str(row[0] or '').strip():
+                        return str(row[0]).strip()
+        except Exception:
+            pass
+        return ''
+
+    def repair_missing_listing_titles(self, max_catalog_items=25):
+        """Backfill blank Amazon titles locally, then use a limited API budget."""
+        repaired_local = 0
+        repaired_catalog = 0
+        catalog_attempts = 0
+        updates = []
+        with connect_db('amazonStore.db') as conn:
+            cur = conn.cursor()
+            rows = cur.execute('''
+                SELECT ID, ASIN, SKU, UPC
+                FROM ITEMS
+                WHERE TRIM(COALESCE(TITLE, '')) = ''
+                ORDER BY ID
+            ''').fetchall()
+        # Do local lookups and slow Catalog calls without holding a write lock.
+        for row_id, asin, sku, upc in rows:
+            title = self._lookup_local_listing_title(upc, asin, sku)
+            if title:
+                updates.append((title, row_id))
+                repaired_local += 1
+                continue
+            if catalog_attempts >= max(0, int(max_catalog_items or 0)):
+                continue
+            catalog_attempts += 1
+            catalog_data = self.get_catalog_item(str(asin or '').strip())
+            title = self._catalog_title(catalog_data)
+            if title:
+                updates.append((title, row_id))
+                repaired_catalog += 1
+        if updates:
+            with connect_db('amazonStore.db') as conn:
+                conn.executemany(
+                    "UPDATE ITEMS SET TITLE = ? WHERE ID = ? AND TRIM(COALESCE(TITLE, '')) = ''",
+                    updates
+                )
+        print(
+            f"Amazon title repair: local={repaired_local}, "
+            f"catalog={repaired_catalog}, catalog_attempts={catalog_attempts}"
+        )
+        return {
+            'local': repaired_local,
+            'catalog': repaired_catalog,
+            'catalog_attempts': catalog_attempts,
+            'total': repaired_local + repaired_catalog,
+        }
     
     def sync_listings_to_db(self):
         """
@@ -1013,10 +1220,11 @@ class AmazonManager:
 
                     # UPC PRESERVATION: Check existing UPC before overwriting
                     # If we already have a valid UPC (not ASIN, status=3), preserve it
-                    cur.execute('SELECT UPC, upc_fetch_attempted FROM ITEMS WHERE ASIN = ?', (asin,))
+                    cur.execute('SELECT UPC, upc_fetch_attempted, TITLE FROM ITEMS WHERE ASIN = ?', (asin,))
                     existing_item = cur.fetchone()
                     existing_upc = existing_item[0] if existing_item else None
                     existing_status = existing_item[1] if existing_item and len(existing_item) > 1 else None
+                    existing_title = str(existing_item[2] or '').strip() if existing_item and len(existing_item) > 2 else ''
 
                     # Determine final UPC to use:
                     # 1. If existing UPC is valid (not ASIN and successfully fetched), keep it
@@ -1033,6 +1241,10 @@ class AmazonManager:
 
                     # Get image: Try Amazon Catalog API first, then fallback to rawbol.db
                     image_url = listing.get('image', '')
+                    listing_title = str(listing.get('title') or '').strip() or existing_title
+                    if not listing_title:
+                        listing_title = self._lookup_local_listing_title(upc, asin, sku)
+                    catalog_data = None
                     if not image_url:
                         try:
                             catalog_api_calls += 1
@@ -1048,6 +1260,8 @@ class AmazonManager:
                                             break
                         except Exception as e:
                             print(f"Could not fetch Amazon image for {asin}: {e}")
+                    if not listing_title and catalog_data:
+                        listing_title = self._catalog_title(catalog_data)
 
                     # Fallback to rawbol.db if still no image and we have a UPC
                     if upc and not image_url:
@@ -1079,13 +1293,15 @@ class AmazonManager:
                     if existing:
                         cur.execute('''
                             UPDATE ITEMS
-                            SET SKU = ?, TITLE = ?, PRICE = ?, QUANTITY = ?,
-                                STATUS = ?, IMAGE = ?, UPC = ?, CONDITION = ?,
+                            SET SKU = ?, TITLE = COALESCE(NULLIF(?, ''), TITLE), PRICE = ?, QUANTITY = ?,
+                                STATUS = ?,
+                                IMAGE = COALESCE(NULLIF(TRIM(?), ''), IMAGE),
+                                UPC = ?, CONDITION = ?,
                                 CONDITION_NOTE = COALESCE(NULLIF(?, ''), CONDITION_NOTE),
                                 FULFILLMENT_CHANNEL = ?, LAST_UPDATED = ?
                             WHERE ASIN = ?
                         ''', (
-                            sku, listing.get('title', ''), price, quantity,
+                            sku, listing_title, price, quantity,
                             listing.get('status', ''), image_url,
                             upc, listing.get('condition', ''),
                             condition_note,
@@ -1099,7 +1315,7 @@ class AmazonManager:
                             (ASIN, SKU, TITLE, PRICE, QUANTITY, STATUS, IMAGE, UPC, CONDITION, CONDITION_NOTE, FULFILLMENT_CHANNEL, LAST_UPDATED)
                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ''', (
-                            asin, sku, listing.get('title', ''), price, quantity,
+                            asin, sku, listing_title, price, quantity,
                             listing.get('status', ''), image_url,
                             upc, listing.get('condition', ''),
                             condition_note,
@@ -1119,6 +1335,13 @@ class AmazonManager:
                 VALUES (?, ?, ?)
             ''', ('last_listings_sync', str(synced_count + updated_count), datetime.utcnow().isoformat()))
             conn.commit()
+
+        # Repair legacy blank titles after each listing sync. Local databases
+        # do most of the work; Catalog calls are deliberately capped.
+        try:
+            self.repair_missing_listing_titles(max_catalog_items=25)
+        except Exception as repair_error:
+            print(f"Warning: Amazon title repair failed: {repair_error}")
 
         print(f"\n✅ Amazon listings sync complete:")
         print(f"   - New: {synced_count} items")
@@ -1199,34 +1422,57 @@ class AmazonManager:
         print("ℹ️ Inventory summary API not yet implemented")
         return []
     
-    def test_connection(self):
-        """Test if credentials are working"""
+    @staticmethod
+    def _connection_error_status(error):
+        """Classify only explicit authentication failures as expired."""
+        text = str(error or '').strip()
+        normalized = text.casefold()
+        auth_markers = (
+            'unauthorized',
+            'invalid_grant',
+            'accessdenied',
+            'access denied',
+            'invalid access token',
+            'invalid refresh token',
+            'authentication token is invalid',
+            'status code: 401',
+            'status=401',
+            'http 401',
+        )
+        return {
+            'ok': False,
+            'status': 'expired' if any(marker in normalized for marker in auth_markers) else 'issue',
+            'message': text or 'Amazon SP-API connection test failed.',
+        }
+
+    def connection_status(self):
+        """Return a detailed connection state without mislabeling transient failures."""
         try:
-            print("🔍 Testing Amazon SP-API connection...")
             orders_api = Orders(credentials=self.credentials, marketplace=self.marketplace)
-            
-            # Try to fetch just 1 order from last 7 days
             created_after = (datetime.utcnow() - timedelta(days=7)).isoformat()
             response = orders_api.get_orders(
                 CreatedAfter=created_after,
                 MaxResultsPerPage=1
             )
-            
             if response.errors:
-                print(f"❌ Connection failed: {response.errors}")
-                return False
-            
+                return self._connection_error_status(response.errors)
+            return {'ok': True, 'status': 'ok', 'message': ''}
+        except SellingApiException as e:
+            return self._connection_error_status(e)
+        except Exception as e:
+            return self._connection_error_status(e)
+
+    def test_connection(self):
+        """Test if credentials are working."""
+        print("🔍 Testing Amazon SP-API connection...")
+        result = self.connection_status()
+        if result.get('ok'):
             print("✅ Amazon SP-API connection successful!")
             print(f"   Marketplace: {self.marketplace.marketplace_id}")
             print(f"   Region: {self.region}")
             return True
-            
-        except SellingApiException as e:
-            print(f"❌ API Error: {e}")
-            return False
-        except Exception as e:
-            print(f"❌ Connection Error: {e}")
-            return False
+        print(f"❌ Amazon SP-API connection {result.get('status')}: {result.get('message')}")
+        return False
     
     def get_returns(self, days_back=90):
         """
