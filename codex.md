@@ -56,9 +56,10 @@ This workflow:
 
 When user says "push", "p", "let's push", or "push to pi":
 - provide only the direct `scp` commands for the relevant files (no auto-execution),
+- put all `scp` commands and the restart command together in one copy/pasteable PowerShell code block,
 - always include the explicit Pi key flag: `-i C:/Users/boxatron/.ssh/sweet_shelves_pi`,
 - when multiple template files are being pushed, combine them into a single `scp` line to `/opt/sweetshelves/templates/`,
-- always include the reset command: `ssh -i C:/Users/boxatron/.ssh/sweet_shelves_pi dk@10.0.0.151 "sudo systemctl restart sweetshelves.service"`,
+- always use this exact restart command as the final line: `ssh -i C:/Users/boxatron/.ssh/sweet_shelves_pi dk@10.0.0.151 "sudo systemctl restart sweetshelves.service"`,
 - exclude all `.db` files,
 - wait for user confirmation (`success` or `s`) before updating this memory checkpoint.
 - after each code change, include the relevant `scp` push command in the handoff so deployment is always easy to do next.

@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.ico') }}">
+    <title>Inventory & Seller Analytics - Sweet Shelves</title>
+    <style>
+        :root{
+            --bg:#f4f7fb;--card:#fff;--soft:#f8fafc;--border:#dfe7ef;--text:#172033;
+            --muted:#64748b;--blue:#2563eb;--green:#15803d;--yellow:#a16207;
+            --orange:#c2410c;--red:#dc2626;--purple:#7c3aed;--shadow:0 8px 26px rgba(15,23,42,.06);
+        }
+        *{box-sizing:border-box}
+        body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,"Segoe UI",Arial,sans-serif}
+        a{color:inherit}
+        .page{max-width:1500px;margin:auto;padding:22px}
+        .header{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:18px}
+        h1{font-size:clamp(1.55rem,3vw,2.25rem);margin:0 0 6px;letter-spacing:-.03em}
+        .subtitle{color:var(--muted);max-width:790px;line-height:1.5}
+        .header-actions{display:flex;gap:8px;flex-wrap:wrap}
+        .button{border:1px solid var(--border);background:var(--card);border-radius:9px;padding:9px 13px;text-decoration:none;cursor:pointer;font-weight:700;color:var(--text)}
+        .button.primary{background:var(--blue);border-color:var(--blue);color:white}
+        .panel{background:var(--card);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow)}
+        .filters{padding:14px;display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:12px;margin-bottom:16px}
+        label{display:block;font-size:.78rem;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin-bottom:5px}
+        select,input{width:100%;padding:10px 11px;border:1px solid var(--border);border-radius:8px;background:white;color:var(--text);font:inherit}
+        .loading{padding:70px 20px;text-align:center;color:var(--muted)}
+        .spinner{width:34px;height:34px;border:4px solid #dbeafe;border-top-color:var(--blue);border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 12px}
+        @keyframes spin{to{transform:rotate(360deg)}}
+        .error{display:none;background:#fef2f2;color:#991b1b;border:1px solid #fecaca;padding:14px;border-radius:10px;margin-bottom:16px}
+        .dashboard{display:none}
+        .kpis{display:grid;grid-template-columns:repeat(5,minmax(150px,1fr));gap:12px;margin-bottom:16px}
+        .kpi{padding:16px;min-height:118px;position:relative;overflow:hidden}
+        .kpi:after{content:"";position:absolute;width:70px;height:70px;border-radius:50%;right:-22px;top:-22px;background:var(--tone,#dbeafe);opacity:.55}
+        .kpi-label{font-size:.76rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:800}
+        .kpi-value{font-size:1.85rem;font-weight:850;margin:7px 0 3px;letter-spacing:-.04em}
+        .kpi-note{font-size:.79rem;color:var(--muted);line-height:1.3}
+        .section-title{display:flex;justify-content:space-between;align-items:end;gap:10px;margin:25px 2px 10px}
+        .section-title h2{font-size:1.15rem;margin:0}
+        .section-title p{font-size:.82rem;color:var(--muted);margin:3px 0 0}
+        .type-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+        .type-card{padding:14px}
+        .type-card h3{font-size:.9rem;margin:0 0 10px}
+        .type-row{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-top:1px solid #edf2f7;font-size:.78rem}
+        .type-row:first-of-type{border-top:0}
+        .type-row span:first-child{font-weight:750}
+        .type-row span:last-child{color:var(--muted);text-align:right;white-space:nowrap}
+        .decision-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+        .decision{overflow:hidden}
+        .decision-head{padding:14px 15px;border-bottom:1px solid var(--border);background:var(--soft)}
+        .decision-head strong{display:flex;align-items:center;justify-content:space-between;gap:8px}
+        .decision-head small{display:block;color:var(--muted);margin-top:4px;line-height:1.35}
+        .count{min-width:27px;text-align:center;padding:3px 7px;border-radius:999px;background:#e2e8f0;font-size:.76rem}
+        .decision-list{max-height:390px;overflow:auto}
+        .decision-item{padding:12px 14px;border-bottom:1px solid #edf2f7}
+        .decision-item:last-child{border-bottom:0}
+        .decision-name{font-weight:800;font-size:.88rem;text-decoration:none;line-height:1.3}
+        .decision-name:hover{color:var(--blue);text-decoration:underline}
+        .decision-meta{font-size:.77rem;color:var(--muted);margin-top:5px;line-height:1.4}
+        .empty{padding:24px 14px;color:var(--muted);text-align:center;font-size:.85rem}
+        .buy .decision-head{border-top:4px solid var(--green)}
+        .avoid .decision-head{border-top:4px solid var(--orange)}
+        .dispose .decision-head{border-top:4px solid var(--red)}
+        .returns .decision-head{border-top:4px solid var(--purple)}
+        .charts{display:grid;grid-template-columns:.8fr 1.2fr 1.2fr;gap:12px}
+        .chart{padding:15px;min-height:340px;position:relative}
+        .chart h3{margin:0;font-size:1rem}
+        .chart-note{font-size:.77rem;color:var(--muted);margin:4px 0 12px}
+        canvas{width:100%;height:270px;display:block}
+        .age-row{display:grid;grid-template-columns:86px 1fr 45px;align-items:center;gap:9px;margin:13px 0;font-size:.78rem}
+        .age-track{height:13px;background:#edf2f7;border-radius:999px;overflow:hidden}
+        .age-fill{height:100%;border-radius:999px;min-width:2px}
+        .chart-tooltip{display:none;position:absolute;z-index:5;pointer-events:none;background:rgba(15,23,42,.94);color:white;padding:8px 10px;border-radius:7px;font-size:.76rem;line-height:1.4;max-width:250px}
+        .legend{display:flex;gap:12px;flex-wrap:wrap;font-size:.75rem;color:var(--muted)}
+        .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:4px}
+        .explorer{overflow:hidden}
+        .explorer-controls{padding:14px;display:grid;grid-template-columns:180px minmax(220px,1fr) 150px auto;gap:10px;align-items:end;border-bottom:1px solid var(--border)}
+        .table-wrap{
+            overflow-x:auto;max-height:none;
+            position:relative;overscroll-behavior-x:contain;border-radius:0 0 14px 14px;
+        }
+        table{width:100%;border-collapse:separate;border-spacing:0;min-width:1050px;font-size:.82rem}
+        th{background:#f1f5f9;text-align:left;padding:11px 10px;color:#475569;font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;border-bottom:1px solid var(--border)}
+        th.sortable{cursor:pointer;user-select:none}
+        th.sortable:hover{color:var(--blue)}
+        .floating-table-header{
+            display:none;position:fixed;top:0;z-index:10000;overflow:hidden;
+            background:#f1f5f9;box-shadow:0 4px 10px rgba(15,23,42,.22);
+        }
+        .floating-table-header table{margin:0;table-layout:fixed;min-width:0;width:auto}
+        .floating-table-header th{box-sizing:border-box;box-shadow:none}
+        td{padding:10px;border-bottom:1px solid #edf2f7;vertical-align:top}
+        tr:hover td{background:#f8fbff}
+        .item-title{font-weight:800;max-width:330px;line-height:1.3}
+        .item-sub{font-size:.72rem;color:var(--muted);margin-top:3px}
+        .number{text-align:right;font-variant-numeric:tabular-nums}
+        .badge{display:inline-block;padding:3px 7px;border-radius:999px;font-size:.69rem;font-weight:800;white-space:nowrap;background:#e2e8f0;color:#334155}
+        .badge.buy{background:#dcfce7;color:#166534}
+        .badge.avoid{background:#ffedd5;color:#9a3412}
+        .badge.dispose{background:#fee2e2;color:#991b1b}
+        .badge.return{background:#ede9fe;color:#5b21b6}
+        .badge.monitor{background:#e0f2fe;color:#075985}
+        .explorer-foot{padding:10px 14px;color:var(--muted);font-size:.78rem;border-top:1px solid var(--border)}
+        details.quality{margin-top:16px;padding:14px}
+        details summary{cursor:pointer;font-weight:800}
+        .quality-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin:14px 0}
+        .quality-stat{background:var(--soft);padding:10px;border-radius:8px}
+        .quality-stat b{display:block;font-size:1.15rem;margin-top:3px}
+        .quality-notes{color:var(--muted);font-size:.82rem;line-height:1.55}
+        @media(max-width:1150px){.kpis{grid-template-columns:repeat(3,1fr)}.type-grid,.decision-grid{grid-template-columns:repeat(2,1fr)}.charts{grid-template-columns:1fr 1fr}.chart.scatter{grid-column:span 2}}
+        @media(max-width:760px){.page{padding:12px}.filters,.explorer-controls{grid-template-columns:1fr 1fr}.kpis{grid-template-columns:1fr 1fr}.decision-grid,.charts{grid-template-columns:1fr}.chart.scatter{grid-column:auto}.quality-grid{grid-template-columns:1fr 1fr}.header-actions{width:100%}.button{flex:1;text-align:center}}
+        @media(max-width:470px){.filters,.explorer-controls,.kpis,.type-grid{grid-template-columns:1fr}.decision-grid{grid-template-columns:1fr}}
+    </style>
+</head>
+<body>
+<main class="page">
+    <header class="header">
+        <div>
+            <h1>Inventory & Seller Analytics</h1>
+            <div class="subtitle">See what moves, what stalls, what comes back, and where your next buying or clearance decision deserves attention.</div>
+        </div>
+        <div class="header-actions">
+            <a class="button" href="/tools">← Tools</a>
+            <a class="button" href="/searchrack">Warehouse</a>
+            <button class="button primary" id="refreshButton">Refresh analytics</button>
+        </div>
+    </header>
+
+    <section class="panel filters">
+        <div>
+            <label for="windowFilter">Sales evidence window</label>
+            <select id="windowFilter">
+                <option value="0">All recorded sales</option>
+                <option value="365">Last 365 days</option>
+                <option value="180">Last 180 days</option>
+                <option value="90">Last 90 days</option>
+            </select>
+        </div>
+        <div>
+            <label for="groupFilter">Analyze by</label>
+            <select id="groupFilter">
+                <option value="category">Category</option>
+                <option value="brand">Brand</option>
+                <option value="item">Item name / UPC</option>
+                <option value="price_band">Selling price</option>
+                <option value="store">Store</option>
+            </select>
+        </div>
+        <div>
+            <label for="searchFilter">Find in explorer</label>
+            <input id="searchFilter" type="search" placeholder="Name, brand, category, UPC…">
+        </div>
+        <div>
+            <label for="minimumSales">Minimum sold units</label>
+            <select id="minimumSales">
+                <option value="0">Show everything</option>
+                <option value="1">1+ sold unit</option>
+                <option value="3">3+ sold units</option>
+                <option value="5">5+ sold units</option>
+                <option value="10">10+ sold units</option>
+            </select>
+        </div>
+    </section>
+
+    <div id="error" class="error"></div>
+    <div id="loading" class="panel loading"><div class="spinner"></div>Building analytics from Warehouse and sold.db…</div>
+
+    <div id="dashboard" class="dashboard">
+        <section class="kpis" id="kpis"></section>
+
+        <div class="section-title">
+            <div><h2>Which types move—and which linger</h2><p>Category and brand patterns make individual-item signals easier to act on.</p></div>
+        </div>
+        <section class="type-grid" id="typeInsights"></section>
+
+        <div class="section-title">
+            <div><h2>Decision center</h2><p>Evidence-ranked actions. Open any item in Unified Search for the underlying record.</p></div>
+        </div>
+        <section class="decision-grid">
+            <article class="panel decision buy"><div class="decision-head"><strong>Buy more <span class="count" id="buyCount">0</span></strong><small>Repeat sellers with speed and low observed return risk.</small></div><div class="decision-list" id="buyList"></div></article>
+            <article class="panel decision avoid"><div class="decision-head"><strong>Avoid / investigate <span class="count" id="avoidCount">0</span></strong><small>Slow movers or items with meaningful return warning signs.</small></div><div class="decision-list" id="avoidList"></div></article>
+            <article class="panel decision dispose"><div class="decision-head"><strong>Clearance / disposal review <span class="count" id="disposeCount">0</span></strong><small>Old inventory with little evidence of demand. Review before discarding.</small></div><div class="decision-list" id="disposeList"></div></article>
+            <article class="panel decision returns"><div class="decision-head"><strong>Most likely to return <span class="count" id="returnCount">0</span></strong><small>Observed item return rates, with evidence confidence shown.</small></div><div class="decision-list" id="returnList"></div></article>
+        </section>
+
+        <div class="section-title">
+            <div><h2>Portfolio shape</h2><p>Aging pressure, sales momentum, and the age-versus-velocity map.</p></div>
+        </div>
+        <section class="charts">
+            <article class="panel chart"><h3>Current inventory age</h3><div class="chart-note">Exact receiving-batch age, weighted by units.</div><div id="ageBars"></div></article>
+            <article class="panel chart"><h3>Sales and returns over time</h3><div class="chart-note">Blue bars are sold units; purple markers are returned units.</div><canvas id="trendChart"></canvas><div class="legend"><span><i class="dot" style="background:#2563eb"></i>Sold</span><span><i class="dot" style="background:#7c3aed"></i>Returned</span></div></article>
+            <article class="panel chart scatter"><h3>Inventory opportunity map</h3><div class="chart-note">Left is younger, up is faster selling. Bubble size reflects current quantity.</div><canvas id="scatterChart"></canvas><div id="scatterTooltip" class="chart-tooltip"></div><div class="legend"><span><i class="dot" style="background:#15803d"></i>Buy more</span><span><i class="dot" style="background:#c2410c"></i>Slow / avoid</span><span><i class="dot" style="background:#dc2626"></i>Clearance review</span><span><i class="dot" style="background:#64748b"></i>Monitor</span></div></article>
+        </section>
+
+        <div class="section-title">
+            <div><h2>Portfolio explorer</h2><p>Click any column heading to sort ascending or descending.</p></div>
+        </div>
+        <section class="panel explorer">
+            <div class="explorer-controls">
+                <div><label for="groupFilterMirror">View</label><select id="groupFilterMirror"></select></div>
+                <div><label for="tableSearch">Filter this table</label><input id="tableSearch" type="search" placeholder="Type to narrow results…"></div>
+                <div><label for="tableLimit">Rows shown</label><select id="tableLimit"><option>25</option><option selected>50</option><option>100</option><option>500</option></select></div>
+                <button class="button" id="exportButton">Export CSV</button>
+            </div>
+            <div class="table-wrap">
+                <table>
+                    <thead><tr>
+                        <th class="sortable" data-sort="name">Name ↕</th>
+                        <th class="sortable number" data-sort="current_qty">In stock ↕</th>
+                        <th class="sortable number" data-sort="average_age_days">Avg age ↕</th>
+                        <th class="sortable number" data-sort="oldest_age_days">Oldest ↕</th>
+                        <th class="sortable number" data-sort="sold_units">Sold ↕</th>
+                        <th class="sortable number" data-sort="median_days_to_sell">Days to sell ↕</th>
+                        <th class="sortable number" data-sort="monthly_velocity">Units/mo ↕</th>
+                        <th class="sortable number" data-sort="revenue">Revenue ↕</th>
+                        <th class="sortable number" data-sort="return_rate">Return rate ↕</th>
+                        <th class="sortable" data-sort="verdict">Signal ↕</th>
+                    </tr></thead>
+                    <tbody id="explorerBody"></tbody>
+                </table>
+            </div>
+            <div class="explorer-foot" id="explorerFoot"></div>
+        </section>
+
+        <details class="panel quality">
+            <summary>Methodology and data confidence</summary>
+            <div class="quality-grid" id="qualityGrid"></div>
+            <ul class="quality-notes" id="qualityNotes"></ul>
+        </details>
+    </div>
+</main>
+
+<script>
+let analyticsData = null;
+let tableSort = {key:'sold_units', direction:-1};
+let scatterGeometry = [];
+
+const money = value => Number(value || 0).toLocaleString('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0});
+const number = value => Number(value || 0).toLocaleString();
+const percent = value => value === null || value === undefined ? '—' : `${Number(value).toFixed(1)}%`;
+const days = value => value === null || value === undefined ? '—' : `${number(Math.round(value))}d`;
+const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+const itemLink = item => item.barcode ? `/unified-search?q=${encodeURIComponent(item.barcode)}` : '#';
+
+function badgeClass(verdict){
+    const text=String(verdict||'').toLowerCase();
+    if(text.includes('buy')) return 'buy';
+    if(text.includes('clearance')||text.includes('disposal')) return 'dispose';
+    if(text.includes('avoid')||text.includes('slow')) return 'avoid';
+    if(text.includes('return')) return 'return';
+    return 'monitor';
+}
+
+async function loadAnalytics(force=false){
+    document.getElementById('loading').style.display='block';
+    document.getElementById('dashboard').style.display='none';
+    document.getElementById('error').style.display='none';
+    const windowDays=document.getElementById('windowFilter').value;
+    try{
+        const refreshPart=force?`&refresh=${Date.now()}`:'';
+        const response=await fetch(`/api/inventory-seller-analytics?days=${encodeURIComponent(windowDays)}${refreshPart}`,{cache:'no-store'});
+        const data=await response.json();
+        if(!response.ok||!data.success) throw new Error(data.error||'Analytics could not be loaded');
+        analyticsData=data;
+        renderAll();
+        document.getElementById('loading').style.display='none';
+        document.getElementById('dashboard').style.display='block';
+        requestAnimationFrame(()=>{drawTrend();drawScatter();});
+    }catch(error){
+        document.getElementById('loading').style.display='none';
+        const box=document.getElementById('error');
+        box.textContent=`Could not load analytics: ${error.message}`;
+        box.style.display='block';
+    }
+}
+
+function renderAll(){
+    renderKpis();
+    renderTypeInsights();
+    renderRecommendations();
+    renderAgeBars();
+    syncGroupSelectors();
+    renderExplorer();
+    renderQuality();
+}
+
+function renderTypeInsights(){
+    const categories=analyticsData.groups.category;
+    const brands=analyticsData.groups.brand;
+    const fastest=categories.filter(row=>row.sold_units>=3&&row.median_days_to_sell!==null)
+        .sort((a,b)=>a.median_days_to_sell-b.median_days_to_sell).slice(0,5);
+    const oldest=categories.filter(row=>row.current_qty>0)
+        .sort((a,b)=>b.average_age_days-a.average_age_days).slice(0,5);
+    const strongest=brands.filter(row=>row.sold_units>=3)
+        .sort((a,b)=>b.sold_units-a.sold_units).slice(0,5);
+    const returnProne=categories.filter(row=>row.sold_units>=3&&row.returned_units>0)
+        .sort((a,b)=>(b.return_rate||0)-(a.return_rate||0)).slice(0,5);
+    const cards=[
+        ['Fastest-selling categories',fastest,row=>`${days(row.median_days_to_sell)} median`],
+        ['Oldest inventory categories',oldest,row=>`${days(row.average_age_days)} avg · ${number(row.current_qty)} units`],
+        ['Highest-volume brands',strongest,row=>`${number(row.sold_units)} sold · ${percent(row.return_rate)} returned`],
+        ['Return-prone categories',returnProne,row=>`${percent(row.return_rate)} · ${number(row.returned_units)} returned`],
+    ];
+    document.getElementById('typeInsights').innerHTML=cards.map(([title,rows,format])=>`
+        <article class="panel type-card"><h3>${title}</h3>
+        ${rows.length?rows.map(row=>`<div class="type-row"><span>${escapeHtml(row.name)}</span><span>${format(row)}</span></div>`).join(''):'<div class="empty">Not enough evidence yet.</div>'}
+        </article>`).join('');
+}
+
+function renderKpis(){
+    const s=analyticsData.summary;
+    const cards=[
+        ['Inventory units',number(s.inventory_units),`${number(s.inventory_skus)} active item types`,'#dbeafe'],
+        ['181+ day units',number(s.aged_180_units),`${s.inventory_units ? Math.round(s.aged_180_units/s.inventory_units*100):0}% of current inventory`,'#fee2e2'],
+        ['Units sold',number(s.sold_units),`${number(s.sales_orders)} order lines in this window`,'#dcfce7'],
+        ['Observed returns',percent(s.return_rate),`${number(s.returned_units)} deduplicated returned units`,'#ede9fe'],
+        ['Median time to sell',s.median_days_to_sell===null?'Not enough matches':days(s.median_days_to_sell),`${number(s.receipt_match_units)} sold units matched to intake`,'#fef3c7'],
+    ];
+    document.getElementById('kpis').innerHTML=cards.map(card=>`
+        <article class="panel kpi" style="--tone:${card[3]}">
+            <div class="kpi-label">${card[0]}</div><div class="kpi-value">${card[1]}</div><div class="kpi-note">${card[2]}</div>
+        </article>`).join('');
+}
+
+function recommendationRows(items,type){
+    if(!items.length) return '<div class="empty">No item currently meets this signal.</div>';
+    return items.map(item=>{
+        const returnText=item.return_rate===null?'No rate':`${percent(item.return_rate)} returned`;
+        const meta=type==='returns'
+            ? `${returnText} · ${number(item.returned_units)} returned / ${number(item.sold_units)} sold · ${item.confidence} confidence`
+            : `${escapeHtml(item.reason)} · ${number(item.current_qty)} in stock`;
+        return `<div class="decision-item">
+            <a class="decision-name" href="${itemLink(item)}">${escapeHtml(item.name)}</a>
+            <div class="decision-meta">${meta}</div>
+        </div>`;
+    }).join('');
+}
+
+function renderRecommendations(){
+    const rec=analyticsData.recommendations;
+    [['buy',rec.buy_more,'buy_more'],['avoid',rec.avoid,'avoid'],['dispose',rec.dispose,'dispose'],['return',rec.return_risk,'returns']].forEach(([prefix,items,type])=>{
+        document.getElementById(`${prefix}Count`).textContent=number(items.length);
+        document.getElementById(`${prefix}List`).innerHTML=recommendationRows(items,type);
+    });
+}
+
+function renderAgeBars(){
+    const colors=['#22c55e','#65a30d','#eab308','#f59e0b','#f97316','#dc2626'];
+    const max=Math.max(1,...analyticsData.age_bands.map(row=>row.units));
+    document.getElementById('ageBars').innerHTML=analyticsData.age_bands.map((row,index)=>`
+        <div class="age-row"><span>${escapeHtml(row.name)}</span>
+        <div class="age-track"><div class="age-fill" style="width:${row.units/max*100}%;background:${colors[index]}"></div></div>
+        <strong class="number">${number(row.units)}</strong></div>`).join('');
+}
+
+function prepareCanvas(canvas,height=270){
+    const rect=canvas.getBoundingClientRect();
+    const width=Math.max(280,Math.floor(rect.width));
+    const ratio=Math.min(2,window.devicePixelRatio||1);
+    canvas.width=width*ratio;canvas.height=height*ratio;canvas.style.height=`${height}px`;
+    const ctx=canvas.getContext('2d');ctx.setTransform(ratio,0,0,ratio,0,0);
+    ctx.clearRect(0,0,width,height);
+    return {ctx,width,height};
+}
+
+function drawTrend(){
+    if(!analyticsData) return;
+    const canvas=document.getElementById('trendChart');
+    const {ctx,width,height}=prepareCanvas(canvas);
+    const rows=analyticsData.trend;
+    if(!rows.length){ctx.fillStyle='#64748b';ctx.fillText('No sales in this window',20,30);return;}
+    const margin={left:35,right:12,top:14,bottom:42};
+    const plotW=width-margin.left-margin.right,plotH=height-margin.top-margin.bottom;
+    const max=Math.max(1,...rows.map(row=>Math.max(row.sold_units,row.returned_units)));
+    ctx.font='11px system-ui';ctx.fillStyle='#64748b';ctx.strokeStyle='#dbe3ec';ctx.lineWidth=1;
+    for(let tick=0;tick<=4;tick++){
+        const y=margin.top+plotH-(plotH*tick/4),value=Math.round(max*tick/4);
+        ctx.beginPath();ctx.moveTo(margin.left,y);ctx.lineTo(width-margin.right,y);ctx.stroke();
+        ctx.textAlign='right';ctx.fillText(value,margin.left-6,y+3);
+    }
+    const slot=plotW/rows.length,bar=Math.max(4,slot*.55);
+    rows.forEach((row,index)=>{
+        const x=margin.left+slot*index+slot/2;
+        const soldH=row.sold_units/max*plotH;
+        ctx.fillStyle='#2563eb';ctx.fillRect(x-bar/2,margin.top+plotH-soldH,bar,soldH);
+        if(row.returned_units){
+            const y=margin.top+plotH-row.returned_units/max*plotH;
+            ctx.beginPath();ctx.arc(x,y,4,0,Math.PI*2);ctx.fillStyle='#7c3aed';ctx.fill();
+        }
+        if(rows.length<=12||index%Math.ceil(rows.length/8)===0){
+            ctx.save();ctx.translate(x,height-8);ctx.rotate(-.5);ctx.textAlign='right';ctx.fillStyle='#64748b';ctx.fillText(row.month,0,0);ctx.restore();
+        }
+    });
+}
+
+function scatterColor(verdict){
+    const type=badgeClass(verdict);
+    return type==='buy'?'#15803d':type==='dispose'?'#dc2626':type==='avoid'?'#c2410c':type==='return'?'#7c3aed':'#64748b';
+}
+
+function drawScatter(){
+    if(!analyticsData) return;
+    const canvas=document.getElementById('scatterChart');
+    const {ctx,width,height}=prepareCanvas(canvas);
+    const rows=analyticsData.scatter;
+    const margin={left:42,right:14,top:14,bottom:34};
+    const plotW=width-margin.left-margin.right,plotH=height-margin.top-margin.bottom;
+    const maxAge=Math.max(30,...rows.map(row=>row.age));
+    const maxVelocity=Math.max(1,...rows.map(row=>row.velocity));
+    ctx.font='10px system-ui';ctx.strokeStyle='#dbe3ec';ctx.fillStyle='#64748b';
+    for(let tick=0;tick<=4;tick++){
+        const x=margin.left+plotW*tick/4,y=margin.top+plotH-plotH*tick/4;
+        ctx.beginPath();ctx.moveTo(x,margin.top);ctx.lineTo(x,margin.top+plotH);ctx.stroke();
+        ctx.beginPath();ctx.moveTo(margin.left,y);ctx.lineTo(margin.left+plotW,y);ctx.stroke();
+        ctx.textAlign='center';ctx.fillText(Math.round(maxAge*tick/4),x,height-8);
+        ctx.textAlign='right';ctx.fillText((maxVelocity*tick/4).toFixed(1),margin.left-5,y+3);
+    }
+    scatterGeometry=rows.map(row=>{
+        const x=margin.left+(row.age/maxAge)*plotW;
+        const y=margin.top+plotH-(row.velocity/maxVelocity)*plotH;
+        const radius=Math.min(12,3+Math.sqrt(Math.max(1,row.quantity))*1.7);
+        ctx.beginPath();ctx.arc(x,y,radius,0,Math.PI*2);ctx.fillStyle=scatterColor(row.verdict)+'bb';ctx.fill();
+        ctx.strokeStyle='#fff';ctx.lineWidth=1;ctx.stroke();
+        return {x,y,radius,row};
+    });
+    ctx.save();ctx.translate(12,margin.top+plotH/2);ctx.rotate(-Math.PI/2);ctx.textAlign='center';ctx.fillStyle='#64748b';ctx.fillText('Units sold / month',0,0);ctx.restore();
+    ctx.textAlign='center';ctx.fillText('Average inventory age (days)',margin.left+plotW/2,height-1);
+}
+
+document.getElementById('scatterChart').addEventListener('mousemove',event=>{
+    const canvas=event.currentTarget,rect=canvas.getBoundingClientRect();
+    const x=event.clientX-rect.left,y=event.clientY-rect.top;
+    let hit=null,distance=Infinity;
+    scatterGeometry.forEach(point=>{const d=Math.hypot(x-point.x,y-point.y);if(d<=point.radius+5&&d<distance){hit=point;distance=d;}});
+    const tooltip=document.getElementById('scatterTooltip');
+    if(!hit){tooltip.style.display='none';return;}
+    tooltip.innerHTML=`<strong>${escapeHtml(hit.row.name)}</strong><br>${number(hit.row.age)} days old · ${hit.row.velocity.toFixed(2)} units/mo<br>${number(hit.row.quantity)} in stock · ${percent(hit.row.return_rate)} returns`;
+    tooltip.style.display='block';
+    tooltip.style.left=`${Math.min(rect.width-250,Math.max(6,x+12))}px`;
+    tooltip.style.top=`${Math.max(6,y-65)}px`;
+});
+document.getElementById('scatterChart').addEventListener('mouseleave',()=>document.getElementById('scatterTooltip').style.display='none');
+
+function syncGroupSelectors(){
+    const source=document.getElementById('groupFilter'),mirror=document.getElementById('groupFilterMirror');
+    mirror.innerHTML=source.innerHTML;
+    mirror.value=source.value;
+}
+
+function currentExplorerRows(){
+    const mode=document.getElementById('groupFilter').value;
+    const search=(document.getElementById('tableSearch').value||document.getElementById('searchFilter').value||'').trim().toLowerCase();
+    const minimum=Number(document.getElementById('minimumSales').value)||0;
+    let rows=[...(analyticsData.groups[mode]||[])];
+    rows=rows.filter(row=>row.sold_units>=minimum);
+    if(search) rows=rows.filter(row=>[row.name,row.brand,row.category,row.barcode,row.verdict].some(value=>String(value||'').toLowerCase().includes(search)));
+    rows.sort((a,b)=>{
+        const av=a[tableSort.key],bv=b[tableSort.key];
+        if(typeof av==='string'||typeof bv==='string') return String(av||'').localeCompare(String(bv||''))*tableSort.direction;
+        return ((Number(av) || 0)-(Number(bv) || 0))*tableSort.direction;
+    });
+    return rows;
+}
+
+function renderExplorer(){
+    if(!analyticsData) return;
+    const mode=document.getElementById('groupFilter').value;
+    const rows=currentExplorerRows();
+    const limit=Number(document.getElementById('tableLimit').value)||50;
+    const shown=rows.slice(0,limit);
+    document.getElementById('explorerBody').innerHTML=shown.map(row=>{
+        const detail=mode==='item'
+            ? `<div class="item-sub">${escapeHtml([row.brand,row.category,row.barcode].filter(Boolean).join(' · '))}</div>`
+            : `<div class="item-sub">${number(row.inventory_skus||0)} inventory SKUs · ${row.confidence||'Low'} evidence</div>`;
+        const name=mode==='item'&&row.barcode
+            ? `<a href="${itemLink(row)}">${escapeHtml(row.name)}</a>`
+            : escapeHtml(row.name);
+        return `<tr>
+            <td><div class="item-title">${name}</div>${detail}</td>
+            <td class="number">${number(row.current_qty)}</td>
+            <td class="number">${days(row.average_age_days)}</td>
+            <td class="number">${days(row.oldest_age_days)}</td>
+            <td class="number">${number(row.sold_units)}</td>
+            <td class="number">${days(row.median_days_to_sell)}</td>
+            <td class="number">${Number(row.monthly_velocity||0).toFixed(2)}</td>
+            <td class="number">${money(row.revenue)}</td>
+            <td class="number">${percent(row.return_rate)}</td>
+            <td><span class="badge ${badgeClass(row.verdict)}">${escapeHtml(row.verdict)}</span></td>
+        </tr>`;
+    }).join('')||'<tr><td colspan="10" class="empty">No rows match these filters.</td></tr>';
+    document.getElementById('explorerFoot').textContent=`Showing ${number(shown.length)} of ${number(rows.length)} matching rows`;
+}
+
+function renderQuality(){
+    const q=analyticsData.data_quality;
+    const stats=[
+        ['Warehouse rows',q.warehouse_rows],['Sales rows used',q.sold_rows_used],
+        ['Returns used',q.return_records_used],['Duplicate returns ignored',q.duplicate_returns_ignored],
+        ['Intake match rate',`${q.receipt_match_rate}%`],
+    ];
+    document.getElementById('qualityGrid').innerHTML=stats.map(row=>{
+        const display=typeof row[1]==='number'?number(row[1]):escapeHtml(row[1]);
+        return `<div class="quality-stat">${row[0]}<b>${display}</b></div>`;
+    }).join('');
+    document.getElementById('qualityNotes').innerHTML=q.notes.map(note=>`<li>${escapeHtml(note)}</li>`).join('')
+        +`<li>Latest recorded sale in this dataset: ${q.latest_sale_at?new Date(q.latest_sale_at).toLocaleString():'Unknown'}.</li>`;
+}
+
+function exportCsv(){
+    const rows=currentExplorerRows();
+    const columns=['name','brand','category','barcode','current_qty','average_age_days','oldest_age_days','sold_units','median_days_to_sell','monthly_velocity','revenue','return_rate','verdict'];
+    const quote=value=>`"${String(value??'').replace(/"/g,'""')}"`;
+    const csv=[columns.join(','),...rows.map(row=>columns.map(key=>quote(row[key])).join(','))].join('\\r\\n');
+    const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
+    const link=document.createElement('a');link.href=URL.createObjectURL(blob);
+    link.download=`inventory-seller-analytics-${new Date().toISOString().slice(0,10)}.csv`;
+    link.click();URL.revokeObjectURL(link.href);
+}
+
+function installViewportTableHeader(wrapperSelector){
+    const wrapper=document.querySelector(wrapperSelector);
+    const table=wrapper&&wrapper.querySelector('table');
+    const sourceHead=table&&table.querySelector('thead');
+    if(!wrapper||!table||!sourceHead)return;
+
+    const floating=document.createElement('div');
+    floating.className='floating-table-header';
+    const floatingTable=document.createElement('table');
+    const clonedHead=sourceHead.cloneNode(true);
+    clonedHead.querySelectorAll('[id]').forEach(node=>node.removeAttribute('id'));
+    floatingTable.appendChild(clonedHead);
+    floating.appendChild(floatingTable);
+    document.body.appendChild(floating);
+
+    const sourceCells=[...sourceHead.querySelectorAll('th')];
+    const clonedCells=[...clonedHead.querySelectorAll('th')];
+    clonedCells.forEach((cell,index)=>cell.addEventListener('click',()=>{
+        if(sourceCells[index])sourceCells[index].click();
+    }));
+
+    let frame=null;
+    function sync(){
+        frame=null;
+        const wrapperRect=wrapper.getBoundingClientRect();
+        const headRect=sourceHead.getBoundingClientRect();
+        const visibleLeft=Math.max(0,wrapperRect.left);
+        const visibleRight=Math.min(window.innerWidth,wrapperRect.right);
+        const visibleWidth=Math.max(0,visibleRight-visibleLeft);
+        const show=wrapperRect.top<0&&wrapperRect.bottom>headRect.height&&visibleWidth>0;
+        if(!show){
+            floating.style.display='none';
+            return;
+        }
+        sourceCells.forEach((cell,index)=>{
+            const width=cell.getBoundingClientRect().width;
+            if(!clonedCells[index])return;
+            clonedCells[index].style.width=`${width}px`;
+            clonedCells[index].style.minWidth=`${width}px`;
+            clonedCells[index].style.maxWidth=`${width}px`;
+        });
+        const tableWidth=table.getBoundingClientRect().width;
+        floating.style.display='block';
+        floating.style.left=`${visibleLeft}px`;
+        floating.style.width=`${visibleWidth}px`;
+        floating.style.height=`${headRect.height}px`;
+        floatingTable.style.width=`${tableWidth}px`;
+        floatingTable.style.minWidth='0';
+        floatingTable.style.transform=`translateX(${-wrapper.scrollLeft}px)`;
+    }
+    function schedule(){
+        if(frame===null)frame=requestAnimationFrame(sync);
+    }
+    window.addEventListener('scroll',schedule,{passive:true});
+    window.addEventListener('resize',schedule,{passive:true});
+    wrapper.addEventListener('scroll',schedule,{passive:true});
+    if(window.ResizeObserver){
+        const observer=new ResizeObserver(schedule);
+        observer.observe(wrapper);
+        observer.observe(table);
+    }
+    schedule();
+}
+
+document.getElementById('refreshButton').addEventListener('click',()=>loadAnalytics(true));
+document.getElementById('windowFilter').addEventListener('change',loadAnalytics);
+document.getElementById('groupFilter').addEventListener('change',event=>{document.getElementById('groupFilterMirror').value=event.target.value;renderExplorer();});
+document.getElementById('groupFilterMirror').addEventListener('change',event=>{document.getElementById('groupFilter').value=event.target.value;renderExplorer();});
+['searchFilter','tableSearch'].forEach(id=>document.getElementById(id).addEventListener('input',renderExplorer));
+['minimumSales','tableLimit'].forEach(id=>document.getElementById(id).addEventListener('change',renderExplorer));
+document.querySelectorAll('th[data-sort]').forEach(th=>th.addEventListener('click',()=>{
+    const key=th.dataset.sort;
+    if(tableSort.key===key)tableSort.direction*=-1;else tableSort={key,direction:key==='name'?1:-1};
+    renderExplorer();
+}));
+document.getElementById('exportButton').addEventListener('click',exportCsv);
+window.addEventListener('resize',()=>{if(!analyticsData)return;clearTimeout(window.analyticsResize);window.analyticsResize=setTimeout(()=>{drawTrend();drawScatter();},120);});
+installViewportTableHeader('.explorer .table-wrap');
+loadAnalytics();
+</script>
+<script src="/static/i18n.js"></script>
+</body>
+</html>

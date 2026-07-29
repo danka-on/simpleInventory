@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.ico') }}">
+    <title>Inventory Cleanup Decisions - Sweet Shelves</title>
+    <style>
+        :root{
+            --bg:#f4f6f8;--card:#fff;--border:#dfe6ed;--text:#172033;--muted:#64748b;
+            --blue:#2563eb;--green:#15803d;--yellow:#a16207;--orange:#c2410c;
+            --red:#dc2626;--purple:#7c3aed;--shadow:0 7px 24px rgba(15,23,42,.06);
+        }
+        *{box-sizing:border-box}
+        body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,"Segoe UI",Arial,sans-serif}
+        .page{max-width:1550px;margin:auto;padding:22px}
+        .header{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:18px}
+        h1{margin:0 0 6px;font-size:clamp(1.55rem,3vw,2.2rem);letter-spacing:-.03em}
+        .subtitle{color:var(--muted);max-width:820px;line-height:1.45}
+        .actions{display:flex;gap:8px;flex-wrap:wrap}
+        .btn{border:1px solid var(--border);background:white;color:var(--text);padding:9px 13px;border-radius:8px;text-decoration:none;font-weight:750;cursor:pointer;font:inherit}
+        .btn.primary{background:var(--blue);border-color:var(--blue);color:white}
+        .panel{background:var(--card);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow)}
+        .policy{display:grid;grid-template-columns:repeat(3,minmax(150px,1fr)) 1.6fr;gap:12px;padding:14px;margin-bottom:15px;align-items:end}
+        label{display:block;font-size:.75rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:800;margin-bottom:5px}
+        select,input{width:100%;border:1px solid var(--border);background:white;border-radius:8px;padding:10px 11px;color:var(--text);font:inherit}
+        .policy-note{padding:10px 12px;background:#eff6ff;border-left:4px solid var(--blue);border-radius:6px;color:#1e3a8a;font-size:.8rem;line-height:1.4}
+        .loading{padding:70px 15px;text-align:center;color:var(--muted)}
+        .spinner{height:34px;width:34px;border:4px solid #dbeafe;border-top-color:var(--blue);border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 12px}
+        @keyframes spin{to{transform:rotate(360deg)}}
+        .error{display:none;padding:14px;border:1px solid #fecaca;background:#fef2f2;color:#991b1b;border-radius:9px;margin-bottom:14px}
+        #workspace{display:none}
+        .section-head{display:flex;justify-content:space-between;align-items:end;gap:12px;margin:24px 2px 10px}
+        .section-head h2{margin:0;font-size:1.15rem}
+        .section-head p{margin:3px 0 0;color:var(--muted);font-size:.8rem}
+        .action-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}
+        .action-card{padding:14px;cursor:pointer;transition:.15s;border-top:4px solid var(--tone)}
+        .action-card:hover{transform:translateY(-2px);box-shadow:0 9px 26px rgba(15,23,42,.1)}
+        .action-name{font-size:.82rem;font-weight:850;min-height:33px}
+        .action-units{font-size:1.65rem;font-weight:850;margin-top:7px}
+        .action-detail{font-size:.74rem;color:var(--muted);margin-top:2px}
+        .insights{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+        .insight-card{padding:15px;min-height:315px}
+        .insight-card h3{margin:0;font-size:1rem}
+        .insight-note{font-size:.76rem;color:var(--muted);margin:4px 0 14px}
+        .bar-row{display:grid;grid-template-columns:minmax(95px,150px) 1fr 72px;align-items:center;gap:9px;margin:11px 0;font-size:.77rem}
+        .bar-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700}
+        .bar-track{height:14px;background:#edf2f7;border-radius:999px;overflow:hidden}
+        .bar-fill{height:100%;border-radius:999px;min-width:2px}
+        .bar-value{text-align:right;color:var(--muted);font-variant-numeric:tabular-nums}
+        .queue{overflow:hidden}
+        .filters{padding:13px;display:grid;grid-template-columns:1.4fr repeat(5,minmax(130px,.8fr));gap:9px;border-bottom:1px solid var(--border)}
+        .queue-toolbar{padding:10px 13px;display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;background:#f8fafc;border-bottom:1px solid var(--border)}
+        .selected-info{font-size:.8rem;color:var(--muted)}
+        .toolbar-actions{display:flex;gap:7px;flex-wrap:wrap}
+        .table-wrap{
+            overflow-x:auto;max-height:none;
+            position:relative;overscroll-behavior-x:contain;border-radius:0 0 14px 14px;
+        }
+        table{border-collapse:separate;border-spacing:0;width:100%;min-width:1700px;font-size:.8rem}
+        th{background:#eef2f6;color:#475569;text-transform:uppercase;letter-spacing:.04em;font-size:.68rem;text-align:left;padding:10px 8px;border-bottom:1px solid var(--border);white-space:nowrap}
+        th.sortable{cursor:pointer;user-select:none}
+        th.sortable:hover{color:var(--blue)}
+        .floating-table-header{
+            display:none;position:fixed;top:0;z-index:10000;overflow:hidden;
+            background:#eef2f6;box-shadow:0 4px 10px rgba(15,23,42,.22);
+        }
+        .floating-table-header table{margin:0;table-layout:fixed;min-width:0;width:auto}
+        .floating-table-header th{box-sizing:border-box;box-shadow:none}
+        td{padding:9px 8px;border-bottom:1px solid #edf2f7;vertical-align:top}
+        tr:hover td{background:#f8fbff}
+        .num{text-align:right;font-variant-numeric:tabular-nums}
+        .item-name{font-weight:800;line-height:1.3;max-width:330px}
+        .item-name a{text-decoration:none;color:var(--text)}
+        .item-name a:hover{color:var(--blue);text-decoration:underline}
+        .item-sub{font-size:.7rem;color:var(--muted);margin-top:3px;line-height:1.35}
+        .badge{display:inline-block;padding:4px 7px;border-radius:999px;font-size:.67rem;font-weight:850;white-space:nowrap}
+        .badge.keep{background:#dcfce7;color:#166534}.badge.watch{background:#fef9c3;color:#854d0e}
+        .badge.markdown{background:#ffedd5;color:#9a3412}.badge.clear{background:#fee2e2;color:#991b1b}
+        .badge.dispose{background:#ede9fe;color:#5b21b6}
+        .urgency{height:7px;background:#e2e8f0;border-radius:999px;overflow:hidden;margin-top:5px;width:75px}
+        .urgency span{display:block;height:100%;border-radius:999px}
+        .why{max-width:265px;color:#475569;line-height:1.35}
+        .loss{color:#b91c1c;font-weight:800}
+        .queue-foot{padding:10px 13px;font-size:.77rem;color:var(--muted);border-top:1px solid var(--border)}
+        details{margin-top:15px;padding:14px}
+        details summary{cursor:pointer;font-weight:800}
+        .method{color:var(--muted);font-size:.81rem;line-height:1.55}
+        @media(max-width:1200px){.action-grid{grid-template-columns:repeat(3,1fr)}.filters{grid-template-columns:repeat(3,1fr)}}
+        @media(max-width:760px){.page{padding:12px}.policy,.filters{grid-template-columns:1fr 1fr}.policy-note{grid-column:span 2}.action-grid{grid-template-columns:1fr 1fr}.insights{grid-template-columns:1fr}.actions{width:100%}.actions .btn{flex:1;text-align:center}}
+        @media(max-width:470px){.policy,.filters,.action-grid{grid-template-columns:1fr}.policy-note{grid-column:auto}}
+    </style>
+</head>
+<body>
+<main class="page">
+    <header class="header">
+        <div>
+            <h1>Inventory Cleanup Decisions</h1>
+            <div class="subtitle">A focused queue for deciding what stays, what gets marked down, what should leave now, and when—using inventory age, demand, returns, current listings, sold prices, and potential value loss.</div>
+        </div>
+        <div class="actions">
+            <a class="btn" href="/searchrack">Warehouse</a>
+            <a class="btn" href="/inventory-analytics">Seller Analytics</a>
+            <a class="btn" href="/cleanup">Operational Cleanup</a>
+            <button class="btn primary" id="refreshButton">Refresh</button>
+        </div>
+    </header>
+
+    <section class="panel policy">
+        <div><label for="clearanceAge">Clear-now age</label><select id="clearanceAge"><option>150</option><option selected>180</option><option>210</option><option>240</option><option>270</option><option>365</option></select></div>
+        <div><label for="disposalAge">Disposal-review age</label><select id="disposalAge"><option>210</option><option selected>240</option><option>270</option><option>300</option><option>365</option><option>540</option></select></div>
+        <div><label for="markdownLead">Begin markdown before clear</label><select id="markdownLead"><option>30</option><option selected>60</option><option>90</option><option>120</option></select></div>
+        <div class="policy-note" id="policyNote">Policy: markdown starts at 120 days, clear at 180 days, and review no-demand low-value inventory for donation/disposal at 240 days. Items above $40/unit or $100 total are protected from disposal.</div>
+    </section>
+
+    <div id="error" class="error"></div>
+    <div id="loading" class="panel loading"><div class="spinner"></div>Building the cleanup queue from current inventory and sales evidence…</div>
+
+    <div id="workspace">
+        <div class="section-head"><div><h2>Recommended action</h2><p>Click a card to filter the queue immediately.</p></div></div>
+        <section class="action-grid" id="actionCards"></section>
+
+        <div class="section-head"><div><h2>What needs attention—and when</h2><p>Current schedule pressure and the categories occupying the cleanup queue.</p></div></div>
+        <section class="insights">
+            <article class="panel insight-card"><h3>Cleanup calendar</h3><div class="insight-note">Units reaching their recommended action window.</div><div id="timingBars"></div></article>
+            <article class="panel insight-card"><h3>Category pressure</h3><div class="insight-note">Units recommended for markdown, clearance, or disposal review.</div><div id="categoryBars"></div></article>
+        </section>
+
+        <div class="section-head"><div><h2>Cleanup review queue</h2><p>Every recommendation includes age, sales evidence, return risk, price evidence, potential loss, and timing.</p></div></div>
+        <section class="panel queue">
+            <div class="filters">
+                <div><label for="searchInput">Search</label><input id="searchInput" type="search" placeholder="Item, UPC, brand, category, shelf…"></div>
+                <div><label for="actionFilter">Action</label><select id="actionFilter"><option value="">All actions</option></select></div>
+                <div><label for="timingFilter">When</label><select id="timingFilter"><option value="">Any time</option><option>Now</option><option>Within 30 days</option><option>31–60 days</option><option>61–90 days</option><option>90+ days</option></select></div>
+                <div><label for="categoryFilter">Category</label><select id="categoryFilter"><option value="">All categories</option></select></div>
+                <div><label for="brandFilter">Brand</label><select id="brandFilter"><option value="">All brands</option></select></div>
+                <div><label for="locationFilter">Shelf</label><select id="locationFilter"><option value="">All shelves</option></select></div>
+            </div>
+            <div class="queue-toolbar">
+                <div class="selected-info"><strong id="selectedCount">0</strong> selected · <span id="matchingCount">0</span> matching</div>
+                <div class="toolbar-actions">
+                    <button class="btn" id="selectVisible">Select visible</button>
+                    <button class="btn" id="clearSelection">Clear selection</button>
+                    <button class="btn" id="exportButton">Export selected / matching CSV</button>
+                </div>
+            </div>
+            <div class="table-wrap">
+                <table>
+                    <thead><tr>
+                        <th><input type="checkbox" id="selectAllCheckbox" aria-label="Select all visible"></th>
+                        <th class="sortable" data-sort="cleanup_action">Action ↕</th>
+                        <th class="sortable" data-sort="next_action_days">When ↕</th>
+                        <th class="sortable" data-sort="name">Item ↕</th>
+                        <th class="sortable num" data-sort="current_qty">Qty ↕</th>
+                        <th class="sortable num" data-sort="oldest_age_days">Age ↕</th>
+                        <th class="sortable num" data-sort="cleanup_urgency">Urgency ↕</th>
+                        <th class="sortable num" data-sort="sold_units">Sold ↕</th>
+                        <th class="sortable num" data-sort="monthly_velocity">Units/mo ↕</th>
+                        <th class="sortable num" data-sort="days_since_last_sale">Last sale ↕</th>
+                        <th class="sortable num" data-sort="months_of_supply">Supply ↕</th>
+                        <th class="sortable num" data-sort="return_rate">Returns ↕</th>
+                        <th class="sortable num" data-sort="decision_price">Decision price ↕</th>
+                        <th class="sortable num" data-sort="known_cost_value">Known cost ↕</th>
+                        <th class="sortable num" data-sort="estimated_value_loss">Est. loss ↕</th>
+                        <th>Why / next step</th>
+                    </tr></thead>
+                    <tbody id="queueBody"></tbody>
+                </table>
+            </div>
+            <div class="queue-foot" id="queueFoot"></div>
+        </section>
+
+        <details class="panel">
+            <summary>How cleanup recommendations work</summary>
+            <div class="method" id="methodology"></div>
+        </details>
+    </div>
+</main>
+
+<script>
+let cleanupData=null;
+let sortState={key:'cleanup_urgency',direction:-1};
+let selectedKeys=new Set();
+
+const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+const num=value=>Number(value||0).toLocaleString();
+const money=value=>value===null||value===undefined?'—':Number(value).toLocaleString('en-US',{style:'currency',currency:'USD'});
+const pct=value=>value===null||value===undefined?'—':`${Number(value).toFixed(1)}%`;
+const day=value=>value===null||value===undefined?'—':`${num(Math.round(value))}d`;
+
+function actionClass(action){
+    if(action==='Keep')return'keep';if(action==='Watch')return'watch';
+    if(action.startsWith('Markdown'))return'markdown';if(action==='Clear now')return'clear';return'dispose';
+}
+function actionColor(action){
+    return {Keep:'#15803d',Watch:'#ca8a04','Markdown / bundle':'#f97316','Clear now':'#dc2626','Donate / disposal review':'#7c3aed'}[action]||'#64748b';
+}
+function updatePolicyNote(){
+    const clear=Number(document.getElementById('clearanceAge').value);
+    const disposal=Number(document.getElementById('disposalAge').value);
+    const lead=Number(document.getElementById('markdownLead').value);
+    if(disposal<clear+30){
+        document.getElementById('disposalAge').value=String([...document.getElementById('disposalAge').options].map(o=>Number(o.value)).find(v=>v>=clear+30)||540);
+    }
+    const actualDisposal=Number(document.getElementById('disposalAge').value);
+    document.getElementById('policyNote').textContent=`Policy: markdown starts at ${Math.max(30,clear-lead)} days, clear at ${clear} days, and review no-demand low-value inventory for donation/disposal at ${actualDisposal} days. Items above $40/unit or $100 total are protected from disposal.`;
+}
+
+async function loadCleanup(force=false){
+    updatePolicyNote();
+    document.getElementById('loading').style.display='block';
+    document.getElementById('workspace').style.display='none';
+    document.getElementById('error').style.display='none';
+    const params=new URLSearchParams({
+        clearance_age:document.getElementById('clearanceAge').value,
+        disposal_age:document.getElementById('disposalAge').value,
+        markdown_lead:document.getElementById('markdownLead').value,
+    });
+    if(force)params.set('refresh',Date.now());
+    try{
+        const response=await fetch(`/api/inventory-cleanup?${params}`,{cache:'no-store'});
+        const data=await response.json();
+        if(!response.ok||!data.success)throw new Error(data.error||'Cleanup data could not be loaded');
+        cleanupData=data;selectedKeys.clear();renderAll();
+        document.getElementById('loading').style.display='none';
+        document.getElementById('workspace').style.display='block';
+    }catch(error){
+        document.getElementById('loading').style.display='none';
+        const box=document.getElementById('error');box.textContent=`Could not load cleanup decisions: ${error.message}`;box.style.display='block';
+    }
+}
+
+function renderAll(){
+    renderActionCards();renderInsights();populateFilters();renderQueue();renderMethodology();
+}
+function renderActionCards(){
+    const order=['Keep','Watch','Markdown / bundle','Clear now','Donate / disposal review'];
+    document.getElementById('actionCards').innerHTML=order.map(action=>{
+        const row=cleanupData.action_counts[action]||{items:0,units:0,known_cost:0};
+        return `<article class="panel action-card" data-action="${esc(action)}" style="--tone:${actionColor(action)}"><div class="action-name">${esc(action)}</div><div class="action-units">${num(row.units)} units</div><div class="action-detail">${num(row.items)} item types · ${money(row.market_value)} priced value<br>${money(row.estimated_value_loss)} estimated value loss</div></article>`;
+    }).join('');
+    document.querySelectorAll('.action-card').forEach(card=>card.addEventListener('click',()=>{
+        document.getElementById('actionFilter').value=card.dataset.action;renderQueue();document.getElementById('queueBody').closest('.queue').scrollIntoView({behavior:'smooth'});
+    }));
+}
+function barRows(rows,label,value,color){
+    const maximum=Math.max(1,...rows.map(value));
+    return rows.map(row=>`<div class="bar-row"><div class="bar-label" title="${esc(label(row))}">${esc(label(row))}</div><div class="bar-track"><div class="bar-fill" style="width:${value(row)/maximum*100}%;background:${color(row)}"></div></div><div class="bar-value">${num(value(row))} units</div></div>`).join('');
+}
+function renderInsights(){
+    document.getElementById('timingBars').innerHTML=barRows(cleanupData.timing,row=>row.name,row=>row.units,row=>row.name==='Now'?'#dc2626':'#2563eb');
+    const categories=cleanupData.categories.filter(row=>row.cleanup_units>0).slice(0,12);
+    document.getElementById('categoryBars').innerHTML=barRows(categories,row=>row.name,row=>row.cleanup_units,()=> '#f97316');
+}
+function populateSelect(id,values,placeholder){
+    const select=document.getElementById(id),current=select.value;
+    select.innerHTML=`<option value="">${placeholder}</option>`+values.map(value=>`<option value="${esc(value)}">${esc(value)}</option>`).join('');
+    if(values.includes(current))select.value=current;
+}
+function populateFilters(){
+    populateSelect('actionFilter',cleanupData.filters.actions,'All actions');
+    populateSelect('categoryFilter',cleanupData.filters.categories,'All categories');
+    populateSelect('brandFilter',cleanupData.filters.brands,'All brands');
+    populateSelect('locationFilter',cleanupData.filters.locations,'All shelves');
+}
+function filteredItems(){
+    const search=document.getElementById('searchInput').value.trim().toLowerCase();
+    const action=document.getElementById('actionFilter').value,timing=document.getElementById('timingFilter').value;
+    const category=document.getElementById('categoryFilter').value,brand=document.getElementById('brandFilter').value,location=document.getElementById('locationFilter').value;
+    const actionRank={'Donate / disposal review':5,'Clear now':4,'Markdown / bundle':3,Watch:2,Keep:1};
+    const rows=cleanupData.items.filter(item=>
+        (!action||item.cleanup_action===action)&&(!timing||item.timing===timing)&&(!category||item.category===category)&&(!brand||item.brand===brand)&&
+        (!location||(item.locations||[]).includes(location))&&
+        (!search||[item.name,item.barcode,item.brand,item.category,(item.locations||[]).join(' ')].some(v=>String(v||'').toLowerCase().includes(search)))
+    );
+    rows.sort((a,b)=>{
+        let av=a[sortState.key],bv=b[sortState.key];
+        if(sortState.key==='cleanup_action'){av=actionRank[av]||0;bv=actionRank[bv]||0;}
+        if(typeof av==='string'||typeof bv==='string')return String(av||'').localeCompare(String(bv||''))*sortState.direction;
+        return ((Number(av)||0)-(Number(bv)||0))*sortState.direction;
+    });
+    return rows;
+}
+function renderQueue(){
+    if(!cleanupData)return;
+    const rows=filteredItems(),visible=rows.slice(0,500);
+    document.getElementById('matchingCount').textContent=num(rows.length);
+    document.getElementById('selectedCount').textContent=num(selectedKeys.size);
+    document.getElementById('queueBody').innerHTML=visible.map(item=>{
+        const checked=selectedKeys.has(item.key)?'checked':'';
+        const when=item.next_action_days===0?'Now':`${day(item.next_action_days)} · ${item.action_date}`;
+        const urgencyColor=item.cleanup_urgency>=80?'#dc2626':item.cleanup_urgency>=60?'#f97316':item.cleanup_urgency>=40?'#eab308':'#15803d';
+        return `<tr>
+            <td><input class="row-select" type="checkbox" data-key="${esc(item.key)}" ${checked}></td>
+            <td><span class="badge ${actionClass(item.cleanup_action)}">${esc(item.cleanup_action)}</span></td>
+            <td><strong>${esc(when)}</strong></td>
+            <td><div class="item-name"><a href="/unified-search?q=${encodeURIComponent(item.barcode||item.name)}">${esc(item.name)}</a></div><div class="item-sub">${esc([item.brand,item.category,item.barcode,(item.locations||[]).join(', ')].filter(Boolean).join(' · '))}</div></td>
+            <td class="num">${num(item.current_qty)}</td><td class="num">${day(item.oldest_age_days)}</td>
+            <td class="num"><strong>${num(item.cleanup_urgency)}</strong><div class="urgency"><span style="width:${item.cleanup_urgency}%;background:${urgencyColor}"></span></div></td>
+            <td class="num">${num(item.sold_units)}</td><td class="num">${Number(item.monthly_velocity||0).toFixed(2)}</td>
+            <td class="num">${item.days_since_last_sale===null?'Never':day(item.days_since_last_sale)}</td>
+            <td class="num">${item.months_of_supply===null?'∞':`${Number(item.months_of_supply).toFixed(1)}mo`}</td>
+            <td class="num">${pct(item.return_rate)}</td>
+            <td class="num"><strong>${money(item.decision_price)}</strong><div class="item-sub">${esc(item.price_source||'No price evidence')}</div></td>
+            <td class="num">${money(item.known_cost_value)}</td>
+            <td class="num"><span class="loss">${money(item.estimated_value_loss)}</span><div class="item-sub">${money(item.expected_recovery_value)} est. recovery · ${num(item.expected_recovery_rate)}%</div></td>
+            <td class="why"><strong>${esc(item.cleanup_reason)}</strong><div class="item-sub">${esc(item.cleanup_steps)}</div></td>
+        </tr>`;
+    }).join('')||'<tr><td colspan="16" style="padding:35px;text-align:center;color:#64748b;">No inventory matches these filters.</td></tr>';
+    document.getElementById('queueFoot').textContent=`Showing ${num(visible.length)} of ${num(rows.length)} matching item types. Recommendations never remove inventory automatically.`;
+    document.querySelectorAll('.row-select').forEach(input=>input.addEventListener('change',()=>{
+        if(input.checked)selectedKeys.add(input.dataset.key);else selectedKeys.delete(input.dataset.key);
+        document.getElementById('selectedCount').textContent=num(selectedKeys.size);
+    }));
+}
+function exportCsv(){
+    let rows=cleanupData.items.filter(item=>selectedKeys.has(item.key));
+    if(!rows.length)rows=filteredItems();
+    const columns=['cleanup_action','timing','action_date','cleanup_urgency','name','barcode','brand','category','locations','current_qty','average_age_days','oldest_age_days','sold_units','monthly_velocity','days_since_last_sale','months_of_supply','return_rate','current_listing_price','latest_sold_price','average_price','decision_price','price_source','market_value','known_cost_value','expected_recovery_rate','expected_recovery_value','estimated_value_loss','estimated_cost_loss','cleanup_reason','cleanup_steps'];
+    const quote=value=>`"${String(Array.isArray(value)?value.join(' | '):(value??'')).replace(/"/g,'""')}"`;
+    const csv=[columns.join(','),...rows.map(row=>columns.map(key=>quote(row[key])).join(','))].join('\\r\\n');
+    const blob=new Blob([csv],{type:'text/csv;charset=utf-8'}),link=document.createElement('a');
+    link.href=URL.createObjectURL(blob);link.download=`inventory-cleanup-${new Date().toISOString().slice(0,10)}.csv`;link.click();setTimeout(()=>URL.revokeObjectURL(link.href),1000);
+}
+function renderMethodology(){
+    const p=cleanupData.policy,q=cleanupData.data_quality;
+    document.getElementById('methodology').innerHTML=`<p><strong>Policy:</strong> markdown begins at ${p.markdown_age} days, clear-now begins after ${p.clearance_age} days, and donation/disposal review begins at ${p.disposal_age} days for no-demand, low-cost inventory.</p>
+    <p><strong>Demand override:</strong> items with at least 3 sold units, at least 0.35 units/month, no more than 15% observed returns, and manageable supply are kept even when old.</p>
+    <p><strong>Price evidence:</strong> the decision price uses the highest active Amazon/eBay listing first, then the latest sold.db unit price and average sold.db price. Items above $40 per unit, $100 total priced value, $25 unit cost, or $50 total known cost are protected from disposal and sent to clearance review instead. ${q.priced_item_types} of ${q.price_item_types} item types have price evidence; ${q.active_listing_item_types} have an active listing match.</p>
+    <p><strong>Loss estimate:</strong> expected gross recovery is modeled as 100% for Keep/Watch, 80% for Markdown, 55% for Clear now, and 0% for Donation/disposal review. Estimated value loss is the difference from the decision-price value. Cost loss exposure compares expected recovery with known acquisition cost. Fees, shipping, labor, and taxes are not included.</p>
+    <p><strong>Evidence quality:</strong> ${q.receipt_match_rate}% of sold units matched to a BOL intake date. ${q.duplicate_returns_ignored} duplicate return records were ignored. Category and brand are inferred from titles. Known cost is only shown where a BOL cost match exists.</p>
+    <p>This page is decision support. It does not delete, archive, move, or change inventory.</p>`;
+}
+
+function installViewportTableHeader(wrapperSelector){
+    const wrapper=document.querySelector(wrapperSelector);
+    const table=wrapper&&wrapper.querySelector('table');
+    const sourceHead=table&&table.querySelector('thead');
+    if(!wrapper||!table||!sourceHead)return;
+
+    const floating=document.createElement('div');
+    floating.className='floating-table-header';
+    const floatingTable=document.createElement('table');
+    const clonedHead=sourceHead.cloneNode(true);
+    clonedHead.querySelectorAll('[id]').forEach(node=>node.removeAttribute('id'));
+    floatingTable.appendChild(clonedHead);
+    floating.appendChild(floatingTable);
+    document.body.appendChild(floating);
+
+    const sourceCells=[...sourceHead.querySelectorAll('th')];
+    const clonedCells=[...clonedHead.querySelectorAll('th')];
+    clonedCells.forEach((cell,index)=>{
+        cell.addEventListener('click',event=>{
+            const clonedInput=event.target.closest('input');
+            const sourceInput=sourceCells[index]&&sourceCells[index].querySelector('input');
+            if(clonedInput&&sourceInput){
+                event.stopPropagation();
+                sourceInput.checked=clonedInput.checked;
+                sourceInput.dispatchEvent(new Event('change',{bubbles:true}));
+            }else if(sourceCells[index]){
+                sourceCells[index].click();
+            }
+        });
+    });
+
+    let frame=null;
+    function sync(){
+        frame=null;
+        const wrapperRect=wrapper.getBoundingClientRect();
+        const headRect=sourceHead.getBoundingClientRect();
+        const visibleLeft=Math.max(0,wrapperRect.left);
+        const visibleRight=Math.min(window.innerWidth,wrapperRect.right);
+        const visibleWidth=Math.max(0,visibleRight-visibleLeft);
+        const show=wrapperRect.top<0&&wrapperRect.bottom>headRect.height&&visibleWidth>0;
+        if(!show){
+            floating.style.display='none';
+            return;
+        }
+        sourceCells.forEach((cell,index)=>{
+            const width=cell.getBoundingClientRect().width;
+            if(!clonedCells[index])return;
+            clonedCells[index].style.width=`${width}px`;
+            clonedCells[index].style.minWidth=`${width}px`;
+            clonedCells[index].style.maxWidth=`${width}px`;
+            const sourceInput=cell.querySelector('input');
+            const clonedInput=clonedCells[index].querySelector('input');
+            if(sourceInput&&clonedInput)clonedInput.checked=sourceInput.checked;
+        });
+        const tableWidth=table.getBoundingClientRect().width;
+        floating.style.display='block';
+        floating.style.left=`${visibleLeft}px`;
+        floating.style.width=`${visibleWidth}px`;
+        floating.style.height=`${headRect.height}px`;
+        floatingTable.style.width=`${tableWidth}px`;
+        floatingTable.style.minWidth='0';
+        floatingTable.style.transform=`translateX(${-wrapper.scrollLeft}px)`;
+    }
+    function schedule(){
+        if(frame===null)frame=requestAnimationFrame(sync);
+    }
+    window.addEventListener('scroll',schedule,{passive:true});
+    window.addEventListener('resize',schedule,{passive:true});
+    wrapper.addEventListener('scroll',schedule,{passive:true});
+    if(window.ResizeObserver){
+        const observer=new ResizeObserver(schedule);
+        observer.observe(wrapper);
+        observer.observe(table);
+    }
+    schedule();
+}
+
+document.getElementById('refreshButton').addEventListener('click',()=>loadCleanup(true));
+['clearanceAge','disposalAge','markdownLead'].forEach(id=>document.getElementById(id).addEventListener('change',()=>loadCleanup()));
+['searchInput'].forEach(id=>document.getElementById(id).addEventListener('input',renderQueue));
+['actionFilter','timingFilter','categoryFilter','brandFilter','locationFilter'].forEach(id=>document.getElementById(id).addEventListener('change',renderQueue));
+document.querySelectorAll('th[data-sort]').forEach(th=>th.addEventListener('click',()=>{const key=th.dataset.sort;if(sortState.key===key)sortState.direction*=-1;else sortState={key,direction:key==='name'?1:-1};renderQueue();}));
+document.getElementById('selectVisible').addEventListener('click',()=>{filteredItems().slice(0,500).forEach(item=>selectedKeys.add(item.key));renderQueue();});
+document.getElementById('clearSelection').addEventListener('click',()=>{selectedKeys.clear();renderQueue();});
+document.getElementById('selectAllCheckbox').addEventListener('change',event=>{filteredItems().slice(0,500).forEach(item=>event.target.checked?selectedKeys.add(item.key):selectedKeys.delete(item.key));renderQueue();});
+document.getElementById('exportButton').addEventListener('click',exportCsv);
+installViewportTableHeader('.queue .table-wrap');
+loadCleanup();
+</script>
+<script src="/static/i18n.js"></script>
+</body>
+</html>

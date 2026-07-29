@@ -127,6 +127,61 @@
     #results table { min-width: 500px; }
     #results tr.warehouse-match-highlight { outline: 3px solid #f59e0b; box-shadow: inset 4px 0 0 #f59e0b; background:#fff7ed !important; }
     html.ss-theme-night #results tr.warehouse-match-highlight { background:rgba(245,158,11,0.18) !important; }
+    .inventory-age{
+        background:none;
+        border:0;
+        padding:0;
+        font-weight:700;
+        text-decoration:none;
+    }
+    button.inventory-age{cursor:pointer}
+    .inventory-age-green{color:#15803d}
+    .inventory-age-yellow{color:#a16207}
+        .inventory-age-orange{color:#c2410c}
+        .inventory-age-red{color:#dc2626}
+        .current-inventory-age-band{
+            width:100%;display:grid;grid-template-columns:90px 1fr 48px;
+            align-items:center;gap:9px;margin:7px 0;padding:8px 10px;
+            border:1px solid transparent;border-radius:9px;background:transparent;
+            color:inherit;font:inherit;text-align:left;cursor:pointer;
+        }
+        .current-inventory-age-band:hover{
+            background:#f8fafc;border-color:#cbd5e1;
+        }
+        .current-inventory-age-band:focus-visible{
+            outline:3px solid rgba(37,99,235,.3);outline-offset:1px;
+        }
+        .current-inventory-age-band.active{
+            background:#eff6ff;border-color:#60a5fa;box-shadow:0 0 0 1px #60a5fa;
+        }
+        html.ss-theme-night .inventory-age-green{color:#4ade80}
+        html.ss-theme-night .inventory-age-yellow{color:#facc15}
+        html.ss-theme-night .inventory-age-orange{color:#fb923c}
+        html.ss-theme-night .inventory-age-red{color:#f87171}
+        html.ss-theme-night .current-inventory-age-band:hover{background:#1e293b;border-color:#475569}
+        html.ss-theme-night .current-inventory-age-band.active{background:#172554;border-color:#60a5fa}
+    .warehouse-sort-header{
+        display:inline-flex;
+        align-items:center;
+        gap:5px;
+        margin:0;
+        padding:0;
+        border:0;
+        background:none;
+        color:inherit;
+        font:inherit;
+        font-weight:inherit;
+        cursor:pointer;
+    }
+    .warehouse-sort-header:hover,.warehouse-sort-header:focus-visible{color:#2563eb}
+    .warehouse-sort-indicator{display:inline-block;min-width:10px;font-size:.72em}
+    html.ss-theme-night .warehouse-sort-header:hover,
+    html.ss-theme-night .warehouse-sort-header:focus-visible{color:#60a5fa}
+    html.ss-theme-night #quantityHistoryRange{
+        background:#172554 !important;
+        color:#dbeafe !important;
+        border-left-color:#60a5fa !important;
+    }
 
     /* Sticky Actions column — mobile only */
     @media (max-width: 768px) {
@@ -343,7 +398,9 @@
                 <div class="inventory-dropdown" id="inventory-dropdown">
                     <button id="location-duplicates-btn">📍 Location Duplicates</button>
                     <button id="rack-history-btn">📋 Rack History</button>
-                    <button id="automatic-cleanup-btn">🧹 Automatic Cleanup</button>
+                    <button id="current-inventory-age-btn">⏳ Current Inventory Age</button>
+                    <button id="quantity-history-btn">📈 Quantity History</button>
+                    <button id="automatic-cleanup-btn">🧹 Inventory Cleanup Decisions</button>
                     <button id="reset-cache-btn" style="color:#ff6b00;">🔄 Reset Cache</button>
                 </div>
             </div>
@@ -378,13 +435,36 @@
             </label>
         </div>
         <div style="margin-left:auto; display:flex; gap:8px; align-items:center">
+            <label id="age-filter-container">Age:
+                <select id="age-filter" style="margin-left:6px;padding:6px;border-radius:6px;border:1px solid #ddd">
+                    <option value="0">All ages</option>
+                    <optgroup label="Exact age bands">
+                        <option value="band:0:30">0–30 days</option>
+                        <option value="band:31:60">31–60 days</option>
+                        <option value="band:61:90">61–90 days</option>
+                        <option value="band:91:119">91–119 days</option>
+                        <option value="band:120:180">120–180 days</option>
+                        <option value="band:181:">181+ days</option>
+                    </optgroup>
+                    <optgroup label="Minimum age">
+                        <option value="7">7+ days</option>
+                        <option value="30">30+ days</option>
+                        <option value="90">90+ days</option>
+                        <option value="180">180+ days</option>
+                        <option value="365">1+ year</option>
+                        <option value="730">2+ years</option>
+                    </optgroup>
+                </select>
+            </label>
             <label>Sort:
                 <select id="sort-select" style="margin-left:6px;padding:6px;border-radius:6px;border:1px solid #ddd">
                     <option value="time_desc">Time (newest)</option>
                     <option value="time_asc">Time (oldest)</option>
+                    <option value="age_oldest">Age (oldest first)</option>
+                    <option value="age_newest">Age (newest first)</option>
                     <option value="name">Name</option>
-                    <option value="qty">Qty</option>
-                    <option value="qty_asc">Qty (least)</option>
+                    <option value="qty">Quantity (highest)</option>
+                    <option value="qty_asc">Quantity (lowest)</option>
                 </select>
             </label>
         </div>
@@ -393,7 +473,6 @@
     <div class="showing-line" style="margin-top:10px; font-size:0.95rem; color:#444; display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
         <span>Showing: <span id="active-dbs">Warehouse</span> <span id="page-indicator" style="color:#00b894; font-weight:600;"></span></span>
         <button id="show-location-browser-btn" class="btn" style="padding:4px 10px; font-size:0.85rem; background:#f0f0f0; border:1px solid #ddd; display:none;">📍 Browse Locations</button>
-        <button id="move-location-btn" class="btn" style="padding:4px 10px; font-size:0.85rem; background:#2d98da; color:#fff; border:1px solid #1b7fc2; display:none;"><span data-i18n="move_items_location">Move Items to Another Location</span></button>
     </div>
 
     <!-- Hidden pagination placeholder for JS compatibility -->
@@ -466,6 +545,17 @@
     <!-- Image / Info Modal -->
     <div id="viewModal" class="modal"><div class="card"><div style="text-align:right"><button id="closeView">Close</button></div><div id="viewContent"></div></div></div>
 
+    <!-- Inventory Age Modal -->
+    <div id="ageModal" class="modal">
+        <div class="card" style="max-width:720px;width:94%;">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px;">
+                <h3 id="ageModalTitle" style="margin:0;">Inventory Age</h3>
+                <button id="closeAgeModal">Close</button>
+            </div>
+            <div id="ageModalContent"></div>
+        </div>
+    </div>
+
     <!-- Edit Modal -->
     <div id="editModal" class="modal"><div class="card"><div style="text-align:right"><button id="closeEdit">Close</button></div><h3>Edit Item</h3><div id="editContent"></div><div style="text-align:right;margin-top:8px"><button id="saveEdit" class="btn btn-primary">Save</button></div></div></div>
 
@@ -480,6 +570,64 @@
         <button id="qty-confirm" class="btn btn-primary">Move</button>
         <button id="qty-cancel" class="btn btn-danger">Cancel</button>
     </div></div></div>
+
+    <!-- Current Inventory Age Modal -->
+    <div id="currentInventoryAgeModal" class="modal">
+        <div class="card" style="max-width:94%;width:620px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px;">
+                <div>
+                    <h3 style="margin:0;">Current Inventory Age</h3>
+                    <div class="small-muted" style="margin-top:3px;">Exact receiving-batch age, weighted by active units. Click a band to filter Warehouse.</div>
+                </div>
+                <button id="closeCurrentInventoryAge">Close</button>
+            </div>
+            <div id="currentInventoryAgeLoading" style="padding:54px 12px;text-align:center;color:#64748b;">Loading current inventory age…</div>
+            <div id="currentInventoryAgeBody" style="display:none;">
+                <div id="currentInventoryAgeBars"></div>
+                <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;margin-top:18px;padding-top:12px;border-top:1px solid #e2e8f0;">
+                    <div class="small-muted"><strong id="currentInventoryAgeTotal">0</strong> active warehouse units</div>
+                    <a href="/inventory-analytics" style="color:#2563eb;font-weight:700;text-decoration:none;">Open full analytics →</a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Warehouse Quantity History Modal -->
+    <div id="quantityHistoryModal" class="modal">
+        <div class="card" style="max-width:96%;max-height:92vh;width:1000px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px;">
+                <div>
+                    <h3 style="margin:0;">Warehouse Quantity History</h3>
+                    <div class="small-muted" style="margin-top:3px;">Total active units over time</div>
+                </div>
+                <button id="closeQuantityHistory">Close</button>
+            </div>
+            <div id="quantityHistoryLoading" style="padding:60px 12px;text-align:center;color:#64748b;">Loading quantity history…</div>
+            <div id="quantityHistoryBody" style="display:none;">
+                <div id="quantityHistoryChartWrap" style="width:100%;overflow:hidden;position:relative;">
+                    <canvas id="quantityHistoryChart" role="img" aria-label="Warehouse quantity by time"
+                        style="display:block;width:100%;height:380px;touch-action:none;"></canvas>
+                    <div id="quantityHistoryTooltip"
+                        style="display:none;position:absolute;z-index:5;max-width:320px;padding:9px 11px;border-radius:8px;background:rgba(15,23,42,.94);color:#fff;box-shadow:0 6px 18px rgba(0,0,0,.28);font-size:.82rem;line-height:1.4;pointer-events:none;"></div>
+                </div>
+                <div id="quantityHistoryRange"
+                    style="display:none;margin:8px 2px 0;padding:9px 12px;border-left:4px solid #2563eb;border-radius:6px;background:#eff6ff;color:#1e3a8a;font-size:.9rem;"></div>
+                <div id="quantityHistoryNote" class="small-muted" style="margin:8px 2px 0;"></div>
+                <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:16px;">
+                    <div style="border:2px solid #f59e0b;background:#fffbeb;border-radius:10px;padding:14px;text-align:center;">
+                        <div style="font-size:.82rem;font-weight:700;color:#92400e;text-transform:uppercase;letter-spacing:.04em;">Highest Peak</div>
+                        <div id="quantityHistoryPeak" style="font-size:2rem;font-weight:800;color:#b45309;line-height:1.15;">0</div>
+                        <div id="quantityHistoryPeakDate" class="small-muted"></div>
+                    </div>
+                    <div style="border:2px solid #16a34a;background:#f0fdf4;border-radius:10px;padding:14px;text-align:center;">
+                        <div style="font-size:.82rem;font-weight:700;color:#166534;text-transform:uppercase;letter-spacing:.04em;">Current Quantity</div>
+                        <div id="quantityHistoryCurrent" style="font-size:2rem;font-weight:800;color:#15803d;line-height:1.15;">0</div>
+                        <div class="small-muted">Active warehouse units now</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- History Modal -->
     <div id="historyModal" class="modal">
@@ -528,6 +676,8 @@ let _allResults = [];
 let _currentPage = 1;
 let _pageSize = 10;
 let _sortMode = 'time_desc';
+let _ageFilterDays = 0;
+let _ageFilterMaxDays = null;
 // Location browser globals (must be initialized before any use)
 let _locationData = [];
 let _selectedLocation = null;
@@ -608,6 +758,10 @@ function attachDBChangeHandlers(){
         } else {
             customItemsFilterContainer.style.display = 'none';
             document.getElementById('custom-items-filter').checked = false;
+        }
+        const ageFilterContainer = document.getElementById('age-filter-container');
+        if(ageFilterContainer){
+            ageFilterContainer.style.display = selectedDb === 'searchRack' ? 'inline-flex' : 'none';
         }
 
         // Show/hide Inventory gear button for searchRack
@@ -735,7 +889,6 @@ async function doSearch(clearInput = false, explicitQuery = null){
     const searchQuery = q;
     
     const nextResults = [];
-    let totalQty = 0;
     // If user requested fetch-all, send limit=0 to tell server to return all matches
     // default: fetch all results from server for each selected DB
     const wantAll = true;
@@ -750,9 +903,6 @@ async function doSearch(clearInput = false, explicitQuery = null){
             const j = await resp.json();
             if(j && j.results) {
                 nextResults.push(...j.results);
-                if(j.total_quantity !== undefined){
-                    totalQty = j.total_quantity;
-                }
             }
         }catch(err){console.error('location duplicates err',err)}
     } else {
@@ -783,10 +933,6 @@ async function doSearch(clearInput = false, explicitQuery = null){
                 if(j && j.results) {
                     console.log(`[SEARCH] ${db} adding ${j.results.length} results`);
                     j.results.forEach(r=> nextResults.push(r));
-                    // Accumulate total quantity if provided by backend
-                    if(j.total_quantity !== undefined){
-                        totalQty += j.total_quantity;
-                    }
                 } else {
                     console.warn(`[SEARCH] ${db} returned no results or invalid response:`, j);
                 }
@@ -799,15 +945,6 @@ async function doSearch(clearInput = false, explicitQuery = null){
     _allResults = nextResults;
     _currentPage = 1;
     _pageSize = parseInt(document.getElementById('page-size').value || '10', 10);
-    // Update the 'Showing' label to include total result count and quantity
-    // Wrap counts in spans so CSS can hide them on mobile
-    const activeLabel = dbs.map(d=>DB_LABELS[d]).join(', ');
-    let displayHTML = `${activeLabel}`;
-    displayHTML += `<span class="results-count"> — ${_allResults.length} results</span>`;
-    if(totalQty > 0){
-        displayHTML += `<span class="qty-count"> — ${totalQty} total quantity</span>`;
-    }
-    document.getElementById('active-dbs').innerHTML = displayHTML;
     renderPagedResults();
     
     hideLoading();
@@ -849,8 +986,65 @@ function highlightWarehouseMatchRow() {
     });
 }
 
+function visibleResultQuantity(result) {
+    const raw = result && result.quantity;
+    const isWarehouse = String(result && result.source_db || '') === 'searchRack';
+    if (raw === undefined || raw === null || String(raw).trim() === '') {
+        return isWarehouse ? 0 : 1;
+    }
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed)) return isWarehouse ? 0 : 1;
+    return Math.max(0, Math.trunc(parsed));
+}
+
+function updateShowingSummary(filteredResults) {
+    const results = Array.isArray(filteredResults) ? filteredResults : [];
+    const activeLabel = getActiveDBs().map(db => DB_LABELS[db] || db).join(', ') || 'None';
+    const totalQuantity = results.reduce(
+        (sum, result) => sum + visibleResultQuantity(result),
+        0
+    );
+    document.getElementById('active-dbs').innerHTML =
+        `${esc(activeLabel)}`
+        + `<span class="results-count"> — ${results.length.toLocaleString()} results</span>`
+        + `<span class="qty-count"> — ${totalQuantity.toLocaleString()} total quantity</span>`;
+}
+
+function setWarehouseAgeFilter(value) {
+    const raw = String(value || '0');
+    _ageFilterDays = 0;
+    _ageFilterMaxDays = null;
+    if (raw.startsWith('band:')) {
+        const parts = raw.split(':');
+        _ageFilterDays = Math.max(0, parseInt(parts[1] || '0', 10) || 0);
+        const parsedMax = parseInt(parts[2] || '', 10);
+        _ageFilterMaxDays = Number.isFinite(parsedMax) ? parsedMax : null;
+        return;
+    }
+    _ageFilterDays = Math.max(0, parseInt(raw, 10) || 0);
+}
+
 function renderPagedResults() {
     let sorted = [..._allResults];
+    if (
+        (_ageFilterDays > 0 || _ageFilterMaxDays !== null)
+        && getActiveDBs().includes('searchRack')
+    ) {
+        const now = Date.now();
+        sorted = sorted.filter(r => {
+            if (r.source_db !== 'searchRack') return true;
+            const received = Date.parse(r.oldest_received_at || r.created_at || '');
+            if (!Number.isFinite(received)) return false;
+            const ageDays = Math.max(
+                0,
+                Math.floor((now - received) / (24 * 60 * 60 * 1000))
+            );
+            return (
+                ageDays >= _ageFilterDays
+                && (_ageFilterMaxDays === null || ageDays <= _ageFilterMaxDays)
+            );
+        });
+    }
     if (_sortMode === 'time_desc') {
         sorted.sort((a, b) => {
             // For sold items, use paid_time as the primary date
@@ -864,6 +1058,18 @@ function renderPagedResults() {
             const ta = Date.parse(a.deleted_at || (a.raw && a.raw.paid_time) || a.created_at || 0) || 0;
             const tb = Date.parse(b.deleted_at || (b.raw && b.raw.paid_time) || b.created_at || 0) || 0;
             return ta - tb;
+        });
+    } else if (_sortMode === 'age_oldest') {
+        sorted.sort((a, b) => {
+            const ta = Date.parse(a.oldest_received_at || a.created_at || 0) || Number.MAX_SAFE_INTEGER;
+            const tb = Date.parse(b.oldest_received_at || b.created_at || 0) || Number.MAX_SAFE_INTEGER;
+            return ta - tb;
+        });
+    } else if (_sortMode === 'age_newest') {
+        sorted.sort((a, b) => {
+            const ta = Date.parse(a.oldest_received_at || a.created_at || 0) || 0;
+            const tb = Date.parse(b.oldest_received_at || b.created_at || 0) || 0;
+            return tb - ta;
         });
     } else if (_sortMode === 'name') {
         sorted.sort((a, b) => String(a.title || '').localeCompare(String(b.title || '')));
@@ -879,18 +1085,10 @@ function renderPagedResults() {
     const notRemovedOnly = document.getElementById('not-removed-filter').checked;
     if (notRemovedOnly) {
         sorted = sorted.filter(r => r.source_db === 'sold' && r.inv_status === 'NOT_REMOVED');
-
-        // Update the showing line to reflect filtered count
-        const filteredQty = sorted.reduce((sum, r) => sum + (parseInt(r.quantity) || 1), 0);
-        const resultsCountEl = document.querySelector('.results-count');
-        const qtyCountEl = document.querySelector('.qty-count');
-        if (resultsCountEl) {
-            resultsCountEl.textContent = ` — ${sorted.length} not removed`;
-        }
-        if (qtyCountEl) {
-            qtyCountEl.textContent = ` — ${filteredQty} total quantity`;
-        }
     }
+
+    // Always describe the complete filtered set, never only the current page.
+    updateShowingSummary(sorted);
 
     // Do not merge on the client; rely on server to handle merging per location
     maybeJumpToWarehouseMatchPage(sorted);
@@ -977,6 +1175,11 @@ document.getElementById('sort-select').addEventListener('change', () => {
     _currentPage = 1;
     renderPagedResults();
 });
+document.getElementById('age-filter').addEventListener('change', () => {
+    setWarehouseAgeFilter(document.getElementById('age-filter').value);
+    _currentPage = 1;
+    renderPagedResults();
+});
     // page-size control hidden when fetching all by default
 
 function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
@@ -1014,6 +1217,137 @@ function goUnifiedFromWarehouse(encodedBarcode){
 
 function missingThumb(width=48,height=48,text='No Img'){ return 'data:image/svg+xml;utf8,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="'+width+'" height="'+height+'"><rect width="100%" height="100%" fill="#f8f8f8"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#b0b0b0" font-size="10">'+text+'</text></svg>'); }
 
+function inventoryAgeParts(timestamp){
+    const parsed = new Date(timestamp || '');
+    if (Number.isNaN(parsed.getTime())) return null;
+    const now = new Date();
+    const start = new Date(Date.UTC(parsed.getFullYear(), parsed.getMonth(), parsed.getDate()));
+    const end = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+    if (start > end) return {years:0, months:0, days:0, totalDays:0};
+
+    function addCalendarMonths(date, count){
+        const year = date.getUTCFullYear();
+        const month = date.getUTCMonth() + count;
+        const day = date.getUTCDate();
+        const target = new Date(Date.UTC(year, month, 1));
+        const lastDay = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
+        target.setUTCDate(Math.min(day, lastDay));
+        return target;
+    }
+
+    let cursor = new Date(start.getTime());
+    let years = 0;
+    while (true) {
+        const next = addCalendarMonths(cursor, 12);
+        if (next > end) break;
+        cursor = next;
+        years += 1;
+    }
+    let months = 0;
+    while (true) {
+        const next = addCalendarMonths(cursor, 1);
+        if (next > end) break;
+        cursor = next;
+        months += 1;
+    }
+    const days = Math.max(0, Math.floor((end.getTime() - cursor.getTime()) / 86400000));
+    const totalDays = Math.max(0, Math.floor((end.getTime() - start.getTime()) / 86400000));
+    return {years, months, days, totalDays};
+}
+
+function inventoryAgeLabel(timestamp){
+    const age = inventoryAgeParts(timestamp);
+    return age ? `${age.years}y ${age.months}m ${age.days}d` : 'Unknown';
+}
+
+function inventoryAgeColorClass(timestamp){
+    const age = inventoryAgeParts(timestamp);
+    if (!age) return '';
+    if (age.totalDays > 180) return 'inventory-age-red';
+    if (age.totalDays >= 120) return 'inventory-age-orange';
+    if (age.totalDays > 90) return 'inventory-age-yellow';
+    return 'inventory-age-green';
+}
+
+function openInventoryAgeDetails(encodedBatches, encodedTitle){
+    let batches = [];
+    let title = 'Inventory Age';
+    try { batches = JSON.parse(decodeURIComponent(encodedBatches || '')) || []; } catch (_) {}
+    try { title = decodeURIComponent(encodedTitle || '') || title; } catch (_) {}
+    batches = Array.isArray(batches) ? batches : [];
+    batches.sort((a, b) => (Date.parse(a.received_at || '') || 0) - (Date.parse(b.received_at || '') || 0));
+
+    const totalQty = batches.reduce((sum, batch) => sum + (parseInt(batch.quantity, 10) || 0), 0);
+    let html = `<div class="small-muted" style="margin-bottom:10px;">FIFO receiving batches — ${totalQty} active unit${totalQty === 1 ? '' : 's'}</div>`;
+    if (!batches.length) {
+        html += '<div class="small-muted">No receiving-batch details are available.</div>';
+    } else {
+        html += '<table><thead><tr><th>Date Added</th><th>Qty</th><th>Age</th><th>Source</th></tr></thead><tbody>';
+        batches.forEach(batch => {
+            const received = batch.received_at || '';
+            const estimated = !!batch.estimated;
+            html += `<tr>
+                <td>${fmtAgeDate(received)}</td>
+                <td>${parseInt(batch.quantity, 10) || 0}</td>
+                <td><span class="inventory-age ${inventoryAgeColorClass(received)}">${inventoryAgeLabel(received)}</span></td>
+                <td>${estimated ? '<span style="color:#b45309;">Estimated legacy date</span>' : 'Recorded'}</td>
+            </tr>`;
+        });
+        html += '</tbody></table>';
+    }
+    document.getElementById('ageModalTitle').textContent = title;
+    document.getElementById('ageModalContent').innerHTML = html;
+    document.getElementById('ageModal').style.display = 'flex';
+}
+
+function fmtAgeDate(timestamp){
+    const parsed = new Date(timestamp || '');
+    if (Number.isNaN(parsed.getTime())) return esc(timestamp || 'Unknown');
+    return parsed.toLocaleString('en-US', {
+        year:'numeric', month:'2-digit', day:'2-digit',
+        hour:'numeric', minute:'2-digit'
+    });
+}
+
+document.getElementById('closeAgeModal').addEventListener('click', () => {
+    document.getElementById('ageModal').style.display = 'none';
+});
+document.getElementById('ageModal').addEventListener('click', event => {
+    if (event.target === event.currentTarget) event.currentTarget.style.display = 'none';
+});
+
+function warehouseSortableTh(label, field) {
+    const modes = field === 'quantity'
+        ? {ascending:'qty_asc', descending:'qty'}
+        : {ascending:'age_oldest', descending:'age_newest'};
+    const isAscending = _sortMode === modes.ascending;
+    const isDescending = _sortMode === modes.descending;
+    const ariaSort = isAscending ? 'ascending' : (isDescending ? 'descending' : 'none');
+    const indicator = isAscending ? '▲' : (isDescending ? '▼' : '↕');
+    const nextDirection = isAscending ? 'descending' : 'ascending';
+    return `<th aria-sort="${ariaSort}">
+        <button type="button" class="warehouse-sort-header"
+            onclick="toggleWarehouseColumnSort('${field}')"
+            title="Sort ${esc(label)} ${nextDirection}">
+            ${esc(label)} <span class="warehouse-sort-indicator" aria-hidden="true">${indicator}</span>
+        </button>
+    </th>`;
+}
+
+function toggleWarehouseColumnSort(field) {
+    if (field === 'quantity') {
+        _sortMode = _sortMode === 'qty_asc' ? 'qty' : 'qty_asc';
+    } else if (field === 'date_added') {
+        _sortMode = _sortMode === 'age_oldest' ? 'age_newest' : 'age_oldest';
+    } else {
+        return;
+    }
+    const sortSelect = document.getElementById('sort-select');
+    if (sortSelect) sortSelect.value = _sortMode;
+    _currentPage = 1;
+    renderPagedResults();
+}
+
 function renderResults(results){
     const container = document.getElementById('results');
     if(!results || results.length===0){ container.innerHTML = '<div class="small-muted">No results</div>'; return; }
@@ -1027,11 +1361,23 @@ function renderResults(results){
     const hasBol = results.some(r => r.source_db === 'bol');
     const hasReturns = results.some(r => r.source_db === 'returns');
     const useMobileWarehouseActionSlot = isMobile && selectedDb === 'searchRack' && hasSearchRack;
+    const sortableWarehouseColumns = selectedDb === 'searchRack' && hasSearchRack;
     
     // Build dynamic headers based on which databases are present
     const dateAddedHeader = hasSearchRack
-        ? `<th>${useMobileWarehouseActionSlot ? 'Action' : 'Date Added'}</th>`
+        ? (
+            useMobileWarehouseActionSlot
+                ? '<th>Action</th>'
+                : (
+                    sortableWarehouseColumns
+                        ? warehouseSortableTh('Date Added', 'date_added')
+                        : '<th>Date Added</th>'
+                )
+          )
         : '';
+    const quantityHeader = sortableWarehouseColumns
+        ? warehouseSortableTh('Qty', 'quantity')
+        : '<th>Qty</th>';
     const itemIdHeader = (hasEbayStore || hasAmazonStore) ? '<th>Item ID</th>' : '';
     const lotHeader = hasBol ? '<th>LOT #</th>' : '';
     const locationHeader = (!hasEbayStore && !hasAmazonStore && !hasBol && !hasReturns) ? '<th>Location</th>' : ''; // Show location for warehouse and sold
@@ -1051,7 +1397,7 @@ function renderResults(results){
         ? ''
         : `<th class="results-action-col${isMobile ? ' is-sticky' : ''}">Actions</th>`;
     
-    let html = `<table><thead><tr><th>Title</th><th>Barcode</th>${itemIdHeader}${lotHeader}${locationHeader}<th>Qty</th>${warehouseNoteHeader}${itemPrepHeader}${dateAddedHeader}${dateSoldHeader}${dateShippedHeader}${invStatusHeader}${storeHeader}${returnDateHeader}${refundAmountHeader}${originalShippingHeader}${returnShippingHeader}${totalReturnCostHeader}<th>DB</th>${actionsHeader}</tr></thead><tbody>`;
+    let html = `<table><thead><tr><th>Title</th><th>Barcode</th>${itemIdHeader}${lotHeader}${locationHeader}${quantityHeader}${warehouseNoteHeader}${itemPrepHeader}${dateAddedHeader}${dateSoldHeader}${dateShippedHeader}${invStatusHeader}${storeHeader}${returnDateHeader}${refundAmountHeader}${originalShippingHeader}${returnShippingHeader}${totalReturnCostHeader}<th>DB</th>${actionsHeader}</tr></thead><tbody>`;
     let lastGroupBarcode = null;
     results.forEach((r, idx)=>{
     // Add visual separator between different duplicate groups
@@ -1220,14 +1566,34 @@ function renderResults(results){
         }catch(_){ return esc(ts||''); }
     }
     const deletedInfo = (isArchived && r.deleted_at) ? `<div class="small-muted">Deleted: ${fmtLocal(r.deleted_at)}</div>` : '';
-    const createdInfo = (!isArchived && r.created_at) ? `<div class="small-muted">Added: ${fmtLocal(r.created_at)}</div>` : '';
+    const createdInfo = (!isArchived && (r.oldest_received_at || r.created_at))
+        ? `<div class="small-muted">Added: ${fmtLocal(r.oldest_received_at || r.created_at)}</div>`
+        : '';
     
     // Dynamic column cells based on which databases are shown
     const dateCell = hasSearchRack
         ? (
             useMobileWarehouseActionSlot
                 ? `<td><div class="results-actions">${actionHtml}</div></td>`
-                : (dbRaw === 'searchRack' && r.created_at ? `<td>${fmtLocal(r.created_at)}</td>` : '<td></td>')
+                : (
+                    dbRaw === 'searchRack' && (r.oldest_received_at || r.created_at)
+                        ? (() => {
+                            const oldest = r.oldest_received_at || r.created_at;
+                            const encodedBatches = encodeURIComponent(JSON.stringify(r.age_batches || []));
+                            const encodedTitle = encodeURIComponent(`Inventory Age — ${r.title || barcodeRaw || 'Item'}`);
+                            const ageColorClass = inventoryAgeColorClass(oldest);
+                            return `<td>
+                                <div>${fmtLocal(oldest)}</div>
+                                <button type="button" class="age-detail-link inventory-age ${ageColorClass}"
+                                    onclick="openInventoryAgeDetails('${encodedBatches}','${encodedTitle}')"
+                                    style="margin-top:4px;font-size:.85rem;"
+                                    title="View individual inventory ages">
+                                    Age: ${inventoryAgeLabel(oldest)}
+                                </button>
+                            </td>`;
+                        })()
+                        : '<td></td>'
+                  )
           )
         : '';
     const itemIdCell = (hasEbayStore || hasAmazonStore) ? `<td>${itemid}</td>` : '';
@@ -2212,12 +2578,684 @@ document.getElementById('rack-history-btn').addEventListener('click', () => {
     openHistoryModalWithSearch('', '');
 });
 
-// Automatic Cleanup button
+async function openCurrentInventoryAge() {
+    const modal = document.getElementById('currentInventoryAgeModal');
+    const loading = document.getElementById('currentInventoryAgeLoading');
+    const body = document.getElementById('currentInventoryAgeBody');
+    document.getElementById('inventory-dropdown').classList.remove('active');
+    modal.style.display = 'flex';
+    loading.style.display = 'block';
+    loading.textContent = 'Loading current inventory age…';
+    body.style.display = 'none';
+    try {
+        const response = await fetch('/api/inventory-age-summary', {cache:'no-store'});
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            throw new Error(data.error || 'Unable to load inventory age');
+        }
+        const bands = Array.isArray(data.age_bands) ? data.age_bands : [];
+        const colors = ['#22c55e','#65a30d','#eab308','#f59e0b','#f97316','#dc2626'];
+        const maximum = Math.max(1, ...bands.map(band => Number(band.units) || 0));
+        const selectedAgeFilter = document.getElementById('age-filter').value;
+        const filterValues = [
+            'band:0:30',
+            'band:31:60',
+            'band:61:90',
+            'band:91:119',
+            'band:120:180',
+            'band:181:',
+        ];
+        document.getElementById('currentInventoryAgeBars').innerHTML = bands.map((band, index) => {
+            const units = Math.max(0, Number(band.units) || 0);
+            const filterValue = filterValues[index] || '0';
+            const active = selectedAgeFilter === filterValue;
+            return `<button type="button" class="current-inventory-age-band${active ? ' active' : ''}"
+                data-age-filter="${filterValue}" aria-pressed="${active ? 'true' : 'false'}"
+                title="Show only ${esc(band.name)} inventory">
+                <span>${esc(band.name)}</span>
+                <div style="height:13px;background:#edf2f7;border-radius:999px;overflow:hidden;">
+                    <div style="height:100%;width:${(units / maximum) * 100}%;background:${colors[index] || '#64748b'};border-radius:999px;"></div>
+                </div>
+                <strong style="text-align:right;font-variant-numeric:tabular-nums;">${units.toLocaleString()}</strong>
+            </button>`;
+        }).join('');
+        const total = data.inventory_units !== undefined
+            ? Number(data.inventory_units) || 0
+            : bands.reduce((sum, band) => sum + (Number(band.units) || 0), 0);
+        document.getElementById('currentInventoryAgeTotal').textContent = total.toLocaleString();
+        loading.style.display = 'none';
+        body.style.display = 'block';
+    } catch (error) {
+        loading.textContent = `Could not load inventory age: ${error.message}`;
+    }
+}
+
+document.getElementById('current-inventory-age-btn').addEventListener('click', openCurrentInventoryAge);
+document.getElementById('currentInventoryAgeBars').addEventListener('click', event => {
+    const band = event.target.closest('button[data-age-filter]');
+    if (!band) return;
+    const filterValue = band.dataset.ageFilter || '0';
+    const ageFilter = document.getElementById('age-filter');
+    ageFilter.value = filterValue;
+    setWarehouseAgeFilter(filterValue);
+    _currentPage = 1;
+    document.getElementById('currentInventoryAgeModal').style.display = 'none';
+    renderPagedResults();
+});
+document.getElementById('closeCurrentInventoryAge').addEventListener('click', () => {
+    document.getElementById('currentInventoryAgeModal').style.display = 'none';
+});
+document.getElementById('currentInventoryAgeModal').addEventListener('click', event => {
+    if (event.target === event.currentTarget) event.currentTarget.style.display = 'none';
+});
+
+let quantityHistoryState = null;
+let quantityHistoryResizeTimer = null;
+let quantityHistoryChartGeometry = null;
+let quantityHistoryDrag = null;
+let quantityHistorySelection = null;
+
+function quantityChartDate(timestamp, includeTime = false) {
+    const parsed = new Date(timestamp || '');
+    if (Number.isNaN(parsed.getTime())) return 'Unknown';
+    const options = includeTime
+        ? {year:'numeric', month:'short', day:'numeric', hour:'numeric', minute:'2-digit'}
+        : {year:'numeric', month:'short', day:'numeric'};
+    return parsed.toLocaleString('en-US', options);
+}
+
+function drawQuantityHistoryChart(data, hoverState = null) {
+    const canvas = document.getElementById('quantityHistoryChart');
+    if (!canvas || !data) return;
+    const points = (Array.isArray(data.points) ? data.points : [])
+        .map(point => ({
+            timestamp: Date.parse(point.timestamp || ''),
+            quantity: Math.max(0, parseInt(point.quantity, 10) || 0)
+        }))
+        .filter(point => Number.isFinite(point.timestamp))
+        .sort((a, b) => a.timestamp - b.timestamp);
+    if (!points.length) return;
+    const bolUploads = (Array.isArray(data.bol_uploads) ? data.bol_uploads : [])
+        .map(upload => ({
+            ...upload,
+            timestampValue: Date.parse(upload.timestamp || '')
+        }))
+        .filter(upload => Number.isFinite(upload.timestampValue))
+        .sort((a, b) => a.timestampValue - b.timestampValue);
+
+    const bounds = canvas.getBoundingClientRect();
+    const cssWidth = Math.max(320, Math.floor(bounds.width || 900));
+    const cssHeight = window.innerWidth <= 640 ? 290 : 380;
+    const pixelRatio = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+    canvas.width = Math.floor(cssWidth * pixelRatio);
+    canvas.height = Math.floor(cssHeight * pixelRatio);
+    canvas.style.height = `${cssHeight}px`;
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+    ctx.clearRect(0, 0, cssWidth, cssHeight);
+
+    const darkMode = document.documentElement.classList.contains('ss-theme-night');
+    const colors = {
+        text: darkMode ? '#dbe7f4' : '#475569',
+        grid: darkMode ? 'rgba(148,163,184,.22)' : 'rgba(148,163,184,.32)',
+        axis: darkMode ? '#94a3b8' : '#64748b',
+        line: '#2563eb',
+        peak: '#f59e0b',
+        current: '#16a34a',
+        bol: '#7c3aed',
+        bolHover: '#f59e0b',
+        selectionFill: darkMode ? 'rgba(96,165,250,.18)' : 'rgba(37,99,235,.12)',
+        selectionLine: darkMode ? '#60a5fa' : '#2563eb'
+    };
+    const margin = {
+        left: window.innerWidth <= 640 ? 46 : 58,
+        right: 22,
+        top: 24,
+        bottom: 72
+    };
+    const plotWidth = Math.max(1, cssWidth - margin.left - margin.right);
+    const plotHeight = Math.max(1, cssHeight - margin.top - margin.bottom);
+    const timelineValues = points.map(point => point.timestamp)
+        .concat(bolUploads.map(upload => upload.timestampValue));
+    let minTime = Math.min(...timelineValues);
+    let maxTime = Math.max(...timelineValues);
+    if (maxTime <= minTime) maxTime = minTime + 86400000;
+    const actualMax = Math.max(
+        parseInt(data.peak_quantity, 10) || 0,
+        ...points.map(point => point.quantity),
+        1
+    );
+    const magnitude = Math.pow(10, Math.max(0, Math.floor(Math.log10(actualMax)) - 1));
+    const maxQuantity = Math.max(5, Math.ceil(actualMax / magnitude) * magnitude);
+    const xFor = value => margin.left + ((value - minTime) / (maxTime - minTime)) * plotWidth;
+    const yFor = value => margin.top + plotHeight - (value / maxQuantity) * plotHeight;
+
+    ctx.font = `${window.innerWidth <= 640 ? 10 : 12}px system-ui, sans-serif`;
+    ctx.textBaseline = 'middle';
+    ctx.lineWidth = 1;
+    for (let tick = 0; tick <= 5; tick += 1) {
+        const value = Math.round((maxQuantity * tick) / 5);
+        const y = yFor(value);
+        ctx.beginPath();
+        ctx.strokeStyle = colors.grid;
+        ctx.moveTo(margin.left, y);
+        ctx.lineTo(cssWidth - margin.right, y);
+        ctx.stroke();
+        ctx.fillStyle = colors.text;
+        ctx.textAlign = 'right';
+        ctx.fillText(String(value), margin.left - 8, y);
+    }
+
+    const xTickCount = window.innerWidth <= 640 ? 3 : 5;
+    for (let tick = 0; tick < xTickCount; tick += 1) {
+        const ratio = xTickCount === 1 ? 0 : tick / (xTickCount - 1);
+        const value = minTime + ((maxTime - minTime) * ratio);
+        const x = xFor(value);
+        ctx.beginPath();
+        ctx.strokeStyle = colors.grid;
+        ctx.moveTo(x, margin.top);
+        ctx.lineTo(x, margin.top + plotHeight);
+        ctx.stroke();
+        ctx.fillStyle = colors.text;
+        ctx.textAlign = tick === 0 ? 'left' : (tick === xTickCount - 1 ? 'right' : 'center');
+        ctx.fillText(quantityChartDate(new Date(value).toISOString()), x, cssHeight - 22);
+    }
+
+    ctx.beginPath();
+    ctx.strokeStyle = colors.axis;
+    ctx.lineWidth = 1.25;
+    ctx.moveTo(margin.left, margin.top);
+    ctx.lineTo(margin.left, margin.top + plotHeight);
+    ctx.lineTo(cssWidth - margin.right, margin.top + plotHeight);
+    ctx.stroke();
+
+    if (hoverState && hoverState.type === 'range') {
+        const startX = xFor(Math.min(hoverState.startTimestamp, hoverState.endTimestamp));
+        const endX = xFor(Math.max(hoverState.startTimestamp, hoverState.endTimestamp));
+        ctx.fillStyle = colors.selectionFill;
+        ctx.fillRect(startX, margin.top, Math.max(1, endX - startX), plotHeight);
+    }
+
+    const coordinates = points.map(point => ({
+        x: xFor(point.timestamp),
+        y: yFor(point.quantity),
+        quantity: point.quantity,
+        timestamp: point.timestamp
+    }));
+    const fill = ctx.createLinearGradient(0, margin.top, 0, margin.top + plotHeight);
+    fill.addColorStop(0, 'rgba(37,99,235,.28)');
+    fill.addColorStop(1, 'rgba(37,99,235,.03)');
+    ctx.beginPath();
+    ctx.moveTo(coordinates[0].x, margin.top + plotHeight);
+    coordinates.forEach((point, index) => {
+        if (index === 0) ctx.lineTo(point.x, point.y);
+        else ctx.lineTo(point.x, point.y);
+    });
+    ctx.lineTo(coordinates[coordinates.length - 1].x, margin.top + plotHeight);
+    ctx.closePath();
+    ctx.fillStyle = fill;
+    ctx.fill();
+
+    ctx.beginPath();
+    coordinates.forEach((point, index) => {
+        if (index === 0) ctx.moveTo(point.x, point.y);
+        else ctx.lineTo(point.x, point.y);
+    });
+    ctx.strokeStyle = colors.line;
+    ctx.lineWidth = 2.5;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.stroke();
+
+    const peakQuantity = Math.max(0, parseInt(data.peak_quantity, 10) || 0);
+    const peakTimestamp = Date.parse(data.peak_timestamp || '');
+    const peakPoint = coordinates.find(point =>
+        point.quantity === peakQuantity
+        && (!Number.isFinite(peakTimestamp) || point.timestamp === peakTimestamp)
+    ) || coordinates.find(point => point.quantity === peakQuantity);
+    const currentPoint = coordinates[coordinates.length - 1];
+    [
+        {point: peakPoint, color: colors.peak, radius: 5},
+        {point: currentPoint, color: colors.current, radius: 5}
+    ].forEach(marker => {
+        if (!marker.point) return;
+        ctx.beginPath();
+        ctx.arc(marker.point.x, marker.point.y, marker.radius, 0, Math.PI * 2);
+        ctx.fillStyle = marker.color;
+        ctx.fill();
+        ctx.strokeStyle = darkMode ? '#0f172a' : '#fff';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+    });
+
+    // BOL uploads share a bottom marker lane. Nearby uploads collapse into one
+    // flag with a count so the timeline remains readable.
+    const bolMarkers = [];
+    bolUploads.forEach(upload => {
+        const x = xFor(upload.timestampValue);
+        const previous = bolMarkers[bolMarkers.length - 1];
+        if (previous && x - previous.lastX <= 28) {
+            previous.uploads.push(upload);
+            previous.lastX = x;
+            previous.xSum += x;
+            previous.x = previous.xSum / previous.uploads.length;
+        } else {
+            bolMarkers.push({
+                uploads: [upload],
+                x,
+                xSum: x,
+                lastX: x
+            });
+        }
+    });
+    bolMarkers.forEach(marker => {
+        const markerKey = marker.uploads.map(upload => String(upload.id)).join('|');
+        const x = marker.x;
+        const y = margin.top + plotHeight + 8;
+        const selected = hoverState && hoverState.type === 'bol'
+            && hoverState.key === markerKey;
+        ctx.save();
+        ctx.setLineDash([2, 4]);
+        ctx.beginPath();
+        ctx.moveTo(x, margin.top);
+        ctx.lineTo(x, margin.top + plotHeight);
+        ctx.strokeStyle = selected
+            ? colors.bolHover
+            : (darkMode ? 'rgba(196,181,253,.65)' : 'rgba(124,58,237,.45)');
+        ctx.lineWidth = selected ? 1.75 : 1;
+        ctx.stroke();
+        ctx.restore();
+        ctx.beginPath();
+        ctx.strokeStyle = selected ? colors.bolHover : colors.bol;
+        ctx.lineWidth = selected ? 2.5 : 1.75;
+        ctx.moveTo(x, y);
+        ctx.lineTo(x, y + 21);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x + 12, y + 4.5);
+        ctx.lineTo(x, y + 9);
+        ctx.closePath();
+        ctx.fillStyle = selected ? colors.bolHover : colors.bol;
+        ctx.fill();
+        if (marker.uploads.length > 1) {
+            ctx.fillStyle = selected ? colors.bolHover : colors.bol;
+            ctx.font = '800 12px system-ui, sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillText(String(marker.uploads.length), x + 15, y + 5);
+        }
+        marker.key = markerKey;
+        marker.y = y;
+        marker.left = x - 7;
+        marker.right = x + (marker.uploads.length > 1 ? 38 : 17);
+        marker.top = y - 6;
+        marker.bottom = y + 25;
+    });
+
+    if (hoverState && hoverState.type === 'range') {
+        const rangeStartX = xFor(Math.min(hoverState.startTimestamp, hoverState.endTimestamp));
+        const rangeEndX = xFor(Math.max(hoverState.startTimestamp, hoverState.endTimestamp));
+        ctx.save();
+        ctx.setLineDash([5, 4]);
+        ctx.strokeStyle = colors.selectionLine;
+        ctx.lineWidth = 1.5;
+        [rangeStartX, rangeEndX].forEach(x => {
+            ctx.beginPath();
+            ctx.moveTo(x, margin.top);
+            ctx.lineTo(x, margin.top + plotHeight);
+            ctx.stroke();
+        });
+        ctx.restore();
+    }
+
+    if (hoverState && hoverState.type === 'quantity') {
+        const hoverTimestamp = Number(hoverState.timestamp);
+        const hoverQuantity = Math.max(0, Number(hoverState.quantity) || 0);
+        const hoverX = xFor(hoverTimestamp);
+        const hoverY = yFor(hoverQuantity);
+        ctx.save();
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.moveTo(hoverX, margin.top);
+        ctx.lineTo(hoverX, margin.top + plotHeight);
+        ctx.strokeStyle = darkMode ? 'rgba(226,232,240,.65)' : 'rgba(71,85,105,.55)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.restore();
+        ctx.beginPath();
+        ctx.arc(hoverX, hoverY, 5.5, 0, Math.PI * 2);
+        ctx.fillStyle = colors.line;
+        ctx.fill();
+        ctx.strokeStyle = darkMode ? '#0f172a' : '#fff';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+    }
+
+    ctx.save();
+    ctx.translate(15, margin.top + plotHeight / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillStyle = colors.text;
+    ctx.font = '600 12px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Quantity', 0, 0);
+    ctx.restore();
+    ctx.fillStyle = colors.text;
+    ctx.font = '600 12px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Time', margin.left + plotWidth / 2, cssHeight - 6);
+
+    quantityHistoryChartGeometry = {
+        coordinates,
+        bolMarkers,
+        margin,
+        plotWidth,
+        plotHeight,
+        cssWidth,
+        cssHeight,
+        minTime,
+        maxTime
+    };
+}
+
+function formatQuantityChartMoney(value) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed)
+        ? parsed.toLocaleString('en-US', {style:'currency', currency:'USD'})
+        : '';
+}
+
+function quantityBolTooltipHtml(uploads) {
+    const list = Array.isArray(uploads) ? uploads : [uploads];
+    return list.map((upload, index) => {
+        const price = upload.total_client_cost !== null && upload.total_client_cost !== undefined
+            ? formatQuantityChartMoney(upload.total_client_cost)
+            : 'Not recorded';
+        const quantity = Math.max(0, Number(upload.total_quantity) || 0).toLocaleString();
+        const separator = index > 0
+            ? 'border-top:1px solid rgba(255,255,255,.24);margin-top:7px;padding-top:7px;'
+            : '';
+        return `<div style="${separator}">
+            <div><strong>Name:</strong> ${esc(upload.filename || upload.lot_number || 'Unnamed BOL')}</div>
+            <div><strong>Date:</strong> ${esc(quantityChartDate(upload.timestamp, true))}</div>
+            <div><strong>Price:</strong> ${esc(price)}</div>
+            <div><strong>Total quantity:</strong> ${quantity}</div>
+        </div>`;
+    }).join('');
+}
+
+function quantityHistoryRangeFromPixels(geometry, firstX, secondX) {
+    const plotLeft = geometry.margin.left;
+    const plotRight = plotLeft + geometry.plotWidth;
+    const startX = Math.max(plotLeft, Math.min(plotRight, Math.min(firstX, secondX)));
+    const endX = Math.max(plotLeft, Math.min(plotRight, Math.max(firstX, secondX)));
+    const timestampForX = x => geometry.minTime
+        + ((x - plotLeft) / geometry.plotWidth) * (geometry.maxTime - geometry.minTime);
+    const quantityAt = timestamp => {
+        let quantity = geometry.coordinates[0] ? geometry.coordinates[0].quantity : 0;
+        for (const point of geometry.coordinates) {
+            if (point.timestamp > timestamp) break;
+            quantity = point.quantity;
+        }
+        return quantity;
+    };
+    const startTimestamp = timestampForX(startX);
+    const endTimestamp = timestampForX(endX);
+    const startQuantity = quantityAt(startTimestamp);
+    const endQuantity = quantityAt(endTimestamp);
+    return {
+        type: 'range',
+        startTimestamp,
+        endTimestamp,
+        startQuantity,
+        endQuantity,
+        change: endQuantity - startQuantity
+    };
+}
+
+function quantityHistoryRangeHtml(range) {
+    const durationDays = Math.max(
+        0,
+        Math.round((range.endTimestamp - range.startTimestamp) / 86400000)
+    );
+    const change = Number(range.change) || 0;
+    const signedChange = `${change > 0 ? '+' : ''}${change.toLocaleString()} units`;
+    const changeColor = change > 0 ? '#15803d' : (change < 0 ? '#dc2626' : '#475569');
+    return `<strong>Selected range:</strong> ${durationDays.toLocaleString()} day${durationDays === 1 ? '' : 's'}
+        <span style="margin-left:12px;"><strong>Quantity change:</strong>
+        <span style="color:${changeColor};font-weight:800;">${signedChange}</span></span>`;
+}
+
+function showQuantityHistoryRange(range) {
+    const summary = document.getElementById('quantityHistoryRange');
+    summary.innerHTML = quantityHistoryRangeHtml(range);
+    summary.style.display = 'block';
+}
+
+function positionQuantityHistoryTooltip(event, html) {
+    const tooltip = document.getElementById('quantityHistoryTooltip');
+    const wrap = document.getElementById('quantityHistoryChartWrap');
+    const wrapRect = wrap.getBoundingClientRect();
+    tooltip.innerHTML = html;
+    tooltip.style.display = 'block';
+    const mouseX = event.clientX - wrapRect.left;
+    const mouseY = event.clientY - wrapRect.top;
+    const tooltipWidth = tooltip.offsetWidth || 220;
+    const tooltipHeight = tooltip.offsetHeight || 80;
+    const left = Math.max(8, Math.min(
+        wrapRect.width - tooltipWidth - 8,
+        mouseX + 14
+    ));
+    const preferredTop = mouseY - tooltipHeight - 12;
+    const top = preferredTop >= 8
+        ? preferredTop
+        : Math.min(wrapRect.height - tooltipHeight - 8, mouseY + 14);
+    tooltip.style.left = `${left}px`;
+    tooltip.style.top = `${Math.max(8, top)}px`;
+}
+
+function hideQuantityHistoryTooltip(redraw = true) {
+    const tooltip = document.getElementById('quantityHistoryTooltip');
+    tooltip.style.display = 'none';
+    if (redraw && quantityHistoryState) {
+        drawQuantityHistoryChart(quantityHistoryState, quantityHistorySelection);
+    }
+}
+
+document.getElementById('quantityHistoryChart').addEventListener('pointerdown', event => {
+    if (!quantityHistoryState || !quantityHistoryChartGeometry) return;
+    const canvas = event.currentTarget;
+    const canvasRect = canvas.getBoundingClientRect();
+    const mouseX = event.clientX - canvasRect.left;
+    const mouseY = event.clientY - canvasRect.top;
+    const geometry = quantityHistoryChartGeometry;
+    const insidePlot = mouseX >= geometry.margin.left
+        && mouseX <= geometry.margin.left + geometry.plotWidth
+        && mouseY >= geometry.margin.top
+        && mouseY <= geometry.margin.top + geometry.plotHeight;
+    if (event.button !== 0 || !insidePlot) return;
+    quantityHistoryDrag = {
+        pointerId: event.pointerId,
+        startX: mouseX,
+        currentX: mouseX,
+        moved: false
+    };
+    quantityHistorySelection = null;
+    document.getElementById('quantityHistoryRange').style.display = 'none';
+    hideQuantityHistoryTooltip(false);
+    if (canvas.setPointerCapture) canvas.setPointerCapture(event.pointerId);
+    canvas.style.cursor = 'ew-resize';
+    event.preventDefault();
+});
+
+document.getElementById('quantityHistoryChart').addEventListener('pointermove', event => {
+    if (!quantityHistoryState || !quantityHistoryChartGeometry) return;
+    const canvas = event.currentTarget;
+    const canvasRect = canvas.getBoundingClientRect();
+    const mouseX = event.clientX - canvasRect.left;
+    const mouseY = event.clientY - canvasRect.top;
+    const geometry = quantityHistoryChartGeometry;
+
+    if (quantityHistoryDrag && quantityHistoryDrag.pointerId === event.pointerId) {
+        quantityHistoryDrag.currentX = mouseX;
+        quantityHistoryDrag.moved = quantityHistoryDrag.moved
+            || Math.abs(quantityHistoryDrag.currentX - quantityHistoryDrag.startX) >= 3;
+        if (quantityHistoryDrag.moved) {
+            quantityHistorySelection = quantityHistoryRangeFromPixels(
+                geometry,
+                quantityHistoryDrag.startX,
+                quantityHistoryDrag.currentX
+            );
+            drawQuantityHistoryChart(quantityHistoryState, quantityHistorySelection);
+            showQuantityHistoryRange(quantityHistorySelection);
+        }
+        canvas.style.cursor = 'ew-resize';
+        event.preventDefault();
+        return;
+    }
+
+    const bolMarker = geometry.bolMarkers.find(marker =>
+        mouseX >= marker.left && mouseX <= marker.right
+        && mouseY >= marker.top && mouseY <= marker.bottom
+    );
+    if (bolMarker) {
+        drawQuantityHistoryChart(quantityHistoryState, {
+            type: 'bol',
+            key: bolMarker.key
+        });
+        positionQuantityHistoryTooltip(event, quantityBolTooltipHtml(bolMarker.uploads));
+        canvas.style.cursor = 'pointer';
+        return;
+    }
+
+    const insidePlot = mouseX >= geometry.margin.left
+        && mouseX <= geometry.margin.left + geometry.plotWidth
+        && mouseY >= geometry.margin.top
+        && mouseY <= geometry.margin.top + geometry.plotHeight;
+    if (!insidePlot || !geometry.coordinates.length) {
+        canvas.style.cursor = 'default';
+        hideQuantityHistoryTooltip();
+        return;
+    }
+
+    let nearest = geometry.coordinates[0];
+    let nearestDistance = Math.abs(mouseX - nearest.x);
+    for (let index = 1; index < geometry.coordinates.length; index += 1) {
+        const candidate = geometry.coordinates[index];
+        const distance = Math.abs(mouseX - candidate.x);
+        if (distance < nearestDistance) {
+            nearest = candidate;
+            nearestDistance = distance;
+        }
+    }
+    drawQuantityHistoryChart(quantityHistoryState, {
+        type: 'quantity',
+        timestamp: nearest.timestamp,
+        quantity: nearest.quantity
+    });
+    positionQuantityHistoryTooltip(
+        event,
+        `<div style="font-size:1rem;font-weight:800;">${Number(nearest.quantity).toLocaleString()} units</div>`
+        + `<div>${esc(quantityChartDate(new Date(nearest.timestamp).toISOString(), true))}</div>`
+    );
+    canvas.style.cursor = 'crosshair';
+});
+
+document.getElementById('quantityHistoryChart').addEventListener('pointerup', event => {
+    if (!quantityHistoryDrag || quantityHistoryDrag.pointerId !== event.pointerId) return;
+    const canvas = event.currentTarget;
+    if (canvas.releasePointerCapture && canvas.hasPointerCapture && canvas.hasPointerCapture(event.pointerId)) {
+        canvas.releasePointerCapture(event.pointerId);
+    }
+    if (!quantityHistoryDrag.moved) {
+        quantityHistorySelection = null;
+        document.getElementById('quantityHistoryRange').style.display = 'none';
+        drawQuantityHistoryChart(quantityHistoryState);
+    } else {
+        drawQuantityHistoryChart(quantityHistoryState, quantityHistorySelection);
+        showQuantityHistoryRange(quantityHistorySelection);
+    }
+    quantityHistoryDrag = null;
+    canvas.style.cursor = 'crosshair';
+    event.preventDefault();
+});
+
+document.getElementById('quantityHistoryChart').addEventListener('pointercancel', event => {
+    if (!quantityHistoryDrag || quantityHistoryDrag.pointerId !== event.pointerId) return;
+    quantityHistoryDrag = null;
+    event.currentTarget.style.cursor = 'default';
+    drawQuantityHistoryChart(quantityHistoryState, quantityHistorySelection);
+});
+
+document.getElementById('quantityHistoryChart').addEventListener('pointerleave', event => {
+    if (quantityHistoryDrag) return;
+    event.currentTarget.style.cursor = 'default';
+    hideQuantityHistoryTooltip();
+});
+
+async function openQuantityHistory() {
+    const modal = document.getElementById('quantityHistoryModal');
+    const loading = document.getElementById('quantityHistoryLoading');
+    const body = document.getElementById('quantityHistoryBody');
+    quantityHistoryDrag = null;
+    quantityHistorySelection = null;
+    document.getElementById('quantityHistoryRange').style.display = 'none';
+    hideQuantityHistoryTooltip(false);
+    modal.style.display = 'flex';
+    loading.style.display = 'block';
+    loading.textContent = 'Loading quantity history…';
+    body.style.display = 'none';
+    try {
+        const response = await fetch('/api/inventory-quantity-history', {cache:'no-store'});
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.error || 'Unable to load quantity history');
+        quantityHistoryState = data;
+        document.getElementById('quantityHistoryPeak').textContent =
+            Number(data.peak_quantity || 0).toLocaleString();
+        document.getElementById('quantityHistoryPeakDate').textContent =
+            quantityChartDate(data.peak_timestamp, true);
+        document.getElementById('quantityHistoryCurrent').textContent =
+            Number(data.current_quantity || 0).toLocaleString();
+        const historyNote = data.reconstructed
+            ? 'Historical totals are reconstructed from rack history; the current total is authoritative.'
+            : 'Quantity history is based on recorded warehouse events.';
+        const bolNote = Array.isArray(data.bol_uploads) && data.bol_uploads.length
+            ? ` Bottom flags mark ${data.bol_uploads.length} BOL upload${data.bol_uploads.length === 1 ? '' : 's'}; grouped flags show a count.`
+            : '';
+        document.getElementById('quantityHistoryNote').textContent =
+            `${historyNote}${bolNote} Hover for details, or drag across the chart to measure a time range.`;
+        loading.style.display = 'none';
+        body.style.display = 'block';
+        window.requestAnimationFrame(() => drawQuantityHistoryChart(data));
+    } catch (error) {
+        loading.textContent = `Could not load quantity history: ${error.message}`;
+    }
+}
+
+document.getElementById('quantity-history-btn').addEventListener('click', () => {
+    document.getElementById('inventory-dropdown').classList.remove('active');
+    openQuantityHistory();
+});
+document.getElementById('closeQuantityHistory').addEventListener('click', () => {
+    document.getElementById('quantityHistoryModal').style.display = 'none';
+});
+document.getElementById('quantityHistoryModal').addEventListener('click', event => {
+    if (event.target === event.currentTarget) event.currentTarget.style.display = 'none';
+});
+window.addEventListener('resize', () => {
+    if (!quantityHistoryState || document.getElementById('quantityHistoryModal').style.display !== 'flex') return;
+    clearTimeout(quantityHistoryResizeTimer);
+    quantityHistoryResizeTimer = setTimeout(
+        () => drawQuantityHistoryChart(quantityHistoryState, quantityHistorySelection),
+        120
+    );
+});
+
+// Inventory Cleanup Decisions button
 document.getElementById('automatic-cleanup-btn').addEventListener('click', () => {
     // Close dropdown
     document.getElementById('inventory-dropdown').classList.remove('active');
-    // Navigate to cleanup page
-    window.location.href = '/cleanup';
+    // Navigate to the strategic cleanup decision page
+    window.location.href = '/inventory-cleanup';
 });
 
 // History modal event handlers

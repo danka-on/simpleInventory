@@ -14,6 +14,7 @@ from tkinter import filedialog, messagebox, ttk
 
 
 APP_TITLE = "Sweet Shelves Server Console"
+APP_VERSION = "2.1.1"
 CONFIG_FILENAME = "server_control_config.json"
 EXAMPLE_CONFIG_FILENAME = "server_control_config.example.json"
 REFRESH_INTERVAL_MS = 5000
@@ -26,7 +27,12 @@ HISTORY_RANGE_OPTIONS = {
     "7d": 168,
     "30d": 720,
     "90d": 2160,
+    "180d": 4320,
+    "1y": 8760,
+    "2y": 17520,
+    "All": 0,
 }
+_SINGLE_INSTANCE_HANDLE = None
 
 # ── Catppuccin Mocha palette ─────────────────────────────────────────────────
 BASE     = "#1e1e2e"   # window background
@@ -49,6 +55,7 @@ MAUVE    = "#cba6f7"   # accent alt
 
 
 DEFAULT_CONFIG = {
+    "schema_version": 2,
     "connection": {
         "host": "10.0.0.151",
         "user": "dk",
@@ -80,63 +87,70 @@ DEFAULT_CONFIG = {
         },
         {
             "label": "Backup + Pull + Restart",
-            "command": "sh -lc 'cd /opt/sweetshelves && python3 rotating_backup.py backup && git pull && sudo systemctl restart sweetshelves.service'",
+            "command": "sh -lc 'set -eu; mountpoint -q /media/dk/USB || { echo \"USB backup drive is not mounted\"; exit 1; }; /opt/sweetshelves/backup_daily_searchrack.sh; cd /opt/sweetshelves; git pull; sudo systemctl restart sweetshelves.service'",
             "section": "Sweet Shelves",
             "tone": "accent",
             "confirm": True,
         },
         {
             "label": "Backup Status & Health",
-            "command": "sh -lc 'echo \"Recent cron entries:\"; crontab -l 2>/dev/null || echo \"No user cron entries\"; echo; echo \"Recent backups:\"; python3 /opt/sweetshelves/rotating_backup.py list 2>/dev/null | head -n 30 || echo \"Backup list unavailable\"; echo; echo \"Storage:\"; df -h /opt/sweetshelves /mnt /media 2>/dev/null'",
+            "command": "sh -lc 'echo \"USB mount:\"; findmnt /media/dk/USB || true; echo; echo \"Automatic schedule:\"; crontab -l 2>/dev/null | grep -E \"backup_(daily|weekly)\" || echo \"No Sweet Shelves backup schedule\"; echo; echo \"Latest daily:\"; find /media/dk/USB/sweetshelves-db-backups/daily -maxdepth 1 -type f -name \"searchRack-*.sqlite3.gz\" -printf \"%TY-%Tm-%Td %TH:%TM  %k KB  %f\\n\" 2>/dev/null | sort -r | head -1; echo; echo \"Latest weekly files:\"; find /media/dk/USB/sweetshelves-db-backups/weekly -maxdepth 1 -type f -name \"*.sqlite3.gz\" -printf \"%TY-%Tm-%Td %TH:%TM  %k KB  %f\\n\" 2>/dev/null | sort -r | head -8; echo; echo \"Recent backup log:\"; tail -n 8 /opt/sweetshelves/logs/backup_daily_searchrack.log 2>/dev/null || true'",
             "section": "Sweet Shelves",
             "tone": "secondary",
             "confirm": False,
         },
         {
-            "label": "Run Backup Now",
-            "command": "cd /opt/sweetshelves && python3 rotating_backup.py backup",
+            "label": "Run Daily USB Backup",
+            "command": "sh -lc 'set -eu; mountpoint -q /media/dk/USB || { echo \"USB backup drive is not mounted; backup stopped\"; exit 1; }; test -w /media/dk/USB || { echo \"USB backup drive is not writable\"; exit 1; }; /opt/sweetshelves/backup_daily_searchrack.sh'",
             "section": "Sweet Shelves",
             "tone": "success",
             "confirm": False,
         },
         {
-            "label": "List Backups",
-            "command": "cd /opt/sweetshelves && python3 rotating_backup.py list",
+            "label": "Run Full USB Backup",
+            "command": "sh -lc 'set -eu; mountpoint -q /media/dk/USB || { echo \"USB backup drive is not mounted; backup stopped\"; exit 1; }; test -w /media/dk/USB || { echo \"USB backup drive is not writable\"; exit 1; }; /opt/sweetshelves/backup_daily_searchrack.sh; /opt/sweetshelves/backup_weekly_otherdbs.sh'",
+            "section": "Sweet Shelves",
+            "tone": "success",
+            "confirm": True,
+        },
+        {
+            "label": "Repair Automatic Backup Schedule",
+            "action": "repair_backup_schedule",
+            "section": "Sweet Shelves",
+            "tone": "warning",
+            "confirm": True,
+        },
+        {
+            "label": "List USB Backups",
+            "command": "sh -lc 'mountpoint -q /media/dk/USB || { echo \"USB backup drive is not mounted\"; exit 1; }; find /media/dk/USB/sweetshelves-db-backups -type f -name \"*.sqlite3.gz\" -printf \"%TY-%Tm-%Td %TH:%TM  %k KB  %p\\n\" 2>/dev/null | sort -r | head -80'",
             "section": "Sweet Shelves",
             "tone": "secondary",
             "confirm": False,
         },
         {
-            "label": "Restore Latest Backup",
-            "command": "cd /opt/sweetshelves && bash ./restore_searchrack.sh",
+            "label": "Restore Latest USB Backup",
+            "command": "sh -lc 'set -eu; mountpoint -q /media/dk/USB || { echo \"USB backup drive is not mounted\"; exit 1; }; latest=$(find /media/dk/USB/sweetshelves-db-backups/daily -maxdepth 1 -type f -name \"searchRack-*.sqlite3.gz\" -printf \"%T@ %p\\n\" | sort -nr | head -1 | cut -d\" \" -f2-); test -n \"$latest\" || { echo \"No daily searchRack backup found\"; exit 1; }; cd /opt/sweetshelves; bash ./restore_searchrack.sh \"$latest\"'",
             "section": "Sweet Shelves",
             "tone": "warning",
             "confirm": True,
         },
         {
             "label": "Backup/Pull Status",
-            "command": "sh -lc 'echo \"Latest backup:\"; latest=$(ls -t /mnt/db-backups/sweetshelves-db-backups/daily/searchRack-*.sqlite3.gz 2>/dev/null | head -1 || true); if [ -n \"$latest\" ]; then stat -c \"%y  %n\" \"$latest\"; else echo \"No backup found in /mnt/db-backups/sweetshelves-db-backups/daily\"; fi; echo; echo \"Recent pull activity:\"; git -C /opt/sweetshelves reflog --date=local --grep-reflog=\"pull\" -n 5 2>/dev/null || echo \"No git pull reflog entries found\"; echo; echo \"Current code version:\"; git -C /opt/sweetshelves log -1 --date=local --pretty=format:\"%ad  %h  %s\"; echo; echo; echo \"Service status:\"; systemctl is-active sweetshelves.service; systemctl status sweetshelves.service --no-pager -n 3 | tail -n 3'",
+            "command": "sh -lc 'echo \"Latest USB backup:\"; latest=$(find /media/dk/USB/sweetshelves-db-backups/daily -maxdepth 1 -type f -name \"searchRack-*.sqlite3.gz\" -printf \"%T@ %p\\n\" 2>/dev/null | sort -nr | head -1 | cut -d\" \" -f2-); if [ -n \"$latest\" ]; then stat -c \"%y  %s bytes  %n\" \"$latest\"; else echo \"No USB backup found\"; fi; echo; echo \"Current code version:\"; git -C /opt/sweetshelves log -1 --date=local --pretty=format:\"%ad  %h  %s\"; echo; echo; echo \"Service status:\"; systemctl is-active sweetshelves.service'",
             "section": "Sweet Shelves",
             "tone": "info",
             "confirm": False,
         },
         {
-            "label": "Backup Helper",
-            "command": "sh -lc 'echo \"Create backup now:\"; echo \"  cd /opt/sweetshelves && python3 rotating_backup.py backup\"; echo; echo \"List backups:\"; echo \"  cd /opt/sweetshelves && python3 rotating_backup.py list\"; echo; echo \"Restore helper:\"; sed -n \"1,120p\" /opt/sweetshelves/restore_searchrack.sh 2>/dev/null || echo \"restore_searchrack.sh not found\"'",
-            "section": "Sweet Shelves",
-            "tone": "secondary",
-            "confirm": False,
-        },
-        {
-            "label": "Check Disk",
+            "label": "Check Server Disk",
             "command": "df -h /",
             "section": "Server",
             "tone": "secondary",
             "confirm": False,
         },
         {
-            "label": "USB Stick Size",
-            "command": "sh -lc 'lsblk -o NAME,TRAN,SIZE,FSTYPE,MOUNTPOINT,LABEL,MODEL | { head -n 1; grep -i usb || true; }'",
+            "label": "USB Storage Details",
+            "command": "sh -lc 'echo \"Physical devices:\"; lsblk -o NAME,TYPE,TRAN,SIZE,FSTYPE,FSAVAIL,FSUSE%,MOUNTPOINTS,LABEL,MODEL; echo; echo \"Mounted backup USB:\"; findmnt /media/dk/USB || echo \"Not mounted\"; echo; df -hT /media/dk/USB 2>/dev/null || true'",
             "section": "Server",
             "tone": "secondary",
             "confirm": False,
@@ -169,6 +183,14 @@ DEFAULT_CONFIG = {
             "command": "journalctl -u sweetshelves.service -n 80 --no-pager",
         },
         {
+            "name": "Daily USB Backup",
+            "command": "tail -n 100 /opt/sweetshelves/logs/backup_daily_searchrack.log",
+        },
+        {
+            "name": "Weekly USB Backup",
+            "command": "tail -n 100 /opt/sweetshelves/logs/backup_weekly_otherdbs.log",
+        },
+        {
             "name": "System Log",
             "command": "tail -n 80 /var/log/syslog",
         },
@@ -177,6 +199,17 @@ DEFAULT_CONFIG = {
             "command": "dmesg -T | tail -n 80",
         },
     ],
+}
+
+MANAGED_COMMAND_LABELS = {
+    command["label"] for command in DEFAULT_CONFIG["commands"]
+} | {
+    "Run Backup Now",
+    "List Backups",
+    "Restore Latest Backup",
+    "Backup Helper",
+    "Check Disk",
+    "USB Stick Size",
 }
 
 
@@ -318,101 +351,177 @@ def cpu_temperature():
 
 
 def usb_stats():
-    candidates = [
-        "/mnt/db-backups",
-        "/mnt/db-backups/sweetshelves-db-backups",
-        "/media/dk/USB",
-        "/media/dk",
-    ]
-    for path in candidates:
-        if not os.path.exists(path):
-            continue
-        try:
-            total, used, free = shutil.disk_usage(path)
-            percent = round((used / total) * 100, 1) if total else None
-            return {
-                "path": path,
-                "total_gb": round(total / (1024 ** 3), 1),
-                "used_gb": round(used / (1024 ** 3), 1),
-                "free_gb": round(free / (1024 ** 3), 1),
-                "percent": percent,
-            }
-        except Exception:
-            continue
-    return {"path": None, "total_gb": None, "used_gb": None, "free_gb": None, "percent": None}
+    # Return only a filesystem mounted from a physical USB block device.
+    empty = {
+        "connected": False,
+        "mounted": False,
+        "writable": False,
+        "device": None,
+        "path": None,
+        "label": None,
+        "model": None,
+        "device_size_bytes": None,
+        "total_bytes": None,
+        "used_bytes": None,
+        "free_bytes": None,
+        "total_gb": None,
+        "used_gb": None,
+        "free_gb": None,
+        "percent": None,
+    }
+    raw = run(
+        "lsblk -J -b -o NAME,KNAME,TYPE,TRAN,SIZE,FSTYPE,MOUNTPOINTS,LABEL,MODEL"
+    )
+    try:
+        roots = json.loads(raw).get("blockdevices", [])
+    except Exception:
+        return empty
+
+    connected = []
+    mounted = []
+
+    def walk(nodes, inherited_transport=None, inherited_model=None, device_size=None):
+        for node in nodes or []:
+            transport = str(node.get("tran") or inherited_transport or "").lower()
+            model = str(node.get("model") or inherited_model or "").strip() or None
+            node_size = int(node.get("size") or 0)
+            physical_size = node_size if node.get("type") == "disk" else device_size
+            if transport == "usb":
+                entry = {
+                    "device": "/dev/" + str(node.get("kname") or node.get("name") or ""),
+                    "label": str(node.get("label") or "").strip() or None,
+                    "model": model,
+                    "device_size_bytes": physical_size or node_size or None,
+                }
+                connected.append(entry)
+                mountpoints = node.get("mountpoints") or []
+                if isinstance(mountpoints, str):
+                    mountpoints = [mountpoints]
+                for mountpoint in mountpoints:
+                    if mountpoint and os.path.ismount(mountpoint):
+                        mounted.append((entry, mountpoint))
+            walk(node.get("children"), transport, model, physical_size)
+
+    walk(roots)
+    if not connected:
+        return empty
+    if not mounted:
+        result = dict(empty)
+        result.update(connected[0])
+        result["connected"] = True
+        return result
+
+    mounted.sort(
+        key=lambda pair: (
+            "db-backup" not in str(pair[0].get("label") or "").lower(),
+            "usb" not in pair[1].lower(),
+            pair[1],
+        )
+    )
+    entry, mountpoint = mounted[0]
+    try:
+        total, used, free = shutil.disk_usage(mountpoint)
+    except Exception:
+        total = used = free = 0
+    result = dict(empty)
+    result.update(entry)
+    result.update({
+        "connected": True,
+        "mounted": True,
+        "writable": os.access(mountpoint, os.W_OK),
+        "path": mountpoint,
+        "total_bytes": total or None,
+        "used_bytes": used if total else None,
+        "free_bytes": free if total else None,
+        "total_gb": round(total / (1024 ** 3), 2) if total else None,
+        "used_gb": round(used / (1024 ** 3), 2) if total else None,
+        "free_gb": round(free / (1024 ** 3), 2) if total else None,
+        "percent": round((used / total) * 100, 1) if total else None,
+    })
+    return result
 
 
-def backup_health():
-    candidates = [
-        "/mnt/db-backups/sweetshelves-db-backups/daily",
-        "/media/dk/USB/sweetshelves-db-backups",
-        "/opt/sweetshelves/backups",
-    ]
-    found_dir = None
-    for raw_path in candidates:
-        path = raw_path
-        if os.path.isdir(path):
-            found_dir = path
-            break
+def backup_health(usb):
+    mountpoint = usb.get("path") if usb.get("mounted") else None
+    backup_root = (
+        os.path.join(mountpoint, "sweetshelves-db-backups")
+        if mountpoint else None
+    )
+    daily_dir = os.path.join(backup_root, "daily") if backup_root else None
+    weekly_dir = os.path.join(backup_root, "weekly") if backup_root else None
 
     cron_output = run("crontab -l 2>/dev/null")
-    cron_present = "rotating_backup.py" in cron_output or "backup" in cron_output.lower()
+    timer_output = run(
+        "systemctl list-timers --all --no-pager 2>/dev/null"
+    )
+    schedules = cron_output + "\n" + timer_output
+    daily_scheduled = (
+        "backup_daily_searchrack.sh" in schedules
+        or "sweetshelves-daily-backup" in schedules.lower()
+    )
+    weekly_scheduled = (
+        "backup_weekly_otherdbs.sh" in schedules
+        or "sweetshelves-weekly-backup" in schedules.lower()
+    )
 
-    if not found_dir:
-        return {
-            "directory": None,
-            "healthy_percent": 15 if cron_present else 0,
-            "status": "No backup directory found",
-            "latest_age_hours": None,
-            "cron_present": cron_present,
-        }
+    def backup_files(directory):
+        if not directory or not os.path.isdir(directory):
+            return []
+        return [
+            os.path.join(directory, name)
+            for name in os.listdir(directory)
+            if name.endswith(".sqlite3.gz")
+        ]
 
-    files = []
-    for name in os.listdir(found_dir):
-        if name.endswith(".sqlite3.gz"):
-            files.append(os.path.join(found_dir, name))
+    daily_files = backup_files(daily_dir)
+    weekly_files = backup_files(weekly_dir)
+    all_files = daily_files + weekly_files
+    latest_daily = max(daily_files, key=os.path.getmtime) if daily_files else None
+    latest_weekly = max(weekly_files, key=os.path.getmtime) if weekly_files else None
 
-    if not files:
-        return {
-            "directory": found_dir,
-            "healthy_percent": 20 if cron_present else 5,
-            "status": "No backup files yet",
-            "latest_age_hours": None,
-            "cron_present": cron_present,
-        }
+    def age_hours(path):
+        if not path:
+            return None
+        return round(max(0, time.time() - os.path.getmtime(path)) / 3600.0, 1)
 
-    latest = max(files, key=os.path.getmtime)
-    age_hours = round((time.time() - os.path.getmtime(latest)) / 3600.0, 1)
-    if age_hours <= 24:
-        percent = 100
-        status = "Healthy"
-    elif age_hours <= 48:
-        percent = 65
-        status = "Stale"
+    daily_age = age_hours(latest_daily)
+    weekly_age = age_hours(latest_weekly)
+    if not usb.get("connected"):
+        percent, status = 0, "USB not connected"
+    elif not usb.get("mounted"):
+        percent, status = 0, "USB not mounted"
+    elif not usb.get("writable"):
+        percent, status = 5, "USB is read-only"
+    elif not daily_scheduled:
+        percent, status = 20, "Daily schedule missing"
+    elif daily_age is None:
+        percent, status = 25, "No daily backup found"
+    elif daily_age > 36:
+        percent, status = 35, "Daily backup overdue"
+    elif not weekly_scheduled:
+        percent, status = 75, "Daily healthy; weekly missing"
+    elif weekly_age is None or weekly_age > (8 * 24):
+        percent, status = 65, "Weekly backup overdue"
     else:
-        percent = 25
-        status = "Overdue"
+        percent, status = 100, "Automatic backups healthy"
 
     return {
-        "directory": found_dir,
+        "directory": backup_root,
         "healthy_percent": percent,
         "status": status,
-        "latest_age_hours": age_hours,
-        "cron_present": cron_present,
+        "latest_age_hours": daily_age,
+        "latest_daily": latest_daily,
+        "latest_weekly": latest_weekly,
+        "latest_weekly_age_hours": weekly_age,
+        "daily_scheduled": daily_scheduled,
+        "weekly_scheduled": weekly_scheduled,
+        "cron_present": daily_scheduled or weekly_scheduled,
+        "daily_count": len(daily_files),
+        "weekly_count": len(weekly_files),
+        "total_size_bytes": sum(
+            os.path.getsize(path) for path in all_files if os.path.isfile(path)
+        ),
     }
-
-
-def git_info(repo_path):
-    try:
-        out = run(
-            f"git -C {repo_path} log -1 --pretty=format:'%ar|%s' 2>/dev/null"
-        ).strip("'")
-        if "|" in out:
-            when, subject = out.split("|", 1)
-            return {"when": when.strip(), "subject": subject.strip()}
-    except Exception:
-        pass
-    return {"when": None, "subject": None}
 
 
 def git_info(repo_path):
@@ -453,14 +562,15 @@ def service_status(service_name):
     return {"active": is_active, "uptime": uptime_str}
 
 
+usb = usb_stats()
 payload = {
     "hostname": socket.gethostname(),
     "uptime": uptime_string(),
     "cpu_percent": cpu_percent(),
     "memory": memory_stats(),
     "disk": disk_stats(),
-    "usb": usb_stats(),
-    "backup": backup_health(),
+    "usb": usb,
+    "backup": backup_health(usb),
     "temperature_c": cpu_temperature(),
     "load_average": load_average(),
     "service": service_status("sweetshelves.service"),
@@ -470,6 +580,56 @@ payload = {
 
 print(json.dumps(payload))
 PY
+""".strip()
+
+
+REMOTE_REPAIR_BACKUP_SCRIPT = r"""
+sh -s <<'SH'
+set -eu
+
+APP_DIR="/opt/sweetshelves"
+USB_MOUNT="/media/dk/USB"
+DAILY_SCRIPT="${APP_DIR}/backup_daily_searchrack.sh"
+WEEKLY_SCRIPT="${APP_DIR}/backup_weekly_otherdbs.sh"
+LOG_DIR="${APP_DIR}/logs"
+
+mountpoint -q "$USB_MOUNT" || {
+  echo "USB backup drive is not mounted at ${USB_MOUNT}."
+  exit 1
+}
+test -w "$USB_MOUNT" || {
+  echo "USB backup drive is mounted but not writable."
+  exit 1
+}
+test -f "$DAILY_SCRIPT" || {
+  echo "Missing ${DAILY_SCRIPT}. Deploy the current backup scripts first."
+  exit 1
+}
+test -f "$WEEKLY_SCRIPT" || {
+  echo "Missing ${WEEKLY_SCRIPT}. Deploy the current backup scripts first."
+  exit 1
+}
+
+chmod u+x "$DAILY_SCRIPT" "$WEEKLY_SCRIPT"
+mkdir -p "$LOG_DIR"
+
+TMP_CRON=$(mktemp)
+trap 'rm -f "$TMP_CRON"' EXIT
+(crontab -l 2>/dev/null || true) \
+  | grep -vF "backup_daily_searchrack.sh" \
+  | grep -vF "backup_weekly_otherdbs.sh" > "$TMP_CRON" || true
+printf '%s\n' \
+  "15 2 * * * ${DAILY_SCRIPT} >> ${LOG_DIR}/backup_daily_searchrack.log 2>&1" \
+  "15 3 * * 0 ${WEEKLY_SCRIPT} >> ${LOG_DIR}/backup_weekly_otherdbs.log 2>&1" \
+  >> "$TMP_CRON"
+crontab "$TMP_CRON"
+
+echo "Automatic USB backup schedule repaired."
+echo "  Daily searchRack.db: 02:15"
+echo "  Weekly other databases: Sunday 03:15"
+echo
+crontab -l | grep -E 'backup_(daily|weekly)'
+SH
 """.strip()
 
 
@@ -508,7 +668,7 @@ try:
         print(json.dumps(payload))
         raise SystemExit
 
-    cutoff_ts = int(time.time()) - (hours * 3600)
+    cutoff_ts = 0 if hours <= 0 else int(time.time()) - (hours * 3600)
     cur.execute(
         '''
         SELECT collected_at, collected_ts, cpu_percent, memory_percent, disk_percent, temp_c
@@ -519,6 +679,23 @@ try:
         (cutoff_ts,)
     )
     rows = cur.fetchall()
+    payload["source_count"] = len(rows)
+    latest_row = rows[-1] if rows else None
+
+    # Keep long-range requests quick over SSH. Each retained row is a real
+    # observation so chart hover details always show an exact sample.
+    max_rows = 12000
+    if len(rows) > max_rows:
+        last_index = len(rows) - 1
+        indexes = sorted({
+            round(idx * last_index / float(max_rows - 1))
+            for idx in range(max_rows)
+        })
+        rows = [rows[idx] for idx in indexes]
+        payload["sampled"] = True
+    else:
+        payload["sampled"] = False
+
     payload["points"] = [
         {
             "collected_at": row["collected_at"],
@@ -531,8 +708,15 @@ try:
         for row in rows
     ]
     payload["count"] = len(payload["points"])
-    if payload["points"]:
-        payload["latest"] = payload["points"][-1]
+    if latest_row is not None:
+        payload["latest"] = {
+            "collected_at": latest_row["collected_at"],
+            "collected_ts": latest_row["collected_ts"],
+            "cpu_percent": latest_row["cpu_percent"],
+            "memory_percent": latest_row["memory_percent"],
+            "disk_percent": latest_row["disk_percent"],
+            "temp_c": latest_row["temp_c"],
+        }
 except Exception as exc:
     payload["status"] = "error"
     payload["error"] = str(exc)
@@ -565,6 +749,24 @@ def enable_windows_dpi_awareness():
         pass
 
 
+def acquire_single_instance():
+    global _SINGLE_INSTANCE_HANDLE
+    if sys.platform != "win32":
+        return True
+    try:
+        handle = ctypes.windll.kernel32.CreateMutexW(
+            None,
+            False,
+            "Local\\SweetShelvesServerConsole-v2",
+        )
+        if not handle:
+            return True
+        _SINGLE_INSTANCE_HANDLE = handle
+        return ctypes.windll.kernel32.GetLastError() != 183
+    except Exception:
+        return True
+
+
 def config_path() -> Path:
     return app_root() / CONFIG_FILENAME
 
@@ -586,8 +788,13 @@ def merged_config(raw_config):
     if isinstance(connection, dict):
         config["connection"].update(connection)
 
-    if isinstance(raw_config.get("commands"), list) and raw_config["commands"]:
-        config["commands"] = raw_config["commands"]
+    if isinstance(raw_config.get("commands"), list):
+        custom_commands = [
+            item for item in raw_config["commands"]
+            if isinstance(item, dict)
+            and item.get("label") not in MANAGED_COMMAND_LABELS
+        ]
+        config["commands"].extend(custom_commands)
 
     if isinstance(raw_config.get("logs"), list) and raw_config["logs"]:
         config["logs"] = raw_config["logs"]
@@ -631,6 +838,12 @@ class SSHClient:
             "BatchMode=yes",
             "-o",
             f'ConnectTimeout={int(connection.get("connect_timeout_seconds", 8) or 8)}',
+            "-o",
+            "ConnectionAttempts=1",
+            "-o",
+            "ServerAliveInterval=5",
+            "-o",
+            "ServerAliveCountMax=1",
             "-p",
             str(connection.get("port", 22)),
         ]
@@ -734,7 +947,8 @@ class MetricCard(tk.Frame):
 
 
 def build_remote_history_script(hours):
-    safe_hours = max(1, min(int(hours or 24), 24 * 365))
+    requested_hours = int(hours if hours is not None else 24)
+    safe_hours = 0 if requested_hours <= 0 else min(requested_hours, 24 * 365 * 10)
     return REMOTE_HISTORY_SCRIPT_TEMPLATE.replace("__HOURS__", str(safe_hours))
 
 
@@ -748,6 +962,8 @@ class HistoryChart(tk.Frame):
         self._max_value = max_value
         self._unit = unit
         self._points = []
+        self._rendered_points = []
+        self._plot_bounds = None
 
         inner = tk.Frame(self, bg=SURFACE0)
         inner.pack(fill="both", expand=True, padx=14, pady=12)
@@ -762,6 +978,8 @@ class HistoryChart(tk.Frame):
         self._canvas = tk.Canvas(inner, height=180, bg=SURFACE0, highlightthickness=0)
         self._canvas.pack(fill="both", expand=True)
         self._canvas.bind("<Configure>", lambda _e: self._redraw())
+        self._canvas.bind("<Motion>", self._show_hover)
+        self._canvas.bind("<Leave>", self._hide_hover)
 
     def set_points(self, points, summary_text=None):
         clean_points = []
@@ -797,18 +1015,12 @@ class HistoryChart(tk.Frame):
     def _downsample(self, points, max_points):
         if len(points) <= max_points:
             return list(points)
-        bucket_size = len(points) / float(max_points)
-        sampled = []
-        for idx in range(max_points):
-            start = int(idx * bucket_size)
-            end = int((idx + 1) * bucket_size)
-            bucket = points[start:max(start + 1, end)]
-            if not bucket:
-                continue
-            avg_ts = int(sum(ts for ts, _ in bucket) / len(bucket))
-            avg_value = sum(value for _, value in bucket) / len(bucket)
-            sampled.append((avg_ts, avg_value))
-        return sampled
+        last_index = len(points) - 1
+        indexes = sorted({
+            round(idx * last_index / float(max_points - 1))
+            for idx in range(max_points)
+        })
+        return [points[idx] for idx in indexes]
 
     def _y_bounds(self, values):
         if self._max_value is not None:
@@ -844,11 +1056,72 @@ class HistoryChart(tk.Frame):
         except Exception:
             return "—"
 
+    def _format_hover_time(self, ts):
+        try:
+            return time.strftime(
+                "%A, %B %d, %Y  %I:%M:%S %p",
+                time.localtime(ts),
+            )
+        except Exception:
+            return "Unknown date"
+
+    def _hide_hover(self, _event=None):
+        self._canvas.delete("history_hover")
+
+    def _show_hover(self, event):
+        if not self._rendered_points or not self._plot_bounds:
+            return
+        left, right, top, bottom = self._plot_bounds
+        if event.x < left or event.x > right or event.y < top or event.y > bottom:
+            self._hide_hover()
+            return
+
+        x, y, ts, value = min(
+            self._rendered_points,
+            key=lambda point: abs(point[0] - event.x),
+        )
+        canvas = self._canvas
+        canvas.delete("history_hover")
+        canvas.create_line(
+            x, top, x, bottom,
+            fill=OVERLAY, width=1, dash=(3, 3),
+            tags="history_hover",
+        )
+        canvas.create_oval(
+            x - 4, y - 4, x + 4, y + 4,
+            fill=self._line_color, outline=CRUST, width=1,
+            tags="history_hover",
+        )
+
+        tooltip_text = f"{self._format_hover_time(ts)}\n{self._title}: {self._fmt_value(value)}"
+        anchor = "ne" if x > (left + right) / 2 else "nw"
+        text_x = x - 10 if anchor == "ne" else x + 10
+        text_y = max(top + 5, min(y - 10, bottom - 34))
+        text_id = canvas.create_text(
+            text_x, text_y,
+            text=tooltip_text,
+            fill=TEXT,
+            font=("Segoe UI", 8, "bold"),
+            justify="left",
+            anchor=anchor,
+            tags="history_hover",
+        )
+        bbox = canvas.bbox(text_id)
+        if bbox:
+            rect_id = canvas.create_rectangle(
+                bbox[0] - 6, bbox[1] - 4, bbox[2] + 6, bbox[3] + 4,
+                fill=SURFACE1, outline=SURFACE2,
+                tags="history_hover",
+            )
+            canvas.tag_lower(rect_id, text_id)
+
     def _redraw(self):
         canvas = self._canvas
         width = max(canvas.winfo_width(), 40)
         height = max(canvas.winfo_height(), 80)
         canvas.delete("all")
+        self._rendered_points = []
+        self._plot_bounds = None
         canvas.create_rectangle(0, 0, width, height, fill=CRUST, outline="")
 
         if not self._points:
@@ -871,6 +1144,7 @@ class HistoryChart(tk.Frame):
         bottom = 28
         plot_w = max(10, width - left - right)
         plot_h = max(10, height - top - bottom)
+        self._plot_bounds = (left, width - right, top, top + plot_h)
 
         for idx in range(4):
             frac = idx / 3.0
@@ -893,10 +1167,11 @@ class HistoryChart(tk.Frame):
             x_vals = [left + (step * idx) for idx in range(len(draw_points))]
 
         coords = []
-        for idx, (_, value) in enumerate(draw_points):
+        for idx, (ts, value) in enumerate(draw_points):
             x = x_vals[idx]
             y = top + ((hi - value) / (hi - lo)) * plot_h
             coords.extend([x, y])
+            self._rendered_points.append((x, y, ts, value))
 
         if len(coords) >= 4:
             canvas.create_line(*coords, fill=self._line_color, width=2, smooth=True, splinesteps=12)
@@ -941,6 +1216,7 @@ class RemoteServerConsole(tk.Tk):
         self.history_job = None
         self.command_counter = 0
         self.last_stats = {}
+        self.active_jobs = set()
 
         self.host_var    = tk.StringVar(value=str(self.config_data["connection"].get("host", "")))
         self.user_var    = tk.StringVar(value=str(self.config_data["connection"].get("user", "")))
@@ -1043,6 +1319,9 @@ class RemoteServerConsole(tk.Tk):
         tk.Label(left, text="  ·  Remote server control",
                  font=("Segoe UI", 11),
                  fg=SUBTEXT0, bg=MANTLE).pack(side="left")
+        tk.Label(left, text=f"  v{APP_VERSION}",
+                 font=("Segoe UI", 9),
+                 fg=OVERLAY, bg=MANTLE).pack(side="left")
 
         right = tk.Frame(bar, bg=MANTLE)
         right.pack(side="right", padx=(0, 16), pady=10)
@@ -1066,18 +1345,22 @@ class RemoteServerConsole(tk.Tk):
         self._conn_drawer_built = False
         self._conn_drawer_visible = False
 
-    # ── Status row: Sweet Shelves tile + Server tile ──────────────────────────
+    # ── Status row: application, server, and automatic backup health ──────────
     def _build_status_row(self):
         row = tk.Frame(self, bg=BASE)
         row.pack(fill="x", padx=0)
         row.columnconfigure(0, weight=1)
         row.columnconfigure(1, weight=1)
+        row.columnconfigure(2, weight=1)
 
         self._ss_tile = StatusTile(row, "Sweet Shelves", icon="●")
         self._ss_tile.grid(row=0, column=0, sticky="nsew", padx=(0, 1))
 
         self._srv_tile = StatusTile(row, "Server", icon="●")
-        self._srv_tile.grid(row=0, column=1, sticky="nsew")
+        self._srv_tile.grid(row=0, column=1, sticky="nsew", padx=(0, 1))
+
+        self._backup_tile = StatusTile(row, "Automatic Backups", icon="●")
+        self._backup_tile.grid(row=0, column=2, sticky="nsew")
 
     # ── Metric row: 5 compact cards ───────────────────────────────────────────
     def _build_metric_row(self):
@@ -1131,14 +1414,35 @@ class RemoteServerConsole(tk.Tk):
         cmd_canvas.bind("<Configure>", _on_resize)
         scroll_frame.bind("<Configure>", _on_frame_change)
 
-        def _on_mousewheel(e):
-            cmd_canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
-        cmd_canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        def _on_mousewheel(event):
+            if event.delta:
+                direction = -1 if event.delta > 0 else 1
+                cmd_canvas.yview_scroll(direction * 3, "units")
+            return "break"
+
+        self._command_mousewheel_handler = _on_mousewheel
 
         self._populate_cmd_scroll(scroll_frame)
 
         self._cmd_scroll_frame = scroll_frame
         self._cmd_canvas = cmd_canvas
+        self._cmd_scrollbar = vsb
+        self._bind_command_mousewheel()
+
+    def _bind_command_mousewheel(self):
+        """Keep command scrolling local to the left panel."""
+        def bind_tree(widget):
+            widget.bind("<MouseWheel>", self._command_mousewheel_handler, add="+")
+            for child in widget.winfo_children():
+                bind_tree(child)
+
+        bind_tree(self._cmd_canvas)
+        bind_tree(self._cmd_scroll_frame)
+        self._cmd_scrollbar.bind(
+            "<MouseWheel>",
+            self._command_mousewheel_handler,
+            add="+",
+        )
 
     def _populate_cmd_scroll(self, parent):
         """Render terminal pin → SS section → Server section into a scroll frame."""
@@ -1208,6 +1512,12 @@ class RemoteServerConsole(tk.Tk):
         # Orange: restart / compound ops
         if tone == "accent" or "restart" in label:
             return ("#dd6b20", "#ffffff")
+        if tone == "success":
+            return ("#15803d", "#ffffff")
+        if tone == "warning":
+            return ("#c2410c", "#ffffff")
+        if tone == "info":
+            return ("#475569", "#ffffff")
         # Everything else: blue
         return ("#3b82f6", "#ffffff")
 
@@ -1370,11 +1680,11 @@ class RemoteServerConsole(tk.Tk):
         charts.rowconfigure(0, weight=1)
         charts.rowconfigure(1, weight=1)
 
-        self.cpu_history_chart = HistoryChart(charts, "CPU", BLUE, max_value=100, unit="%")
+        self.cpu_history_chart = HistoryChart(charts, "CPU", BLUE, unit="%")
         self.cpu_history_chart.grid(row=0, column=0, sticky="nsew", padx=(0, 6), pady=(0, 6))
-        self.mem_history_chart = HistoryChart(charts, "Memory", GREEN, max_value=100, unit="%")
+        self.mem_history_chart = HistoryChart(charts, "Memory", GREEN, unit="%")
         self.mem_history_chart.grid(row=0, column=1, sticky="nsew", padx=(6, 0), pady=(0, 6))
-        self.disk_history_chart = HistoryChart(charts, "Disk", YELLOW, max_value=100, unit="%")
+        self.disk_history_chart = HistoryChart(charts, "Disk", YELLOW, unit="%")
         self.disk_history_chart.grid(row=1, column=0, sticky="nsew", padx=(0, 6), pady=(6, 0))
         self.temp_history_chart = HistoryChart(charts, "Temperature", RED, unit="°C")
         self.temp_history_chart.grid(row=1, column=1, sticky="nsew", padx=(6, 0), pady=(6, 0))
@@ -1423,6 +1733,7 @@ class RemoteServerConsole(tk.Tk):
         for widget in self._cmd_scroll_frame.winfo_children():
             widget.destroy()
         self._populate_cmd_scroll(self._cmd_scroll_frame)
+        self._bind_command_mousewheel()
 
     def _update_conn_mini(self):
         user = self.user_var.get().strip()
@@ -1569,7 +1880,27 @@ class RemoteServerConsole(tk.Tk):
             messagebox.showerror("Terminal launch failed", str(exc))
 
     def _spawn_worker(self, job_type, target, payload=None):
-        threading.Thread(target=target, args=(job_type, payload), daemon=True).start()
+        if job_type in self.active_jobs:
+            return False
+        self.active_jobs.add(job_type)
+
+        def runner():
+            try:
+                target(job_type, payload)
+            except Exception as exc:
+                self.event_queue.put({
+                    "type": job_type,
+                    "ok": False,
+                    "error": str(exc),
+                })
+            finally:
+                self.event_queue.put({
+                    "type": "worker_done",
+                    "job_type": job_type,
+                })
+
+        threading.Thread(target=runner, daemon=True).start()
+        return True
 
     def _test_connection_worker(self, job_type, _payload):
         try:
@@ -1594,7 +1925,7 @@ class RemoteServerConsole(tk.Tk):
 
     def _history_worker(self, job_type, hours):
         try:
-            result = self.ssh.run(build_remote_history_script(hours), timeout=20)
+            result = self.ssh.run(build_remote_history_script(hours), timeout=30)
             if result.returncode != 0:
                 self.event_queue.put({
                     "type": job_type,
@@ -1633,7 +1964,12 @@ class RemoteServerConsole(tk.Tk):
 
     def _command_worker(self, job_type, command_item):
         label   = command_item.get("label", "Command")
-        command = command_item.get("command", "")
+        action  = command_item.get("action", "")
+        command = (
+            REMOTE_REPAIR_BACKUP_SCRIPT
+            if action == "repair_backup_schedule"
+            else command_item.get("command", "")
+        )
         try:
             result = self.ssh.run(command, timeout=90)
             self.event_queue.put({
@@ -1657,7 +1993,9 @@ class RemoteServerConsole(tk.Tk):
 
     def _handle_event(self, message):
         t = message.get("type", "")
-        if t == "test_connection":
+        if t == "worker_done":
+            self.active_jobs.discard(message.get("job_type"))
+        elif t == "test_connection":
             self._handle_connection_test(message)
         elif t == "stats_refresh":
             self._handle_stats_update(message)
@@ -1688,6 +2026,7 @@ class RemoteServerConsole(tk.Tk):
     def _handle_stats_update(self, message):
         if not message.get("ok"):
             self._srv_tile.set_waiting()
+            self._backup_tile.set_waiting()
             self.conn_state_var.set("Stats unavailable")
             self.conn_detail_var.set(message.get("error", "Unable to read stats."))
             self._update_conn_mini()
@@ -1723,6 +2062,37 @@ class RemoteServerConsole(tk.Tk):
         else:
             self._ss_tile.set_live("DOWN", RED, "sweetshelves.service is not running", RED)
 
+        # ── Automatic USB backup status tile ────────────────────────────────
+        backup = stats.get("backup", {})
+        backup_score = backup.get("healthy_percent")
+        if isinstance(backup_score, (int, float)) and backup_score >= 90:
+            backup_color = GREEN
+        elif isinstance(backup_score, (int, float)) and backup_score >= 60:
+            backup_color = YELLOW
+        else:
+            backup_color = RED
+        daily_age = backup.get("latest_age_hours")
+        weekly_age = backup.get("latest_weekly_age_hours")
+        daily_text = (
+            f"daily {_format_age_hours(daily_age)} ago"
+            if isinstance(daily_age, (int, float)) else "no daily backup"
+        )
+        weekly_text = (
+            f"weekly {_format_age_hours(weekly_age)} ago"
+            if isinstance(weekly_age, (int, float)) else "no weekly backup"
+        )
+        schedule_text = (
+            "schedule installed"
+            if backup.get("daily_scheduled") and backup.get("weekly_scheduled")
+            else "schedule incomplete"
+        )
+        self._backup_tile.set_live(
+            str(backup.get("status") or "Unknown").upper(),
+            backup_color,
+            f"{daily_text}  ·  {weekly_text}  ·  {schedule_text}",
+            backup_color,
+        )
+
         # Connection mini status
         self.conn_state_var.set("Live")
         self._update_conn_mini()
@@ -1746,11 +2116,25 @@ class RemoteServerConsole(tk.Tk):
         )
 
         usb = stats.get("usb", {})
-        usb_val = f"{usb.get('free_gb', '—')} GB free" if usb.get("free_gb") is not None else "No USB"
+        if usb.get("mounted"):
+            usb_val = f"{_format_bytes(usb.get('free_bytes'))} free"
+            usb_subtitle = (
+                f"{_format_bytes(usb.get('total_bytes'))} total  ·  "
+                f"{usb.get('path') or usb.get('device') or 'USB'}"
+            )
+        elif usb.get("connected"):
+            usb_val = "Unmounted"
+            usb_subtitle = (
+                f"{_format_bytes(usb.get('device_size_bytes'))} device  ·  "
+                f"{usb.get('device') or 'USB detected'}"
+            )
+        else:
+            usb_val = "No USB"
+            usb_subtitle = "No physical USB storage detected"
         self.usb_card.set_value(
             usb.get("percent"),
             usb_val,
-            usb.get("path") or "No USB found",
+            usb_subtitle,
         )
 
         tmp = stats.get("temperature_c")
@@ -1808,8 +2192,13 @@ class RemoteServerConsole(tk.Tk):
 
         latest_ts = latest.get("collected_ts")
         latest_label = self._format_history_time(latest_ts)
+        source_count = history.get("source_count", len(points))
+        if history.get("sampled") and source_count > len(points):
+            sample_label = f"{len(points):,} plotted of {source_count:,} samples"
+        else:
+            sample_label = f"{len(points):,} samples"
         self.history_status_var.set(
-            f"{len(points)} samples  ·  {self.history_range_var.get()}  ·  latest {latest_label}"
+            f"{sample_label}  ·  {self.history_range_var.get()}  ·  latest {latest_label}"
         )
 
         def _metric_points(key):
@@ -1845,7 +2234,7 @@ class RemoteServerConsole(tk.Tk):
         else:
             err = message.get("error") or message.get("output") or "Command failed."
             self._append_activity(f"{label} failed (exit {message.get('code', '?')}):\n{err}")
-        if any(kw in label.lower() for kw in ("status", "restart", "reboot")):
+        if any(kw in label.lower() for kw in ("status", "restart", "reboot", "backup")):
             self.after(1200, self.refresh_all)
 
     def _append_activity(self, text):
@@ -1896,6 +2285,64 @@ def _brighten(hex_color, amount=20):
         return hex_color
 
 
+def _format_bytes(value):
+    if not isinstance(value, (int, float)) or value < 0:
+        return "—"
+    size = float(value)
+    units = ("B", "KB", "MB", "GB", "TB")
+    for unit in units:
+        if size < 1024 or unit == units[-1]:
+            decimals = 0 if unit in ("B", "KB", "MB") else 1
+            return f"{size:.{decimals}f} {unit}"
+        size /= 1024.0
+    return f"{value} B"
+
+
+def _format_age_hours(value):
+    if not isinstance(value, (int, float)):
+        return "—"
+    if value < 1:
+        return "<1h"
+    if value < 48:
+        return f"{value:.0f}h"
+    return f"{value / 24.0:.1f}d"
+
+
+def run_self_test():
+    config = load_or_create_config()
+    labels = [
+        item.get("label")
+        for item in config.get("commands", [])
+        if isinstance(item, dict)
+    ]
+    if len(labels) != len(set(labels)):
+        raise RuntimeError("Duplicate command labels were found in the merged configuration.")
+    required = {
+        "Run Daily USB Backup",
+        "Run Full USB Backup",
+        "Repair Automatic Backup Schedule",
+        "USB Storage Details",
+    }
+    missing = sorted(required.difference(labels))
+    if missing:
+        raise RuntimeError(f"Required console commands are missing: {', '.join(missing)}")
+
+    marker = "python3 - <<'PY'\n"
+    if marker not in REMOTE_STATS_SCRIPT or not REMOTE_STATS_SCRIPT.endswith("\nPY"):
+        raise RuntimeError("Remote stats script wrapper is malformed.")
+    embedded_python = REMOTE_STATS_SCRIPT.split(marker, 1)[1].rsplit("\nPY", 1)[0]
+    compile(embedded_python, "<remote-stats>", "exec")
+
+    payload = {
+        "version": APP_VERSION,
+        "config_path": str(config_path()),
+        "host": config["connection"]["host"],
+        "commands": len(labels),
+        "status": "ok",
+    }
+    print(json.dumps(payload))
+
+
 def main():
     enable_windows_dpi_awareness()
     parser = argparse.ArgumentParser(description=APP_TITLE)
@@ -1904,9 +2351,17 @@ def main():
     args = parser.parse_args()
 
     if args.self_test:
-        config = load_or_create_config()
-        print(json.dumps({"config_path": str(config_path()),
-                          "host": config["connection"]["host"]}))
+        run_self_test()
+        return
+
+    if not acquire_single_instance():
+        if sys.platform == "win32":
+            ctypes.windll.user32.MessageBoxW(
+                None,
+                "Sweet Shelves Console is already open.",
+                APP_TITLE,
+                0x40,
+            )
         return
 
     app = RemoteServerConsole()

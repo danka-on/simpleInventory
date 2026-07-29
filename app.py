@@ -1157,15 +1157,378 @@ def _initialize_searchrack_history_guard():
         with sqlite3.connect(str(BASE_DIR / 'rackhistory.db'), timeout=30.0) as history_conn:
             _ensure_removed_items_table(history_conn.cursor())
         mirrored = _flush_searchrack_history_outbox()
+        age_summary = _reconcile_inventory_age_batches(conn)
         if cleanup.get('normalized') or cleanup.get('deleted'):
             try:
                 _invalidate_searchrack_cache()
             except Exception:
                 pass
-        return {**guard, **cleanup, 'mirrored': mirrored}
+        return {**guard, **cleanup, 'mirrored': mirrored, 'inventory_age': age_summary}
     finally:
         if conn is not None:
             conn.close()
+
+
+def _ensure_inventory_age_schema(conn):
+    """Create the persistent FIFO receiving-batch ledger in searchRack.db."""
+    cur = conn.cursor()
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS inventory_age_batches (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            searchrack_id INTEGER NOT NULL,
+            barcode TEXT,
+            received_at TEXT NOT NULL,
+            quantity INTEGER NOT NULL CHECK(quantity > 0),
+            source TEXT NOT NULL DEFAULT 'inventory',
+            source_history_id INTEGER,
+            estimated INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS inventory_age_meta (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )
+    ''')
+    cur.execute('''
+        CREATE INDEX IF NOT EXISTS idx_inventory_age_row_fifo
+        ON inventory_age_batches(searchrack_id, received_at, id)
+    ''')
+    cur.execute('''
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_inventory_age_history_event
+        ON inventory_age_batches(source_history_id)
+        WHERE source_history_id IS NOT NULL
+    ''')
+    conn.commit()
+
+
+def _inventory_age_received_at(value, fallback=None):
+    text = str(value or '').strip()
+    if text:
+        try:
+            parsed = datetime.datetime.fromisoformat(text.replace('Z', '+00:00'))
+            if parsed.tzinfo is not None:
+                parsed = parsed.astimezone().replace(tzinfo=None)
+            return parsed.isoformat()
+        except Exception:
+            pass
+    fallback_text = str(fallback or '').strip()
+    if fallback_text:
+        try:
+            parsed = datetime.datetime.fromisoformat(fallback_text.replace('Z', '+00:00'))
+            if parsed.tzinfo is not None:
+                parsed = parsed.astimezone().replace(tzinfo=None)
+            return parsed.isoformat()
+        except Exception:
+            pass
+    return datetime.datetime.now().isoformat()
+
+
+def _inventory_age_insert_batch(
+    cur, searchrack_id, barcode, received_at, quantity, *,
+    source='inventory', source_history_id=None, estimated=False
+):
+    quantity = max(0, _coerce_int(quantity, 0))
+    if quantity <= 0 or searchrack_id in (None, ''):
+        return None
+    cur.execute('''
+        INSERT OR IGNORE INTO inventory_age_batches (
+            searchrack_id, barcode, received_at, quantity,
+            source, source_history_id, estimated
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    ''', (
+        int(searchrack_id),
+        str(barcode or '').strip(),
+        _inventory_age_received_at(received_at),
+        quantity,
+        str(source or 'inventory'),
+        source_history_id,
+        1 if estimated else 0,
+    ))
+    return cur.lastrowid
+
+
+def _inventory_age_consume_fifo(cur, searchrack_id, quantity):
+    """Consume and return the oldest batches for one SEARCHRACK row."""
+    remaining = max(0, _coerce_int(quantity, 0))
+    consumed = []
+    if remaining <= 0:
+        return consumed
+    cur.execute('''
+        SELECT id, barcode, received_at, quantity, source, source_history_id, estimated
+        FROM inventory_age_batches
+        WHERE searchrack_id = ? AND quantity > 0
+        ORDER BY received_at, id
+    ''', (int(searchrack_id),))
+    for row in cur.fetchall():
+        if remaining <= 0:
+            break
+        batch_id, barcode, received_at, batch_qty, source, history_id, estimated = row
+        batch_qty = max(0, _coerce_int(batch_qty, 0))
+        take = min(batch_qty, remaining)
+        if take <= 0:
+            continue
+        consumed.append({
+            'barcode': barcode,
+            'received_at': received_at,
+            'quantity': take,
+            'source': source,
+            'source_history_id': history_id,
+            'estimated': bool(estimated),
+        })
+        if take >= batch_qty:
+            cur.execute('DELETE FROM inventory_age_batches WHERE id = ?', (batch_id,))
+        else:
+            cur.execute(
+                'UPDATE inventory_age_batches SET quantity = quantity - ? WHERE id = ?',
+                (take, batch_id)
+            )
+        remaining -= take
+    return consumed
+
+
+def _inventory_age_transfer_fifo(cur, source_row_id, destination_row_id, quantity, barcode=''):
+    """Move the oldest units and retain their immutable received timestamps."""
+    if int(source_row_id) == int(destination_row_id):
+        return max(0, _coerce_int(quantity, 0))
+    consumed = _inventory_age_consume_fifo(cur, source_row_id, quantity)
+    moved = 0
+    for batch in consumed:
+        batch_qty = max(0, _coerce_int(batch.get('quantity'), 0))
+        if batch_qty <= 0:
+            continue
+        _inventory_age_insert_batch(
+            cur,
+            destination_row_id,
+            batch.get('barcode') or barcode,
+            batch.get('received_at'),
+            batch_qty,
+            source='fifo_move',
+            estimated=bool(batch.get('estimated')),
+        )
+        moved += batch_qty
+    return moved
+
+
+def _backfill_inventory_age_batches(conn):
+    """Seed active inventory from add-to-shelf history, with explicit legacy estimates."""
+    _ensure_inventory_age_schema(conn)
+    cur = conn.cursor()
+    cur.execute("SELECT value FROM inventory_age_meta WHERE key = 'backfill_v1'")
+    if cur.fetchone():
+        return {'backfilled': False, 'rows': 0, 'units': 0}
+
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND LOWER(name)='searchrack'")
+    if not cur.fetchone():
+        cur.execute(
+            "INSERT OR REPLACE INTO inventory_age_meta(key, value) VALUES ('backfill_v1', ?)",
+            (datetime.datetime.now().isoformat(),)
+        )
+        conn.commit()
+        return {'backfilled': True, 'rows': 0, 'units': 0}
+
+    cur.execute("PRAGMA table_info('SEARCHRACK')")
+    cols = {str(row[1]).lower(): row[1] for row in cur.fetchall()}
+    id_col = cols.get('id')
+    qty_col = cols.get('quantity') or cols.get('qty')
+    barcode_col = cols.get('barcode') or cols.get('upc')
+    created_col = cols.get('created_at')
+    if not qty_col:
+        return {'backfilled': False, 'rows': 0, 'units': 0}
+
+    id_expr = _sqlite_ident(id_col) if id_col else 'rowid'
+    barcode_expr = _sqlite_ident(barcode_col) if barcode_col else "''"
+    created_expr = _sqlite_ident(created_col) if created_col else "''"
+    cur.execute(f'''
+        SELECT {id_expr} AS searchrack_id,
+               {barcode_expr} AS barcode,
+               COALESCE(CAST({_sqlite_ident(qty_col)} AS INTEGER), 0) AS quantity,
+               {created_expr} AS created_at
+        FROM SEARCHRACK
+        WHERE COALESCE(CAST({_sqlite_ident(qty_col)} AS INTEGER), 0) > 0
+    ''')
+    active_rows = [dict(row) for row in cur.fetchall()]
+
+    history_conn = None
+    history_cur = None
+    try:
+        history_conn = sqlite3.connect(str(BASE_DIR / 'rackhistory.db'), timeout=30.0)
+        history_conn.row_factory = sqlite3.Row
+        history_cur = history_conn.cursor()
+        _ensure_removed_items_table(history_cur)
+        history_conn.commit()
+    except Exception:
+        if history_conn is not None:
+            history_conn.close()
+        history_conn = None
+        history_cur = None
+
+    inserted_rows = 0
+    inserted_units = 0
+    cur.execute('BEGIN IMMEDIATE')
+    try:
+        for active in active_rows:
+            row_id = active['searchrack_id']
+            target_qty = max(0, _coerce_int(active['quantity'], 0))
+            barcode = str(active.get('barcode') or '').strip()
+            event_qty = 0
+            if history_cur is not None:
+                history_cur.execute('''
+                    SELECT id, removed_at, old_quantity, new_quantity
+                    FROM removed_items
+                    WHERE searchrack_id = ?
+                      AND removal_type = 'add_to_shelf'
+                      AND COALESCE(new_quantity, 0) > COALESCE(old_quantity, 0)
+                      AND (undone_at IS NULL OR undone_at = '')
+                      AND COALESCE(event_status, 'applied') != 'superseded'
+                    ORDER BY removed_at, id
+                ''', (row_id,))
+                for event in history_cur.fetchall():
+                    delta = max(
+                        0,
+                        _coerce_int(event['new_quantity'], 0)
+                        - _coerce_int(event['old_quantity'], 0)
+                    )
+                    if delta <= 0:
+                        continue
+                    _inventory_age_insert_batch(
+                        cur, row_id, barcode, event['removed_at'], delta,
+                        source='rack_history',
+                        source_history_id=event['id'],
+                        estimated=False,
+                    )
+                    event_qty += delta
+                    inserted_rows += 1
+                    inserted_units += delta
+
+            if event_qty > target_qty:
+                _inventory_age_consume_fifo(cur, row_id, event_qty - target_qty)
+            elif event_qty < target_qty:
+                missing = target_qty - event_qty
+                _inventory_age_insert_batch(
+                    cur,
+                    row_id,
+                    barcode,
+                    active.get('created_at'),
+                    missing,
+                    source='legacy_backfill',
+                    estimated=True,
+                )
+                inserted_rows += 1
+                inserted_units += missing
+
+        cur.execute(
+            "INSERT OR REPLACE INTO inventory_age_meta(key, value) VALUES ('backfill_v1', ?)",
+            (datetime.datetime.now().isoformat(),)
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        if history_conn is not None:
+            history_conn.close()
+    return {'backfilled': True, 'rows': inserted_rows, 'units': inserted_units}
+
+
+def _reconcile_inventory_age_batches(conn):
+    """Keep the batch ledger aligned with active quantities after every mutation path."""
+    backfill = _backfill_inventory_age_batches(conn)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    cur.execute("PRAGMA table_info('SEARCHRACK')")
+    cols = {str(row[1]).lower(): row[1] for row in cur.fetchall()}
+    id_col = cols.get('id')
+    qty_col = cols.get('quantity') or cols.get('qty')
+    barcode_col = cols.get('barcode') or cols.get('upc')
+    created_col = cols.get('created_at')
+    if not qty_col:
+        return {**backfill, 'added_units': 0, 'consumed_units': 0}
+
+    id_expr = _sqlite_ident(id_col) if id_col else 'rowid'
+    barcode_expr = _sqlite_ident(barcode_col) if barcode_col else "''"
+    created_expr = _sqlite_ident(created_col) if created_col else "''"
+    cur.execute(f'''
+        SELECT {id_expr} AS searchrack_id,
+               {barcode_expr} AS barcode,
+               COALESCE(CAST({_sqlite_ident(qty_col)} AS INTEGER), 0) AS quantity,
+               {created_expr} AS created_at
+        FROM SEARCHRACK
+        WHERE COALESCE(CAST({_sqlite_ident(qty_col)} AS INTEGER), 0) > 0
+    ''')
+    active = [dict(row) for row in cur.fetchall()]
+    active_ids = {int(row['searchrack_id']) for row in active}
+    added_units = 0
+    consumed_units = 0
+
+    cur.execute('BEGIN IMMEDIATE')
+    try:
+        for row in active:
+            row_id = int(row['searchrack_id'])
+            target = max(0, _coerce_int(row['quantity'], 0))
+            cur.execute(
+                'SELECT COALESCE(SUM(quantity), 0) FROM inventory_age_batches WHERE searchrack_id = ?',
+                (row_id,)
+            )
+            ledger_qty = max(0, _coerce_int(cur.fetchone()[0], 0))
+            if ledger_qty < target:
+                delta = target - ledger_qty
+                _inventory_age_insert_batch(
+                    cur,
+                    row_id,
+                    row.get('barcode'),
+                    row.get('created_at'),
+                    delta,
+                    source='quantity_reconcile',
+                    estimated=False,
+                )
+                added_units += delta
+            elif ledger_qty > target:
+                delta = ledger_qty - target
+                _inventory_age_consume_fifo(cur, row_id, delta)
+                consumed_units += delta
+
+        if active_ids:
+            placeholders = ','.join('?' for _ in active_ids)
+            cur.execute(
+                f'DELETE FROM inventory_age_batches WHERE searchrack_id NOT IN ({placeholders})',
+                tuple(sorted(active_ids))
+            )
+        else:
+            cur.execute('DELETE FROM inventory_age_batches')
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    return {**backfill, 'added_units': added_units, 'consumed_units': consumed_units}
+
+
+def _inventory_age_lookup(conn, searchrack_ids):
+    ids = sorted({
+        int(value) for value in (searchrack_ids or [])
+        if value not in (None, '') and str(value).lstrip('-').isdigit()
+    })
+    if not ids:
+        return {}
+    placeholders = ','.join('?' for _ in ids)
+    cur = conn.cursor()
+    cur.execute(f'''
+        SELECT searchrack_id, received_at, quantity, estimated
+        FROM inventory_age_batches
+        WHERE searchrack_id IN ({placeholders}) AND quantity > 0
+        ORDER BY received_at, id
+    ''', tuple(ids))
+    result = {row_id: [] for row_id in ids}
+    for row_id, received_at, quantity, estimated in cur.fetchall():
+        result.setdefault(int(row_id), []).append({
+            'received_at': str(received_at or ''),
+            'quantity': max(0, _coerce_int(quantity, 0)),
+            'estimated': bool(estimated),
+        })
+    return result
 
 
 def _history_restore_quantity(history_row):
@@ -3130,6 +3493,7 @@ def _clear_searchrack_row_location(row_id):
     try:
         conn = sqlite3.connect('searchRack.db')
         conn.row_factory = sqlite3.Row
+        _reconcile_inventory_age_batches(conn)
         cur = conn.cursor()
         cur.execute("PRAGMA table_info('SEARCHRACK')")
         cols = [r[1] for r in cur.fetchall()]
@@ -3180,6 +3544,7 @@ def _clear_searchrack_row_location(row_id):
                 f"UPDATE SEARCHRACK SET {qty_col} = ? WHERE {id_lookup_col} = ?",
                 (new_qty, row_id)
             )
+        _inventory_age_consume_fifo(cur, row_id, 1)
 
         rem_cur.execute('''
             INSERT INTO removed_items
@@ -17604,6 +17969,31 @@ def _ensure_telegram_tables():
                 UNIQUE(chat_id, alert_type)
             )
         ''')
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS telegram_alert_state (
+                alert_key TEXT PRIMARY KEY,
+                signature TEXT,
+                consecutive_count INTEGER DEFAULT 0,
+                first_seen_at TEXT,
+                last_seen_at TEXT,
+                notified_signature TEXT,
+                notified_at TEXT,
+                metadata_json TEXT
+            )
+        ''')
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS telegram_recent_chats (
+                chat_id TEXT PRIMARY KEY,
+                title TEXT,
+                username TEXT,
+                first_name TEXT,
+                last_name TEXT,
+                chat_type TEXT,
+                last_text TEXT,
+                last_message_at TEXT,
+                last_update_id INTEGER
+            )
+        ''')
         conn.commit()
     finally:
         if conn is not None:
@@ -17750,15 +18140,24 @@ def _api_status_probe():
             'Content-Type': 'application/json'
         }
         r = requests.get('https://api.ebay.com/sell/fulfillment/v1/order?limit=1', headers=test_headers, timeout=8)
-        if r.status_code in (401, 403):
+        if r.status_code == 401:
             status['ebay'] = 'expired'
             status['details']['ebay'] = f'eBay auth check failed with HTTP {r.status_code}.'
+        elif r.status_code == 403:
+            status['ebay'] = 'permission'
+            status['details']['ebay'] = (
+                'eBay API returned HTTP 403. The token was accepted, but the request '
+                'does not have the required permission or scope.'
+            )
+        elif r.status_code == 429 or r.status_code >= 500:
+            status['ebay'] = 'transient'
+            status['details']['ebay'] = f'eBay API is temporarily unavailable (HTTP {r.status_code}).'
         elif r.status_code >= 400:
             status['ebay'] = 'issue'
             status['details']['ebay'] = f'eBay API check returned HTTP {r.status_code}.'
     except requests.exceptions.RequestException as e:
-        status['ebay'] = 'issue'
-        status['details']['ebay'] = f'eBay API request failed: {e}'
+        status['ebay'] = 'transient'
+        status['details']['ebay'] = f'eBay API request temporarily failed: {e}'
     except Exception as e:
         err_str = str(e).lower()
         if 'unauthorized' in err_str or 'invalid' in err_str or 'expired' in err_str:
@@ -17772,10 +18171,21 @@ def _api_status_probe():
         amazon_result = amazon.connection_status()
         amazon_state = str(amazon_result.get('status') or 'issue').strip().lower()
         if amazon_state != 'ok':
-            status['amazon'] = amazon_state if amazon_state in ('expired', 'issue') else 'issue'
-            status['details']['amazon'] = str(
+            amazon_detail = str(
                 amazon_result.get('message') or 'Amazon SP-API connection test failed.'
             ).strip()
+            transient_markers = (
+                'timeout', 'timed out', 'connection', 'temporar', 'throttl',
+                'rate limit', 'http 429', 'http 500', 'http 502', 'http 503',
+                'http 504', 'service unavailable'
+            )
+            if amazon_state == 'expired':
+                status['amazon'] = 'expired'
+            elif any(marker in amazon_detail.casefold() for marker in transient_markers):
+                status['amazon'] = 'transient'
+            else:
+                status['amazon'] = 'issue'
+            status['details']['amazon'] = amazon_detail
     except Exception as e:
         err_str = str(e).lower()
         if (
@@ -17787,46 +18197,148 @@ def _api_status_probe():
             or 'http 401' in err_str
         ):
             status['amazon'] = 'expired'
+        elif any(marker in err_str for marker in (
+            'timeout', 'timed out', 'connection', 'temporar', 'throttl',
+            'rate limit', 'http 429', 'http 500', 'http 502', 'http 503', 'http 504'
+        )):
+            status['amazon'] = 'transient'
         else:
             status['amazon'] = 'issue'
         status['details']['amazon'] = f'Amazon SP-API check failed: {e}'
 
-    reminders = []
-    for issue in (
-        _api_credential_age_issue('eBay OAuth', BASE_DIR / 'tokens.json')
-    ):
-        if issue:
-            reminders.append(issue)
-    status['reminders'] = reminders
+    # Token-file modification time is not credential issuance time. eBay access
+    # token refreshes rewrite tokens.json, and Amazon credentials live elsewhere,
+    # so file age produced misleading expiry reminders.
+    status['reminders'] = []
     return status
 
-_API_ALERT_CONFIRMATION_LOCK = threading.Lock()
-_API_ALERT_CONFIRMATION_STATE = {
-    'ebay': {'signature': '', 'count': 0},
-    'amazon': {'signature': '', 'count': 0},
-}
+def _telegram_alert_state_update(
+    alert_key,
+    signature,
+    *,
+    required_count=1,
+    minimum_age_minutes=0,
+    metadata=None
+):
+    """Persist confirmation state so restarts and brief failures cannot trigger alerts."""
+    _ensure_telegram_tables()
+    now = datetime.datetime.now().astimezone()
+    now_iso = now.isoformat()
+    key = str(alert_key or '').strip()
+    signature = str(signature or '').strip()
+    conn = sqlite3.connect('searchRack.db')
+    conn.row_factory = sqlite3.Row
+    try:
+        cur = conn.cursor()
+        cur.execute('SELECT * FROM telegram_alert_state WHERE alert_key = ?', (key,))
+        row = cur.fetchone()
+        if not signature:
+            cur.execute('''
+                INSERT INTO telegram_alert_state (
+                    alert_key, signature, consecutive_count, first_seen_at,
+                    last_seen_at, notified_signature, notified_at, metadata_json
+                ) VALUES (?, '', 0, NULL, ?, '', NULL, ?)
+                ON CONFLICT(alert_key) DO UPDATE SET
+                    signature = '',
+                    consecutive_count = 0,
+                    first_seen_at = NULL,
+                    last_seen_at = excluded.last_seen_at,
+                    notified_signature = '',
+                    notified_at = NULL,
+                    metadata_json = excluded.metadata_json
+            ''', (key, now_iso, json.dumps(metadata or {}, default=str)))
+            conn.commit()
+            return False
+
+        if row and str(row['signature'] or '') == signature:
+            count = int(row['consecutive_count'] or 0) + 1
+            first_seen_raw = str(row['first_seen_at'] or now_iso)
+        else:
+            count = 1
+            first_seen_raw = now_iso
+
+        try:
+            first_seen = datetime.datetime.fromisoformat(first_seen_raw)
+            if first_seen.tzinfo is None:
+                first_seen = first_seen.replace(tzinfo=now.tzinfo)
+            age_minutes = max(0, (now - first_seen).total_seconds() / 60.0)
+        except Exception:
+            age_minutes = 0
+
+        notified_signature = (
+            str(row['notified_signature'] or '')
+            if row and str(row['signature'] or '') == signature
+            else ''
+        )
+        cur.execute('''
+            INSERT INTO telegram_alert_state (
+                alert_key, signature, consecutive_count, first_seen_at,
+                last_seen_at, notified_signature, notified_at, metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?)
+            ON CONFLICT(alert_key) DO UPDATE SET
+                signature = excluded.signature,
+                consecutive_count = excluded.consecutive_count,
+                first_seen_at = excluded.first_seen_at,
+                last_seen_at = excluded.last_seen_at,
+                notified_signature = excluded.notified_signature,
+                metadata_json = excluded.metadata_json
+        ''', (
+            key,
+            signature,
+            count,
+            first_seen_raw,
+            now_iso,
+            notified_signature,
+            json.dumps(metadata or {}, default=str),
+        ))
+        conn.commit()
+        return (
+            count >= max(1, int(required_count or 1))
+            and age_minutes >= max(0, float(minimum_age_minutes or 0))
+            and notified_signature != signature
+        )
+    finally:
+        conn.close()
 
 
-def _api_alert_failure_is_confirmed(platform, state, message, required_count=2):
-    """Require repeated failures of the same type before an automated text alert."""
+def _telegram_alert_state_mark_notified(alert_keys):
+    keys = [str(key or '').strip() for key in (alert_keys or []) if str(key or '').strip()]
+    if not keys:
+        return
+    _ensure_telegram_tables()
+    now_iso = datetime.datetime.now().astimezone().isoformat()
+    conn = sqlite3.connect('searchRack.db')
+    try:
+        cur = conn.cursor()
+        for key in keys:
+            cur.execute('''
+                UPDATE telegram_alert_state
+                SET notified_signature = signature, notified_at = ?
+                WHERE alert_key = ?
+            ''', (now_iso, key))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _api_alert_failure_is_confirmed(platform, state, message):
+    """Require a sustained, persisted marketplace failure before automated texts."""
     platform_key = str(platform or '').strip().lower()
     state_key = str(state or '').strip().lower()
-    signature = state_key
-    with _API_ALERT_CONFIRMATION_LOCK:
-        entry = _API_ALERT_CONFIRMATION_STATE.setdefault(
-            platform_key,
-            {'signature': '', 'count': 0}
-        )
-        if state_key == 'ok':
-            entry['signature'] = ''
-            entry['count'] = 0
-            return False
-        if entry.get('signature') == signature:
-            entry['count'] = int(entry.get('count') or 0) + 1
-        else:
-            entry['signature'] = signature
-            entry['count'] = 1
-        return entry['count'] >= max(1, int(required_count or 1))
+    if state_key == 'ok':
+        _telegram_alert_state_update(f'api:{platform_key}', '')
+        return False
+    # Transient network/rate-limit/service failures need a longer confirmation
+    # window than explicit authentication or permission failures.
+    required_count = 4 if state_key == 'transient' else 3
+    minimum_age = 25 if state_key == 'transient' else 15
+    return _telegram_alert_state_update(
+        f'api:{platform_key}',
+        state_key,
+        required_count=required_count,
+        minimum_age_minutes=minimum_age,
+        metadata={'message': str(message or '')[:1000]},
+    )
 
 
 def _collect_api_issue_alert(require_confirmation=False):
@@ -17843,6 +18355,7 @@ def _collect_api_issue_alert(require_confirmation=False):
             continue
         label = 'eBay' if platform == 'ebay' else 'Amazon'
         issues.append({
+            'alert_key': f'api:{platform}',
             'platform': label,
             'status': state,
             'message': detail or f'{label} API status is {state}.'
@@ -17959,6 +18472,434 @@ def _telegram_send_alert_to_recipients(alert_type, text_builder, *, recipients=N
         conn.close()
     return {'sent': sent, 'errors': errors}
 
+
+def _telegram_format_age_hours(value):
+    if not isinstance(value, (int, float)):
+        return 'never'
+    if value < 1:
+        return f'{max(0, int(round(value * 60)))}m ago'
+    if value < 48:
+        return f'{value:.1f}h ago'
+    return f'{value / 24.0:.1f}d ago'
+
+
+def _telegram_system_uptime():
+    try:
+        seconds = int(float(Path('/proc/uptime').read_text().split()[0]))
+    except Exception:
+        try:
+            import psutil
+            seconds = max(0, int(time.time() - psutil.boot_time()))
+        except Exception:
+            return 'unknown'
+    days, remainder = divmod(seconds, 86400)
+    hours, remainder = divmod(remainder, 3600)
+    minutes = remainder // 60
+    return f'{days}d {hours}h {minutes}m' if days else f'{hours}h {minutes}m'
+
+
+def _telegram_latest_backup_file(directory, pattern='*.sqlite3.gz'):
+    try:
+        files = [path for path in Path(directory).glob(pattern) if path.is_file()]
+        if not files:
+            return None
+        latest = max(files, key=lambda path: path.stat().st_mtime)
+        stat = latest.stat()
+        return {
+            'path': str(latest),
+            'name': latest.name,
+            'mtime': float(stat.st_mtime),
+            'age_hours': round(max(0, time.time() - stat.st_mtime) / 3600.0, 1),
+            'size_mb': round(stat.st_size / (1024 ** 2), 1),
+        }
+    except Exception:
+        return None
+
+
+def _telegram_backup_log_result(path):
+    try:
+        log_path = Path(path)
+        if not log_path.is_file():
+            return {'exists': False, 'result': 'unknown', 'line': '', 'mtime': None}
+        lines = log_path.read_text(encoding='utf-8', errors='replace').splitlines()
+        last_line = next((line.strip() for line in reversed(lines) if line.strip()), '')
+        lowered = last_line.casefold()
+        if 'error:' in lowered or ' failed' in lowered:
+            result = 'failed'
+        elif 'backup ok:' in lowered or 'completed:' in lowered:
+            result = 'ok'
+        else:
+            result = 'unknown'
+        return {
+            'exists': True,
+            'result': result,
+            'line': last_line[-800:],
+            'mtime': float(log_path.stat().st_mtime),
+        }
+    except Exception as exc:
+        return {'exists': False, 'result': 'unknown', 'line': str(exc), 'mtime': None}
+
+
+def _telegram_backup_status():
+    mount_path = Path(os.getenv('SWEETSHELVES_USB_MOUNT', '/media/dk/USB'))
+    mounted = os.path.ismount(str(mount_path))
+    writable = bool(mounted and os.access(str(mount_path), os.W_OK))
+    backup_root = mount_path / 'sweetshelves-db-backups'
+    daily = _telegram_latest_backup_file(backup_root / 'daily', 'searchRack-*.sqlite3.gz')
+    weekly = _telegram_latest_backup_file(backup_root / 'weekly', '*.sqlite3.gz')
+
+    schedules = ''
+    if os.name != 'nt':
+        try:
+            proc = subprocess.run(
+                ['crontab', '-l'],
+                capture_output=True,
+                text=True,
+                timeout=3,
+            )
+            schedules = proc.stdout or ''
+        except Exception:
+            schedules = ''
+    daily_scheduled = 'backup_daily_searchrack.sh' in schedules
+    weekly_scheduled = 'backup_weekly_otherdbs.sh' in schedules
+    daily_log = _telegram_backup_log_result(BASE_DIR / 'logs' / 'backup_daily_searchrack.log')
+    weekly_log = _telegram_backup_log_result(BASE_DIR / 'logs' / 'backup_weekly_otherdbs.log')
+
+    if not mounted:
+        health = 'failed'
+        status = 'USB backup drive is not mounted'
+    elif not writable:
+        health = 'failed'
+        status = 'USB backup drive is read-only'
+    elif not daily_scheduled:
+        health = 'failed'
+        status = 'Daily backup schedule is missing'
+    elif daily_log.get('result') == 'failed':
+        health = 'failed'
+        status = 'Latest daily backup attempt failed'
+    elif not daily:
+        health = 'failed'
+        status = 'No daily backup was found'
+    elif daily['age_hours'] > 36:
+        health = 'overdue'
+        status = 'Daily backup is overdue'
+    elif not weekly_scheduled:
+        health = 'warning'
+        status = 'Weekly backup schedule is missing'
+    elif weekly_log.get('result') == 'failed':
+        health = 'failed'
+        status = 'Latest weekly backup attempt failed'
+    elif not weekly or weekly['age_hours'] > (8 * 24):
+        health = 'overdue'
+        status = 'Weekly backup is overdue'
+    else:
+        health = 'ok'
+        status = 'Automatic backups are healthy'
+
+    return {
+        'health': health,
+        'status': status,
+        'mount_path': str(mount_path),
+        'mounted': mounted,
+        'writable': writable,
+        'daily_scheduled': daily_scheduled,
+        'weekly_scheduled': weekly_scheduled,
+        'daily': daily,
+        'weekly': weekly,
+        'daily_log': daily_log,
+        'weekly_log': weekly_log,
+    }
+
+
+def _telegram_recent_metric_summary(key, hours=1):
+    result = {'average': None, 'peak': None, 'minimum': None, 'count': 0}
+    try:
+        cutoff = int(time.time()) - max(1, int(hours)) * 3600
+        with connect_db(_SERVER_METRICS_DB_NAME) as conn:
+            cur = conn.cursor()
+            _ensure_server_metrics_schema(cur)
+            cur.execute(
+                f'''
+                SELECT AVG({key}), MAX({key}), MIN({key}), COUNT({key})
+                FROM system_metric_snapshots
+                WHERE collected_ts >= ? AND {key} IS NOT NULL
+                ''',
+                (cutoff,),
+            )
+            row = cur.fetchone()
+        if row:
+            result = {
+                'average': round(float(row[0]), 1) if row[0] is not None else None,
+                'peak': round(float(row[1]), 1) if row[1] is not None else None,
+                'minimum': round(float(row[2]), 1) if row[2] is not None else None,
+                'count': int(row[3] or 0),
+            }
+    except Exception:
+        pass
+    return result
+
+
+def _telegram_metric_line(label, current, recent, unit='%'):
+    current_text = f'{current:.1f}{unit}' if isinstance(current, (int, float)) else 'unavailable'
+    if recent.get('count'):
+        return (
+            f'{label}: {current_text} '
+            f'(1h avg {recent["average"]:.1f}{unit}, peak {recent["peak"]:.1f}{unit})'
+        )
+    return f'{label}: {current_text}'
+
+
+def _telegram_api_status_text(probe=None):
+    probe = probe or _api_status_probe()
+    lines = ['Marketplace APIs']
+    for key, label in (('ebay', 'eBay'), ('amazon', 'Amazon')):
+        state = str(probe.get(key) or 'issue').strip().lower()
+        marker = 'OK' if state == 'ok' else state.upper()
+        lines.append(f'- {label}: {marker}')
+        detail = str((probe.get('details') or {}).get(key) or '').strip()
+        if detail and state != 'ok':
+            lines.append(f'  {detail[:500]}')
+    return '\n'.join(lines)
+
+
+def _telegram_backup_status_text(status=None):
+    status = status or _telegram_backup_status()
+    lines = [
+        'Backups',
+        f'- Status: {status["status"]}',
+        f'- USB: {"mounted and writable" if status["mounted"] and status["writable"] else "not ready"}',
+    ]
+    for key, label in (('daily', 'Daily searchRack'), ('weekly', 'Weekly databases')):
+        item = status.get(key)
+        if item:
+            lines.append(
+                f'- {label}: {_telegram_format_age_hours(item.get("age_hours"))}, '
+                f'{item.get("size_mb", 0):.1f} MB'
+            )
+        else:
+            lines.append(f'- {label}: not found')
+    return '\n'.join(lines)
+
+
+def _telegram_command_response(command):
+    normalized = str(command or '').strip().casefold()
+    if normalized in ('help', 'start'):
+        return (
+            'Sweet Shelves server commands\n'
+            '- status: complete server update\n'
+            '- cpu: CPU usage and one-hour trend\n'
+            '- memory: memory usage and one-hour trend\n'
+            '- temp or temperature: temperature and one-hour trend\n'
+            '- backups: USB backup status\n'
+            '- api: live Amazon and eBay status\n\n'
+            'Commands work with or without a leading slash.'
+        )
+
+    if normalized == 'backups':
+        return _telegram_backup_status_text()
+    if normalized == 'api':
+        return _telegram_api_status_text()
+
+    snapshot = _collect_server_metrics_snapshot()
+    cpu_recent = _telegram_recent_metric_summary('cpu_percent')
+    memory_recent = _telegram_recent_metric_summary('memory_percent')
+    temp_recent = _telegram_recent_metric_summary('temp_c')
+    if normalized == 'cpu':
+        return _telegram_metric_line('CPU', snapshot.get('cpu_percent'), cpu_recent)
+    if normalized == 'memory':
+        return _telegram_metric_line('Memory', snapshot.get('memory_percent'), memory_recent)
+    if normalized in ('temp', 'temperature'):
+        return _telegram_metric_line('Temperature', snapshot.get('temp_c'), temp_recent, '°C')
+    if normalized != 'status':
+        return ''
+
+    disk = snapshot.get('disk_percent')
+    disk_text = f'{disk:.1f}%' if isinstance(disk, (int, float)) else 'unavailable'
+    backup_text = _telegram_backup_status_text()
+    api_text = _telegram_api_status_text()
+    return '\n'.join([
+        'Sweet Shelves server status',
+        f'Uptime: {_telegram_system_uptime()}',
+        _telegram_metric_line('CPU', snapshot.get('cpu_percent'), cpu_recent),
+        _telegram_metric_line('Memory', snapshot.get('memory_percent'), memory_recent),
+        _telegram_metric_line('Temperature', snapshot.get('temp_c'), temp_recent, '°C'),
+        f'Disk: {disk_text} used',
+        '',
+        backup_text,
+        '',
+        api_text,
+    ])
+
+
+def _telegram_authorized_chat_ids():
+    return {
+        str(row.get('chat_id') or '').strip()
+        for row in _telegram_collect_recipient_rows()
+        if int(row.get('enabled') or 0) == 1 and str(row.get('chat_id') or '').strip()
+    }
+
+
+def _telegram_store_recent_chat(update_id, message):
+    chat = (message or {}).get('chat') or {}
+    chat_id = str(chat.get('id') or '').strip()
+    if not chat_id:
+        return
+    raw_date = message.get('date')
+    try:
+        message_at = datetime.datetime.fromtimestamp(
+            int(raw_date),
+            tz=datetime.timezone.utc,
+        ).isoformat()
+    except Exception:
+        message_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    _ensure_telegram_tables()
+    conn = sqlite3.connect('searchRack.db')
+    try:
+        conn.execute('''
+            INSERT INTO telegram_recent_chats (
+                chat_id, title, username, first_name, last_name, chat_type,
+                last_text, last_message_at, last_update_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(chat_id) DO UPDATE SET
+                title = excluded.title,
+                username = excluded.username,
+                first_name = excluded.first_name,
+                last_name = excluded.last_name,
+                chat_type = excluded.chat_type,
+                last_text = excluded.last_text,
+                last_message_at = excluded.last_message_at,
+                last_update_id = excluded.last_update_id
+        ''', (
+            chat_id,
+            str(chat.get('title') or ''),
+            str(chat.get('username') or ''),
+            str(chat.get('first_name') or ''),
+            str(chat.get('last_name') or ''),
+            str(chat.get('type') or ''),
+            str(message.get('text') or '')[:1000],
+            message_at,
+            int(update_id or 0),
+        ))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _telegram_normalize_command(text):
+    value = str(text or '').strip()
+    if not value:
+        return ''
+    first = value.split()[0].casefold()
+    if first.startswith('/'):
+        first = first[1:]
+    if '@' in first:
+        first = first.split('@', 1)[0]
+    aliases = {
+        'temperature': 'temperature',
+        'temp': 'temp',
+        'cpu': 'cpu',
+        'memory': 'memory',
+        'mem': 'memory',
+        'backup': 'backups',
+        'backups': 'backups',
+        'status': 'status',
+        'api': 'api',
+        'apis': 'api',
+        'help': 'help',
+        'start': 'start',
+    }
+    return aliases.get(first, '')
+
+
+def _telegram_register_commands():
+    base = _telegram_api_base()
+    if not base:
+        return
+    commands = [
+        {'command': 'status', 'description': 'Complete server status'},
+        {'command': 'cpu', 'description': 'CPU usage and trend'},
+        {'command': 'memory', 'description': 'Memory usage and trend'},
+        {'command': 'temp', 'description': 'Temperature and trend'},
+        {'command': 'backups', 'description': 'USB backup status'},
+        {'command': 'api', 'description': 'Amazon and eBay API status'},
+        {'command': 'help', 'description': 'Show available commands'},
+    ]
+    try:
+        requests.post(
+            f'{base}/setMyCommands',
+            json={'commands': commands},
+            timeout=15,
+        )
+    except Exception:
+        pass
+
+
+_telegram_command_thread_started = False
+
+
+def telegram_command_worker():
+    """Long-poll Telegram and answer server commands from configured chats."""
+    import time as _time
+    _telegram_register_commands()
+    while True:
+        base = _telegram_api_base()
+        if not base:
+            _time.sleep(60)
+            continue
+        try:
+            raw_offset = _telegram_get_config_value('updates_offset', '')
+            offset = int(raw_offset) if str(raw_offset).strip() else None
+            initial_sync = offset is None
+            params = {
+                'timeout': 20,
+                'limit': 100,
+                'allowed_updates': json.dumps(['message', 'edited_message']),
+            }
+            if offset is not None:
+                params['offset'] = offset
+            response = requests.get(
+                f'{base}/getUpdates',
+                params=params,
+                timeout=30,
+            )
+            data = response.json() if response.content else {}
+            if not response.ok or not data.get('ok'):
+                _time.sleep(30)
+                continue
+
+            updates = data.get('result') or []
+            authorized = _telegram_authorized_chat_ids()
+            newest_offset = offset
+            for update in updates:
+                update_id = int(update.get('update_id') or 0)
+                newest_offset = max(newest_offset or 0, update_id + 1)
+                message = update.get('message') or update.get('edited_message') or {}
+                _telegram_store_recent_chat(update_id, message)
+                chat_id = str((message.get('chat') or {}).get('id') or '').strip()
+                command = _telegram_normalize_command(message.get('text'))
+                # The first poll acknowledges the historical queue without
+                # replaying old commands. New commands work from the next poll.
+                if initial_sync or not command or chat_id not in authorized:
+                    continue
+                reply = _telegram_command_response(command)
+                if reply:
+                    _telegram_send_message(chat_id, reply, disable_notification=True)
+            if newest_offset is not None and newest_offset != offset:
+                _telegram_set_config_value('updates_offset', str(newest_offset))
+        except Exception as exc:
+            print(f'⚠️ Telegram command worker error: {exc}')
+            _time.sleep(30)
+
+
+def _start_telegram_command_thread():
+    global _telegram_command_thread_started
+    if _telegram_command_thread_started:
+        return
+    _telegram_command_thread_started = True
+    thread = threading.Thread(target=telegram_command_worker, daemon=True)
+    thread.start()
+    print('🚀 Telegram command thread started')
+
 @app.route('/telegram')
 def telegram_page():
     return render_template('telegram.html')
@@ -17984,7 +18925,19 @@ def api_telegram_settings():
             _telegram_set_config_value('bot_token', bot_token)
         recipients = data.get('recipients', [])
         conn = sqlite3.connect('searchRack.db')
+        conn.row_factory = sqlite3.Row
         cur = conn.cursor()
+        cur.execute('''
+            SELECT chat_id, alert_type, last_sent_at, last_test_sent, created_at
+            FROM telegram_recipients
+        ''')
+        existing_rows = {
+            (
+                str(row['chat_id'] or '').strip(),
+                str(row['alert_type'] or '').strip().lower(),
+            ): dict(row)
+            for row in cur.fetchall()
+        }
         cur.execute('DELETE FROM telegram_recipients')
         now_iso = datetime.datetime.now().isoformat()
         for recipient in recipients:
@@ -17998,11 +18951,31 @@ def api_telegram_settings():
             interval = str(recipient.get('interval') or '1d').strip()
             enabled = 1 if str(recipient.get('enabled', 1)).strip().lower() not in ('0', 'false', 'no', 'off') else 0
             disable_notification = 1 if _telegram_disable_notification_value(recipient.get('disable_notification'), default=True) else 0
+            previous = existing_rows.get((chat_id, alert_type), {})
+            last_sent_at = str(
+                recipient.get('last_sent_at')
+                or previous.get('last_sent_at')
+                or ''
+            ).strip() or None
+            last_test_sent = str(
+                recipient.get('last_test_sent')
+                or previous.get('last_test_sent')
+                or ''
+            ).strip() or None
+            created_at = str(previous.get('created_at') or now_iso)
             cur.execute('''
                 INSERT INTO telegram_recipients
-                (chat_id, display_name, alert_type, interval, enabled, disable_notification, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (chat_id, display_name, alert_type, interval, enabled, disable_notification, now_iso, now_iso))
+                (
+                    chat_id, display_name, alert_type, interval, enabled,
+                    disable_notification, last_sent_at, last_test_sent,
+                    created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                chat_id, display_name, alert_type, interval, enabled,
+                disable_notification, last_sent_at, last_test_sent,
+                created_at, now_iso
+            ))
         conn.commit()
         conn.close()
         return jsonify({'success': True})
@@ -18012,35 +18985,22 @@ def api_telegram_settings():
 @app.route('/api/telegram/recent-chats', methods=['GET'])
 def api_telegram_recent_chats():
     try:
-        base = _telegram_api_base()
-        if not base:
-            return jsonify({'success': False, 'error': 'Telegram bot token is not configured'}), 400
         limit = max(1, min(50, int(request.args.get('limit', 20))))
-        resp = requests.get(f'{base}/getUpdates', params={'timeout': 0, 'limit': limit}, timeout=20)
-        data = resp.json() if resp.content else {}
-        if not resp.ok or not data.get('ok'):
-            return jsonify({'success': False, 'error': data.get('description') or f'HTTP {resp.status_code}'}), 500
-
-        chats = []
-        seen = set()
-        for update in data.get('result', []):
-            msg = update.get('message') or update.get('edited_message') or update.get('channel_post') or {}
-            chat = msg.get('chat') or {}
-            chat_id = str(chat.get('id') or '').strip()
-            if not chat_id or chat_id in seen:
-                continue
-            seen.add(chat_id)
-            chats.append({
-                'chat_id': chat_id,
-                'title': chat.get('title') or '',
-                'username': chat.get('username') or '',
-                'first_name': chat.get('first_name') or '',
-                'last_name': chat.get('last_name') or '',
-                'type': chat.get('type') or '',
-                'text': msg.get('text') or '',
-                'date': msg.get('date') or ''
-            })
-
+        _ensure_telegram_tables()
+        conn = sqlite3.connect('searchRack.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute('''
+            SELECT
+                chat_id, title, username, first_name, last_name,
+                chat_type AS type, last_text AS text,
+                last_message_at AS date
+            FROM telegram_recent_chats
+            ORDER BY COALESCE(last_update_id, 0) DESC
+            LIMIT ?
+        ''', (limit,))
+        chats = [dict(row) for row in cur.fetchall()]
+        conn.close()
         return jsonify({'success': True, 'chats': chats})
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
@@ -18132,6 +19092,144 @@ def api_telegram_send_api_issue():
     except Exception as e:
         return jsonify({'success': False, 'error': _safe_error(e)}), 500
 
+
+def _telegram_signature_event_ready(alert_key, signature, metadata=None):
+    """Return true once for each new event signature; initialize old events silently."""
+    signature = str(signature or '').strip()
+    if not signature:
+        return False
+    _ensure_telegram_tables()
+    now_iso = datetime.datetime.now().astimezone().isoformat()
+    conn = sqlite3.connect('searchRack.db')
+    conn.row_factory = sqlite3.Row
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            'SELECT signature, notified_signature FROM telegram_alert_state WHERE alert_key = ?',
+            (alert_key,),
+        )
+        row = cur.fetchone()
+        if row is None:
+            cur.execute('''
+                INSERT INTO telegram_alert_state (
+                    alert_key, signature, consecutive_count, first_seen_at,
+                    last_seen_at, notified_signature, notified_at, metadata_json
+                ) VALUES (?, ?, 1, ?, ?, ?, ?, ?)
+            ''', (
+                alert_key, signature, now_iso, now_iso, signature, now_iso,
+                json.dumps(metadata or {}, default=str)
+            ))
+            conn.commit()
+            return False
+
+        cur.execute('''
+            UPDATE telegram_alert_state
+            SET signature = ?, consecutive_count = 1, first_seen_at = ?,
+                last_seen_at = ?, metadata_json = ?
+            WHERE alert_key = ?
+        ''', (
+            signature, now_iso, now_iso,
+            json.dumps(metadata or {}, default=str),
+            alert_key
+        ))
+        conn.commit()
+        return str(row['notified_signature'] or '') != signature
+    finally:
+        conn.close()
+
+
+def _telegram_server_monitor_events():
+    """Create deduplicated events for sustained resource spikes and USB backups."""
+    events = []
+    snapshot = _collect_server_metrics_snapshot()
+    thresholds = {
+        'cpu': float(os.getenv('TELEGRAM_CPU_ALERT_PERCENT', '90')),
+        'memory': float(os.getenv('TELEGRAM_MEMORY_ALERT_PERCENT', '90')),
+        'temperature': float(os.getenv('TELEGRAM_TEMP_ALERT_C', '78')),
+    }
+    resource_checks = (
+        ('cpu', 'CPU', snapshot.get('cpu_percent'), thresholds['cpu'], '%'),
+        ('memory', 'Memory', snapshot.get('memory_percent'), thresholds['memory'], '%'),
+        ('temperature', 'Temperature', snapshot.get('temp_c'), thresholds['temperature'], '°C'),
+    )
+    for key, label, value, threshold, unit in resource_checks:
+        is_high = isinstance(value, (int, float)) and value >= threshold
+        ready = _telegram_alert_state_update(
+            f'server:{key}:high',
+            'high' if is_high else '',
+            required_count=3,
+            minimum_age_minutes=15,
+            metadata={'value': value, 'threshold': threshold},
+        )
+        if ready:
+            events.append({
+                'alert_key': f'server:{key}:high',
+                'text': (
+                    f'SERVER HEALTH ALERT\n'
+                    f'{label} has remained unusually high for at least 15 minutes.\n'
+                    f'Current: {value:.1f}{unit}\n'
+                    f'Alert threshold: {threshold:.1f}{unit}'
+                ),
+            })
+
+    backup = _telegram_backup_status()
+    unhealthy = backup.get('health') != 'ok'
+    backup_ready = _telegram_alert_state_update(
+        'backup:unhealthy',
+        str(backup.get('health') or 'failed') if unhealthy else '',
+        required_count=2,
+        minimum_age_minutes=8,
+        metadata=backup,
+    )
+    if backup_ready:
+        events.append({
+            'alert_key': 'backup:unhealthy',
+            'text': f'BACKUP ALERT\n{_telegram_backup_status_text(backup)}',
+        })
+
+    for key, label in (('daily', 'Daily searchRack'), ('weekly', 'Weekly databases')):
+        log_result = backup.get(f'{key}_log') or {}
+        if log_result.get('result') != 'ok' or not log_result.get('mtime'):
+            continue
+        signature = f'{int(log_result["mtime"])}:{log_result.get("line", "")}'
+        alert_key = f'backup:{key}:completed'
+        if _telegram_signature_event_ready(alert_key, signature, log_result):
+            item = backup.get(key) or {}
+            events.append({
+                'alert_key': alert_key,
+                'text': (
+                    f'BACKUP COMPLETED\n'
+                    f'{label} backup completed successfully.\n'
+                    f'File: {item.get("name") or "available on USB"}\n'
+                    f'Size: {item.get("size_mb", 0):.1f} MB\n'
+                    f'Time: {_telegram_format_age_hours(item.get("age_hours"))}'
+                ),
+            })
+    return events
+
+
+def _telegram_send_server_events(events):
+    if not events:
+        return {'sent': 0, 'errors': []}
+    recipients = _telegram_subscription_targets('health')
+    if not recipients:
+        return {'sent': 0, 'errors': [], 'skipped': 'No health recipients configured'}
+    body = '\n\n'.join(str(event.get('text') or '').strip() for event in events)
+    result = _telegram_send_alert_to_recipients(
+        'health',
+        lambda _recipient: body,
+        recipients=recipients,
+    )
+    if result.get('sent'):
+        _telegram_alert_state_mark_notified(
+            [event.get('alert_key') for event in events]
+        )
+    return result
+
+
+_telegram_alert_thread_started = False
+
+
 def telegram_alert_worker():
     """Background worker that sends Telegram alerts to per-user subscriptions."""
     import time
@@ -18144,6 +19242,13 @@ def telegram_alert_worker():
 
             now = datetime.datetime.now()
             sent_any = False
+
+            # Server events are independent of periodic report intervals. Alerts
+            # are sustained and persisted, while backup completions are emitted
+            # once for each new successful run.
+            server_events = _telegram_server_monitor_events()
+            server_result = _telegram_send_server_events(server_events)
+            sent_any = sent_any or bool(server_result.get('sent'))
 
             for alert_type in ('inventory', 'health', 'sync_overdue', 'api_issue'):
                 relevant = []
@@ -18163,6 +19268,21 @@ def telegram_alert_worker():
                             pass
                     relevant.append(row)
 
+                # Keep API confirmation progressing every worker pass instead
+                # of tying it to a recipient's delivery interval.
+                api_alert = None
+                if alert_type == 'api_issue' and any(
+                    int(row.get('enabled') or 0) == 1
+                    and str(row.get('alert_type') or '').strip().lower() == 'api_issue'
+                    for row in recipients
+                ):
+                    api_alert = _collect_api_issue_alert(require_confirmation=True)
+
+                if alert_type == 'health' and server_result.get('sent'):
+                    # The event message already updated health recipients and
+                    # contains the actionable status; avoid a second report in
+                    # the same worker pass.
+                    continue
                 if not relevant:
                     continue
 
@@ -18203,7 +19323,7 @@ def telegram_alert_worker():
                     result = _telegram_send_alert_to_recipients(alert_type, _build_text, recipients=relevant)
                     sent_any = sent_any or bool(result.get('sent'))
                 elif alert_type == 'api_issue':
-                    alert = _collect_api_issue_alert(require_confirmation=True)
+                    alert = api_alert or _collect_api_issue_alert(require_confirmation=True)
                     if not alert.get('has_issues'):
                         continue
 
@@ -18212,6 +19332,11 @@ def telegram_alert_worker():
 
                     result = _telegram_send_alert_to_recipients(alert_type, _build_text, recipients=relevant)
                     sent_any = sent_any or bool(result.get('sent'))
+                    if result.get('sent'):
+                        _telegram_alert_state_mark_notified([
+                            issue.get('alert_key')
+                            for issue in alert.get('issues') or []
+                        ])
 
             time.sleep(300 if sent_any else 600)
         except Exception as e:
@@ -18222,6 +19347,10 @@ def telegram_alert_worker():
 
 def _start_telegram_alert_thread():
     """Start the Telegram alert background thread."""
+    global _telegram_alert_thread_started
+    if _telegram_alert_thread_started:
+        return
+    _telegram_alert_thread_started = True
     telegram_thread = threading.Thread(target=telegram_alert_worker, daemon=True)
     telegram_thread.start()
     print("🚀 Telegram alert thread started")
@@ -18931,7 +20060,9 @@ def _collect_server_metrics_snapshot():
 
 def _record_server_metrics_snapshot(force=False):
     interval_seconds = _server_metrics_env_int('SERVER_METRICS_SNAPSHOT_INTERVAL_SECONDS', 300, 60, 3600)
-    retention_days = _server_metrics_env_int('SERVER_METRICS_RETENTION_DAYS', 90, 1, 365)
+    # Keep enough data for the console's 180d/1y/2y/All history choices.
+    # At the default five-minute cadence, two years is roughly 210k compact rows.
+    retention_days = _server_metrics_env_int('SERVER_METRICS_RETENTION_DAYS', 730, 1, 3650)
     snapshot = _collect_server_metrics_snapshot()
 
     with connect_db(_SERVER_METRICS_DB_NAME) as conn:
@@ -19394,6 +20525,85 @@ def misc():
 def financial_analytics():
     print("DEBUG: Financial analytics page accessed")
     return render_template('financial_analytics.html')
+
+
+@app.route('/inventory-analytics')
+def inventory_seller_analytics():
+    """Decision-oriented warehouse, sales velocity, and return-risk analytics."""
+    return render_template('inventory_analytics.html')
+
+
+@app.route('/inventory-cleanup')
+def inventory_cleanup_decisions():
+    """Strategic cleanup queue for aging active inventory."""
+    return render_template('inventory_cleanup.html')
+
+
+@app.route('/api/inventory-cleanup', methods=['GET'])
+@cache.cached(timeout=120, query_string=True)
+def api_inventory_cleanup():
+    try:
+        from seller_analytics import build_inventory_cleanup
+
+        def bounded_int(name, default, minimum, maximum):
+            try:
+                value = int(request.args.get(name, default))
+            except (TypeError, ValueError):
+                value = default
+            return max(minimum, min(maximum, value))
+
+        clearance_age = bounded_int('clearance_age', 180, 90, 365)
+        disposal_age = bounded_int('disposal_age', 240, clearance_age + 30, 730)
+        markdown_lead = bounded_int(
+            'markdown_lead', 60, 15, max(15, clearance_age - 30)
+        )
+        return jsonify(build_inventory_cleanup(
+            BASE_DIR,
+            clearance_age=clearance_age,
+            disposal_age=disposal_age,
+            markdown_lead=markdown_lead,
+        ))
+    except Exception as exc:
+        logger.exception('Inventory cleanup analytics failed')
+        return jsonify({
+            'success': False,
+            'error': _safe_error(exc, 'inventory_cleanup')
+        }), 500
+
+
+@app.route('/api/inventory-age-summary', methods=['GET'])
+def api_inventory_age_summary():
+    try:
+        from seller_analytics import build_inventory_age_summary
+        return jsonify(build_inventory_age_summary(BASE_DIR))
+    except Exception as exc:
+        logger.exception('Inventory age summary failed')
+        return jsonify({
+            'success': False,
+            'error': _safe_error(exc, 'inventory_age_summary')
+        }), 500
+
+
+@app.route('/api/inventory-seller-analytics', methods=['GET'])
+@cache.cached(timeout=300, query_string=True)
+def api_inventory_seller_analytics():
+    try:
+        from seller_analytics import build_seller_analytics
+
+        try:
+            window_days = max(0, int(request.args.get('days', '0')))
+        except (TypeError, ValueError):
+            window_days = 0
+        if window_days not in (0, 90, 180, 365):
+            window_days = 0
+        return jsonify(build_seller_analytics(BASE_DIR, window_days))
+    except Exception as exc:
+        logger.exception('Inventory seller analytics failed')
+        return jsonify({
+            'success': False,
+            'error': _safe_error(exc, 'inventory_seller_analytics')
+        }), 500
+
 
 # API endpoint for financial analytics data
 @app.route('/api/financial-analytics')
@@ -29693,6 +30903,7 @@ def api_items_prep_location_set():
             search_conn = None
             try:
                 search_conn = sqlite3.connect('searchRack.db')
+                _reconcile_inventory_age_batches(search_conn)
                 search_cur = search_conn.cursor()
                 # Ensure table exists
                 search_cur.execute('''
@@ -29733,6 +30944,7 @@ def api_items_prep_location_set():
                     ''', (title, upc, location, pictureposition, ts))
                 
                 search_conn.commit()
+                _reconcile_inventory_age_batches(search_conn)
                 _invalidate_searchrack_cache()
             except Exception as e:
                 print(f'Warning: Failed to update searchRack: {e}')
@@ -37597,6 +38809,10 @@ def additemtrue():
         
         labels_to_print = []
         reserved_note_suffixes = {}
+        # Settle any earlier removals before new receipts are added so a
+        # remove-then-add sequence with the same net quantity still ages correctly.
+        with sqlite3.connect(str(BASE_DIR / 'searchRack.db'), timeout=30.0) as age_conn:
+            _reconcile_inventory_age_batches(age_conn)
         rack_conn_for_suffix = sqlite3.connect(str(BASE_DIR / 'searchRack.db'))
         rack_cur_for_suffix = rack_conn_for_suffix.cursor()
         for barcode_item in barcodes:
@@ -37628,6 +38844,8 @@ def additemtrue():
             addToSearchRack(item_position_to_store, barcode_to_add, None, final_pictureposition, title_override, warehouse_note)
             print(f"Added to searchRack: position={item_position_to_store}, barcode={barcode_to_add}, pictureposition={final_pictureposition}")
         rack_conn_for_suffix.close()
+        with sqlite3.connect(str(BASE_DIR / 'searchRack.db'), timeout=30.0) as age_conn:
+            _reconcile_inventory_age_batches(age_conn)
 
         # SearchRack writes should be visible immediately in /searchrack.
         _invalidate_searchrack_cache()
@@ -37771,6 +38989,7 @@ def position_diagnostic():
         if location or pictureposition:
             try:
                 search_conn = sqlite3.connect('searchRack.db')
+                _reconcile_inventory_age_batches(search_conn)
                 search_cur = search_conn.cursor()
                 # Ensure table exists
                 search_cur.execute('''
@@ -37892,6 +39111,7 @@ def position_diagnostic():
                             removed_conn.close()
                 
                 search_conn.commit()
+                _reconcile_inventory_age_batches(search_conn)
                 _invalidate_searchrack_cache()
             except Exception as e:
                 print(f'Warning: Failed to update searchRack: {e}')
@@ -42699,6 +43919,200 @@ def searchrack_page():
     response.headers['Expires'] = '0'
     return response
 
+
+@app.route('/api/inventory-quantity-history', methods=['GET'])
+def api_inventory_quantity_history():
+    """Return a move-safe reconstruction of total active warehouse units over time."""
+    rack_conn = None
+    history_conn = None
+    rawbol_conn = None
+    try:
+        _flush_searchrack_history_outbox()
+
+        rack_conn = sqlite3.connect(str(BASE_DIR / 'searchRack.db'), timeout=30.0)
+        rack_cur = rack_conn.cursor()
+        rack_cur.execute('''
+            SELECT COALESCE(SUM(COALESCE(CAST(QUANTITY AS INTEGER), 0)), 0)
+            FROM SEARCHRACK
+            WHERE COALESCE(CAST(QUANTITY AS INTEGER), 0) > 0
+        ''')
+        current_quantity = max(0, _coerce_int(rack_cur.fetchone()[0], 0))
+
+        bol_uploads = []
+        try:
+            rawbol_conn = sqlite3.connect(str(BASE_DIR / 'rawbol.db'), timeout=30.0)
+            rawbol_conn.row_factory = sqlite3.Row
+            rawbol_cur = rawbol_conn.cursor()
+            rawbol_cur.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='upload_logs'"
+            )
+            if rawbol_cur.fetchone():
+                rawbol_cur.execute('''
+                    SELECT u.id, u.filename, u.lot_number, u.bol_location, u.import_date,
+                           u.rows_imported, u.uploaded_at, u.total_client_cost, u.shipping_cost,
+                           COALESCE((
+                               SELECT SUM(
+                                   CASE
+                                       WHEN COALESCE(CAST(items.quantity AS INTEGER), 0) > 0
+                                       THEN CAST(items.quantity AS INTEGER)
+                                       ELSE 0
+                                   END
+                               )
+                               FROM raw_bol_items AS items
+                               WHERE items.lot_number = u.lot_number
+                           ), 0) AS total_quantity
+                    FROM upload_logs AS u
+                    ORDER BY COALESCE(NULLIF(u.uploaded_at, ''), u.import_date), u.id
+                ''')
+                for upload_row in rawbol_cur.fetchall():
+                    upload = dict(upload_row)
+                    uploaded_at = _history_timestamp(
+                        upload.get('uploaded_at') or upload.get('import_date')
+                    )
+                    if uploaded_at is None:
+                        continue
+                    total_client_cost = upload.get('total_client_cost')
+                    shipping_cost = upload.get('shipping_cost')
+                    bol_uploads.append({
+                        'id': upload.get('id'),
+                        'timestamp': uploaded_at.isoformat(),
+                        'filename': str(upload.get('filename') or '').strip(),
+                        'lot_number': str(upload.get('lot_number') or '').strip(),
+                        'bol_location': str(upload.get('bol_location') or '').strip(),
+                        'import_date': str(upload.get('import_date') or '').strip(),
+                        'rows_imported': (
+                            max(0, _coerce_int(upload.get('rows_imported'), 0))
+                            if upload.get('rows_imported') not in (None, '') else None
+                        ),
+                        'total_quantity': max(
+                            0, _coerce_int(upload.get('total_quantity'), 0)
+                        ),
+                        'total_client_cost': (
+                            float(total_client_cost)
+                            if total_client_cost not in (None, '') else None
+                        ),
+                        'shipping_cost': (
+                            float(shipping_cost)
+                            if shipping_cost not in (None, '') else None
+                        ),
+                    })
+        except Exception as bol_error:
+            logger.warning('BOL chart markers unavailable: %s', bol_error)
+
+        history_conn = sqlite3.connect(str(BASE_DIR / 'rackhistory.db'), timeout=30.0)
+        history_conn.row_factory = sqlite3.Row
+        history_cur = history_conn.cursor()
+        _ensure_removed_items_table(history_cur)
+        history_conn.commit()
+        history_cur.execute('''
+            SELECT id, removed_at, searchrack_id, old_quantity, new_quantity,
+                   removal_type
+            FROM removed_items
+            WHERE old_quantity IS NOT NULL
+              AND new_quantity IS NOT NULL
+              AND COALESCE(event_status, 'applied') != 'superseded'
+            ORDER BY removed_at, id
+        ''')
+
+        events = []
+        for raw_row in history_cur.fetchall():
+            row = dict(raw_row)
+            occurred_at = _history_timestamp(row.get('removed_at'))
+            if occurred_at is None:
+                continue
+            old_quantity = max(0, _coerce_int(row.get('old_quantity'), 0))
+            new_quantity = max(0, _coerce_int(row.get('new_quantity'), 0))
+            row_id = row.get('searchrack_id')
+            row_key = str(row_id) if row_id not in (None, '') else f"event:{row.get('id')}"
+            events.append({
+                'timestamp': occurred_at,
+                'delta': new_quantity - old_quantity,
+                'old_quantity': old_quantity,
+                'row_key': row_key,
+                'event_id': max(0, _coerce_int(row.get('id'), 0)),
+            })
+        events.sort(key=lambda event: (event['timestamp'], event['event_id']))
+
+        first_old_by_row = {}
+        for event in events:
+            if event['row_key'] not in first_old_by_row:
+                first_old_by_row[event['row_key']] = event['old_quantity']
+
+        now = datetime.datetime.now()
+        if not events:
+            return jsonify({
+                'success': True,
+                'points': [{'timestamp': now.isoformat(), 'quantity': current_quantity}],
+                'peak_quantity': current_quantity,
+                'peak_timestamp': now.isoformat(),
+                'current_quantity': current_quantity,
+                'reconstructed': False,
+                'bol_uploads': bol_uploads,
+            })
+
+        # A row whose first recorded event starts above zero was already active
+        # when retained rack history began.
+        initial_quantity = sum(first_old_by_row.values())
+        cumulative = 0
+        minimum_cumulative = 0
+        for event in events:
+            cumulative += event['delta']
+            minimum_cumulative = min(minimum_cumulative, cumulative)
+        if initial_quantity + minimum_cumulative < 0:
+            initial_quantity += -(initial_quantity + minimum_cumulative)
+
+        first_timestamp = events[0]['timestamp']
+        points = [{
+            'timestamp': (first_timestamp - datetime.timedelta(milliseconds=1)).isoformat(),
+            'quantity': initial_quantity,
+        }]
+        running_quantity = initial_quantity
+        for event in events:
+            running_quantity = max(0, running_quantity + event['delta'])
+            points.append({
+                'timestamp': event['timestamp'].isoformat(),
+                'quantity': running_quantity,
+            })
+
+        reconstructed = running_quantity != current_quantity
+        # SEARCHRACK is authoritative. The final anchor accounts for inventory
+        # outside the retained history window while guaranteeing an exact current value.
+        points.append({
+            'timestamp': now.isoformat(),
+            'quantity': current_quantity,
+        })
+
+        peak_point = max(
+            points,
+            key=lambda point: (
+                max(0, _coerce_int(point.get('quantity'), 0)),
+                point.get('timestamp') or ''
+            )
+        )
+        return jsonify({
+            'success': True,
+            'points': points,
+            'peak_quantity': max(0, _coerce_int(peak_point.get('quantity'), 0)),
+            'peak_timestamp': str(peak_point.get('timestamp') or ''),
+            'current_quantity': current_quantity,
+            'reconstructed': reconstructed,
+            'history_start': points[0]['timestamp'],
+            'bol_uploads': bol_uploads,
+        })
+    except Exception as exc:
+        return jsonify({
+            'success': False,
+            'error': _safe_error(exc, 'inventory_quantity_history')
+        }), 500
+    finally:
+        if history_conn is not None:
+            history_conn.close()
+        if rack_conn is not None:
+            rack_conn.close()
+        if rawbol_conn is not None:
+            rawbol_conn.close()
+
+
 @app.route('/finder')
 def finder_page():
     response = make_response(render_template('finder.html'))
@@ -43523,6 +44937,7 @@ def api_search_db(db_key):
                 conn_m.commit()
                 if schema_changed:
                     _install_searchrack_history_guard(conn_m)
+                _reconcile_inventory_age_batches(conn_m)
             except Exception:
                 # Don't block search if migration fails
                 pass
@@ -43739,6 +45154,12 @@ def api_search_db(db_key):
 
         # Pre-load enrichment data in batch for searchRack results (avoids N+1 queries)
         _enrichment_cache = {}
+        _inventory_age_cache = {}
+        if db_key == 'searchRack' and rows:
+            _inventory_age_cache = _inventory_age_lookup(
+                conn,
+                [r.get('ID') if r.get('ID') is not None else r.get('id') for r in rows]
+            )
         if db_key == 'searchRack' and rows:
             # Collect all barcodes that need enrichment
             _barcodes_to_enrich = set()
@@ -43891,6 +45312,17 @@ def api_search_db(db_key):
                 'store': item.get('store') or item.get('Store') or item.get('STORE') or '',
                 'raw': item
             }
+            if db_key == 'searchRack':
+                age_row_id = item.get('ID') if item.get('ID') is not None else item.get('id')
+                try:
+                    age_row_id = int(age_row_id)
+                except Exception:
+                    age_row_id = None
+                age_batches = list(_inventory_age_cache.get(age_row_id, []))
+                item_out['age_batches'] = age_batches
+                item_out['oldest_received_at'] = (
+                    age_batches[0].get('received_at') if age_batches else item_out['created_at']
+                )
             # If this row comes from searchRack, enrich from pre-loaded batch cache
             try:
                 if db_key == 'searchRack' and item_out.get('barcode'):
@@ -44194,6 +45626,35 @@ def api_search_db(db_key):
                     else:
                         add_q = 1
                     merged[key]['quantity'] = merged[key].get('quantity', 0) + add_q
+                    merged[key].setdefault('age_batches', []).extend(r.get('age_batches') or [])
+
+            for merged_row in merged.values():
+                grouped_batches = {}
+                for batch in merged_row.get('age_batches') or []:
+                    received_at = str(batch.get('received_at') or '').strip()
+                    if not received_at:
+                        continue
+                    estimated = bool(batch.get('estimated'))
+                    batch_key = (received_at, estimated)
+                    grouped_batches[batch_key] = grouped_batches.get(batch_key, 0) + max(
+                        0, _coerce_int(batch.get('quantity'), 0)
+                    )
+                merged_row['age_batches'] = [
+                    {
+                        'received_at': received_at,
+                        'quantity': quantity,
+                        'estimated': estimated,
+                    }
+                    for (received_at, estimated), quantity in sorted(
+                        grouped_batches.items(), key=lambda entry: entry[0][0]
+                    )
+                    if quantity > 0
+                ]
+                merged_row['oldest_received_at'] = (
+                    merged_row['age_batches'][0]['received_at']
+                    if merged_row['age_batches']
+                    else merged_row.get('created_at', '')
+                )
             results = list(merged.values())
             # adjust total_count to reflect merged items count
             total_count = len(results)
@@ -46517,6 +47978,7 @@ def api_movelocation_execute():
 
         conn = sqlite3.connect('searchRack.db')
         conn.row_factory = sqlite3.Row
+        _reconcile_inventory_age_batches(conn)
         cur = conn.cursor()
 
         cur.execute("PRAGMA table_info('SEARCHRACK')")
@@ -46679,7 +48141,23 @@ def api_movelocation_execute():
                         source_warnings.append(f'Barcode not found at {source_location}')
                         continue
 
-                    matched_rows.sort(key=lambda r: int(r.get('_qty_for_move') or 0), reverse=True)
+                    for matched_row in matched_rows:
+                        matched_row_id = (
+                            matched_row.get(id_col) if id_col else matched_row.get('_rowid_')
+                        )
+                        cur.execute('''
+                            SELECT MIN(received_at)
+                            FROM inventory_age_batches
+                            WHERE searchrack_id = ? AND quantity > 0
+                        ''', (matched_row_id,))
+                        oldest_row = cur.fetchone()
+                        matched_row['_oldest_received_at'] = (
+                            str(oldest_row[0] or '') if oldest_row else ''
+                        )
+                    matched_rows.sort(key=lambda r: (
+                        r.get('_oldest_received_at') or '9999-12-31T23:59:59',
+                        int(r.get(id_col) or r.get('_rowid_') or 0),
+                    ))
                     available_qty = sum(int(r.get('_qty_for_move') or 0) for r in matched_rows)
                     if available_qty <= 0:
                         source_warnings.append(f'No available quantity at {source_location}')
@@ -46718,6 +48196,7 @@ def api_movelocation_execute():
 
                             if clear_location:
                                 # Partial remove: just decrement qty at source, no locationless ghost row
+                                _inventory_age_consume_fifo(cur, row_id, take_qty)
                                 rem_cur.execute('''
                                     INSERT INTO removed_items
                                     (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position, event_status)
@@ -46742,6 +48221,9 @@ def api_movelocation_execute():
                                     tuple(insert_values)
                                 )
                                 new_id = cur.lastrowid
+                                _inventory_age_transfer_fifo(
+                                    cur, row_id, new_id, take_qty, barcode_val
+                                )
 
                                 rem_cur.execute('''
                                     INSERT INTO removed_items
@@ -46791,6 +48273,7 @@ def api_movelocation_execute():
                                         f"UPDATE SEARCHRACK SET {pic_col} = '' WHERE {id_lookup_col} = ?",
                                         (row_id,)
                                     )
+                                _inventory_age_consume_fifo(cur, row_id, take_qty)
                                 rem_cur.execute('''
                                     INSERT INTO removed_items
                                     (order_id, barcode, title, quantity_removed, removed_at, searchrack_id, old_quantity, new_quantity, removal_type, item_position, event_status)
@@ -47293,6 +48776,7 @@ def api_move_location():
     try:
         conn = sqlite3.connect('searchRack.db')
         conn.row_factory = sqlite3.Row
+        _reconcile_inventory_age_batches(conn)
         cur = conn.cursor()
 
         # Determine PK and picture column names
@@ -47394,6 +48878,9 @@ def api_move_location():
                         vals.append(val)
                     cur.execute(f"INSERT INTO SEARCHRACK ({', '.join(col_names)}) VALUES ({placeholders})", tuple(vals))
                     new_id = cur.lastrowid
+                    _inventory_age_transfer_fifo(
+                        cur, raw_id, new_id, move_qty_int, barcode
+                    )
 
                     # Log as a location move (removed from old + added to new)
                     rem_cur.execute('''
@@ -50949,18 +52436,32 @@ def _start_mail_center_refresh_thread():
     refresh_thread.start()
     print("🚀 Mail-center refresh thread started")
 
+_background_tasks_lock_handle = None
+
+
 def start_background_services():
     """Start all background services with a lock to ensure single execution"""
+    global _background_tasks_lock_handle
     # Only run on non-Windows (Unix/Pi) to avoid locking issues during dev
     if os.name != 'nt':
+        lock_file = None
         try:
             import fcntl
             # Create/open lock file
             lock_file = open("background_tasks.lock", "w")
             # Try to acquire an exclusive non-blocking lock
             fcntl.lockf(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            # Retain the open descriptor for the lifetime of this worker.
+            # Letting this local object be garbage-collected released the lock
+            # and allowed other Gunicorn workers to start duplicate alert loops.
+            _background_tasks_lock_handle = lock_file
             print("🔒 Acquired background task lock")
         except IOError:
+            if lock_file is not None:
+                try:
+                    lock_file.close()
+                except Exception:
+                    pass
             print("⚠️ Another worker is already running background tasks. Skipping.")
             return
         except ImportError:
@@ -51001,6 +52502,11 @@ def start_background_services():
         _start_telegram_alert_thread()
     except Exception as e:
         print(f"Failed to start telegram alerts: {e}")
+
+    try:
+        _start_telegram_command_thread()
+    except Exception as e:
+        print(f"Failed to start telegram commands: {e}")
 
     try:
         _start_mail_center_refresh_thread()
